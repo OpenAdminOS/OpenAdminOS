@@ -468,7 +468,7 @@ const AGENT_CATEGORY_PHRASES: Record<AgentSummary["category"], string[]> = {
 };
 
 const AGENT_CATEGORY_LABELS: Record<AgentSummary["category"], string> = {
-  apps: "app deployment",
+  apps: "app",
   compliance: "compliance",
   devices: "device",
   policies: "policy",
@@ -555,6 +555,37 @@ export function hasTenantReference(question: string): boolean {
   const trimmed = question.trim();
   const lower = trimmed.toLowerCase();
   return TENANT_REFERENCE.test(lower) || TENANT_STATE.test(lower) || TENANT_VALUE.test(trimmed);
+}
+
+/** A question in which the admin asks how to do something themselves: "how do I", "how can we", "how to". */
+const HOW_TO_START = /^how (?:(?:do|can|should|would) (?:i|we)|to)\b/;
+/** The same opening asking where the tenant stands, not how to do something: "how do we compare to the baseline". */
+const HOW_WE_STAND = /^how (?:do|can|should|would) (?:i|we) (?:compare|look|stand|rank|perform|score|fare|measure|stack)\b/;
+/** The admin speaking about themselves: "how do I upload my first app", "how do we set this up". */
+const FIRST_PERSON = /\b(?:our|my|mine|we|us)\b/g;
+
+/**
+ * Whether the admin asks how to do something: the answer is a procedure,
+ * not a fact. "How does our compliance look" and "how do my devices stay
+ * compliant" ask about something else's state and are not how-tos.
+ */
+export function asksHowTo(question: string): boolean {
+  const lower = question.trim().toLowerCase();
+  return HOW_TO_START.test(lower) && !HOW_WE_STAND.test(lower);
+}
+
+/**
+ * Whether the wording refers to this tenant strongly enough to overrule
+ * a model that calls the question docs. In a how-to, "my", "our", "we"
+ * and "us" are the admin speaking, not a reference to tenant state, so
+ * "how do I upload my first app" leaves the kind to the model. A state
+ * word ("which", "list", "how many"), "your", a possessive or a tenant
+ * value still counts, and so does first-person wording in any other
+ * question, such as "how does our compliance look".
+ */
+export function hasStrongTenantReference(question: string): boolean {
+  if (!asksHowTo(question)) return hasTenantReference(question);
+  return hasTenantReference(question.replace(FIRST_PERSON, " "));
 }
 
 /**
@@ -1353,6 +1384,8 @@ export function pathForResource(resource: GraphCacheResourceKind): {
 const GENERIC_AGENT_TERMS = new Set([
   "device", "devices", "intune", "endpoint", "endpoints", "managed", "macos", "mac", "macs", "windows", "ios", "ipados",
   "android", "linux", "check", "show", "list", "tenant", "microsoft",
+  // "How do I upload my first app?" is not about app registrations.
+  "app", "apps", "application", "applications",
 ].map((term) => stemAgentWord(term)));
 
 const AGENT_MATCH_STOP_TERMS = new Set([

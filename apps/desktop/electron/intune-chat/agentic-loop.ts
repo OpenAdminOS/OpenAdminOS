@@ -11,7 +11,7 @@ import type {
   TenantRecord,
 } from "@openadminos/agent-sdk";
 
-import { GRAPH_CACHE_RESOURCES, pathForResource, resolveQuestionKind } from "./planner.js";
+import { GRAPH_CACHE_RESOURCES, asksHowTo, pathForResource, resolveQuestionKind } from "./planner.js";
 import { buildIntuneChatSystemPrompt } from "../state-helpers.js";
 import { fenceTenantData, stripTenantDataFences } from "@openadminos/runtime";
 import { tenantDataSourceForTool } from "./tools.js";
@@ -170,7 +170,7 @@ export interface RunAgenticChatInput {
    */
   classify?: {
     tenantReference: boolean;
-    onKind: (kind: IntuneChatQuestionKind, reason: Exclude<QuestionKindReason, "keywords">, declaredSources: string[]) => Pick<ChatSourcePlan, "requiredServerIds" | "learnFirst"> & { detail?: string };
+    onKind: (kind: IntuneChatQuestionKind, reason: Exclude<QuestionKindReason, "keywords">, declaredSources: string[]) => Pick<ChatSourcePlan, "requiredServerIds" | "serversFirst"> & { detail?: string };
   };
   /** A docs answer called a tenant tool, so it is now mixed. */
   onUpgrade?: () => void;
@@ -194,10 +194,11 @@ export interface RunAgenticChatInput {
    */
   documentation?: ReadonlyArray<DocsIndexPassage>;
   /**
-   * Microsoft Learn may be the chosen source, so the local index is
-   * withheld. It is loaded from here once the decided sources do not
-   * include Learn, or a Learn call fails, is blocked or returns nothing.
-   * `reason` says which, such as "Microsoft Learn returned nothing".
+   * A server may be the chosen source, so the local index is withheld.
+   * It is loaded from here once the decided kind has no server in play,
+   * or when no chosen server answered: a call failed, was blocked or
+   * returned nothing. `reason` says which, such as "Microsoft Learn
+   * returned nothing".
    */
   documentationFallback?: (reason?: string) => Promise<DocsIndexPassage[]>;
   tenant: TenantRecord;
@@ -315,8 +316,16 @@ export async function runAgenticChat(
   let required = new Set(input.requiredServerIds ?? []);
   const attemptedServers = new Set<string>();
   let missingSourceCount = 0;
+  // Servers whose tool that reads one result in full (get_article) was requested in this answer.
+  const readServers = new Set<string>();
+  let excerptsRepaired = false;
   let learnAnswered = false;
-  let fallbackPending = Boolean(input.documentationFallback);
+  // An MCP server returned results in this answer, so the withheld local docs index stays out.
+  let serverAnswered = false;
+  // Why the withheld index would stand in: the last server call that did not answer.
+  let fallbackReason: string | undefined;
+  // A tenant question gets no local docs index, also not as a fallback for a server it names.
+  let fallbackPending = Boolean(input.documentationFallback) && (Boolean(input.classify) || (input.questionKind ?? "tenant") !== "tenant");
   const citations = new CitationRegistry();
   // Sources numbered up to here reached a model request; only they are returned as consulted and citable.
   let consultedSources = 0;
@@ -348,7 +357,7 @@ export async function runAgenticChat(
   let iteration = 0;
   let attempts = 0;
   // The source guard gets as many retries as the evidence guard.
-  const maxAttempts = MAX_AGENTIC_ITERATIONS + MAX_MALFORMED_RETRIES + MAX_UNFINISHED_RETRIES + MAX_NO_EVIDENCE_RETRIES * 2 + 2;
+  const maxAttempts = MAX_AGENTIC_ITERATIONS + MAX_MALFORMED_RETRIES + MAX_UNFINISHED_RETRIES + MAX_NO_EVIDENCE_RETRIES * 2 + 3;
   // Streamed final text the loop did not accept is withdrawn as soon as
   // that is known, before any slow work (a refresh, a tool, a fallback).
   let answerShown = false;
@@ -464,11 +473,15 @@ export async function runAgenticChat(
       const plan = input.classify.onKind(decided.kind, !action.questionKind ? "fallback" : decided.vetoed ? "veto" : "model", action.sources);
       required = new Set(plan.requiredServerIds);
       classification = plan.detail;
-      // A tenant question gets no local docs index; docs and mixed load it unless Learn leads.
+      // A tenant question gets no local docs index; docs and mixed load it unless a server leads:
+      // one chosen for the question, declared by the model or requested in this reply.
       if (questionKind === "tenant") fallbackPending = false;
-      const loadIndex = !plan.learnFirst && fallbackPending && input.documentationFallback;
+      const serverInPlay = plan.serversFirst
+        || (action.kind === "tool" && isMcpChatToolName(action.tool))
+        || action.sources.some((id) => input.tools.mcp?.servers?.some((server) => server.id === id));
+      const loadIndex = !serverInPlay && fallbackPending && input.documentationFallback;
       const tenantData = questionKind !== "docs";
-      // Microsoft Learn is no longer the chosen source, so the withheld local index is loaded now.
+      // No server is in play for this question, so the withheld local index is loaded now.
       indexLoad = loadIndex
         ? async () => {
             indexLoad = undefined;
@@ -546,12 +559,35 @@ export async function runAgenticChat(
       });
       continue;
     }
-    if (action.kind === "final" && indexLoad) {
-      // The classification of this reply loads the local docs index, so the
-      // answer was written without those passages. It is accepted only when
-      // none matched; otherwise the model answers again with them.
+    // A how-to answered from search results alone: their excerpts rarely hold
+    // the steps, so the model is asked once to read the best match in full.
+    // A second answer without that read is accepted.
+    const unread = action.kind === "final" && !excerptsRepaired && !input.voice && !input.smallTalk && invalidQueries.size === 0 && asksHowTo(input.adminQuestion ?? "")
+      ? (input.tools.mcp?.tools ?? []).find((tool) => tool.itemIds?.params?.length && !readServers.has(tool.serverId) && mcpResults.some((item) => item.serverId === tool.serverId && item.id))
+      : undefined;
+    if (unread) {
+      excerptsRepaired = true;
+      await settleModelStep({ kind: "repair", reason: "excerpts" });
+      turns.push({ role: "repair", content: `The ${unread.serverName} results so far are titles and short excerpts, and the question asks how to do something. Request ${unread.name} with empty params to read the best matching result in full, then answer from it. The host writes the id. If no result matches the question, answer again and say so.` });
+      continue;
+    }
+    // The index waited for a server and none answered: it stands in now. A
+    // chosen server that was never asked is left to the source guard's note.
+    const lateIndex = action.kind === "final" && !indexLoad && fallbackPending && !serverAnswered && input.documentationFallback && (fallbackReason !== undefined || missingSources.length === 0)
+      ? async () => {
+          fallbackPending = false;
+          const passages = await input.documentationFallback!(fallbackReason);
+          addDocumentation(passages);
+          return passages.length;
+        }
+      : undefined;
+    const pendingIndex = indexLoad ?? lateIndex;
+    if (action.kind === "final" && pendingIndex) {
+      // The local docs index loads only now, so the answer was written
+      // without those passages. It is accepted only when none matched;
+      // otherwise the model answers again with them.
       withdrawAnswer();
-      if (await indexLoad() > 0) {
+      if (await pendingIndex() > 0) {
         await settleModelStep({ kind: "repair", reason: "documentation" });
         turns.push({ role: "repair", content: "Passages from the local docs index are now in the prompt. Answer again using them, and cite them with their numbers where you rely on them." });
         continue;
@@ -598,6 +634,7 @@ export async function runAgenticChat(
     }
     const startedAt = new Date().toISOString();
     const mcpTool = isMcpChatToolName(action.tool) ? input.tools.mcp?.tools.find((tool) => tool.name === action.tool) : undefined;
+    if (mcpTool?.itemIds?.params?.length) readServers.add(mcpTool.serverId);
     input.onToolStart?.({
       tool: action.tool,
       // The model's params for an MCP tool are never sent, so they are not shown either.
@@ -640,10 +677,12 @@ export async function runAgenticChat(
       const learnEmpty = mcpSource.serverId === LEARN_SERVER_ID && !execution.trace.error && (mcpSource.results?.length ?? 0) === 0;
       // Any server that answered with nothing gets a designed empty observation, never a placeholder source.
       const answeredEmpty = !execution.trace.error && mcpSource.empty === true;
-      if (answeredEmpty && !(learnEmpty && fallbackPending && !learnAnswered && input.documentationFallback)) {
-        const { results: _none, content: _empty, ...rest } = execution.result as { results?: unknown; content?: unknown } & Record<string, unknown>;
-        observed = { ...rest, content: `${mcpSource.serverName} returned no results for this query. Say so plainly. Do not present other text as ${mcpSource.serverName} content.` };
-      } else if (!execution.trace.error && !learnEmpty) {
+      const answered = !execution.trace.error && !learnEmpty && !answeredEmpty;
+      // The withheld local index stands in once no chosen server is left to ask and none has answered.
+      const indexWaits = !answered && fallbackPending && !serverAnswered && Boolean(input.documentationFallback);
+      const indexStandsIn = indexWaits && ![...required].some((id) => !attemptedServers.has(id));
+      if (answered) {
+        serverAnswered = true;
         if (mcpSource.serverId === LEARN_SERVER_ID) learnAnswered = true;
         // The model cites MCP results with the numbers listed here, after the local passages.
         const { results = [], content, matched, counts, ...rest } = execution.result as { results?: McpResultItem[]; content?: unknown; matched?: number; counts?: Record<string, number | boolean> } & Record<string, unknown>;
@@ -655,19 +694,29 @@ export async function runAgenticChat(
         observed = results.some((item) => item.excerpt)
           ? { ...rest, content: [note, numberedMcpResults(results, cites.map((entry) => entry.cite))].filter(Boolean).join("\n\n") }
           : { ...rest, content, citations: cites };
-      } else if (mcpSource.serverId === LEARN_SERVER_ID && fallbackPending && !learnAnswered && input.documentationFallback) {
-        // Learn is offline, the query was blocked or nothing matched: the local index takes over.
-        fallbackPending = false;
-        const reason = mcpSource.blocked ? "the Microsoft Learn query was blocked"
-          : learnEmpty ? "Microsoft Learn returned nothing"
-            : !mcpSource.sentToHost ? "no Microsoft Learn query was sent"
-              : "Microsoft Learn did not answer";
-        const fallback = await input.documentationFallback(reason);
-        addDocumentation(fallback);
-        const lead = `${reason[0]!.toUpperCase()}${reason.slice(1)}.`;
-        turns.push({ role: "repair", content: fallback.length > 0
-          ? `${lead} Passages from the local docs index are now in the prompt. Cite them with their numbers and call them the local docs index, not Microsoft Learn.`
-          : `${lead} The local docs index has no passages for this question either. Say so, and do not present text as Microsoft Learn content.` });
+      } else {
+        if (answeredEmpty && !indexStandsIn) {
+          const { results: _none, content: _empty, ...rest } = execution.result as { results?: unknown; content?: unknown } & Record<string, unknown>;
+          observed = { ...rest, content: `${mcpSource.serverName} returned no results for this query. Say so plainly. Do not present other text as ${mcpSource.serverName} content.` };
+        }
+        const name = mcpSource.serverName;
+        const reason = mcpSource.blocked ? `the ${name} query was blocked`
+          : learnEmpty || answeredEmpty ? `${name} returned nothing`
+            : !mcpSource.sentToHost ? `no ${name} query was sent`
+              : `${name} did not answer`;
+        if (indexStandsIn) {
+          // The server is offline, the query was blocked or nothing matched: the local index takes over.
+          fallbackPending = false;
+          const fallback = await input.documentationFallback!(reason);
+          addDocumentation(fallback);
+          const lead = `${reason[0]!.toUpperCase()}${reason.slice(1)}.`;
+          turns.push({ role: "repair", content: fallback.length > 0
+            ? `${lead} Passages from the local docs index are now in the prompt. Cite them with their numbers and call them the local docs index, not ${name}.`
+            : `${lead} The local docs index has no passages for this question either. Say so, and do not present text as ${name} content.` });
+        } else if (indexWaits) {
+          // Another chosen server is still to be asked; the index loads only if that one does not answer either.
+          fallbackReason = reason;
+        }
       }
     }
     // In a consented web-research session, public evidence is
@@ -861,7 +910,7 @@ function buildAgenticSystemPrompt(input: RunAgenticChatInput, questionKind: Intu
     ...(servers.length > 0 || docsIndexInPlay
       ? ["", "Sources and what each is for:",
           ...(servers.length > 0 ? [mcpSourceLinesForPrompt(servers)] : []),
-          ...(docsIndexInPlay ? ["- Local docs index (on this device): Intune, Entra and Defender documentation passages, numbered in the prompt. Use when no installed server covers the question, or when Microsoft Learn did not answer."] : [])]
+          ...(docsIndexInPlay ? ["- Local docs index (on this device): Intune, Entra and Defender documentation passages, numbered in the prompt. It is loaded when no installed server covers the question, or when the servers chosen for it did not answer."] : [])]
       : []),
     missing.length > 0 ? `Call ${missing.join(" and ")} before you answer: it is the source chosen for this question.` : "",
     "Source names: name a source only when its tool ran in this answer. Call numbered local passages the local docs index, never Microsoft Learn. Cite documentation only with the [n] numbers the host gave; do not invent numbers.",
@@ -898,7 +947,7 @@ function buildLoopPrompt(input: RunAgenticChatInput, turns: LoopTurn[]): string 
     .join("\n\n");
   return [
     documentation
-      ? `Microsoft documentation passages from the local docs index on this device. They describe general product behaviour, not this tenant's state. Cite them with their numbers, such as [1], when you rely on them, and call them the local docs index.\n\n${documentation}`
+      ? `Microsoft documentation passages from the local docs index on this device. They describe general product behaviour, not this tenant's state. Cite them with their numbers, such as [1], when you rely on them, and call them the local docs index. A passage about another product or topic is not a source: do not cite it, also not to say that it does not apply.\n\n${documentation}`
       : "",
     `Admin question:\n${input.question}`,
     transcript ? `Conversation so far:\n${transcript}` : "",

@@ -426,7 +426,7 @@ describe("Intune Chat agentic loop", () => {
           runAgenticChat({
             ...baseInput(store, scriptedLlm([reply])),
             signal: controller.signal,
-            ...(classify ? { classify: { tenantReference: false, onKind: () => ({ requiredServerIds: [], learnFirst: false }) } } : {}),
+            ...(classify ? { classify: { tenantReference: false, onKind: () => ({ requiredServerIds: [], serversFirst: false }) } } : {}),
             ensureTenantData: async () => { controller.abort(); },
             onToolStart: (event) => started.push(event.tool),
           }),
@@ -933,7 +933,7 @@ describe("withdrawing a streamed final", () => {
           '{"tool":"query_cache","params":{"resource":"managedDevices","limit":5}}',
           '{"final":true,"answer":"WIN-01 is compliant."}',
         ])),
-        classify: { tenantReference: false, onKind: () => ({ requiredServerIds: [], learnFirst: false }) },
+        classify: { tenantReference: false, onKind: () => ({ requiredServerIds: [], serversFirst: false }) },
         ensureTenantData: async () => { log.push("refresh"); },
         onAnswerText: (text) => log.push(text === "" ? "withdrawn" : "shown"),
       });

@@ -108,8 +108,8 @@ export interface ChatSourcePlan {
   kind: IntuneChatQuestionKind;
   /** Servers the answer must call before it can finish: named in the question or chosen for it. */
   requiredServerIds: string[];
-  /** Microsoft Learn is chosen, so the local docs index is only a fallback. */
-  learnFirst: boolean;
+  /** A server is chosen for the question, so the local docs index is only its fallback. */
+  serversFirst: boolean;
   /** The first step's detail: the classification and the chosen sources. */
   detail: string;
 }
@@ -214,7 +214,8 @@ function escapeRegExp(text: string): string {
  * a docs question with none chosen, Microsoft Learn is chosen when
  * installed; a mixed question may be an ambiguous tenant question, so it
  * never gets a third-party call it did not ask for. The local docs index
- * is used directly unless Learn is chosen, and is Learn's fallback.
+ * is used directly only when no server is chosen. Behind a chosen server
+ * it is the fallback: it loads when no chosen server answers.
  */
 export function planChatSources(input: {
   question: string;
@@ -236,21 +237,24 @@ export function planChatSources(input: {
     const learn = input.servers.find((server) => server.id === LEARN_SERVER_ID);
     if (input.kind === "docs" && chosen.size === 0 && learn) chosen.set(learn.id, learn);
   }
-  const learnFirst = chosen.has(LEARN_SERVER_ID);
+  // TODO(ugur): the index waits behind every chosen server, also KQL Search or IntuneAutomation. Should only documentation servers hold it back?
+  const serversFirst = chosen.size > 0;
   const names = [...chosen.values()].map((server) => server.name);
-  const docs = input.docsIndexAvailable ? (learnFirst ? "the local docs index if Microsoft Learn is unavailable" : "the local docs index") : undefined;
-  const documentation = [...names, ...(docs && !learnFirst ? [docs] : [])];
-  const docsList = joinList(documentation) + (docs && learnFirst ? `, then ${docs}` : "");
+  const docs = input.docsIndexAvailable
+    ? (serversFirst ? `the local docs index if ${names.length === 1 ? `${names[0]} is unavailable` : "none of them answers"}` : "the local docs index")
+    : undefined;
+  const documentation = [...names, ...(docs && !serversFirst ? [docs] : [])];
+  const docsList = joinList(documentation) + (docs && serversFirst ? `, then ${docs}` : "");
   const tenant = "cached tenant data and Microsoft Graph";
   const lead = input.lead ?? (input.kind === "docs" ? "Documentation question." : input.kind === "mixed" ? "Documentation and tenant question." : "Tenant question.");
   const rest = input.kind === "docs"
     ? `${documentation.length > 0 ? `Sources: ${docsList}.` : "No documentation source is available, so the model answers from what it knows."} Your tenant is not checked.`
     : input.kind === "mixed"
-      ? `Sources: ${documentation.length > 0 ? `${docsList}, and ` : ""}${tenant}.`
+      ? `Sources: ${documentation.length > 0 ? `${docsList}${docs && serversFirst ? ", and " : ", "}` : ""}${tenant}.`
       : `Sources: ${tenant}${names.length > 0 ? `, and ${joinList(names)}` : ""}.`;
   const intended = input.servers.filter((server) => input.declaredServerIds?.includes(server.id) && !chosen.has(server.id)).map((server) => server.name);
   const intent = intended.length > 0 ? ` The model also plans to ask ${joinList(intended)}.` : "";
-  return { kind: input.kind, requiredServerIds: [...chosen.keys()], learnFirst, detail: `${lead} ${rest}${intent}` };
+  return { kind: input.kind, requiredServerIds: [...chosen.keys()], serversFirst, detail: `${lead} ${rest}${intent}` };
 }
 
 /**
@@ -463,8 +467,13 @@ export function toolStepSending(tool: IntuneChatInvestigationToolName, params: R
   return { detail: mcp?.tool ?? tool, sent: mcpSentText(params) };
 }
 
-/** How a finished tool call changes its step. MCP calls that sent nothing show no sent text. */
-export function toolStepFinish(entry: IntuneChatToolTraceEntry): Partial<IntuneChatStep> {
+/**
+ * How a finished tool call changes its step. MCP calls that sent nothing
+ * show no sent text. `readsItem` marks a tool that reads one result by its
+ * id (get_article): its step names the item, since the sent text is only
+ * the id.
+ */
+export function toolStepFinish(entry: IntuneChatToolTraceEntry, readsItem = false): Partial<IntuneChatStep> {
   const durationMs = entry.durationMs;
   if (entry.mcpSource) {
     const { serverName, host, tool, blocked, results } = entry.mcpSource;
@@ -481,7 +490,8 @@ export function toolStepFinish(entry: IntuneChatToolTraceEntry): Partial<IntuneC
     const matched = entry.mcpSource.matched;
     const shown = matched !== undefined && matched > count ? `${count} of ${matched} results` : `${count} ${count === 1 ? "result" : "results"}`;
     const more = entry.mcpSource.more ? " · the server has more" : "";
-    return { status: "completed", title: `Asked ${serverName}`, detail: `${tool} · ${count > 0 ? shown : `answer from ${host}`}${more}`, durationMs };
+    const item = readsItem && count === 1 ? results?.[0]?.title?.trim() : undefined;
+    return { status: "completed", title: `Asked ${serverName}`, detail: `${tool} · ${item || (count > 0 ? shown : `answer from ${host}`)}${more}`, durationMs };
   }
   if (entry.tool === "web_search") return entry.error ? { status: "failed", title: "Web search failed", detail: entry.error, durationMs } : { status: "completed", title: "Searched the web", detail: entry.resultSummary, durationMs };
   if (isSplashtopReadTool(entry.tool)) {
@@ -507,7 +517,7 @@ export function toolStepHooks(steps: ChatStepRecorder, mcp: McpChatContext | und
       if (current) steps.update(current, toolStepSending(tool, params, mcp?.tools.find((entry) => entry.name === tool)));
     },
     finish(entry: IntuneChatToolTraceEntry): void {
-      if (current) steps.finish(current, toolStepFinish(entry));
+      if (current) steps.finish(current, toolStepFinish(entry, Boolean(mcp?.tools.find((tool) => tool.name === entry.tool)?.itemIds?.params?.length)));
       current = undefined;
     },
   };
@@ -517,7 +527,7 @@ export function toolStepHooks(steps: ChatStepRecorder, mcp: McpChatContext | und
 export type ModelStepOutcome =
   | { kind: "tool"; tool: IntuneChatInvestigationToolName; params: unknown }
   | { kind: "final"; passages: number; trace: readonly IntuneChatToolTraceEntry[] }
-  | { kind: "repair"; reason: "malformed" | "kind" | "sources" | "evidence" | "unfinished" | "lookup" | "empty" | "documentation" };
+  | { kind: "repair"; reason: "malformed" | "kind" | "sources" | "evidence" | "unfinished" | "lookup" | "empty" | "documentation" | "excerpts" };
 
 export interface ModelStepHooks {
   start(): void;
@@ -544,7 +554,13 @@ const REPAIR: Record<Extract<ModelStepOutcome, { kind: "repair" }>["reason"], st
   lookup: "Answered on a failed lookup",
   empty: "Reply was an empty answer",
   documentation: "Answered before the local docs passages arrived",
+  excerpts: "Answered from search excerpts",
 };
+
+/** A resource label inside a sentence: product names keep their capital, other labels read as plain words. */
+function midSentenceLabel(label: string): string {
+  return /^(?:Intune|Entra|Microsoft|Windows|Defender|Autopilot|Apple|Conditional)\b/.test(label) ? label : `${label.charAt(0).toLowerCase()}${label.slice(1)}`;
+}
 
 /** The plain decision of a tool call, such as "Chose to ask Microsoft Learn" or "Chose to query cached managed devices". */
 export function toolDecision(tool: IntuneChatInvestigationToolName, params: unknown, mcp: McpChatTool | undefined): string {
@@ -553,8 +569,7 @@ export function toolDecision(tool: IntuneChatInvestigationToolName, params: unkn
   if (tool === "query_cache") {
     const label = resourceLabel(params);
     if (!label) return "Chose to query cached data";
-    // Product names keep their capital; other labels read as plain words.
-    return `Chose to query cached ${/^(?:Intune|Entra|Microsoft|Windows|Defender|Autopilot|Apple|Conditional)\b/.test(label) ? label : `${label.charAt(0).toLowerCase()}${label.slice(1)}`}`;
+    return `Chose to query cached ${midSentenceLabel(label)}`;
   }
   return DECISION[tool] ?? "Chose a tool";
 }
@@ -592,7 +607,7 @@ export function modelStepHooks(steps: ChatStepRecorder, model: AnswerModel, mcp:
         : outcome.kind === "tool" ? toolDecision(outcome.tool, outcome.params, mcp?.tools.find((tool) => tool.name === outcome.tool))
           : REPAIR[outcome.reason];
       const detail = outcome.kind === "final" ? `${name} · ${answerInputs(outcome.passages, outcome.trace)}`
-        : outcome.kind === "repair" ? `${name} · asked the model to try again` : name;
+        : outcome.kind === "repair" ? `${name} · ${outcome.reason === "excerpts" ? "asked the model to read the best match first" : "asked the model to try again"}` : name;
       steps.finish(current.id, { title, detail: classification ? `${detail} · ${classification}` : detail, durationMs: Math.max(0, Date.now() - current.startedAt) });
       current = undefined;
     },
@@ -757,8 +772,8 @@ export function tenantTieInFollowUp(input: {
   // The planner lists the most relevant resource first.
   // TODO(ugur): this generic wording is used for every non-device tie-in, such as a KQL
   // question about sign-ins. Confirm it, or name per-resource follow-ups.
-  const label = definitionForResource(input.tieInResources[0]!).label;
-  return topic ? `Check ${topic} in our ${label.toLowerCase()}` : `Check how this applies to our ${label.toLowerCase()}`;
+  const label = midSentenceLabel(definitionForResource(input.tieInResources[0]!).label);
+  return topic ? `Check ${topic} in our ${label}` : `Check how this applies to our ${label}`;
 }
 
 /**

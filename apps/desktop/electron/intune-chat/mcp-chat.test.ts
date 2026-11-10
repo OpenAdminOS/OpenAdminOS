@@ -11,7 +11,7 @@ import {
   type TenantRecord,
 } from "@openadminos/agent-sdk";
 
-import { runAgenticChat } from "./agentic-loop.js";
+import { runAgenticChat, type RunAgenticChatInput } from "./agentic-loop.js";
 import { toolStepFinish } from "./chat-steps.js";
 import { isMcpQueryWriterRequest, parseMcpQueryParams } from "./mcp-query-writer.js";
 import { classifyChatQuestion, isGeneralKnowledgeQuestion } from "./planner.js";
@@ -845,6 +845,76 @@ describe("The MCP query writer boundary", () => {
       // The second writer saw the earlier result's link and the query already sent.
       assert.match(writerPrompts[1]!, new RegExp(page.replace(/[.]/g, "\\.")));
       assert.match(writerPrompts[1]!, /Queries already sent in this answer[\s\S]*Intune compliance grace period/);
+    });
+  });
+
+  describe("a how-to answered from search results", () => {
+    const format = { items: [{ title: [["title"]], url: ["url"], text: ["snippet", "body"], id: ["id"] }] };
+    const search: McpChatTool = { ...docsTool, name: mcpChatToolName("splashtop-packr-kb", "search_articles"), serverId: "splashtop-packr-kb", serverName: "Splashtop Agentic Packr Docs MCP", host: "support-splashtopagenticpackr.splashtop.com", tool: "search_articles",
+      inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] }, resultFormat: format };
+    const article: McpChatTool = { ...search, name: mcpChatToolName("splashtop-packr-kb", "get_article"), tool: "get_article",
+      inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] }, itemIds: { params: ["id"], form: { kind: "number" } } };
+    const packr = (calls: Array<{ tool: string; args: Record<string, unknown> }>): McpChatContext => ({
+      ...mcpContext(calls),
+      tools: [search, article],
+      async call(tool, args) {
+        calls.push({ tool: tool.tool, args });
+        return tool.tool === "search_articles"
+          ? { text: "", truncated: false, structured: { results: [{ id: 57314645399579, title: "Package your own installer with AI", url: "https://support-splashtopagenticpackr.splashtop.com/hc/articles/57314645399579", snippet: "Upload an installer." }] } }
+          : { text: "", truncated: false, structured: { id: 57314645399579, title: "Package your own installer with AI", url: "https://support-splashtopagenticpackr.splashtop.com/hc/articles/57314645399579", body: "Open Catalog, Add Package, Upload Installer." } };
+      },
+    });
+    const callSearch = JSON.stringify({ tool: search.name, params: {} });
+    const callArticle = JSON.stringify({ tool: article.name, params: {} });
+    const final = '{"final":true,"answer":"Open Catalog, then Add Package [1]."}';
+    const run = (store: IntelligenceSqliteStore, question: string, replies: string[], calls: Array<{ tool: string; args: Record<string, unknown> }>, prompts: Array<{ system?: string; prompt: string }>, extra: Partial<RunAgenticChatInput> = {}) =>
+      runAgenticChat({ ...input(store, scriptedLlm(replies, prompts, [], ['{"query":"upload first app"}', '{"id":"57314645399579"}']), packr(calls)), question, adminQuestion: question, questionKind: "docs", ...extra });
+    const READ_FIRST = /Request mcp__splashtop-packr-kb__get_article with empty params to read the best matching result in full/;
+
+    it("asks once for the full article, then answers from it", async () => {
+      await withStore(async (store) => {
+        const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+        const prompts: Array<{ system?: string; prompt: string }> = [];
+        const outcomes: string[] = [];
+        const result = await run(store, "how do I upload my first app?", [callSearch, final, callArticle, final], calls, prompts,
+          { modelStep: { start() {}, writing() {}, finish(outcome) { outcomes.push(outcome.kind === "repair" ? outcome.reason : outcome.kind); } } });
+        assert.equal(result.ok, true);
+        assert.deepEqual(calls.map((call) => call.tool), ["search_articles", "get_article"]);
+        assert.deepEqual(calls[1]!.args, { id: "57314645399579" });
+        assert.deepEqual(outcomes, ["tool", "excerpts", "tool", "final"]);
+        assert.match(prompts[2]!.prompt, READ_FIRST);
+        assert.match(prompts[0]!.system!, /request that tool for the best match before you answer/);
+      });
+    });
+
+    it("accepts a second answer without the read, and never asks twice", async () => {
+      await withStore(async (store) => {
+        const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+        const prompts: Array<{ system?: string; prompt: string }> = [];
+        const result = await run(store, "how do I upload my first app?", [callSearch, final, final], calls, prompts);
+        assert.equal(result.ok, true);
+        if (result.ok) assert.equal(result.answer, "Open Catalog, then Add Package [1].");
+        assert.deepEqual(calls.map((call) => call.tool), ["search_articles"]);
+        assert.equal(prompts.length, 3, "one extra model call, then the answer stands");
+        assert.match(prompts[2]!.prompt, READ_FIRST);
+      });
+    });
+
+    it("does not ask when the article was read, the question is not a how-to, or the answer is spoken", async () => {
+      await withStore(async (store) => {
+        for (const [question, replies, extra] of [
+          ["how do I upload my first app?", [callSearch, callArticle, final], {}],
+          ["What is Agentic Packr?", [callSearch, final], {}],
+          ["how do I upload my first app?", [callSearch, final], { voice: true }],
+          // Nothing was searched, so there is no result to read.
+          ["how do I upload my first app?", [final], {}],
+        ] as Array<[string, string[], Partial<RunAgenticChatInput>]>) {
+          const prompts: Array<{ system?: string; prompt: string }> = [];
+          const result = await run(store, question, replies, [], prompts, extra);
+          assert.equal(result.ok, true, question);
+          assert.equal(prompts.some((entry) => READ_FIRST.test(entry.prompt)), false, `${question} ${JSON.stringify(extra)}`);
+        }
+      });
     });
   });
 

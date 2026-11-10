@@ -20,7 +20,10 @@ import {
   MAX_PLANNED_RESOURCES,
   buildAnswerPack,
   definitionForResource,
+  asksHowTo,
   graphCacheResourcesForWrite,
+  hasStrongTenantReference,
+  hasTenantReference,
   matchAgentsToQuestion,
   pathForResource,
   planChatContext,
@@ -301,6 +304,52 @@ describe("agent matcher probe table (real registry)", () => {
     for (const question of ["Which devices have not synced in 45 days?", "How many of my devices are noncompliant?", "Why are sign-ins failing for finance users?"]) {
       assert.equal(matchAgentsToQuestion(question, agents).length, 1, question);
     }
+  });
+
+  it("suggests no agent on the word app alone, and keeps the agent its own topic names", async () => {
+    const agents = await registryAgents();
+    // A how-to about packaging an installer shares only "app" with "Dormant app registrations".
+    assert.deepEqual(slugs(matchAgentsToQuestion("how do I upload my first app?", agents)), []);
+    assert.deepEqual(slugs(matchAgentsToQuestion("How do I deploy an application?", agents)), []);
+    const dormant = matchAgentsToQuestion("Which app registrations are dormant?", agents);
+    assert.deepEqual(slugs(dormant), ["dormant-app-registrations"]);
+    assert.equal(dormant[0]!.reason, "This installed read agent matched app terms from the investigation.");
+  });
+});
+
+describe("tenant references that overrule a docs label", () => {
+  it("leaves first-person wording in a how-to to the model", () => {
+    for (const question of ["how do I upload my first app?", "How do we set up our first deployment template?", "How can I connect my Intune to it?", "How should we roll this out to us first?"]) {
+      assert.equal(asksHowTo(question), true, question);
+      assert.equal(hasTenantReference(question), true, question);
+      assert.equal(hasStrongTenantReference(question), false, question);
+    }
+  });
+
+  it("keeps state words, tenant values and other question forms as tenant references", () => {
+    for (const question of [
+      "How do I list my noncompliant devices?",
+      "How do I see which of my devices are encrypted?",
+      "How do I fix HR-LAPTOP-07?",
+      "How do I reset the password of anna@contoso.com?",
+      "How does our tenant handle guest access?",
+      // Not how-tos: they ask where the tenant stands or how something of ours behaves.
+      "How do we compare to the CIS baseline?",
+      "How does our compliance look?",
+      "How do my devices stay compliant?",
+      "How would we score on the secure score?",
+      "How do I fix all my devices?",
+      "How many of my devices are noncompliant?",
+      "What do the docs say about our devices?",
+      "Why does my device fail compliance?",
+      "Can I see my noncompliant devices?",
+      "Show our Intune devices",
+    ]) {
+      assert.equal(hasStrongTenantReference(question), true, question);
+    }
+    assert.equal(hasStrongTenantReference("How do I enroll macOS devices?"), false);
+    assert.equal(asksHowTo("How does Agentic Packr package an installer?"), false);
+    assert.equal(asksHowTo("How to package an installer"), true);
   });
 });
 

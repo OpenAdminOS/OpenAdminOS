@@ -37,9 +37,9 @@ describe("Chat documentation grounding", () => {
       2,
       "both deterministic paths should build a grounded prompt",
     );
-    // When Microsoft Learn is the chosen source or the model classifies, the index waits; a tenant question skips it.
+    // When a server is the chosen source or the model classifies, the index waits; a tenant question skips it.
     assert.equal(
-      (service.match(/learnFirst \|\| answerPlan\??\.sources\.kind === "tenant" \? \[\] : await this\.searchDocsIndex\(modelQuestion, steps\)/g) ?? []).length,
+      (service.match(/indexLater \|\| answerPlan\??\.sources\.kind === "tenant" \? \[\] : await this\.searchDocsIndex\(modelQuestion, steps\)/g) ?? []).length,
       2,
       "both agentic call sites should pass retrieved documentation",
     );
