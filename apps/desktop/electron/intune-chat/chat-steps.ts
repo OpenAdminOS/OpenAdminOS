@@ -239,7 +239,7 @@ export function planChatSources(input: {
   }
   const names = [...chosen.values()].map((server) => server.name);
   const intended = input.servers.filter((server) => input.declaredServerIds?.includes(server.id) && !chosen.has(server.id)).map((server) => server.name);
-  // TODO(ugur): the index waits behind every chosen server, also KQL Search or IntuneAutomation. Should only documentation servers hold it back?
+  // The index waits behind every chosen server, also KQL Search or IntuneAutomation, not only documentation servers (decision 2026-11-10).
   // It waits for the servers the model declared too, although those are never required calls.
   const waitsFor = [...names, ...intended];
   const serversFirst = waitsFor.length > 0;

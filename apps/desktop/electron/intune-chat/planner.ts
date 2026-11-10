@@ -541,9 +541,32 @@ const WEAK_DOCS =
 /** How-to and guidance wording: about a tenant object, it asks for docs and tenant state together. */
 const HOW_TO_OR_GUIDANCE =
   /^(?:how (?:do|does|can|should|would|to)|why (?:does|do|would)|explain|describe|when (?:does|do|should)|can i|where (?:do|can))\b|\b(?:best practices?|recommended|recommendation|requirements?|prerequisites?)\b/;
+/** An email address or a GUID. An address is tried only from the start of its token, so a long question scans in linear time. */
+const TENANT_ADDRESS_OR_ID = /(?<![\w.+-])[\w.+-]+@[\w-]+\.[\w.-]+|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-/;
+
+/**
+ * A name like HR-LAPTOP-07: a part in capitals that starts with a letter,
+ * a hyphen, and a digit later in the same run of capitals, digits and
+ * hyphens. Each run is read once, so a name of any length and a long
+ * question both scan in linear time.
+ */
+function holdsTenantName(text: string): boolean {
+  for (const run of text.matchAll(/[A-Z0-9-]+/g)) {
+    const name = run[0];
+    let digit = name.length - 1;
+    while (digit >= 0 && (name[digit]! < "0" || name[digit]! > "9")) digit -= 1;
+    if (digit < 0) continue;
+    // A run that continues a word ("fooBAR-1") has no name starting at its first character.
+    const continuesWord = run.index > 0 && /\w/.test(text[run.index - 1]!);
+    if ((continuesWord ? /-[A-Z][A-Z0-9]*-/ : /(?:^|-)[A-Z][A-Z0-9]*-/).test(name.slice(0, digit))) return true;
+  }
+  return false;
+}
+
 /** Values that only make sense in one tenant: an email address, a GUID, or a name like HR-LAPTOP-07. */
-// An address is tried only from the start of its token and a name has bounded parts, so a long question scans in linear time.
-const TENANT_VALUE = /(?<![\w.+-])[\w.+-]+@[\w-]+\.[\w.-]+|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-|\b[A-Z][A-Z0-9]{0,40}-[A-Z0-9-]{0,60}\d/;
+function holdsTenantValue(text: string): boolean {
+  return TENANT_ADDRESS_OR_ID.test(text) || holdsTenantName(text);
+}
 /** Phrases about someone's or something's state: "Bob's laptop", "your devices", "status of". */
 const TENANT_STATE =
   /\b(?:state of|status of|assigned to|enrolled in|your|their|his|her|any|all|who|run it|run this|execute|against)\b|\b(?!(?:what|it|that|there|here|let|who|where|how)'s\b)[a-z0-9]+'s\b/;
@@ -555,7 +578,7 @@ const TENANT_STATE =
 export function hasTenantReference(question: string): boolean {
   const trimmed = question.trim();
   const lower = trimmed.toLowerCase();
-  return TENANT_REFERENCE.test(lower) || TENANT_STATE.test(lower) || TENANT_VALUE.test(trimmed);
+  return TENANT_REFERENCE.test(lower) || TENANT_STATE.test(lower) || holdsTenantValue(trimmed);
 }
 
 /** A question in which the admin asks how to do something themselves: "how do I", "how can we", "how to". */
@@ -615,7 +638,7 @@ export function asksHowTo(question: string): boolean {
 export function hasStrongTenantReference(question: string): boolean {
   if (!asksHowTo(question)) return hasTenantReference(question);
   const trimmed = question.trim();
-  return TENANT_VALUE.test(trimmed) || INSPECTS_OWN.test(trimmed.toLowerCase()) || hasTenantReference(question.replace(FIRST_PERSON, " "));
+  return holdsTenantValue(trimmed) || INSPECTS_OWN.test(trimmed.toLowerCase()) || hasTenantReference(question.replace(FIRST_PERSON, " "));
 }
 
 /**
@@ -667,7 +690,7 @@ export function isExplicitDocsRequest(question: string): boolean {
   // Writing a query or script asks for code, also when it says "our" or
   // "which"; asking to run it, or a tenant value such as a device name,
   // still needs the tenant.
-  const codeRequest = (CODE_AUTHORING.test(lower) || CODE_REQUEST.test(lower)) && !RUN_AGAINST.test(lower) && !TENANT_VALUE.test(trimmed);
+  const codeRequest = (CODE_AUTHORING.test(lower) || CODE_REQUEST.test(lower)) && !RUN_AGAINST.test(lower) && !holdsTenantValue(trimmed);
   return codeRequest || (DOCS_REFERENCE.test(lower) && !hasTenantReference(question));
 }
 

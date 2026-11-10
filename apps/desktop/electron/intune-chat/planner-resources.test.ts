@@ -400,6 +400,17 @@ describe("tenant references that overrule a docs label", () => {
       assert.equal(hasStrongTenantReference(question), false, question);
     }
     assert.equal(asksHowTo("How does Agentic Packr package an installer?"), false);
+    // Names are read as the pattern before the linear scan read them, at any length.
+    const nameBefore = /\b[A-Z][A-Z0-9]*-[A-Z0-9-]*\d/;
+    for (const [value, expected] of [
+      ["HR-LAPTOP-07", true], ["CORPORATEWINDOWSAUTOPILOTENROLLMENTWORKSTATION-07", true], [`${"LONG".repeat(40)}-${"PART-".repeat(30)}7`, true],
+      ["foo-BAR-1", true], ["A-1-B", true], ["CVE-2024-1234", true], ["KIOSK-0042.", true], ["(HR-LAPTOP-07)", true],
+      ["fooBAR-1", false], ["HR7-X", false], ["M365", false], ["E5-", false], ["7A-B1", false], ["A-B", false], ["x_HR-07", false], ["-07", false],
+    ] as Array<[string, boolean]>) {
+      assert.equal(nameBefore.test(value), expected, `the earlier pattern on ${value}`);
+      assert.equal(hasTenantReference(`Rename ${value}`), expected, value);
+      assert.equal(hasStrongTenantReference(`How do I rename ${value}?`), expected, value);
+    }
     // A question at the length limit still finds its tenant value, and one without any has none.
     assert.equal(hasStrongTenantReference(`How do we upload ${"a".repeat(19900)}?`), false);
     assert.equal(hasStrongTenantReference(`How do we rename ${"A-".repeat(9900)}x?`), false);
