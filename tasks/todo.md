@@ -1,5 +1,15 @@
 # Current active plan
 
+- [x] New Intune icon and connector row logos (branch `ui/intune-icon-connector-rows`, 2026-11-10). Maintainer answers on the open logo points of PR #185: keep the Signal, Microsoft and WhatsApp logos as they are, KQL Search stays at 48 px (no larger file exists), no caption guard; replace the Intune icon with the new one; add the logos to the connector rows.
+
+  Acceptance criteria:
+  1. Every surface that shows the Intune icon shows the design Microsoft introduced in 2025, from a file Microsoft serves, unmodified, listed in the service logo NOTICE with owner, source, checksum and date; the earlier file is removed.
+  2. Each connector row under Results go to shows the same logo as the connector's card and reach map row; a connector without a logo shows two letters.
+  3. Light and dark both read (checked in a browser).
+  4. Typecheck, the renderer suite on Node 22 and the docs check pass.
+
+  Review (2026-11-10): all four met. The icon is the 256 px PNG frame of https://intune.microsoft.com/Content/favicon.ico, byte for byte (SHA-256 in the NOTICE); Microsoft's Azure icon archive, the previous source, still holds the earlier design. Checked in a browser in light and dark at the three tile sizes and at 40 and 72 px, with seven connector rows. Typecheck and the renderer suite (726 tests) pass on Node 22.
+
 - [x] Reach map polish and real logos (branch `ui/connections-flow-logos`, 2026-11-10). Request: optimize the Connections reach map and use real logos in it.
 
   Acceptance criteria:
