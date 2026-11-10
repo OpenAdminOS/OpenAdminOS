@@ -300,7 +300,7 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
       "Ask questions about Splashtop Agentic Packr and get answers from its documentation at support-splashtopagenticpackr.splashtop.com: connecting Intune, single sign-on with Entra ID, packaging installers, deployment and user experience templates, and deploying catalog apps to Intune. Chat finds the matching articles, reads them and answers with links to the sources. Built into OpenAdminOS: the documentation is searched directly from this device, with no sign-in.",
     pitch: "Ask about Splashtop Agentic Packr and get answers from its documentation, with links to the articles.",
     useFor: "Any question about Splashtop Agentic Packr answered from its documentation: connecting Intune, Entra ID sign-in, packaging installers, deployment and user experience templates, branding install dialogs and deploying catalog apps. Not for other Splashtop products or Microsoft 365.",
-    aliases: ["agentic packr", "splashtop agentic packr", "packr", "agentic packr docs", "splashtop agentic packr docs", "splashtop agentic packr docs mcp", "agentic packr documentation", "agentic packr help center", "agentic packr support"],
+    aliases: ["agentic packr", "splashtop agentic packr", "splashtop packr", "packr", "agentic packr docs", "splashtop agentic packr docs", "splashtop agentic packr docs mcp", "agentic packr documentation", "agentic packr help center", "agentic packr support"],
     topics: ["agentic packr", "packr"],
     auth: "none",
     readOnly: true,

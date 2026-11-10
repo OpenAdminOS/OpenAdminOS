@@ -162,7 +162,8 @@ function isHostName(name: string): boolean {
  */
 function longerNamePattern(name: string): RegExp {
   const words = name.split(/\s+/).map(escapeRegExp).join("(?:['\u2019]s)?\\s+");
-  const rest = isHostName(name) ? "(?:[/?#]\\S*)?" : "";
+  // The link ends at whitespace or a delimiter around it: <...>, [..](...), quotes or a comma.
+  const rest = isHostName(name) ? "(?:[/?#][^\\s<>()\\[\\]{}\"'`,]*)?" : "";
   return new RegExp(`(?<![\\p{L}\\p{N}.@-])${words}${rest}(?![\\p{L}\\p{N}_@-]|\\.[\\p{L}\\p{N}])`, "gu");
 }
 

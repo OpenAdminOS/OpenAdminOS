@@ -211,7 +211,7 @@ describe("Chat sources for the two Splashtop Help Centers", () => {
     assert.deepEqual(chosen("Does Agentic Packr support Entra ID single sign-on?"), ["splashtop-packr-kb"]);
     assert.deepEqual(chosen("Ask the Splashtop Agentic Packr Docs MCP about branding", "tenant"), ["splashtop-packr-kb"]);
     assert.deepEqual(namedServers("What can Packr do?", servers).map((server) => server.id), ["splashtop-packr-kb"]);
-    for (const question of ["How does Splashtop's Agentic Packr connect to Intune?", "How does Splashtop\u2019s Agentic Packr connect to Intune?"]) {
+    for (const question of ["How does Splashtop's Agentic Packr connect to Intune?", "How does Splashtop\u2019s Agentic Packr connect to Intune?", "How do I configure Splashtop Packr?", "How do I configure Splashtop's Packr?"]) {
       assert.deepEqual(chosen(question), ["splashtop-packr-kb"]);
       assert.deepEqual(chosen(question, "tenant"), ["splashtop-packr-kb"]);
     }
@@ -233,6 +233,10 @@ describe("Chat sources for the two Splashtop Help Centers", () => {
     assert.deepEqual(chosen("Summarize https://support-splashtopagenticpackr.splashtop.com/hc/en-us/articles/1?utm_source=windowsforum"), ["splashtop-packr-kb"]);
     assert.deepEqual(chosen("Summarize https://support-splashtopagenticpackr.splashtop.com/hc/en-us/articles/1?utm_source=kql"), ["splashtop-packr-kb"]);
     assert.deepEqual(chosen("Summarize https://support-splashtopagenticpackr.splashtop.com/hc/en-us/articles/1?utm_source=kql", "tenant"), ["splashtop-packr-kb"]);
+    // A link ends at the delimiters around it, so a source named right after it still counts.
+    assert.deepEqual(chosen("Compare <https://learn.microsoft.com/mem/intune/>,<https://www.microsoft.com/releasecommunications/mcp>").sort(), ["microsoft-learn", "release-communications"]);
+    assert.deepEqual(chosen("See [article](https://support-splashtopagenticpackr.splashtop.com/hc/en-us/articles/1)(WindowsForum has more details)").sort(), ["splashtop-packr-kb", "windowsforum"]);
+    assert.deepEqual(chosen("Read \"https://support-splashtopagenticpackr.splashtop.com/hc/en-us/articles/1\",KQL Search too", "tenant").sort(), ["kql-search", "splashtop-packr-kb"]);
     // A separate mention outside the link still counts.
     assert.deepEqual(chosen("Read https://support-splashtopagenticpackr.splashtop.com/hc/en-us/articles/1 and find KQL for it").sort(), ["kql-search", "splashtop-packr-kb"]);
     assert.deepEqual(chosen("Read https://support-splashtopagenticpackr.splashtop.com/hc/en-us/articles/1?ref=splashtop and compare it with Splashtop Streamer").sort(), ["splashtop-kb", "splashtop-packr-kb"]);
@@ -245,6 +249,8 @@ describe("Chat sources for the two Splashtop Help Centers", () => {
     assert.deepEqual(only("Ask support-splashtopagenticpackr.splashtop.com about templates").includes("splashtop-kb"), false);
     assert.deepEqual(namedServers("How do I configure Splashtop Agentic Packr?", withoutPackr), []);
     assert.equal(only("How does Splashtop's Agentic Packr connect to Intune?").includes("splashtop-kb"), false);
+    assert.equal(only("How do I configure Splashtop Packr?").includes("splashtop-kb"), false);
+    assert.equal(only("How do I configure Splashtop's Packr?").includes("splashtop-kb"), false);
     assert.equal(only("Summarize https://support-splashtopagenticpackr.splashtop.com/hc/en-us/articles/1-Template?utm_source=splashtop").includes("splashtop-kb"), false);
     for (const source of ["windowsforum", "kql"]) {
       const required = only(`Summarize https://support-splashtopagenticpackr.splashtop.com/hc/en-us/articles/1?utm_source=${source}`);
