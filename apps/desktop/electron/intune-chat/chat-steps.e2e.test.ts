@@ -473,7 +473,7 @@ describe("Chat steps, sources and follow-ups end to end", () => {
         { final: true, answer: "Start from this community query [1]." },
       ]);
       const message = (await store.sendIntuneChatMessage({ content: KQL_QUESTION })).assistantMessage;
-      assert.equal(classifiedAs(message.steps), "Classified as a docs question. Sources: KQL Search, then the local docs index if KQL Search is unavailable. Your tenant is not checked.");
+      assert.equal(classifiedAs(message.steps), "Classified as a docs question. Sources: KQL Search, then the local docs index if KQL Search does not answer. Your tenant is not checked.");
       assert.deepEqual(kinds(message.steps), ["plan", "answer", "mcp", "answer"]);
       assert.deepEqual(docsSearches, []);
       assert.ok(prompts.every((entry) => !entry.prompt.includes("passages from the local docs index")));

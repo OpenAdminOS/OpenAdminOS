@@ -237,13 +237,18 @@ export function planChatSources(input: {
     const learn = input.servers.find((server) => server.id === LEARN_SERVER_ID);
     if (input.kind === "docs" && chosen.size === 0 && learn) chosen.set(learn.id, learn);
   }
-  // TODO(ugur): the index waits behind every chosen server, also KQL Search or IntuneAutomation. Should only documentation servers hold it back?
-  const serversFirst = chosen.size > 0;
   const names = [...chosen.values()].map((server) => server.name);
+  const intended = input.servers.filter((server) => input.declaredServerIds?.includes(server.id) && !chosen.has(server.id)).map((server) => server.name);
+  // TODO(ugur): the index waits behind every chosen server, also KQL Search or IntuneAutomation. Should only documentation servers hold it back?
+  // It waits for the servers the model declared too, although those are never required calls.
+  const waitsFor = [...names, ...intended];
+  const serversFirst = waitsFor.length > 0;
   const docs = input.docsIndexAvailable
-    ? (serversFirst ? `the local docs index if ${names.length === 1 ? `${names[0]} is unavailable` : "none of them answers"}` : "the local docs index")
+    ? (serversFirst ? `the local docs index if ${waitsFor.length === 1 ? `${waitsFor[0]} does not answer` : intended.length > 0 ? "no server answers" : "none of them answers"}` : "the local docs index")
     : undefined;
-  const documentation = [...names, ...(docs && !serversFirst ? [docs] : [])];
+  // With no server chosen, the model's own choice leads the list, so the fallback reads in order.
+  const modelLed = names.length === 0 && intended.length > 0 && Boolean(docs) && input.kind !== "tenant";
+  const documentation = [...(modelLed ? [`${joinList(intended)}, chosen by the model`] : names), ...(docs && !serversFirst ? [docs] : [])];
   const docsList = joinList(documentation) + (docs && serversFirst ? `, then ${docs}` : "");
   const tenant = "cached tenant data and Microsoft Graph";
   const lead = input.lead ?? (input.kind === "docs" ? "Documentation question." : input.kind === "mixed" ? "Documentation and tenant question." : "Tenant question.");
@@ -252,8 +257,7 @@ export function planChatSources(input: {
     : input.kind === "mixed"
       ? `Sources: ${documentation.length > 0 ? `${docsList}${docs && serversFirst ? ", and " : ", "}` : ""}${tenant}.`
       : `Sources: ${tenant}${names.length > 0 ? `, and ${joinList(names)}` : ""}.`;
-  const intended = input.servers.filter((server) => input.declaredServerIds?.includes(server.id) && !chosen.has(server.id)).map((server) => server.name);
-  const intent = intended.length > 0 ? ` The model also plans to ask ${joinList(intended)}.` : "";
+  const intent = intended.length > 0 && !modelLed ? ` The model also plans to ask ${joinList(intended)}.` : "";
   return { kind: input.kind, requiredServerIds: [...chosen.keys()], serversFirst, detail: `${lead} ${rest}${intent}` };
 }
 
@@ -559,7 +563,7 @@ const REPAIR: Record<Extract<ModelStepOutcome, { kind: "repair" }>["reason"], st
 
 /** A resource label inside a sentence: product names keep their capital, other labels read as plain words. */
 function midSentenceLabel(label: string): string {
-  return /^(?:Intune|Entra|Microsoft|Windows|Defender|Autopilot|Apple|Conditional)\b/.test(label) ? label : `${label.charAt(0).toLowerCase()}${label.slice(1)}`;
+  return /^(?:Intune|Entra|Microsoft|Windows|Defender|Autopilot|Apple|Android|Conditional|Secure Score)\b/.test(label) ? label : `${label.charAt(0).toLowerCase()}${label.slice(1)}`;
 }
 
 /** The plain decision of a tool call, such as "Chose to ask Microsoft Learn" or "Chose to query cached managed devices". */

@@ -314,11 +314,11 @@ export async function runAgenticChat(
   let kindRepaired = false;
   // Servers named in the question, or chosen for it, must be called once.
   let required = new Set(input.requiredServerIds ?? []);
-  // Installed servers the model declared as its sources. They are never required calls, but the withheld docs index waits for them.
+  // Installed servers the model declared as its sources or asked in its classifying reply. They are never required calls, but the withheld docs index waits for them.
   let declared = new Set<string>();
   const attemptedServers = new Set<string>();
   let missingSourceCount = 0;
-  // Servers whose tool that reads one result in full (get_article) was requested in this answer.
+  // Servers whose tool that reads one result in full (get_article) answered in this answer.
   const readServers = new Set<string>();
   let excerptsRepaired = false;
   let learnAnswered = false;
@@ -472,14 +472,17 @@ export async function runAgenticChat(
         ? resolveQuestionKind(action.questionKind, input.classify.tenantReference)
         : { kind: input.questionKind ?? "tenant", vetoed: false };
       questionKind = decided.kind;
-      const plan = input.classify.onKind(decided.kind, !action.questionKind ? "fallback" : decided.vetoed ? "veto" : "model", action.sources);
+      // A server whose tool this reply requests is the model's choice as much as one it lists in "sources".
+      const requested = action.kind === "tool" ? input.tools.mcp?.tools.find((tool) => tool.name === action.tool)?.serverId : undefined;
+      const declaredIds = [...new Set([...action.sources, ...(requested ? [requested] : [])])];
+      const plan = input.classify.onKind(decided.kind, !action.questionKind ? "fallback" : decided.vetoed ? "veto" : "model", declaredIds);
       required = new Set(plan.requiredServerIds);
       classification = plan.detail;
       // A tenant question gets no local docs index; docs and mixed load it unless a server leads:
       // one chosen for the question, declared by the model or requested in this reply.
       if (questionKind === "tenant") fallbackPending = false;
-      declared = new Set(action.sources.filter((id) => input.tools.mcp?.servers?.some((server) => server.id === id)));
-      const serverInPlay = plan.serversFirst || declared.size > 0 || (action.kind === "tool" && isMcpChatToolName(action.tool));
+      declared = new Set(declaredIds.filter((id) => input.tools.mcp?.servers?.some((server) => server.id === id)));
+      const serverInPlay = plan.serversFirst || declared.size > 0;
       const loadIndex = !serverInPlay && fallbackPending && input.documentationFallback;
       const tenantData = questionKind !== "docs";
       // No server is in play for this question, so the withheld local index is loaded now.
@@ -577,7 +580,9 @@ export async function runAgenticChat(
     const lateIndex = action.kind === "final" && !indexLoad && fallbackPending && !serverAnswered && input.documentationFallback && (fallbackReason !== undefined || missingSources.length === 0)
       ? async () => {
           fallbackPending = false;
-          const passages = await input.documentationFallback!(fallbackReason);
+          // No server failed, so the reason is the declared server the model then did not ask.
+          const unasked = [...declared].filter((id) => !attemptedServers.has(id)).map((id) => input.tools.mcp?.servers?.find((server) => server.id === id)?.name ?? id);
+          const passages = await input.documentationFallback!(fallbackReason ?? (unasked.length > 0 ? `${unasked.join(" and ")} ${unasked.length === 1 ? "was" : "were"} not asked` : undefined));
           addDocumentation(passages);
           return passages.length;
         }
@@ -635,7 +640,6 @@ export async function runAgenticChat(
     }
     const startedAt = new Date().toISOString();
     const mcpTool = isMcpChatToolName(action.tool) ? input.tools.mcp?.tools.find((tool) => tool.name === action.tool) : undefined;
-    if (mcpTool?.itemIds?.params?.length) readServers.add(mcpTool.serverId);
     input.onToolStart?.({
       tool: action.tool,
       // The model's params for an MCP tool are never sent, so they are not shown either.
@@ -685,6 +689,8 @@ export async function runAgenticChat(
       if (answered) {
         serverAnswered = true;
         if (mcpSource.serverId === LEARN_SERVER_ID) learnAnswered = true;
+        // Only a read that answered counts; a failed one leaves the how-to without its article.
+        if (mcpTool?.itemIds?.params?.length) readServers.add(mcpSource.serverId);
         // The model cites MCP results with the numbers listed here, after the local passages.
         const { results = [], content, matched, counts, ...rest } = execution.result as { results?: McpResultItem[]; content?: unknown; matched?: number; counts?: Record<string, number | boolean> } & Record<string, unknown>;
         mcpResults.push(...results.map((item) => ({ serverId: mcpSource.serverId, serverName: mcpSource.serverName, title: item.title, ...(item.url ? { url: item.url } : {}), ...(item.id ? { id: item.id } : {}) })));

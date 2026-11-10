@@ -900,6 +900,21 @@ describe("The MCP query writer boundary", () => {
       });
     });
 
+    it("still asks when the read was requested but sent nothing", async () => {
+      await withStore(async (store) => {
+        const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+        const prompts: Array<{ system?: string; prompt: string }> = [];
+        // The article is requested before any search, so the host has no id to send.
+        const question = "how do I upload my first app?";
+        const writer = ['{"id":"57314645399579"}', '{"query":"upload first app"}', '{"id":"57314645399579"}'];
+        const result = await runAgenticChat({ ...input(store, scriptedLlm([callArticle, callSearch, final, callArticle, final], prompts, [], writer), packr(calls)), question, adminQuestion: question, questionKind: "docs" });
+        assert.equal(result.ok, true);
+        assert.equal(result.toolTrace[0]!.mcpSource?.sentToHost, false, "no earlier result gave the id");
+        assert.deepEqual(calls.map((call) => call.tool), ["search_articles", "get_article"]);
+        assert.match(prompts[3]!.prompt, READ_FIRST);
+      });
+    });
+
     it("does not ask when the article was read, the question is not a how-to, or the answer is spoken", async () => {
       await withStore(async (store) => {
         for (const [question, replies, extra] of [
