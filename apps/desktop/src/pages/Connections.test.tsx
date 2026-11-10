@@ -433,7 +433,9 @@ describe("Connections results and organizations", () => {
   it("opens and closes a connector drawer from its URL", async () => {
     const user = userEvent.setup();
     render(createMockAppState(), { listConnectors: vi.fn(async () => [teamsConnector()]) }, "/connections?connector=teams");
-    expect(await screen.findByRole("dialog", { name: "Microsoft Teams" })).toBeInTheDocument();
+    const drawer = await screen.findByRole("dialog", { name: "Microsoft Teams" });
+    // The connector's card shows the same logo file as its row in the reach map.
+    expect(drawer.querySelector('article [data-reference-logo="microsoft-teams"][data-kind="logo"] img')).not.toBeNull();
     await user.click(screen.getByRole("button", { name: "Close drawer" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Microsoft Teams" })).not.toBeInTheDocument());
   });
