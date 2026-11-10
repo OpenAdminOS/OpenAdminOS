@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-11-10T08:00:48.205Z",
+  "updatedAt": "2026-11-10T09:00:47.577Z",
   "agents": {
     "find-inactive-devices": {
       "installs": 36,
@@ -14,8 +14,8 @@
       "installs7d": 1
     },
     "compliance-overview": {
-      "installs": 52,
-      "installs7d": 7
+      "installs": 53,
+      "installs7d": 8
     },
     "os-update-posture": {
       "installs": 25,
@@ -46,8 +46,8 @@
       "installs7d": 7
     },
     "sign-in-failure-explainer": {
-      "installs": 28,
-      "installs7d": 4
+      "installs": 29,
+      "installs7d": 5
     },
     "stale-guest-cleanup": {
       "installs": 24,
