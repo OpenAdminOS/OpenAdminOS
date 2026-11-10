@@ -390,12 +390,21 @@ describe("tenant references that overrule a docs label", () => {
       "How do I make a report to review with my manager?",
       "How do I see my options in the enrollment wizard?",
       "How do I check my work before I assign the profile?",
+      // A tenant word in a later phrase does not make the admin's "options" or "work" a tenant thing.
+      "How do I see my options for device enrollment?",
+      "How do I view my options for app protection?",
+      "How do I check my work before deploying apps?",
       "How do we perform a remote wipe?",
     ]) {
       assert.equal(asksHowTo(question), true, question);
       assert.equal(hasStrongTenantReference(question), false, question);
     }
     assert.equal(asksHowTo("How does Agentic Packr package an installer?"), false);
+    // A question at the length limit is read in linear time, with and without an address in it.
+    const started = performance.now();
+    for (const long of [`How do we upload ${"a".repeat(19900)}?`, `How do we upload ${"a".repeat(19800)} for b@contoso.com?`, `How do we rename ${"A-".repeat(9900)}x?`]) hasStrongTenantReference(long);
+    assert.ok(performance.now() - started < 250, `long questions took ${Math.round(performance.now() - started)} ms`);
+    assert.equal(hasStrongTenantReference(`How do we upload ${"a".repeat(19800)} for b@contoso.com?`), true);
     assert.equal(asksHowTo("How to package an installer"), true);
   });
 });

@@ -542,7 +542,8 @@ const WEAK_DOCS =
 const HOW_TO_OR_GUIDANCE =
   /^(?:how (?:do|does|can|should|would|to)|why (?:does|do|would)|explain|describe|when (?:does|do|should)|can i|where (?:do|can))\b|\b(?:best practices?|recommended|recommendation|requirements?|prerequisites?)\b/;
 /** Values that only make sense in one tenant: an email address, a GUID, or a name like HR-LAPTOP-07. */
-const TENANT_VALUE = /[\w.+-]+@[\w-]+\.[\w.-]+|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-|\b[A-Z][A-Z0-9]*-[A-Z0-9-]*\d/;
+// An address is tried only from the start of its token and a name has bounded parts, so a long question scans in linear time.
+const TENANT_VALUE = /(?<![\w.+-])[\w.+-]+@[\w-]+\.[\w.-]+|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-|\b[A-Z][A-Z0-9]{0,40}-[A-Z0-9-]{0,60}\d/;
 /** Phrases about someone's or something's state: "Bob's laptop", "your devices", "status of". */
 const TENANT_STATE =
   /\b(?:state of|status of|assigned to|enrolled in|your|their|his|her|any|all|who|run it|run this|execute|against)\b|\b(?!(?:what|it|that|there|here|let|who|where|how)'s\b)[a-z0-9]+'s\b/;
@@ -572,16 +573,18 @@ const HOW_WE_STAND = /^how (?:do|can|should|would) (?:i|we) (?:\w+ )?(?:(?:compa
  * my noncompliant devices", "how do I check if our devices are compliant".
  * The first-person word follows the verb directly, or after a word such
  * as "if" or "which of", and names something a tenant holds within the
- * next words. So a purpose further on ("configure Intune to monitor our
- * devices"), another clause ("check a setting before we deploy it") and
- * other things of the admin's ("see my options", "check my work") do not
- * count, and neither does "tell my team".
+ * next words of the same phrase: a preposition or conjunction ends it.
+ * So a purpose further on ("configure Intune to monitor our devices"),
+ * another clause ("check a setting before we deploy it") and other
+ * things of the admin's ("see my options for device enrollment", "check
+ * my work before deploying apps") do not count, and neither does "tell
+ * my team".
  */
 const INSPECTS_OWN = new RegExp(
   "^how (?:(?:do|can|should|would) (?:i|we)|to) (?:\\w+ )?"
   + "(?:(?:see|view|check|verify|confirm|know|find|identify|look (?:at|up|for|into))(?: (?:if|whether|that|which|what|when|why|how|many|all|any|out|of)){0,3}"
   + "|tell(?: (?:if|whether|which|what|when|why|how|many|all|any|of)){1,3})"
-  + " (?:our|ours|my|mine|we|us)\\b(?: \\S+){0,3}?"
+  + " (?:our|ours|my|mine|we|us)\\b(?: (?!(?:for|before|after|in|on|to|with|within|when|while|and|or|of|that|at|from|about|by|if|so|because|then|during|until|through|via)\\b)\\S+){0,3}?"
   + " (?:devices?|laptops?|phones?|macs?|pcs?|machines?|endpoints?|users?|guests?|admins?|accounts?|groups?|policy|policies|profiles?|apps?|applications?|licen[cs]es?|sign-?ins?|logs?|roles?|tenant|fleet|compliance|compliant|non-?compliant|encrypted|enrolled|managed|score|baseline|alerts?|incidents?|registrations?|deployments?)\\b",
 );
 /** The admin speaking about themselves: "how do I upload my first app", "how do we set this up". */
