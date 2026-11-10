@@ -24,8 +24,9 @@ import {
 
 /**
  * The owner's icon for each service, unmodified (sources in
- * `assets/service-logos/NOTICE.md`). Microsoft's are single colour files
- * for light and dark surfaces alike; Splashtop's sits on a white tile.
+ * `assets/service-logos/NOTICE.md`). Microsoft provides one file per
+ * service, shown on light and dark surfaces alike; Splashtop's sits on a
+ * white tile.
  */
 const ICONS: Readonly<Partial<Record<string, string>>> = {
   intune: intuneIcon,

@@ -474,6 +474,8 @@ function ConnectorLoadingState() {
     >
       {[0, 1, 2].map((item) => (
         <div key={item} className="flex items-center gap-4 border-b border-[var(--color-border-soft)] px-5 py-4 last:border-b-0">
+          {/* Holds the place of the row's logo tile, so the text does not jump when the rows load. */}
+          <Skeleton shape="block" className="h-[30px] w-[30px] shrink-0" />
           <div className="min-w-0 flex-1 space-y-2">
             <Skeleton className="w-36" />
             <Skeleton className="w-64 max-w-full" />
