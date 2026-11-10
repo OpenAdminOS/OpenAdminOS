@@ -559,10 +559,20 @@ export function hasTenantReference(question: string): boolean {
 
 /** A question in which the admin asks how to do something themselves: "how do I", "how can we", "how to". */
 const HOW_TO_START = /^how (?:(?:do|can|should|would) (?:i|we)|to)\b/;
-/** The same opening asking where the tenant stands, not how to do something: "how do we compare to the baseline". */
-const HOW_WE_STAND = /^how (?:do|can|should|would) (?:i|we) (?:compare|look|stand|rank|perform|score|fare|measure|stack|do (?:on|against))\b/;
-/** A how-to that asks to look at the admin's own things: "how do I see my noncompliant devices", "how do I check if our devices are compliant". */
-const INSPECTS_OWN = /\b(?:see|view|check|verify|confirm|know|tell|find out|monitor|audit|review)\b.*\b(?:our|my|mine|we|us)\b/;
+/**
+ * The same opening asking where the tenant stands, not how to do something:
+ * "how do we compare to the baseline", "how do we actually stand on Secure
+ * Score", "how do we do on secure score". The verb counts only with what
+ * follows it, so "how do we perform an unattended installation" and "how
+ * do we look up an application ID" stay how-tos.
+ */
+const HOW_WE_STAND = /^how (?:do|can|should|would) (?:i|we) (?:\w+ )?(?:(?:compare|look|stand|rank|perform|score|fare|measure up|stack up)(?: (?:on|against|to|with|versus|vs|in terms of|in comparison|compared|relative)\b|[\s?.!]*$)|do (?:on|against)\b)/;
+/**
+ * A how-to whose own verb is to look at the admin's things: "how do I see
+ * my noncompliant devices", "how do I check if our devices are compliant".
+ * A purpose further on ("configure Intune to monitor our devices") is not.
+ */
+const INSPECTS_OWN = /^how (?:(?:do|can|should|would) (?:i|we)|to) (?:\w+ )?(?:see|view|check|verify|confirm|know|find|identify|tell (?:if|whether|which|what|when|who)|look (?:at|up|for|into))\b.*\b(?:our|my|mine|we|us)\b/;
 /** The admin speaking about themselves: "how do I upload my first app", "how do we set this up". */
 const FIRST_PERSON = /\b(?:our|my|mine|we|us)\b/gi;
 

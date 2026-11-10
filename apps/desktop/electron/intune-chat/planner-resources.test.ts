@@ -340,6 +340,11 @@ describe("tenant references that overrule a docs label", () => {
       "How do I know if we have stale devices?",
       "How can we tell if we are compliant with the CIS baseline?",
       "How do we do on secure score?",
+      "How do we actually stand on Secure Score?",
+      "How do we compare?",
+      "How do I find our noncompliant devices?",
+      "How do I quickly see my noncompliant devices?",
+      "How do I look up my tenant ID?",
       // A first-person word inside a tenant value is part of the value.
       "How do I reset the password for us@contoso.com?",
       "How do I unlock my@contoso.com?",
@@ -362,8 +367,23 @@ describe("tenant references that overrule a docs label", () => {
     assert.equal(hasStrongTenantReference("How do I enroll macOS devices?"), false);
     // Looking at something general stays with the model, and so does doing something.
     assert.equal(hasStrongTenantReference("How do I check a policy setting in the portal?"), false);
-    assert.equal(hasStrongTenantReference("How do we do a remote wipe?"), false);
-    assert.equal(asksHowTo("How do we do a remote wipe?"), true);
+    // A verb that also describes standing or looking is a procedure with a plain object.
+    for (const question of [
+      "How do we do a remote wipe?",
+      "How do we perform an unattended installation?",
+      "How do I perform my first app deployment?",
+      "How do we look up an application ID?",
+      "How do we perform in-place upgrades?",
+      "How do we compare two policies?",
+      "How do we stand up a new distribution point?",
+      // The look is a purpose further on, not what the admin asks to do.
+      "How do I configure Intune to monitor our devices?",
+      "How do I set up a report to check our compliance?",
+      "How do I tell my users to enroll?",
+    ]) {
+      assert.equal(asksHowTo(question), true, question);
+      assert.equal(hasStrongTenantReference(question), false, question);
+    }
     assert.equal(asksHowTo("How does Agentic Packr package an installer?"), false);
     assert.equal(asksHowTo("How to package an installer"), true);
   });
