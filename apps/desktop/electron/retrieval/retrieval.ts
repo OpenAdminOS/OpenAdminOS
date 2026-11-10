@@ -192,8 +192,8 @@ export function normalizeIndexMeta(raw: Record<string, unknown>): RetrievalIndex
 /** What the published index corpus was embedded with. */
 export const DEFAULT_INDEX_EMBEDDING_MODEL = "nomic-embed-text";
 
-/** Front matter at the start of a chunk. Its closing line may carry trailing spaces. */
-const FRONT_MATTER = /^\uFEFF?---[ \t]*\r?\n([\w.-]+:[\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
+/** Front matter at the start of a chunk. It may open with comment lines, and its closing line may carry trailing spaces. */
+const FRONT_MATTER = /^\uFEFF?---[ \t]*\r?\n((?:#[^\n]*\r?\n)*[\w.-]+:[\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
 
 /**
  * Repairs chunks of an index built before front matter with a trailing

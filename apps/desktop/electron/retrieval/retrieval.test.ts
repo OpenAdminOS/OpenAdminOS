@@ -67,6 +67,9 @@ describe("local documentation retrieval", () => {
     ]);
     assert.deepEqual([headed!.title, tail!.title], ["Configure single sign-on", "Configure single sign-on"]);
     assert.equal(repairFrontMatter([{ file: "e.md", title: comment, text: `---\nms.topic: how-to\n# ${comment}\n---\nNo heading here.` }])[0]!.title, "e.md");
+    // Front matter that opens with the comment is still front matter.
+    const [opened] = repairFrontMatter([{ file: "f.md", title: comment, text: `---\n# ${comment}\ntitle: Configure single sign-on\n---\nBody` }]);
+    assert.deepEqual([opened!.title, opened!.text], ["Configure single sign-on", "Body"]);
   });
 
   it("ranks chunks by cosine similarity and carries provenance", async () => {
