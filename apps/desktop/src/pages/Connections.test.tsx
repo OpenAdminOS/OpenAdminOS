@@ -268,36 +268,63 @@ describe("reach map connectors and layout", () => {
     expect(path!.d.endsWith(" 590 55")).toBe(true);
   });
 
-  it("keeps every line out of the caption under the tile, with a few rows and with sixteen", () => {
+  it("keeps every line out of the caption under the tile, however many rows there are", () => {
     // The wide map: a 72 px tile centred in a 128 px column, 76 px gaps, the caption 10 px under the tile and as wide as the column.
-    const box = { left: 0, right: 1000, top: 0, height: 700 };
-    const tile = { left: 428, right: 500, top: 300, height: 72 };
-    const caption = { left: 400, right: 528, top: 382 };
+    const box = { left: 0, right: 1000, top: 0, height: 1400 };
+    const tile = { left: 428, right: 500, top: 600, height: 72 };
+    const caption = { left: 400, right: 528, top: 682 };
     const centre = tile.top + tile.height / 2;
     const column = (ids: string[], left: number, right: number) =>
       ids.map((id, index): [string, { left: number; right: number; top: number; height: number }] => [id, { left, right, top: centre - (ids.length * 32) / 2 + index * 32 + 5, height: 22 }]);
+    /** Points along a path of M, H and C segments. */
     const samples = (d: string): Array<[number, number]> => {
-      const [x0, y0, x1, y1, x2, y2, x3, y3] = d.match(/-?[\d.]+/g)!.map(Number) as [number, number, number, number, number, number, number, number];
-      return Array.from({ length: 201 }, (_, step) => {
-        const t = step / 200;
-        const u = 1 - t;
-        return [u ** 3 * x0 + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t ** 3 * x3, u ** 3 * y0 + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t ** 3 * y3];
-      });
+      const tokens = d.match(/[MHC]|-?[\d.]+/g)!;
+      const points: Array<[number, number]> = [];
+      let [x, y] = [0, 0];
+      for (let at = 0; at < tokens.length; ) {
+        const command = tokens[at++];
+        const take = (count: number) => tokens.slice(at, (at += count)).map(Number);
+        if (command === "M") {
+          [x, y] = take(2) as [number, number];
+          points.push([x, y]);
+        } else if (command === "H") {
+          const [to] = take(1) as [number];
+          for (let step = 1; step <= 20; step += 1) points.push([x + ((to - x) * step) / 20, y]);
+          x = to;
+        } else {
+          const [x1, y1, x2, y2, x3, y3] = take(6) as [number, number, number, number, number, number];
+          for (let step = 1; step <= 200; step += 1) {
+            const t = step / 200;
+            const u = 1 - t;
+            points.push([u ** 3 * x + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t ** 3 * x3, u ** 3 * y + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t ** 3 * y3]);
+          }
+          [x, y] = [x3, y3];
+        }
+      }
+      return points;
     };
-    for (const outgoing of [7, 16]) {
-      const ins = ["in-0", "in-1", "in-2"];
+    const crossings = (incoming: number, outgoing: number, clear?: { left: number; right: number }) => {
+      const ins = Array.from({ length: incoming }, (_, index) => `in-${index}`);
       const outs = Array.from({ length: outgoing }, (_, index) => `out-${index}`);
       const rows = new Map([...column(ins, 124, 324), ...column(outs, 604, 960)]);
-      const paths = reachPaths(box, tile, rows, [
-        ...ins.map((id) => ({ id, direction: "in" as const, tone: "default" as const })),
-        ...outs.map((id) => ({ id, direction: "out" as const, tone: "default" as const })),
-      ]);
-      expect(paths).toHaveLength(3 + outgoing);
-      for (const path of paths) {
-        const inside = samples(path.d).filter(([x, y]) => x >= caption.left && x <= caption.right && y >= caption.top);
-        expect(inside, `${path.id} with ${outgoing} rows out`).toEqual([]);
-      }
-    }
+      const paths = reachPaths(
+        box,
+        tile,
+        rows,
+        [...ins.map((id) => ({ id, direction: "in" as const, tone: "default" as const })), ...outs.map((id) => ({ id, direction: "out" as const, tone: "default" as const }))],
+        clear,
+      );
+      expect(paths).toHaveLength(incoming + outgoing);
+      return paths.filter((path) => samples(path.d).some(([x, y]) => x >= caption.left && x <= caption.right && y >= caption.top)).map((path) => path.id);
+    };
+    expect(crossings(3, 7, caption)).toEqual([]);
+    expect(crossings(3, 16, caption)).toEqual([]);
+    expect(crossings(30, 30, caption)).toEqual([]);
+    // Without the level run past the caption, the lowest rows of a long list cut its corners.
+    expect(crossings(30, 30)).toEqual(expect.arrayContaining(["in-29", "out-29"]));
+    // Each line runs level from the tile until it is 2 px past the caption, then curves to its row.
+    const [path] = reachPaths(box, tile, new Map(column(["out-0"], 604, 960)), [{ id: "out-0", direction: "out", tone: "default" }], caption);
+    expect(path!.d).toBe("M506 636 H530 C563.2 636, 563.2 636, 594 636");
   });
 
   it(`stacks the map below ${REACH_STACK_BELOW} px of content width`, () => {
@@ -477,6 +504,8 @@ describe("Connections services", () => {
     const references = screen.getByRole("region", { name: CONNECTIONS_COPY.referencesHeading });
     expect(within(references).getByText("KQL Search")).toBeInTheDocument();
     expect(within(references).getByText("www.kqlsearch.com")).toBeInTheDocument();
+    // The row shows the logo of the host's owner, not two letters.
+    expect(within(references).getByText("KQL Search").closest("li")!.querySelector('.svc-mark [data-reference-logo="kqlsearch"][data-kind="logo"] img')).not.toBeNull();
     expect(within(references).queryByText("Microsoft Learn")).not.toBeInTheDocument();
     await user.click(within(references).getByRole("button", { name: `${CONNECTIONS_COPY.referenceTurnOff} KQL Search` }));
     await waitFor(() => expect(bridge.setMcpServerEnabled).toHaveBeenCalledWith("kql-search", false));

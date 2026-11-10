@@ -927,7 +927,7 @@ function WhatsAppWebCard({
       <div className="border-b border-[var(--color-border-soft)] p-5">
         <div className="flex items-start gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white p-1.5 ring-1 ring-[var(--color-border-soft)]">
-            <ReferenceLogo name="WhatsApp" size={30} surface="light" />
+            <ReferenceLogo name={descriptor.name} size={30} surface="light" />
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">

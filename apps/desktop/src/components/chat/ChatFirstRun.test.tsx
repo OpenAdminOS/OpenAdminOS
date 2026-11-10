@@ -1,9 +1,10 @@
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { createMockAppState, makeMockBridge, mockTenant, renderWithAppState } from "../../test/test-utils";
+import { FIRST_RUN_CHAT_COPY } from "../../copy/chat";
+import { createMockAppState, createMockMcpServers, makeMockBridge, mockTenant, renderWithAppState } from "../../test/test-utils";
 import { qualifyScope, requestedScopes, type TenantRecord } from "../../shared/openAdminOS";
-import { NotConnectedCard } from "./ChatFirstRun";
+import { NoTenantChatHome, NotConnectedCard } from "./ChatFirstRun";
 
 const grants = (partIds: string[]) => requestedScopes(partIds).map((scope) => qualifyScope(scope.name));
 const notConnected = { reason: "service-missing" as const, partIds: ["entra.signins", "defender.incidents"], tenantId: mockTenant.id };
@@ -71,5 +72,16 @@ describe("NotConnectedCard after the tenant changed (Muse round 2, P)", () => {
     expect(screen.getByText(/The organization this question was about is no longer in OpenAdminOS/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Connect Entra.+Defender$/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Use our own app registration" })).toBeInTheDocument();
+  });
+});
+
+describe("NoTenantChatHome reference suggestions", () => {
+  it("shows the logo of each suggested reference's owner", () => {
+    const state = createMockAppState({ mcpServers: createMockMcpServers() });
+    renderWithAppState(<NoTenantChatHome state={state} disabled={false} onAsk={vi.fn()} />, { bridge: makeMockBridge({}, state) });
+    const suggestions = screen.getByRole("region", { name: FIRST_RUN_CHAT_COPY.referencesTitle });
+    const row = (name: string) => within(suggestions).getByText(name).closest("li")!;
+    expect(row("Microsoft Learn").querySelector('.svc-mark [data-reference-logo="microsoft"][data-kind="logo"] img')).not.toBeNull();
+    expect(row("KQL Search").querySelector('.svc-mark [data-reference-logo="kqlsearch"][data-kind="logo"] img')).not.toBeNull();
   });
 });

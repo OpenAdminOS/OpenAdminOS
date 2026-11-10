@@ -13,6 +13,8 @@
 
   Review (2026-11-10): all seven met. Measured in a browser at 975 px: 0 of 10 lines (the reported data) and 0 of 19 lines (16 outgoing rows) inside the caption box. Typecheck and the renderer suite (720 tests) pass on Node 22. A separate reviewer graded the seven criteria as passed; its two findings (an assertion that could not fail, a wrap rule that reached the stacked caption) are fixed. Open points for the maintainer: Signal's 26 px minimum size, Microsoft's licence wording for product icons, and larger files for the 48 px KQL Search and WindowsForum icons.
 
+  Review round 1 on PR #185 (2026-11-10): GPT-6.1-Sol and Muse Wonder Full both approved with nothing blocking. Their findings are fixed: connector logos are looked up in a Map (a name such as `constructor` no longer matches an inherited property); each line runs level past the caption before it bends, so the caption stays clear with any number of rows (measured in a browser: 0 of 10, 0 of 19 and 0 of 35 lines inside the caption, at least 18 px above it); the row anchor is its own tested function; a sampled-curve test fails when a line enters the caption; the Public references row and the Chat suggestions have logo assertions; a host with a trailing dot matches its owner; the WhatsApp card reads its name from the descriptor. Main's listing logos for the Splashtop references (PR #184) replace this branch's Splashtop host lookup.
+
 - [ ] Managed configuration, issue #176 (branch `managed/policy-file`, PR #177). Built: policy file paths, schema, parsing with line numbers, precedence, main-process enforcement for providers, models, public references and the app registration, Settings and notice UI, configuration audit events, IT admin docs.
 
   Acceptance criteria:

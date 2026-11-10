@@ -116,9 +116,9 @@ export function referenceMarkText(name: string): string {
 /**
  * A logo file as its owner provides it (sources in
  * `assets/service-logos/NOTICE.md`). `dark` is the owner's variant for dark
- * surfaces; without one the single file shows on both. `scale` renders a
- * file whose artwork carries its own clear space larger; the file is never
- * cropped. `whiteTile` keeps the tile white in both themes for artwork that
+ * surfaces; without one the single file shows on both. `scale` sizes a
+ * file to its own clear space, smaller for artwork that fills its canvas
+ * edge to edge; the file is never cropped. `whiteTile` keeps the tile white in both themes for artwork that
  * only reads on a light surface.
  */
 interface ReferenceLogoFile {
@@ -169,7 +169,8 @@ const CONNECTOR_LOGOS: ReadonlyMap<string, ReferenceLogoFile> = new Map([
 ]);
 
 function referenceLogo(name: string): ReferenceLogoFile | undefined {
-  const key = name.trim().toLowerCase();
+  // A fully qualified host may end in a dot: learn.microsoft.com. is still Microsoft's.
+  const key = name.trim().toLowerCase().replace(/\.$/, "");
   if (HOST_NAME.test(key)) return HOST_LOGOS.find(([domain]) => key === domain || key.endsWith(`.${domain}`))?.[1];
   return CONNECTOR_LOGOS.get(key);
 }

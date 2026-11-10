@@ -241,13 +241,9 @@ const REACH_FAN = 9;
 const REACH_FAN_INSET = 8;
 /** Where a line bends, as a share of its run measured from the row. */
 const REACH_BEND = 0.35;
+/** A line runs level until it is this far past the caption under the tile. */
+const REACH_CLEAR = 2;
 
-/**
- * Cubic curves from each row to the tile, fanned at the tile edge. A line
- * leaves the tile level and bends near its row, so it clears the caption
- * under the tile; with many rows the fan tightens instead of leaving the
- * tile edge. Coordinates are relative to `box`.
- */
 /**
  * Where a line meets its row. A row with a detail line is taller than its
  * mark, so the line meets the mark, not the middle of the block. A row
@@ -257,7 +253,20 @@ export function reachRowAnchor(row: Rect, mark?: Rect): Rect {
   return mark && mark.height > 0 ? { left: row.left, right: row.right, top: mark.top, height: mark.height } : row;
 }
 
-export function reachPaths(box: Rect, tile: Rect, rows: ReadonlyMap<string, Rect>, links: readonly ReachLink[]): ReachPath[] {
+/**
+ * Cubic curves from each row to the tile, fanned at the tile edge. A line
+ * bends near its row and runs level past `clear`, the span of the caption
+ * under the tile, so it stays out of the caption however far away its row
+ * is; with many rows the fan tightens instead of leaving the tile edge.
+ * Coordinates are relative to `box`.
+ */
+export function reachPaths(
+  box: Rect,
+  tile: Rect,
+  rows: ReadonlyMap<string, Rect>,
+  links: readonly ReachLink[],
+  clear: Pick<Rect, "left" | "right"> = tile,
+): ReachPath[] {
   const tileY = tile.top + tile.height / 2 - box.top;
   const count = { in: links.filter((link) => link.direction === "in").length, out: links.filter((link) => link.direction === "out").length };
   const index = { in: 0, out: 0 };
@@ -274,9 +283,17 @@ export function reachPaths(box: Rect, tile: Rect, rows: ReadonlyMap<string, Rect
       link.direction === "in"
         ? [row.right - box.left + 10, y, tile.left - box.left - 6, fanY]
         : [tile.right - box.left + 6, fanY, row.left - box.left - 10, y];
-    const bend = link.direction === "in" ? x1 + (x2 - x1) * REACH_BEND : x2 - (x2 - x1) * REACH_BEND;
     const r = (value: number) => Math.round(value * 10) / 10;
-    paths.push({ ...link, d: `M${r(x1)} ${r(y1)} C${r(bend)} ${r(y1)}, ${r(bend)} ${r(y2)}, ${r(x2)} ${r(y2)}` });
+    if (link.direction === "in") {
+      // The curve ends level before the caption; a straight run carries it on to the tile.
+      const level = Math.max(x1, Math.min(x2, clear.left - box.left - REACH_CLEAR));
+      const bend = Math.min(level, x1 + (x2 - x1) * REACH_BEND);
+      paths.push({ ...link, d: `M${r(x1)} ${r(y1)} C${r(bend)} ${r(y1)}, ${r(bend)} ${r(y2)}, ${r(level)} ${r(y2)}${level < x2 ? ` H${r(x2)}` : ""}` });
+    } else {
+      const level = Math.min(x2, Math.max(x1, clear.right - box.left + REACH_CLEAR));
+      const bend = Math.max(level, x2 - (x2 - x1) * REACH_BEND);
+      paths.push({ ...link, d: `M${r(x1)} ${r(y1)}${level > x1 ? ` H${r(level)}` : ""} C${r(bend)} ${r(y1)}, ${r(bend)} ${r(y2)}, ${r(x2)} ${r(y2)}` });
+    }
   }
   return paths;
 }
@@ -312,7 +329,8 @@ function useReachGeometry(model: ReachModel) {
     figure.querySelectorAll<HTMLElement>("[data-link-id]").forEach((row) => {
       rows.set(row.dataset.linkId!, reachRowAnchor(row.getBoundingClientRect(), row.querySelector(".svc-mark")?.getBoundingClientRect()));
     });
-    const next = reachPaths(box, tile, rows, links);
+    const caption = figure.querySelector(".reach-hub-caption")?.getBoundingClientRect();
+    const next = reachPaths(box, tile, rows, links, caption && caption.width > 0 ? caption : tile);
     setPaths(next);
     if (next.length > 0) setDrawIn((current) => current ?? new Set(prefersReducedMotion() ? [] : next.map((path) => path.id)));
   }, [links]);

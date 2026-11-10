@@ -24,6 +24,7 @@ describe("reference logos", () => {
     for (const host of hosts) expect(referenceLogoId(host), host).toBeDefined();
     expect(referenceLogoId("learn.microsoft.com")).toBe("microsoft");
     expect(referenceLogoId("www.microsoft.com")).toBe("microsoft");
+    expect(referenceLogoId(" Learn.Microsoft.com. ")).toBe("microsoft");
   });
 
   it("shows the service's logo for every result connector, by the name it goes by", () => {
@@ -34,7 +35,7 @@ describe("reference logos", () => {
   });
 
   it("keeps two letters for a host or connector it does not know, and for a lookalike domain", () => {
-    for (const name of ["mcp.example.org", "learn-microsoft.com", "microsoft.com.example.org", "notsplashtop.com", "Webhook", "slack.example.org", "constructor", "__proto__", "toString"]) {
+    for (const name of ["mcp.example.org", "learn-microsoft.com", "microsoft.com.example.org", "notsplashtop.com", "Webhook", "slack.example.org", "constructor", "__proto__", "toString", "learn.microsoft.com.example.org.", "learn.microsoft.com:443"]) {
       expect(referenceLogoId(name), name).toBeUndefined();
     }
     const { container } = render(<ReferenceMark name="mcp.example.org" />);
