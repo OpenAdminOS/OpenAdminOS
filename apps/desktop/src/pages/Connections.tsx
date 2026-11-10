@@ -248,6 +248,15 @@ const REACH_BEND = 0.35;
  * under the tile; with many rows the fan tightens instead of leaving the
  * tile edge. Coordinates are relative to `box`.
  */
+/**
+ * Where a line meets its row. A row with a detail line is taller than its
+ * mark, so the line meets the mark, not the middle of the block. A row
+ * without a measurable mark is met at its own middle.
+ */
+export function reachRowAnchor(row: Rect, mark?: Rect): Rect {
+  return mark && mark.height > 0 ? { left: row.left, right: row.right, top: mark.top, height: mark.height } : row;
+}
+
 export function reachPaths(box: Rect, tile: Rect, rows: ReadonlyMap<string, Rect>, links: readonly ReachLink[]): ReachPath[] {
   const tileY = tile.top + tile.height / 2 - box.top;
   const count = { in: links.filter((link) => link.direction === "in").length, out: links.filter((link) => link.direction === "out").length };
@@ -301,10 +310,7 @@ function useReachGeometry(model: ReachModel) {
     }
     const rows = new Map<string, Rect>();
     figure.querySelectorAll<HTMLElement>("[data-link-id]").forEach((row) => {
-      const rect = row.getBoundingClientRect();
-      // A row with a detail line is taller than its mark: the line meets the mark, not the middle of the block.
-      const mark = row.querySelector(".svc-mark")?.getBoundingClientRect();
-      rows.set(row.dataset.linkId!, mark && mark.height > 0 ? { left: rect.left, right: rect.right, top: mark.top, height: mark.height } : rect);
+      rows.set(row.dataset.linkId!, reachRowAnchor(row.getBoundingClientRect(), row.querySelector(".svc-mark")?.getBoundingClientRect()));
     });
     const next = reachPaths(box, tile, rows, links);
     setPaths(next);

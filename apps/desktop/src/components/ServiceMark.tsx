@@ -157,21 +157,21 @@ const HOST_LOGOS: ReadonlyArray<readonly [domain: string, logo: ReferenceLogoFil
   ["endoflife.ai", ENDOFLIFE_AI],
 ];
 
-/** Result connectors by the name they go by, in lower case. */
-const CONNECTOR_LOGOS: Readonly<Partial<Record<string, ReferenceLogoFile>>> = {
-  "microsoft teams": TEAMS,
-  outlook: OUTLOOK,
-  slack: SLACK,
-  discord: DISCORD,
-  signal: SIGNAL,
-  whatsapp: WHATSAPP,
-  "whatsapp web": WHATSAPP,
-};
+/** Result connectors by the name they go by, in lower case. A Map, so a name such as "constructor" finds nothing. */
+const CONNECTOR_LOGOS: ReadonlyMap<string, ReferenceLogoFile> = new Map([
+  ["microsoft teams", TEAMS],
+  ["outlook", OUTLOOK],
+  ["slack", SLACK],
+  ["discord", DISCORD],
+  ["signal", SIGNAL],
+  ["whatsapp", WHATSAPP],
+  ["whatsapp web", WHATSAPP],
+]);
 
 function referenceLogo(name: string): ReferenceLogoFile | undefined {
   const key = name.trim().toLowerCase();
   if (HOST_NAME.test(key)) return HOST_LOGOS.find(([domain]) => key === domain || key.endsWith(`.${domain}`))?.[1];
-  return CONNECTOR_LOGOS[key];
+  return CONNECTOR_LOGOS.get(key);
 }
 
 /** The logo a reference host or result connector shows, or undefined when it keeps its two letters. */

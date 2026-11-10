@@ -2,7 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import Connections, { REACH_STACK_BELOW, buildReachModel, reachDescription, reachLayout, reachLinks, reachPaths } from "./Connections";
+import Connections, { REACH_STACK_BELOW, buildReachModel, reachDescription, reachLayout, reachLinks, reachPaths, reachRowAnchor } from "./Connections";
 import { reportDestinations, resultDestinations, targetlessDestinations } from "../shared/delivery-destinations";
 import {
   createAwaitingConfirmationRun,
@@ -253,6 +253,51 @@ describe("reach map connectors and layout", () => {
     expect(ends[0]).toBe(108);
     expect(ends.at(-1)).toBe(164);
     expect(ends).toEqual([...ends].sort((a, b) => a - b));
+  });
+
+  it("meets a row at its mark, and at its own middle when the mark cannot be measured", () => {
+    const row = { left: 600, right: 880, top: 40, height: 58 };
+    const mark = { left: 600, right: 622, top: 44, height: 22 };
+    expect(reachRowAnchor(row, mark)).toEqual({ left: 600, right: 880, top: 44, height: 22 });
+    expect(reachRowAnchor(row)).toEqual(row);
+    expect(reachRowAnchor(row, { ...mark, height: 0 })).toEqual(row);
+    // The line to a row with a detail line ends level with the mark (55), not the middle of the block (69).
+    const box = { left: 0, right: 900, top: 0, height: 300 };
+    const tile = { left: 428, right: 500, top: 100, height: 72 };
+    const [path] = reachPaths(box, tile, new Map([["a", reachRowAnchor(row, mark)]]), [{ id: "a", direction: "out", tone: "hosted" }]);
+    expect(path!.d.endsWith(" 590 55")).toBe(true);
+  });
+
+  it("keeps every line out of the caption under the tile, with a few rows and with sixteen", () => {
+    // The wide map: a 72 px tile centred in a 128 px column, 76 px gaps, the caption 10 px under the tile and as wide as the column.
+    const box = { left: 0, right: 1000, top: 0, height: 700 };
+    const tile = { left: 428, right: 500, top: 300, height: 72 };
+    const caption = { left: 400, right: 528, top: 382 };
+    const centre = tile.top + tile.height / 2;
+    const column = (ids: string[], left: number, right: number) =>
+      ids.map((id, index): [string, { left: number; right: number; top: number; height: number }] => [id, { left, right, top: centre - (ids.length * 32) / 2 + index * 32 + 5, height: 22 }]);
+    const samples = (d: string): Array<[number, number]> => {
+      const [x0, y0, x1, y1, x2, y2, x3, y3] = d.match(/-?[\d.]+/g)!.map(Number) as [number, number, number, number, number, number, number, number];
+      return Array.from({ length: 201 }, (_, step) => {
+        const t = step / 200;
+        const u = 1 - t;
+        return [u ** 3 * x0 + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t ** 3 * x3, u ** 3 * y0 + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t ** 3 * y3];
+      });
+    };
+    for (const outgoing of [7, 16]) {
+      const ins = ["in-0", "in-1", "in-2"];
+      const outs = Array.from({ length: outgoing }, (_, index) => `out-${index}`);
+      const rows = new Map([...column(ins, 124, 324), ...column(outs, 604, 960)]);
+      const paths = reachPaths(box, tile, rows, [
+        ...ins.map((id) => ({ id, direction: "in" as const, tone: "default" as const })),
+        ...outs.map((id) => ({ id, direction: "out" as const, tone: "default" as const })),
+      ]);
+      expect(paths).toHaveLength(3 + outgoing);
+      for (const path of paths) {
+        const inside = samples(path.d).filter(([x, y]) => x >= caption.left && x <= caption.right && y >= caption.top);
+        expect(inside, `${path.id} with ${outgoing} rows out`).toEqual([]);
+      }
+    }
   });
 
   it(`stacks the map below ${REACH_STACK_BELOW} px of content width`, () => {

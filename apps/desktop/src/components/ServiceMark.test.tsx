@@ -34,7 +34,7 @@ describe("reference logos", () => {
   });
 
   it("keeps two letters for a host or connector it does not know, and for a lookalike domain", () => {
-    for (const name of ["mcp.example.org", "learn-microsoft.com", "microsoft.com.example.org", "notsplashtop.com", "Webhook", "slack.example.org"]) {
+    for (const name of ["mcp.example.org", "learn-microsoft.com", "microsoft.com.example.org", "notsplashtop.com", "Webhook", "slack.example.org", "constructor", "__proto__", "toString"]) {
       expect(referenceLogoId(name), name).toBeUndefined();
     }
     const { container } = render(<ReferenceMark name="mcp.example.org" />);
