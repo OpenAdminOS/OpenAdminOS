@@ -285,7 +285,7 @@ function Ledger({ server, onDark = false }: { server: McpServerSummary; onDark?:
     <div className={`grid gap-1.5 text-sm ${muted}`}>
       <div className="flex items-center gap-2"><IconShield size={13} className="shrink-0" /><span>No tenant access · read only</span></div>
       <div className={`flex items-center gap-2 ${outbound}`}><IconCloud size={13} className="shrink-0" /><span>Sends tool queries to {server.host}</span></div>
-      <div className="flex items-center gap-2"><IconExternal size={13} className="shrink-0" /><span>Tool calls run at {server.publisher}</span></div>
+      <div className="flex items-center gap-2"><IconExternal size={13} className="shrink-0" /><span>{server.builtIn ? "Built in: this device calls the public API" : `Tool calls run at ${server.publisher}`}</span></div>
     </div>
   );
 }

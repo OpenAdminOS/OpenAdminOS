@@ -55,6 +55,8 @@ function readyProviders(): ProviderSummary[] {
 const catalog: McpCatalogEntry[] = [
   { ...MCP_CATALOG[0]!, id: "microsoft-learn", name: "Microsoft Learn", url: "http://127.0.0.1:9/mcp" },
   { ...MCP_CATALOG[0]!, id: "kql-search", name: "KQL Search", url: "http://127.0.0.1:9/kql" },
+  // Built in, with the Splashtop logo; its host is never called by these tests.
+  MCP_CATALOG.find((entry) => entry.id === "splashtop-packr-kb")!,
 ];
 
 /**
@@ -304,6 +306,16 @@ describe("managed policy: public references", () => {
       await assert.rejects(fixture.store.setMcpServerEnabled("microsoft-learn", true), ManagedPolicyError);
       // Removing one that was installed before the policy is still possible.
       await fixture.store.uninstallMcpServer("microsoft-learn");
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("passes the owner's logo to the summaries of listings that have one", async () => {
+    const fixture = await makeFixture({ policy: await policyOf({ allowedPublicReferences: ["kql-search", "splashtop-packr-kb"] }) });
+    try {
+      const logos = (await fixture.store.listMcpServers()).map((server) => [server.id, server.logo]);
+      assert.deepEqual(logos, [["kql-search", undefined], ["splashtop-packr-kb", "splashtop"]]);
     } finally {
       await fixture.close();
     }

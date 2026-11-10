@@ -85,7 +85,7 @@ export function McpServerDialog({
           <ListingTags tags={[server.builtIn ? "Built in" : "MCP tool", "Read only"]} />
           <h2 className="font-serif text-[34px] font-normal leading-[1.05] tracking-[-0.02em]">{server.name}</h2>
           <span className="flex items-center gap-2 text-sm">
-            {server.logo ? <ServiceMark serviceId={server.logo} size="sm" /> : null}
+            {server.logo ? <ServiceMark serviceId={server.logo} size="md" /> : null}
             <span className="opacity-80">{server.publisher}</span>
           </span>
         </div>
