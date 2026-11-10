@@ -48,5 +48,10 @@ describe("Chat documentation grounding", () => {
       2,
       "both agentic call sites should fall back to the index when Learn is left out, fails, is blocked or returns nothing",
     );
+    // The deterministic prompt and the tool loop prompt give the same rule about citing passages that do not apply.
+    const loop = await readFile(new URL("../intune-chat/agentic-loop.ts", import.meta.url), "utf8");
+    const rule = "A passage about another product or topic is not a source: do not cite it, also not to say that it does not apply.";
+    assert.ok(service.includes(rule), "the deterministic answer prompt carries the citation rule");
+    assert.ok(loop.includes(rule), "the tool loop prompt carries the citation rule");
   });
 });

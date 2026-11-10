@@ -4092,7 +4092,7 @@ function buildAnswerPrompt(
     "Microsoft documentation passages from the local docs index on this device. Call them the local docs index, never Microsoft Learn:",
     passages,
     "",
-    "The documentation above describes how Microsoft 365 behaves in general. It is not this tenant's state. When you rely on it, cite the source in square brackets, for example [1]. If it does not cover the question, say so rather than guessing.",
+    "The documentation above describes how Microsoft 365 behaves in general. It is not this tenant's state. When you rely on it, cite the source in square brackets, for example [1]. A passage about another product or topic is not a source: do not cite it, also not to say that it does not apply. If it does not cover the question, say so rather than guessing.",
     "",
     "Retrieved tenant context, which is this tenant's actual state:",
     context,
