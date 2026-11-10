@@ -332,6 +332,14 @@ describe("tenant references that overrule a docs label", () => {
       "How do I see which of my devices are encrypted?",
       "How do I fix HR-LAPTOP-07?",
       "How do I reset the password of anna@contoso.com?",
+      // Looking at the admin's own things asks for tenant facts.
+      "How do I see my noncompliant devices?",
+      "How do I view our failed sign-ins?",
+      "How do I check if our devices are compliant?",
+      "How do I verify our devices are encrypted?",
+      "How do I know if we have stale devices?",
+      "How can we tell if we are compliant with the CIS baseline?",
+      "How do we do on secure score?",
       // A first-person word inside a tenant value is part of the value.
       "How do I reset the password for us@contoso.com?",
       "How do I unlock my@contoso.com?",
@@ -352,6 +360,10 @@ describe("tenant references that overrule a docs label", () => {
       assert.equal(hasStrongTenantReference(question), true, question);
     }
     assert.equal(hasStrongTenantReference("How do I enroll macOS devices?"), false);
+    // Looking at something general stays with the model, and so does doing something.
+    assert.equal(hasStrongTenantReference("How do I check a policy setting in the portal?"), false);
+    assert.equal(hasStrongTenantReference("How do we do a remote wipe?"), false);
+    assert.equal(asksHowTo("How do we do a remote wipe?"), true);
     assert.equal(asksHowTo("How does Agentic Packr package an installer?"), false);
     assert.equal(asksHowTo("How to package an installer"), true);
   });

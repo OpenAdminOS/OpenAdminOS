@@ -560,7 +560,9 @@ export function hasTenantReference(question: string): boolean {
 /** A question in which the admin asks how to do something themselves: "how do I", "how can we", "how to". */
 const HOW_TO_START = /^how (?:(?:do|can|should|would) (?:i|we)|to)\b/;
 /** The same opening asking where the tenant stands, not how to do something: "how do we compare to the baseline". */
-const HOW_WE_STAND = /^how (?:do|can|should|would) (?:i|we) (?:compare|look|stand|rank|perform|score|fare|measure|stack)\b/;
+const HOW_WE_STAND = /^how (?:do|can|should|would) (?:i|we) (?:compare|look|stand|rank|perform|score|fare|measure|stack|do (?:on|against))\b/;
+/** A how-to that asks to look at the admin's own things: "how do I see my noncompliant devices", "how do I check if our devices are compliant". */
+const INSPECTS_OWN = /\b(?:see|view|check|verify|confirm|know|tell|find out|monitor|audit|review)\b.*\b(?:our|my|mine|we|us)\b/;
 /** The admin speaking about themselves: "how do I upload my first app", "how do we set this up". */
 const FIRST_PERSON = /\b(?:our|my|mine|we|us)\b/gi;
 
@@ -582,11 +584,14 @@ export function asksHowTo(question: string): boolean {
  * word ("which", "list", "how many"), "your", a possessive or a tenant
  * value still counts, and so does first-person wording in any other
  * question, such as "how does our compliance look". A tenant value is
- * read from the question as written, so "us@contoso.com" stays one.
+ * read from the question as written, so "us@contoso.com" stays one. A
+ * how-to that asks to look at the admin's own things ("how do I see my
+ * noncompliant devices") asks for tenant facts and counts as well.
  */
 export function hasStrongTenantReference(question: string): boolean {
   if (!asksHowTo(question)) return hasTenantReference(question);
-  return TENANT_VALUE.test(question.trim()) || hasTenantReference(question.replace(FIRST_PERSON, " "));
+  const trimmed = question.trim();
+  return TENANT_VALUE.test(trimmed) || INSPECTS_OWN.test(trimmed.toLowerCase()) || hasTenantReference(question.replace(FIRST_PERSON, " "));
 }
 
 /**
