@@ -2236,8 +2236,8 @@ Branch `splashtop/agentic-packr-docs-mcp`, based on `main` after PR #183.
 
 - [x] The Marketplace lists Splashtop Agentic Packr Docs MCP (`splashtop-packr-kb`, publisher Splashtop), built in, read only, no sign-in, with `search_articles` and `get_article` against support-splashtopagenticpackr.splashtop.com only.
 - [x] It behaves like Splashtop Docs MCP: same Help Center code, host-pinned links, item-ID rule, designed errors that name its own listing and host.
-- [x] A question about Agentic Packr asks only the Packr reference; a Splashtop question without Packr still asks Splashtop Docs MCP; naming both asks both.
-- [x] Both Splashtop references show the real Splashtop logo on the Marketplace card, spotlight rail and hero, details dialog, Connections reference rows and Chat first-run suggestions. Listings without a logo are unchanged.
+- [x] A question about Agentic Packr (name, possessive, host or article link) asks only the Packr reference, also when it is off or not installed; a Splashtop question without Packr still asks Splashtop Docs MCP; naming both asks both.
+- [x] Both Splashtop references show the real Splashtop logo on the Marketplace card, spotlight rail and hero, details dialog and Connections reference rows, and in the Chat first-run suggestions when one is among the two suggested. Listings without a logo are unchanged.
 - [x] IT policy files accept `splashtop-packr-kb`; the schema enum matches the catalog.
 - [x] Live probe: search and article read on the Packr Help Center answer without sign-in.
 - [x] Docs (gitbook and web copy), SPEC.md and CHANGELOG updated.
