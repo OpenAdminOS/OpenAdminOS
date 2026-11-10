@@ -2,8 +2,8 @@ import defenderIcon from "../assets/service-logos/defender-for-cloud.svg";
 import discordSymbol from "../assets/service-logos/discord-symbol-blurple.svg";
 import endoflifeIcon from "../assets/service-logos/endoflife-ai.svg";
 import entraIcon from "../assets/service-logos/entra-id-color.svg";
-import intuneIcon from "../assets/service-logos/intune.svg";
 import intuneAutomationIcon from "../assets/service-logos/intuneautomation.png";
+import intuneIcon from "../assets/service-logos/microsoft-intune.png";
 import kqlSearchIcon from "../assets/service-logos/kqlsearch.png";
 import microsoftLogo from "../assets/service-logos/microsoft-logo.png";
 import outlookIcon from "../assets/service-logos/microsoft-outlook.png";
@@ -24,8 +24,9 @@ import {
 
 /**
  * The owner's icon for each service, unmodified (sources in
- * `assets/service-logos/NOTICE.md`). Microsoft's are single colour files
- * for light and dark surfaces alike; Splashtop's sits on a white tile.
+ * `assets/service-logos/NOTICE.md`). Microsoft provides one file per
+ * service, shown on light and dark surfaces alike; Splashtop's sits on a
+ * white tile.
  */
 const ICONS: Readonly<Partial<Record<string, string>>> = {
   intune: intuneIcon,

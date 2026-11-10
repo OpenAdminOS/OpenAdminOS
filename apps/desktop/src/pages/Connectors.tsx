@@ -19,7 +19,7 @@ import type {
 
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Button } from "../components/Button";
-import { ReferenceLogo } from "../components/ServiceMark";
+import { ReferenceLogo, ReferenceMark } from "../components/ServiceMark";
 import {
   IconCheck,
   IconChevronDown,
@@ -244,6 +244,7 @@ function ConnectorSettingsRow({
   const status = connectorStatus(connector.status);
   return (
     <div className="flex flex-wrap items-center gap-4 border-b border-[var(--color-border-soft)] px-5 py-4">
+      <ReferenceMark name={connector.descriptor.name} size="lg" />
       <div className="min-w-0 flex-1">
         <div className="text-base font-medium text-[var(--color-text)]">
           {connector.descriptor.name}
@@ -473,6 +474,8 @@ function ConnectorLoadingState() {
     >
       {[0, 1, 2].map((item) => (
         <div key={item} className="flex items-center gap-4 border-b border-[var(--color-border-soft)] px-5 py-4 last:border-b-0">
+          {/* Holds the place of the row's logo tile, so the text does not jump when the rows load. */}
+          <Skeleton shape="block" className="h-[30px] w-[30px] shrink-0" />
           <div className="min-w-0 flex-1 space-y-2">
             <Skeleton className="w-36" />
             <Skeleton className="w-64 max-w-full" />

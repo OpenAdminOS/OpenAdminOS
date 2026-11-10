@@ -529,6 +529,19 @@ describe("Connections services", () => {
 });
 
 describe("Connections results and organizations", () => {
+  it("shows each connector's logo on its row under Results go to", async () => {
+    render(createMockAppState(), { listConnectors: vi.fn(async () => [teamsConnector(), connector("generic-webhook", "Generic webhook", "unknown")]) });
+    const results = await screen.findByRole("region", { name: CONNECTIONS_COPY.resultsHeading });
+    // A row is the element that holds the name, the status and the button.
+    const rows = (await within(results).findAllByRole("button", { name: /^(Set up|Manage)$/ })).map((button) => button.parentElement!);
+    const row = (name: string) => rows.find((candidate) => within(candidate).queryByText(name))!;
+    expect(row("Microsoft Teams").querySelector('.svc-mark[data-service="reference"] [data-reference-logo="microsoft-teams"][data-kind="logo"] img')).not.toBeNull();
+    // A connector OpenAdminOS has no logo for keeps two letters in the same tile.
+    const unknown = row("Generic webhook").querySelector('.svc-mark[data-service="reference"]')!;
+    expect(unknown).toHaveTextContent("GW");
+    expect(unknown.querySelector("img")).toBeNull();
+  });
+
   it("opens and closes a connector drawer from its URL", async () => {
     const user = userEvent.setup();
     render(createMockAppState(), { listConnectors: vi.fn(async () => [teamsConnector()]) }, "/connections?connector=teams");
