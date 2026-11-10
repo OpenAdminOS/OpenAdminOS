@@ -247,7 +247,8 @@ export function planChatSources(input: {
     ? (serversFirst ? `the local docs index if ${waitsFor.length === 1 ? `${waitsFor[0]} does not answer` : intended.length > 0 ? "no server answers" : "none of them answers"}` : "the local docs index")
     : undefined;
   // With no server chosen, the model's own choice leads the list, so the fallback reads in order.
-  const modelLed = names.length === 0 && intended.length > 0 && Boolean(docs) && input.kind !== "tenant";
+  // A docs question does so without an index as well; it would otherwise read "No documentation source is available".
+  const modelLed = names.length === 0 && intended.length > 0 && (input.kind === "docs" || (Boolean(docs) && input.kind === "mixed"));
   const documentation = [...(modelLed ? [`${joinList(intended)}, chosen by the model`] : names), ...(docs && !serversFirst ? [docs] : [])];
   const docsList = joinList(documentation) + (docs && serversFirst ? `, then ${docs}` : "");
   const tenant = "cached tenant data and Microsoft Graph";

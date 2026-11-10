@@ -186,6 +186,10 @@ describe("source plan", () => {
     const added = planChatSources({ question: "How do I enroll a Mac?", kind: "docs", servers: [learn, kql], docsIndexAvailable: true, declaredServerIds: ["kql-search"] });
     assert.deepEqual(added.requiredServerIds, ["microsoft-learn"]);
     assert.equal(added.detail, "Documentation question. Sources: Microsoft Learn, then the local docs index if no server answers. Your tenant is not checked. The model also plans to ask KQL Search.");
+    assert.equal(planChatSources({ question: "How do I enroll a Mac?", kind: "docs", servers: [kql], docsIndexAvailable: false, declaredServerIds: ["kql-search"] }).detail,
+      "Documentation question. Sources: KQL Search, chosen by the model. Your tenant is not checked.");
+    assert.equal(planChatSources({ question: "How do I enroll a Mac?", kind: "docs", servers: [kql], docsIndexAvailable: false }).detail,
+      "Documentation question. No documentation source is available, so the model answers from what it knows. Your tenant is not checked.");
     // Without an index nothing is promised, and a tenant question keeps its own sentence.
     assert.equal(planChatSources({ question: "How do I fix our noncompliant devices?", kind: "mixed", servers: [kql], docsIndexAvailable: false, declaredServerIds: ["kql-search"] }).detail,
       "Documentation and tenant question. Sources: cached tenant data and Microsoft Graph. The model also plans to ask KQL Search.");
