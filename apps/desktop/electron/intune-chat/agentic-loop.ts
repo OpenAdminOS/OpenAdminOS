@@ -314,6 +314,8 @@ export async function runAgenticChat(
   let kindRepaired = false;
   // Servers named in the question, or chosen for it, must be called once.
   let required = new Set(input.requiredServerIds ?? []);
+  // Installed servers the model declared as its sources. They are never required calls, but the withheld docs index waits for them.
+  let declared = new Set<string>();
   const attemptedServers = new Set<string>();
   let missingSourceCount = 0;
   // Servers whose tool that reads one result in full (get_article) was requested in this answer.
@@ -476,9 +478,8 @@ export async function runAgenticChat(
       // A tenant question gets no local docs index; docs and mixed load it unless a server leads:
       // one chosen for the question, declared by the model or requested in this reply.
       if (questionKind === "tenant") fallbackPending = false;
-      const serverInPlay = plan.serversFirst
-        || (action.kind === "tool" && isMcpChatToolName(action.tool))
-        || action.sources.some((id) => input.tools.mcp?.servers?.some((server) => server.id === id));
+      declared = new Set(action.sources.filter((id) => input.tools.mcp?.servers?.some((server) => server.id === id)));
+      const serverInPlay = plan.serversFirst || declared.size > 0 || (action.kind === "tool" && isMcpChatToolName(action.tool));
       const loadIndex = !serverInPlay && fallbackPending && input.documentationFallback;
       const tenantData = questionKind !== "docs";
       // No server is in play for this question, so the withheld local index is loaded now.
@@ -678,9 +679,9 @@ export async function runAgenticChat(
       // Any server that answered with nothing gets a designed empty observation, never a placeholder source.
       const answeredEmpty = !execution.trace.error && mcpSource.empty === true;
       const answered = !execution.trace.error && !learnEmpty && !answeredEmpty;
-      // The withheld local index stands in once no chosen server is left to ask and none has answered.
+      // The withheld local index stands in once no chosen or declared server is left to ask and none has answered.
       const indexWaits = !answered && fallbackPending && !serverAnswered && Boolean(input.documentationFallback);
-      const indexStandsIn = indexWaits && ![...required].some((id) => !attemptedServers.has(id));
+      const indexStandsIn = indexWaits && ![...required, ...declared].some((id) => !attemptedServers.has(id));
       if (answered) {
         serverAnswered = true;
         if (mcpSource.serverId === LEARN_SERVER_ID) learnAnswered = true;
@@ -714,7 +715,7 @@ export async function runAgenticChat(
             ? `${lead} Passages from the local docs index are now in the prompt. Cite them with their numbers and call them the local docs index, not ${name}.`
             : `${lead} The local docs index has no passages for this question either. Say so, and do not present text as ${name} content.` });
         } else if (indexWaits) {
-          // Another chosen server is still to be asked; the index loads only if that one does not answer either.
+          // Another chosen or declared server is still to be asked; the index loads only if that one does not answer either.
           fallbackReason = reason;
         }
       }

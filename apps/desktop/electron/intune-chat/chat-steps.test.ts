@@ -708,6 +708,14 @@ describe("agentic loop sources", () => {
         // Requested, and it finds nothing: the index stands in.
         const empty = await run(store, [kind({ sources: ["kql-search"], ...request }), final], {}, { classify });
         assert.deepEqual(empty.reasons, ["KQL Search returned nothing"]);
+        // Two declared, the first finds nothing, the second answers: the index waits for both and stays out.
+        const both = await run(store, [kind({ sources: ["kql-search", "microsoft-learn"], ...request }), callLearn, final], { "microsoft-learn": found }, { classify });
+        assert.deepEqual(both.reasons, []);
+        assert.deepEqual(both.result.ok && both.result.documentationSources?.map((source) => source.kind), ["mcp"]);
+        // Two declared, the first finds nothing, the second is never asked: the index loads before the answer is kept.
+        const one = await run(store, [kind({ sources: ["kql-search", "microsoft-learn"], ...request }), final], {}, { classify });
+        assert.deepEqual(one.reasons, ["KQL Search returned nothing"]);
+        assert.equal(one.prompts.length, 3);
         // Declared but never asked: the index loads before the answer is kept, with no server blamed.
         const declared = await run(store, [kind({ sources: ["kql-search"], final: true, answer: "From memory." }), final], {}, { classify });
         assert.deepEqual(declared.reasons, [undefined]);
