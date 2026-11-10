@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
-import { RetrievalIndex, type EmbedQuery } from "./retrieval.js";
+import { RetrievalIndex, repairFrontMatter, type EmbedQuery } from "./retrieval.js";
 
 async function writeIndex(
   dir: string,
@@ -30,6 +30,45 @@ async function writeIndex(
 }
 
 describe("local documentation retrieval", () => {
+  it("reads the page title from front matter an older index build left in the first chunk", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-retrieval-"));
+    try {
+      const frontMatter = "---\ntitle: Configure Splashtop for Single sign-on with Microsoft Entra ID\nms.topic: how-to\n# Customer intent: As an IT administrator, I want to learn how to configure single sign-on.\n--- \n\n";
+      const comment = "Customer intent: As an IT administrator, I want to learn how to configure single sign-on.";
+      await writeIndex(dir, [[1, 0], [0.9, 0.1], [0, 1]], [
+        { file: "entra/splashtop-tutorial.md", title: comment, text: `${frontMatter}# Configure Splashtop for Single sign-on with Microsoft Entra ID\n\nIn this article, you learn how.` },
+        { file: "entra/splashtop-tutorial.md", title: comment, text: "## Prerequisites\n\nA Splashtop subscription." },
+        { file: "intune/table.md", title: "A table", text: "---|---\n| a | b |\n---\n" },
+      ]);
+      const hits = await new RetrievalIndex(dir).retrieve("splashtop", async () => [1, 0], { k: 3 });
+      assert.deepEqual(hits.map((hit) => hit.title), ["Configure Splashtop for Single sign-on with Microsoft Entra ID", "Configure Splashtop for Single sign-on with Microsoft Entra ID", "A table"]);
+      assert.equal(hits[0]!.text, "# Configure Splashtop for Single sign-on with Microsoft Entra ID\n\nIn this article, you learn how.");
+      assert.equal(hits[1]!.text, "## Prerequisites\n\nA Splashtop subscription.");
+      assert.equal(hits[2]!.text, "---|---\n| a | b |\n---\n", "a table or rule that starts with dashes is not front matter");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("repairs quoted titles, a BOM and CRLF front matter, and leaves chunks without front matter alone", () => {
+    const untouched = [{ file: "a.md", title: "A", text: "# A\n\nText." }];
+    assert.equal(repairFrontMatter(untouched)[0], untouched[0]);
+    const [quoted] = repairFrontMatter([{ file: "b.md", title: "b.md", text: "\uFEFF---\r\ntitle: \"Set up enrollment\"\r\nms.date: 01/01/2026\r\n---\r\n# Set up\r\n" }]);
+    assert.equal(quoted!.title, "Set up enrollment");
+    assert.equal(quoted!.text, "# Set up\r\n");
+    // Front matter without a title keeps the title the index gave.
+    const [untitled] = repairFrontMatter([{ file: "c.md", title: "Kept", text: "---\nms.topic: how-to\n---\nBody" }]);
+    assert.deepEqual([untitled!.title, untitled!.text], ["Kept", "Body"]);
+    // A title read from a YAML comment, with no front matter title: the first heading, else the file path.
+    const comment = "Customer intent: As an admin, I want single sign-on.";
+    const [headed, tail] = repairFrontMatter([
+      { file: "d.md", title: comment, text: `---\nms.topic: how-to\n# ${comment}\n---\n# Configure single sign-on\n\nText.` },
+      { file: "d.md", title: comment, text: "## Steps" },
+    ]);
+    assert.deepEqual([headed!.title, tail!.title], ["Configure single sign-on", "Configure single sign-on"]);
+    assert.equal(repairFrontMatter([{ file: "e.md", title: comment, text: `---\nms.topic: how-to\n# ${comment}\n---\nNo heading here.` }])[0]!.title, "e.md");
+  });
+
   it("ranks chunks by cosine similarity and carries provenance", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-retrieval-"));
     try {

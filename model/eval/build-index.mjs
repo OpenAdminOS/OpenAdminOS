@@ -35,9 +35,17 @@ function* walk(dir) {
   }
 }
 
-function stripFrontmatter(text) {
-  const m = text.match(/^---\n[\s\S]*?\n---\n/);
-  return m ? text.slice(m[0].length) : text;
+// Learn pages close their front matter with "--- " (trailing space) in many
+// files, and some start with a BOM or use CRLF. A stricter pattern left the
+// front matter in the text, and the title then came from the YAML comment
+// "# Customer intent: ...".
+const FRONT_MATTER = /^\uFEFF?---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
+
+function splitFrontmatter(text) {
+  const m = text.match(FRONT_MATTER);
+  if (!m) return { body: text };
+  const title = (m[1].match(/^title:[ \t]*(.+?)[ \t]*$/m) ?? [])[1]?.replace(/^(["'])(.*)\1$/, "$2");
+  return { body: text.slice(m[0].length), ...(title ? { title } : {}) };
 }
 
 function chunkMarkdown(text) {
@@ -89,9 +97,11 @@ async function flush() {
 for (const { label, dir } of CORPORA) {
   for (const file of walk(dir)) {
     const rel = `${label}/${relative(dir, file)}`;
-    let text;
-    try { text = stripFrontmatter(readFileSync(file, "utf8")); } catch { continue; }
-    const title = (text.match(/^# (.+)$/m) ?? [])[1] ?? rel;
+    let page;
+    try { page = splitFrontmatter(readFileSync(file, "utf8")); } catch { continue; }
+    const text = page.body;
+    // The front matter title is the page title; a page without one falls back to its first heading.
+    const title = page.title ?? (text.match(/^# (.+)$/m) ?? [])[1] ?? rel;
     for (const chunk of chunkMarkdown(text)) {
       pendingTexts.push(chunk);
       pendingMeta.push({ file: rel, title, text: chunk });
