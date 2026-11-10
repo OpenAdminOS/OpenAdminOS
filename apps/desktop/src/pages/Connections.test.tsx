@@ -529,6 +529,16 @@ describe("Connections services", () => {
 });
 
 describe("Connections results and organizations", () => {
+  it("shows each connector's logo on its row under Results go to", async () => {
+    render(createMockAppState(), { listConnectors: vi.fn(async () => [teamsConnector()]) });
+    const results = await screen.findByRole("region", { name: CONNECTIONS_COPY.resultsHeading });
+    const setUp = await within(results).findByRole("button", { name: /^(Set up|Manage)$/ });
+    // The row is the element that holds the name, the status and the button.
+    const row = setUp.parentElement!;
+    expect(within(row).getByText("Microsoft Teams")).toBeInTheDocument();
+    expect(row.querySelector('.svc-mark[data-service="reference"] [data-reference-logo="microsoft-teams"][data-kind="logo"] img')).not.toBeNull();
+  });
+
   it("opens and closes a connector drawer from its URL", async () => {
     const user = userEvent.setup();
     render(createMockAppState(), { listConnectors: vi.fn(async () => [teamsConnector()]) }, "/connections?connector=teams");

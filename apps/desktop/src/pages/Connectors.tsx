@@ -19,7 +19,7 @@ import type {
 
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Button } from "../components/Button";
-import { ReferenceLogo } from "../components/ServiceMark";
+import { ReferenceLogo, ReferenceMark } from "../components/ServiceMark";
 import {
   IconCheck,
   IconChevronDown,
@@ -244,6 +244,7 @@ function ConnectorSettingsRow({
   const status = connectorStatus(connector.status);
   return (
     <div className="flex flex-wrap items-center gap-4 border-b border-[var(--color-border-soft)] px-5 py-4">
+      <ReferenceMark name={connector.descriptor.name} size="lg" />
       <div className="min-w-0 flex-1">
         <div className="text-base font-medium text-[var(--color-text)]">
           {connector.descriptor.name}
