@@ -345,6 +345,9 @@ describe("tenant references that overrule a docs label", () => {
       "How do I find our noncompliant devices?",
       "How do I quickly see my noncompliant devices?",
       "How do I look up my tenant ID?",
+      "How do I tell if ours are compliant?",
+      "How do I find out why our laptops keep failing enrollment?",
+      "How do we do with secure score?",
       // A first-person word inside a tenant value is part of the value.
       "How do I reset the password for us@contoso.com?",
       "How do I unlock my@contoso.com?",
@@ -380,6 +383,14 @@ describe("tenant references that overrule a docs label", () => {
       "How do I configure Intune to monitor our devices?",
       "How do I set up a report to check our compliance?",
       "How do I tell my users to enroll?",
+      "How do I tell my team about the new enrollment flow?",
+      // Another clause, or something of the admin's that no tenant holds.
+      "How do I check a policy setting before we deploy it?",
+      "How do I set up a compliance policy that will check our devices daily?",
+      "How do I make a report to review with my manager?",
+      "How do I see my options in the enrollment wizard?",
+      "How do I check my work before I assign the profile?",
+      "How do we perform a remote wipe?",
     ]) {
       assert.equal(asksHowTo(question), true, question);
       assert.equal(hasStrongTenantReference(question), false, question);

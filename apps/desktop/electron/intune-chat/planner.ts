@@ -566,15 +566,26 @@ const HOW_TO_START = /^how (?:(?:do|can|should|would) (?:i|we)|to)\b/;
  * follows it, so "how do we perform an unattended installation" and "how
  * do we look up an application ID" stay how-tos.
  */
-const HOW_WE_STAND = /^how (?:do|can|should|would) (?:i|we) (?:\w+ )?(?:(?:compare|look|stand|rank|perform|score|fare|measure up|stack up)(?: (?:on|against|to|with|versus|vs|in terms of|in comparison|compared|relative)\b|[\s?.!]*$)|do (?:on|against)\b)/;
+const HOW_WE_STAND = /^how (?:do|can|should|would) (?:i|we) (?:\w+ )?(?:(?:compare|look|stand|rank|perform|score|fare|measure up|stack up)(?: (?:on|against|to|with|versus|vs|in terms of|in comparison|compared|relative)\b|[\s?.!]*$)|do (?:on|against|with)\b)/;
 /**
  * A how-to whose own verb is to look at the admin's things: "how do I see
  * my noncompliant devices", "how do I check if our devices are compliant".
- * A purpose further on ("configure Intune to monitor our devices") is not.
+ * The first-person word follows the verb directly, or after a word such
+ * as "if" or "which of", and names something a tenant holds within the
+ * next words. So a purpose further on ("configure Intune to monitor our
+ * devices"), another clause ("check a setting before we deploy it") and
+ * other things of the admin's ("see my options", "check my work") do not
+ * count, and neither does "tell my team".
  */
-const INSPECTS_OWN = /^how (?:(?:do|can|should|would) (?:i|we)|to) (?:\w+ )?(?:see|view|check|verify|confirm|know|find|identify|tell (?:if|whether|which|what|when|who)|look (?:at|up|for|into))\b.*\b(?:our|my|mine|we|us)\b/;
+const INSPECTS_OWN = new RegExp(
+  "^how (?:(?:do|can|should|would) (?:i|we)|to) (?:\\w+ )?"
+  + "(?:(?:see|view|check|verify|confirm|know|find|identify|look (?:at|up|for|into))(?: (?:if|whether|that|which|what|when|why|how|many|all|any|out|of)){0,3}"
+  + "|tell(?: (?:if|whether|which|what|when|why|how|many|all|any|of)){1,3})"
+  + " (?:our|ours|my|mine|we|us)\\b(?: \\S+){0,3}?"
+  + " (?:devices?|laptops?|phones?|macs?|pcs?|machines?|endpoints?|users?|guests?|admins?|accounts?|groups?|policy|policies|profiles?|apps?|applications?|licen[cs]es?|sign-?ins?|logs?|roles?|tenant|fleet|compliance|compliant|non-?compliant|encrypted|enrolled|managed|score|baseline|alerts?|incidents?|registrations?|deployments?)\\b",
+);
 /** The admin speaking about themselves: "how do I upload my first app", "how do we set this up". */
-const FIRST_PERSON = /\b(?:our|my|mine|we|us)\b/gi;
+const FIRST_PERSON = /\b(?:our|ours|my|mine|we|us)\b/gi;
 
 /**
  * Whether the admin asks how to do something: the answer is a procedure,
