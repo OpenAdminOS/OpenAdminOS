@@ -7,7 +7,7 @@ import { Modal, ModalHeader } from "../components/Modal";
 import { DeviceTile } from "../components/DeviceTile";
 import { DisconnectOrganizationDialog } from "../components/DisconnectOrganizationDialog";
 import { ProviderMark } from "../components/ProviderLogo";
-import { ReferenceMark, ServiceMark } from "../components/ServiceMark";
+import { ListingMark, ReferenceMark, ServiceMark } from "../components/ServiceMark";
 import {
   ServiceAccessDialog,
   TenantCheckResultLine,
@@ -88,6 +88,8 @@ export interface ReachModel {
     locationDetail?: string;
   };
   referenceHosts: string[];
+  /** The owner's logo for a reference host whose listing has one, such as the Splashtop Help Centers. */
+  referenceLogos: Readonly<Record<string, string>>;
   /** null while the connector list loads or when it could not be loaded. */
   reportDestinations: string[] | null;
   reportDestinationsState: "ready" | "loading" | "failed";
@@ -131,6 +133,7 @@ export function buildReachModel(state: AppState, connectors?: readonly Connector
     services,
     model,
     referenceHosts: chatToolHosts(state),
+    referenceLogos: Object.fromEntries((state.mcpServers ?? []).flatMap((server) => (server.logo ? [[server.host, server.logo]] : []))),
     // Until the connector list resolves, nothing is known about where
     // reports go; the map says so instead of saying nowhere.
     reportDestinations: connectors ? reportDestinations(resultDestinations(state.installedAgents, connectors)) : null,
@@ -468,7 +471,7 @@ function ReachMap({ model }: { model: ReachModel }) {
               <ReachRow mark={<ReferenceMark name="" off />} off title={CONNECTIONS_COPY.map.noReferences} />
             ) : (
               model.referenceHosts.map((host) => (
-                <ReachRow key={host} linkId={`host:${host}`} mark={<ReferenceMark name={host} />} title={host} />
+                <ReachRow key={host} linkId={`host:${host}`} mark={<ListingMark logo={model.referenceLogos[host]} name={host} />} title={host} />
               ))
             )}
           </ul>
@@ -906,7 +909,7 @@ function PublicReferences({ state }: { state: AppState }) {
                   : CONNECTIONS_COPY.referenceOn;
             return (
               <li key={server.id} className="conn-row">
-                <ReferenceMark name={server.name} size="lg" />
+                <ListingMark logo={server.logo} name={server.name} size="lg" />
                 <div className="min-w-0">
                   <div className="text-base font-medium text-[var(--color-text)]">{server.name}</div>
                   <div className="truncate text-sm text-[var(--color-text-muted)]">{server.host}</div>
@@ -1152,7 +1155,7 @@ function NoOrganization({ model, onConnect, onShowReferences }: { model: ReachMo
           <DeviceTile size="lg" />
           <span className="conn-empty-wire" aria-hidden="true" />
           <span className="conn-empty-col" aria-hidden="true">
-            {model.referenceHosts.length === 0 ? <ReferenceMark name="" off /> : model.referenceHosts.map((host) => <ReferenceMark key={host} name={host} />)}
+            {model.referenceHosts.length === 0 ? <ReferenceMark name="" off /> : model.referenceHosts.map((host) => <ListingMark key={host} logo={model.referenceLogos[host]} name={host} />)}
           </span>
         </figure>
         <h2 id="connections-empty-title" className="font-serif text-lg font-medium text-[var(--color-text)]">{CONNECTIONS_COPY.emptyTitle}</h2>
@@ -1191,7 +1194,7 @@ function NoOrganization({ model, onConnect, onShowReferences }: { model: ReachMo
             </li>
           ) : null}
           <li className="conn-row">
-            {model.referenceHosts[0] ? <ReferenceMark name={model.referenceHosts[0]} size="lg" /> : <ReferenceMark name="" size="lg" off />}
+            {model.referenceHosts[0] ? <ListingMark logo={model.referenceLogos[model.referenceHosts[0]]} name={model.referenceHosts[0]} size="lg" /> : <ReferenceMark name="" size="lg" off />}
             <div className="min-w-0">
               <div className="text-base font-medium text-[var(--color-text)]">{CONNECTIONS_COPY.map.questionWords}</div>
               <div className="truncate text-sm text-[var(--color-text-muted)]">

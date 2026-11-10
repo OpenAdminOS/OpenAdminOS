@@ -89,6 +89,31 @@ describe("Connections reach map", () => {
     expect(within(map).getByText(CONNECTIONS_COPY.map.promptsLocal)).toBeInTheDocument();
   });
 
+  it("shows the Splashtop logo for a Splashtop reference host and letters for other hosts", async () => {
+    const packr = {
+      ...createMockMcpServers()[0]!,
+      id: "splashtop-packr-kb",
+      name: "Splashtop Agentic Packr Docs MCP",
+      publisher: "Splashtop",
+      url: "https://support-splashtopagenticpackr.splashtop.com/api/v2/help_center",
+      host: "support-splashtopagenticpackr.splashtop.com",
+      builtIn: true as const,
+      installed: true,
+      enabled: true,
+      logo: "splashtop" as const,
+    };
+    const state = createMockAppState({
+      tenants: [partialTenant],
+      mcpServers: [...createMockMcpServers({ "kql-search": { installed: true, enabled: true } }), packr],
+    });
+    expect(buildReachModel(state, []).referenceLogos).toEqual({ "support-splashtopagenticpackr.splashtop.com": "splashtop" });
+    render(state, { listConnectors: vi.fn(async () => []) });
+    const map = await screen.findByRole("figure", { name: CONNECTIONS_COPY.map.label });
+    const row = (host: string) => within(map).getByText(host).closest("li")!;
+    await waitFor(() => expect(row("support-splashtopagenticpackr.splashtop.com").querySelector('[data-service-logo="splashtop"][data-kind="logo"]')).not.toBeNull());
+    expect(row("www.kqlsearch.com").querySelector("[data-service-logo]")).toBeNull();
+  });
+
   it("names the hosted provider and its documented API location", async () => {
     const hosted = mockProviders.find((provider) => !provider.isLocal && provider.status === "connected")!;
     const state = createMockAppState({ activeProviderId: hosted.id });

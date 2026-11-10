@@ -285,7 +285,7 @@ function Ledger({ server, onDark = false }: { server: McpServerSummary; onDark?:
     <div className={`grid gap-1.5 text-sm ${muted}`}>
       <div className="flex items-center gap-2"><IconShield size={13} className="shrink-0" /><span>No tenant access · read only</span></div>
       <div className={`flex items-center gap-2 ${outbound}`}><IconCloud size={13} className="shrink-0" /><span>Sends tool queries to {server.host}</span></div>
-      <div className="flex items-center gap-2"><IconExternal size={13} className="shrink-0" /><span>Tool calls run at {server.publisher}</span></div>
+      <div className="flex items-center gap-2"><IconExternal size={13} className="shrink-0" /><span>{server.builtIn ? "Built in: this device calls the public API" : `Tool calls run at ${server.publisher}`}</span></div>
     </div>
   );
 }
@@ -304,9 +304,12 @@ function McpCard({ server, toolUseNotice, onOpen }: { server: McpServerSummary; 
         <span className="absolute left-3 top-3"><ListingTags tags={["MCP tool", "Read only"]} /></span>
       </span>
       <span className="flex flex-1 flex-col gap-2.5 px-4 pb-4 pt-3.5">
-        <span>
-          <span className="block text-[15px] font-semibold leading-tight text-[var(--color-text)]">{server.name}</span>
-          <span className="text-sm text-[var(--color-text-muted)]">{server.publisher}</span>
+        <span className="flex items-center gap-2.5">
+          {server.logo ? <ServiceMark serviceId={server.logo} size="lg" /> : null}
+          <span>
+            <span className="block text-[15px] font-semibold leading-tight text-[var(--color-text)]">{server.name}</span>
+            <span className="text-sm text-[var(--color-text-muted)]">{server.publisher}</span>
+          </span>
         </span>
         <span className="text-sm text-[var(--color-text-soft)]">{server.pitch}</span>
         <Ledger server={server} />
@@ -344,6 +347,7 @@ function Spotlight({
         />
         <div className="flex h-full max-w-[470px] flex-col justify-end gap-3.5 px-7 py-7">
           <ListingTags tags={["MCP tool", "Read only"]} />
+          {featured.logo ? <ServiceMark serviceId={featured.logo} size="lg" /> : null}
           <h2 className="font-serif text-[42px] font-normal leading-[1.02] tracking-[-0.02em]">{featured.name}</h2>
           <p className="max-w-[40ch] text-[15px] opacity-80">{featured.pitch}</p>
           <div className="opacity-80"><Ledger server={featured} onDark /></div>
@@ -379,7 +383,10 @@ function Spotlight({
                 : "ring-transparent hover:bg-[var(--color-hover)]"
             }`}
           >
-            <span className="h-12 w-16 overflow-hidden rounded-lg"><CoverArt id={server.id} variant="icon" className="h-full w-full" /></span>
+            <span className="relative grid h-12 w-16 place-items-center overflow-hidden rounded-lg">
+              <CoverArt id={server.id} variant="icon" className="absolute inset-0 h-full w-full" />
+              {server.logo ? <span className="relative"><ServiceMark serviceId={server.logo} /></span> : null}
+            </span>
             <span className="min-w-0">
               <b className="block truncate text-sm font-medium text-[var(--color-text)]">{server.name}</b>
               <span className="block truncate text-xs text-[var(--color-text-muted)]">{server.publisher}</span>
