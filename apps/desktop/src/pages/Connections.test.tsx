@@ -89,6 +89,24 @@ describe("Connections reach map", () => {
     expect(within(map).getByText(CONNECTIONS_COPY.map.promptsLocal)).toBeInTheDocument();
   });
 
+  it("shows the logo of each reference host and result connector on its row", async () => {
+    const state = createMockAppState({
+      tenants: [partialTenant],
+      mcpServers: createMockMcpServers({ "kql-search": { installed: true, enabled: true }, "microsoft-learn": { installed: true, enabled: true } }),
+      installedAgents: [createMockAgent({ delivery: { teams: { enabled: true } } })],
+    });
+    render(state, { listConnectors: vi.fn(async () => [teamsConnector()]) });
+    const map = await screen.findByRole("figure", { name: CONNECTIONS_COPY.map.label });
+    await waitFor(() => expect(map.querySelector('[data-link-id="report:Microsoft Teams"]')).not.toBeNull());
+    for (const [row, logo] of [
+      ["host:learn.microsoft.com", "microsoft"],
+      ["host:www.kqlsearch.com", "kqlsearch"],
+      ["report:Microsoft Teams", "microsoft-teams"],
+    ]) {
+      expect(map.querySelector(`[data-link-id="${row}"] .svc-mark [data-reference-logo="${logo}"][data-kind="logo"] img`), row).not.toBeNull();
+    }
+  });
+
   it("names the hosted provider and its documented API location", async () => {
     const hosted = mockProviders.find((provider) => !provider.isLocal && provider.status === "connected")!;
     const state = createMockAppState({ activeProviderId: hosted.id });
@@ -191,11 +209,25 @@ describe("reach map connectors and layout", () => {
       { id: "b", direction: "in", tone: "missing" },
       { id: "c", direction: "out", tone: "hosted" },
     ]);
+    // Each line bends 35% of the way from its row, so it leaves the tile level.
     expect(paths.map((path) => path.d)).toEqual([
-      "M310 56 C352 56, 352 131.5, 394 131.5",
-      "M310 88 C352 88, 352 140.5, 394 140.5",
-      "M478 136 C534 136, 534 56, 590 56",
+      "M310 56 C339.4 56, 339.4 131.5, 394 131.5",
+      "M310 88 C339.4 88, 339.4 140.5, 394 140.5",
+      "M478 136 C550.8 136, 550.8 56, 590 56",
     ]);
+  });
+
+  it("tightens the fan so many lines still end on the tile edge", () => {
+    const box = { left: 0, right: 900, top: 0, height: 700 };
+    const tile = { left: 400, right: 472, top: 100, height: 72 };
+    const ids = Array.from({ length: 16 }, (_, index) => `row-${index}`);
+    const rows = new Map(ids.map((id, index) => [id, { left: 600, right: 880, top: 40 + index * 32, height: 22 }]));
+    const paths = reachPaths(box, tile, rows, ids.map((id) => ({ id, direction: "out" as const, tone: "default" as const })));
+    const ends = paths.map((path) => Number(/^M\S+ (\S+) /.exec(path.d)![1]));
+    // The ends stay 8 px inside the tile's top (100) and bottom (172), in row order.
+    expect(ends[0]).toBe(108);
+    expect(ends.at(-1)).toBe(164);
+    expect(ends).toEqual([...ends].sort((a, b) => a - b));
   });
 
   it(`stacks the map below ${REACH_STACK_BELOW} px of content width`, () => {
@@ -562,6 +594,7 @@ describe("one destination list for the map and Results (review round 1)", () => 
     const map = screen.getByRole("figure", { name: CONNECTIONS_COPY.map.label });
     expect(map).toHaveAccessibleDescription(/Run reports and agent messages can go to Microsoft Teams and Discord under saved delivery rules and agent steps\./);
     expect(map).not.toHaveAccessibleDescription(/Slack/);
+    await waitFor(() => expect(map.querySelector('[data-link-id="report:Discord"] [data-reference-logo="discord"] img')).not.toBeNull());
   });
 
   it("dedupes reference hosts in the map, its text alternative and the strip", async () => {

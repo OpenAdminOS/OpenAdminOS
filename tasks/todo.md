@@ -1,5 +1,18 @@
 # Current active plan
 
+- [x] Reach map polish and real logos (branch `ui/connections-flow-logos`, 2026-11-10). Request: optimize the Connections reach map and use real logos in it.
+
+  Acceptance criteria:
+  1. In the wide map no connector line crosses the caption under the device tile, with the data of the reported screenshot and with 16 outgoing rows (measured in a browser).
+  2. The services sit next to the tile with names and states in columns, the map is centred as one block, and a model name follows its destination row.
+  3. A line to a row with a detail line meets the row's mark, not the middle of the block.
+  4. Every Marketplace reference host and every result connector shows its owner's logo on the map, the Public references rows, the Chat suggestions and the connector cards; an unknown or lookalike host keeps two letters.
+  5. Each logo file is unmodified and listed in the service logo NOTICE with owner, source and date.
+  6. The stacked layout below 760 px is unchanged; light and dark both read.
+  7. Typecheck and the renderer suite pass on Node 22.
+
+  Review (2026-11-10): all seven met. Measured in a browser at 975 px: 0 of 10 lines (the reported data) and 0 of 19 lines (16 outgoing rows) inside the caption box. Typecheck and the renderer suite (720 tests) pass on Node 22. A separate reviewer graded the seven criteria as passed; its two findings (an assertion that could not fail, a wrap rule that reached the stacked caption) are fixed. Open points for the maintainer: Signal's 26 px minimum size, Microsoft's licence wording for product icons, and larger files for the 48 px KQL Search and WindowsForum icons.
+
 - [ ] Managed configuration, issue #176 (branch `managed/policy-file`, PR #177). Built: policy file paths, schema, parsing with line numbers, precedence, main-process enforcement for providers, models, public references and the app registration, Settings and notice UI, configuration audit events, IT admin docs.
 
   Acceptance criteria:

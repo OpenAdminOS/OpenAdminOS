@@ -1,0 +1,9 @@
+<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" role="img">
+  <title>endoflife.ai</title>
+  <rect width="32" height="32" fill="#08090c"/>
+  <!-- Pulse rings -->
+  <circle cx="16" cy="16" r="13" fill="none" stroke="rgba(74,222,128,0.12)"/>
+  <circle cx="16" cy="16" r="9" fill="none" stroke="rgba(74,222,128,0.2)"/>
+  <!-- Core dot -->
+  <circle cx="16" cy="16" r="5" fill="#4ade80"/>
+</svg>

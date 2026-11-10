@@ -234,10 +234,16 @@ interface Rect {
 
 /** Spacing of the line ends at the tile edge. */
 const REACH_FAN = 9;
+/** The line ends stay this far inside the tile's top and bottom. */
+const REACH_FAN_INSET = 8;
+/** Where a line bends, as a share of its run measured from the row. */
+const REACH_BEND = 0.35;
 
 /**
- * Cubic curves from each row to the tile, control points at the horizontal
- * midpoint, fanned at the tile edge. Coordinates are relative to `box`.
+ * Cubic curves from each row to the tile, fanned at the tile edge. A line
+ * leaves the tile level and bends near its row, so it clears the caption
+ * under the tile; with many rows the fan tightens instead of leaving the
+ * tile edge. Coordinates are relative to `box`.
  */
 export function reachPaths(box: Rect, tile: Rect, rows: ReadonlyMap<string, Rect>, links: readonly ReachLink[]): ReachPath[] {
   const tileY = tile.top + tile.height / 2 - box.top;
@@ -249,14 +255,16 @@ export function reachPaths(box: Rect, tile: Rect, rows: ReadonlyMap<string, Rect
     const i = index[link.direction]++;
     if (!row) continue;
     const y = row.top + row.height / 2 - box.top;
-    const fanY = tileY + (i - (count[link.direction] - 1) / 2) * REACH_FAN;
+    const ends = count[link.direction];
+    const step = ends > 1 ? Math.min(REACH_FAN, Math.max(0, tile.height - 2 * REACH_FAN_INSET) / (ends - 1)) : 0;
+    const fanY = tileY + (i - (ends - 1) / 2) * step;
     const [x1, y1, x2, y2] =
       link.direction === "in"
         ? [row.right - box.left + 10, y, tile.left - box.left - 6, fanY]
         : [tile.right - box.left + 6, fanY, row.left - box.left - 10, y];
-    const mid = (x1 + x2) / 2;
+    const bend = link.direction === "in" ? x1 + (x2 - x1) * REACH_BEND : x2 - (x2 - x1) * REACH_BEND;
     const r = (value: number) => Math.round(value * 10) / 10;
-    paths.push({ ...link, d: `M${r(x1)} ${r(y1)} C${r(mid)} ${r(y1)}, ${r(mid)} ${r(y2)}, ${r(x2)} ${r(y2)}` });
+    paths.push({ ...link, d: `M${r(x1)} ${r(y1)} C${r(bend)} ${r(y1)}, ${r(bend)} ${r(y2)}, ${r(x2)} ${r(y2)}` });
   }
   return paths;
 }
@@ -289,7 +297,12 @@ function useReachGeometry(model: ReachModel) {
       return;
     }
     const rows = new Map<string, Rect>();
-    figure.querySelectorAll<HTMLElement>("[data-link-id]").forEach((row) => rows.set(row.dataset.linkId!, row.getBoundingClientRect()));
+    figure.querySelectorAll<HTMLElement>("[data-link-id]").forEach((row) => {
+      const rect = row.getBoundingClientRect();
+      // A row with a detail line is taller than its mark: the line meets the mark, not the middle of the block.
+      const mark = row.querySelector(".svc-mark")?.getBoundingClientRect();
+      rows.set(row.dataset.linkId!, mark && mark.height > 0 ? { left: rect.left, right: rect.right, top: mark.top, height: mark.height } : rect);
+    });
     const next = reachPaths(box, tile, rows, links);
     setPaths(next);
     if (next.length > 0) setDrawIn((current) => current ?? new Set(prefersReducedMotion() ? [] : next.map((path) => path.id)));
@@ -906,7 +919,7 @@ function PublicReferences({ state }: { state: AppState }) {
                   : CONNECTIONS_COPY.referenceOn;
             return (
               <li key={server.id} className="conn-row">
-                <ReferenceMark name={server.name} size="lg" />
+                <ReferenceMark name={server.host} size="lg" />
                 <div className="min-w-0">
                   <div className="text-base font-medium text-[var(--color-text)]">{server.name}</div>
                   <div className="truncate text-sm text-[var(--color-text-muted)]">{server.host}</div>

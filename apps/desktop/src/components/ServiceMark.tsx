@@ -1,7 +1,19 @@
 import defenderIcon from "../assets/service-logos/defender-for-cloud.svg";
+import discordSymbol from "../assets/service-logos/discord-symbol-blurple.svg";
+import endoflifeIcon from "../assets/service-logos/endoflife-ai.svg";
 import entraIcon from "../assets/service-logos/entra-id-color.svg";
 import intuneIcon from "../assets/service-logos/intune.svg";
+import intuneAutomationIcon from "../assets/service-logos/intuneautomation.png";
+import kqlSearchIcon from "../assets/service-logos/kqlsearch.png";
+import microsoftLogo from "../assets/service-logos/microsoft-logo.png";
+import outlookIcon from "../assets/service-logos/microsoft-outlook.png";
+import teamsIcon from "../assets/service-logos/microsoft-teams.png";
+import signalLogoWhite from "../assets/service-logos/signal-logo-white.svg";
+import signalLogo from "../assets/service-logos/signal-logo.svg";
+import slackMark from "../assets/service-logos/slack-mark.svg";
 import splashtopIcon from "../assets/service-logos/splashtop-logo-120.png";
+import whatsappLogo from "../assets/service-logos/whatsapp-logo.svg";
+import windowsForumIcon from "../assets/service-logos/windowsforum.png";
 import {
   AVAILABLE_SERVICES,
   serviceById,
@@ -80,6 +92,8 @@ export function ServiceMark({
   );
 }
 
+const HOST_NAME = /^[\w-]+(\.[\w-]+)+$/;
+
 /**
  * Two letters for a reference or connector tile. A host name leads with its
  * brand, the label before the top-level domain, so it never reads like a
@@ -89,7 +103,7 @@ export function ServiceMark({
  */
 export function referenceMarkText(name: string): string {
   const trimmed = name.trim();
-  if (/^[\w-]+(\.[\w-]+)+$/.test(trimmed)) {
+  if (HOST_NAME.test(trimmed)) {
     const labels = trimmed.toLowerCase().split(".").filter((label) => label !== "www");
     const brand = labels.length >= 2 ? labels[labels.length - 2]! : labels[0]!;
     const sub = labels.length >= 3 ? labels[0] : undefined;
@@ -99,12 +113,120 @@ export function referenceMarkText(name: string): string {
   return (words.length >= 2 ? `${words[0]![0]}${words[1]![0]}` : (words[0] ?? "?").slice(0, 2)).toUpperCase();
 }
 
-/** Tile for a public reference or result connector, from its name. */
-export function ReferenceMark({ name, size = "md", off = false }: { name: string; size?: "sm" | "md" | "lg"; off?: boolean }) {
-  const text = referenceMarkText(name);
+/**
+ * A logo file as its owner provides it (sources in
+ * `assets/service-logos/NOTICE.md`). `dark` is the owner's variant for dark
+ * surfaces; without one the single file shows on both. `scale` renders a
+ * file whose artwork carries its own clear space larger; the file is never
+ * cropped. `whiteTile` keeps the tile white in both themes for artwork that
+ * only reads on a light surface.
+ */
+interface ReferenceLogoFile {
+  id: string;
+  light: string;
+  dark?: string;
+  scale?: number;
+  whiteTile?: boolean;
+}
+
+// The four squares fill their canvas edge to edge.
+const MICROSOFT: ReferenceLogoFile = { id: "microsoft", light: microsoftLogo, scale: 0.88 };
+// The site icon has an opaque white background.
+const KQL_SEARCH: ReferenceLogoFile = { id: "kqlsearch", light: kqlSearchIcon, whiteTile: true };
+const INTUNE_AUTOMATION: ReferenceLogoFile = { id: "intuneautomation", light: intuneAutomationIcon };
+const WINDOWS_FORUM: ReferenceLogoFile = { id: "windowsforum", light: windowsForumIcon };
+const ENDOFLIFE_AI: ReferenceLogoFile = { id: "endoflife-ai", light: endoflifeIcon };
+const SPLASHTOP: ReferenceLogoFile = { id: "splashtop", light: splashtopIcon, whiteTile: true };
+const TEAMS: ReferenceLogoFile = { id: "microsoft-teams", light: teamsIcon };
+const OUTLOOK: ReferenceLogoFile = { id: "microsoft-outlook", light: outlookIcon };
+const SLACK: ReferenceLogoFile = { id: "slack", light: slackMark };
+const DISCORD: ReferenceLogoFile = { id: "discord", light: discordSymbol };
+const SIGNAL: ReferenceLogoFile = { id: "signal", light: signalLogo, dark: signalLogoWhite };
+const WHATSAPP: ReferenceLogoFile = { id: "whatsapp", light: whatsappLogo };
+
+/**
+ * Public reference hosts by the domain of whoever runs them. A host shows
+ * a logo only when it is that domain or one of its subdomains, so a
+ * lookalike such as learn-microsoft.com keeps its letters.
+ */
+const HOST_LOGOS: ReadonlyArray<readonly [domain: string, logo: ReferenceLogoFile]> = [
+  ["microsoft.com", MICROSOFT],
+  ["kqlsearch.com", KQL_SEARCH],
+  ["intuneautomation.com", INTUNE_AUTOMATION],
+  ["windowsforum.com", WINDOWS_FORUM],
+  ["endoflife.ai", ENDOFLIFE_AI],
+  ["splashtop.com", SPLASHTOP],
+];
+
+/** Result connectors by the name they go by, in lower case. */
+const CONNECTOR_LOGOS: Readonly<Partial<Record<string, ReferenceLogoFile>>> = {
+  "microsoft teams": TEAMS,
+  outlook: OUTLOOK,
+  slack: SLACK,
+  discord: DISCORD,
+  signal: SIGNAL,
+  whatsapp: WHATSAPP,
+  "whatsapp web": WHATSAPP,
+};
+
+function referenceLogo(name: string): ReferenceLogoFile | undefined {
+  const key = name.trim().toLowerCase();
+  if (HOST_NAME.test(key)) return HOST_LOGOS.find(([domain]) => key === domain || key.endsWith(`.${domain}`))?.[1];
+  return CONNECTOR_LOGOS[key];
+}
+
+/** The logo a reference host or result connector shows, or undefined when it keeps its two letters. */
+export function referenceLogoId(name: string): string | undefined {
+  return referenceLogo(name)?.id;
+}
+
+/**
+ * The logo of a public reference host or result connector alone, for a
+ * surface that draws its own tile; two letters when OpenAdminOS has no
+ * logo for it. `surface="light"` keeps the light-surface file in both
+ * themes, for a tile that is always white.
+ */
+export function ReferenceLogo({ name, size, surface }: { name: string; size: number; surface?: "light" }) {
+  const logo = referenceLogo(name);
+  if (!logo) {
+    return (
+      <span aria-hidden="true" data-kind="neutral" className="inline-flex shrink-0 items-center justify-center font-semibold" style={{ width: size, height: size, fontSize: Math.max(9, Math.round(size * 0.5)), ...(surface === "light" ? { color: "#3a3631" } : {}) }}>
+        {referenceMarkText(name)}
+      </span>
+    );
+  }
+  const image = "h-full w-full object-contain";
+  const style = logo.scale ? { transform: `scale(${logo.scale})` } : undefined;
   return (
-    <span aria-hidden="true" className="svc-mark" data-service="reference" data-size={size} data-off={off ? "true" : undefined}>
-      {off ? "" : text.toUpperCase()}
+    <span aria-hidden="true" data-reference-logo={logo.id} data-kind="logo" className="inline-flex shrink-0 items-center justify-center" style={{ width: size, height: size }}>
+      {logo.dark && surface !== "light" ? (
+        <>
+          <img src={logo.light} alt="" draggable={false} className={`provider-logo-light ${image}`} style={style} />
+          <img src={logo.dark} alt="" draggable={false} className={`provider-logo-dark ${image}`} style={style} />
+        </>
+      ) : (
+        <img src={logo.light} alt="" draggable={false} className={image} style={style} />
+      )}
+    </span>
+  );
+}
+
+/**
+ * Tile for a public reference or result connector, from its host or name:
+ * the owner's logo where OpenAdminOS has it, two letters otherwise.
+ */
+export function ReferenceMark({ name, size = "md", off = false }: { name: string; size?: "sm" | "md" | "lg"; off?: boolean }) {
+  const logo = off ? undefined : referenceLogo(name);
+  return (
+    <span
+      aria-hidden="true"
+      className="svc-mark"
+      data-service="reference"
+      data-size={size}
+      data-off={off ? "true" : undefined}
+      data-tile={logo?.whiteTile ? "white" : undefined}
+    >
+      {off ? "" : logo ? <ReferenceLogo name={name} size={INNER[size]} {...(logo.whiteTile ? { surface: "light" as const } : {})} /> : referenceMarkText(name)}
     </span>
   );
 }
