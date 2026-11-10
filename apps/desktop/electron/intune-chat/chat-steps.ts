@@ -9,9 +9,9 @@ import type {
 
 import { definitionForResource, planChatContext } from "./planner.js";
 import { normalizeSourceUrl } from "../../src/shared/chat-steps.js";
-import { isMcpChatToolName, isTenantTool, type McpChatContext, type McpChatServer, type McpChatTool } from "./tools.js";
+import { isMcpChatToolName, isTenantTool, mcpChatServerOf, type McpChatContext, type McpChatServer, type McpChatTool } from "./tools.js";
 import { isSplashtopReadTool } from "../splashtop/reads.js";
-import { MCP_CATALOG, mcpHost } from "../mcp/catalog.js";
+import { MCP_CATALOG } from "../mcp/catalog.js";
 
 export const LEARN_SERVER_ID = "microsoft-learn";
 export const ON_DEVICE = "On device";
@@ -135,8 +135,8 @@ function serverNames(server: McpChatServer): string[] {
 // A name counts only as a whole: no letter, digit, dot, hyphen or @ may continue it on the left, and no letter, digit, hyphen,
 // underscore, @ or dot followed by another label on the right. So "learn.microsoft.com", "admin@kqlsearch.com" and
 // "kqlsearch.com.example" do not name a server, and a sentence ending in "kqlsearch.com." does.
-function wholeName(name: string, flags = "u"): RegExp {
-  return new RegExp(`(?<![\\p{L}\\p{N}.@-])${escapeRegExp(name)}(?![\\p{L}\\p{N}_@-]|\\.[\\p{L}\\p{N}])`, flags);
+function wholeName(name: string): RegExp {
+  return new RegExp(`(?<![\\p{L}\\p{N}.@-])${escapeRegExp(name)}(?![\\p{L}\\p{N}_@-]|\\.[\\p{L}\\p{N}])`, "u");
 }
 
 /** A topic matches as a word, and also right before digits, so "KB5034441" matches the topic "kb". */
@@ -148,24 +148,27 @@ function topicPattern(topic: string): RegExp {
  * Every catalog server, installed or not. Their names settle which server
  * a longer name belongs to even when that server is off for this answer.
  */
-const CATALOG_SERVERS: readonly McpChatServer[] = MCP_CATALOG.map((entry) => ({
-  id: entry.id,
-  name: entry.name,
-  host: mcpHost(entry.url),
-  url: entry.url,
-  useFor: entry.useFor,
-  aliases: entry.aliases,
-  topics: entry.topics,
-  ...(entry.sharedHost ? { sharedHost: true as const } : {}),
-}));
+const CATALOG_SERVERS: readonly McpChatServer[] = MCP_CATALOG.map(mcpChatServerOf);
+
+/**
+ * A longer name as written in a question: with a possessive after a word
+ * ("Splashtop's Agentic Packr"), and a host with the rest of its link, so
+ * a path or query such as `?utm_source=splashtop` goes with it.
+ */
+function longerNamePattern(name: string): RegExp {
+  const words = name.split(/\s+/).map(escapeRegExp).join("(?:['\u2019]s)?\\s+");
+  const rest = /^[^\s/]+\.[^\s/]+$/.test(name) ? "(?:[/?#]\\S*)?" : "";
+  return new RegExp(`(?<![\\p{L}\\p{N}.@-])${words}${rest}(?![\\p{L}\\p{N}_@-]|\\.[\\p{L}\\p{N}])`, "gu");
+}
 
 /**
  * The question as one server reads it: another server's name or host that
  * holds one of this server's names or topics is blanked out, so "Splashtop
- * Agentic Packr" and support-splashtopagenticpackr.splashtop.com name that
- * listing and not the one called "Splashtop", whether or not the Agentic
- * Packr listing is installed. A separate mention ("Splashtop Business and
- * Splashtop Agentic Packr") still names both.
+ * Agentic Packr", "Splashtop's Agentic Packr" and
+ * support-splashtopagenticpackr.splashtop.com name that listing and not the
+ * one called "Splashtop", whether or not the Agentic Packr listing is
+ * installed. A separate mention ("Splashtop Business and Splashtop Agentic
+ * Packr") still names both.
  */
 function questionFor(server: McpChatServer, lower: string, servers: readonly McpChatServer[]): string {
   const ownNames = serverNames(server);
@@ -177,7 +180,7 @@ function questionFor(server: McpChatServer, lower: string, servers: readonly Mcp
     for (const name of serverNames(other)) {
       const holdsOwnWord = ownNames.some((word) => word !== name && wholeName(word).test(name))
         || server.topics.some((topic) => topic !== name && topicPattern(topic).test(name));
-      if (holdsOwnWord) text = text.replace(wholeName(name, "gu"), " ");
+      if (holdsOwnWord) text = text.replace(longerNamePattern(name), " ");
     }
   }
   return text;

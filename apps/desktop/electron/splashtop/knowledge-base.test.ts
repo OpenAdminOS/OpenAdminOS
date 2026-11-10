@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { namedServers, planChatSources } from "../intune-chat/chat-steps.js";
-import type { McpChatServer } from "../intune-chat/tools.js";
-import { MCP_CATALOG, mcpCatalogEntry, mcpHost } from "../mcp/catalog.js";
+import { mcpChatServerOf, type McpChatServer } from "../intune-chat/tools.js";
+import { MCP_CATALOG, mcpCatalogEntry } from "../mcp/catalog.js";
 import { McpHost, McpHostError } from "../mcp/host.js";
 import { articleText, SPLASHTOP_KB_HOST, SPLASHTOP_PACKR_KB_HOST } from "./knowledge-base.js";
 
@@ -203,7 +203,7 @@ describe("Splashtop Agentic Packr Docs MCP (built-in reference)", () => {
 });
 
 describe("Chat sources for the two Splashtop Help Centers", () => {
-  const servers: McpChatServer[] = MCP_CATALOG.map((item) => ({ id: item.id, name: item.name, host: mcpHost(item.url), url: item.url, useFor: item.useFor, aliases: item.aliases, topics: item.topics, ...(item.sharedHost ? { sharedHost: true } : {}) }));
+  const servers: McpChatServer[] = MCP_CATALOG.map(mcpChatServerOf);
   const chosen = (question: string, kind: "docs" | "mixed" | "tenant" = "docs") => planChatSources({ question, kind, servers, docsIndexAvailable: true }).requiredServerIds;
 
   it("an Agentic Packr question asks only the Agentic Packr Help Center", () => {
@@ -211,6 +211,10 @@ describe("Chat sources for the two Splashtop Help Centers", () => {
     assert.deepEqual(chosen("Does Agentic Packr support Entra ID single sign-on?"), ["splashtop-packr-kb"]);
     assert.deepEqual(chosen("Ask the Splashtop Agentic Packr Docs MCP about branding", "tenant"), ["splashtop-packr-kb"]);
     assert.deepEqual(namedServers("What can Packr do?", servers).map((server) => server.id), ["splashtop-packr-kb"]);
+    for (const question of ["How does Splashtop's Agentic Packr connect to Intune?", "How does Splashtop\u2019s Agentic Packr connect to Intune?"]) {
+      assert.deepEqual(chosen(question), ["splashtop-packr-kb"]);
+      assert.deepEqual(chosen(question, "tenant"), ["splashtop-packr-kb"]);
+    }
   });
 
   it("a Splashtop question still asks Splashtop Docs MCP, and naming both asks both", () => {
@@ -223,7 +227,10 @@ describe("Chat sources for the two Splashtop Help Centers", () => {
     assert.deepEqual(chosen("Ask support-splashtopagenticpackr.splashtop.com how to create a deployment template"), ["splashtop-packr-kb"]);
     assert.deepEqual(chosen("Ask support-splashtopagenticpackr.splashtop.com how to create a deployment template", "mixed"), ["splashtop-packr-kb"]);
     assert.deepEqual(chosen("Summarize https://support-splashtopagenticpackr.splashtop.com/hc/en-us/articles/57274342939291-Create-an-Intune-Deployment-Template"), ["splashtop-packr-kb"]);
+    assert.deepEqual(chosen("Summarize https://support-splashtopagenticpackr.splashtop.com/hc/en-us/articles/57274342939291-Create-an-Intune-Deployment-Template?utm_source=splashtop#splashtop"), ["splashtop-packr-kb"]);
     assert.deepEqual(chosen("What does support-splashtopbusiness.splashtop.com say about SOS?"), ["splashtop-kb"]);
+    // A separate Splashtop mention outside the link still asks Splashtop Docs MCP.
+    assert.deepEqual(chosen("Read https://support-splashtopagenticpackr.splashtop.com/hc/en-us/articles/1?ref=splashtop and compare it with Splashtop Streamer").sort(), ["splashtop-kb", "splashtop-packr-kb"]);
   });
 
   it("an Agentic Packr question does not fall back to Splashtop Docs MCP when Agentic Packr is off or not installed", () => {
@@ -232,6 +239,8 @@ describe("Chat sources for the two Splashtop Help Centers", () => {
     assert.deepEqual(only("How do I configure Splashtop Agentic Packr?").includes("splashtop-kb"), false);
     assert.deepEqual(only("Ask support-splashtopagenticpackr.splashtop.com about templates").includes("splashtop-kb"), false);
     assert.deepEqual(namedServers("How do I configure Splashtop Agentic Packr?", withoutPackr), []);
+    assert.equal(only("How does Splashtop's Agentic Packr connect to Intune?").includes("splashtop-kb"), false);
+    assert.equal(only("Summarize https://support-splashtopagenticpackr.splashtop.com/hc/en-us/articles/1-Template?utm_source=splashtop").includes("splashtop-kb"), false);
     // Splashtop on its own still asks Splashtop Docs MCP.
     assert.deepEqual(only("How do I reboot a computer with Splashtop?"), ["splashtop-kb"]);
     assert.deepEqual(only("Compare Splashtop Streamer deployment with Splashtop Agentic Packr"), ["splashtop-kb"]);

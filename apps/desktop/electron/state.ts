@@ -285,7 +285,7 @@ import {
 } from "./registry-client.js";
 import { IntelligenceSqliteStore } from "./intune-chat/sqlite-store.js";
 import { IntuneChatService, chatToolUseStatus, type IntuneChatStreamOptions } from "./intune-chat/service.js";
-import { mcpChatToolName, mcpPrivateTermsForTenant, type McpChatContext, type McpChatServer, type McpChatTool } from "./intune-chat/tools.js";
+import { mcpChatServerOf, mcpChatToolName, mcpPrivateTermsForTenant, type McpChatContext, type McpChatServer, type McpChatTool } from "./intune-chat/tools.js";
 import { TenantValueIndex } from "./intune-chat/tenant-values.js";
 import { MCP_CATALOG, mcpHost, type McpCatalogEntry } from "./mcp/catalog.js";
 import { SplashtopApiError, type SplashtopFetch } from "./splashtop/api.js";
@@ -2549,7 +2549,7 @@ export class AppStateStore {
       // A server without one of its allowlisted tools is skipped until a check finds it again.
       if (missingMcpTools(entry, installed.tools).length > 0) continue;
       generations.set(entry.id, this.mcpHost.generation(entry.id));
-      servers.push({ id: entry.id, name: entry.name, host: mcpHost(entry.url), url: entry.url, useFor: entry.useFor, aliases: entry.aliases, topics: entry.topics, ...(entry.sharedHost ? { sharedHost: true } : {}) });
+      servers.push(mcpChatServerOf(entry));
       for (const tool of installed.tools) {
         if (tool.unavailable || !isAllowedTool(entry, tool.name)) continue;
         tools.push({

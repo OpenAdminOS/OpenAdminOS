@@ -6,7 +6,7 @@ import { numberedMcpResults } from "../intune-chat/agentic-loop.js";
 import { CitationRegistry, planChatSources } from "../intune-chat/chat-steps.js";
 import { canonicalMcpFilter } from "../intune-chat/mcp-filter.js";
 import { buildMcpQueryWriterPrompt, MCP_QUERY_WRITER_SYSTEM } from "../intune-chat/mcp-query-writer.js";
-import { canonicalItemId, itemIdsInText, mcpChatToolName, readMcpResult, type McpChatServer } from "../intune-chat/tools.js";
+import { canonicalItemId, itemIdsInText, mcpChatServerOf, mcpChatToolName, readMcpResult, type McpChatServer } from "../intune-chat/tools.js";
 import { MCP_CATALOG, mcpCatalogEntry, mcpHost } from "./catalog.js";
 
 /** Trimmed live captures from 2026-11-05; see transports.test.ts. */
@@ -22,7 +22,7 @@ function read(serverId: string, call: string, tool: string, args: Record<string,
   return readMcpResult(text, { tool, args, host: mcpHost(entry.url), format: entry.results!, ...(result.structuredContent !== undefined ? { structured: result.structuredContent } : {}) });
 }
 
-const servers: McpChatServer[] = MCP_CATALOG.map((entry) => ({ id: entry.id, name: entry.name, host: mcpHost(entry.url), url: entry.url, useFor: entry.useFor, aliases: entry.aliases, topics: entry.topics, ...(entry.sharedHost ? { sharedHost: true } : {}) }));
+const servers: McpChatServer[] = MCP_CATALOG.map(mcpChatServerOf);
 const chosen = (question: string, kind: "docs" | "mixed" | "tenant" = "docs") => planChatSources({ question, kind, servers, docsIndexAvailable: true }).requiredServerIds;
 
 describe("Second-wave catalog entries", () => {
