@@ -319,7 +319,7 @@ describe("agent matcher probe table (real registry)", () => {
 
 describe("tenant references that overrule a docs label", () => {
   it("leaves first-person wording in a how-to to the model", () => {
-    for (const question of ["how do I upload my first app?", "How do we set up our first deployment template?", "How can I connect my Intune to it?", "How should we roll this out to us first?"]) {
+    for (const question of ["how do I upload my first app?", "How do we set up our first deployment template?", "How can I connect my Intune to it?", "How should we roll this out to us first?", "How do I upload My first app?"]) {
       assert.equal(asksHowTo(question), true, question);
       assert.equal(hasTenantReference(question), true, question);
       assert.equal(hasStrongTenantReference(question), false, question);
@@ -332,6 +332,10 @@ describe("tenant references that overrule a docs label", () => {
       "How do I see which of my devices are encrypted?",
       "How do I fix HR-LAPTOP-07?",
       "How do I reset the password of anna@contoso.com?",
+      // A first-person word inside a tenant value is part of the value.
+      "How do I reset the password for us@contoso.com?",
+      "How do I unlock my@contoso.com?",
+      "How do I rename US-LAPTOP-07?",
       "How does our tenant handle guest access?",
       // Not how-tos: they ask where the tenant stands or how something of ours behaves.
       "How do we compare to the CIS baseline?",

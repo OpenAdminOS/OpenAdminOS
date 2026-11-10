@@ -562,7 +562,7 @@ const HOW_TO_START = /^how (?:(?:do|can|should|would) (?:i|we)|to)\b/;
 /** The same opening asking where the tenant stands, not how to do something: "how do we compare to the baseline". */
 const HOW_WE_STAND = /^how (?:do|can|should|would) (?:i|we) (?:compare|look|stand|rank|perform|score|fare|measure|stack)\b/;
 /** The admin speaking about themselves: "how do I upload my first app", "how do we set this up". */
-const FIRST_PERSON = /\b(?:our|my|mine|we|us)\b/g;
+const FIRST_PERSON = /\b(?:our|my|mine|we|us)\b/gi;
 
 /**
  * Whether the admin asks how to do something: the answer is a procedure,
@@ -581,11 +581,12 @@ export function asksHowTo(question: string): boolean {
  * "how do I upload my first app" leaves the kind to the model. A state
  * word ("which", "list", "how many"), "your", a possessive or a tenant
  * value still counts, and so does first-person wording in any other
- * question, such as "how does our compliance look".
+ * question, such as "how does our compliance look". A tenant value is
+ * read from the question as written, so "us@contoso.com" stays one.
  */
 export function hasStrongTenantReference(question: string): boolean {
   if (!asksHowTo(question)) return hasTenantReference(question);
-  return hasTenantReference(question.replace(FIRST_PERSON, " "));
+  return TENANT_VALUE.test(question.trim()) || hasTenantReference(question.replace(FIRST_PERSON, " "));
 }
 
 /**
