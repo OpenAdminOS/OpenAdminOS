@@ -11,7 +11,8 @@ import { McpHostError } from "../mcp/host.js";
  * installing, turning off, the egress checks on their params and the
  * third-party fencing of their results are the same.
  *
- * Endpoints (verified 2026-11-09 on both hosts, public):
+ * Endpoints (public, verified 2026-11-09 on both hosts; the Agentic Packr
+ * Help Center publishes only en-us):
  * `/api/v2/help_center/articles/search.json?query=` and
  * `/api/v2/help_center/{locale}/articles/{id}.json`.
  */
@@ -38,6 +39,8 @@ interface HelpCenter {
   covers: string;
   /** Example query words for the query param. */
   example: string;
+  /** The locales the Help Center publishes, for the locale param descriptions. */
+  locales: string;
 }
 
 const LOCALE = /^[a-z]{2}(?:-[a-z]{2,4})?$/;
@@ -219,7 +222,7 @@ function helpCenterReference(center: HelpCenter): BuiltinReference {
           required: ["query"],
           properties: {
             query: { type: "string", maxLength: 200, description: `A few product words, for example ${center.example}.` },
-            locale: { type: "string", description: "Optional Help Center locale such as en-us or de." },
+            locale: { type: "string", description: `Optional Help Center locale: ${center.locales}.` },
             page: { type: "number", description: `Page of ${PER_PAGE} results, from 1 to ${MAX_PAGE}.` },
           },
         },
@@ -232,7 +235,7 @@ function helpCenterReference(center: HelpCenter): BuiltinReference {
           required: ["id"],
           properties: {
             id: { type: "number", description: "Article id from search_articles." },
-            locale: { type: "string", description: "Help Center locale. Defaults to en-us." },
+            locale: { type: "string", description: `Help Center locale: ${center.locales}. Defaults to en-us.` },
           },
         },
       },
@@ -251,6 +254,7 @@ export const SPLASHTOP_KNOWLEDGE_BASE = helpCenterReference({
   product: "Splashtop",
   covers: "Splashtop Business, Enterprise, SOS and Remote Support",
   example: "reboot computer or SOS connection",
+  locales: "en-us, de, fr and others",
 });
 
 export const SPLASHTOP_PACKR_KNOWLEDGE_BASE = helpCenterReference({
@@ -259,4 +263,5 @@ export const SPLASHTOP_PACKR_KNOWLEDGE_BASE = helpCenterReference({
   product: "Splashtop Agentic Packr",
   covers: "Splashtop Agentic Packr: packaging installers, deployment templates and publishing apps to Intune",
   example: "deployment template or package installer",
+  locales: "en-us only",
 });
