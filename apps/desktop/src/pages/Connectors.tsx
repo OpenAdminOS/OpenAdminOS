@@ -4,7 +4,6 @@ import {
   useRef,
   useState,
   type FormEvent,
-  type ReactElement,
   type ReactNode,
 } from "react";
 import type {
@@ -19,14 +18,8 @@ import type {
 } from "@openadminos/agent-sdk";
 
 import { PageBody, PageHeader } from "../components/AppShell";
-import {
-  OutlookLogo,
-  SlackLogo,
-  TeamsLogo,
-  WebhookLogo,
-  WhatsAppLogo,
-} from "../components/BrandIcons";
 import { Button } from "../components/Button";
+import { ReferenceLogo } from "../components/ServiceMark";
 import {
   IconCheck,
   IconChevronDown,
@@ -51,7 +44,6 @@ import {
   type BadgeTone,
 } from "../components/ui";
 
-type BrandIcon = (props: { size?: number }) => ReactElement;
 type WhatsAppTargetDraft = {
   type: WhatsAppWebRecipientType;
   recipient: string;
@@ -571,7 +563,7 @@ function FeaturedTeamsCard({
         <div className="p-5">
           <div className="flex items-start gap-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white p-1.5 ring-1 ring-[var(--color-border-soft)]">
-              <TeamsLogo size={30} />
+              <ReferenceLogo name={descriptor.name} size={30} surface="light" />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
@@ -935,7 +927,7 @@ function WhatsAppWebCard({
       <div className="border-b border-[var(--color-border-soft)] p-5">
         <div className="flex items-start gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white p-1.5 ring-1 ring-[var(--color-border-soft)]">
-            <WhatsAppLogo size={30} />
+            <ReferenceLogo name={descriptor.name} size={30} surface="light" />
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
@@ -1333,7 +1325,6 @@ interface NotificationSecretSpec {
 
 interface NotificationConnectorSpec {
   id: NotificationConnectorId;
-  Icon: BrandIcon;
   authLabel: string;
   description: string;
   defaultLabel: string;
@@ -1348,7 +1339,6 @@ const notificationConnectorSpecs: Record<
 > = {
   outlook: {
     id: "outlook",
-    Icon: OutlookLogo,
     authLabel: "Graph delegated",
     description:
       "Sends run reports by email via Microsoft Graph as the signed-in admin.",
@@ -1371,7 +1361,6 @@ const notificationConnectorSpecs: Record<
   },
   slack: {
     id: "slack",
-    Icon: SlackLogo,
     authLabel: "External bot token",
     description:
       "Posts run reports to a Slack channel through a Slack app bot token.",
@@ -1398,7 +1387,6 @@ const notificationConnectorSpecs: Record<
   },
   discord: {
     id: "discord",
-    Icon: WebhookLogo,
     authLabel: "Webhook secret",
     description:
       "Posts run reports to a Discord channel webhook. Webhook URLs are stored as secrets.",
@@ -1430,7 +1418,6 @@ const notificationConnectorSpecs: Record<
   },
   signal: {
     id: "signal",
-    Icon: WebhookLogo,
     authLabel: "Local signal-cli",
     description:
       "Sends run reports through a local signal-cli account or local REST bridge.",
@@ -1501,7 +1488,6 @@ function NotificationConnectorCard({
 
   if (!spec) return null;
 
-  const { Icon } = spec;
   const isConnected = summary.status === "connected";
   const hasSecret = Boolean(spec.secret);
 
@@ -1554,7 +1540,7 @@ function NotificationConnectorCard({
         <div className="p-4">
           <div className="flex items-start gap-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white p-1.5 ring-1 ring-[var(--color-border-soft)]">
-              <Icon size={30} />
+              <ReferenceLogo name={summary.descriptor.name} size={30} surface="light" />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">

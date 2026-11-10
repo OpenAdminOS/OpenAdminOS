@@ -2,7 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import Connections, { REACH_STACK_BELOW, buildReachModel, reachDescription, reachLayout, reachLinks, reachPaths } from "./Connections";
+import Connections, { REACH_STACK_BELOW, buildReachModel, reachDescription, reachLayout, reachLinks, reachPaths, reachRowAnchor } from "./Connections";
 import { reportDestinations, resultDestinations, targetlessDestinations } from "../shared/delivery-destinations";
 import {
   createAwaitingConfirmationRun,
@@ -89,7 +89,25 @@ describe("Connections reach map", () => {
     expect(within(map).getByText(CONNECTIONS_COPY.map.promptsLocal)).toBeInTheDocument();
   });
 
-  it("shows the Splashtop logo for a Splashtop reference host and letters for other hosts", async () => {
+  it("shows the logo of each reference host and result connector on its row", async () => {
+    const state = createMockAppState({
+      tenants: [partialTenant],
+      mcpServers: createMockMcpServers({ "kql-search": { installed: true, enabled: true }, "microsoft-learn": { installed: true, enabled: true } }),
+      installedAgents: [createMockAgent({ delivery: { teams: { enabled: true } } })],
+    });
+    render(state, { listConnectors: vi.fn(async () => [teamsConnector()]) });
+    const map = await screen.findByRole("figure", { name: CONNECTIONS_COPY.map.label });
+    await waitFor(() => expect(map.querySelector('[data-link-id="report:Microsoft Teams"]')).not.toBeNull());
+    for (const [row, logo] of [
+      ["host:learn.microsoft.com", "microsoft"],
+      ["host:www.kqlsearch.com", "kqlsearch"],
+      ["report:Microsoft Teams", "microsoft-teams"],
+    ]) {
+      expect(map.querySelector(`[data-link-id="${row}"] .svc-mark [data-reference-logo="${logo}"][data-kind="logo"] img`), row).not.toBeNull();
+    }
+  });
+
+  it("shows the Splashtop logo for a Splashtop reference host through its listing, not for other hosts", async () => {
     const packr = {
       ...createMockMcpServers()[0]!,
       id: "splashtop-packr-kb",
@@ -216,11 +234,97 @@ describe("reach map connectors and layout", () => {
       { id: "b", direction: "in", tone: "missing" },
       { id: "c", direction: "out", tone: "hosted" },
     ]);
+    // Each line bends 35% of the way from its row, so it leaves the tile level.
     expect(paths.map((path) => path.d)).toEqual([
-      "M310 56 C352 56, 352 131.5, 394 131.5",
-      "M310 88 C352 88, 352 140.5, 394 140.5",
-      "M478 136 C534 136, 534 56, 590 56",
+      "M310 56 C339.4 56, 339.4 131.5, 394 131.5",
+      "M310 88 C339.4 88, 339.4 140.5, 394 140.5",
+      "M478 136 C550.8 136, 550.8 56, 590 56",
     ]);
+  });
+
+  it("tightens the fan so many lines still end on the tile edge", () => {
+    const box = { left: 0, right: 900, top: 0, height: 700 };
+    const tile = { left: 400, right: 472, top: 100, height: 72 };
+    const ids = Array.from({ length: 16 }, (_, index) => `row-${index}`);
+    const rows = new Map(ids.map((id, index) => [id, { left: 600, right: 880, top: 40 + index * 32, height: 22 }]));
+    const paths = reachPaths(box, tile, rows, ids.map((id) => ({ id, direction: "out" as const, tone: "default" as const })));
+    const ends = paths.map((path) => Number(/^M\S+ (\S+) /.exec(path.d)![1]));
+    // The ends stay 8 px inside the tile's top (100) and bottom (172), in row order.
+    expect(ends[0]).toBe(108);
+    expect(ends.at(-1)).toBe(164);
+    expect(ends).toEqual([...ends].sort((a, b) => a - b));
+  });
+
+  it("meets a row at its mark, and at its own middle when the mark cannot be measured", () => {
+    const row = { left: 600, right: 880, top: 40, height: 58 };
+    const mark = { left: 600, right: 622, top: 44, height: 22 };
+    expect(reachRowAnchor(row, mark)).toEqual({ left: 600, right: 880, top: 44, height: 22 });
+    expect(reachRowAnchor(row)).toEqual(row);
+    expect(reachRowAnchor(row, { ...mark, height: 0 })).toEqual(row);
+    // The line to a row with a detail line ends level with the mark (55), not the middle of the block (69).
+    const box = { left: 0, right: 900, top: 0, height: 300 };
+    const tile = { left: 428, right: 500, top: 100, height: 72 };
+    const [path] = reachPaths(box, tile, new Map([["a", reachRowAnchor(row, mark)]]), [{ id: "a", direction: "out", tone: "hosted" }]);
+    expect(path!.d.endsWith(" 590 55")).toBe(true);
+  });
+
+  it("keeps every line out of the caption under the tile, however many rows there are", () => {
+    // The wide map: a 72 px tile centred in a 128 px column, 76 px gaps, the caption 10 px under the tile and as wide as the column.
+    const box = { left: 0, right: 1000, top: 0, height: 1400 };
+    const tile = { left: 428, right: 500, top: 600, height: 72 };
+    const caption = { left: 400, right: 528, top: 682 };
+    const centre = tile.top + tile.height / 2;
+    const column = (ids: string[], left: number, right: number) =>
+      ids.map((id, index): [string, { left: number; right: number; top: number; height: number }] => [id, { left, right, top: centre - (ids.length * 32) / 2 + index * 32 + 5, height: 22 }]);
+    /** Points along a path of M, H and C segments. */
+    const samples = (d: string): Array<[number, number]> => {
+      const tokens = d.match(/[MHC]|-?[\d.]+/g)!;
+      const points: Array<[number, number]> = [];
+      let [x, y] = [0, 0];
+      for (let at = 0; at < tokens.length; ) {
+        const command = tokens[at++];
+        const take = (count: number) => tokens.slice(at, (at += count)).map(Number);
+        if (command === "M") {
+          [x, y] = take(2) as [number, number];
+          points.push([x, y]);
+        } else if (command === "H") {
+          const [to] = take(1) as [number];
+          for (let step = 1; step <= 20; step += 1) points.push([x + ((to - x) * step) / 20, y]);
+          x = to;
+        } else {
+          const [x1, y1, x2, y2, x3, y3] = take(6) as [number, number, number, number, number, number];
+          for (let step = 1; step <= 200; step += 1) {
+            const t = step / 200;
+            const u = 1 - t;
+            points.push([u ** 3 * x + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t ** 3 * x3, u ** 3 * y + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t ** 3 * y3]);
+          }
+          [x, y] = [x3, y3];
+        }
+      }
+      return points;
+    };
+    const crossings = (incoming: number, outgoing: number, clear?: { left: number; right: number }) => {
+      const ins = Array.from({ length: incoming }, (_, index) => `in-${index}`);
+      const outs = Array.from({ length: outgoing }, (_, index) => `out-${index}`);
+      const rows = new Map([...column(ins, 124, 324), ...column(outs, 604, 960)]);
+      const paths = reachPaths(
+        box,
+        tile,
+        rows,
+        [...ins.map((id) => ({ id, direction: "in" as const, tone: "default" as const })), ...outs.map((id) => ({ id, direction: "out" as const, tone: "default" as const }))],
+        clear,
+      );
+      expect(paths).toHaveLength(incoming + outgoing);
+      return paths.filter((path) => samples(path.d).some(([x, y]) => x >= caption.left && x <= caption.right && y >= caption.top)).map((path) => path.id);
+    };
+    expect(crossings(3, 7, caption)).toEqual([]);
+    expect(crossings(3, 16, caption)).toEqual([]);
+    expect(crossings(30, 30, caption)).toEqual([]);
+    // Without the level run past the caption, the lowest rows of a long list cut its corners.
+    expect(crossings(30, 30)).toEqual(expect.arrayContaining(["in-29", "out-29"]));
+    // Each line runs level from the tile until it is 2 px past the caption, then curves to its row.
+    const [path] = reachPaths(box, tile, new Map(column(["out-0"], 604, 960)), [{ id: "out-0", direction: "out", tone: "default" }], caption);
+    expect(path!.d).toBe("M506 636 H530 C563.2 636, 563.2 636, 594 636");
   });
 
   it(`stacks the map below ${REACH_STACK_BELOW} px of content width`, () => {
@@ -400,6 +504,8 @@ describe("Connections services", () => {
     const references = screen.getByRole("region", { name: CONNECTIONS_COPY.referencesHeading });
     expect(within(references).getByText("KQL Search")).toBeInTheDocument();
     expect(within(references).getByText("www.kqlsearch.com")).toBeInTheDocument();
+    // The row shows the logo of the host's owner, not two letters.
+    expect(within(references).getByText("KQL Search").closest("li")!.querySelector('.svc-mark [data-reference-logo="kqlsearch"][data-kind="logo"] img')).not.toBeNull();
     expect(within(references).queryByText("Microsoft Learn")).not.toBeInTheDocument();
     await user.click(within(references).getByRole("button", { name: `${CONNECTIONS_COPY.referenceTurnOff} KQL Search` }));
     await waitFor(() => expect(bridge.setMcpServerEnabled).toHaveBeenCalledWith("kql-search", false));
@@ -426,7 +532,9 @@ describe("Connections results and organizations", () => {
   it("opens and closes a connector drawer from its URL", async () => {
     const user = userEvent.setup();
     render(createMockAppState(), { listConnectors: vi.fn(async () => [teamsConnector()]) }, "/connections?connector=teams");
-    expect(await screen.findByRole("dialog", { name: "Microsoft Teams" })).toBeInTheDocument();
+    const drawer = await screen.findByRole("dialog", { name: "Microsoft Teams" });
+    // The connector's card shows the same logo file as its row in the reach map.
+    expect(drawer.querySelector('article [data-reference-logo="microsoft-teams"][data-kind="logo"] img')).not.toBeNull();
     await user.click(screen.getByRole("button", { name: "Close drawer" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Microsoft Teams" })).not.toBeInTheDocument());
   });
@@ -587,6 +695,7 @@ describe("one destination list for the map and Results (review round 1)", () => 
     const map = screen.getByRole("figure", { name: CONNECTIONS_COPY.map.label });
     expect(map).toHaveAccessibleDescription(/Run reports and agent messages can go to Microsoft Teams and Discord under saved delivery rules and agent steps\./);
     expect(map).not.toHaveAccessibleDescription(/Slack/);
+    await waitFor(() => expect(map.querySelector('[data-link-id="report:Discord"] [data-reference-logo="discord"] img')).not.toBeNull());
   });
 
   it("dedupes reference hosts in the map, its text alternative and the strip", async () => {
