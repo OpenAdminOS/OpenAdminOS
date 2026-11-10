@@ -109,6 +109,14 @@ export function ReferenceMark({ name, size = "md", off = false }: { name: string
   );
 }
 
+/**
+ * Tile for a Marketplace listing or its host: the owner's logo when the
+ * listing has one (both Splashtop Help Centers), else letters from `name`.
+ */
+export function ListingMark({ logo, name, size = "md", off = false }: { logo?: string; name: string; size?: "sm" | "md" | "lg"; off?: boolean }) {
+  return logo ? <ServiceMark serviceId={logo} size={size} off={off} /> : <ReferenceMark name={name} size={size} off={off} />;
+}
+
 /** Services with at least one part granted for the tenant, in registry order. */
 export function connectedServiceIds(tenant: TenantRecord | undefined): ServiceId[] {
   if (!tenant) return [];
