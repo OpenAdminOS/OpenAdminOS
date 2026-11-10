@@ -163,15 +163,36 @@ describe("source plan", () => {
   it("requires a named server and prefers Learn over the local index", () => {
     const named = planChatSources({ question: "What does the microsoft learn say about defender for macos?", kind: "docs", servers: [learn, kql], docsIndexAvailable: true });
     assert.deepEqual(named.requiredServerIds, ["microsoft-learn"]);
-    assert.equal(named.learnFirst, true);
-    assert.equal(named.detail, "Documentation question. Sources: Microsoft Learn, then the local docs index if Microsoft Learn is unavailable. Your tenant is not checked.");
+    assert.equal(named.serversFirst, true);
+    assert.equal(named.detail, "Documentation question. Sources: Microsoft Learn, then the local docs index if Microsoft Learn does not answer. Your tenant is not checked.");
   });
 
-  it("chooses a server by topic and keeps the index direct when Learn is not chosen", () => {
+  it("chooses a server by topic and keeps the index as its fallback, also when Learn is not chosen", () => {
     const plan = planChatSources({ question: "Write a KQL query for failed sign-ins", kind: "docs", servers: [learn, kql], docsIndexAvailable: true });
     assert.deepEqual(plan.requiredServerIds, ["kql-search"]);
-    assert.equal(plan.learnFirst, false);
-    assert.equal(plan.detail, "Documentation question. Sources: KQL Search and the local docs index. Your tenant is not checked.");
+    assert.equal(plan.serversFirst, true);
+    assert.equal(plan.detail, "Documentation question. Sources: KQL Search, then the local docs index if KQL Search does not answer. Your tenant is not checked.");
+    const both = planChatSources({ question: "What does Microsoft Learn say about KQL joins?", kind: "mixed", servers: [learn, kql], docsIndexAvailable: true });
+    assert.equal(both.detail, "Documentation and tenant question. Sources: Microsoft Learn and KQL Search, then the local docs index if none of them answers, and cached tenant data and Microsoft Graph.");
+    // With no server chosen the index is read directly; with no index nothing is promised.
+    const direct = planChatSources({ question: "How do I fix our noncompliant devices?", kind: "mixed", servers: [learn, kql], docsIndexAvailable: true });
+    assert.equal(direct.serversFirst, false);
+    assert.equal(direct.detail, "Documentation and tenant question. Sources: the local docs index, cached tenant data and Microsoft Graph.");
+    assert.equal(planChatSources({ question: "Write a KQL query for failed sign-ins", kind: "docs", servers: [kql], docsIndexAvailable: false }).detail, "Documentation question. Sources: KQL Search. Your tenant is not checked.");
+    // A server the model declares holds the index back as well, and the sentence says so without making it a required call.
+    const led = planChatSources({ question: "How do I fix our noncompliant devices?", kind: "mixed", servers: [learn, kql], docsIndexAvailable: true, declaredServerIds: ["kql-search"] });
+    assert.deepEqual([led.requiredServerIds, led.serversFirst], [[], true]);
+    assert.equal(led.detail, "Documentation and tenant question. Sources: KQL Search, chosen by the model, then the local docs index if KQL Search does not answer, and cached tenant data and Microsoft Graph.");
+    const added = planChatSources({ question: "How do I enroll a Mac?", kind: "docs", servers: [learn, kql], docsIndexAvailable: true, declaredServerIds: ["kql-search"] });
+    assert.deepEqual(added.requiredServerIds, ["microsoft-learn"]);
+    assert.equal(added.detail, "Documentation question. Sources: Microsoft Learn, then the local docs index if no server answers. Your tenant is not checked. The model also plans to ask KQL Search.");
+    assert.equal(planChatSources({ question: "How do I enroll a Mac?", kind: "docs", servers: [kql], docsIndexAvailable: false, declaredServerIds: ["kql-search"] }).detail,
+      "Documentation question. Sources: KQL Search, chosen by the model. Your tenant is not checked.");
+    assert.equal(planChatSources({ question: "How do I enroll a Mac?", kind: "docs", servers: [kql], docsIndexAvailable: false }).detail,
+      "Documentation question. No documentation source is available, so the model answers from what it knows. Your tenant is not checked.");
+    // Without an index nothing is promised, and a tenant question keeps its own sentence.
+    assert.equal(planChatSources({ question: "How do I fix our noncompliant devices?", kind: "mixed", servers: [kql], docsIndexAvailable: false, declaredServerIds: ["kql-search"] }).detail,
+      "Documentation and tenant question. Sources: cached tenant data and Microsoft Graph. The model also plans to ask KQL Search.");
   });
 
   it("names tenant sources for tenant questions and asks nothing of servers that are not named", () => {
@@ -180,9 +201,9 @@ describe("source plan", () => {
     assert.equal(plan.detail, "Tenant question. Sources: cached tenant data and Microsoft Graph.");
     const mixed = planChatSources({ question: "How do I fix our noncompliant devices?", kind: "mixed", servers: [learn], docsIndexAvailable: true });
     assert.deepEqual(mixed.requiredServerIds, [], "a mixed question gets no third-party call it did not ask for");
-    assert.equal(mixed.detail, "Documentation and tenant question. Sources: the local docs index, and cached tenant data and Microsoft Graph.");
+    assert.equal(mixed.detail, "Documentation and tenant question. Sources: the local docs index, cached tenant data and Microsoft Graph.");
     const named = planChatSources({ question: "What does Microsoft Learn recommend for our noncompliant devices?", kind: "mixed", servers: [learn], docsIndexAvailable: false });
-    assert.equal(named.detail, "Documentation and tenant question. Sources: Microsoft Learn, and cached tenant data and Microsoft Graph.");
+    assert.equal(named.detail, "Documentation and tenant question. Sources: Microsoft Learn, cached tenant data and Microsoft Graph.");
     assert.match(planChatSources({ question: "What is Autopatch?", kind: "docs", servers: [], docsIndexAvailable: false }).detail, /No documentation source is available/);
   });
 });
@@ -306,6 +327,11 @@ describe("follow-ups", () => {
     assert.equal(tenantTieInFollowUp({ ...base, kind: "tenant" }), undefined);
     const kqlQuestion = "Write a KQL query that lists failed sign-ins in the last 24 hours";
     assert.equal(tenantTieInFollowUp({ question: kqlQuestion, kind: "docs", tieInResources: planChatContext(kqlQuestion).resources }), "Check how this applies to our sign-in logs");
+    // Product names keep their capital inside the sentence.
+    assert.equal(tenantTieInFollowUp({ question: "How do I set up Splashtop for Intune?", kind: "docs", tieInResources: ["managedDevices"] }), "Check how this applies to our Intune managed devices");
+    assert.equal(tenantTieInFollowUp({ question: "How do I protect work data on phones?", kind: "docs", tieInResources: ["androidManagedAppProtections"] }), "Check how this applies to our Android app protection policies");
+    assert.equal(tenantTieInFollowUp({ question: "How do I raise the score?", kind: "docs", tieInResources: ["secureScores"] }), "Check how this applies to our Secure Score history");
+    assert.equal(tenantTieInFollowUp({ question: "How does Conditional Access evaluate a sign-in?", kind: "docs", tieInResources: ["conditionalAccessPolicies"] }), "Check Conditional Access in our Conditional Access policies");
   });
 
   it("builds the follow-up after a tenant read from the template, platform and count only", () => {
@@ -358,7 +384,7 @@ describe("source labels and steps", () => {
     model.finish({ kind: "tool", tool: mcpChatToolName("microsoft-learn", "microsoft_docs_search"), params: { query: "x" } }, plan.detail);
     assert.equal(steps.steps[0]!.detail, "Sources available: Microsoft Learn and the local docs index. The model classifies the question.");
     assert.equal(steps.steps[1]!.title, "Chose to ask an MCP server");
-    assert.equal(steps.steps[1]!.detail, "gpt-6-sol · Classified as a docs question. Sources: Microsoft Learn, then the local docs index if Microsoft Learn is unavailable. Your tenant is not checked.");
+    assert.equal(steps.steps[1]!.detail, "gpt-6-sol · Classified as a docs question. Sources: Microsoft Learn, then the local docs index if Microsoft Learn does not answer. Your tenant is not checked.");
     model.start();
     model.writing();
     assert.equal(steps.steps[2]!.title, "Writing the answer");
@@ -381,6 +407,12 @@ describe("source labels and steps", () => {
     const done = toolStepFinish({ id: "t", tool: learnTool.name, params: {}, resultSummary: "", durationMs: 1, createdAt: "", completedAt: "",
       mcpSource: { serverId: learn.id, serverName: learn.name, host: learn.host, tool: "microsoft_docs_search", results: [{ title: "a", url: "https://a" }, { title: "b", url: "https://b" }] } });
     assert.deepEqual([done.status, done.title, done.detail], ["completed", "Asked Microsoft Learn", "microsoft_docs_search · 2 results"]);
+    // A tool that reads one item by its id sent only that id, so its step names the item.
+    const article = { id: "t", tool: learnTool.name, params: {}, resultSummary: "", durationMs: 1, createdAt: "", completedAt: "",
+      mcpSource: { serverId: "packr", serverName: "Splashtop Agentic Packr Docs MCP", host: "support-splashtopagenticpackr.splashtop.com", tool: "get_article", results: [{ title: "Package your own installer with AI", url: "https://a" }] } };
+    assert.equal(toolStepFinish(article, true).detail, "get_article · Package your own installer with AI");
+    assert.equal(toolStepFinish(article).detail, "get_article · 1 result", "a search that found one result still shows its count");
+    assert.equal(toolStepFinish({ ...article, mcpSource: { ...article.mcpSource, results: [{ title: "a" }, { title: "b" }] } }, true).detail, "get_article · 2 results");
     const failure = { id: "t", tool: learnTool.name, params: {}, resultSummary: "", durationMs: 1, createdAt: "", completedAt: "", error: "params must be an object." };
     const notSent = toolStepFinish({ ...failure, mcpSource: { serverId: learn.id, serverName: learn.name, host: learn.host, tool: "microsoft_docs_search", sentToHost: false } });
     assert.ok("sent" in notSent && notSent.sent === undefined, "a call that failed before sending clears its sent text");
@@ -477,7 +509,7 @@ describe("agentic loop sources", () => {
       let refreshes = 0;
       const classify = (tenantReference: boolean) => ({
         tenantReference,
-        onKind: (kind: string, reason: string) => { decided.push(`${kind}:${reason}`); return { requiredServerIds: [], learnFirst: false }; },
+        onKind: (kind: string, reason: string) => { decided.push(`${kind}:${reason}`); return { requiredServerIds: [], serversFirst: false }; },
       });
       const prompts: Array<{ system?: string; prompt: string }> = [];
       const fallback = await runAgenticChat(loopInput(store, scripted(['{"final":true,"answer":"From memory."}', '{"kind":"Docs?","final":true,"answer":"From memory."}'], prompts),
@@ -588,11 +620,136 @@ describe("agentic loop sources", () => {
     });
   });
 
+  describe("the local index behind a third-party server", () => {
+    const kqlTool: McpChatTool = { ...learnTool, name: mcpChatToolName("kql-search", "search_queries"), serverId: "kql-search", serverName: "KQL Search", host: "www.kqlsearch.com", tool: "search_queries" };
+    const callKql = JSON.stringify({ tool: kqlTool.name, params: { query: "failed sign-ins" } });
+    const found = JSON.stringify({ results: [{ title: "Failed sign-ins", contentUrl: "https://learn.microsoft.com/kusto/failed-sign-ins" }] });
+    const final = '{"final":true,"answer":"Use SigninLogs [1]."}';
+    /** Runs a script against Learn and KQL Search; `answers` is what each server returns per call (the last one repeats), empty when absent, an Error to fail. */
+    const run = async (store: IntelligenceSqliteStore, replies: string[], answers: Record<string, string | Error | Array<string | Error>>, overrides: Partial<RunAgenticChatInput>) => {
+      const prompts: Array<{ system?: string; prompt: string }> = [];
+      const reasons: Array<string | undefined> = [];
+      const asked = new Map<string, number>();
+      const context: McpChatContext = { ...learnContext(async (tool) => {
+        const call = asked.get(tool.serverId) ?? 0;
+        asked.set(tool.serverId, call + 1);
+        const all = [answers[tool.serverId] ?? ""].flat();
+        const answer = all[Math.min(call, all.length - 1)]!;
+        if (answer instanceof Error) throw answer;
+        return { text: answer, truncated: false };
+      }), tools: [learnTool, kqlTool], servers: [learn, kql] };
+      const result = await runAgenticChat(loopInput(store, scripted(replies, prompts), context, {
+        questionKind: "docs",
+        documentationFallback: async (reason) => { reasons.push(reason); return [{ file: "defender/hunting.md", title: "Advanced hunting", text: "Use SigninLogs." }]; },
+        ...overrides,
+      }));
+      return { result, prompts, reasons };
+    };
+    const INDEX_LOADED = /\[\d\] Advanced hunting - defender\/hunting\.md/;
+
+    it("stays out when the chosen server answers", async () => {
+      await withStore(async (store) => {
+        const { result, prompts, reasons } = await run(store, [callKql, final], { "kql-search": found }, { requiredServerIds: ["kql-search"] });
+        assert.equal(result.ok, true);
+        assert.deepEqual(reasons, [], "the local docs index is never searched");
+        for (const prompt of prompts) assert.doesNotMatch(prompt.prompt, INDEX_LOADED);
+        assert.deepEqual(result.ok && result.documentationSources?.map((source) => source.kind), ["mcp"]);
+      });
+    });
+
+    it("stands in when the chosen server returns nothing or fails, and names that server", async () => {
+      await withStore(async (store) => {
+        const empty = await run(store, [callKql, final], {}, { requiredServerIds: ["kql-search"] });
+        assert.deepEqual(empty.reasons, ["KQL Search returned nothing"]);
+        assert.match(empty.prompts[1]!.prompt, INDEX_LOADED);
+        assert.match(empty.prompts[1]!.prompt, /KQL Search returned nothing\. Passages from the local docs index are now in the prompt\. Cite them with their numbers and call them the local docs index, not KQL Search\./);
+        assert.deepEqual(empty.result.ok && empty.result.documentationSources?.map((source) => source.kind), ["docs-index"]);
+        const failed = await run(store, [callKql, final], { "kql-search": new Error("KQL Search could not be reached at www.kqlsearch.com.") }, { requiredServerIds: ["kql-search"] });
+        assert.deepEqual(failed.reasons, ["KQL Search did not answer"]);
+        assert.match(failed.prompts[1]!.prompt, /KQL Search did not answer\. Passages from the local docs index are now in the prompt/);
+      });
+    });
+
+    it("stays out once a server answered, also when a later call finds nothing", async () => {
+      await withStore(async (store) => {
+        const later = await run(store, [callKql, callKql, final], { "kql-search": [found, ""] }, { requiredServerIds: ["kql-search"] });
+        assert.deepEqual(later.reasons, []);
+        assert.match(later.prompts[2]!.prompt, /KQL Search returned no results for this query/);
+      });
+    });
+
+    it("never stands in for a tenant question, also when the server it names finds nothing", async () => {
+      await withStore(async (store) => {
+        // The answer itself fails the evidence guard here (nothing is cached); only the index matters.
+        const tenantQuestion = await run(store, [callKql, final], {}, { questionKind: "tenant", requiredServerIds: ["kql-search"] });
+        assert.equal(tenantQuestion.result.toolTrace[0]?.mcpSource?.empty, true);
+        assert.deepEqual(tenantQuestion.reasons, []);
+        for (const prompt of tenantQuestion.prompts) {
+          assert.doesNotMatch(prompt.prompt, INDEX_LOADED);
+          assert.doesNotMatch(prompt.system ?? "", /Local docs index \(on this device\)/);
+        }
+        assert.match(tenantQuestion.prompts[1]!.prompt, /KQL Search returned no results for this query/);
+      });
+    });
+
+    it("waits for every chosen server before it stands in", async () => {
+      await withStore(async (store) => {
+        const required = { requiredServerIds: ["kql-search", "microsoft-learn"] };
+        // KQL Search finds nothing, Microsoft Learn answers: the index stays out.
+        const second = await run(store, [callKql, callLearn, final], { "microsoft-learn": found }, required);
+        assert.deepEqual(second.reasons, []);
+        assert.match(second.prompts[1]!.prompt, /KQL Search returned no results for this query/);
+        // Neither answers: the index loads once, after the last one.
+        const none = await run(store, [callKql, callLearn, final], {}, required);
+        assert.deepEqual(none.reasons, ["Microsoft Learn returned nothing"]);
+        assert.doesNotMatch(none.prompts[1]!.prompt, INDEX_LOADED);
+        assert.match(none.prompts[2]!.prompt, INDEX_LOADED);
+        // KQL Search finds nothing and Microsoft Learn is never asked: the index loads before the answer is kept.
+        const skipped = await run(store, [callKql, final], {}, required);
+        assert.deepEqual(skipped.reasons, ["KQL Search returned nothing"]);
+        assert.equal(skipped.prompts.length, 5, "two source repairs, one answer with the passages");
+        assert.match(skipped.prompts[4]!.prompt, /Passages from the local docs index are now in the prompt\. Answer again using them/);
+        assert.match(skipped.result.ok ? skipped.result.answer : "", /Microsoft Learn was not consulted for this answer/);
+      });
+    });
+
+    it("waits for a server the model declares or requests when it classifies the question", async () => {
+      await withStore(async (store) => {
+        const classify = { tenantReference: false, onKind: () => ({ requiredServerIds: [], serversFirst: false }) };
+        const kind = (rest: Record<string, unknown>) => JSON.stringify({ kind: "docs", ...rest });
+        const request = { tool: kqlTool.name, params: { query: "failed sign-ins" } };
+        // Requested in the classifying reply, and it answers: no index.
+        const answered = await run(store, [kind({ sources: [], ...request }), final], { "kql-search": found }, { classify });
+        assert.deepEqual(answered.reasons, []);
+        // Requested, and it finds nothing: the index stands in.
+        const empty = await run(store, [kind({ sources: ["kql-search"], ...request }), final], {}, { classify });
+        assert.deepEqual(empty.reasons, ["KQL Search returned nothing"]);
+        // Two declared, the first finds nothing, the second answers: the index waits for both and stays out.
+        const both = await run(store, [kind({ sources: ["kql-search", "microsoft-learn"], ...request }), callLearn, final], { "microsoft-learn": found }, { classify });
+        assert.deepEqual(both.reasons, []);
+        assert.deepEqual(both.result.ok && both.result.documentationSources?.map((source) => source.kind), ["mcp"]);
+        // Two declared, the first finds nothing, the second is never asked: the index loads before the answer is kept.
+        const one = await run(store, [kind({ sources: ["kql-search", "microsoft-learn"], ...request }), final], {}, { classify });
+        assert.deepEqual(one.reasons, ["KQL Search returned nothing"]);
+        assert.equal(one.prompts.length, 3);
+        // Declared but never asked: the index loads before the answer is kept, and the step says who was not asked.
+        const declared = await run(store, [kind({ sources: ["kql-search"], final: true, answer: "From memory." }), final], {}, { classify });
+        assert.deepEqual(declared.reasons, ["KQL Search was not asked"]);
+        assert.equal(declared.prompts.length, 2);
+        assert.match(declared.prompts[1]!.prompt, /Passages from the local docs index are now in the prompt\. Answer again using them/);
+        // No server in play: the index loads with the classification, as before.
+        const direct = await run(store, [kind({ sources: ["docs-index"], tool: "find_graph_endpoint", params: { query: "sign-ins" } }), final], {}, { classify });
+        assert.deepEqual(direct.reasons, [undefined]);
+        assert.match(direct.prompts[1]!.prompt, INDEX_LOADED);
+      });
+    });
+  });
+
   it("answers again when the classification loads local docs passages after a final answer, and cites only passages the model saw", async () => {
     await withStore(async (store) => {
       const prompts: Array<{ system?: string; prompt: string }> = [];
       const outcomes: string[] = [];
-      const classify = { tenantReference: false, onKind: () => ({ requiredServerIds: [], learnFirst: false }) };
+      const classify = { tenantReference: false, onKind: () => ({ requiredServerIds: [], serversFirst: false }) };
       const modelStep = { start() {}, writing() {}, finish(outcome: { kind: string; reason?: string }) { outcomes.push(outcome.kind === "repair" ? `repair:${outcome.reason}` : outcome.kind); } };
       const result = await runAgenticChat(loopInput(store, scripted([
         '{"kind":"docs","sources":["docs-index"],"final":true,"answer":"From memory [1] [2]."}',

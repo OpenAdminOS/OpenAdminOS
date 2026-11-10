@@ -36,7 +36,7 @@ function buildServer(kind: "learn" | "kql"): McpServer {
       ] }) }] }));
   } else {
     server.registerTool("search_kql_queries", { description: "Search community KQL queries.", inputSchema: { query: z.string() } },
-      async () => ({ content: [{ type: "text", text: JSON.stringify({ queries: [
+      async ({ query }) => ({ content: [{ type: "text", text: query.includes("nothing") ? "" : JSON.stringify({ queries: [
         { title: "Failed sign-ins in the last 24 hours", url: "https://www.kqlsearch.com/query/failed-sign-ins-24h", query: "SigninLogs | where ResultType != 0" },
       ] }) }] }));
   }
@@ -466,6 +466,32 @@ describe("Chat steps, sources and follow-ups end to end", () => {
     });
   });
 
+  it("keeps the local docs index out when a third-party server answers, and searches it when that server finds nothing", async () => {
+    await withHarness(async ({ store, docsSearches, prompts, script }) => {
+      script([
+        { kind: "docs", sources: ["kql-search"], tool: kqlTool, params: { query: "failed sign-ins last 24 hours" } },
+        { final: true, answer: "Start from this community query [1]." },
+      ]);
+      const message = (await store.sendIntuneChatMessage({ content: KQL_QUESTION })).assistantMessage;
+      assert.equal(classifiedAs(message.steps), "Classified as a docs question. Sources: KQL Search, then the local docs index if KQL Search does not answer. Your tenant is not checked.");
+      assert.deepEqual(kinds(message.steps), ["plan", "answer", "mcp", "answer"]);
+      assert.deepEqual(docsSearches, []);
+      assert.ok(prompts.every((entry) => !entry.prompt.includes("passages from the local docs index")));
+      assert.deepEqual(message.documentationSources?.map((source) => source.kind), ["mcp"]);
+    }, { docsIndex: true });
+    await withHarness(async ({ store, docsSearches, prompts, script }) => {
+      script([
+        { kind: "docs", sources: ["kql-search"], tool: kqlTool, params: { query: "nothing for sign-ins" } },
+        { final: true, answer: "The local docs index describes SigninLogs [1]." },
+      ]);
+      const message = (await store.sendIntuneChatMessage({ content: KQL_QUESTION })).assistantMessage;
+      assert.deepEqual(kinds(message.steps), ["plan", "answer", "mcp", "docs-index", "answer"]);
+      assert.equal(message.steps![3]!.title, "Searched the local docs index, because KQL Search returned nothing");
+      assert.equal(docsSearches.length, 1);
+      assert.match(prompts[1]!.prompt, /KQL Search returned nothing\. Passages from the local docs index are now in the prompt/);
+    }, { docsIndex: true });
+  });
+
   it("gives the deterministic path the same plan step and tenant follow-up, and says MCP tools were not used", async () => {
     await withHarness(async ({ store, graphPaths, script }) => {
       await store.setChatInvestigationMode("always-deterministic");
@@ -534,6 +560,25 @@ describe("Chat steps, sources and follow-ups end to end", () => {
         assert.equal(cache.listToolCalls(result.conversation.id).some((call) => call.type === "graph-cache-refresh"), false, question);
         assert.equal(message.tenantContext, undefined, question);
       }
+    });
+  });
+
+  it("keeps a how-to the model calls docs as docs when it only speaks in the first person", async () => {
+    await withHarness(async ({ store, cache, graphPaths, prompts, script }) => {
+      script([
+        { kind: "docs", sources: ["microsoft-learn"], tool: learnTool, params: { query: "upload first app" } },
+        { final: true, answer: "Microsoft Learn describes the steps [1]." },
+      ]);
+      const result = await store.sendIntuneChatMessage({ content: "how do I upload my first app?" });
+      const message = result.assistantMessage;
+      assert.equal(message.questionKind, "docs");
+      assert.equal(classifiedAs(message.steps), "Classified as a docs question. Sources: Microsoft Learn. Your tenant is not checked.");
+      assert.deepEqual(kinds(message.steps), ["plan", "answer", "mcp", "answer"]);
+      assert.deepEqual(graphPaths, [], "no Graph call for a how-to that says my");
+      assert.equal(cache.listToolCalls(result.conversation.id).some((call) => call.type === "graph-cache-refresh"), false);
+      assert.equal(prompts.some((entry) => /That answer used no tenant evidence/.test(entry.prompt)), false, "the docs answer is not sent back for tenant evidence");
+      assert.equal(message.toolTrace?.some((entry) => entry.tool === "query_cache") ?? false, false);
+      assert.equal(message.content, "Microsoft Learn describes the steps [1].");
     });
   });
 
@@ -688,7 +733,7 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       const result = await store.sendIntuneChatMessage({ content: MIXED_QUESTION });
       const message = result.assistantMessage;
       assert.equal(message.questionKind, "mixed");
-      assert.equal(classifiedAs(message.steps), "Classified as a docs and tenant question. Sources: Microsoft Learn, and cached tenant data and Microsoft Graph.");
+      assert.equal(classifiedAs(message.steps), "Classified as a docs and tenant question. Sources: Microsoft Learn, cached tenant data and Microsoft Graph.");
       assert.deepEqual(message.steps!.map((step) => step.kind === "answer" ? step.title : step.kind), [
         "plan", "Chose to ask Microsoft Learn", "graph-refresh", "mcp", "Answered without checking tenant data", "Chose to query cached Intune managed devices", "tool", "Wrote the answer",
       ]);

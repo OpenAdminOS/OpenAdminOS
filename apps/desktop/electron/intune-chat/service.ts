@@ -128,6 +128,7 @@ import {
   classifyChatQuestion,
   isExplicitDocsRequest,
   definitionForResource,
+  hasStrongTenantReference,
   hasTenantReference,
   isSmallTalk,
   matchAgentsToQuestion,
@@ -2311,15 +2312,15 @@ export class IntuneChatService {
           if (capability.enabled) {
             const tenantObservations = new TenantValueIndex();
             const toolSteps = toolStepHooks(steps, mcp.mcp, answerModel.providerName);
-            const learnFirst = indexWaits(answerPlan.sources, lazyRefresh);
-            const documentation = learnFirst || answerPlan.sources.kind === "tenant" ? [] : await this.searchDocsIndex(modelQuestion, steps);
+            const indexLater = indexWaits(answerPlan.sources, lazyRefresh);
+            const documentation = indexLater || answerPlan.sources.kind === "tenant" ? [] : await this.searchDocsIndex(modelQuestion, steps);
             const agentic = await this.rememberingTenantValues(conversation.id, tenantObservations, async () => runAgenticChat({
               question: modelQuestion,
               adminQuestion: content,
               ...(newConversationTitle ? { askTitle: true } : {}),
               modelStep: modelStepHooks(steps, answerModel, mcp.mcp),
               documentation,
-              ...(learnFirst ? { documentationFallback: (reason?: string) => this.searchDocsIndex(modelQuestion, steps, reason) } : {}),
+              ...(indexLater ? { documentationFallback: (reason?: string) => this.searchDocsIndex(modelQuestion, steps, reason) } : {}),
               questionKind: answerPlan.sources.kind,
               requiredServerIds: answerPlan.sources.requiredServerIds,
               ...(lazyRefresh ? modelClassification(veto, answerPlan.kind, loadTenantData) : noTenant ? noTenantUpgrade(answerPlan.kind, loadTenantData) : {}),
@@ -2998,17 +2999,17 @@ export class IntuneChatService {
               },
             });
             const toolSteps = toolStepHooks(steps, mcp.mcp, answerModel.providerName);
-            const learnFirst = answerPlan ? indexWaits(answerPlan.sources, lazyRefresh) : false;
+            const indexLater = answerPlan ? indexWaits(answerPlan.sources, lazyRefresh) : false;
             const documentation = options.voice
               ? options.webSearch ? [] : await this.retrieveDocumentationSafely(modelQuestion)
-              : learnFirst || answerPlan?.sources.kind === "tenant" ? [] : await this.searchDocsIndex(modelQuestion, steps);
+              : indexLater || answerPlan?.sources.kind === "tenant" ? [] : await this.searchDocsIndex(modelQuestion, steps);
             const agentic = await this.rememberingTenantValues(conversation.id, tenantObservations, async () => runAgenticChat({
               question: modelQuestion,
               adminQuestion: content,
               ...(newConversationTitle ? { askTitle: true } : {}),
               modelStep: modelStepHooks(steps, answerModel, mcp.mcp),
               documentation,
-              ...(learnFirst ? { documentationFallback: (reason?: string) => this.searchDocsIndex(modelQuestion, steps, reason) } : {}),
+              ...(indexLater ? { documentationFallback: (reason?: string) => this.searchDocsIndex(modelQuestion, steps, reason) } : {}),
               ...(answerPlan ? { questionKind: answerPlan.sources.kind, requiredServerIds: answerPlan.sources.requiredServerIds } : {}),
               ...(answerPlan && lazyRefresh ? modelClassification(veto, answerPlan.kind, loadTenantData) : answerPlan && noTenant ? noTenantUpgrade(answerPlan.kind, loadTenantData) : {}),
               tenant,
@@ -3458,7 +3459,7 @@ export class IntuneChatService {
             ? { status: "failed", title: "Could not refresh tenant data", detail: failed[0]?.error ?? "Every refresh failed." }
             : {
                 title: "Refreshed tenant data",
-                detail: `${first!.label} · ${first!.rows.toLocaleString()} rows${ok.length > 1 ? ` and ${ok.length - 1} more` : ""}${failed.length > 0 ? ` · ${failed.length} failed` : ""}${skippedDetail}`,
+                detail: `${first!.label} · ${first!.rows.toLocaleString()} rows${ok.length > 1 ? ` and ${ok.length - 1} more ${ok.length === 2 ? "source" : "sources"}` : ""}${failed.length > 0 ? ` · ${failed.length} failed` : ""}${skippedDetail}`,
               });
       },
     };
@@ -3899,10 +3900,11 @@ export function smallModelNotice(model: string): string {
 /**
  * Why the question may not be docs only: its wording refers to the
  * tenant, or an answer in the conversation memory used tenant data, so a
- * docs answer could repeat tenant facts without fresh evidence.
+ * docs answer could repeat tenant facts without fresh evidence. First
+ * person wording in a how-to is not such a reference.
  */
 function docsVeto(content: string, history: readonly IntuneChatMessage[]): string | undefined {
-  if (hasTenantReference(content)) return "the question mentions your tenant";
+  if (hasStrongTenantReference(content)) return "the question mentions your tenant";
   const recent = history.filter((message) => message.role === "assistant" && message.status === "completed").slice(-CHAT_MEMORY_MAX_TURNS);
   if (recent.some((message) => usedTenantEvidence(message))) return "earlier answers in this chat used your tenant data";
   return undefined;
@@ -3925,16 +3927,17 @@ function refreshedResourceSet(result: GraphCacheRefreshResult | undefined): Set<
  */
 /**
  * Whether the local docs index waits instead of going into the prompt up
- * front. It waits when Microsoft Learn is the chosen source, and always
+ * front. It waits when a server is chosen for the question, and always
  * while the model has yet to classify the question: the loop then loads
- * it for a docs or mixed kind whose sources leave Learn out, never for a
- * tenant kind, and when Learn fails, is blocked or returns nothing.
+ * it for a docs or mixed kind with no server in play, never for a tenant
+ * kind, and when no chosen server answers (offline, blocked or nothing
+ * returned).
  */
 /** How often live answer text is sent while it streams: about every other frame. */
 const LIVE_TEXT_INTERVAL_MS = 32;
 
 function indexWaits(sources: ChatSourcePlan, modelClassifies: boolean): boolean {
-  return sources.learnFirst || modelClassifies;
+  return sources.serversFirst || modelClassifies;
 }
 
 function modelClassification(
@@ -4089,7 +4092,7 @@ function buildAnswerPrompt(
     "Microsoft documentation passages from the local docs index on this device. Call them the local docs index, never Microsoft Learn:",
     passages,
     "",
-    "The documentation above describes how Microsoft 365 behaves in general. It is not this tenant's state. When you rely on it, cite the source in square brackets, for example [1]. If it does not cover the question, say so rather than guessing.",
+    "The documentation above describes how Microsoft 365 behaves in general. It is not this tenant's state. When you rely on it, cite the source in square brackets, for example [1]. A passage about another product or topic is not a source: do not cite it, also not to say that it does not apply. If it does not cover the question, say so rather than guessing.",
     "",
     "Retrieved tenant context, which is this tenant's actual state:",
     context,

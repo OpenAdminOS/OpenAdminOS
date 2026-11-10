@@ -20,7 +20,10 @@ import {
   MAX_PLANNED_RESOURCES,
   buildAnswerPack,
   definitionForResource,
+  asksHowTo,
   graphCacheResourcesForWrite,
+  hasStrongTenantReference,
+  hasTenantReference,
   matchAgentsToQuestion,
   pathForResource,
   planChatContext,
@@ -301,6 +304,107 @@ describe("agent matcher probe table (real registry)", () => {
     for (const question of ["Which devices have not synced in 45 days?", "How many of my devices are noncompliant?", "Why are sign-ins failing for finance users?"]) {
       assert.equal(matchAgentsToQuestion(question, agents).length, 1, question);
     }
+  });
+
+  it("suggests no agent on the word app alone, and keeps the agent its own topic names", async () => {
+    const agents = await registryAgents();
+    // A how-to about packaging an installer shares only "app" with "Dormant app registrations".
+    assert.deepEqual(slugs(matchAgentsToQuestion("how do I upload my first app?", agents)), []);
+    assert.deepEqual(slugs(matchAgentsToQuestion("How do I deploy an application?", agents)), []);
+    const dormant = matchAgentsToQuestion("Which app registrations are dormant?", agents);
+    assert.deepEqual(slugs(dormant), ["dormant-app-registrations"]);
+    assert.equal(dormant[0]!.reason, "This installed read agent matched app terms from the investigation.");
+  });
+});
+
+describe("tenant references that overrule a docs label", () => {
+  it("leaves first-person wording in a how-to to the model", () => {
+    for (const question of ["how do I upload my first app?", "How do we set up our first deployment template?", "How can I connect my Intune to it?", "How should we roll this out to us first?", "How do I upload My first app?"]) {
+      assert.equal(asksHowTo(question), true, question);
+      assert.equal(hasTenantReference(question), true, question);
+      assert.equal(hasStrongTenantReference(question), false, question);
+    }
+  });
+
+  it("keeps state words, tenant values and other question forms as tenant references", () => {
+    for (const question of [
+      "How do I list my noncompliant devices?",
+      "How do I see which of my devices are encrypted?",
+      "How do I fix HR-LAPTOP-07?",
+      "How do I reset the password of anna@contoso.com?",
+      // Looking at the admin's own things asks for tenant facts.
+      "How do I see my noncompliant devices?",
+      "How do I view our failed sign-ins?",
+      "How do I check if our devices are compliant?",
+      "How do I verify our devices are encrypted?",
+      "How do I know if we have stale devices?",
+      "How can we tell if we are compliant with the CIS baseline?",
+      "How do we do on secure score?",
+      "How do we actually stand on Secure Score?",
+      "How do we compare?",
+      "How do I find our noncompliant devices?",
+      "How do I quickly see my noncompliant devices?",
+      "How do I look up my tenant ID?",
+      "How do I tell if ours are compliant?",
+      "How do I find out why our laptops keep failing enrollment?",
+      "How do we do with secure score?",
+      // A first-person word inside a tenant value is part of the value.
+      "How do I reset the password for us@contoso.com?",
+      "How do I unlock my@contoso.com?",
+      "How do I rename US-LAPTOP-07?",
+      "How does our tenant handle guest access?",
+      // Not how-tos: they ask where the tenant stands or how something of ours behaves.
+      "How do we compare to the CIS baseline?",
+      "How does our compliance look?",
+      "How do my devices stay compliant?",
+      "How would we score on the secure score?",
+      "How do I fix all my devices?",
+      "How many of my devices are noncompliant?",
+      "What do the docs say about our devices?",
+      "Why does my device fail compliance?",
+      "Can I see my noncompliant devices?",
+      "Show our Intune devices",
+    ]) {
+      assert.equal(hasStrongTenantReference(question), true, question);
+    }
+    assert.equal(hasStrongTenantReference("How do I enroll macOS devices?"), false);
+    // Looking at something general stays with the model, and so does doing something.
+    assert.equal(hasStrongTenantReference("How do I check a policy setting in the portal?"), false);
+    // A verb that also describes standing or looking is a procedure with a plain object.
+    for (const question of [
+      "How do we do a remote wipe?",
+      "How do we perform an unattended installation?",
+      "How do I perform my first app deployment?",
+      "How do we look up an application ID?",
+      "How do we perform in-place upgrades?",
+      "How do we compare two policies?",
+      "How do we stand up a new distribution point?",
+      // The look is a purpose further on, not what the admin asks to do.
+      "How do I configure Intune to monitor our devices?",
+      "How do I set up a report to check our compliance?",
+      "How do I tell my users to enroll?",
+      "How do I tell my team about the new enrollment flow?",
+      // Another clause, or something of the admin's that no tenant holds.
+      "How do I check a policy setting before we deploy it?",
+      "How do I set up a compliance policy that will check our devices daily?",
+      "How do I make a report to review with my manager?",
+      "How do I see my options in the enrollment wizard?",
+      "How do I check my work before I assign the profile?",
+      // A tenant word in a later phrase does not make the admin's "options" or "work" a tenant thing.
+      "How do I see my options for device enrollment?",
+      "How do I view my options for app protection?",
+      "How do I check my work before deploying apps?",
+      "How do we perform a remote wipe?",
+    ]) {
+      assert.equal(asksHowTo(question), true, question);
+      assert.equal(hasStrongTenantReference(question), false, question);
+    }
+    assert.equal(asksHowTo("How does Agentic Packr package an installer?"), false);
+    // A question at the length limit still finds its tenant value, and one without any has none.
+    assert.equal(hasStrongTenantReference(`How do we upload ${"a".repeat(19900)}?`), false);
+    assert.equal(hasStrongTenantReference(`How do we rename ${"A-".repeat(9900)}x?`), false);
+    assert.equal(hasStrongTenantReference(`How do we upload ${"a".repeat(19800)} for b@contoso.com?`), true);
+    assert.equal(asksHowTo("How to package an installer"), true);
   });
 });
 

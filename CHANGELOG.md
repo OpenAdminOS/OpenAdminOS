@@ -72,6 +72,13 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Chat keeps the local Microsoft docs index out of an answer when a docs server chosen for the question answers, as it already did for Microsoft Learn: a Splashtop question answered by the Splashtop servers no longer gets Microsoft passages about other topics. The index is searched only when no chosen server answers, and the step says which one did not ("Searched the local docs index, because KQL Search returned nothing").
+- Chat no longer treats a how-to as a tenant question because it says "my", "our" or "we": "how do I upload my first app?" stays a docs question when the model calls it one, so no Graph refresh runs, the docs answer is not sent back for tenant evidence, and no cached tenant rows go to the provider for an answer that does not use them. State words, tenant values and earlier tenant answers in the chat still make it a docs and tenant question.
+- Chat reads the article before it answers a how-to from an MCP docs server: when the model answers from search excerpts alone and the server can return the full article, it is asked once to read the best match first. The step of such a read names the article, and its sent text stays the exact id.
+- Local docs index sources show the page title instead of "Customer intent: ..." (1,916 pages in the current index), and their passages no longer start with front matter. The index builder strips front matter with trailing spaces, a BOM or CRLF.
+- Chat no longer suggests an agent for the word "app" alone ("Dormant app registrations" on a packaging how-to), and the suggestion reason says "app terms" instead of "app deployment terms".
+- Chat copy: the screen reader summary reads "2 on this device" instead of "2 on On device", the tenant follow-up keeps product capitals ("our Intune managed devices"), the plan reads "Sources: the local docs index, cached tenant data and Microsoft Graph.", a refresh of several sources reads "and 1 more source", and the model is told not to cite a source only to say that it does not apply.
+
 - Every option in the sidebar account menu now has an icon, keeping labels consistently aligned.
 - Splashtop: Disconnect stops a Splashtop change that is applying and waits for it before deleting the token, and a change plan applies only through the connection it was prepared with, so a reconnect (also to another team for end-session plans) is refused.
 - Chat no longer refuses requests to write text, such as "create a KQL query" or "update the query to only include guests", as tenant changes; requests that place text in the tenant or change a tenant object are still sent to write agents.

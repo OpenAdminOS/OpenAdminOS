@@ -66,7 +66,7 @@ describe("chat steps", () => {
     const summary = screen.getByRole("button", { name: /4 steps/ });
     expect(summary).toHaveAttribute("aria-expanded", "false");
     expect(summary).toHaveTextContent("Microsoft Learn and docs index · Tenant not used");
-    expect(summary).toHaveTextContent("1 on On device, 2 on learn.microsoft.com and www.kqlsearch.com, 1 on OpenAI.");
+    expect(summary).toHaveTextContent("1 on this device, 2 on learn.microsoft.com and www.kqlsearch.com, 1 on OpenAI.");
     // The coloured dots are gone: one icon per origin with its count.
     expect(summary.querySelectorAll("i")).toHaveLength(0);
     const sent = screen.getByRole("button", { name: "Sent: search text to learn.microsoft.com, answer context to OpenAI" });

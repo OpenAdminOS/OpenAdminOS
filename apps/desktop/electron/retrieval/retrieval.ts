@@ -192,6 +192,35 @@ export function normalizeIndexMeta(raw: Record<string, unknown>): RetrievalIndex
 /** What the published index corpus was embedded with. */
 export const DEFAULT_INDEX_EMBEDDING_MODEL = "nomic-embed-text";
 
+/** Front matter at the start of a chunk. It may open with comment lines, and its closing line may carry trailing spaces. */
+const FRONT_MATTER = /^\uFEFF?---[ \t]*\r?\n((?:#[^\n]*\r?\n)*[\w.-]+:[\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
+
+/**
+ * Repairs chunks of an index built before front matter with a trailing
+ * space on its closing line was stripped. Such a page kept its front
+ * matter in the first chunk and took its title from the YAML comment
+ * "# Customer intent: ...". The front matter title becomes the title of
+ * every chunk of that page, and the front matter leaves the text. A page
+ * without a front matter title whose title was such a comment takes its
+ * first heading, or its file path. The vectors are not touched, so the
+ * ranking stays as built.
+ */
+export function repairFrontMatter<T extends { file: string; title?: string; text: string }>(chunks: T[]): T[] {
+  const titles = new Map<string, string>();
+  const cleaned = chunks.map((chunk) => {
+    const match = FRONT_MATTER.exec(chunk.text);
+    if (!match) return chunk;
+    const body = chunk.text.slice(match[0].length).trimStart();
+    const title = /^title:[ \t]*(.+?)[ \t]*$/m.exec(match[1]!)?.[1]?.replace(/^(["'])(.*)\1$/, "$2");
+    const fromComment = chunk.title !== undefined && match[1]!.split(/\r?\n/).some((line) => line.trim() === `# ${chunk.title!.trim()}`);
+    if (title) titles.set(chunk.file, title);
+    else if (fromComment) titles.set(chunk.file, /^# (.+)$/m.exec(body)?.[1]?.trim() || chunk.file);
+    return { ...chunk, text: body || chunk.text };
+  });
+  if (titles.size === 0) return cleaned;
+  return cleaned.map((chunk) => (titles.has(chunk.file) ? { ...chunk, title: titles.get(chunk.file)! } : chunk));
+}
+
 function loadIndexFrom(dir: string): LoadedIndex {
   const metaPath = join(dir, "index-meta.json");
   if (!existsSync(metaPath)) {
@@ -202,10 +231,10 @@ function loadIndexFrom(dir: string): LoadedIndex {
   const meta = normalizeIndexMeta(
     JSON.parse(readFileSync(metaPath, "utf8")) as Record<string, unknown>,
   );
-  const chunks = readFileSync(join(dir, "chunks.jsonl"), "utf8")
+  const chunks = repairFrontMatter(readFileSync(join(dir, "chunks.jsonl"), "utf8")
     .split("\n")
     .filter(Boolean)
-    .map((line) => JSON.parse(line) as { file: string; title?: string; text: string });
+    .map((line) => JSON.parse(line) as { file: string; title?: string; text: string }));
   const raw = readFileSync(join(dir, "embeddings.f32"));
   const matrix = new Float32Array(
     raw.buffer,

@@ -125,7 +125,8 @@ function OriginCounts({ steps }: { steps: readonly IntuneChatStep[] }) {
           );
         })}
       </span>
-      <span className="sr-only">{counts.map(({ label, count }) => `${count} on ${label}`).join(", ")}.</span>
+      {/* The device label is "On device", so it gets its own wording instead of "on On device". */}
+      <span className="sr-only">{counts.map(({ origin, label, count }) => (origin === "device" ? `${count} on this device` : `${count} on ${label}`)).join(", ")}.</span>
     </>
   );
 }
