@@ -150,6 +150,11 @@ function topicPattern(topic: string): RegExp {
  */
 const CATALOG_SERVERS: readonly McpChatServer[] = MCP_CATALOG.map(mcpChatServerOf);
 
+/** A host such as mcp.windowsforum.com, as opposed to a product name. */
+function isHostName(name: string): boolean {
+  return /^[^\s/]+\.[^\s/]+$/.test(name);
+}
+
 /**
  * A longer name as written in a question: with a possessive after a word
  * ("Splashtop's Agentic Packr"), and a host with the rest of its link, so
@@ -157,13 +162,14 @@ const CATALOG_SERVERS: readonly McpChatServer[] = MCP_CATALOG.map(mcpChatServerO
  */
 function longerNamePattern(name: string): RegExp {
   const words = name.split(/\s+/).map(escapeRegExp).join("(?:['\u2019]s)?\\s+");
-  const rest = /^[^\s/]+\.[^\s/]+$/.test(name) ? "(?:[/?#]\\S*)?" : "";
+  const rest = isHostName(name) ? "(?:[/?#]\\S*)?" : "";
   return new RegExp(`(?<![\\p{L}\\p{N}.@-])${words}${rest}(?![\\p{L}\\p{N}_@-]|\\.[\\p{L}\\p{N}])`, "gu");
 }
 
 /**
- * The question as one server reads it: another server's name or host that
- * holds one of this server's names or topics is blanked out, so "Splashtop
+ * The question as one server reads it: another server's name that holds
+ * one of this server's names or topics, and any link to another server's
+ * host with its path and query, are blanked out, so "Splashtop
  * Agentic Packr", "Splashtop's Agentic Packr" and
  * support-splashtopagenticpackr.splashtop.com name that listing and not the
  * one called "Splashtop", whether or not the Agentic Packr listing is
@@ -178,7 +184,9 @@ function questionFor(server: McpChatServer, lower: string, servers: readonly Mcp
   let text = lower;
   for (const other of others.values()) {
     for (const name of serverNames(other)) {
-      const holdsOwnWord = ownNames.some((word) => word !== name && wholeName(word).test(name))
+      // A link to another server's host belongs to that server, query and all.
+      const holdsOwnWord = isHostName(name)
+        || ownNames.some((word) => word !== name && wholeName(word).test(name))
         || server.topics.some((topic) => topic !== name && topicPattern(topic).test(name));
       if (holdsOwnWord) text = text.replace(longerNamePattern(name), " ");
     }

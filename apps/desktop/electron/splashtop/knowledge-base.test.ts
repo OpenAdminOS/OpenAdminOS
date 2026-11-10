@@ -229,7 +229,12 @@ describe("Chat sources for the two Splashtop Help Centers", () => {
     assert.deepEqual(chosen("Summarize https://support-splashtopagenticpackr.splashtop.com/hc/en-us/articles/57274342939291-Create-an-Intune-Deployment-Template"), ["splashtop-packr-kb"]);
     assert.deepEqual(chosen("Summarize https://support-splashtopagenticpackr.splashtop.com/hc/en-us/articles/57274342939291-Create-an-Intune-Deployment-Template?utm_source=splashtop#splashtop"), ["splashtop-packr-kb"]);
     assert.deepEqual(chosen("What does support-splashtopbusiness.splashtop.com say about SOS?"), ["splashtop-kb"]);
-    // A separate Splashtop mention outside the link still asks Splashtop Docs MCP.
+    // The query of a Packr link names no other reference either.
+    assert.deepEqual(chosen("Summarize https://support-splashtopagenticpackr.splashtop.com/hc/en-us/articles/1?utm_source=windowsforum"), ["splashtop-packr-kb"]);
+    assert.deepEqual(chosen("Summarize https://support-splashtopagenticpackr.splashtop.com/hc/en-us/articles/1?utm_source=kql"), ["splashtop-packr-kb"]);
+    assert.deepEqual(chosen("Summarize https://support-splashtopagenticpackr.splashtop.com/hc/en-us/articles/1?utm_source=kql", "tenant"), ["splashtop-packr-kb"]);
+    // A separate mention outside the link still counts.
+    assert.deepEqual(chosen("Read https://support-splashtopagenticpackr.splashtop.com/hc/en-us/articles/1 and find KQL for it").sort(), ["kql-search", "splashtop-packr-kb"]);
     assert.deepEqual(chosen("Read https://support-splashtopagenticpackr.splashtop.com/hc/en-us/articles/1?ref=splashtop and compare it with Splashtop Streamer").sort(), ["splashtop-kb", "splashtop-packr-kb"]);
   });
 
@@ -241,6 +246,10 @@ describe("Chat sources for the two Splashtop Help Centers", () => {
     assert.deepEqual(namedServers("How do I configure Splashtop Agentic Packr?", withoutPackr), []);
     assert.equal(only("How does Splashtop's Agentic Packr connect to Intune?").includes("splashtop-kb"), false);
     assert.equal(only("Summarize https://support-splashtopagenticpackr.splashtop.com/hc/en-us/articles/1-Template?utm_source=splashtop").includes("splashtop-kb"), false);
+    for (const source of ["windowsforum", "kql"]) {
+      const required = only(`Summarize https://support-splashtopagenticpackr.splashtop.com/hc/en-us/articles/1?utm_source=${source}`);
+      assert.equal(required.includes("windowsforum") || required.includes("kql-search"), false);
+    }
     // Splashtop on its own still asks Splashtop Docs MCP.
     assert.deepEqual(only("How do I reboot a computer with Splashtop?"), ["splashtop-kb"]);
     assert.deepEqual(only("Compare Splashtop Streamer deployment with Splashtop Agentic Packr"), ["splashtop-kb"]);
