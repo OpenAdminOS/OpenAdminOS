@@ -1,5 +1,24 @@
 # Current active plan
 
+- [x] Chat answer routing fixes (branch `chat/answer-routing-fixes`, 2026-11-10). Request: fix everything found in the review of a Splashtop Agentic Packr chat ("how can I setup the agentic packr by splashtop", then "how do I upload my first app?").
+
+  Acceptance criteria:
+  1. "how do I upload my first app?" that the model labels docs stays a docs question: no Graph refresh, no tenant tool, no evidence repair, no tenant source. A how-to with a state word ("how do I list my noncompliant devices"), a tenant value, or tenant data in earlier answers is still treated as docs and tenant.
+  2. A how-to question answered from a search on a server that also has a tool reading one result in full gets one repair asking for that read. A second answer without it is accepted. Voice and small talk are not affected.
+  3. The step of a call that read one item by id names the item's title; the sent text stays the exact value sent.
+  4. A local docs passage whose title is the "Customer intent" comment shows the page title from its front matter, or the file path. The index builder reads the front matter title and strips front matter with a BOM or CRLF line endings.
+  5. The prompt tells the model to cite only passages and results the answer relies on.
+  6. "how do I upload my first app?" suggests no agent; "Which app registrations are dormant?" still suggests Dormant app registrations. The existing probe table passes unchanged.
+  7. Copy: "2 on this device" (no "on On device"), the tie-in chip keeps product capitals ("our Intune managed devices"), the mixed plan reads "Sources: the local docs index, cached tenant data and Microsoft Graph.", the refresh step reads "and 1 more source".
+  8. Typecheck, the electron suite and the renderer suite pass on Node 22.
+  9. Added 2026-11-10 after the review ("skip the local Microsoft docs when a third-party doc server answers the question"): when a server is chosen for the question, or the model's classifying reply declares or requests one, the local docs index is not searched up front. It is searched only when no such server answered (failed, blocked or nothing returned) and no chosen server is left to ask, as its own step naming the server; when a chosen server failed and the model skips another one despite the source repairs, it loads before the final answer is kept. With no server in play it loads as before. A tenant question never gets the index, also not as a fallback. Microsoft Learn behaviour on docs and mixed questions is unchanged.
+
+  Review (2026-11-10): all eight met. Typecheck clean; electron suite 1245 of 1245 and renderer suite 725 of 725 on Node 22. The title repair was run against the installed 2026-08-26 index: 9,619 chunks of 1,916 pages had a "Customer intent" title, none after. A separate reviewer graded the criteria and found the how-to exemption too wide ("how does our compliance look", "how do we compare to the baseline" stayed docs); it now covers only "how do I", "how can we", "how to" and the like, and excludes questions about where the tenant stands. Its smaller findings are fixed too: a title read from a comment with no front matter title falls back to the first heading or the file path, and the read repair does not fire while a failed lookup is open.
+
+  Review of criterion 9 (2026-11-10): met. Typecheck clean; electron suite 1252 of 1252 and renderer suite 725 of 725 on Node 22. A separate reviewer walked the Microsoft Learn paths against the removed code and found them unchanged, and found one gap: a tenant question that names a server could load the index as that server's fallback on the path where the model does not classify. Fixed (a tenant question never gets the index) with a test that fails without the fix. Open question, marked `TODO(ugur)` in `planChatSources`: the index waits behind every chosen server, also KQL Search and IntuneAutomation, not only documentation servers.
+
+  Not done, with reasons: (a) no relevance threshold for local docs passages, because the passages in the reported chat were the nearest by similarity (Splashtop SSO tutorials, Intune app upload pages), so a score cut would not have removed them; the cause was the index loading next to the Splashtop servers, which criterion 9 now removes. (b) Tenant sources still come from the executed trace, not from citations: they show what was read, and the forced read is gone with criterion 1. (c) The refresh was correct: Detected apps go stale after 12 hours and were refreshed, Intune apps after 24 hours and were 13 hours old. (d) No live run with a hosted model: the installed app was open and shares the profile and single-instance lock with a dev build.
+
 - [x] New Intune icon and connector row logos (branch `ui/intune-icon-connector-rows`, 2026-11-10). Maintainer answers on the open logo points of PR #185: keep the Signal, Microsoft and WhatsApp logos as they are, KQL Search stays at 48 px (no larger file exists), no caption guard; replace the Intune icon with the new one; add the logos to the connector rows.
 
   Acceptance criteria:
@@ -973,7 +992,6 @@ The `@` picker, parallel tool calls, and changing the local index content.
 - Criterion 10: the live check in the running app is still open, because the main-process changes need a restart of the running dev instance. The end-to-end test stands in for it until then.
 - Found while testing: a final answer containing a fenced KQL block was read as malformed tool JSON and fell back to deterministic retrieval. Fixed in its own commit.
 
-
 # Model-declared question kinds with a keyword veto (2026-11-04)
 
 Same branch, `marketplace/first-wave`. Runs locally only.
@@ -1789,7 +1807,6 @@ M4. [x] SPEC says "A click, Skip or any key settles at once"; it is Escape, Skip
 - M3: `1d0bc8d3`. Probes carry `notContacted`; the closing line lists only what ran and names refused endpoints as not contacted.
 - M4: SPEC says Escape, Skip or a click.
 
-
 ## PR #175 review round 4 (GPT-6.1-Sol, head feafb9a, 2026-11-09)
 
 Blocking
@@ -1843,7 +1860,6 @@ B. [x] A scan check that times out can be missing from the served listing (its a
 - 4: `b853d29b`. The wrapper-kill tests wait for the wrapper's child, then stop the check through its signal (the path the timeout uses) instead of racing a 1.5 s timeout against a loaded machine; `gone` waits up to 5 s for the system to reap. The timeout itself is still covered by a separate `runScanCheck` case.
 - A: `77e8a25b`. `getGraphCacheStatus()` without an id and without an active tenant returns an empty status; an explicit unknown id still throws. Test in the no-tenant harness.
 - B: `c260f99c`. After a scan or Retry, a check that ended could not check without a summary (timed out, refused off-device endpoint) is served as a failed check with its row's reason. Test: a check that never answers is listed with `checkFailed` and the row's fact, not "not checked".
-
 
 ## PR #175 design and enterprise round (maintainer decision, 2026-11-09)
 
@@ -1902,7 +1918,6 @@ Acceptance criteria
 - [x] Tests: every provider and service resolves to its logo, light and dark variants or one file on both, accessible labels.
 - [x] Step 4: the same logos on #174's provider and service marks (reach map, service rows, switcher, Agents chips, run review).
 
-
 ## Remove pilot mode and sample data (maintainer decision, 2026-11-09; step 4, done after #174 merged)
 
 Supersedes the 2026-11-01 pilot decision and the 2026-11-08 block where they keep sample data. Done in this PR now: every entry point is gone (the scan, Chat's model choice, Settings, Tenants and the tenant menu); `startPilot` in `SetupFlowContext` and `PILOT_COPY` have no callers left. The rest waits for #174, which adds sample-organization code.
@@ -1921,7 +1936,6 @@ Done (step 4, 2026-11-09):
 - [x] Real logos on #174's surfaces: reach map and connection rows (`ProviderMark`), service rows, organization switcher, need chips, run review (tests).
 - [x] Pilot mode removed: SDK `kind: "sample"`, `RunRecord.pilot`, `addSampleTenant` and "pilot-active"; `electron/sample-tenant/`, `pilot-chat.ts`, `PilotMode.tsx`, `PilotAgentsHome.tsx`, `shared/pilot-mode.ts`; every branch on them in runs, deliveries, audit, state, Chat, Agents, Connections, switcher, sidebar, run pages and reports; pilot copy; pilot docs; capture shots and the paused-schedules shot that only existed for pilot; pilot-only tests (bundled agents on the sample graph included, since the fake Graph is gone; the qa-graph gate still checks agents).
 - [x] One-time upgrade `removeLegacySampleData` at launch with the notice "Sample data was removed. OpenAdminOS works with your own Microsoft 365 organization." (tests: removal of runs, conversations and organization, no sign-in removal, notice once, idempotent, id-only detection, no-op without pilot).
-
 
 ## PR #175 onboarding round review (GPT-6.1-Sol at 6865d05)
 
