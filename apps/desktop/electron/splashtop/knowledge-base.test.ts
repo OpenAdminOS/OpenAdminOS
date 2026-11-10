@@ -218,4 +218,22 @@ describe("Chat sources for the two Splashtop Help Centers", () => {
     assert.deepEqual(chosen("Ask Splashtop Docs MCP about SOS", "tenant"), ["splashtop-kb"]);
     assert.deepEqual(chosen("Compare Splashtop Streamer deployment with Splashtop Agentic Packr").sort(), ["splashtop-kb", "splashtop-packr-kb"]);
   });
+
+  it("the Agentic Packr host or an article link asks only the Agentic Packr Help Center", () => {
+    assert.deepEqual(chosen("Ask support-splashtopagenticpackr.splashtop.com how to create a deployment template"), ["splashtop-packr-kb"]);
+    assert.deepEqual(chosen("Ask support-splashtopagenticpackr.splashtop.com how to create a deployment template", "mixed"), ["splashtop-packr-kb"]);
+    assert.deepEqual(chosen("Summarize https://support-splashtopagenticpackr.splashtop.com/hc/en-us/articles/57274342939291-Create-an-Intune-Deployment-Template"), ["splashtop-packr-kb"]);
+    assert.deepEqual(chosen("What does support-splashtopbusiness.splashtop.com say about SOS?"), ["splashtop-kb"]);
+  });
+
+  it("an Agentic Packr question does not fall back to Splashtop Docs MCP when Agentic Packr is off or not installed", () => {
+    const withoutPackr = servers.filter((server) => server.id !== "splashtop-packr-kb");
+    const only = (question: string, kind: "docs" | "mixed" | "tenant" = "docs") => planChatSources({ question, kind, servers: withoutPackr, docsIndexAvailable: true }).requiredServerIds;
+    assert.deepEqual(only("How do I configure Splashtop Agentic Packr?").includes("splashtop-kb"), false);
+    assert.deepEqual(only("Ask support-splashtopagenticpackr.splashtop.com about templates").includes("splashtop-kb"), false);
+    assert.deepEqual(namedServers("How do I configure Splashtop Agentic Packr?", withoutPackr), []);
+    // Splashtop on its own still asks Splashtop Docs MCP.
+    assert.deepEqual(only("How do I reboot a computer with Splashtop?"), ["splashtop-kb"]);
+    assert.deepEqual(only("Compare Splashtop Streamer deployment with Splashtop Agentic Packr"), ["splashtop-kb"]);
+  });
 });

@@ -11,6 +11,7 @@ import { definitionForResource, planChatContext } from "./planner.js";
 import { normalizeSourceUrl } from "../../src/shared/chat-steps.js";
 import { isMcpChatToolName, isTenantTool, type McpChatContext, type McpChatServer, type McpChatTool } from "./tools.js";
 import { isSplashtopReadTool } from "../splashtop/reads.js";
+import { MCP_CATALOG, mcpHost } from "../mcp/catalog.js";
 
 export const LEARN_SERVER_ID = "microsoft-learn";
 export const ON_DEVICE = "On device";
@@ -138,20 +139,45 @@ function wholeName(name: string, flags = "u"): RegExp {
   return new RegExp(`(?<![\\p{L}\\p{N}.@-])${escapeRegExp(name)}(?![\\p{L}\\p{N}_@-]|\\.[\\p{L}\\p{N}])`, flags);
 }
 
+/** A topic matches as a word, and also right before digits, so "KB5034441" matches the topic "kb". */
+function topicPattern(topic: string): RegExp {
+  return new RegExp(`\\b${escapeRegExp(topic)}(?:\\b|(?=\\d))`);
+}
+
 /**
- * The question as one server reads it: another server's name that holds
- * one of this server's names or topics is blanked out, so "Splashtop
- * Agentic Packr" names that listing and not the one called "Splashtop".
- * A separate mention ("Splashtop Business and Splashtop Agentic Packr")
- * still names both.
+ * Every catalog server, installed or not. Their names settle which server
+ * a longer name belongs to even when that server is off for this answer.
+ */
+const CATALOG_SERVERS: readonly McpChatServer[] = MCP_CATALOG.map((entry) => ({
+  id: entry.id,
+  name: entry.name,
+  host: mcpHost(entry.url),
+  url: entry.url,
+  useFor: entry.useFor,
+  aliases: entry.aliases,
+  topics: entry.topics,
+  ...(entry.sharedHost ? { sharedHost: true as const } : {}),
+}));
+
+/**
+ * The question as one server reads it: another server's name or host that
+ * holds one of this server's names or topics is blanked out, so "Splashtop
+ * Agentic Packr" and support-splashtopagenticpackr.splashtop.com name that
+ * listing and not the one called "Splashtop", whether or not the Agentic
+ * Packr listing is installed. A separate mention ("Splashtop Business and
+ * Splashtop Agentic Packr") still names both.
  */
 function questionFor(server: McpChatServer, lower: string, servers: readonly McpChatServer[]): string {
-  const own = [...serverNames(server), ...server.topics];
+  const ownNames = serverNames(server);
+  const others = new Map(CATALOG_SERVERS.map((other) => [other.id, other]));
+  for (const other of servers) others.set(other.id, other);
+  others.delete(server.id);
   let text = lower;
-  for (const other of servers) {
-    if (other.id === server.id) continue;
+  for (const other of others.values()) {
     for (const name of serverNames(other)) {
-      if (own.some((word) => word !== name && wholeName(word).test(name))) text = text.replace(wholeName(name, "gu"), " ");
+      const holdsOwnWord = ownNames.some((word) => word !== name && wholeName(word).test(name))
+        || server.topics.some((topic) => topic !== name && topicPattern(topic).test(name));
+      if (holdsOwnWord) text = text.replace(wholeName(name, "gu"), " ");
     }
   }
   return text;
@@ -192,9 +218,8 @@ export function planChatSources(input: {
   const chosen = new Map(namedServers(input.question, input.servers).map((server) => [server.id, server]));
   if (input.kind !== "tenant") {
     for (const server of input.servers) {
-      // A topic also matches right before digits, so "KB5034441" chooses the server with the "kb" topic.
       const text = questionFor(server, lower, input.servers);
-      if (server.topics.some((topic) => new RegExp(`\\b${escapeRegExp(topic)}(?:\\b|(?=\\d))`).test(text))) chosen.set(server.id, server);
+      if (server.topics.some((topic) => topicPattern(topic).test(text))) chosen.set(server.id, server);
     }
     const learn = input.servers.find((server) => server.id === LEARN_SERVER_ID);
     if (input.kind === "docs" && chosen.size === 0 && learn) chosen.set(learn.id, learn);
