@@ -2275,6 +2275,7 @@ export class AppStateStore {
         ...(entry.operator ? { operator: entry.operator } : {}),
         ...(entry.policy ? { policy: { ...entry.policy } } : {}),
         ...(entry.notes?.length ? { notes: [...entry.notes] } : {}),
+        ...(entry.logo ? { logo: entry.logo } : {}),
         ...(missingTools.length > 0 ? { missingTools } : {}),
       };
     });

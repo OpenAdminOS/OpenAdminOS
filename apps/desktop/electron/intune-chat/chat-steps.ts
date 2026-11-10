@@ -131,14 +131,39 @@ function serverNames(server: McpChatServer): string[] {
   return names.filter(Boolean);
 }
 
+// A name counts only as a whole: no letter, digit, dot, hyphen or @ may continue it on the left, and no letter, digit, hyphen,
+// underscore, @ or dot followed by another label on the right. So "learn.microsoft.com", "admin@kqlsearch.com" and
+// "kqlsearch.com.example" do not name a server, and a sentence ending in "kqlsearch.com." does.
+function wholeName(name: string, flags = "u"): RegExp {
+  return new RegExp(`(?<![\\p{L}\\p{N}.@-])${escapeRegExp(name)}(?![\\p{L}\\p{N}_@-]|\\.[\\p{L}\\p{N}])`, flags);
+}
+
+/**
+ * The question as one server reads it: another server's name that holds
+ * one of this server's names or topics is blanked out, so "Splashtop
+ * Agentic Packr" names that listing and not the one called "Splashtop".
+ * A separate mention ("Splashtop Business and Splashtop Agentic Packr")
+ * still names both.
+ */
+function questionFor(server: McpChatServer, lower: string, servers: readonly McpChatServer[]): string {
+  const own = [...serverNames(server), ...server.topics];
+  let text = lower;
+  for (const other of servers) {
+    if (other.id === server.id) continue;
+    for (const name of serverNames(other)) {
+      if (own.some((word) => word !== name && wholeName(word).test(name))) text = text.replace(wholeName(name, "gu"), " ");
+    }
+  }
+  return text;
+}
+
 /** Servers the question names by name, alias or host. */
 export function namedServers(question: string, servers: readonly McpChatServer[]): McpChatServer[] {
   const lower = question.toLowerCase();
-  // A name counts only as a whole: no letter, digit, dot, hyphen or @ may continue it on the left, and no letter, digit, hyphen,
-  // underscore, @ or dot followed by another label on the right. So "learn.microsoft.com", "admin@kqlsearch.com" and
-  // "kqlsearch.com.example" do not name a server, and a sentence ending in "kqlsearch.com." does.
-  const names = (name: string) => new RegExp(`(?<![\\p{L}\\p{N}.@-])${escapeRegExp(name)}(?![\\p{L}\\p{N}_@-]|\\.[\\p{L}\\p{N}])`, "u").test(lower);
-  return servers.filter((server) => serverNames(server).some(names));
+  return servers.filter((server) => {
+    const text = questionFor(server, lower, servers);
+    return serverNames(server).some((name) => wholeName(name).test(text));
+  });
 }
 
 function escapeRegExp(text: string): string {
@@ -168,7 +193,8 @@ export function planChatSources(input: {
   if (input.kind !== "tenant") {
     for (const server of input.servers) {
       // A topic also matches right before digits, so "KB5034441" chooses the server with the "kb" topic.
-      if (server.topics.some((topic) => new RegExp(`\\b${escapeRegExp(topic)}(?:\\b|(?=\\d))`).test(lower))) chosen.set(server.id, server);
+      const text = questionFor(server, lower, input.servers);
+      if (server.topics.some((topic) => new RegExp(`\\b${escapeRegExp(topic)}(?:\\b|(?=\\d))`).test(text))) chosen.set(server.id, server);
     }
     const learn = input.servers.find((server) => server.id === LEARN_SERVER_ID);
     if (input.kind === "docs" && chosen.size === 0 && learn) chosen.set(learn.id, learn);

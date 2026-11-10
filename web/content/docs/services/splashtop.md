@@ -7,7 +7,7 @@ description: "Connect the Splashtop Open API to an organization: what it needs, 
 
 OpenAdminOS works with Splashtop in two ways:
 
-- **Splashtop support references**, with no sign-in: Splashtop Docs MCP, a built-in search over Splashtop's public Help Center that answers Splashtop questions from the documentation. Add it from the **Marketplace**.
+- **Splashtop support references**, with no sign-in: Splashtop Docs MCP and Splashtop Agentic Packr Docs MCP, built-in searches over Splashtop's public Help Centers that answer Splashtop questions from the documentation. Add them from the **Marketplace**.
 - **The Splashtop Open API**, connected to one organization with an API token: Chat reads that team's computers, inventory, users, groups, sessions and logs, and you can plan changes such as reboots that apply only after your typed confirmation.
 
 ## Support references (no sign-in)
@@ -15,10 +15,14 @@ OpenAdminOS works with Splashtop in two ways:
 | Reference | Host | Tools | Used for |
 | --- | --- | --- | --- |
 | Splashtop Docs MCP | support-splashtopbusiness.splashtop.com | `search_articles`, `get_article` | Questions about setting up, using and troubleshooting Splashtop, answered from the documentation |
+| Splashtop Agentic Packr Docs MCP | support-splashtopagenticpackr.splashtop.com | `search_articles`, `get_article` | Questions about Splashtop Agentic Packr: connecting Intune, Entra ID sign-in, packaging installers, deployment and user experience templates, and deploying catalog apps |
 
-It is a public reference source like the other Marketplace servers: off until you add it, used by Chat in every organization, and words from your question can reach the host shown. The same filter blocks known tenant names, IDs, email addresses and IP addresses before a query is sent, and results are treated as third-party reference material, never as instructions.
+Each is a public reference source like the other Marketplace servers: off until you add it, used by Chat in every organization, and words from your question can reach the host shown. The same filter blocks known tenant names, IDs, email addresses and IP addresses before a query is sent, and results are treated as third-party reference material, never as instructions.
 
 - **Splashtop Docs MCP** answers questions about Splashtop from its documentation. It is built into OpenAdminOS and offered to Chat like an MCP server, without a separate server in between: Chat calls the Help Center's public article search and article API directly from this device. An article id is sent only when it appeared in your question or in an earlier search result of the same answer. If the Help Center limits requests (HTTP 429), Chat says how long to wait.
+- **Splashtop Agentic Packr Docs MCP** works the same way against the Agentic Packr Help Center. A question that names Agentic Packr, or Packr, asks only this reference; a question that names Splashtop without Agentic Packr asks Splashtop Docs MCP; a question that names both asks both.
+
+Both Splashtop references show the Splashtop logo in the Marketplace and on Connections.
 
 ## Connect the Open API
 
