@@ -13,6 +13,9 @@ import {
   type GatewayServiceHost,
 } from "./service.js";
 
+/** Lets other queued work run, so overlapping calls interleave at every await. */
+const yieldTurn = () => new Promise<void>((resolve) => setImmediate(resolve));
+
 function makeGateway(options: {
   config?: Partial<GatewayConfig>;
   legacyToken?: string;
@@ -23,12 +26,21 @@ function makeGateway(options: {
   const queued: Array<Parameters<GatewayServiceHost["queueExternalProposal"]>[0]> = [];
   const audit: GatewayAuditEvent[] = [];
   const host: GatewayServiceHost = {
-    readConfig: async () => structuredClone(config),
+    readConfig: async () => {
+      const snapshot = structuredClone(config);
+      await yieldTurn();
+      return snapshot;
+    },
     writeConfig: async (next) => {
+      await yieldTurn();
       config = structuredClone(next);
     },
-    readLegacyToken: async () => legacyToken,
+    readLegacyToken: async () => {
+      await yieldTurn();
+      return legacyToken;
+    },
     clearLegacyToken: async () => {
+      await yieldTurn();
       legacyToken = undefined;
     },
     tenantName: async () => "Contoso",
@@ -163,6 +175,55 @@ describe("gateway client pairing", () => {
       { clientId: audit[0]?.details.clientId, reason: audit[0]?.details.reason },
       { clientId: "client_1", reason: "pending-limit" },
     );
+  });
+
+  it("keeps a revoke and a pairing that overlap", async () => {
+    const { service, config } = makeGateway();
+    await service.enable({ boundTenantId: "tenant-1", port: 0 });
+    try {
+      const first = await service.pairClient({ name: "Claude Code" });
+      const [, second] = await Promise.all([
+        service.revokeClient(first.client.id),
+        service.pairClient({ name: "Codex" }),
+      ]);
+      assert.deepEqual(config().clients.map((client) => client.name), ["Codex"]);
+      assert.deepEqual(await service.authenticate(first.token), { kind: "unknown" });
+      assert.equal((await service.authenticate(second.token)).kind, "client");
+
+      const paired = await Promise.all(["Intune helper", "Splunk", "Copilot"].map((name) => service.pairClient({ name })));
+      assert.deepEqual(config().clients.map((client) => client.name).sort(), ["Codex", "Copilot", "Intune helper", "Splunk"]);
+      for (const { token } of paired) assert.equal((await service.authenticate(token)).kind, "client");
+    } finally {
+      await service.stop();
+    }
+  });
+
+  it("does not let the move of an earlier shared token undo a pairing made at the same time", async () => {
+    const legacy = "legacy-shared-token-from-0.7-abcdefghijkl";
+    // Start the pairing at each point of the move, so one of them lands
+    // between the move's read and its write.
+    for (let turns = 0; turns < 6; turns += 1) {
+      const { service, config, legacyToken } = makeGateway({
+        legacyToken: legacy,
+        config: { enabled: true, boundTenantId: "tenant-1" },
+      });
+      const pairLater = async () => {
+        for (let turn = 0; turn < turns; turn += 1) await yieldTurn();
+        return service.pairClient({ name: "Claude Code" });
+      };
+      const [, paired] = await Promise.all([service.getStatus(), pairLater()]);
+      assert.equal(legacyToken(), undefined);
+      assert.match(config().legacyTokenHash ?? "", /^[0-9a-f]{64}$/);
+      assert.deepEqual(config().clients.map((client) => client.name), ["Claude Code"], `pairing after ${turns} turns`);
+      assert.equal((await service.authenticate(paired.token)).kind, "client");
+    }
+  });
+
+  it("refuses the earlier shared token as such before anything else read the config", async () => {
+    const legacy = "legacy-shared-token-from-0.7-abcdefghijkl";
+    const { service, legacyToken } = makeGateway({ legacyToken: legacy, config: { enabled: true, boundTenantId: "tenant-1" } });
+    assert.deepEqual(await service.authenticate(legacy), { kind: "legacy-token" });
+    assert.equal(legacyToken(), undefined);
   });
 
   it("revokes every client when the gateway is disabled", async () => {
