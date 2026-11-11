@@ -7,6 +7,7 @@ import {
   createGraphAdapter,
   GraphWriteAuditError,
   GraphWriteUnauditedError,
+  isGraphHost,
   type GraphWriteAuditSink,
 } from "./graph-adapter.js";
 import { GraphAccessDeniedError } from "@openadminos/agent-sdk";
@@ -612,6 +613,17 @@ describe("Graph write audit", () => {
   });
 });
 
+describe("isGraphHost", () => {
+  it("matches the Graph hosts in any case, with or without one trailing dot", () => {
+    for (const host of ["graph.microsoft.com", "graph.microsoft.com.", "GRAPH.MICROSOFT.COM.", "graph.microsoft.us.", "dod-graph.microsoft.us", "microsoftgraph.chinacloudapi.cn."]) {
+      assert.equal(isGraphHost(host), true, host);
+    }
+    for (const host of ["graph.microsoft.com..", "evilgraph.microsoft.com", "graph.microsoft.com.example.com", "slack.com", ""]) {
+      assert.equal(isGraphHost(host), false, host);
+    }
+  });
+});
+
 describe("auditGraphWritesFetch", () => {
   function recordingSink(events: Array<Record<string, unknown>>, options: { failAttempted?: boolean } = {}): GraphWriteAuditSink {
     return {
@@ -654,6 +666,20 @@ describe("auditGraphWritesFetch", () => {
     assert.equal(result?.status, 202);
     assert.equal(result?.requestId, "req-1");
     assert.equal(result?.attempts, 1);
+  });
+
+  it("records a write to the fully qualified Graph host with a trailing dot", async () => {
+    const events: Array<Record<string, unknown>> = [];
+    const audited = auditGraphWritesFetch(
+      mockFetch([new Response(null, { status: 202 }), new Response(null, { status: 202 })], []),
+      recordingSink(events),
+    );
+    await audited("https://graph.microsoft.com./beta/me/sendMail", { method: "POST", body: "{}" });
+    await audited("https://GRAPH.microsoft.us./v1.0/groups/g1", { method: "DELETE" });
+    assert.deepEqual(
+      events.map((event) => `${String(event.kind)} ${String(event.method)} ${String(event.path)}`),
+      ["attempted POST /me/sendMail", "result POST /me/sendMail", "attempted DELETE /groups/g1", "result DELETE /groups/g1"],
+    );
   });
 
   it("records a refused Graph write as failed with its class", async () => {

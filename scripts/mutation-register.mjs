@@ -192,6 +192,14 @@ export const REGISTER = [
     why: "An Outlook or Teams Graph send whose attempt the audit log cannot record must not leave the device.",
   },
   {
+    id: "graph-host-keeps-trailing-dot",
+    path: "packages/runtime/src/graph-adapter.ts",
+    find: 'return GRAPH_HOSTS.has(name.endsWith(".") ? name.slice(0, -1) : name);',
+    replace: "return GRAPH_HOSTS.has(name);",
+    tests: ["packages/runtime/src/graph-adapter.test.ts"],
+    why: "graph.microsoft.com. reaches Graph too; a write sent to it must still be audited and refused during the replan.",
+  },
+  {
     id: "gateway-accepts-any-token",
     path: "apps/desktop/electron/gateway/service.ts",
     find: "if (client.tokenHash && hashesEqual(presented, client.tokenHash)) match = client;",

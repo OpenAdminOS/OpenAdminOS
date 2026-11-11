@@ -417,9 +417,15 @@ const GRAPH_HOSTS = new Set([
   "microsoftgraph.chinacloudapi.cn",
 ]);
 
-/** True for a Microsoft Graph host of the public or a national cloud. */
+/**
+ * True for a Microsoft Graph host of the public or a national cloud. The
+ * name is compared lowercased and without one trailing dot, so the fully
+ * qualified "graph.microsoft.com." that reaches the same host is a Graph
+ * host too.
+ */
 export function isGraphHost(hostname: string): boolean {
-  return GRAPH_HOSTS.has(hostname);
+  const name = hostname.toLowerCase();
+  return GRAPH_HOSTS.has(name.endsWith(".") ? name.slice(0, -1) : name);
 }
 
 const WRITE_METHODS = new Set<string>(["POST", "PATCH", "PUT", "DELETE"]);
@@ -439,7 +445,7 @@ export function auditGraphWritesFetch(
   return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
     const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
-    if (!GRAPH_HOSTS.has(url.hostname) || method === "GET" || method === "HEAD" || method === "OPTIONS") {
+    if (!isGraphHost(url.hostname) || method === "GET" || method === "HEAD" || method === "OPTIONS") {
       return base(input, init);
     }
     const path = url.pathname.replace(/^\/(?:v1\.0|beta)(?=\/|$)/, "") || "/";

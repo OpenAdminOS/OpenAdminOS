@@ -403,6 +403,14 @@ describe("write plans are checked against the tenant before apply", () => {
       transport.fetch(new Request("https://graph.microsoft.us/v1.0/teams/team-1/channels/channel-1/messages", { method: "POST", body: "{}" })),
       { message: `POST /v1.0/teams/team-1/channels/channel-1/messages was not sent. ${PLAN_REVALIDATION_READ_ONLY_COPY}` },
     );
+    // The fully qualified name with a trailing dot, in any case, reaches
+    // the same Graph host and is refused the same way.
+    for (const host of ["graph.microsoft.com.", "GRAPH.Microsoft.com."]) {
+      await assert.rejects(
+        transport.fetch(`https://${host}/v1.0/me/sendMail`, { method: "POST", body: "{}" }),
+        { message: `POST /v1.0/me/sendMail was not sent. ${PLAN_REVALIDATION_READ_ONLY_COPY}` },
+      );
+    }
     assert.deepEqual(sent, [], "no write reached the transport");
 
     await transport.fetch("https://graph.microsoft.com/v1.0/me/mailFolders");
