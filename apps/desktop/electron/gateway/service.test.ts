@@ -31,9 +31,11 @@ function makeGateway(options: {
       await yieldTurn();
       return snapshot;
     },
-    writeConfig: async (next) => {
+    // Like the host, the read, change and write happen under one lock.
+    updateConfig: async (change) => {
       await yieldTurn();
-      config = structuredClone(next);
+      config = structuredClone(change(structuredClone(config)));
+      return structuredClone(config);
     },
     readLegacyToken: async () => {
       await yieldTurn();

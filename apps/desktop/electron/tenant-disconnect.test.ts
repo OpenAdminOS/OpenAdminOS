@@ -298,6 +298,43 @@ describe("Disconnect redesign: two phases with a removal record", () => {
     }
   });
 
+  it("does not let a gateway pairing that overlaps Disconnect bring back the removed tenant's binding", async () => {
+    // The pairing is held in flight, after it started and before it writes,
+    // while Disconnect removes the tenant and unbinds the gateway.
+    const secretRead = gate();
+    let pairingInFlight = false;
+    const noSecret = { get: async () => undefined, set: async () => {}, remove: async () => {} };
+    const f = await fixture(
+      { gateway: { enabled: true, port: 0, boundTenantId: tenant.id, clients: [] } },
+      {
+        providerSecretsFor: (providerId: string) => providerId !== "__gateway__" ? noSecret : {
+          ...noSecret,
+          get: async () => {
+            pairingInFlight = true;
+            await secretRead.opened;
+            return undefined;
+          },
+        },
+      },
+    );
+    try {
+      const pairing = f.store.pairGatewayClient({ name: "Claude Code" }).then(() => undefined, (error: unknown) => error);
+      await until(() => pairingInFlight);
+      const disconnected = f.store.disconnectTenant(tenant.id);
+      await until(async () => (await stored(f.statePath)).tenants.length === 0);
+      secretRead.open();
+      const refused = await pairing;
+      await disconnected;
+      assert.ok(refused instanceof Error, "the pairing for the removed tenant is refused");
+      assert.match(refused.message, /^Enable the gateway before pairing a client\.$/);
+      const after = (await stored(f.statePath)).gateway as { boundTenantId?: string; clients: unknown[] } | undefined;
+      assert.equal(after?.boundTenantId, undefined, "the removed tenant's binding does not come back");
+      assert.deepEqual(after?.clients, [], "no client is paired for the removed tenant");
+    } finally {
+      await f.close();
+    }
+  });
+
   it("drops a late snapshot of a deleted run and sends no report for it", async () => {
     const running = { id: "run-live", agentSlug: "fixture", tenantId: tenant.id, status: "running", queuedAt: "2026-08-01T00:00:00.000Z", providerId: "ollama", steps: [], logs: [] };
     const f = await fixture({ runs: [running] });

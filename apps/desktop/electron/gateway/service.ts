@@ -63,7 +63,14 @@ export interface GatewayAuditEvent {
 
 export interface GatewayServiceHost {
   readConfig(): Promise<GatewayConfig>;
-  writeConfig(config: GatewayConfig): Promise<void>;
+  /**
+   * Reads the config, applies `change` and writes the result under the
+   * host lock for the state file, so no other change, such as a tenant
+   * removal unbinding the gateway, lands between the read and the write.
+   * Resolves with the config written. When `change` throws, nothing is
+   * written and the call rejects with its error.
+   */
+  updateConfig(change: (config: GatewayConfig) => GatewayConfig): Promise<GatewayConfig>;
   /** The shared token an earlier version kept in safeStorage, if any. */
   readLegacyToken(): Promise<string | undefined>;
   clearLegacyToken(): Promise<void>;
@@ -94,10 +101,11 @@ export interface GatewayServiceHost {
 export class GatewayService {
   private server: RunningGatewayServer | undefined;
   /**
-   * Every read-modify-write of the config, and every listener start or
-   * stop, runs in this queue, so two changes never write snapshots over
-   * each other. `writeConfig` takes the host lock for the state file,
-   * but a change read before another change wrote would still undo it.
+   * Every config change, and every listener start or stop, runs in this
+   * queue, so a change and the listener it starts stay in order. The
+   * read, change and write of the config itself happen in one
+   * `updateConfig`, under the host lock, so a change can never write
+   * back a config that another writer of the state file replaced.
    */
   private configQueue: Promise<unknown> = Promise.resolve();
 
@@ -124,15 +132,13 @@ export class GatewayService {
     port?: number;
   }): Promise<GatewayPublicStatus> {
     await this.withConfig(async () => {
-      const config = await this.migratedConfig();
-      const nextConfig: GatewayConfig = {
+      const nextConfig = await this.changeConfig((config) => ({
         ...config,
         enabled: true,
         port: input.port ?? config.port ?? DEFAULT_GATEWAY_PORT,
         boundTenantId: input.boundTenantId,
         clients: config.boundTenantId === input.boundTenantId ? config.clients : [],
-      };
-      await this.host.writeConfig(nextConfig);
+      }));
       await this.restart(nextConfig);
     });
     return this.getStatus();
@@ -141,8 +147,7 @@ export class GatewayService {
   /** Stop the listener and revoke every paired client. */
   async disable(): Promise<GatewayPublicStatus> {
     await this.withConfig(async () => {
-      const config = await this.migratedConfig();
-      await this.host.writeConfig({ ...config, enabled: false, clients: [] });
+      await this.changeConfig((config) => ({ ...config, enabled: false, clients: [] }));
       await this.stop();
     });
     return this.getStatus();
@@ -157,35 +162,40 @@ export class GatewayService {
     name: string;
   }): Promise<{ status: GatewayPublicStatus; client: GatewayClientSummary; token: string }> {
     const { record, token } = await this.withConfig(async () => {
-      const config = await this.migratedConfig();
-      if (!config.enabled || !config.boundTenantId) {
-        throw new Error("Enable the gateway before pairing a client.");
-      }
-      const name = input.name.trim();
-      if (name.length === 0 || name.length > CLIENT_NAME_MAX_LENGTH) {
-        throw new Error(
-          `Enter a client name of 1 to ${CLIENT_NAME_MAX_LENGTH} characters, for example Claude Code.`,
-        );
-      }
-      const sameName = (client: GatewayClientRecord) =>
-        client.name.toLowerCase() === name.toLowerCase();
-      if (config.clients.some((client) => client.tokenHash && sameName(client))) {
-        throw new Error(
-          `A client named ${name} is already paired. Choose another name, or revoke ${name} and pair it again.`,
-        );
-      }
-      const token = generateToken();
-      const record: GatewayClientRecord = {
-        id: `client_${randomBytes(6).toString("hex")}`,
-        name,
-        createdAt: new Date().toISOString(),
-        tokenHash: hashToken(token),
-      };
-      await this.host.writeConfig({
-        ...config,
-        clients: [...config.clients.filter((client) => !sameName(client)), record],
+      let paired!: { record: GatewayClientRecord; token: string };
+      // Checked against the config as written, not an earlier read, so a
+      // tenant removal that unbound the gateway refuses the pairing.
+      await this.changeConfig((config) => {
+        if (!config.enabled || !config.boundTenantId) {
+          throw new Error("Enable the gateway before pairing a client.");
+        }
+        const name = input.name.trim();
+        if (name.length === 0 || name.length > CLIENT_NAME_MAX_LENGTH) {
+          throw new Error(
+            `Enter a client name of 1 to ${CLIENT_NAME_MAX_LENGTH} characters, for example Claude Code.`,
+          );
+        }
+        const sameName = (client: GatewayClientRecord) =>
+          client.name.toLowerCase() === name.toLowerCase();
+        if (config.clients.some((client) => client.tokenHash && sameName(client))) {
+          throw new Error(
+            `A client named ${name} is already paired. Choose another name, or revoke ${name} and pair it again.`,
+          );
+        }
+        const token = generateToken();
+        const record: GatewayClientRecord = {
+          id: `client_${randomBytes(6).toString("hex")}`,
+          name,
+          createdAt: new Date().toISOString(),
+          tokenHash: hashToken(token),
+        };
+        paired = { record, token };
+        return {
+          ...config,
+          clients: [...config.clients.filter((client) => !sameName(client)), record],
+        };
       });
-      return { record, token };
+      return paired;
     });
     return { status: await this.getStatus(), client: publicClient(record), token };
   }
@@ -193,11 +203,10 @@ export class GatewayService {
   /** Remove a client record; its token stops working on the next request. */
   async revokeClient(clientId: string): Promise<GatewayPublicStatus> {
     await this.withConfig(async () => {
-      const config = await this.migratedConfig();
-      await this.host.writeConfig({
+      await this.changeConfig((config) => ({
         ...config,
         clients: config.clients.filter((client) => client.id !== clientId),
-      });
+      }));
     });
     return this.getStatus();
   }
@@ -304,13 +313,25 @@ export class GatewayService {
   }
 
   /** The migrating read. Call it only inside `withConfig`. */
-  private async migratedConfig(): Promise<GatewayConfig> {
-    const config = await this.host.readConfig();
+  private migratedConfig(): Promise<GatewayConfig> {
+    return this.changeConfig();
+  }
+
+  /**
+   * Applies `change` to the config in one host update, after moving an
+   * earlier shared token to a hash in the same write. Without a change
+   * and without a token to move, it only reads. The token leaves
+   * safeStorage only once its hash is written. Call it only inside
+   * `withConfig`.
+   */
+  private async changeConfig(change?: (config: GatewayConfig) => GatewayConfig): Promise<GatewayConfig> {
     const legacy = await this.host.readLegacyToken();
-    if (!legacy) return config;
-    const next: GatewayConfig = { ...config, legacyTokenHash: hashToken(legacy) };
-    await this.host.writeConfig(next);
-    await this.host.clearLegacyToken();
+    if (!legacy && !change) return this.host.readConfig();
+    const next = await this.host.updateConfig((config) => {
+      const migrated = legacy ? { ...config, legacyTokenHash: hashToken(legacy) } : config;
+      return change ? change(migrated) : migrated;
+    });
+    if (legacy) await this.host.clearLegacyToken();
     return next;
   }
 

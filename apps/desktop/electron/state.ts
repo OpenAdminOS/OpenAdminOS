@@ -786,6 +786,20 @@ export const NO_MICROSOFT_365_ORGANIZATION = (action: string) =>
 /** The tenant id pilot mode used for its sample tenant, before pilot mode was removed. */
 export const LEGACY_SAMPLE_TENANT_ID = "openadminos-sample-tenant";
 
+/** The saved gateway config, or the default when none was saved: off, port 8092, no clients. */
+function gatewayConfigOf(persisted: Pick<PersistedState, "gateway">): GatewayConfig {
+  return persisted.gateway ?? { enabled: false, port: 8092, clients: [] };
+}
+
+/** A gateway change that drops the binding to a removed tenant, and leaves any other binding. */
+function gatewayUnboundFrom(tenantId: string): (config: GatewayConfig) => GatewayConfig {
+  return (config) => {
+    if (config.boundTenantId !== tenantId) return config;
+    const { boundTenantId: _removed, ...unbound } = config;
+    return unbound;
+  };
+}
+
 /** A sample tenant written by an earlier version: marked "sample", or the pilot tenant's id. */
 function isLegacySampleTenant(tenant: TenantRecord): boolean {
   return (tenant as { kind?: unknown }).kind === "sample" || tenant.id === LEGACY_SAMPLE_TENANT_ID;
@@ -2067,19 +2081,8 @@ export class AppStateStore {
       },
     });
     this.gatewayService = new GatewayService({
-      readConfig: async () => {
-        const persisted = await host.read();
-        return (
-          persisted.gateway ?? { enabled: false, port: 8092, clients: [] }
-        );
-      },
-      writeConfig: async (config) => {
-        await host.serialize(async () => {
-          const persisted = await host.read();
-          await host.write({ ...persisted, gateway: config });
-        });
-        host.emitStateChanged("gateway-config-changed");
-      },
+      readConfig: async () => gatewayConfigOf(await host.read()),
+      updateConfig: (change) => host.updateGatewayConfig(change),
       readLegacyToken: () => this.gatewaySecrets().get("token"),
       clearLegacyToken: () => this.gatewaySecrets().remove("token"),
       tenantName: async (tenantId) => {
@@ -3309,6 +3312,24 @@ export class AppStateStore {
     payload: unknown;
   }): void {
     this.chatService.recordLearningEventSafely(input);
+  }
+
+  /**
+   * Reads the gateway config, applies `change` and writes the result in
+   * one serialize, so a gateway change made from a config read earlier
+   * can never write back what another change, such as a tenant removal,
+   * replaced. `change` runs inside the lock and must not call serialize.
+   * When it throws, nothing is written.
+   */
+  private async updateGatewayConfig(change: (config: GatewayConfig) => GatewayConfig): Promise<GatewayConfig> {
+    const written = await this.serialize(async () => {
+      const persisted = await this.read();
+      const gateway = change(gatewayConfigOf(persisted));
+      await this.write({ ...persisted, gateway });
+      return gateway;
+    });
+    this.emitStateChanged("gateway-config-changed");
+    return written;
   }
 
   private serialize<T>(task: () => Promise<T>): Promise<T> {
@@ -7916,11 +7937,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       if (deliveryQueue.length > 0) next.runDeliveryQueue = deliveryQueue;
       else delete next.runDeliveryQueue;
       if (persisted.activeTenantId === id) delete next.activeTenantId;
-      // The write gateway was bound to this tenant; it is not bound to any now.
-      if (persisted.gateway?.boundTenantId === id) {
-        const { boundTenantId: _removed, ...gateway } = persisted.gateway;
-        next.gateway = gateway;
-      }
+      // The write gateway was bound to this tenant; it is not bound to any
+      // now. This runs under the same lock as updateGatewayConfig, which
+      // cannot be called here without waiting on itself.
+      if (persisted.gateway) next.gateway = gatewayUnboundFrom(id)(persisted.gateway);
       // Close before the write, so no work of the tenant can slip a change
       // in between. If the write fails, nothing was removed: reopen.
       this.tenantLifecycle.close(id);
