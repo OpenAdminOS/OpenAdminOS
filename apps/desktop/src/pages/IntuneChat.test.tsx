@@ -393,6 +393,31 @@ describe("IntuneChat organization name", () => {
     expect(screen.queryByText("Contoso IT")).toBeNull();
   });
 
+  it("opens with the organization's name when it differs from the tenant's", async () => {
+    const tenant = { ...createMockAppState().tenants[0]!, displayName: "sl6ll.onmicrosoft.com" };
+    const bridge = makeMockBridge(
+      {},
+      createMockAppState({
+        tenants: [tenant],
+        activeTenantId: tenant.id,
+        organizations: [
+          {
+            id: "org-tenant-1",
+            name: "OAOS Lab",
+            createdAt: tenant.addedAt,
+            connections: { microsoft365: { tenantId: tenant.id } },
+          },
+        ],
+      }),
+    );
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+
+    expect(await screen.findByRole("heading", { level: 1, name: "OAOS Lab" })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Ask about OAOS Lab, or type / to run an agent")).toBeInTheDocument();
+    expect(screen.getByLabelText("Scope: OAOS Lab")).toBeInTheDocument();
+    expect(screen.queryByText("sl6ll.onmicrosoft.com")).toBeNull();
+  });
+
   it("renames the tenant in the header of an earlier answer", async () => {
     const user = userEvent.setup();
     const conversation: IntuneChatConversation = {
