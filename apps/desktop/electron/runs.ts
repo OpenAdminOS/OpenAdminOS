@@ -23,11 +23,13 @@ import {
   unmappedScopesCopy,
   resolveProviderDefaultModel,
   resolveRunModel,
+  runInitiator,
   type AgentSummary,
   type IntuneChatMessage,
   type ProviderId,
   type ProviderSummary,
   type RunGraphApi,
+  type RunInitiator,
   type RunLlmApi,
   type RunLogLevel,
   type RunRecord,
@@ -110,7 +112,7 @@ export interface RunGraphExecution {
   signal: AbortSignal;
   allowInteractive: boolean;
   onAuthRequired(): Promise<void>;
-  audit?: { runId: string; agentSlug: string };
+  audit?: { runId: string; agentSlug: string; initiator: RunInitiator };
 }
 
 export interface SplashtopRunClient {
@@ -582,6 +584,7 @@ export class RunService {
       if (options.retryOfRunId) queuedRun.retryOfRunId = options.retryOfRunId;
       if (pinnedTenantId) queuedRun.tenantId = pinnedTenantId;
       queuedRun.trigger = options.trigger ?? "manual";
+      queuedRun.initiator = options.office ? "office" : queuedRun.trigger === "schedule" ? "schedule" : "person";
       if (options.office) queuedRun.office = options.office;
       if (options.officeContext) {
         if ((!options.office && !options.retryOfRunId) || options.officeContext.tenantId !== pinnedTenantId || Buffer.byteLength(JSON.stringify(options.officeContext), "utf8") > 40000) throw new Error("Invalid team task context.");
@@ -689,6 +692,7 @@ export class RunService {
       status: "awaiting-confirmation",
       queuedAt,
       trigger: "manual",
+      initiator: "rollback",
       summary: input.plan.summary,
       steps: [],
       logs: [],
@@ -742,6 +746,7 @@ export class RunService {
       status: "awaiting-confirmation",
       queuedAt,
       trigger: "manual",
+      initiator: "gateway",
       summary: input.plan.summary,
       steps: [],
       logs: [],
@@ -793,6 +798,7 @@ export class RunService {
       status: "awaiting-confirmation",
       queuedAt,
       trigger: "manual",
+      initiator: "person",
       summary: input.plan.summary,
       steps: [],
       logs: [],
@@ -1020,7 +1026,7 @@ export class RunService {
   private executionOptions(run: RunRecord, signal: AbortSignal): RunGraphExecution {
     return {
       signal,
-      audit: { runId: run.id, agentSlug: run.agentSlug },
+      audit: { runId: run.id, agentSlug: run.agentSlug, initiator: runInitiator(run) },
       allowInteractive: run.trigger !== "schedule",
       onAuthRequired: async () => {
         const message = "Waiting for Microsoft sign-in. Complete sign-in in your browser, or select Cancel run. This request expires after five minutes.";

@@ -4689,6 +4689,10 @@ function validateExportAuditLogInput(value: unknown): ExportAuditLogInput {
     if (typeof value.saveToFile !== "boolean") throw new Error("Audit log saveToFile must be a boolean.");
     input.saveToFile = value.saveToFile;
   }
+  if (value.notStartedByPerson !== undefined) {
+    if (typeof value.notStartedByPerson !== "boolean") throw new Error("Audit log notStartedByPerson must be a boolean.");
+    if (value.notStartedByPerson) input.notStartedByPerson = true;
+  }
   const from = validateOptionalAuditLogBoundary(value.from, "from");
   const to = validateOptionalAuditLogBoundary(value.to, "to");
   if (from !== undefined) input.from = from;

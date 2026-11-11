@@ -182,6 +182,45 @@ describe("append-only audit log in the export", () => {
     }
   });
 
+  it("carries who started each run, and filters to runs no person started", async () => {
+    const fixture = await makeStoreFixture({
+      extraRuns: [
+        { ...oldRun(), id: "run-scheduled", trigger: "schedule" },
+        // Written before runs carried an initiator: a gateway proposal stamped manual.
+        { ...oldRun(), id: "run-gateway", agentSlug: "external-proposal", origin: "external-proposal", trigger: "manual" },
+      ],
+    });
+    try {
+      const all = JSON.parse((await fixture.store.exportAuditLog({ format: "json" })).content) as {
+        events: Array<{ runId?: string; initiator?: string; source: string }>;
+      };
+      const initiators = new Map(all.events.filter((event) => event.runId).map((event) => [event.runId, event.initiator]));
+      assert.deepEqual(Object.fromEntries(initiators), {
+        "run-old": "person",
+        "run-write": "person",
+        "run-scheduled": "schedule",
+        "run-gateway": "gateway",
+      });
+
+      const exported = await fixture.store.exportAuditLog({ format: "json", notStartedByPerson: true });
+      const document = JSON.parse(exported.content) as {
+        filters: Record<string, unknown>;
+        events: Array<{ runId?: string; initiator?: string }>;
+      };
+      assert.deepEqual(document.filters, { notStartedByPerson: true });
+      assert.ok(document.events.length > 0);
+      assert.deepEqual([...new Set(document.events.map((event) => event.runId))].sort(), ["run-gateway", "run-scheduled"]);
+      assert.ok(document.events.every((event) => event.initiator === "schedule" || event.initiator === "gateway"));
+
+      const csv = parseCsv((await fixture.store.exportAuditLog({ format: "csv", notStartedByPerson: true })).content);
+      const column = csv[0]?.indexOf("initiator") ?? -1;
+      assert.ok(column >= 0);
+      assert.deepEqual([...new Set(csv.slice(1).map((cells) => cells[column]))].sort(), ["gateway", "schedule"]);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
 });
 
 async function makeStoreFixture(options: { extraRuns?: RunRecord[] } = {}): Promise<{

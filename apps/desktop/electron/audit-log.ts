@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
+import type { RunInitiator } from "@openadminos/agent-sdk";
 import type { GraphWriteAuditSink } from "@openadminos/runtime";
 
 /**
@@ -47,6 +48,8 @@ export interface AuditLogEventSeed {
   runId?: string;
   tenantId?: string;
   agentSlug?: string;
+  /** Who started the run the event belongs to. */
+  initiator?: RunInitiator;
   actor?: AuditLogActor;
   details: Record<string, unknown>;
 }
@@ -121,6 +124,7 @@ export class AuditLogStore {
           source TEXT NOT NULL,
           run_id TEXT,
           tenant_id TEXT,
+          initiator TEXT,
           event_json TEXT NOT NULL,
           previous_sha256 TEXT NOT NULL,
           sha256 TEXT NOT NULL
@@ -165,9 +169,9 @@ export class AuditLogStore {
     const exists = this.db.prepare("SELECT 1 FROM audit_log WHERE event_id = ?");
     const insert = this.db.prepare(
       `INSERT INTO audit_log (
-        event_id, recorded_at, timestamp, type, source, run_id, tenant_id,
+        event_id, recorded_at, timestamp, type, source, run_id, tenant_id, initiator,
         event_json, previous_sha256, sha256
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     const recordedAt = this.clock().toISOString();
     let added = 0;
@@ -189,6 +193,7 @@ export class AuditLogStore {
           event.source,
           event.runId ?? null,
           event.tenantId ?? null,
+          event.initiator ?? null,
           json,
           previous,
           sha256,
@@ -268,6 +273,7 @@ export function graphWriteAuditSink(
     actor?: AuditLogActor;
     runId?: string;
     agentSlug?: string;
+    initiator?: RunInitiator;
   },
   clock: () => Date = () => new Date(),
 ): GraphWriteAuditSink {
@@ -276,6 +282,7 @@ export function graphWriteAuditSink(
     tenantId: context.tenantId,
     ...(context.runId ? { runId: context.runId } : {}),
     ...(context.agentSlug ? { agentSlug: context.agentSlug } : {}),
+    ...(context.initiator ? { initiator: context.initiator } : {}),
     ...(context.actor ? { actor: context.actor } : {}),
   };
   return {

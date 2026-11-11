@@ -1010,6 +1010,11 @@ export interface RunRecord {
   providerId?: ProviderId;
   model?: string;
   trigger?: "manual" | "schedule";
+  /**
+   * Who started the run. Records written before it existed have none;
+   * read them through `runInitiator`.
+   */
+  initiator?: RunInitiator;
   changeState?: "new" | "changed" | "unchanged";
   /**
    * Best-effort live LLM report text while a run is still executing.
@@ -1035,6 +1040,28 @@ export interface RunRecord {
   tokens?: LlmTokenUsage;
   /** Per-call totals for local forecasts; missing metrics stay unknown. Older runs have null usage. */
   usage?: RunModelUsage | null;
+}
+
+/**
+ * Who started a run: a person in the app, a schedule, an Agent Team
+ * assignment, a write-gateway client, or a baseline rollback.
+ */
+export type RunInitiator = "person" | "schedule" | "office" | "gateway" | "rollback";
+
+/**
+ * The initiator of a run. A record written before runs carried one is
+ * read from what it does carry: an Agent Team assignment, a gateway
+ * proposal or a rollback by its origin, otherwise by its trigger
+ * (manual means a person, schedule means a schedule).
+ */
+export function runInitiator(
+  run: Pick<RunRecord, "initiator" | "trigger" | "origin" | "office">,
+): RunInitiator {
+  if (run.initiator) return run.initiator;
+  if (run.office) return "office";
+  if (run.origin === "external-proposal") return "gateway";
+  if (run.origin === "baseline-rollback") return "rollback";
+  return run.trigger === "schedule" ? "schedule" : "person";
 }
 
 export interface RunModelUsage extends LlmTokenUsage {
@@ -1144,6 +1171,11 @@ export interface ExportAuditLogInput {
   from?: string;
   /** Inclusive ISO timestamp upper bound. */
   to?: string;
+  /**
+   * Only events of runs no person started (schedule, Agent Team, write
+   * gateway, rollback). Events that belong to no run are left out.
+   */
+  notStartedByPerson?: boolean;
 }
 
 export interface AuditLogHashChainSummary {

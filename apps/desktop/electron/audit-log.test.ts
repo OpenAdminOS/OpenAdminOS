@@ -150,6 +150,7 @@ describe("Graph write audit sink", () => {
         tenantId: "tenant-1",
         runId: "run-1",
         agentSlug: "offboarding",
+        initiator: "schedule",
         actor: { kind: "connected-admin", tenantId: "tenant-1", username: "admin@contoso.example" },
       }),
       fetchImpl: (async () => {
@@ -168,6 +169,7 @@ describe("Graph write audit sink", () => {
       assert.equal(entry.runId, "run-1");
       assert.equal(entry.tenantId, "tenant-1");
       assert.equal(entry.agentSlug, "offboarding");
+      assert.equal(entry.initiator, "schedule");
       assert.equal(entry.details.method, "PATCH");
       assert.equal(entry.details.path, "/users/user-1");
     }

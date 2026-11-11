@@ -202,6 +202,7 @@ import {
   normalizeGraphScopeName,
   providerCatalog,
   resolveProviderDefaultModel,
+  runInitiator,
   graphAccessDenialFromError,
   requestedScopes,
   SERVICE_PARTS,
@@ -815,6 +816,7 @@ function runAuditEvents(run: RunRecord, context: AuditLogContext): AuditLogEvent
     runId: run.id,
     ...(run.tenantId ? { tenantId: run.tenantId } : {}),
     agentSlug: run.agentSlug,
+    initiator: runInitiator(run),
   };
   const events: AuditLogEventSeed[] = [];
   events.push({
@@ -1417,6 +1419,7 @@ interface AuditLogSerializeInput {
   generatedAt: string;
   from?: string;
   to?: string;
+  notStartedByPerson?: boolean;
   retentionPolicy: RunHistoryRetentionSettings;
   lastPruneResult?: RunHistoryPruneResult;
   events: AuditLogEvent[];
@@ -1433,6 +1436,7 @@ function serializeAuditLogJson(input: AuditLogSerializeInput): string {
       filters: {
         ...(input.from ? { from: input.from } : {}),
         ...(input.to ? { to: input.to } : {}),
+        ...(input.notStartedByPerson ? { notStartedByPerson: true } : {}),
       },
       retention: {
         policy: input.retentionPolicy,
@@ -1485,6 +1489,7 @@ function serializeAuditLogCsv(input: AuditLogSerializeInput): string {
     "runId",
     "tenantId",
     "agentSlug",
+    "initiator",
     "actorJson",
     "detailsJson",
   ];
@@ -1510,6 +1515,7 @@ function serializeAuditLogCsv(input: AuditLogSerializeInput): string {
       event.runId ?? "",
       event.tenantId ?? "",
       event.agentSlug ?? "",
+      event.initiator ?? "",
       event.actor ? canonicalJson(event.actor) : "",
       canonicalJson(event.details),
     ].map(csvCell).join(","),
@@ -4471,13 +4477,15 @@ export class AppStateStore {
     this.recordAuditLog(persisted);
     const stored = this.auditLog.readVerified();
     const filteredEvents = stored.events.filter((event) =>
-      auditEventWithinRange(event, fromMs, toMs),
+      auditEventWithinRange(event, fromMs, toMs) &&
+      (!input.notStartedByPerson || (event.initiator !== undefined && event.initiator !== "person")),
     ).map(({ sha256: _stored, ...event }) => event);
     const { events, finalHash } = applyAuditHashChain(filteredEvents);
     const common = {
       generatedAt,
       ...(input.from ? { from: input.from } : {}),
       ...(input.to ? { to: input.to } : {}),
+      ...(input.notStartedByPerson ? { notStartedByPerson: true } : {}),
       retentionPolicy,
       ...(persisted.lastRunHistoryPrune
         ? { lastPruneResult: persisted.lastRunHistoryPrune }
@@ -5723,6 +5731,7 @@ export class AppStateStore {
       // Removing this tenant also removes this record.
       tenantId,
       trigger: "schedule",
+      initiator: "schedule",
       summary,
       error: message,
       ...(accessDenial ? { accessDenial } : {}),

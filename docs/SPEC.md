@@ -1114,12 +1114,19 @@ recorded twice. Hosted-provider consent is appended when it is given. Every
 Microsoft Graph write (any method but GET) records `graph.write.attempted`
 before the request is sent and `graph.write.result` after it (ok or failed,
 HTTP status, Graph `request-id`, error class, requests sent, duration), sharing
-one attempt id, with the run id, tenant id, agent slug, method and path, and a SHA-256 digest of the body, never the body. If the attempt cannot
+one attempt id, with the run id, tenant id, agent slug, initiator, method and
+path, and a SHA-256 digest of the body, never the body. If the attempt cannot
 be recorded, the write is refused and nothing is sent; a result that cannot be
 recorded is reported in the run log. On upgrade, the run history, configuration
 changes, Nova connector deliveries and consent events stored by earlier
 versions are imported once, in time order, so nothing still on the device is
 lost; events of runs pruned before the upgrade cannot be recovered.
+
+Runs carry `initiator`: `person`, `schedule`, `office` (an Agent Team
+assignment), `gateway` (a write gateway proposal) or `rollback` (a baseline
+rollback). A record written before it existed is read from its origin (Agent
+Team, gateway, rollback) and otherwise its trigger (manual means a person,
+schedule means a schedule). Run-scoped audit events carry the initiator.
 
 Audit log export lives in Settings -> General next to run-history retention.
 It is an explicit local save only, never an upload. The native save dialog writes
@@ -1137,8 +1144,10 @@ Each exported event carries a SHA-256 hash chained as
 `previousHash + canonical JSON event without sha256`, starting from 64 zeroes;
 JSON records the start and final hash in `hashChain` plus the verified stored
 chain (`hashChain.stored`), and CSV includes the hash and chain metadata
-columns. Without filters the export chain equals the stored chain. Exports can
-be limited to a date range. Signed or third-party
+columns and an `initiator` column. Without filters the export chain equals the
+stored chain. Exports can be limited to a date range and to runs no person
+started (Settings: "Only runs no person started"), which keeps only events of
+runs whose initiator is not `person` and leaves out events of no run. Signed or third-party
 cryptographic timestamps are deferred.
 
 The export also includes configuration changes, with source

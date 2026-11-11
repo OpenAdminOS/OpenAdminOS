@@ -2705,6 +2705,7 @@ function GeneralSection() {
   const [auditExportFormat, setAuditExportFormat] =
     useState<AuditLogExportFormat>("json");
   const [auditExportBusy, setAuditExportBusy] = useState(false);
+  const [auditExportNotStartedByPerson, setAuditExportNotStartedByPerson] = useState(false);
   const [schedulerError, setSchedulerError] = useState<string | null>(null);
   const [companionError, setCompanionError] = useState<string | null>(null);
   const [sandboxError, setSandboxError] = useState<string | null>(null);
@@ -2930,7 +2931,11 @@ function GeneralSection() {
     setRunHistoryNotice(null);
     setAuditExportNotice(null);
     try {
-      const exported = await api.exportAuditLog({ format: auditExportFormat, saveToFile: true });
+      const exported = await api.exportAuditLog({
+        format: auditExportFormat,
+        saveToFile: true,
+        ...(auditExportNotStartedByPerson ? { notStartedByPerson: true } : {}),
+      });
       const saved = exported.savedFile;
       if (!saved) throw new Error("The desktop did not return a save result. Restart the app and try again.");
       if (saved.canceled) {
@@ -3148,6 +3153,8 @@ function GeneralSection() {
             <AuditLogExportControls
               format={auditExportFormat}
               busy={auditExportBusy}
+              notStartedByPerson={auditExportNotStartedByPerson}
+              onNotStartedByPersonChange={setAuditExportNotStartedByPerson}
               onFormatChange={setAuditExportFormat}
               onExport={() => void exportAuditLog()}
             />
@@ -3495,11 +3502,15 @@ function DriftRetentionControls({
 function AuditLogExportControls({
   format,
   busy,
+  notStartedByPerson,
+  onNotStartedByPersonChange,
   onFormatChange,
   onExport,
 }: {
   format: AuditLogExportFormat;
   busy: boolean;
+  notStartedByPerson: boolean;
+  onNotStartedByPersonChange: (value: boolean) => void;
   onFormatChange: (format: AuditLogExportFormat) => void;
   onExport: () => void;
 }) {
@@ -3530,6 +3541,26 @@ function AuditLogExportControls({
           );
         })}
       </div>
+      <label
+        htmlFor="audit-log-not-started-by-person"
+        className="flex items-start gap-2 rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+      >
+        <input
+          id="audit-log-not-started-by-person"
+          name="audit-log-not-started-by-person"
+          type="checkbox"
+          className="mt-0.5"
+          checked={notStartedByPerson}
+          disabled={busy}
+          onChange={(event) => onNotStartedByPersonChange(event.currentTarget.checked)}
+        />
+        <span>
+          Only runs no person started
+          <span className="block text-[var(--color-text-muted)]">
+            Schedules, Agent Team assignments, write gateway proposals and rollbacks.
+          </span>
+        </span>
+      </label>
       <div className="rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-xs leading-4 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
         Saved through the local file dialog. Nothing is uploaded. CSV includes the
         per-entry hash; JSON includes the full hash-chain header.

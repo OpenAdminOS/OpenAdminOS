@@ -74,6 +74,9 @@ describe("Settings provider section", () => {
     await user.click(screen.getByRole("button", { name: "csv" }));
     await user.click(screen.getByRole("button", { name: "Export audit log" }));
     await waitFor(() => expect(bridge.exportAuditLog).toHaveBeenLastCalledWith({ format: "csv", saveToFile: true }));
+    await user.click(screen.getByRole("checkbox", { name: /Only runs no person started/ }));
+    await user.click(screen.getByRole("button", { name: "Export audit log" }));
+    await waitFor(() => expect(bridge.exportAuditLog).toHaveBeenLastCalledWith({ format: "csv", saveToFile: true, notStartedByPerson: true }));
   });
 
   it("requires a real Gemini test and shows CLI diagnostics before activation", async () => {

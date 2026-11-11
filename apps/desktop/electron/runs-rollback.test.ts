@@ -139,6 +139,7 @@ describe("rollback apply", () => {
       manualCount: 1,
     });
     assert.equal(queued.status, "awaiting-confirmation");
+    assert.equal(queued.initiator, "rollback");
     assert.equal(requests.length, 0, "nothing applies before confirmation");
 
     await service.confirmRun(queued.id, "ROLLBACK 2 OBJECTS");
@@ -157,8 +158,8 @@ describe("rollback apply", () => {
       ["completed", "completed"],
     );
     assert.match(run?.summary ?? "", /2 objects rolled back/);
-    // Its Graph writes are audited under the run.
-    assert.deepEqual((executions[0] as { audit?: unknown }).audit, { runId: queued.id, agentSlug: "baseline-rollback" });
+    // Its Graph writes are audited under the run and its initiator.
+    assert.deepEqual((executions[0] as { audit?: unknown }).audit, { runId: queued.id, agentSlug: "baseline-rollback", initiator: "rollback" });
     assert.match(run?.summary ?? "", /1 change still need/);
     // System runs pass their write scopes to invalidation, so the
     // scope family is stale-marked, not only the resources whose
@@ -270,6 +271,8 @@ describe("external gateway proposal apply", () => {
     });
     assert.equal(queued.status, "awaiting-confirmation");
     assert.equal(queued.origin, "external-proposal");
+    // A gateway client started it, not a person in the app.
+    assert.equal(queued.initiator, "gateway");
     assert.equal(requests.length, 0, "external proposals never self-apply");
 
     // A wrong phrase must not apply anything.
@@ -284,7 +287,7 @@ describe("external gateway proposal apply", () => {
     assert.equal(run?.status, "completed");
     assert.equal(requests.length, 1);
     assert.match(run?.summary ?? "", /1 proposed change applied/);
-    assert.deepEqual((executions[0] as { audit?: unknown }).audit, { runId: queued.id, agentSlug: "external-proposal" });
+    assert.deepEqual((executions[0] as { audit?: unknown }).audit, { runId: queued.id, agentSlug: "external-proposal", initiator: "gateway" });
   });
 
   it("refuses to queue an empty proposal", async () => {

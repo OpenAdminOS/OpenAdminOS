@@ -96,7 +96,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Security
 
-- The audit log is an append-only SQLite table written when each event happens, hash chained on insert, with triggers that refuse changes and early deletes; every Microsoft Graph write is recorded before it is sent (and refused if it cannot be), run retention and Disconnect no longer remove audit history, and the export verifies the stored chain.
+- The audit log is an append-only SQLite table written when each event happens, hash chained on insert, with triggers that refuse changes and early deletes; every Microsoft Graph write is recorded before it is sent (and refused if it cannot be), run retention and Disconnect no longer remove audit history, runs record who started them, the export verifies the stored chain and can be limited to runs no person started.
 
 ## [0.7.2] - 2026-10-25
 
