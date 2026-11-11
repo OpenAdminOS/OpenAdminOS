@@ -6003,8 +6003,15 @@ function registerIpcHandlers() {
     handleTrusted(() => store.disableGateway()),
   );
   ipcMain.handle(
-    "openadminos:regenerate-gateway-token",
-    handleTrusted(() => store.regenerateGatewayToken()),
+    "openadminos:pair-gateway-client",
+    handleTrusted((_event, input: unknown) => {
+      if (!isPlainRecord(input)) {
+        throw new Error("Pair gateway client input must be an object.");
+      }
+      return store.pairGatewayClient({
+        name: requireBoundedString(input.name, "name", 100),
+      });
+    }),
   );
   ipcMain.handle(
     "openadminos:revoke-gateway-client",

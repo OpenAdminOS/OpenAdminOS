@@ -190,14 +190,19 @@ describe("Settings provider section", () => {
     }
   });
 
-  it("enables the gateway, shows its one-time token, revokes a client, and disables it", async () => {
+  it("enables the gateway, pairs a named client with a one-time token, revokes a client, and disables it", async () => {
     const user = userEvent.setup();
     const disabledStatus = {
       enabled: false,
       running: false,
       port: 47_891,
-      hasToken: false,
       clients: [],
+    };
+    const legacyClient = {
+      id: "client-old",
+      name: "Codex",
+      createdAt: "2026-08-20T10:00:00.000Z",
+      needsPairing: true as const,
     };
     const enabledStatus = {
       enabled: true,
@@ -205,31 +210,29 @@ describe("Settings provider section", () => {
       port: 47_891,
       listeningPort: 47_891,
       boundTenantId: "tenant-1",
-      hasToken: true,
-      clients: [
-        {
-          id: "client-1",
-          name: "Claude Code",
-          createdAt: "2026-08-28T10:00:00.000Z",
-        },
-      ],
+      clients: [legacyClient],
     };
-    const enableGateway = vi.fn(async () => ({
-      status: enabledStatus,
+    const claude = {
+      id: "client-1",
+      name: "Claude Code",
+      createdAt: "2026-08-28T10:00:00.000Z",
+    };
+    const pairedStatus = { ...enabledStatus, clients: [legacyClient, claude] };
+    const enableGateway = vi.fn(async () => enabledStatus);
+    const pairGatewayClient = vi.fn(async () => ({
+      status: pairedStatus,
+      client: claude,
       token: "OAO-Q7R4-LM2C",
     }));
     const revokeGatewayClient = vi.fn(async () => ({
-      ...enabledStatus,
-      clients: [],
+      ...pairedStatus,
+      clients: [legacyClient],
     }));
     const disableGateway = vi.fn(async () => disabledStatus);
     const bridge = makeMockBridge({
       getGatewayStatus: vi.fn(async () => disabledStatus),
       enableGateway,
-      regenerateGatewayToken: vi.fn(async () => ({
-        status: enabledStatus,
-        token: "OAO-REGENERATED",
-      })),
+      pairGatewayClient,
       revokeGatewayClient,
       disableGateway,
     });
@@ -245,14 +248,24 @@ describe("Settings provider section", () => {
     await waitFor(() => {
       expect(enableGateway).toHaveBeenCalledWith({ boundTenantId: "tenant-1" });
     });
-    expect(screen.getAllByText("OAO-Q7R4-LM2C")).toHaveLength(1);
     expect(screen.getByText("http://127.0.0.1:47891/")).toBeInTheDocument();
+    // A client from before per-client tokens is marked for pairing again.
+    expect(screen.getByText("Pair again")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Client name"), "Claude Code");
+    await user.click(screen.getByRole("button", { name: "Pair client" }));
+    await waitFor(() => {
+      expect(pairGatewayClient).toHaveBeenCalledWith({ name: "Claude Code" });
+    });
+    expect(screen.getByText("Pairing token for Claude Code")).toBeInTheDocument();
+    expect(screen.getAllByText("OAO-Q7R4-LM2C")).toHaveLength(1);
 
     await user.click(screen.getByRole("button", { name: "Revoke Claude Code" }));
     await user.click(screen.getByRole("button", { name: "Revoke client" }));
     await waitFor(() => {
       expect(revokeGatewayClient).toHaveBeenCalledWith("client-1");
     });
+    expect(screen.queryByText("OAO-Q7R4-LM2C")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Disable gateway" }));
     await user.click(screen.getByRole("button", { name: "Disable gateway now" }));

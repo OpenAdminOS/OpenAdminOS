@@ -982,6 +982,9 @@ export interface RunRecord {
     manualCount: number;
   };
   external?: {
+    /** The paired gateway client record; absent on proposals from before per-client pairing. */
+    clientId?: string;
+    /** The name the admin gave the client at pairing, never one the client sent. */
     clientName: string;
     requiredScopes: string[];
   };
@@ -2050,8 +2053,23 @@ export interface GatewayPublicStatus {
   port: number;
   listeningPort?: number;
   boundTenantId?: string;
-  hasToken: boolean;
-  clients: Array<{ id: string; name: string; createdAt: string }>;
+  clients: GatewayClientSummary[];
+}
+
+/**
+ * A paired gateway client. Each has its own token, shown once at
+ * pairing; the app keeps only its SHA-256 hash.
+ */
+export interface GatewayClientSummary {
+  id: string;
+  /** Given or accepted by the admin at pairing. */
+  name: string;
+  createdAt: string;
+  /**
+   * Recorded before per-client tokens, from the name the client sent.
+   * It has no token of its own and must be paired again.
+   */
+  needsPairing?: true;
 }
 
 // ─── Fleet drift status (v0.5) ───────────────────────────────────────────
@@ -3183,9 +3201,12 @@ export interface OpenAdminOSApi {
   enableGateway?(input: {
     boundTenantId: string;
     port?: number;
-  }): Promise<{ status: GatewayPublicStatus; token: string }>;
+  }): Promise<GatewayPublicStatus>;
   disableGateway?(): Promise<GatewayPublicStatus>;
-  regenerateGatewayToken?(): Promise<{ status: GatewayPublicStatus; token: string }>;
+  /** Pair one client under the given name; its token is returned only here. */
+  pairGatewayClient?(input: {
+    name: string;
+  }): Promise<{ status: GatewayPublicStatus; client: GatewayClientSummary; token: string }>;
   revokeGatewayClient?(clientId: string): Promise<GatewayPublicStatus>;
   /** Connect to a catalog MCP server, list its tools and record the install. */
   installMcpServer?(serverId: string): Promise<McpServerSummary[]>;

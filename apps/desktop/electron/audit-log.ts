@@ -29,7 +29,8 @@ export type AuditLogEventSource =
   | "connector-audit"
   | "hosted-provider-consent"
   | "configuration-change"
-  | "graph-write";
+  | "graph-write"
+  | "gateway";
 
 export interface AuditLogActor {
   kind: "connected-admin" | "local-admin";

@@ -297,8 +297,8 @@ const api: OpenAdminOSApi = {
   getGatewayStatus: () => ipcRenderer.invoke("openadminos:get-gateway-status"),
   enableGateway: (input) => ipcRenderer.invoke("openadminos:enable-gateway", input),
   disableGateway: () => ipcRenderer.invoke("openadminos:disable-gateway"),
-  regenerateGatewayToken: () =>
-    ipcRenderer.invoke("openadminos:regenerate-gateway-token"),
+  pairGatewayClient: (input) =>
+    ipcRenderer.invoke("openadminos:pair-gateway-client", input),
   revokeGatewayClient: (clientId: string) =>
     ipcRenderer.invoke("openadminos:revoke-gateway-client", clientId),
   installMcpServer: (serverId: string) =>

@@ -106,6 +106,43 @@ export class OrganizationBoundaryError extends Error {
 /** Why nothing new starts or applies for an organization that is being disconnected. */
 export const TENANT_DISCONNECTING_COPY = TENANT_CLOSED_COPY;
 
+/** How many gateway proposals one paired client may have waiting for review at once. */
+export const GATEWAY_PENDING_PROPOSALS_PER_CLIENT = 5;
+/** How long an identical proposal is refused after the admin rejected it. */
+export const GATEWAY_REJECTED_PROPOSAL_COOLDOWN_MS = 15 * 60_000;
+
+/**
+ * Identifies what a gateway plan would change: the ordered Graph
+ * requests, not the client's labels or title, so renaming a rejected
+ * proposal does not make it a new one.
+ */
+export function externalPlanDigest(plan: NonNullable<RunRecord["plan"]>): string {
+  return createHash("sha256")
+    .update(stableStringify(plan.actions.map((action) => action.request ?? null)))
+    .digest("hex");
+}
+
+/** A gateway proposal the host refused to queue; the message goes back to the client. */
+export class GatewayProposalRefusedError extends Error {
+  override readonly name = "GatewayProposalRefusedError";
+  constructor(
+    readonly reason: "pending-limit" | "rejected-cooldown",
+    message: string,
+    readonly details: { planDigest: string; existingRunId?: string; retryAfter?: string },
+  ) {
+    super(message);
+  }
+}
+
+export function gatewayPendingLimitCopy(clientName: string): string {
+  return `${clientName} already has ${GATEWAY_PENDING_PROPOSALS_PER_CLIENT} proposals waiting for review in OpenAdminOS, the most one client can have. No new proposal was queued. Ask the admin to confirm or reject a waiting proposal, then propose again.`;
+}
+
+export function gatewayRejectedCooldownCopy(clientName: string, minutesLeft: number): string {
+  const window = GATEWAY_REJECTED_PROPOSAL_COOLDOWN_MS / 60_000;
+  return `The admin rejected an identical proposal from ${clientName} less than ${window} minutes ago. No new proposal was queued. Propose it again in ${minutesLeft} ${minutesLeft === 1 ? "minute" : "minutes"} at the earliest, or ask the admin what to change first.`;
+}
+
 /** What a Splashtop change run needs at apply: the team and a request bound to the organization's host and token. */
 /** How a run uses its Graph client: cancellation, sign-in, and what its writes are audited under. */
 export interface RunGraphExecution {
@@ -724,22 +761,29 @@ export class RunService {
    * Queue an external gateway proposal as a system run. The plan was
    * validated by the gateway host; it parks at the same typed
    * confirmation gate and can never apply without a human in the app.
+   * Under the state lock, an identical proposal (same client, tenant and
+   * plan digest) already waiting is returned instead of a second one; a
+   * client at the pending limit, or one re-proposing a plan the admin
+   * rejected within the cooldown window, is refused.
    */
   async startExternalProposalRun(input: {
     tenantId: string;
+    clientId: string;
     clientName: string;
     plan: NonNullable<RunRecord["plan"]>;
     requiredScopes: string[];
-  }): Promise<RunRecord> {
+  }): Promise<{ run: RunRecord; alreadyWaiting: boolean }> {
     if (input.plan.actions.length === 0) {
       throw new Error("A proposal needs at least one action.");
     }
+    const planDigest = externalPlanDigest(input.plan);
     const queuedAt = new Date().toISOString();
     const run: RunRecord = {
       id: `run_${randomUUID()}`,
       agentSlug: "external-proposal",
       origin: "external-proposal",
       external: {
+        clientId: input.clientId,
         clientName: input.clientName,
         requiredScopes: input.requiredScopes,
       },
@@ -753,12 +797,42 @@ export class RunService {
       plan: input.plan,
       tenantId: input.tenantId,
     };
-    await this.host.serialize(async () => {
+    const existing = await this.host.serialize(async () => {
       this.assertTenantOpen(input.tenantId);
       const persisted = await this.host.read();
+      const fromClient = persisted.runs.filter(
+        (candidate) =>
+          candidate.origin === "external-proposal" &&
+          candidate.external?.clientId === input.clientId &&
+          candidate.tenantId === input.tenantId,
+      );
+      const pending = fromClient.filter((candidate) => candidate.status === "awaiting-confirmation");
+      const same = (candidate: RunRecord) =>
+        candidate.plan !== undefined && externalPlanDigest(candidate.plan) === planDigest;
+      const waiting = pending.find(same);
+      if (waiting) return waiting;
+      const nowMs = Date.parse(queuedAt);
+      const rejectedAtMs = fromClient
+        .filter((candidate) => candidate.status === "rejected" && candidate.rejectedAt && same(candidate))
+        .map((candidate) => Date.parse(candidate.rejectedAt!))
+        .filter((at) => Number.isFinite(at) && nowMs - at < GATEWAY_REJECTED_PROPOSAL_COOLDOWN_MS)
+        .sort((left, right) => right - left)[0];
+      if (rejectedAtMs !== undefined) {
+        const retryAtMs = rejectedAtMs + GATEWAY_REJECTED_PROPOSAL_COOLDOWN_MS;
+        throw new GatewayProposalRefusedError(
+          "rejected-cooldown",
+          gatewayRejectedCooldownCopy(input.clientName, Math.max(1, Math.ceil((retryAtMs - nowMs) / 60_000))),
+          { planDigest, retryAfter: new Date(retryAtMs).toISOString() },
+        );
+      }
+      if (pending.length >= GATEWAY_PENDING_PROPOSALS_PER_CLIENT) {
+        throw new GatewayProposalRefusedError("pending-limit", gatewayPendingLimitCopy(input.clientName), { planDigest });
+      }
       run.riskAssessment = this.assessPlan(run, persisted);
       await this.host.write({ ...persisted, runs: [run, ...persisted.runs] });
+      return undefined;
     });
+    if (existing) return { run: existing, alreadyWaiting: true };
     this.host.recordLearningEventSafely({
       tenantId: input.tenantId,
       agentSlug: "external-proposal",
@@ -771,7 +845,7 @@ export class RunService {
       },
     });
     this.host.emitStateChanged("gateway-proposal-queued", run.id);
-    return run;
+    return { run, alreadyWaiting: false };
   }
 
   /**

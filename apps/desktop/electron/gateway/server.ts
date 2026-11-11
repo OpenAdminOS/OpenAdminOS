@@ -1,5 +1,4 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { timingSafeEqual } from "node:crypto";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -12,27 +11,60 @@ import { z } from "zod";
  * typed confirmation inside the desktop app; nothing an external
  * client sends can apply a change.
  *
- * Transport: streamable HTTP bound to 127.0.0.1 only, authenticated
- * with a single pairing token. The server is stateless per request;
+ * Transport: streamable HTTP bound to 127.0.0.1 only. Every request
+ * carries one paired client's own token; the host resolves it to that
+ * client's record, and the client name on a proposal comes from that
+ * record, never from the request. The server is stateless per request;
  * tenant scope is fixed by the gateway configuration, never chosen by
  * the client.
  */
+
+/** The paired client a request authenticated as. */
+export interface GatewayClientIdentity {
+  id: string;
+  name: string;
+}
+
+export type GatewayAuthResult =
+  | { kind: "client"; client: GatewayClientIdentity }
+  /** The shared token from before per-client pairing. */
+  | { kind: "legacy-token" }
+  | { kind: "unknown" };
+
+export type GatewayProposalResult =
+  | {
+      outcome: "queued" | "already-waiting";
+      runId: string;
+      confirmationPhrase: string;
+    }
+  | {
+      outcome: "refused";
+      reason: "pending-limit" | "rejected-cooldown";
+      message: string;
+      retryAfter?: string;
+    };
+
+export const GATEWAY_LEGACY_TOKEN_COPY =
+  "This client uses the shared gateway token from an earlier OpenAdminOS version. That token no longer works, because each client now has its own token. In OpenAdminOS, open Settings, Gateway, enter a name for this client and select Pair client, then replace the token in this client's MCP configuration with the one shown.";
+
+export const GATEWAY_UNKNOWN_TOKEN_COPY =
+  "This gateway token is not paired with OpenAdminOS, or the client was revoked. In OpenAdminOS, open Settings, Gateway, enter a name for this client and select Pair client, then put the token shown in this client's MCP configuration as a Bearer token.";
 
 export interface GatewayHost {
   /** Human-readable tenant label for tool descriptions and errors. */
   tenantName(): Promise<string>;
   executeReadTool(name: string, input: Record<string, unknown>): Promise<unknown>;
-  proposeWritePlan(input: {
+  proposeWritePlan(client: GatewayClientIdentity, input: {
     title: string;
-    clientName: string;
     actions: Array<{
       method: "POST" | "PATCH" | "PUT" | "DELETE";
       path: string;
       body?: Record<string, unknown>;
       label: string;
     }>;
-  }): Promise<{ runId: string; confirmationPhrase: string }>;
-  getProposalStatus(runId: string): Promise<
+  }): Promise<GatewayProposalResult>;
+  /** Status of a proposal; only the client that made it can read it. */
+  getProposalStatus(client: GatewayClientIdentity, runId: string): Promise<
     | { found: false }
     | { found: true; status: string; summary?: string; error?: string }
   >;
@@ -41,7 +73,8 @@ export interface GatewayHost {
 
 export interface GatewayServerOptions {
   port: number;
-  token: string;
+  /** Resolve a presented Bearer token, reading the current client records. */
+  authenticate(token: string): Promise<GatewayAuthResult>;
 }
 
 export interface RunningGatewayServer {
@@ -71,7 +104,11 @@ const READ_TOOL_INPUTS: Record<string, z.ZodRawShape> = {
   },
 };
 
-function buildMcpServer(host: GatewayHost, tenantLabel: string): McpServer {
+function buildMcpServer(
+  host: GatewayHost,
+  tenantLabel: string,
+  client: GatewayClientIdentity,
+): McpServer {
   const server = new McpServer({
     name: "openadminos-gateway",
     version: "0.5.0",
@@ -102,7 +139,7 @@ function buildMcpServer(host: GatewayHost, tenantLabel: string): McpServer {
         inputSchema: shape,
       },
       async (input: Record<string, unknown>) => {
-        host.log(`gateway read tool ${name}`, { name });
+        host.log(`gateway read tool ${name}`, { name, clientId: client.id });
         return toolResult(await host.executeReadTool(name, input));
       },
     );
@@ -115,7 +152,6 @@ function buildMcpServer(host: GatewayHost, tenantLabel: string): McpServer {
         "Propose Microsoft Graph write actions for this tenant. The proposal is queued inside OpenAdminOS and applies ONLY after a human reviews the plan and types the confirmation phrase in the desktop app. This tool cannot apply changes.",
       inputSchema: {
         title: z.string().min(3).max(200),
-        clientName: z.string().min(1).max(100),
         actions: z
           .array(
             z.object({
@@ -131,7 +167,6 @@ function buildMcpServer(host: GatewayHost, tenantLabel: string): McpServer {
     },
     async (input: {
       title: string;
-      clientName: string;
       actions: Array<{
         method: "POST" | "PATCH" | "PUT" | "DELETE";
         path: string;
@@ -140,14 +175,37 @@ function buildMcpServer(host: GatewayHost, tenantLabel: string): McpServer {
       }>;
     }) => {
       host.log("gateway write proposal", {
-        clientName: input.clientName,
+        clientId: client.id,
         actionCount: input.actions.length,
       });
-      const proposal = await host.proposeWritePlan(input);
+      // The proposing client is the authenticated one; a name in the
+      // body is not part of the schema and never reaches the plan.
+      const proposal = await host.proposeWritePlan(client, {
+        title: input.title,
+        actions: input.actions,
+      });
+      if (proposal.outcome === "refused") {
+        return {
+          ...toolResult({
+            status: "refused",
+            reason: proposal.reason,
+            note: proposal.message,
+            ...(proposal.retryAfter ? { retryAfter: proposal.retryAfter } : {}),
+          }),
+          isError: true,
+        };
+      }
+      const confirm = `A human must review this plan in OpenAdminOS and type "${proposal.confirmationPhrase}" before anything is applied. Poll get_proposal_status for the outcome.`;
       return toolResult({
         runId: proposal.runId,
-        status: "awaiting-confirmation",
-        note: `A human must review this plan in OpenAdminOS and type "${proposal.confirmationPhrase}" before anything is applied. Poll get_proposal_status for the outcome.`,
+        status:
+          proposal.outcome === "already-waiting"
+            ? "already-awaiting-confirmation"
+            : "awaiting-confirmation",
+        note:
+          proposal.outcome === "already-waiting"
+            ? `An identical proposal from this client is already waiting for review, so no new one was queued. ${confirm}`
+            : confirm,
       });
     },
   );
@@ -160,9 +218,9 @@ function buildMcpServer(host: GatewayHost, tenantLabel: string): McpServer {
       inputSchema: { runId: z.string().min(1).max(200) },
     },
     async (input: { runId: string }) => {
-      const status = await host.getProposalStatus(input.runId);
+      const status = await host.getProposalStatus(client, input.runId);
       if (!status.found) {
-        return toolResult({ found: false, note: "No proposal with this id exists." });
+        return toolResult({ found: false, note: "This client has no proposal with this id. Each client sees only the proposals it made." });
       }
       return toolResult(status);
     },
@@ -171,35 +229,38 @@ function buildMcpServer(host: GatewayHost, tenantLabel: string): McpServer {
   return server;
 }
 
-function tokenMatches(header: string | undefined, token: string): boolean {
-  if (!header?.startsWith("Bearer ")) return false;
-  const presented = Buffer.from(header.slice("Bearer ".length));
-  const expected = Buffer.from(token);
-  if (presented.length !== expected.length) return false;
-  return timingSafeEqual(presented, expected);
+function bearerToken(header: string | undefined): string | undefined {
+  if (!header?.startsWith("Bearer ")) return undefined;
+  const token = header.slice("Bearer ".length).trim();
+  return token.length > 0 ? token : undefined;
 }
 
 export async function startGatewayServer(
   host: GatewayHost,
   options: GatewayServerOptions,
 ): Promise<RunningGatewayServer> {
-  if (!options.token || options.token.length < 24) {
-    throw new Error("Gateway pairing token is missing or too short.");
-  }
-
   const handler = async (request: IncomingMessage, response: ServerResponse) => {
     try {
-      if (!tokenMatches(request.headers.authorization, options.token)) {
+      const presented = bearerToken(request.headers.authorization);
+      const auth: GatewayAuthResult = presented
+        ? await options.authenticate(presented)
+        : { kind: "unknown" };
+      if (auth.kind !== "client") {
+        host.log("gateway request refused", { reason: auth.kind });
         response.writeHead(401, { "content-type": "application/json" });
         response.end(
-          JSON.stringify({ error: "Missing or invalid gateway pairing token." }),
+          JSON.stringify(
+            auth.kind === "legacy-token"
+              ? { error: GATEWAY_LEGACY_TOKEN_COPY, code: "legacy-shared-token" }
+              : { error: GATEWAY_UNKNOWN_TOKEN_COPY, code: "unpaired-token" },
+          ),
         );
         return;
       }
       // Stateless mode: one server + transport per request keeps every
       // request isolated; tenant scope comes from configuration.
       const tenantLabel = await host.tenantName();
-      const server = buildMcpServer(host, tenantLabel);
+      const server = buildMcpServer(host, tenantLabel, auth.client);
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
         enableJsonResponse: true,

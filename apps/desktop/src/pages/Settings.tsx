@@ -2066,13 +2066,15 @@ function GatewaySection({
     useState<GatewayPublicStatus | null>(null);
   const [selectedTenantId, setSelectedTenantId] = useState(fallbackTenantId);
   const [portInput, setPortInput] = useState("");
-  const [pairingToken, setPairingToken] = useState<string | null>(null);
+  const [pairingToken, setPairingToken] = useState<
+    { clientName: string; token: string } | null
+  >(null);
+  const [clientNameInput, setClientNameInput] = useState("");
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [endpointCopied, setEndpointCopied] = useState(false);
   const [pendingConfirmation, setPendingConfirmation] = useState<
-    | { kind: "regenerate" }
     | { kind: "revoke"; clientId: string; clientName: string }
     | { kind: "disable" }
     | null
@@ -2081,7 +2083,7 @@ function GatewaySection({
     window.openAdminOS?.getGatewayStatus &&
       window.openAdminOS.enableGateway &&
       window.openAdminOS.disableGateway &&
-      window.openAdminOS.regenerateGatewayToken &&
+      window.openAdminOS.pairGatewayClient &&
       window.openAdminOS.revokeGatewayClient,
   );
 
@@ -2129,6 +2131,8 @@ function GatewaySection({
   const endpoint = listeningPort
     ? `http://127.0.0.1:${listeningPort}/`
     : undefined;
+  const pairedClientCount =
+    gatewayStatus?.clients.filter((client) => !client.needsPairing).length ?? 0;
 
   const enableGateway = async (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
@@ -2150,12 +2154,12 @@ function GatewaySection({
     setBusyAction("enable");
     setError(null);
     try {
-      const result = await api.enableGateway({
-        boundTenantId: selectedTenantId,
-        ...(parsedPort !== undefined ? { port: parsedPort } : {}),
-      });
-      setGatewayStatus(result.status);
-      setPairingToken(result.token);
+      setGatewayStatus(
+        await api.enableGateway({
+          boundTenantId: selectedTenantId,
+          ...(parsedPort !== undefined ? { port: parsedPort } : {}),
+        }),
+      );
     } catch (caught) {
       setError(
         gatewayActionError(
@@ -2169,21 +2173,28 @@ function GatewaySection({
     }
   };
 
-  const regenerateToken = async () => {
+  const pairClient = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
     const api = window.openAdminOS;
-    if (!api?.regenerateGatewayToken || busyAction) return;
-    setBusyAction("regenerate");
+    if (!api?.pairGatewayClient || busyAction) return;
+    const name = clientNameInput.trim();
+    if (!name) {
+      setError("Enter a name for the client, for example Claude Code, then select Pair client.");
+      return;
+    }
+    setBusyAction("pair");
     setError(null);
     try {
-      const result = await api.regenerateGatewayToken();
+      const result = await api.pairGatewayClient({ name });
       setGatewayStatus(result.status);
-      setPairingToken(result.token);
+      setPairingToken({ clientName: result.client.name, token: result.token });
+      setClientNameInput("");
     } catch (caught) {
       setError(
         gatewayActionError(
-          "The pairing token could not be regenerated",
+          "The client could not be paired",
           caught,
-          "The existing token remains active. Try again after checking the gateway status.",
+          "No token was issued. Check the name, then try again.",
         ),
       );
     } finally {
@@ -2198,6 +2209,7 @@ function GatewaySection({
     setError(null);
     try {
       setGatewayStatus(await api.revokeGatewayClient(clientId));
+      setPairingToken(null);
     } catch (caught) {
       setError(
         gatewayActionError(
@@ -2251,9 +2263,7 @@ function GatewaySection({
 
   const confirmGatewayAction = async () => {
     if (!pendingConfirmation || busyAction) return;
-    if (pendingConfirmation.kind === "regenerate") {
-      await regenerateToken();
-    } else if (pendingConfirmation.kind === "revoke") {
+    if (pendingConfirmation.kind === "revoke") {
       await revokeClient(pendingConfirmation.clientId);
     } else {
       await disableGateway();
@@ -2408,8 +2418,8 @@ function GatewaySection({
                     mono
                   />
                   <GatewayFact
-                    label="Pairing token"
-                    value={gatewayStatus.hasToken ? "Configured" : "Not configured"}
+                    label="Paired clients"
+                    value={pairedClientCount.toLocaleString()}
                   />
                 </dl>
 
@@ -2447,17 +2457,18 @@ function GatewaySection({
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <h3 className="text-base font-medium text-[var(--color-text)]">
-                        Pairing token
+                        Pairing token for {pairingToken.clientName}
                       </h3>
                       <p className="mt-1 text-sm leading-5 text-[var(--color-text-soft)]">
-                        This token is shown once. Copy it now. You can regenerate a
-                        replacement later.
+                        This token is shown once and is not stored. Copy it now and
+                        set it as the Bearer token in this client's MCP configuration.
+                        To replace it, revoke the client and pair it again.
                       </p>
                     </div>
                     <Badge tone="warning">Shown once</Badge>
                   </div>
                   <OutputJsonBlock
-                    value={pairingToken}
+                    value={pairingToken.token}
                     copyLabel="Copy pairing token"
                     className="mt-4"
                   />
@@ -2472,25 +2483,45 @@ function GatewaySection({
                       Connected clients
                     </h3>
                     <p className="mt-1 text-sm leading-5 text-[var(--color-text-muted)]">
-                      {gatewayStatus.clients.length.toLocaleString()} paired client
-                      {gatewayStatus.clients.length === 1 ? "" : "s"} for this local gateway.
+                      {pairedClientCount.toLocaleString()} paired client
+                      {pairedClientCount === 1 ? "" : "s"} for this local gateway. Each
+                      client has its own token, and its proposals carry the name you
+                      give it here.
                     </p>
                   </div>
-                  <div className="max-w-[360px] text-right">
+                  <form
+                    onSubmit={(event) => void pairClient(event)}
+                    className="flex max-w-[360px] items-end gap-2"
+                  >
+                    <div>
+                      <label
+                        htmlFor="gateway-client-name"
+                        className="block text-xs font-medium text-[var(--color-text-muted)]"
+                      >
+                        Client name
+                      </label>
+                      <input
+                        id="gateway-client-name"
+                        name="gateway-client-name"
+                        type="text"
+                        autoComplete="off"
+                        maxLength={100}
+                        value={clientNameInput}
+                        onChange={(event) => setClientNameInput(event.target.value)}
+                        placeholder="Claude Code"
+                        disabled={busyAction !== null}
+                        className="mt-1.5 h-8 w-[180px] rounded-lg bg-[var(--color-bg-raised)] px-3 text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                      />
+                    </div>
                     <Button
-                      type="button"
+                      type="submit"
                       size="sm"
                       variant="secondary"
                       disabled={busyAction !== null}
-                      leadingIcon={<IconRefresh size={11} />}
-                      onClick={() => setPendingConfirmation({ kind: "regenerate" })}
                     >
-                      {busyAction === "regenerate" ? "Regenerating…" : "Regenerate token"}
+                      {busyAction === "pair" ? "Pairing…" : "Pair client"}
                     </Button>
-                    <p className="mt-1.5 text-xs leading-4 text-[var(--color-warning)]">
-                      Paired clients must re-pair after regeneration.
-                    </p>
-                  </div>
+                  </form>
                 </div>
               </div>
 
@@ -2506,11 +2537,14 @@ function GatewaySection({
                       className="flex flex-wrap items-center justify-between gap-4 px-5 py-3.5"
                     >
                       <div className="min-w-0">
-                        <div className="text-base font-medium text-[var(--color-text)]">
+                        <div className="flex flex-wrap items-center gap-2 text-base font-medium text-[var(--color-text)]">
                           {client.name}
+                          {client.needsPairing && <Badge tone="warning">Pair again</Badge>}
                         </div>
                         <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">
-                          Paired {formatDateTime(client.createdAt)}
+                          {client.needsPairing
+                            ? "Used the shared token from an earlier version, which no longer works. Pair it again under the same name to issue its own token."
+                            : `Paired ${formatDateTime(client.createdAt)}`}
                         </div>
                       </div>
                       <Button
@@ -2536,8 +2570,8 @@ function GatewaySection({
 
               <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[var(--color-border-soft)] px-5 py-4">
                 <p className="max-w-[560px] text-sm leading-5 text-[var(--color-text-muted)]">
-                  Disabling stops the loopback listener. Existing client records
-                  remain available when the gateway is enabled again.
+                  Disabling stops the loopback listener and revokes every paired
+                  client. Pair clients again after you enable it.
                 </p>
                 <Button
                   type="button"
@@ -2639,25 +2673,15 @@ function gatewayActionError(
 
 function gatewayConfirmationCopy(
   confirmation:
-    | { kind: "regenerate" }
     | { kind: "revoke"; clientId: string; clientName: string }
     | { kind: "disable" }
     | null,
 ): { title: string; detail: string; confirmLabel: string; busyLabel: string } {
-  if (confirmation?.kind === "regenerate") {
-    return {
-      title: "Regenerate pairing token?",
-      detail:
-        "The current token will stop working. Every paired client must pair again with the replacement token.",
-      confirmLabel: "Regenerate pairing token",
-      busyLabel: "Regenerating…",
-    };
-  }
   if (confirmation?.kind === "revoke") {
     return {
       title: `Revoke ${confirmation.clientName}?`,
       detail:
-        "This client will lose gateway access immediately. It can connect again only after pairing with a valid token.",
+        "Its token stops working on the next request. It can connect again only after you pair it again and update its configuration with the new token.",
       confirmLabel: "Revoke client",
       busyLabel: "Revoking…",
     };
@@ -2665,7 +2689,7 @@ function gatewayConfirmationCopy(
   return {
     title: "Disable gateway?",
     detail:
-      "The loopback listener will stop. Existing client records remain available if the gateway is enabled again.",
+      "The loopback listener will stop and every paired client is revoked. After you enable the gateway again, pair each client again.",
     confirmLabel: "Disable gateway now",
     busyLabel: "Disabling…",
   };

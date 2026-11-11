@@ -97,6 +97,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Security
 
 - The audit log is an append-only SQLite table written when each event happens, hash chained on insert, with triggers that refuse changes and early deletes; every Microsoft Graph write is recorded before it is sent (and refused if it cannot be), run retention and Disconnect no longer remove audit history, runs record who started them, the export verifies the stored chain and can be limited to runs no person started, and CSV cells that a spreadsheet would run as a formula are prefixed with a quote.
+- Each MCP gateway client is paired under a name you give and gets its own token, kept only as a hash; proposals carry that name instead of one the client sends, revoke takes effect on the next request, the shared token of earlier versions is refused with a message to pair again, an identical waiting proposal is returned instead of queued twice, and a client is limited to 5 waiting proposals and cannot repeat a rejected one for 15 minutes.
 
 ## [0.7.2] - 2026-10-25
 

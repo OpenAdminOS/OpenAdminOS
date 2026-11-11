@@ -312,7 +312,7 @@ import type { SplashtopChatContext } from "./intune-chat/tools.js";
 import { isAllowedTool, McpHost, type McpToolInfo } from "./mcp/host.js";
 import { definitionForResource } from "./intune-chat/planner.js";
 import { DriftService } from "./intune-chat/drift/service.js";
-import { GatewayService } from "./gateway/service.js";
+import { GatewayService, type GatewayConfig } from "./gateway/service.js";
 import {
   RetrievalIndex,
   ollamaEmbedQuery,
@@ -483,15 +483,11 @@ interface PersistedState {
   /** Why the last background pull failed, shown in Settings until a pull succeeds. */
   embeddingModelPullError?: string;
   /**
-   * MCP write-gateway configuration. The pairing token is never stored
-   * here; it lives in provider-style safeStorage. Off by default.
+   * MCP write-gateway configuration. Each paired client keeps only the
+   * SHA-256 hash of its own token; the token is shown once at pairing
+   * and stored nowhere. Off by default.
    */
-  gateway?: {
-    enabled: boolean;
-    port: number;
-    boundTenantId?: string;
-    clients: Array<{ id: string; name: string; createdAt: string }>;
-  };
+  gateway?: GatewayConfig;
   /**
    * Enables experimental MXC-backed code execution for preview script
    * agents. Undefined means "no saved preference yet" so the host may
@@ -1101,6 +1097,7 @@ function compareAuditEvents(left: AuditLogEventSeed, right: AuditLogEventSeed): 
     "hosted-provider-consent": 2,
     "configuration-change": 3,
     "graph-write": 4,
+    gateway: 5,
   };
   const sourceDiff = sourceOrder[left.source] - sourceOrder[right.source];
   if (sourceDiff !== 0) return sourceDiff;
@@ -2046,9 +2043,8 @@ export class AppStateStore {
         });
         host.emitStateChanged("gateway-config-changed");
       },
-      readToken: () => this.gatewaySecrets().get("token"),
-      writeToken: (token) => this.gatewaySecrets().set("token", token),
-      clearToken: () => this.gatewaySecrets().remove("token"),
+      readLegacyToken: () => this.gatewaySecrets().get("token"),
+      clearLegacyToken: () => this.gatewaySecrets().remove("token"),
       tenantName: async (tenantId) => {
         const persisted = await host.read();
         return persisted.tenants.find((entry) => entry.id === tenantId)?.displayName;
@@ -2058,6 +2054,17 @@ export class AppStateStore {
       queueExternalProposal: (input) =>
         this.runService.startExternalProposalRun(input),
       getRun: (runId) => this.runService.getRun(runId),
+      recordAudit: (event) =>
+        this.auditLog.append([{
+          id: `gateway:${randomUUID()}`,
+          timestamp: event.timestamp,
+          type: event.type,
+          source: "gateway",
+          tenantId: event.tenantId,
+          agentSlug: "external-proposal",
+          initiator: "gateway",
+          details: { ...event.details },
+        }]),
       log: (message, metadata) =>
         console.info("[gateway]", message, metadata ?? ""),
     });
@@ -2194,8 +2201,9 @@ export class AppStateStore {
     );
   }
 
-  // The gateway pairing token reuses the provider safeStorage vault
-  // under a reserved id so it never lands in plaintext state.json.
+  // The shared pairing token of earlier versions lived in the provider
+  // safeStorage vault under a reserved id. It is read once, to keep its
+  // hash for the "pair again" refusal, and then removed.
   private gatewaySecrets(): SecretAccessor {
     return (
       this.providerSecretsForOverride?.("__gateway__" as ProviderId) ??
@@ -2216,8 +2224,8 @@ export class AppStateStore {
     return this.gatewayService.disable();
   }
 
-  async regenerateGatewayToken() {
-    return this.gatewayService.regenerateToken();
+  async pairGatewayClient(input: { name: string }) {
+    return this.gatewayService.pairClient(input);
   }
 
   async revokeGatewayClient(clientId: string) {
@@ -8491,13 +8499,26 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
             ...(typeof gateway.boundTenantId === "string"
               ? { boundTenantId: gateway.boundTenantId }
               : {}),
-            clients: gateway.clients.filter(
-              (client): client is { id: string; name: string; createdAt: string } =>
-                isPlainRecordValue(client) &&
-                typeof (client as Record<string, unknown>).id === "string" &&
-                typeof (client as Record<string, unknown>).name === "string" &&
-                typeof (client as Record<string, unknown>).createdAt === "string",
-            ),
+            ...(typeof gateway.legacyTokenHash === "string"
+              ? { legacyTokenHash: gateway.legacyTokenHash }
+              : {}),
+            clients: gateway.clients.flatMap((client) => {
+              if (!isPlainRecordValue(client)) return [];
+              const record = client as Record<string, unknown>;
+              if (
+                typeof record.id !== "string" ||
+                typeof record.name !== "string" ||
+                typeof record.createdAt !== "string"
+              ) {
+                return [];
+              }
+              return [{
+                id: record.id,
+                name: record.name,
+                createdAt: record.createdAt,
+                ...(typeof record.tokenHash === "string" ? { tokenHash: record.tokenHash } : {}),
+              }];
+            }),
           };
         }
       }

@@ -1,7 +1,175 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { buildProposalPlan } from "./service.js";
+import type { RunRecord, WritePlan } from "@openadminos/agent-sdk";
+
+import { GatewayProposalRefusedError } from "../runs.js";
+import { GATEWAY_LEGACY_TOKEN_COPY, GATEWAY_UNKNOWN_TOKEN_COPY } from "./server.js";
+import {
+  buildProposalPlan,
+  GatewayService,
+  type GatewayAuditEvent,
+  type GatewayConfig,
+  type GatewayServiceHost,
+} from "./service.js";
+
+function makeGateway(options: {
+  config?: Partial<GatewayConfig>;
+  legacyToken?: string;
+  queue?: GatewayServiceHost["queueExternalProposal"];
+} = {}) {
+  let config: GatewayConfig = { enabled: false, port: 0, clients: [], ...options.config };
+  let legacyToken = options.legacyToken;
+  const queued: Array<Parameters<GatewayServiceHost["queueExternalProposal"]>[0]> = [];
+  const audit: GatewayAuditEvent[] = [];
+  const host: GatewayServiceHost = {
+    readConfig: async () => structuredClone(config),
+    writeConfig: async (next) => {
+      config = structuredClone(next);
+    },
+    readLegacyToken: async () => legacyToken,
+    clearLegacyToken: async () => {
+      legacyToken = undefined;
+    },
+    tenantName: async () => "Contoso",
+    executeReadTool: async () => ({}),
+    queueExternalProposal:
+      options.queue ??
+      (async (input) => {
+        queued.push(input);
+        return {
+          run: { id: `run-${queued.length}`, plan: input.plan } as RunRecord,
+          alreadyWaiting: false,
+        };
+      }),
+    getRun: async () => undefined,
+    recordAudit: (event) => audit.push(event),
+    log: () => undefined,
+  };
+  const service = new GatewayService(host);
+  return { service, queued, audit, config: () => config, legacyToken: () => legacyToken };
+}
+
+const proposalInput = {
+  title: "Rename policy",
+  actions: [{
+    method: "PATCH" as const,
+    path: "/deviceManagement/deviceCompliancePolicies/policy-1",
+    body: { displayName: "Renamed" },
+    label: "Rename compliance policy",
+  }],
+};
+
+describe("gateway client pairing", () => {
+  it("gives each client its own token, keeps only its hash, and revokes it at once", async () => {
+    const { service, config } = makeGateway();
+    await service.enable({ boundTenantId: "tenant-1", port: 0 });
+    try {
+      const claude = await service.pairClient({ name: "  Claude Code " });
+      const codex = await service.pairClient({ name: "Codex" });
+      assert.equal(claude.client.name, "Claude Code");
+      assert.notEqual(claude.token, codex.token);
+      assert.ok(!JSON.stringify(config()).includes(claude.token), "the raw token is never stored");
+      assert.ok(!JSON.stringify(claude.status).includes("tokenHash"), "hashes stay out of the public status");
+      assert.deepEqual(await service.authenticate(claude.token), {
+        kind: "client",
+        client: { id: claude.client.id, name: "Claude Code" },
+      });
+      assert.deepEqual(await service.authenticate("not-a-paired-token"), { kind: "unknown" });
+
+      await service.revokeClient(claude.client.id);
+      assert.deepEqual(await service.authenticate(claude.token), { kind: "unknown" });
+      assert.equal((await service.authenticate(codex.token)).kind, "client");
+
+      await assert.rejects(service.pairClient({ name: "codex" }), /A client named codex is already paired/);
+      await assert.rejects(service.pairClient({ name: "   " }), /Enter a client name/);
+    } finally {
+      await service.stop();
+    }
+  });
+
+  it("refuses the shared token of earlier versions with a pair-again message", async () => {
+    const legacy = "legacy-shared-token-from-0.7-abcdefghijkl";
+    const { service, config, legacyToken } = makeGateway({
+      legacyToken: legacy,
+      config: {
+        enabled: true,
+        boundTenantId: "tenant-1",
+        clients: [{ id: "client_old", name: "Claude Code", createdAt: "2026-08-28T10:00:00.000Z" }],
+      },
+    });
+    await service.startIfEnabled();
+    try {
+      assert.equal(legacyToken(), undefined, "the raw shared token leaves safeStorage");
+      assert.match(config().legacyTokenHash ?? "", /^[0-9a-f]{64}$/);
+      assert.deepEqual(await service.authenticate(legacy), { kind: "legacy-token" });
+      const status = await service.getStatus();
+      assert.deepEqual(status.clients, [
+        { id: "client_old", name: "Claude Code", createdAt: "2026-08-28T10:00:00.000Z", needsPairing: true },
+      ]);
+
+      // Pairing again under the same name replaces the old record.
+      const paired = await service.pairClient({ name: "Claude Code" });
+      assert.equal((await service.getStatus()).clients.length, 1);
+      assert.equal((await service.authenticate(paired.token)).kind, "client");
+
+      const port = (await service.getStatus()).listeningPort;
+      for (const [token, code, copy] of [
+        [legacy, "legacy-shared-token", GATEWAY_LEGACY_TOKEN_COPY],
+        ["never-issued", "unpaired-token", GATEWAY_UNKNOWN_TOKEN_COPY],
+      ] as const) {
+        const response = await fetch(`http://127.0.0.1:${port}/`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: "{}",
+        });
+        assert.equal(response.status, 401);
+        assert.deepEqual(await response.json(), { error: copy, code });
+      }
+    } finally {
+      await service.stop();
+    }
+  });
+
+  it("takes the proposing client's name from its record and records refusals in the audit log", async () => {
+    let refuse = false;
+    const queued: Array<{ clientId: string; clientName: string; plan: WritePlan }> = [];
+    const { service, audit } = makeGateway({
+      queue: async (input) => {
+        if (refuse) {
+          throw new GatewayProposalRefusedError("pending-limit", "Claude Code already has 5 proposals waiting.", { planDigest: "d".repeat(64) });
+        }
+        queued.push(input);
+        return { run: { id: "run-1", plan: input.plan } as RunRecord, alreadyWaiting: false };
+      },
+    });
+    const client = { id: "client_1", name: "Claude Code" };
+    const accepted = await service.propose("tenant-1", client, proposalInput);
+    assert.deepEqual(accepted, { outcome: "queued", runId: "run-1", confirmationPhrase: "APPLY 1 CHANGE" });
+    assert.equal(queued[0]?.clientId, "client_1");
+    assert.match(queued[0]!.plan.summary, /^Claude Code proposes 1 change/);
+    assert.equal(audit.length, 0);
+
+    refuse = true;
+    const refused = await service.propose("tenant-1", client, proposalInput);
+    assert.equal(refused.outcome, "refused");
+    assert.equal(audit.length, 1);
+    assert.equal(audit[0]?.type, "gateway.proposal.refused");
+    assert.deepEqual(
+      { clientId: audit[0]?.details.clientId, reason: audit[0]?.details.reason },
+      { clientId: "client_1", reason: "pending-limit" },
+    );
+  });
+
+  it("revokes every client when the gateway is disabled", async () => {
+    const { service } = makeGateway();
+    await service.enable({ boundTenantId: "tenant-1", port: 0 });
+    const paired = await service.pairClient({ name: "Claude Code" });
+    const status = await service.disable();
+    assert.deepEqual(status.clients, []);
+    assert.deepEqual(await service.authenticate(paired.token), { kind: "unknown" });
+  });
+});
 
 describe("gateway proposal plan builder", () => {
   it("validates paths against the Graph catalog and marks deletes destructive", () => {

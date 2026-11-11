@@ -8,7 +8,13 @@ import type {
   TenantSession,
 } from "@openadminos/agent-sdk";
 
-import { RunService, type RunPersistedState, type RunServiceHost } from "./runs.js";
+import {
+  GATEWAY_PENDING_PROPOSALS_PER_CLIENT,
+  GatewayProposalRefusedError,
+  RunService,
+  type RunPersistedState,
+  type RunServiceHost,
+} from "./runs.js";
 
 interface HarnessOptions {
   failOnRequestIndex?: number;
@@ -247,8 +253,9 @@ describe("rollback apply", () => {
 describe("external gateway proposal apply", () => {
   it("queues, gates, and applies an external proposal through the same path", async () => {
     const { service, persisted, requests, executions } = makeHarness();
-    const queued = await service.startExternalProposalRun({
+    const { run: queued } = await service.startExternalProposalRun({
       tenantId: "tenant-1",
+      clientId: "client-1",
       clientName: "Claude Code",
       requiredScopes: ["DeviceManagementConfiguration.ReadWrite.All"],
       plan: {
@@ -290,11 +297,87 @@ describe("external gateway proposal apply", () => {
     assert.deepEqual((executions[0] as { audit?: unknown }).audit, { runId: queued.id, agentSlug: "external-proposal", initiator: "gateway" });
   });
 
+  const proposal = (path: string, label = "Rename policy") => ({
+    tenantId: "tenant-1",
+    clientId: "client-1",
+    clientName: "Claude Code",
+    requiredScopes: [],
+    plan: {
+      summary: `Claude Code proposes 1 change: ${label}`,
+      confirmationPhrase: "APPLY 1 CHANGE",
+      actions: [{
+        id: "proposal-0",
+        kind: "graph-write",
+        label,
+        severity: "default" as const,
+        request: { method: "PATCH" as const, path, body: { displayName: "Renamed" } },
+      }],
+    },
+  });
+
+  it("returns the waiting run for an identical proposal instead of queueing another", async () => {
+    const { service, persisted } = makeHarness();
+    const first = await service.startExternalProposalRun(proposal("/deviceManagement/deviceCompliancePolicies/p1"));
+    // A new title or label is still the same change.
+    const again = await service.startExternalProposalRun(proposal("/deviceManagement/deviceCompliancePolicies/p1", "Renamed label"));
+    assert.equal(first.alreadyWaiting, false);
+    assert.equal(again.alreadyWaiting, true);
+    assert.equal(again.run.id, first.run.id);
+    assert.equal(persisted.runs.length, 1);
+    // Another client proposing the same change gets its own run.
+    const other = await service.startExternalProposalRun({ ...proposal("/deviceManagement/deviceCompliancePolicies/p1"), clientId: "client-2", clientName: "Codex" });
+    assert.equal(other.alreadyWaiting, false);
+    assert.equal(persisted.runs.length, 2);
+  });
+
+  it("refuses a proposal past the per-client pending limit", async () => {
+    const { service, persisted } = makeHarness();
+    for (let index = 0; index < GATEWAY_PENDING_PROPOSALS_PER_CLIENT; index += 1) {
+      await service.startExternalProposalRun(proposal(`/deviceManagement/deviceCompliancePolicies/p${index}`));
+    }
+    await assert.rejects(
+      service.startExternalProposalRun(proposal("/deviceManagement/deviceCompliancePolicies/one-more")),
+      (error: unknown) =>
+        error instanceof GatewayProposalRefusedError &&
+        error.reason === "pending-limit" &&
+        /Claude Code already has 5 proposals waiting for review/.test(error.message),
+    );
+    assert.equal(persisted.runs.length, GATEWAY_PENDING_PROPOSALS_PER_CLIENT);
+    // Rejecting one frees a slot.
+    await service.rejectRun(persisted.runs[0]!.id);
+    await service.startExternalProposalRun(proposal("/deviceManagement/deviceCompliancePolicies/one-more"));
+    assert.equal(persisted.runs.length, GATEWAY_PENDING_PROPOSALS_PER_CLIENT + 1);
+  });
+
+  it("refuses an identical re-proposal inside the cooldown after a rejection", async () => {
+    const { service, persisted } = makeHarness();
+    const { run } = await service.startExternalProposalRun(proposal("/deviceManagement/deviceCompliancePolicies/p1"));
+    await service.rejectRun(run.id);
+    await assert.rejects(
+      service.startExternalProposalRun(proposal("/deviceManagement/deviceCompliancePolicies/p1", "Same change, new words")),
+      (error: unknown) =>
+        error instanceof GatewayProposalRefusedError &&
+        error.reason === "rejected-cooldown" &&
+        /rejected an identical proposal from Claude Code/.test(error.message) &&
+        typeof error.details.retryAfter === "string",
+    );
+    assert.equal(persisted.runs.length, 1);
+    // A different change is not held back.
+    await service.startExternalProposalRun(proposal("/deviceManagement/deviceCompliancePolicies/p2"));
+    // Past the window the same change can be proposed again.
+    persisted.runs = persisted.runs.map((candidate) =>
+      candidate.id === run.id ? { ...candidate, rejectedAt: "2020-01-01T00:00:00.000Z" } : candidate,
+    );
+    const later = await service.startExternalProposalRun(proposal("/deviceManagement/deviceCompliancePolicies/p1"));
+    assert.equal(later.alreadyWaiting, false);
+  });
+
   it("refuses to queue an empty proposal", async () => {
     const { service } = makeHarness();
     await assert.rejects(
       service.startExternalProposalRun({
         tenantId: "tenant-1",
+        clientId: "client-1",
         clientName: "Claude Code",
         requiredScopes: [],
         plan: { summary: "s", confirmationPhrase: "APPLY 0 CHANGES", actions: [] },
