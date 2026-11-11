@@ -6,7 +6,7 @@ import { Route, Routes, useLocation } from "react-router";
 import IntuneChat, { createHostedBatchProviderConsent } from "./IntuneChat";
 import Agents from "./Agents";
 import { AppShell } from "../components/AppShell";
-import { DataBoundaryProvider } from "../state";
+import { DataBoundaryProvider, useAppState } from "../state";
 import {
   createAwaitingConfirmationRun,
   createMockAgent,
@@ -360,6 +360,37 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
     } finally {
       window.localStorage.removeItem("openadminos:intune-chat-hosted-consent:v2:no-tenant:openai:gpt-5");
     }
+  });
+});
+
+describe("IntuneChat organization name", () => {
+  function RenameProbe() {
+    const { renameOrganization } = useAppState();
+    return (
+      <button type="button" onClick={() => void renameOrganization("org-tenant-1", "OAOS Lab")}>
+        Rename organization
+      </button>
+    );
+  }
+
+  it("names the tenant by its organization and follows a rename", async () => {
+    const user = userEvent.setup();
+    renderRoute(
+      <>
+        <RenameProbe />
+        <IntuneChat />
+      </>,
+      { path: "/chat/:conversationId?", route: "/chat" },
+    );
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Contoso IT" })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Ask about Contoso IT, or type / to run an agent")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Rename organization" }));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "OAOS Lab" })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Ask about OAOS Lab, or type / to run an agent")).toBeInTheDocument();
+    expect(screen.queryByText("Contoso IT")).toBeNull();
   });
 });
 

@@ -76,6 +76,7 @@ import {
   MANAGED_POLICY_SET_BY,
   isManagedSettingLocked,
   managedLockedModel,
+  tenantsNamedByOrganization,
 } from "../shared/openAdminOS";
 import { copyTextToClipboard } from "../shared/clipboard";
 import { CHAT_COPY, FIRST_RUN_CHAT_COPY, HOSTED_CONFIRM_COPY, LOCAL_BOUNDARY_COPY, PROVIDER_COMPANIES, PROVIDER_DETECTION_COPY, PROVIDER_TOOL_NAMES, chatErrorCopy, deriveTrustCopy, promptsGoTo, providerDataLocation, providerDataLocationDetail, sendsThroughTool } from "../copy";
@@ -321,8 +322,13 @@ function IntuneChatContent() {
   const followLatestRef = useRef(true);
   const restoreConversationScrollRef = useRef<string | null>(null);
 
+  // Chat names each tenant by its organization, so a rename shows here too.
+  const tenants = useMemo(
+    () => tenantsNamedByOrganization({ organizations: state.organizations, tenants: state.tenants }),
+    [state.organizations, state.tenants],
+  );
   const activeTenant = state.activeTenantId
-    ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
+    ? tenants.find((tenant) => tenant.id === state.activeTenantId)
     : undefined;
   const provider = state.providers.find((entry) => entry.id === state.activeProviderId);
   const activeModel = resolveProviderDefaultModel(
@@ -1647,7 +1653,7 @@ function IntuneChatContent() {
     label: scopeLabel,
     scopeMode,
     onScopeModeChange: setScopeMode,
-    tenants: state.tenants,
+    tenants,
     activeTenantId: state.activeTenantId,
     selectedTenantIds,
     onToggleTenant: toggleTenantSelection,
@@ -2026,7 +2032,7 @@ function IntuneChatContent() {
                     conversations.find((entry) => entry.id === message.conversationId) ??
                     activeConversation;
                   const messageTenant = messageConversation?.tenantId
-                    ? state.tenants.find((tenant) => tenant.id === messageConversation.tenantId)
+                    ? tenants.find((tenant) => tenant.id === messageConversation.tenantId)
                     : activeTenant;
                   if (message.role === "assistant" && message.notConnected && message.id !== shownProgressMessageId) {
                     const question = previousUserPromptForMessage(displayedMessages, message);
@@ -2034,7 +2040,7 @@ function IntuneChatContent() {
                       <div key={message.id} data-message-id={message.id} className="mt-3 scroll-mt-[18px]">
                         <NotConnectedCard
                           notConnected={message.notConnected}
-                          tenants={state.tenants}
+                          tenants={tenants}
                           activeTenant={activeTenant}
                           {...(question && !sending ? { onAskAgain: () => void handleSend(question, message.conversationId) } : {})}
                         />
