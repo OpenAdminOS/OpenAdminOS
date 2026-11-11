@@ -339,7 +339,7 @@ import {
   buildUsageTelemetryPayload,
   type UsageTelemetryPayload,
 } from "./telemetry/usage.js";
-import { OrganizationBoundaryError, RunService, type RunGraphExecution, type SplashtopRunClient } from "./runs.js";
+import { OrganizationBoundaryError, RunService, gatewayRejectionCoolingDown, type RunGraphExecution, type SplashtopRunClient } from "./runs.js";
 import { RunDeliveryService } from "./run-delivery.js";
 import {
   OUTLOOK_CONNECTOR_ID,
@@ -4709,9 +4709,11 @@ export class AppStateStore {
           ? Date.now() - policy.keepDays * 24 * 60 * 60 * 1000
           : undefined;
 
+      const pruneNowMs = Date.now();
       const pruneCandidates = persisted.runs
         .filter((run) => {
           if (protectedSets.all.has(run.id)) return false;
+          if (gatewayRejectionCoolingDown(run, pruneNowMs)) return false;
           const keptByCount = newestKeptIds?.has(run.id) === true;
           const keptByAge =
             cutoffMs !== undefined && runHistorySortMs(run) >= cutoffMs;

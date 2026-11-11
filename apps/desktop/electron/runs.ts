@@ -246,6 +246,17 @@ export const GATEWAY_PENDING_PROPOSALS_PER_CLIENT = 5;
 export const GATEWAY_REJECTED_PROPOSAL_COOLDOWN_MS = 15 * 60_000;
 
 /**
+ * A rejected gateway proposal whose cooldown is still running. Run history
+ * retention keeps it, because the cooldown is read from this record and
+ * pruning it would let the same proposal be queued again at once.
+ */
+export function gatewayRejectionCoolingDown(run: RunRecord, nowMs: number): boolean {
+  if (run.status !== "rejected" || !run.external?.clientId || !run.rejectedAt) return false;
+  const rejectedAtMs = Date.parse(run.rejectedAt);
+  return Number.isFinite(rejectedAtMs) && nowMs - rejectedAtMs < GATEWAY_REJECTED_PROPOSAL_COOLDOWN_MS;
+}
+
+/**
  * Identifies what a gateway plan would change: the ordered Graph
  * requests, not the client's labels or title, so renaming a rejected
  * proposal does not make it a new one.
