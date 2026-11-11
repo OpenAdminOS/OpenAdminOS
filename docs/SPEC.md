@@ -637,19 +637,27 @@ Concretely:
   available. No flags means only that the current rules found no match.
 - After typed confirmation and immediately before apply, every agent write run
   (ordinary runs and Agent Team assignments) plans again against the live
-  tenant with Graph reads only, retirement and connector changes denied. The
-  fresh actions and confirmation phrase must equal the confirmed ones exactly
-  (canonical JSON). On any difference nothing is written and the run fails
-  with what changed, for example "The planned actions changed since review: 1
-  of the 2 actions you reviewed is no longer in the plan, and 2 actions are
-  new. Nothing was applied. Select Run again to review a fresh plan." Agent
-  Team keeps its wording ("The proposed actions changed since review: ... Run
-  the assignment again to review a fresh proposal."). Counts compare actions
-  without their position id, so a reorder or a changed phrase is named on its
-  own. Planning again repeats the agent's LLM steps, so a plan whose actions
-  depend on model text, or on values derived from the current time, can be
-  refused although the targets are unchanged; the refusal is safe and Run
-  again prepares a new plan. System plans are applied as confirmed: a gateway
+  tenant with Graph reads only, retirement and connector changes denied. Each
+  action is compared by what it sends, as a multiset in canonical JSON: its
+  kind and request (method, path, body); for a retire, its
+  `metadata.deviceId`; for any other action without a request, its metadata.
+  Ids, labels, descriptions, the summary and the metadata of a Graph write do
+  not count, so "Inactive for 91 days" becoming "92 days" across a day
+  boundary, or regenerated ids, do not refuse. A pure reorder is not a change:
+  apply runs the reviewed plan in the reviewed order, never the fresh one. The
+  confirmation phrase must also be unchanged. On any difference nothing is
+  written and the run fails with what changed, for example "The planned
+  actions changed since review: 1 of the 2 actions you reviewed is no longer
+  in the plan, and 2 actions are new. Nothing was applied. Select Run again to
+  review a fresh plan." Agent Team keeps its wording ("The proposed actions
+  changed since review: ... Run the assignment again to review a fresh
+  proposal."). A changed phrase with the same actions is named on its own.
+  Planning again repeats the agent's model steps, including its LLM calls,
+  because some agents derive their actions from model output and skipping
+  those steps would change the plan; confirming a write run therefore costs
+  the planning again before apply. A plan whose requests depend on model text
+  can be refused although the targets are unchanged; the refusal is safe and
+  Run again prepares a new plan. System plans are applied as confirmed: a gateway
   proposal has no agent to plan it again, so the proposing client owns the
   plan and the diff the admin confirmed is applied as-is, fail-stop; a
   baseline rollback is built from local drift snapshots rather than a live
@@ -3015,7 +3023,7 @@ v0.5 adds four capability areas on top of the drift timeline; each maps to an ac
 
 **Governed MCP write-gateway.** A local, loopback-only (127.0.0.1) MCP server, off by default and bound to exactly one tenant at enable time. External AI clients get the same read-only tool allowlist as Chat. The only write capability is `propose_write_plan`: proposed actions are validated against the bundled Graph endpoint catalog (unknown endpoints rejected), turned into a standard `WritePlan`, and queued as an `external-proposal` system run that requires the normal typed confirmation in the desktop app. No external client can apply a change; a proposal can only be reviewed, confirmed, or rejected by a human. Apply is fail-stop and shares the rollback apply path.
 
-*Client identity.* Each client is paired in Settings, Gateway under a name the admin gives (Pair client). Pairing creates a client record (id, name, created time, SHA-256 hash of the client's own token); the token is shown once and stored nowhere, and a presented token is hashed and compared with every record in constant time. The name on a proposal and in run history comes from that record; the tool takes no client name. A client reads only the status of its own proposals. Revoke removes the record, so the token stops working on the next request; disabling the gateway revokes every client, and enabling it for another tenant drops the clients of the previous one. The single shared token of earlier versions is not migrated, because every client held it and their names were self-reported: on upgrade its hash is kept and the raw token removed from safeStorage, a client that still presents it gets HTTP 401 with code `legacy-shared-token` and a message to pair again in Settings, Gateway, and client records from that time are listed with "Pair again" until they are paired again under the same name or revoked.
+*Client identity.* Each client is paired in Settings, Gateway under a name the admin gives (Pair client). Pairing creates a client record (id, name, created time, SHA-256 hash of the client's own token); the token is shown once and stored nowhere, and a presented token is hashed and compared with every record in constant time. The name on a proposal and in run history comes from that record; the tool takes no client name. A client reads only the status of its own proposals. Revoke removes the record, so the token stops working on the next request; disabling the gateway revokes every client, and enabling it for another tenant drops the clients of the previous one. The single shared token of earlier versions is not migrated, because every client held it and their names were self-reported: on upgrade its hash is kept and the raw token removed from safeStorage, a client that still presents it gets HTTP 401 with code `legacy-shared-token` and a message to pair again in Settings, Gateway, and client records from that time are listed with "Pair again" until they are paired again under the same name or revoked. Pairing, revoking, enabling, disabling and that upgrade step each read and write the gateway config inside one queue in the gateway service, so overlapping changes never write snapshots over each other, and token checks read the config through the upgrade step. Proposals queued before the upgrade carry no client id, so no client can read their status; they stay in the desktop app for review.
 
 *Proposal limits.* An identical proposal (same client, tenant and plan digest, the SHA-256 of the canonical ordered Graph requests, so titles and labels do not count) that is already awaiting confirmation is not queued again; the tool returns the waiting run with status `already-awaiting-confirmation`. A client may have at most 5 proposals awaiting confirmation (`GATEWAY_PENDING_PROPOSALS_PER_CLIENT`), and after the admin rejects a proposal the same plan from the same client is refused for 15 minutes (`GATEWAY_REJECTED_PROPOSAL_COOLDOWN_MS`). Both refusals return a tool error with status `refused`, a reason (`pending-limit` or `rejected-cooldown`) and a message that says what to do, and are recorded in the audit log as `gateway.proposal.refused` (source `gateway`, initiator `gateway`) with the client, reason and plan digest.
 
