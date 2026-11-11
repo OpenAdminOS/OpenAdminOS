@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { request as httpRequest } from "node:http";
 import { describe, it } from "node:test";
 
 import type { RunRecord, WritePlan } from "@openadminos/agent-sdk";
@@ -25,6 +26,9 @@ function makeGateway(options: {
   config?: Partial<GatewayConfig>;
   legacyToken?: string;
   queue?: GatewayServiceHost["queueExternalProposal"];
+  /** Called when a request has authenticated, before its body is read. */
+  onAuthenticated?: () => void;
+  executeReadTool?: GatewayServiceHost["executeReadTool"];
 } = {}) {
   let config: GatewayConfig = { enabled: false, port: 0, clients: [], ...options.config };
   let legacyToken = options.legacyToken;
@@ -50,8 +54,11 @@ function makeGateway(options: {
       await yieldTurn();
       legacyToken = undefined;
     },
-    tenantName: async () => "Contoso",
-    executeReadTool: async () => ({}),
+    tenantName: async () => {
+      options.onAuthenticated?.();
+      return "Contoso";
+    },
+    executeReadTool: options.executeReadTool ?? (async () => ({})),
     queueExternalProposal:
       options.queue ??
       (async (input) => {
@@ -286,6 +293,99 @@ describe("gateway client pairing", () => {
       } finally {
         await service.stop();
       }
+    }
+  });
+
+  it("refuses a tool call from a client revoked, or a gateway turned off or rebound, after its request authenticated", async () => {
+    const proposeCall = { name: "propose_write_plan", arguments: proposalInput };
+    const readCall = { name: "graph_get", arguments: { path: "/users" } };
+    const statusCall = { name: "get_proposal_status", arguments: { runId: "run-1" } };
+    for (const [label, call, change, code, copy] of [
+      ["revoked, propose", proposeCall, "revoke", "unpaired-token", GATEWAY_UNKNOWN_TOKEN_COPY],
+      ["revoked, read", readCall, "revoke", "unpaired-token", GATEWAY_UNKNOWN_TOKEN_COPY],
+      ["revoked, status", statusCall, "revoke", "unpaired-token", GATEWAY_UNKNOWN_TOKEN_COPY],
+      ["off, propose", proposeCall, (config: GatewayConfig) => ({ ...config, enabled: false }), "gateway-off", GATEWAY_OFF_COPY],
+      ["unbound, read", readCall, ({ boundTenantId: _removed, ...config }: GatewayConfig) => config, "gateway-off", GATEWAY_OFF_COPY],
+      ["rebound, propose", proposeCall, (config: GatewayConfig) => ({ ...config, boundTenantId: "tenant-2" }), "gateway-other-organization", GATEWAY_OTHER_ORGANIZATION_COPY],
+    ] as const) {
+      let authenticated!: () => void;
+      const reachedBody = new Promise<void>((resolve) => { authenticated = resolve; });
+      const reads: string[] = [];
+      const { service, queued, writeConfig } = makeGateway({
+        onAuthenticated: () => authenticated(),
+        executeReadTool: async (_tenantId, name) => {
+          reads.push(name);
+          return {};
+        },
+      });
+      await service.enable({ boundTenantId: "tenant-1", port: 0 });
+      try {
+        const paired = await service.pairClient({ name: "Claude Code" });
+        const port = (await service.getStatus()).listeningPort;
+        // Send the headers now and the body only after the change, as a
+        // client that trickles its body would.
+        const pending = new Promise<{ status: number; body: string }>((resolve, reject) => {
+          const outgoing = httpRequest({
+            host: "127.0.0.1",
+            port,
+            method: "POST",
+            path: "/",
+            headers: {
+              authorization: `Bearer ${paired.token}`,
+              "content-type": "application/json",
+              accept: "application/json, text/event-stream",
+            },
+          }, (response) => {
+            let body = "";
+            response.setEncoding("utf8");
+            response.on("data", (chunk: string) => { body += chunk; });
+            response.on("end", () => resolve({ status: response.statusCode ?? 0, body }));
+          });
+          outgoing.on("error", reject);
+          outgoing.flushHeaders();
+          void reachedBody.then(async () => {
+            if (change === "revoke") await service.revokeClient(paired.client.id);
+            else writeConfig(change);
+            outgoing.end(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: call }));
+          });
+        });
+        const response = await pending;
+        assert.equal(response.status, 200, label);
+        const result = (JSON.parse(response.body) as { result: { isError?: boolean; content: Array<{ text: string }> } }).result;
+        assert.equal(result.isError, true, label);
+        assert.deepEqual(JSON.parse(result.content[0]!.text), { error: copy, code }, label);
+        assert.deepEqual(queued, [], `${label}: nothing was queued`);
+        assert.deepEqual(reads, [], `${label}: nothing was read`);
+      } finally {
+        await service.stop();
+      }
+    }
+  });
+
+  it("runs a tool call from a client that is still paired", async () => {
+    const { service, queued } = makeGateway();
+    await service.enable({ boundTenantId: "tenant-1", port: 0 });
+    try {
+      const paired = await service.pairClient({ name: "Claude Code" });
+      assert.deepEqual(await service.authorizeClient(paired.client, "tenant-1"), {
+        kind: "client",
+        client: { id: paired.client.id, name: "Claude Code" },
+      });
+      const port = (await service.getStatus()).listeningPort;
+      const response = await fetch(`http://127.0.0.1:${port}/`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${paired.token}`,
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "propose_write_plan", arguments: proposalInput } }),
+      });
+      const result = (await response.json() as { result: { isError?: boolean } }).result;
+      assert.notEqual(result.isError, true);
+      assert.equal(queued.length, 1);
+    } finally {
+      await service.stop();
     }
   });
 

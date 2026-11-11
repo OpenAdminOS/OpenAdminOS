@@ -216,6 +216,22 @@ export const REGISTER = [
     why: "A proposal carries the name of the client record its token belongs to, not another one.",
   },
   {
+    id: "gateway-tool-skips-reauthorization",
+    path: "apps/desktop/electron/gateway/server.ts",
+    find: 'if (auth.kind === "client") return tool();',
+    replace: "if (auth.kind || true) return tool();",
+    tests: ["apps/desktop/electron/gateway/service.test.ts"],
+    why: "A request authenticates from its headers before its body arrives; a client revoked meanwhile must not read or propose.",
+  },
+  {
+    id: "gateway-reauthorizes-revoked-client",
+    path: "apps/desktop/electron/gateway/service.ts",
+    find: "const record = config.clients.find((candidate) => candidate.id === client.id && candidate.tokenHash);",
+    replace: "const record = config.clients.find((candidate) => candidate.tokenHash) ?? { id: client.id, name: client.name };",
+    tests: ["apps/desktop/electron/gateway/service.test.ts"],
+    why: "A tool call is checked against the client records as they are now, so a revoke stops the call it lands in.",
+  },
+  {
     id: "audit-log-allows-update",
     path: "apps/desktop/electron/audit-log.ts",
     find: "CREATE TRIGGER audit_log_refuse_update BEFORE UPDATE ON audit_log\n",

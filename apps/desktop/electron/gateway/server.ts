@@ -86,6 +86,13 @@ export interface GatewayHost {
     | { found: false }
     | { found: true; status: string; summary?: string; error?: string }
   >;
+  /**
+   * Check, when a tool runs, that `client` may still act: the gateway is
+   * on, bound to this listener's tenant, and the client still paired.
+   * The request was authenticated from its headers, before its body
+   * arrived, so this reads the config again.
+   */
+  authorize(client: GatewayClientIdentity): Promise<GatewayAuthResult>;
   log(message: string, metadata?: Record<string, unknown>): void;
 }
 
@@ -141,6 +148,19 @@ function buildMcpServer(
     ],
   });
 
+  /**
+   * Runs `tool` only when the client may still act. Otherwise the tool
+   * returns the designed refusal the request would get now, as a tool
+   * error, and nothing is read or queued.
+   */
+  const authorized = async <T>(tool: () => Promise<T>) => {
+    const auth = await host.authorize(client);
+    if (auth.kind === "client") return tool();
+    host.log("gateway tool call refused", { reason: auth.kind, clientId: client.id });
+    const refusal = GATEWAY_REFUSALS[auth.kind];
+    return { ...toolResult({ error: refusal.error, code: refusal.code }), isError: true };
+  };
+
   const readToolDescriptions: Record<string, string> = {
     list_cached_resources:
       "List the connected tenant's cached Graph resources with row counts, freshness, and errors.",
@@ -159,10 +179,10 @@ function buildMcpServer(
         description: `${readToolDescriptions[name]} Tenant: ${tenantLabel}.`,
         inputSchema: shape,
       },
-      async (input: Record<string, unknown>) => {
+      async (input: Record<string, unknown>) => authorized(async () => {
         host.log(`gateway read tool ${name}`, { name, clientId: client.id });
         return toolResult(await host.executeReadTool(name, input));
-      },
+      }),
     );
   }
 
@@ -194,7 +214,7 @@ function buildMcpServer(
         body?: Record<string, unknown>;
         label: string;
       }>;
-    }) => {
+    }) => authorized(async () => {
       host.log("gateway write proposal", {
         clientId: client.id,
         actionCount: input.actions.length,
@@ -228,7 +248,7 @@ function buildMcpServer(
             ? `An identical proposal from this client is already waiting for review, so no new one was queued. ${confirm}`
             : confirm,
       });
-    },
+    }),
   );
 
   server.registerTool(
@@ -238,13 +258,13 @@ function buildMcpServer(
         "Check the status of a previously proposed write plan (awaiting-confirmation, running, completed, failed, or rejected).",
       inputSchema: { runId: z.string().min(1).max(200) },
     },
-    async (input: { runId: string }) => {
+    async (input: { runId: string }) => authorized(async () => {
       const status = await host.getProposalStatus(client, input.runId);
       if (!status.found) {
         return toolResult({ found: false, note: "This client has no proposal with this id. Each client sees only the proposals it made." });
       }
       return toolResult(status);
-    },
+    }),
   );
 
   return server;

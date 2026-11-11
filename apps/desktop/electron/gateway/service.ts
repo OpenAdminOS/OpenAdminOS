@@ -252,8 +252,8 @@ export class GatewayService {
    */
   async authenticate(token: string, listenerTenantId: string): Promise<GatewayAuthResult> {
     const config = await this.readConfig();
-    if (!config.enabled || !config.boundTenantId) return { kind: "gateway-off" };
-    if (config.boundTenantId !== listenerTenantId) return { kind: "other-organization" };
+    const off = gatewayRefusal(config, listenerTenantId);
+    if (off) return off;
     const presented = Buffer.from(hashToken(token), "hex");
     let match: GatewayClientRecord | undefined;
     for (const client of config.clients) {
@@ -264,6 +264,25 @@ export class GatewayService {
       return { kind: "legacy-token" };
     }
     return { kind: "unknown" };
+  }
+
+  /**
+   * Check again, when a tool runs, that the client a request
+   * authenticated as may still act for `listenerTenantId`: the gateway
+   * is on, still bound to that tenant, and the client is still paired.
+   * A request is authenticated from its headers before its body is read,
+   * so a client revoked, or a gateway turned off, while the body arrives
+   * is refused here.
+   */
+  async authorizeClient(
+    client: GatewayClientIdentity,
+    listenerTenantId: string,
+  ): Promise<GatewayAuthResult> {
+    const config = await this.readConfig();
+    const off = gatewayRefusal(config, listenerTenantId);
+    if (off) return off;
+    const record = config.clients.find((candidate) => candidate.id === client.id && candidate.tokenHash);
+    return record ? { kind: "client", client: { id: record.id, name: record.name } } : { kind: "unknown" };
   }
 
   /**
@@ -392,6 +411,7 @@ export class GatewayService {
           ...(run.error ? { error: run.error } : {}),
         };
       },
+      authorize: (client) => this.authorizeClient(client, boundTenantId),
       log: (message, metadata) => this.host.log(message, metadata),
     };
     const server = await startGatewayServer(gatewayHost, {
@@ -404,6 +424,16 @@ export class GatewayService {
     }
     this.server = server;
   }
+}
+
+/** Why no client may act for `listenerTenantId` under `config`, if none may. */
+function gatewayRefusal(
+  config: GatewayConfig,
+  listenerTenantId: string,
+): Extract<GatewayAuthResult, { kind: "gateway-off" | "other-organization" }> | undefined {
+  if (!config.enabled || !config.boundTenantId) return { kind: "gateway-off" };
+  if (config.boundTenantId !== listenerTenantId) return { kind: "other-organization" };
+  return undefined;
 }
 
 function publicClient(client: GatewayClientRecord): GatewayClientSummary {
