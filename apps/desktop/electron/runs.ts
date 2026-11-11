@@ -107,28 +107,49 @@ export class OrganizationBoundaryError extends Error {
 export const TENANT_DISCONNECTING_COPY = TENANT_CLOSED_COPY;
 
 /**
+ * What an action would send to the tenant, without the words around it.
+ * A Graph write sends its request. A retire acts on `metadata.deviceId`
+ * only. Any other action without a request is applied from its
+ * metadata, so all of it counts. Ids, labels and descriptions do not:
+ * apply runs the reviewed plan, so they cannot change what is written.
+ */
+function writeEffectKey(action: WriteAction): string {
+  if (action.request) {
+    const { method, path, body } = action.request;
+    return stableStringify({ kind: action.kind, request: { method, path, ...(body !== undefined ? { body } : {}) } });
+  }
+  if (action.kind === "retire-managed-device") {
+    return stableStringify({ kind: action.kind, deviceId: action.metadata?.deviceId ?? null });
+  }
+  return stableStringify({ kind: action.kind, metadata: action.metadata ?? null });
+}
+
+/**
  * How a fresh read-only plan differs from the one the admin confirmed.
- * Actions are compared without their position id, as a multiset, so
- * the counts say how many reviewed actions are gone and how many are
- * new; any difference at all, order and phrase included, is a change.
+ * Actions are compared by what they send, as a multiset: the counts say
+ * how many reviewed actions are gone and how many are new. A pure
+ * reorder is not a change, because apply runs the reviewed plan in the
+ * reviewed order, not the fresh one. A different confirmation phrase is.
  */
 export function planChangeSinceReview(
   reviewed: NonNullable<RunRecord["plan"]>,
   fresh: NonNullable<RunRecord["plan"]>,
 ): { changed: boolean; reviewed: number; removed: number; added: number; phraseChanged: boolean } {
   const phraseChanged = fresh.confirmationPhrase !== reviewed.confirmationPhrase;
-  const changed = phraseChanged || stableStringify(fresh.actions) !== stableStringify(reviewed.actions);
-  const key = ({ id: _id, ...action }: WriteAction) => stableStringify(action);
   const remaining = new Map<string, number>();
-  for (const action of fresh.actions) remaining.set(key(action), (remaining.get(key(action)) ?? 0) + 1);
+  for (const action of fresh.actions) {
+    const key = writeEffectKey(action);
+    remaining.set(key, (remaining.get(key) ?? 0) + 1);
+  }
   let removed = 0;
   for (const action of reviewed.actions) {
-    const left = remaining.get(key(action)) ?? 0;
-    if (left > 0) remaining.set(key(action), left - 1);
+    const key = writeEffectKey(action);
+    const left = remaining.get(key) ?? 0;
+    if (left > 0) remaining.set(key, left - 1);
     else removed += 1;
   }
   const added = [...remaining.values()].reduce((sum, count) => sum + count, 0);
-  return { changed, reviewed: reviewed.actions.length, removed, added, phraseChanged };
+  return { changed: phraseChanged || removed > 0 || added > 0, reviewed: reviewed.actions.length, removed, added, phraseChanged };
 }
 
 /**
@@ -145,9 +166,7 @@ export function planChangedSinceReviewCopy(
     parts.push(`${change.removed.toLocaleString("en-US")} of the ${actions(change.reviewed)} you reviewed ${change.removed === 1 ? "is" : "are"} no longer in the plan`);
   }
   if (change.added > 0) parts.push(`${actions(change.added)} ${change.added === 1 ? "is" : "are"} new`);
-  if (parts.length === 0) {
-    parts.push(change.phraseChanged ? "the confirmation phrase is different" : `the ${actions(change.reviewed)} you reviewed are in a different order`);
-  }
+  if (parts.length === 0) parts.push("the confirmation phrase is different");
   const what = parts.join(", and ");
   return kind === "office"
     ? `The proposed actions changed since review: ${what}. Nothing was applied. Run the assignment again to review a fresh proposal.`
@@ -155,7 +174,21 @@ export function planChangedSinceReviewCopy(
 }
 
 /** Why a Graph write was refused while a confirmed plan is checked again. */
-const PLAN_REVALIDATION_READ_ONLY_COPY = "Checking a plan before apply permits only Graph reads.";
+export const PLAN_REVALIDATION_READ_ONLY_COPY = "Checking a plan before apply permits only Graph reads.";
+
+/** The Graph client for the replan before apply: reads pass, every write is refused before it is sent. */
+export function readOnlyRevalidationGraph(graph: RunGraphApi): RunGraphApi {
+  return {
+    ...graph,
+    retireManagedDevice: async () => {
+      throw new Error(PLAN_REVALIDATION_READ_ONLY_COPY);
+    },
+    request: async (request) => {
+      if (request.method !== "GET") throw new Error(PLAN_REVALIDATION_READ_ONLY_COPY);
+      return graph.request(request);
+    },
+  };
+}
 
 /** How many gateway proposals one paired client may have waiting for review at once. */
 export const GATEWAY_PENDING_PROPOSALS_PER_CLIENT = 5;
@@ -1313,13 +1346,7 @@ export class RunService {
       const fresh = await executePlan({
         signal: controller.signal, run: { ...input.run, steps: [], logs: [] }, agent: input.agent,
         providerId: input.providerId, model: input.model, llm, tenant: selection.tenantSession,
-        createGraph: (log) => {
-          const graph = selection.createGraph(log);
-          return { ...graph, retireManagedDevice: async () => { throw new Error(PLAN_REVALIDATION_READ_ONLY_COPY); }, request: async (request) => {
-            if (request.method !== "GET") throw new Error(PLAN_REVALIDATION_READ_ONLY_COPY);
-            return graph.request(request);
-          } };
-        },
+        createGraph: (log) => readOnlyRevalidationGraph(selection.createGraph(log)),
         realWrites: false, connectorConfigs: await this.host.readConnectorConfigs(),
         connectorSecretsFor: (id) => this.host.connectorSecretsFor(id),
         confirmCapability: async () => ({ approved: false, reason: "Revalidating a plan cannot send notifications or change external state." }), onProgress: () => {},
@@ -1333,6 +1360,9 @@ export class RunService {
       const change = planChangeSinceReview(input.plan, fresh.plan);
       if (change.changed) throw new Error(planChangedSinceReviewCopy(change, kind));
       controller.signal.throwIfAborted();
+      // Apply gets the reviewed plan, never the fresh one, and runs its
+      // actions in the reviewed order; the fresh plan only decides
+      // whether apply may start.
       try {
         await executeApply({
           signal: controller.signal,
