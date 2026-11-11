@@ -335,6 +335,42 @@ describe("Disconnect redesign: two phases with a removal record", () => {
     }
   });
 
+  it("turns the gateway off and revokes its clients, so reconnecting the same tenant does not bring an old token back", async () => {
+    const network = recordFetch();
+    const f = await fixture({}, {
+      interactiveSignIn: async ({ scopes }: { scopes?: string[] }) => ({
+        account: { homeAccountId: tenant.homeAccountId, tenantId: tenant.id, username: tenant.username },
+        scopes: scopes ?? [],
+        accessToken: "token",
+      }),
+    });
+    const gateway = (f.store as unknown as { gatewayService: { authenticate(token: string, listenerTenantId: string): Promise<{ kind: string }> } }).gatewayService;
+    try {
+      await f.store.enableGateway({ boundTenantId: tenant.id, port: 0 });
+      const { token } = await f.store.pairGatewayClient({ name: "Claude Code" });
+      assert.equal((await gateway.authenticate(token, tenant.id)).kind, "client");
+      assert.equal((await f.store.getGatewayStatus()).running, true);
+
+      await f.store.disconnectTenant(tenant.id);
+      const connected = await f.store.connectTenant();
+      assert.deepEqual(connected.tenants.map((entry) => entry.id), [tenant.id]);
+
+      // Refused by the config as written, whatever the listener: no client is paired.
+      assert.notEqual((await gateway.authenticate(token, tenant.id)).kind, "client", "the old token is refused");
+      const status = await f.store.getGatewayStatus();
+      assert.equal(status.enabled, false);
+      assert.equal(status.running, false);
+      assert.equal(status.boundTenantId, undefined);
+      assert.deepEqual(status.clients, []);
+      const persisted = (await stored(f.statePath)).gateway as { enabled?: boolean; clients?: unknown[] } | undefined;
+      assert.equal(persisted?.enabled, false);
+      assert.deepEqual(persisted?.clients, []);
+    } finally {
+      network.restore();
+      await f.close();
+    }
+  });
+
   it("drops a late snapshot of a deleted run and sends no report for it", async () => {
     const running = { id: "run-live", agentSlug: "fixture", tenantId: tenant.id, status: "running", queuedAt: "2026-08-01T00:00:00.000Z", providerId: "ollama", steps: [], logs: [] };
     const f = await fixture({ runs: [running] });

@@ -1964,7 +1964,10 @@ enforced at choke points, not by each caller.
 - **Two phases, persisted.** Phase 1, under the state lock: the tenant closes (every
   lease signal fires) and one write removes the tenant with its runs, deliveries,
   active selection and gateway binding, and stores a removal record
-  (`tenantRemovals`). From here the organization is gone in the UI. Phase 2: drain
+  (`tenantRemovals`). A gateway bound to the tenant is turned off and every
+  paired client revoked in that write, as Disable does, and its listener is
+  stopped right after, so connecting the same tenant again never accepts an old
+  token; Settings shows the gateway off. From here the organization is gone in the UI. Phase 2: drain
   leased work with a bounded wait (15 seconds; past it, cleanup goes on because the
   choke points refuse anything the work could still do), remove the Microsoft
   sign-in, delete Agent Team and Chat data, then drop the record. If phase 2 fails

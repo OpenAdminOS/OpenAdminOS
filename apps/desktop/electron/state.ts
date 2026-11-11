@@ -791,12 +791,17 @@ function gatewayConfigOf(persisted: Pick<PersistedState, "gateway">): GatewayCon
   return persisted.gateway ?? { enabled: false, port: 8092, clients: [] };
 }
 
-/** A gateway change that drops the binding to a removed tenant, and leaves any other binding. */
+/**
+ * A gateway change for a removed tenant: a gateway bound to it is turned
+ * off and every paired client revoked, as Disable does, so connecting the
+ * same tenant again never brings its old clients back. A gateway bound to
+ * another tenant is left as it is.
+ */
 function gatewayUnboundFrom(tenantId: string): (config: GatewayConfig) => GatewayConfig {
   return (config) => {
     if (config.boundTenantId !== tenantId) return config;
     const { boundTenantId: _removed, ...unbound } = config;
-    return unbound;
+    return { ...unbound, enabled: false, clients: [] };
   };
 }
 
@@ -7906,6 +7911,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * or from Retry cleanup. The returned state lists pending cleanups.
    */
   async disconnectTenant(id: string): Promise<AppState> {
+    let gatewayUnbound = false;
     await this.serialize(async () => {
       const persisted = await this.read();
       const current = persisted.tenants.find((tenant) => tenant.id === id);
@@ -7937,10 +7943,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       if (deliveryQueue.length > 0) next.runDeliveryQueue = deliveryQueue;
       else delete next.runDeliveryQueue;
       if (persisted.activeTenantId === id) delete next.activeTenantId;
-      // The write gateway was bound to this tenant; it is not bound to any
-      // now. This runs under the same lock as updateGatewayConfig, which
-      // cannot be called here without waiting on itself.
-      if (persisted.gateway) next.gateway = gatewayUnboundFrom(id)(persisted.gateway);
+      // A write gateway bound to this tenant is turned off and its clients
+      // revoked. This runs under the same lock as updateGatewayConfig,
+      // which cannot be called here without waiting on itself.
+      if (persisted.gateway) {
+        next.gateway = gatewayUnboundFrom(id)(persisted.gateway);
+        gatewayUnbound = next.gateway !== persisted.gateway;
+      }
       // Close before the write, so no work of the tenant can slip a change
       // in between. If the write fails, nothing was removed: reopen.
       this.tenantLifecycle.close(id);
@@ -7953,6 +7962,15 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     });
     // A license check of the removed connection saves nothing.
     this.supersedeTenantCheck(id, "disconnected");
+    // The gateway was turned off with the write; its listener stops now.
+    // Until it has, every request is refused, because a token is checked
+    // against the config as written.
+    if (gatewayUnbound) {
+      await this.gatewayService.stop().catch((error: unknown) => {
+        console.warn("[gateway] the listener of the removed organization's gateway did not stop; it refuses every request and stops when the app quits:", errorText(error));
+      });
+      this.emitStateChanged("gateway-config-changed");
+    }
     // The organization is gone with this write, so its Splashtop token goes
     // now, whatever the rest of the cleanup does; cleanup sweeps again.
     await this.splashtop.sweep(await this.read()).catch((error: unknown) => {
