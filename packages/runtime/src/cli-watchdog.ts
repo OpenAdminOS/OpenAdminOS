@@ -15,9 +15,16 @@ export interface CliWatchdogLimits {
 }
 
 /**
+ * The longest delay a Node timer takes. A longer one fires after 1 ms,
+ * which would end every request at once.
+ */
+export const CLI_WATCHDOG_MAX_LIMIT_MS = 2_147_483_647;
+
+/**
  * The limits for one provider: an explicit option first, then a positive
- * whole number of milliseconds from the environment, then the default.
- * A value that is not one is ignored.
+ * whole number of milliseconds from the environment, up to
+ * `CLI_WATCHDOG_MAX_LIMIT_MS`, then the default. A value that is not one
+ * is ignored.
  */
 export function cliWatchdogLimits(input: {
   idleMs?: number;
@@ -31,7 +38,7 @@ export function cliWatchdogLimits(input: {
     const raw = environment[name]?.trim() ?? "";
     if (!/^\d+$/.test(raw)) return undefined;
     const value = Number(raw);
-    return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+    return Number.isSafeInteger(value) && value > 0 && value <= CLI_WATCHDOG_MAX_LIMIT_MS ? value : undefined;
   };
   return {
     idleMs: input.idleMs ?? fromEnv(input.env.idleMs) ?? input.defaults.idleMs,

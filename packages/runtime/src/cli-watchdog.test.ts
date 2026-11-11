@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
 
-import { CliWatchdogError, cliWatchdogLimits, startCliWatchdog } from "./cli-watchdog.js";
+import { CLI_WATCHDOG_MAX_LIMIT_MS, CliWatchdogError, cliWatchdogLimits, startCliWatchdog } from "./cli-watchdog.js";
 
 describe("startCliWatchdog", () => {
   beforeEach(() => mock.timers.enable({ apis: ["setTimeout"] }));
@@ -101,12 +101,20 @@ describe("cliWatchdogLimits", () => {
   });
 
   it("ignores a value that is not a positive whole number of milliseconds", () => {
-    for (const value of ["", "abc", "0", "-5", "1.5", "90s", "1e6", "99999999999999999999"]) {
+    for (const value of ["", "abc", "0", "-5", "1.5", "90s", "1e6", "99999999999999999999", "2147483648", "86400000000"]) {
       assert.deepEqual(
         cliWatchdogLimits({ defaults, env, environment: { IDLE_MS: value, MAX_MS: value } }),
         { ...defaults, env },
         JSON.stringify(value),
       );
     }
+  });
+
+  it("takes the longest limit a Node timer can wait, and ignores a longer one", () => {
+    assert.equal(CLI_WATCHDOG_MAX_LIMIT_MS, 2 ** 31 - 1);
+    assert.deepEqual(
+      cliWatchdogLimits({ defaults, env, environment: { IDLE_MS: String(CLI_WATCHDOG_MAX_LIMIT_MS), MAX_MS: String(CLI_WATCHDOG_MAX_LIMIT_MS + 1) } }),
+      { idleMs: CLI_WATCHDOG_MAX_LIMIT_MS, maxMs: defaults.maxMs, env },
+    );
   });
 });

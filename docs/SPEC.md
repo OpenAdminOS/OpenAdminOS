@@ -436,7 +436,8 @@ off when it is not below the cap. `OPENADMINOS_CLAUDE_CODE_IDLE_TIMEOUT_MS` and
 `OPENADMINOS_CODEX_IDLE_TIMEOUT_MS` override the idle limits, and
 `OPENADMINOS_CLAUDE_CODE_TIMEOUT_MS` and `OPENADMINOS_CODEX_TIMEOUT_MS` the
 caps, as a positive whole number of milliseconds in the environment OpenAdminOS
-starts with; any other value is ignored. The two stops end the CLI process and give distinct errors, each
+starts with, at most 2147483647, the longest a Node timer waits; any other value
+is ignored. The two stops end the CLI process and give distinct errors, each
 naming its variable: a stall says "Claude Code stopped sending output for 90
 seconds, so OpenAdminOS ended the request. Test the provider in Settings, then
 retry." and the cap says "Claude Code was still working after 15 minutes, the
