@@ -1202,14 +1202,22 @@ export interface AuditLogExportResult {
 
 /** Whether the audit log on this device is recording. */
 export interface AuditLogStatus {
-  /** The last append that failed, until an append succeeds again. */
+  /**
+   * The last append that failed. It clears only when the audit log next
+   * records the app state in full, which the next change to settings or
+   * runs does. A Graph write recorded in between does not clear it,
+   * because it also marks that run and configuration events may be
+   * missing from the log.
+   */
   lastFailure?: { failedAt: string; message: string };
   /**
    * Results of Graph writes that were sent but not recorded yet. They are
    * kept on the device and cleared only when an append records them.
    * `unreadableFile` names a file of kept results that cannot be read.
+   * `inMemoryOnly` says some of them could not be saved to disk either,
+   * so they are lost if the app quits before they are recorded.
    */
-  unrecordedResults?: { count: number; unreadableFile?: string };
+  unrecordedResults?: { count: number; unreadableFile?: string; inMemoryOnly?: true };
 }
 
 export interface TrustState {

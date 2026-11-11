@@ -110,6 +110,18 @@ describe("Settings provider section", () => {
     await waitFor(() => expect(screen.queryByText(/Graph write results are not in the audit log yet/)).not.toBeInTheDocument());
   });
 
+  it("says when kept Graph write results are only in memory and what to do", async () => {
+    const bridge = makeMockBridge({
+      getAuditLogStatus: vi.fn(async () => ({ unrecordedResults: { count: 1, inMemoryOnly: true as const } })),
+    });
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/general", bridge });
+    const notice = await screen.findByRole("alert");
+    expect(notice).toHaveTextContent("1 Graph write result is not in the audit log yet");
+    expect(notice).toHaveTextContent(
+      "This result could not be saved to disk either, so it is only in memory and lost if OpenAdminOS quits before the audit log records it. Keep OpenAdminOS open and free disk space in the OpenAdminOS data folder. OpenAdminOS saves it to disk with the next audit log entry or when this page is opened again.",
+    );
+  });
+
   it("names a file of kept Graph write results that cannot be read", async () => {
     const bridge = makeMockBridge({
       getAuditLogStatus: vi.fn(async () => ({ unrecordedResults: { count: 0, unreadableFile: "openadminos.db-audit-pending.json" } })),

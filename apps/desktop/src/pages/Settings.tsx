@@ -3581,7 +3581,8 @@ function AuditLogFailureNotice({
             {failure.message} Missed run and configuration events are recorded with the next
             change, and a change that would remove them first is refused. Graph writes are not
             sent while the audit log cannot record them. Check free disk space and permissions of
-            the OpenAdminOS data folder. This notice clears once the audit log records again.
+            the OpenAdminOS data folder. This notice clears once the audit log records the next
+            change to settings or runs.
           </p>
         </div>
       </div>
@@ -3594,7 +3595,7 @@ function AuditLogUnrecordedResultsNotice({
 }: {
   unrecorded: NonNullable<AuditLogStatus["unrecordedResults"]>;
 }) {
-  const { count, unreadableFile } = unrecorded;
+  const { count, unreadableFile, inMemoryOnly } = unrecorded;
   return (
     <div
       role="alert"
@@ -3610,6 +3611,17 @@ function AuditLogUnrecordedResultsNotice({
                 ? "1 Graph write result is not in the audit log yet"
                 : `${count.toLocaleString("en-US")} Graph write results are not in the audit log yet`}
           </div>
+          {count > 0 && inMemoryOnly && (
+            <p className="mt-1 text-sm font-medium leading-relaxed text-[var(--color-warning)]">
+              {count === 1 ? "This result could" : "Some of these results could"} not be saved to
+              disk either, so {count === 1 ? "it is" : "they are"} only in memory and lost if
+              OpenAdminOS quits before the audit log records {count === 1 ? "it" : "them"}. Keep
+              OpenAdminOS open and free disk space in the OpenAdminOS data folder
+              {unreadableFile ? `, and move ${unreadableFile} out of it` : ""}. OpenAdminOS saves{" "}
+              {count === 1 ? "it" : "them"} to disk with the next audit log entry or when this page
+              is opened again.
+            </p>
+          )}
           {count > 0 && (
             <p className="mt-1 text-sm leading-relaxed text-[var(--color-text-soft)]">
               {count === 1 ? "The write was sent and its attempt is recorded. Its result is" : "The writes were sent and their attempts are recorded. Their results are"}{" "}
@@ -3622,7 +3634,7 @@ function AuditLogUnrecordedResultsNotice({
             <p className="mt-1 text-sm leading-relaxed text-[var(--color-text-soft)]">
               {unreadableFile} in the app data folder holds results kept from an earlier session and
               cannot be read, so they cannot be recorded. Keep a copy of it for review, then remove
-              it and restart OpenAdminOS.
+              it{inMemoryOnly ? "; do not quit OpenAdminOS while results are only in memory" : " and restart OpenAdminOS"}.
             </p>
           )}
         </div>

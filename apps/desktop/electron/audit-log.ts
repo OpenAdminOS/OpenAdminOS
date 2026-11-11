@@ -36,7 +36,10 @@ import type { GraphWriteAuditSink } from "@openadminos/runtime";
  *
  * A `graph.write.result` that cannot be appended is kept in a pending
  * file next to the database until an append records it, so a write that
- * was sent always ends with its result in the log.
+ * was sent always ends with its result in the log. When that file cannot
+ * be written either, the result is only in memory: Settings and the
+ * error say so, and every later append, a status read and close try
+ * the file again.
  */
 
 /** The hash the first row is chained to. */
@@ -122,12 +125,17 @@ const AUDIT_PENDING_SUFFIX = "-audit-pending.json";
 
 /**
  * The result of a Graph write that was sent could not be appended. It is
- * kept on the device and recorded with the next append that succeeds.
+ * kept and recorded with the next append that succeeds; `inMemoryOnly`
+ * says the pending file could not hold it, so it is lost if the app quits
+ * before then.
  */
 export class AuditLogResultKeptError extends Error {
-  constructor(cause: unknown) {
+  constructor(cause: unknown, inMemoryOnly = false) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
     super(
-      `${cause instanceof Error ? cause.message : String(cause)} The request was sent. Its result is kept on this device and recorded once the audit log can record again; Settings, General shows how many results wait.`,
+      inMemoryOnly
+        ? `${reason} The request was sent. Its result could not be saved to disk either, so it is only in memory and is lost if OpenAdminOS quits before the audit log records it. Free disk space and check permissions of the OpenAdminOS data folder, and keep OpenAdminOS open; Settings, General shows how many results wait.`
+        : `${reason} The request was sent. Its result is kept on this device and recorded once the audit log can record again; Settings, General shows how many results wait.`,
       { cause },
     );
     this.name = "AuditLogResultKeptError";
@@ -139,6 +147,12 @@ export interface AuditLogUnrecordedResults {
   count: number;
   /** A pending file that could not be read; it is left in place for review. */
   unreadableFile?: string;
+  /**
+   * Some kept results could not be written to the pending file, so they
+   * are only in memory and are lost if the app quits before they are
+   * recorded. Never set for an in-memory log, which has no file.
+   */
+  inMemoryOnly?: true;
 }
 
 /** The chain as the app last left it, kept outside the table. */
@@ -175,6 +189,8 @@ export class AuditLogStore {
   private pending: AuditLogEventSeed[] = [];
   /** The pending file could not be read, so it is never overwritten. */
   private pendingUnreadable = false;
+  /** False while `pending` holds results the pending file does not. */
+  private pendingOnDisk = true;
 
   /** `path` is the app database, or ":memory:" when the host has no data folder. */
   constructor(path: string, private readonly clock: () => Date = () => new Date()) {
@@ -200,9 +216,11 @@ export class AuditLogStore {
     this.loadPending();
   }
 
+  /** Tries once more to save results only in memory, then closes the database. */
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    this.retryPendingPersist();
     this.db.close();
   }
 
@@ -257,13 +275,24 @@ export class AuditLogStore {
     return this.db.prepare("SELECT 1 FROM audit_log WHERE event_id = ?").get(eventId) !== undefined;
   }
 
-  /** What is kept because it could not be recorded yet. */
+  /**
+   * What is kept because it could not be recorded yet. Results only in
+   * memory are first written to the pending file again, so a status
+   * read after the disk has room shows them as saved.
+   */
   unrecordedResults(): AuditLogUnrecordedResults | undefined {
+    this.retryPendingPersist();
     if (this.pending.length === 0 && !this.pendingUnreadable) return undefined;
     return {
       count: this.pending.length,
       ...(this.pendingUnreadable && this.pendingPath ? { unreadableFile: basename(this.pendingPath) } : {}),
+      ...(this.pendingOnDisk ? {} : { inMemoryOnly: true as const }),
     };
+  }
+
+  /** True when every kept result is in the pending file, or there is no file to keep it in. */
+  pendingPersisted(): boolean {
+    return this.pendingOnDisk;
   }
 
   /**
@@ -289,6 +318,16 @@ export class AuditLogStore {
    * by an earlier failed `appendOrKeep` go first, in the same transaction.
    */
   append(events: readonly AuditLogEventSeed[]): number {
+    try {
+      return this.appendNow(events);
+    } catch (error) {
+      // The database refused; the pending file may take what it could not.
+      this.retryPendingPersist();
+      throw error;
+    }
+  }
+
+  private appendNow(events: readonly AuditLogEventSeed[]): number {
     const retried = this.pending;
     const all = retried.length > 0 ? [...retried, ...events] : events;
     if (all.length === 0) return 0;
@@ -480,6 +519,11 @@ export class AuditLogStore {
     return this.db.prepare("SELECT 1 FROM audit_log LIMIT 1").get() === undefined;
   }
 
+  /** Writes the pending file again when it does not hold every kept result. */
+  private retryPendingPersist(): void {
+    if (!this.pendingOnDisk) this.persistPending();
+  }
+
   /** Loads the pending file; events stored since it was written are dropped. */
   private loadPending(): void {
     if (!this.pendingPath || !existsSync(this.pendingPath)) return;
@@ -501,16 +545,27 @@ export class AuditLogStore {
 
   /**
    * Writes the pending events durably, or removes the file when none are
-   * left. A failure is only logged: the events stay in memory, and the
-   * next append records them or writes the file again.
+   * left. When it cannot, the events stay in memory only and
+   * `pendingOnDisk` says so until a later append, status read or close
+   * writes the file. An unreadable pending file is never overwritten;
+   * once the admin has moved it away, the next try writes a new one.
    */
   private persistPending(): void {
-    if (!this.pendingPath || this.pendingUnreadable) return;
+    if (!this.pendingPath) return;
+    if (this.pendingUnreadable) {
+      if (existsSync(this.pendingPath)) {
+        this.pendingOnDisk = this.pending.length === 0;
+        return;
+      }
+      this.pendingUnreadable = false;
+    }
     try {
       if (this.pending.length === 0) rmSync(this.pendingPath, { force: true });
       else writeFileDurablySync(this.pendingPath, `${JSON.stringify(this.pending)}\n`);
+      this.pendingOnDisk = true;
     } catch (error) {
-      console.warn(`[audit] ${basename(this.pendingPath)} could not be updated; the events stay in memory until the audit log records them. ${error instanceof Error ? error.message : String(error)}`);
+      this.pendingOnDisk = this.pending.length === 0;
+      console.warn(`[audit] ${basename(this.pendingPath)} could not be updated; the events are only in memory until the audit log records them or the file can be written. ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -614,7 +669,7 @@ export function graphWriteAuditSink(
           details: { ...result },
         }]);
       } catch (error) {
-        throw new AuditLogResultKeptError(error);
+        throw new AuditLogResultKeptError(error, !store.pendingPersisted());
       }
     },
   };

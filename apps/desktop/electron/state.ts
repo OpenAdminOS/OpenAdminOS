@@ -1794,7 +1794,12 @@ export class AppStateStore {
   private readonly auditedRuns = new Map<string, string>();
   /** Whether events stored before the audit log existed were imported in this process. */
   private auditLogImported = false;
-  /** The last audit log append that failed, shown in Settings until an append succeeds. */
+  /**
+   * The last audit log append that failed, shown in Settings. Only a
+   * `recordAuditLog` of the latest state clears it: it also tells the
+   * next state write to record the previous state first, so a later
+   * Graph write that is recorded leaves it in place.
+   */
   private auditLogFailure: { failedAt: string; message: string } | undefined;
   /** A hosted-provider consent is only in the Chat database, so the next record imports it. */
   private auditConsentsPending = false;
@@ -9078,7 +9083,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
   /**
    * What Settings shows about the audit log: the last append that failed,
-   * until one succeeds, and the Graph write results kept until recorded.
+   * until the latest state is recorded in full, and the Graph write
+   * results kept until recorded, with whether some are only in memory.
    */
   async getAuditLogStatus(): Promise<AuditLogStatus> {
     const unrecorded = this.auditLog.unrecordedResults();

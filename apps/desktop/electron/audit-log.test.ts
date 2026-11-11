@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -397,17 +397,111 @@ describe("Graph write results the audit log could not record", () => {
     };
   }
 
-  /** A store whose appends fail while `failing` is set, as with a full disk. */
+  /**
+   * A store whose database refuses appends while `failing` is set, as
+   * with a full disk. The refusal is planted below `append`, so what
+   * `append` does after a refusal still runs.
+   */
   function failingStore(path: string): { store: AuditLogStore; fail(on: boolean): void } {
     const store = new AuditLogStore(path);
-    const append = store.append.bind(store);
+    const inner = store as unknown as { appendNow(events: readonly AuditLogEventSeed[]): number };
+    const appendNow = inner.appendNow.bind(store);
     let failing = false;
-    store.append = (events) => {
+    inner.appendNow = (events) => {
       if (failing) throw new Error("database or disk is full");
-      return append(events);
+      return appendNow(events);
     };
     return { store, fail: (on) => (failing = on) };
   }
+
+  /** Makes the pending file unwritable by putting a folder with a file in it at its path. */
+  function blockPendingFile(path: string): () => void {
+    const pendingPath = `${path}-audit-pending.json`;
+    mkdirSync(pendingPath);
+    writeFileSync(join(pendingPath, "keep"), "");
+    return () => rmSync(pendingPath, { recursive: true, force: true });
+  }
+
+  it("says a kept result is only in memory while the pending file cannot be written, and saves it once it can", async () => {
+    await withDatabase((path) => {
+      const first = failingStore(path);
+      const unblock = blockPendingFile(path);
+      first.fail(true);
+      assert.throws(() => first.store.appendOrKeep([result("attempt-1")]), /database or disk is full/);
+      assert.deepEqual(first.store.unrecordedResults(), { count: 1, inMemoryOnly: true });
+      assert.equal(first.store.pendingPersisted(), false);
+
+      // A later append the database refuses tries the file again.
+      unblock();
+      assert.throws(() => first.store.append([event("refused")]), /database or disk is full/);
+      assert.equal(first.store.pendingPersisted(), true);
+      assert.deepEqual(first.store.unrecordedResults(), { count: 1 });
+      assert.deepEqual(JSON.parse(readFileSync(`${path}-audit-pending.json`, "utf8")).map((entry: { id: string }) => entry.id), ["graph-write:attempt-1:result"]);
+      first.store.close();
+
+      // So it survives a restart.
+      const second = new AuditLogStore(path);
+      try {
+        assert.deepEqual(second.unrecordedResults(), { count: 1 });
+      } finally {
+        second.close();
+      }
+    });
+  });
+
+  it("tries again to save a result only in memory when the status is read and when it closes", async () => {
+    await withDatabase((path) => {
+      const read = failingStore(path);
+      let unblock = blockPendingFile(path);
+      read.fail(true);
+      assert.throws(() => read.store.appendOrKeep([result("attempt-1")]));
+      assert.equal(read.store.unrecordedResults()?.inMemoryOnly, true);
+      unblock();
+      assert.deepEqual(read.store.unrecordedResults(), { count: 1 }, "a status read saves it");
+      assert.ok(existsSync(`${path}-audit-pending.json`));
+
+      // The file goes and its path is blocked again, so the next result is only in memory.
+      rmSync(`${path}-audit-pending.json`);
+      unblock = blockPendingFile(path);
+      assert.throws(() => read.store.appendOrKeep([result("attempt-2")]));
+      assert.equal(read.store.pendingPersisted(), false);
+      unblock();
+      read.store.close();
+      const reopened = new AuditLogStore(path);
+      try {
+        assert.deepEqual(reopened.unrecordedResults(), { count: 2 }, "close saved both");
+      } finally {
+        reopened.close();
+      }
+    });
+  });
+
+  it("says the result is only in memory in the error when the pending file cannot be written", async () => {
+    await withDatabase(async (path) => {
+      const { store, fail } = failingStore(path);
+      const unblock = blockPendingFile(path);
+      const warnings: string[] = [];
+      try {
+        const graph = createGraphAdapter({
+          tokenProvider: async () => "token",
+          writeAudit: graphWriteAuditSink(store, { tenantId: "tenant-1", runId: "run-1" }),
+          log: (level, message) => {
+            if (level === "warn") warnings.push(message);
+          },
+          fetchImpl: (async () => {
+            fail(true);
+            return new Response(null, { status: 204 });
+          }) as typeof fetch,
+        });
+        await graph.request({ method: "PATCH", path: "/users/user-1", body: { department: "Finance" } });
+        assert.match(warnings[0] ?? "", /The request was sent\. Its result could not be saved to disk either, so it is only in memory and is lost if OpenAdminOS quits before the audit log records it\. Free disk space and check permissions of the OpenAdminOS data folder, and keep OpenAdminOS open; Settings, General shows how many results wait\.$/);
+        assert.doesNotMatch(warnings[0] ?? "", /kept on this device/);
+      } finally {
+        unblock();
+        store.close();
+      }
+    });
+  });
 
   it("keeps a result that cannot be appended, across a restart, until an append records it", async () => {
     await withDatabase((path) => {
@@ -457,8 +551,13 @@ describe("Graph write results the audit log could not record", () => {
         assert.deepEqual(store.unrecordedResults(), { count: 0, unreadableFile: "openadminos.db-audit-pending.json" });
         fail(true);
         assert.throws(() => store.appendOrKeep([result("attempt-2")]));
-        assert.deepEqual(store.unrecordedResults(), { count: 1, unreadableFile: "openadminos.db-audit-pending.json" });
+        // The unreadable file is kept, so the new result is only in memory.
+        assert.deepEqual(store.unrecordedResults(), { count: 1, unreadableFile: "openadminos.db-audit-pending.json", inMemoryOnly: true });
         assert.equal(readFileSync(`${path}-audit-pending.json`, "utf8"), "not json");
+        // Once the admin moves it away, the next try saves the result in a new file.
+        rmSync(`${path}-audit-pending.json`);
+        assert.deepEqual(store.unrecordedResults(), { count: 1 });
+        assert.deepEqual(JSON.parse(readFileSync(`${path}-audit-pending.json`, "utf8")).map((entry: { id: string }) => entry.id), ["graph-write:attempt-2:result"]);
       } finally {
         store.close();
       }
