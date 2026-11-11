@@ -258,3 +258,41 @@ describe("createLemonadeLlm sends only a listed chat model", () => {
     });
   });
 });
+
+describe("createLemonadeLlm when the model list cannot be read", () => {
+  const send = async (llm: ReturnType<typeof createLemonadeLlm>, mode: "complete" | "stream", signal?: AbortSignal) => {
+    if (mode === "complete") return llm.complete({ prompt: "x", ...(signal ? { signal } : {}) });
+    for await (const _ of llm.stream({ prompt: "x", ...(signal ? { signal } : {}) })) { /* nothing */ }
+  };
+
+  for (const mode of ["complete", "stream"] as const) {
+    it(`${mode}: names an unreadable list, a timeout and a stop, never a missing model`, async () => {
+      let posted = false;
+      await withFetch(async (input) => {
+        if (!String(input).endsWith("/models")) posted = true;
+        return new Response("{not json", { status: 200, headers: { "content-type": "application/json" } });
+      }, async () => {
+        await assert.rejects(send(createLemonadeLlm({ defaultModel: "m" }), mode), /^Error: Lemonade answered http:\/\/127\.0\.0\.1:13305\/v1\/models with a model list OpenAdminOS could not read\. Try again\.$/);
+      });
+
+      // Headers arrive, then the body stalls until the request is aborted.
+      const stalled: typeof fetch = async (input, init) => {
+        if (!String(input).endsWith("/models")) posted = true;
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            init?.signal?.addEventListener("abort", () => controller.error(new DOMException("aborted", "AbortError")), { once: true });
+          },
+        });
+        return new Response(body, { status: 200, headers: { "content-type": "application/json" } });
+      };
+      await withFetch(stalled, async () => {
+        await assert.rejects(send(createLemonadeLlm({ defaultModel: "m", timeoutMs: 30 }), mode), /^Error: Lemonade timed out after 30ms at http:\/\/127\.0\.0\.1:13305\/v1\/models\.$/);
+        const controller = new AbortController();
+        const pending = send(createLemonadeLlm({ defaultModel: "m" }), mode, controller.signal);
+        setTimeout(() => controller.abort(), 10);
+        await assert.rejects(pending, /^Error: Lemonade request stopped by user\.$/);
+      });
+      assert.equal(posted, false, "no chat request is sent without a readable list");
+    });
+  }
+});

@@ -143,8 +143,16 @@ export function createOpenAiCompatibleLlm(
           `${name} responded with HTTP ${response.status} at ${modelsUrl}.`,
       );
     }
-    const payload = (await response.json().catch(() => ({}))) as ModelsResponse;
-    const data = Array.isArray(payload.data) ? payload.data : [];
+    let data: OpenAiCompatibleModel[];
+    try {
+      const payload = (await response.json()) as ModelsResponse;
+      if (!Array.isArray(payload.data)) throw new TypeError("The model list is not an array.");
+      data = payload.data;
+    } catch (error) {
+      // A stopped or timed-out read is that, not a missing model.
+      if (error instanceof Error && error.name === "AbortError") throw requestError(error, modelsUrl, callerSignal);
+      throw new Error(`${name} answered ${modelsUrl} with a model list OpenAdminOS could not read. Try again.`);
+    }
     if ((server.chatModelIds ?? allModelIds)(data).includes(model)) return;
     throw new Error(server.unlistedModelMessage(model, data.find((entry) => entry.id === model)));
   };
