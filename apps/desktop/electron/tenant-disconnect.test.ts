@@ -106,6 +106,13 @@ describe("tenant disconnect", () => {
           .get("tenant-1") as { count: number };
         assert.equal(row.count, 0, `${table} still contains tenant data`);
       }
+      // The append-only audit log outlives the disconnect, including the
+      // removed run and the disconnect itself.
+      const audited = inspected
+        .prepare(`SELECT type FROM audit_log WHERE tenant_id = ? ORDER BY seq`)
+        .all("tenant-1") as Array<{ type: string }>;
+      assert.ok(audited.some((row) => row.type === "run.queued"));
+      assert.ok(audited.some((row) => row.type === "microsoft365.disconnected"));
       assert.equal(
         (inspected.prepare(`SELECT COUNT(*) AS count FROM chat_conversations`).get() as { count: number }).count,
         0,

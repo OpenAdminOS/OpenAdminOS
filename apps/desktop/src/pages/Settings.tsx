@@ -2942,8 +2942,11 @@ function GeneralSection() {
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      // A failed integrity check carries its own next step; another folder would not help.
       setRunHistoryError(
-        `Audit log export failed: ${message} Try again and choose a writable local folder in the save dialog.`,
+        /integrity check/.test(message)
+          ? `Audit log export failed: ${message}`
+          : `Audit log export failed: ${message} Try again and choose a writable local folder in the save dialog.`,
       );
     } finally {
       setAuditExportBusy(false);
@@ -3140,7 +3143,7 @@ function GeneralSection() {
         />
         <SettingRow
           id="audit-log-export"
-          description="Exports retained run history, write-confirmation events, connector delivery audit entries, recorded hosted-provider consent acknowledgements, and changes to connections, organizations, provider, model, public references and schedule assignments. Old run records may already be absent because of retention. Those changes are kept independently of it."
+          description="Exports run events, write confirmations, Graph write attempts and results, connector deliveries, hosted-provider consent acknowledgements, and changes to connections, organizations, provider, model, public references and schedule assignments. Events are recorded when they happen and kept for 10 years, whatever run-history retention removes."
           control={
             <AuditLogExportControls
               format={auditExportFormat}

@@ -1094,23 +1094,52 @@ delete a run that is linked to or pinned in a Workspace, currently queued or
 running, or awaiting write confirmation. Settings surfaces the last prune result
 so local deletion is not silent.
 
+Audit events live in an append-only `audit_log` table in the app database
+(`openadminos.db`), written when each event happens, never rebuilt at export
+time. Each row stores the canonical JSON of the event, the hash of the row
+before it and its own SHA-256 (`previousHash + canonical JSON event`, the first
+row chained to 64 zeroes), computed on insert inside one transaction so the
+chain stays linear. SQLite triggers refuse every UPDATE and every replace, and
+refuse a DELETE unless it removes the oldest row and that row was recorded more
+than `AUDIT_LOG_RETENTION_DAYS` (3,650 days, the longest run-history retention
+Settings allows) ago; the store removes such rows oldest first. Run-history
+pruning and Disconnect never delete audit rows: the audit of a disconnected
+organization, its runs and the disconnect itself outlive it (decided
+2026-11-11). Run events (queued, started, write confirmation requested,
+accepted and rejected, finished, connector deliveries in run logs),
+configuration changes and Nova connector deliveries are derived from each
+write to `state.json` and appended right after it, under event ids fixed by
+the run and event, so a missed append is made by the next write and nothing is
+recorded twice. Hosted-provider consent is appended when it is given. Every
+Microsoft Graph write (any method but GET) records `graph.write.attempted`
+before the request is sent and `graph.write.result` after it (ok or failed,
+HTTP status, Graph `request-id`, error class, requests sent, duration), sharing
+one attempt id, with the run id, tenant id, agent slug, method and path, and a SHA-256 digest of the body, never the body. If the attempt cannot
+be recorded, the write is refused and nothing is sent; a result that cannot be
+recorded is reported in the run log. On upgrade, the run history, configuration
+changes, Nova connector deliveries and consent events stored by earlier
+versions are imported once, in time order, so nothing still on the device is
+lost; events of runs pruned before the upgrade cannot be recovered.
+
 Audit log export lives in Settings -> General next to run-history retention.
 It is an explicit local save only, never an upload. The native save dialog writes
 host-generated audit content directly in the main process, so retained histories
 above the renderer text-file IPC limit remain exportable. Cancellation writes no
 file and the response contains metadata rather than the full audit payload.
-JSON and CSV exports include
-retained run-history events, write-confirmation request/accepted/rejected
-events without exporting the typed phrase content, connector delivery audit
-entries from `ConnectorAuditEntry`, and hosted-provider consent events recorded
-in the SQLite `audit_events` table from this version onward. The export header
-records the active run-history retention policy and the last prune result when
-present so missing old runs are explainable. Each exported event carries a
-SHA-256 hash chained as
+JSON and CSV exports read the `audit_log` table in the order events were
+recorded: run events, write-confirmation request/accepted/rejected events
+without the typed phrase content, Graph write attempts and results, connector
+delivery audit entries from `ConnectorAuditEntry`, and hosted-provider consent
+events. The export first verifies the whole stored chain; a broken chain is a
+designed error that names the entry and exports nothing. The export header
+records the active run-history retention policy and the last prune result.
+Each exported event carries a SHA-256 hash chained as
 `previousHash + canonical JSON event without sha256`, starting from 64 zeroes;
-JSON records the start and final hash in `hashChain`, and CSV includes the hash
-and chain metadata columns. Signed or third-party cryptographic timestamps are
-deferred.
+JSON records the start and final hash in `hashChain` plus the verified stored
+chain (`hashChain.stored`), and CSV includes the hash and chain metadata
+columns. Without filters the export chain equals the stored chain. Exports can
+be limited to a date range. Signed or third-party
+cryptographic timestamps are deferred.
 
 The export also includes configuration changes, with source
 `configuration-change`: Microsoft 365 connected (including a reconnect) and
@@ -1131,7 +1160,8 @@ identifiers and names needed to see what changed. Events are derived in the host
 by comparing the state before and after each write to `state.json`, so every
 flow records them, including organizations created and removed with their
 tenant. They are stored in `state.json` under `configurationAudit`, apart from
-run history, so run retention never prunes them; the newest 10,000 are kept.
+run history, so run retention never prunes them; the newest 10,000 are kept
+there, and each is also appended to the `audit_log` table when it is written.
 They never contain tokens, secrets, prompts or tenant content. Recording and
 export are free features.
 

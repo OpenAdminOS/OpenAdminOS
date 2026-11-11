@@ -105,6 +105,14 @@ export class OrganizationBoundaryError extends Error {
 export const TENANT_DISCONNECTING_COPY = TENANT_CLOSED_COPY;
 
 /** What a Splashtop change run needs at apply: the team and a request bound to the organization's host and token. */
+/** How a run uses its Graph client: cancellation, sign-in, and what its writes are audited under. */
+export interface RunGraphExecution {
+  signal: AbortSignal;
+  allowInteractive: boolean;
+  onAuthRequired(): Promise<void>;
+  audit?: { runId: string; agentSlug: string };
+}
+
 export interface SplashtopRunClient {
   teamId: number;
   /** Refuses anything but the request kinds the host plans, for this team. */
@@ -136,7 +144,7 @@ export interface RunServiceHost {
   buildGraph(
     pinnedTenantId?: string,
     agentScopes?: string[],
-    execution?: { signal: AbortSignal; allowInteractive: boolean; onAuthRequired(): Promise<void> },
+    execution?: RunGraphExecution,
   ): Promise<{
     createGraph: (
       log: (
@@ -1009,9 +1017,10 @@ export class RunService {
     return persisted.runs.find((run) => run.id === id);
   }
 
-  private executionOptions(run: RunRecord, signal: AbortSignal) {
+  private executionOptions(run: RunRecord, signal: AbortSignal): RunGraphExecution {
     return {
       signal,
+      audit: { runId: run.id, agentSlug: run.agentSlug },
       allowInteractive: run.trigger !== "schedule",
       onAuthRequired: async () => {
         const message = "Waiting for Microsoft sign-in. Complete sign-in in your browser, or select Cancel run. This request expires after five minutes.";

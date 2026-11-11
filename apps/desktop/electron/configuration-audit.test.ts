@@ -349,9 +349,9 @@ describe("configuration audit events", () => {
       assert.equal((changes[0]!.details as Record<string, unknown>).organizationId, `org-${fabrikam.id}`);
       assert.equal((changes[0]!.details as Record<string, unknown>).organizationName, "Fabrikam");
       assert.equal(changes[0]!.tenantId, fabrikam.id);
-      assert.match(document.retention.note, /Configuration changes are kept independently of run retention/);
-      // The pruned run is gone from the export; the changes are not.
-      assert.equal(document.events.some((event) => event.runId === "run-old"), false);
+      assert.match(document.retention.note, /kept for 3,650 days, independent of run-history retention/);
+      // The audit log keeps the events of the pruned run as well as the changes.
+      assert.ok(document.events.some((event) => event.runId === "run-old"));
       assert.ok(document.events.some((event) => event.runId === "run-new"));
 
       let previousHash = ZERO_HASH;
@@ -550,7 +550,7 @@ describe("configuration audit, design round review (Muse C, G, H, I, K)", () => 
       const columns = header!.split(",");
       assert.ok(columns.includes("id"));
       assert.ok(columns.includes("retentionNote"));
-      assert.match(row!, /up to the newest 10,000/);
+      assert.match(row!, /older than the newest 10,000 kept until then/);
     } finally {
       await fixture.close();
     }

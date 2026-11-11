@@ -18,6 +18,7 @@ interface HarnessOptions {
 function makeHarness(options: HarnessOptions = {}) {
   const requests: GraphRequestInput[] = [];
   const invalidations: Array<{ tenantId: string; resources: string[] }> = [];
+  const executions: unknown[] = [];
   let service: RunService | undefined;
   const persisted: RunPersistedState = {
     activeProviderId: "ollama",
@@ -68,11 +69,14 @@ function makeHarness(options: HarnessOptions = {}) {
     buildLlm: async () => {
       throw new Error("LLM must not be used by rollback apply.");
     },
-    buildGraph: async (pinnedTenantId?: string) => ({
-      createGraph: () => graph,
-      tenantId: pinnedTenantId ?? "tenant-1",
-      tenantSession: {} as TenantSession,
-    }),
+    buildGraph: async (pinnedTenantId?: string, _scopes?: string[], execution?: unknown) => {
+      executions.push(execution);
+      return {
+        createGraph: () => graph,
+        tenantId: pinnedTenantId ?? "tenant-1",
+        tenantSession: {} as TenantSession,
+      };
+    },
     readConnectorConfigs: async () => ({}),
     connectorSecretsFor: () => ({}) as never,
     selfTrainingPromptOverlay: () => undefined,
@@ -91,7 +95,7 @@ function makeHarness(options: HarnessOptions = {}) {
   } as unknown as RunServiceHost;
   service = new RunService(host);
 
-  return { service, persisted, requests, invalidations };
+  return { service, persisted, requests, invalidations, executions };
 }
 
 function planWithActions(count: number) {
@@ -126,7 +130,7 @@ async function waitForTerminal(
 
 describe("rollback apply", () => {
   it("applies confirmed actions strictly in order and records each step", async () => {
-    const { service, persisted, requests, invalidations } = makeHarness();
+    const { service, persisted, requests, invalidations, executions } = makeHarness();
     const queued = await service.startRollbackRun({
       tenantId: "tenant-1",
       baselineId: "baseline-1",
@@ -153,6 +157,8 @@ describe("rollback apply", () => {
       ["completed", "completed"],
     );
     assert.match(run?.summary ?? "", /2 objects rolled back/);
+    // Its Graph writes are audited under the run.
+    assert.deepEqual((executions[0] as { audit?: unknown }).audit, { runId: queued.id, agentSlug: "baseline-rollback" });
     assert.match(run?.summary ?? "", /1 change still need/);
     // System runs pass their write scopes to invalidation, so the
     // scope family is stale-marked, not only the resources whose
@@ -239,7 +245,7 @@ describe("rollback apply", () => {
 
 describe("external gateway proposal apply", () => {
   it("queues, gates, and applies an external proposal through the same path", async () => {
-    const { service, persisted, requests } = makeHarness();
+    const { service, persisted, requests, executions } = makeHarness();
     const queued = await service.startExternalProposalRun({
       tenantId: "tenant-1",
       clientName: "Claude Code",
@@ -278,6 +284,7 @@ describe("external gateway proposal apply", () => {
     assert.equal(run?.status, "completed");
     assert.equal(requests.length, 1);
     assert.match(run?.summary ?? "", /1 proposed change applied/);
+    assert.deepEqual((executions[0] as { audit?: unknown }).audit, { runId: queued.id, agentSlug: "external-proposal" });
   });
 
   it("refuses to queue an empty proposal", async () => {

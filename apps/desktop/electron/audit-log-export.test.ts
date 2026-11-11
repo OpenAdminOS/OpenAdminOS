@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
 
 import type {
@@ -14,6 +15,7 @@ import type {
 } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 
+import { AuditLogIntegrityError } from "./audit-log.js";
 import { IntelligenceSqliteStore } from "./intune-chat/sqlite-store.js";
 import { AppStateStore } from "./state.js";
 
@@ -107,8 +109,84 @@ describe("audit log export", () => {
   });
 });
 
-async function makeStoreFixture(): Promise<{
+describe("append-only audit log in the export", () => {
+  it("records events when they happen and keeps a pruned run's events", async () => {
+    const fixture = await makeStoreFixture();
+    try {
+      // A write records what the state shows, without an export.
+      await fixture.store.setActiveProvider("openai");
+      const db = new DatabaseSync(join(fixture.dir, "openadminos.db"), { readOnly: true });
+      const recorded = db.prepare("SELECT type FROM audit_log WHERE run_id = 'run-old' ORDER BY seq").all() as Array<{ type: string }>;
+      db.close();
+      assert.deepEqual(recorded.map((row) => row.type), ["run.queued", "run.started", "run.completed"]);
+
+      await fixture.store.setRunHistoryRetentionSettings({ neverPrune: false, keepLastRuns: 1, keepDays: null });
+      const pruned = await fixture.store.pruneRunHistoryNow();
+      assert.equal(pruned.prunedCount, 1);
+      const state = JSON.parse(await readFile(join(fixture.dir, "state.json"), "utf8")) as { runs: RunRecord[] };
+      assert.deepEqual(state.runs.map((run) => run.id), ["run-write"]);
+
+      const document = JSON.parse((await fixture.store.exportAuditLog({ format: "json" })).content) as {
+        events: Array<{ runId?: string; type: string }>;
+      };
+      assert.deepEqual(
+        document.events.filter((event) => event.runId === "run-old").map((event) => event.type),
+        ["run.queued", "run.started", "run.completed"],
+      );
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("adds nothing twice across exports and a restart, and an unfiltered export repeats the stored chain", async () => {
+    const fixture = await makeStoreFixture();
+    try {
+      const first = await fixture.store.exportAuditLog({ format: "json" });
+      const again = await fixture.store.exportAuditLog({ format: "json" });
+      assert.equal(again.eventCount, first.eventCount);
+      assert.equal(again.hashChain.finalHash, first.hashChain.finalHash);
+      // A second store on the same files, as after a restart.
+      const reopened = new AppStateStore({ filePath: join(fixture.dir, "state.json"), tokenStore, userDataPath: fixture.dir, statsApiUrl: "" });
+      try {
+        const restarted = await reopened.exportAuditLog({ format: "json" });
+        assert.equal(restarted.eventCount, first.eventCount);
+        assert.equal(restarted.hashChain.finalHash, first.hashChain.finalHash);
+        const document = JSON.parse(restarted.content) as { hashChain: { stored: { verified: boolean; rowCount: number; finalHash: string } } };
+        assert.deepEqual(
+          { verified: document.hashChain.stored.verified, rowCount: document.hashChain.stored.rowCount, finalHash: document.hashChain.stored.finalHash },
+          { verified: true, rowCount: first.eventCount, finalHash: first.hashChain.finalHash },
+        );
+      } finally {
+        reopened.close();
+      }
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("refuses to export a stored chain that fails verification", async () => {
+    const fixture = await makeStoreFixture();
+    try {
+      await fixture.store.exportAuditLog({ format: "json" });
+      const db = new DatabaseSync(join(fixture.dir, "openadminos.db"));
+      db.exec("DROP TRIGGER audit_log_refuse_update");
+      db.prepare("UPDATE audit_log SET sha256 = ? WHERE seq = 2").run("f".repeat(64));
+      db.close();
+      await assert.rejects(fixture.store.exportAuditLog({ format: "csv" }), (error) => {
+        assert.ok(error instanceof AuditLogIntegrityError);
+        assert.match(error.message, /failed its integrity check at entry 2/);
+        return true;
+      });
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+});
+
+async function makeStoreFixture(options: { extraRuns?: RunRecord[] } = {}): Promise<{
   store: AppStateStore;
+  dir: string;
   cleanup(): Promise<void>;
 }> {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-audit-export-"));
@@ -119,7 +197,7 @@ async function makeStoreFixture(): Promise<{
       {
         activeProviderId: "ollama",
         installedAgents: [agent],
-        runs: [oldRun(), writeRun()],
+        runs: [oldRun(), writeRun(), ...(options.extraRuns ?? [])],
         tenants: [tenant],
         activeTenantId: tenant.id,
         runHistoryRetention: {
@@ -160,6 +238,7 @@ async function makeStoreFixture(): Promise<{
 
   return {
     store,
+    dir,
     async cleanup() {
       store.close();
       await rm(dir, { recursive: true, force: true });

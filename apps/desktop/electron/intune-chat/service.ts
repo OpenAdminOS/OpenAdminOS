@@ -119,7 +119,7 @@ import {
   trimForPrompt,
   updateJobTenantProgress,
 } from "../state-helpers.js";
-import { IntelligenceSqliteStore } from "./sqlite-store.js";
+import { IntelligenceSqliteStore, type HostedProviderConsentAuditRecord } from "./sqlite-store.js";
 import { runAgenticChat, type RunAgenticChatInput } from "./agentic-loop.js";
 import {
   GRAPH_CACHE_RESOURCES,
@@ -469,6 +469,8 @@ export interface ChatServiceHost {
    * for a Chat answer. Undefined when it has none.
    */
   splashtopChatContext?(tenant: TenantRecord): Promise<SplashtopChatContext | undefined>;
+  /** Appends a hosted-provider consent to the audit log. Without it, consent is kept in the Chat database. */
+  recordHostedProviderConsent?(record: HostedProviderConsentAuditRecord): void;
   readonly appVersion: string;
   readonly userDataPath: string | undefined;
   readonly intelligenceStore: IntelligenceSqliteStore | undefined;
@@ -761,9 +763,12 @@ export class IntuneChatService {
     workspaceContext?: WorkspacePromptContextSummary;
   }): void {
     const primaryTenantId = input.tenantIds[0];
-    if (!this.host.intelligenceStore || !primaryTenantId) return;
+    const store = this.host.intelligenceStore;
+    const record = this.host.recordHostedProviderConsent?.bind(this.host)
+      ?? (store ? (consent: HostedProviderConsentAuditRecord) => store.recordHostedProviderConsentAuditEvent(consent) : undefined);
+    if (!record || !primaryTenantId) return;
     try {
-      this.host.intelligenceStore.recordHostedProviderConsentAuditEvent({
+      record({
         id: `event_${randomUUID()}`,
         tenantId: primaryTenantId,
         source: input.scope,

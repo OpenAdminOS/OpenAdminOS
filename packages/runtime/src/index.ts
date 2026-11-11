@@ -149,8 +149,14 @@ export {
 } from "./msal.js";
 export {
   createGraphAdapter,
+  GraphWriteAuditError,
   type GraphAdapterLogger,
   type GraphAdapterOptions,
+  type GraphWriteAuditAttempt,
+  type GraphWriteAuditResult,
+  type GraphWriteAuditSink,
+  type GraphWriteErrorClass,
+  type GraphWriteMethod,
 } from "./graph-adapter.js";
 export {
   detectEntraTier,

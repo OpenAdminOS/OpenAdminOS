@@ -1,3 +1,5 @@
+import { createHash, randomUUID } from "node:crypto";
+
 import { awaitWithSignal } from "./cancellation.js";
 import { scopesFromAccessToken } from "./token-scopes.js";
 import { GraphAccessDeniedError, type GraphAccessContext } from "@openadminos/agent-sdk";
@@ -44,6 +46,71 @@ export interface GraphAdapterOptions {
    * call-site behaviour for tests and ad-hoc usage).
    */
   log?: GraphAdapterLogger;
+  /**
+   * Records every Graph write (any method but GET) in the host's audit
+   * log: `attempted` before the request is sent, `result` after it.
+   * When `attempted` rejects, the write is refused and nothing is sent.
+   */
+  writeAudit?: GraphWriteAuditSink;
+}
+
+export type GraphWriteMethod = "POST" | "PATCH" | "PUT" | "DELETE";
+
+/** A Graph write about to be sent. It never carries the request body, only its digest. */
+export interface GraphWriteAuditAttempt {
+  /** Shared by the attempt and its result. */
+  attemptId: string;
+  method: GraphWriteMethod;
+  /** Path relative to the Graph base URL, without the query string. */
+  path: string;
+  /** SHA-256 hex of the JSON body sent, when the write has one. */
+  bodyDigest?: string;
+}
+
+/**
+ * Why a write failed: `not-sent` when it failed before any request left
+ * the device, for example while acquiring a token.
+ */
+export type GraphWriteErrorClass =
+  | "not-sent"
+  | "cancelled"
+  | "timeout"
+  | "network-error"
+  | "unauthorized"
+  | "access-denied"
+  | "http-error";
+
+export interface GraphWriteAuditResult {
+  attemptId: string;
+  method: GraphWriteMethod;
+  path: string;
+  outcome: "ok" | "failed";
+  /** HTTP status of the last response, when one arrived. */
+  status?: number;
+  /** Graph `request-id` (or `client-request-id`) of the last response. */
+  requestId?: string;
+  errorClass?: GraphWriteErrorClass;
+  /** Requests sent, including retries. */
+  attempts: number;
+  durationMs: number;
+}
+
+export interface GraphWriteAuditSink {
+  /** Must finish recording before the write is sent; a rejection refuses the write. */
+  attempted(attempt: GraphWriteAuditAttempt): void | Promise<void>;
+  /** A rejection is reported in the run log; the write already happened. */
+  result(result: GraphWriteAuditResult): void | Promise<void>;
+}
+
+/** The audit log could not record a Graph write, so it was not sent. */
+export class GraphWriteAuditError extends Error {
+  constructor(method: GraphWriteMethod, path: string, cause: unknown) {
+    super(
+      `${method} ${path} was not sent: the audit log could not record it. ${describe(cause)} Check free disk space and permissions of the OpenAdminOS data folder, then run it again.`,
+      { cause },
+    );
+    this.name = "GraphWriteAuditError";
+  }
 }
 
 /** Cap on the raw response sample stored in log metadata. */
@@ -152,6 +219,7 @@ export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
         baseUrl,
         log: options.log,
         accessContext: options.accessContext,
+        writeAudit: options.writeAudit,
       });
     },
 
@@ -200,6 +268,7 @@ export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
         baseUrl,
         log: options.log,
         accessContext: options.accessContext,
+        writeAudit: options.writeAudit,
         ...(input.signal ? { signal: options.signal ? AbortSignal.any([options.signal, input.signal]) : input.signal } : {}),
       });
     },
@@ -251,6 +320,8 @@ interface GraphRequestInput {
   baseUrl?: string;
   /** Optional adapter logger; emits debug/info/warn at request boundaries. */
   log?: GraphAdapterLogger;
+  /** Audit sink for writes; see GraphAdapterOptions.writeAudit. */
+  writeAudit?: GraphWriteAuditSink;
   /**
    * Caller cancellation. Distinct from the per-attempt timeout: when
    * this aborts the request is abandoned without a retry, because the
@@ -259,7 +330,73 @@ interface GraphRequestInput {
   signal?: AbortSignal;
 }
 
+/** What the requests of one call showed, for the audit result of a write. */
+interface GraphExchange {
+  attempts: number;
+  status?: number;
+  requestId?: string;
+}
+
 async function graphRequest<T>(input: GraphRequestInput): Promise<T> {
+  const sink = input.method === "GET" ? undefined : input.writeAudit;
+  const exchange: GraphExchange = { attempts: 0 };
+  if (!sink) return sendGraphRequest<T>(input, exchange);
+  const method = input.method as GraphWriteMethod;
+  const path = input.baseUrl ? shortenPath(input.url, input.baseUrl) : input.url.split("?")[0] ?? input.url;
+  const attemptId = randomUUID();
+  try {
+    await sink.attempted({
+      attemptId,
+      method,
+      path,
+      ...(input.body !== undefined
+        ? { bodyDigest: createHash("sha256").update(input.body).digest("hex") }
+        : {}),
+    });
+  } catch (cause) {
+    throw new GraphWriteAuditError(method, path, cause);
+  }
+  const startMs = Date.now();
+  const record = async (result: Pick<GraphWriteAuditResult, "outcome" | "errorClass">) => {
+    try {
+      await sink.result({
+        attemptId,
+        method,
+        path,
+        ...result,
+        ...(exchange.status !== undefined ? { status: exchange.status } : {}),
+        ...(exchange.requestId ? { requestId: exchange.requestId } : {}),
+        attempts: exchange.attempts,
+        durationMs: Date.now() - startMs,
+      });
+    } catch (error) {
+      const message = `The audit log could not record the result of ${method} ${path}. ${describe(error)}`;
+      if (input.log) input.log("warn", message);
+      else console.warn(`[graph] ${message}`);
+    }
+  };
+  try {
+    const value = await sendGraphRequest<T>(input, exchange);
+    await record({ outcome: "ok" });
+    return value;
+  } catch (error) {
+    await record({ outcome: "failed", errorClass: classifyWriteFailure(error, exchange) });
+    throw error;
+  }
+}
+
+function classifyWriteFailure(error: unknown, exchange: GraphExchange): GraphWriteErrorClass {
+  const message = describe(error);
+  if (message === GRAPH_REQUEST_CANCELLED) return "cancelled";
+  if (error instanceof GraphAccessDeniedError) return "access-denied";
+  if (exchange.status === 401) return "unauthorized";
+  if (exchange.status !== undefined) return "http-error";
+  if (exchange.attempts === 0) return "not-sent";
+  if (message.startsWith("Graph request timed out")) return "timeout";
+  return "network-error";
+}
+
+async function sendGraphRequest<T>(input: GraphRequestInput, exchange: GraphExchange): Promise<T> {
   const expectJson = input.expectJson ?? true;
   const shortPath = input.baseUrl ? shortenPath(input.url, input.baseUrl) : input.url;
   const query = extractQuery(input.url);
@@ -312,6 +449,10 @@ async function graphRequest<T>(input: GraphRequestInput): Promise<T> {
     }
 
     let response: Response;
+    // Only the last request decides what the audit result reports.
+    exchange.attempts = attempt;
+    delete exchange.status;
+    delete exchange.requestId;
     try {
       response = await input.fetchImpl(input.url, {
         method: input.method,
@@ -384,6 +525,9 @@ async function graphRequest<T>(input: GraphRequestInput): Promise<T> {
     }
     clearTimeout(timer);
     releaseSignal();
+    exchange.status = response.status;
+    const requestId = response.headers?.get("request-id") ?? response.headers?.get("client-request-id");
+    if (requestId) exchange.requestId = requestId;
 
     if (response.ok) {
       const status = response.status;
