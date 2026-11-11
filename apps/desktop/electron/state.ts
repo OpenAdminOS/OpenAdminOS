@@ -9073,11 +9073,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const persisted = this.lastReadSnapshot;
     const context = auditLogContext(persisted ?? { tenants: [], installedAgents: [] });
     try {
-      this.auditLog.append([hostedProviderConsentAuditEvent(consent, context)]);
+      // Kept with the pending audit events when the append fails, so the
+      // consent survives even when the Chat database could not keep it either.
+      this.auditLog.appendOrKeep([hostedProviderConsentAuditEvent(consent, context)]);
     } catch (error) {
       this.auditConsentsPending = true;
       this.noteAuditLogFailure(error);
-      console.warn(`[audit] a hosted-provider consent is kept in the Chat database until the audit log can record it. ${errorText(error)}`);
+      console.warn(`[audit] a hosted-provider consent is kept on this device until the audit log can record it. ${errorText(error)}`);
     }
   }
 

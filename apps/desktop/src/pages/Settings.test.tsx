@@ -95,7 +95,7 @@ describe("Settings provider section", () => {
     await waitFor(() => expect(screen.queryByText("The audit log could not record an event")).not.toBeInTheDocument());
   });
 
-  it("counts Graph write results the audit log has not recorded yet, until they are recorded", async () => {
+  it("counts audit events the audit log has not recorded yet, until they are recorded", async () => {
     const user = userEvent.setup();
     const getAuditLogStatus = vi.fn()
       .mockResolvedValueOnce({ unrecordedResults: { count: 2 } })
@@ -103,33 +103,33 @@ describe("Settings provider section", () => {
     const bridge = makeMockBridge({ getAuditLogStatus });
     renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/general", bridge });
     const notice = await screen.findByRole("alert");
-    expect(notice).toHaveTextContent("2 Graph write results are not in the audit log yet");
-    expect(notice).toHaveTextContent("The writes were sent and their attempts are recorded.");
+    expect(notice).toHaveTextContent("2 audit events are not in the audit log yet");
+    expect(notice).toHaveTextContent("A kept Graph write result means the write was sent and its attempt is recorded");
     expect(notice).toHaveTextContent("recorded with the next audit log entry");
     await user.click(screen.getByRole("button", { name: "Export audit log" }));
-    await waitFor(() => expect(screen.queryByText(/Graph write results are not in the audit log yet/)).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText(/audit events are not in the audit log yet/)).not.toBeInTheDocument());
   });
 
-  it("says when kept Graph write results are only in memory and what to do", async () => {
+  it("says when kept audit events are only in memory and what to do", async () => {
     const bridge = makeMockBridge({
       getAuditLogStatus: vi.fn(async () => ({ unrecordedResults: { count: 1, inMemoryOnly: true as const } })),
     });
     renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/general", bridge });
     const notice = await screen.findByRole("alert");
-    expect(notice).toHaveTextContent("1 Graph write result is not in the audit log yet");
+    expect(notice).toHaveTextContent("1 audit event is not in the audit log yet");
     expect(notice).toHaveTextContent(
-      "This result could not be saved to disk either, so it is only in memory and lost if OpenAdminOS quits before the audit log records it. Keep OpenAdminOS open and free disk space in the OpenAdminOS data folder. OpenAdminOS saves it to disk with the next audit log entry or when this page is opened again.",
+      "This event could not be saved to disk either, so it is only in memory and lost if OpenAdminOS quits before the audit log records it. Keep OpenAdminOS open and free disk space in the OpenAdminOS data folder. OpenAdminOS saves it to disk with the next audit log entry or when this page is opened again.",
     );
   });
 
-  it("names a file of kept Graph write results that cannot be read", async () => {
+  it("names a file of kept audit events that cannot be read", async () => {
     const bridge = makeMockBridge({
       getAuditLogStatus: vi.fn(async () => ({ unrecordedResults: { count: 0, unreadableFile: "openadminos.db-audit-pending.json" } })),
     });
     renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/general", bridge });
     const notice = await screen.findByRole("alert");
-    expect(notice).toHaveTextContent("Kept Graph write results cannot be read");
-    expect(notice).toHaveTextContent("openadminos.db-audit-pending.json in the app data folder holds results kept from an earlier session and cannot be read");
+    expect(notice).toHaveTextContent("Kept audit events cannot be read");
+    expect(notice).toHaveTextContent("openadminos.db-audit-pending.json in the app data folder holds audit events kept from an earlier session and cannot be read");
     expect(notice).toHaveTextContent("Keep a copy of it for review, then remove it and restart OpenAdminOS.");
   });
 

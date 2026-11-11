@@ -3606,14 +3606,14 @@ function AuditLogUnrecordedResultsNotice({
         <div>
           <div className="text-sm font-medium text-[var(--color-warning)]">
             {count === 0
-              ? "Kept Graph write results cannot be read"
+              ? "Kept audit events cannot be read"
               : count === 1
-                ? "1 Graph write result is not in the audit log yet"
-                : `${count.toLocaleString("en-US")} Graph write results are not in the audit log yet`}
+                ? "1 audit event is not in the audit log yet"
+                : `${count.toLocaleString("en-US")} audit events are not in the audit log yet`}
           </div>
           {count > 0 && inMemoryOnly && (
             <p className="mt-1 text-sm font-medium leading-relaxed text-[var(--color-warning)]">
-              {count === 1 ? "This result could" : "Some of these results could"} not be saved to
+              {count === 1 ? "This event could" : "Some of these events could"} not be saved to
               disk either, so {count === 1 ? "it is" : "they are"} only in memory and lost if
               OpenAdminOS quits before the audit log records {count === 1 ? "it" : "them"}. Keep
               OpenAdminOS open and free disk space in the OpenAdminOS data folder
@@ -3624,17 +3624,18 @@ function AuditLogUnrecordedResultsNotice({
           )}
           {count > 0 && (
             <p className="mt-1 text-sm leading-relaxed text-[var(--color-text-soft)]">
-              {count === 1 ? "The write was sent and its attempt is recorded. Its result is" : "The writes were sent and their attempts are recorded. Their results are"}{" "}
-              kept on this device and recorded with the next audit log entry. Check free disk space
+              {count === 1 ? "It is" : "They are"} kept on this device and recorded with the next
+              audit log entry. A kept Graph write result means the write was sent and its attempt is
+              recorded; a kept hosted-provider consent was given and is waiting to be recorded. Check free disk space
               and permissions of the OpenAdminOS data folder. This notice clears once{" "}
               {count === 1 ? "it is" : "they are"} recorded.
             </p>
           )}
           {unreadableFile && (
             <p className="mt-1 text-sm leading-relaxed text-[var(--color-text-soft)]">
-              {unreadableFile} in the app data folder holds results kept from an earlier session and
+              {unreadableFile} in the app data folder holds audit events kept from an earlier session and
               cannot be read, so they cannot be recorded. Keep a copy of it for review, then remove
-              it{inMemoryOnly ? "; do not quit OpenAdminOS while results are only in memory" : " and restart OpenAdminOS"}.
+              it{inMemoryOnly ? "; do not quit OpenAdminOS while events are only in memory" : " and restart OpenAdminOS"}.
             </p>
           )}
         </div>

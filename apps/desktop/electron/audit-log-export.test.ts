@@ -255,6 +255,41 @@ describe("audit log behind the state", () => {
     appendAuditEvents(events: unknown[]): number;
   };
 
+  it("keeps a hosted-provider consent the audit log and the Chat database both failed to record, and records it later", async () => {
+    const fixture = await makeStoreFixture();
+    const internals = fixture.store as unknown as Internals & {
+      recordHostedProviderConsent(consent: unknown): void;
+    };
+    try {
+      await fixture.store.getAppState();
+      const append = internals.auditLog.append.bind(internals.auditLog);
+      let failing = true;
+      internals.auditLog.append = (events) => {
+        if (failing) throw new Error("database or disk is full");
+        return append(events);
+      };
+      // Calling the host directly leaves the Chat database out, as when its write failed too.
+      internals.recordHostedProviderConsent({
+        id: "event-consent-disk-full",
+        tenantId: tenant.id,
+        source: "single-tenant-chat",
+        payload: { tenantIds: [tenant.id], providerId: "anthropic", acknowledgedAt: "2026-07-06T08:00:00.000Z", remember: false },
+        createdAt: "2026-07-06T08:00:00.000Z",
+      });
+      assert.equal((await fixture.store.getAuditLogStatus()).unrecordedResults?.count, 1);
+
+      failing = false;
+      await fixture.store.setRunHistoryRetentionSettings({ neverPrune: true, keepLastRuns: null, keepDays: null });
+      assert.deepEqual(await fixture.store.getAuditLogStatus(), {});
+      const db = new DatabaseSync(join(fixture.dir, "openadminos.db"), { readOnly: true });
+      const recorded = db.prepare("SELECT COUNT(*) AS count FROM audit_log WHERE event_id = ?").get("hosted-provider-consent:event-consent-disk-full") as { count: number };
+      db.close();
+      assert.equal(recorded.count, 1);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
   it("refuses a prune that would remove unrecorded runs while appends fail, and records them on the next attempt", async () => {
     const fixture = await makeStoreFixture();
     const internals = fixture.store as unknown as Internals;
