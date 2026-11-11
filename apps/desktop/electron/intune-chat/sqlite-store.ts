@@ -418,7 +418,9 @@ export class IntelligenceSqliteStore {
     this.db = new DatabaseSync(dbPath);
     chmodSync(dbPath, 0o600);
     this.db.exec(
-      "PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA secure_delete = ON;",
+      // The audit log shares this database file over its own connection;
+      // the same busy timeout lets either wait for the other's write.
+      "PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON; PRAGMA secure_delete = ON;",
     );
     for (const sidecar of [`${dbPath}-wal`, `${dbPath}-shm`]) {
       if (existsSync(sidecar)) chmodSync(sidecar, 0o600);
