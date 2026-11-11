@@ -4486,10 +4486,15 @@ export class AppStateStore {
     // after that, every event was recorded when it happened.
     this.recordAuditLog(persisted);
     const stored = this.auditLog.readVerified();
-    const filteredEvents = stored.events.filter((event) =>
-      auditEventWithinRange(event, fromMs, toMs) &&
-      (!input.notStartedByPerson || (event.initiator !== undefined && event.initiator !== "person")),
-    ).map(({ sha256: _stored, ...event }) => event);
+    // An event recorded without an initiator still belongs to its run, so
+    // the filter classifies it by that run instead of leaving it out.
+    const initiatorByRun = new Map(persisted.runs.map((run) => [run.id, runInitiator(run)]));
+    const filteredEvents = stored.events.filter((event) => {
+      if (!auditEventWithinRange(event, fromMs, toMs)) return false;
+      if (!input.notStartedByPerson) return true;
+      const initiator = event.initiator ?? (event.runId ? initiatorByRun.get(event.runId) : undefined);
+      return initiator !== undefined && initiator !== "person";
+    }).map(({ sha256: _stored, ...event }) => event);
     const { events, finalHash } = applyAuditHashChain(filteredEvents);
     const common = {
       generatedAt,
