@@ -1,5 +1,6 @@
 import { cliFailure, type CliFailure } from "./cli-provider.js";
 import { cliExecutablePath, cliSpawn, killCliProcess } from "./cli-invocation.js";
+import { startCliWatchdog, type CliWatchdogLimits } from "./cli-watchdog.js";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -18,7 +19,10 @@ export interface CodexProviderOptions {
   signal?: AbortSignal;
   homePath?: string;
   defaultModel?: string;
+  /** Longest one request may run in total. */
   timeoutMs?: number;
+  /** Longest the CLI may stay silent before the request is ended. */
+  idleTimeoutMs?: number;
 }
 
 export interface CodexProbeResult {
@@ -41,7 +45,10 @@ interface CodexModelsCache {
   }>;
 }
 
-const DEFAULT_TIMEOUT_MS = 180_000;
+// `codex exec --json` prints whole items, not tokens, so one long reply is
+// silent until it completes. The silence limit matches the old total limit.
+const DEFAULT_IDLE_TIMEOUT_MS = 180_000;
+const DEFAULT_TIMEOUT_MS = 15 * 60_000;
 const CODEX_ENV_ALLOWLIST = new Set([
   "ALL_PROXY",
   "all_proxy",
@@ -81,9 +88,12 @@ export function createCodexLlm(options: CodexProviderOptions = {}): RunLlmApi {
   const homePath = expandHome(options.homePath ?? process.env.CODEX_HOME ?? "~/.codex");
   const defaultModel = options.defaultModel;
   const configuredTimeout = Number.parseInt(process.env.OPENADMINOS_CODEX_TIMEOUT_MS ?? "", 10);
-  const timeoutMs =
-    options.timeoutMs ??
-    (Number.isFinite(configuredTimeout) ? configuredTimeout : DEFAULT_TIMEOUT_MS);
+  const limits: CliWatchdogLimits = {
+    idleMs: options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS,
+    maxMs:
+      options.timeoutMs ??
+      (Number.isFinite(configuredTimeout) ? configuredTimeout : DEFAULT_TIMEOUT_MS),
+  };
   const binaryPathPromise = resolveCodexBinary(options.binaryPath);
 
   return {
@@ -114,7 +124,7 @@ export function createCodexLlm(options: CodexProviderOptions = {}): RunLlmApi {
           outputPath,
           model,
           prompt: formatPrompt(opts),
-          timeoutMs,
+          limits,
           signal: opts.signal,
         });
       } finally {
@@ -331,7 +341,7 @@ async function* runCodexExecStream(input: {
   outputPath: string;
   model?: string;
   prompt: string;
-  timeoutMs: number;
+  limits: CliWatchdogLimits;
   signal?: AbortSignal;
 }): AsyncIterable<LlmStreamChunk> {
   const authStore = await readCodexAuthStore(input.homePath);
@@ -395,9 +405,9 @@ async function* runCodexExecStream(input: {
   let accumulated = "";
   let tokenUsage: LlmTokenUsage | undefined;
   let yielded = false;
-  let settled = false;
+  let closed = false;
   const abortFromCaller = () => {
-    if (!settled) {
+    if (!closed) {
       child.kill("SIGKILL");
     }
   };
@@ -409,90 +419,99 @@ async function* runCodexExecStream(input: {
   const model = input.model ?? "codex-default";
   const closePromise = new Promise<number | null>((resolveResult, rejectResult) => {
     child.on("error", rejectResult);
-    child.on("close", resolveResult);
+    child.on("close", (code) => {
+      closed = true;
+      resolveResult(code);
+    });
   });
-  const timer = setTimeout(() => {
-    if (settled) return;
-    child.kill("SIGKILL");
-  }, input.timeoutMs);
-
-  child.stderr.setEncoding("utf8");
-  child.stderr.on("data", (chunk) => {
-    stderr += String(chunk);
+  const watchdog = startCliWatchdog("Codex CLI", input.limits, () => {
+    if (!closed) child.kill("SIGKILL");
   });
-  child.stdin.end(input.prompt);
 
-  if (!child.stdout) {
-    clearTimeout(timer);
-    throw new Error("Codex CLI did not expose stdout.");
-  }
+  try {
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    child.stdin.end(input.prompt);
 
-  child.stdout.setEncoding("utf8");
-  for await (const raw of child.stdout) {
-    stdout += String(raw);
-    const lines = stdout.split(/\r?\n/);
-    stdout = lines.pop() ?? "";
-    for (const line of lines) {
-      const event = parseCodexJsonLine(line);
-      if (!event) continue;
-      tokenUsage = codexTokenUsage(event) ?? tokenUsage;
-      const next = extractCodexAssistantText(event);
-      if (!next) continue;
-      if (next.kind === "delta") {
-        accumulated += next.text;
-      } else {
-        if (accumulated.length > 0 && next.text.startsWith(accumulated)) {
-          accumulated = next.text;
-        } else if (accumulated.length === 0) {
-          accumulated = next.text;
-        } else if (next.text !== accumulated) {
-          accumulated = next.text;
+    if (!child.stdout) {
+      throw new Error("Codex CLI did not expose stdout.");
+    }
+
+    child.stdout.setEncoding("utf8");
+    for await (const raw of child.stdout) {
+      watchdog.touch();
+      stdout += String(raw);
+      const lines = stdout.split(/\r?\n/);
+      stdout = lines.pop() ?? "";
+      for (const line of lines) {
+        const event = parseCodexJsonLine(line);
+        if (!event) continue;
+        tokenUsage = codexTokenUsage(event) ?? tokenUsage;
+        const next = extractCodexAssistantText(event);
+        if (!next) continue;
+        if (next.kind === "delta") {
+          accumulated += next.text;
+        } else {
+          if (accumulated.length > 0 && next.text.startsWith(accumulated)) {
+            accumulated = next.text;
+          } else if (accumulated.length === 0) {
+            accumulated = next.text;
+          } else if (next.text !== accumulated) {
+            accumulated = next.text;
+          }
         }
+        yielded = true;
+        yield {
+          delta: next.kind === "delta" ? next.text : accumulated,
+          accumulated,
+          done: false,
+          model,
+        };
       }
-      yielded = true;
-      yield {
-        delta: next.kind === "delta" ? next.text : accumulated,
-        accumulated,
-        done: false,
-        model,
-      };
     }
-  }
 
-  tokenUsage = codexTokenUsage(parseCodexJsonLine(stdout)) ?? tokenUsage;
-  const exitCode = await closePromise;
-  settled = true;
-  clearTimeout(timer);
-  input.signal?.removeEventListener("abort", abortFromCaller);
+    tokenUsage = codexTokenUsage(parseCodexJsonLine(stdout)) ?? tokenUsage;
+    const exitCode = await closePromise;
+    watchdog.clear();
 
-  if (exitCode !== 0) {
-    if (input.signal?.aborted) {
-      throw new Error("Codex CLI request stopped by user.");
+    if (exitCode !== 0) {
+      if (input.signal?.aborted) {
+        throw new Error("Codex CLI request stopped by user.");
+      }
+      const stopped = watchdog.error();
+      if (stopped) throw stopped;
+      const detail = stderr || stdout;
+      if (/unexpected argument.*--ignore-(?:user-config|rules)|unknown feature/i.test(detail)) {
+        throw new Error("Update Codex CLI to a version that supports isolated app completions, then test the provider again in Settings.");
+      }
+      throw new Error(
+        detail
+          ? `Codex CLI command failed: ${truncate(detail, 500)}`
+          : `Codex CLI command failed with code ${exitCode}.`,
+      );
     }
-    const detail = stderr || stdout;
-    if (/unexpected argument.*--ignore-(?:user-config|rules)|unknown feature/i.test(detail)) {
-      throw new Error("Update Codex CLI to a version that supports isolated app completions, then test the provider again in Settings.");
-    }
-    throw new Error(
-      detail
-        ? `Codex CLI command failed: ${truncate(detail, 500)}`
-        : `Codex CLI command failed with code ${exitCode}.`,
-    );
-  }
 
-  const finalText = (await readFile(input.outputPath, "utf8").catch(() => "")).trim() || accumulated.trim();
-  if (!finalText) {
-    throw new Error("Codex CLI returned no final assistant message.");
+    const finalText = (await readFile(input.outputPath, "utf8").catch(() => "")).trim() || accumulated.trim();
+    if (!finalText) {
+      throw new Error("Codex CLI returned no final assistant message.");
+    }
+    yield {
+      delta: yielded && finalText.startsWith(accumulated)
+        ? finalText.slice(accumulated.length)
+        : finalText,
+      accumulated: finalText,
+      done: true,
+      model,
+      ...(tokenUsage ? { tokenUsage } : {}),
+    };
+  } finally {
+    watchdog.clear();
+    input.signal?.removeEventListener("abort", abortFromCaller);
+    // A consumer that stops reading early leaves no CLI behind.
+    if (!closed) child.kill("SIGKILL");
   }
-  yield {
-    delta: yielded && finalText.startsWith(accumulated)
-      ? finalText.slice(accumulated.length)
-      : finalText,
-    accumulated: finalText,
-    done: true,
-    model,
-    ...(tokenUsage ? { tokenUsage } : {}),
-  };
 }
 
 /** Preserve the sign-in backend without loading user tools or instructions. */

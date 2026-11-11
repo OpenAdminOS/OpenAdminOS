@@ -1,5 +1,6 @@
 import { cliFailure, type CliFailure } from "./cli-provider.js";
 import { cliExecutablePath, cliSpawn, killCliProcess } from "./cli-invocation.js";
+import { startCliWatchdog, type CliWatchdogLimits } from "./cli-watchdog.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -18,7 +19,10 @@ export interface ClaudeCodeProviderOptions {
   signal?: AbortSignal;
   homePath?: string;
   defaultModel?: string;
+  /** Longest one request may run in total. */
   timeoutMs?: number;
+  /** Longest the CLI may stay silent before the request is ended. */
+  idleTimeoutMs?: number;
 }
 
 export interface ClaudeCodeProbeResult {
@@ -56,7 +60,9 @@ interface ClaudeCodeStreamEvent {
   };
 }
 
-const DEFAULT_TIMEOUT_MS = 180_000;
+// Partial messages stream every token, so a long silence means a stall.
+const DEFAULT_IDLE_TIMEOUT_MS = 90_000;
+const DEFAULT_TIMEOUT_MS = 15 * 60_000;
 const MIN_CLAUDE_CODE_VERSION = "2.1.200";
 const DEFAULT_CLAUDE_CODE_MODEL = "claude-sonnet-5";
 const CLAUDE_CODE_MODELS = [
@@ -110,32 +116,33 @@ export function createClaudeCodeLlm(
     process.env.OPENADMINOS_CLAUDE_CODE_TIMEOUT_MS ?? "",
     10,
   );
-  const timeoutMs =
-    options.timeoutMs ??
-    (Number.isFinite(configuredTimeout) ? configuredTimeout : DEFAULT_TIMEOUT_MS);
+  const limits: CliWatchdogLimits = {
+    idleMs: options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS,
+    maxMs:
+      options.timeoutMs ??
+      (Number.isFinite(configuredTimeout) ? configuredTimeout : DEFAULT_TIMEOUT_MS),
+  };
   const binaryPathPromise = resolveClaudeCodeBinary(options.binaryPath);
 
   return {
     available: true,
     defaultModel,
     streamsIncrementally: true,
+    // Completions read the same stream as `stream`, so the silence timer
+    // sees every token instead of one JSON result at the end.
     async complete(opts: LlmOptions): Promise<LlmCompletion> {
-      const binaryPath = await binaryPathPromise;
-      const tempDir = await mkdtemp(join(tmpdir(), "openadminos-claude-code-"));
-      try {
-        return await runClaudeCodeJson({
-          binaryPath,
-          homePath,
-          cwd: tempDir,
-          model: opts.model ?? defaultModel,
-          system: opts.system,
-          prompt: opts.prompt,
-          timeoutMs,
-          signal: opts.signal,
-        });
-      } finally {
-        await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+      let last: LlmStreamChunk | undefined;
+      for await (const chunk of this.stream(opts)) {
+        last = chunk;
       }
+      if (!last) {
+        throw new Error("Claude Code returned no final assistant message.");
+      }
+      return {
+        text: last.accumulated,
+        model: last.model,
+        ...(last.tokenUsage ? { tokenUsage: last.tokenUsage } : {}),
+      };
     },
     async *stream(opts: LlmOptions): AsyncIterable<LlmStreamChunk> {
       const binaryPath = await binaryPathPromise;
@@ -148,7 +155,7 @@ export function createClaudeCodeLlm(
           model: opts.model ?? defaultModel,
           system: opts.system,
           prompt: opts.prompt,
-          timeoutMs,
+          limits,
           signal: opts.signal,
         });
       } finally {
@@ -330,66 +337,6 @@ function claudeCodeBinaryCandidates(preferredBinaryPath?: string): string[] {
   });
 }
 
-async function runClaudeCodeJson(input: {
-  binaryPath: string;
-  homePath?: string;
-  cwd: string;
-  model?: string;
-  system?: string;
-  prompt: string;
-  timeoutMs: number;
-  signal?: AbortSignal;
-}): Promise<LlmCompletion> {
-  const result = await runProcess({
-    binaryPath: input.binaryPath,
-    args: [
-      "-p",
-      "--output-format",
-      "json",
-      ...claudeCodeSafetyArgs(),
-      ...(input.model ? ["--model", input.model] : []),
-      ...(input.system ? ["--append-system-prompt", input.system] : []),
-      "--",
-      input.prompt,
-    ],
-    cwd: input.cwd,
-    env: createClaudeCodeProcessEnv({
-      overrides: claudeCodeEnvOverrides(input.homePath),
-    }),
-    timeoutMs: input.timeoutMs,
-    signal: input.signal,
-  });
-
-  if (result.exitCode !== 0) {
-    if (input.signal?.aborted) {
-      throw new Error("Claude Code request stopped by user.");
-    }
-    const detail = result.stderr || result.stdout;
-    throw new Error(
-      detail
-        ? `Claude Code command failed: ${truncate(detail, 500)}`
-        : `Claude Code command failed with code ${result.exitCode}.`,
-    );
-  }
-
-  const parsed = parseClaudeCodeJson(result.stdout);
-  if (!parsed) {
-    throw new Error("Claude Code returned no JSON result.");
-  }
-  if (parsed.is_error === true || parsed.subtype === "error") {
-    throw new Error(parsed.error ?? parsed.result ?? "Claude Code generation failed.");
-  }
-  const text = extractClaudeCodeResultText(parsed);
-  if (!text) {
-    throw new Error("Claude Code returned no final assistant message.");
-  }
-  return {
-    text,
-    model: extractClaudeCodeModel(parsed) ?? input.model ?? DEFAULT_CLAUDE_CODE_MODEL,
-    ...(tokenUsageFromClaudeEvent(parsed) ? { tokenUsage: tokenUsageFromClaudeEvent(parsed) } : {}),
-  };
-}
-
 async function* runClaudeCodeStream(input: {
   binaryPath: string;
   homePath?: string;
@@ -397,7 +344,7 @@ async function* runClaudeCodeStream(input: {
   model?: string;
   system?: string;
   prompt: string;
-  timeoutMs: number;
+  limits: CliWatchdogLimits;
   signal?: AbortSignal;
 }): AsyncIterable<LlmStreamChunk> {
   const spawned = cliSpawn(
@@ -432,11 +379,11 @@ async function* runClaudeCodeStream(input: {
   let accumulated = "";
   let finalText = "";
   let yielded = false;
-  let settled = false;
+  let closed = false;
   let actualModel = input.model ?? DEFAULT_CLAUDE_CODE_MODEL;
   let finalTokenUsage: LlmTokenUsage | undefined;
   const abortFromCaller = () => {
-    if (!settled) {
+    if (!closed) {
       child.kill("SIGKILL");
     }
   };
@@ -447,102 +394,111 @@ async function* runClaudeCodeStream(input: {
   }
   const closePromise = new Promise<number | null>((resolveResult, rejectResult) => {
     child.on("error", rejectResult);
-    child.on("close", resolveResult);
+    child.on("close", (code) => {
+      closed = true;
+      resolveResult(code);
+    });
   });
-  const timer = setTimeout(() => {
-    if (settled) return;
-    child.kill("SIGKILL");
-  }, input.timeoutMs);
-
-  child.stderr.setEncoding("utf8");
-  child.stderr.on("data", (chunk) => {
-    stderr += String(chunk);
+  const watchdog = startCliWatchdog("Claude Code", input.limits, () => {
+    if (!closed) child.kill("SIGKILL");
   });
 
-  if (!child.stdout) {
-    clearTimeout(timer);
-    throw new Error("Claude Code CLI did not expose stdout.");
-  }
+  try {
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
 
-  child.stdout.setEncoding("utf8");
-  for await (const raw of child.stdout) {
-    stdout += String(raw);
-    const lines = stdout.split(/\r?\n/);
-    stdout = lines.pop() ?? "";
-    for (const line of lines) {
-      const event = parseClaudeCodeJson(line);
-      if (!event) continue;
-      const model = extractClaudeCodeModel(event);
-      if (model) actualModel = model;
-      const tokenUsage = tokenUsageFromClaudeEvent(event);
-      if (tokenUsage) finalTokenUsage = tokenUsage;
-      if (event.is_error === true || event.subtype === "error") {
-        throw new Error(event.error ?? event.result ?? "Claude Code generation failed.");
-      }
-      const next = extractClaudeCodeStreamText(event);
-      if (!next) continue;
-      if (next.kind === "result") {
-        finalText = next.text;
-        continue;
-      }
-      if (next.kind === "delta") {
-        accumulated += next.text;
-      } else if (accumulated.length > 0 && next.text.startsWith(accumulated)) {
-        accumulated = next.text;
-      } else if (accumulated.length === 0) {
-        accumulated = next.text;
-      } else if (next.text !== accumulated) {
-        accumulated = next.text;
-      }
-      yielded = true;
-      yield {
-        delta: next.kind === "delta" ? next.text : accumulated,
-        accumulated,
-        done: false,
-        model: actualModel,
-        ...(tokenUsage ? { tokenUsage } : {}),
-      };
+    if (!child.stdout) {
+      throw new Error("Claude Code CLI did not expose stdout.");
     }
-  }
 
-  const trailingEvent = parseClaudeCodeJson(stdout);
-  if (trailingEvent) {
-    if (trailingEvent.is_error === true || trailingEvent.subtype === "error") {
-      throw new Error(trailingEvent.error ?? trailingEvent.result ?? "Claude Code generation failed.");
+    child.stdout.setEncoding("utf8");
+    for await (const raw of child.stdout) {
+      watchdog.touch();
+      stdout += String(raw);
+      const lines = stdout.split(/\r?\n/);
+      stdout = lines.pop() ?? "";
+      for (const line of lines) {
+        const event = parseClaudeCodeJson(line);
+        if (!event) continue;
+        const model = extractClaudeCodeModel(event);
+        if (model) actualModel = model;
+        const tokenUsage = tokenUsageFromClaudeEvent(event);
+        if (tokenUsage) finalTokenUsage = tokenUsage;
+        if (event.is_error === true || event.subtype === "error") {
+          throw new Error(event.error ?? event.result ?? "Claude Code generation failed.");
+        }
+        const next = extractClaudeCodeStreamText(event);
+        if (!next) continue;
+        if (next.kind === "result") {
+          finalText = next.text;
+          continue;
+        }
+        if (next.kind === "delta") {
+          accumulated += next.text;
+        } else if (accumulated.length > 0 && next.text.startsWith(accumulated)) {
+          accumulated = next.text;
+        } else if (accumulated.length === 0) {
+          accumulated = next.text;
+        } else if (next.text !== accumulated) {
+          accumulated = next.text;
+        }
+        yielded = true;
+        yield {
+          delta: next.kind === "delta" ? next.text : accumulated,
+          accumulated,
+          done: false,
+          model: actualModel,
+          ...(tokenUsage ? { tokenUsage } : {}),
+        };
+      }
     }
-    actualModel = extractClaudeCodeModel(trailingEvent) ?? actualModel;
-    finalTokenUsage = tokenUsageFromClaudeEvent(trailingEvent) ?? finalTokenUsage;
-    const trailingText = extractClaudeCodeStreamText(trailingEvent);
-    if (trailingText?.kind === "result") finalText = trailingText.text;
-  }
-  const exitCode = await closePromise;
-  settled = true;
-  clearTimeout(timer);
-  input.signal?.removeEventListener("abort", abortFromCaller);
 
-  if (exitCode !== 0) {
-    if (input.signal?.aborted) {
-      throw new Error("Claude Code request stopped by user.");
+    const trailingEvent = parseClaudeCodeJson(stdout);
+    if (trailingEvent) {
+      if (trailingEvent.is_error === true || trailingEvent.subtype === "error") {
+        throw new Error(trailingEvent.error ?? trailingEvent.result ?? "Claude Code generation failed.");
+      }
+      actualModel = extractClaudeCodeModel(trailingEvent) ?? actualModel;
+      finalTokenUsage = tokenUsageFromClaudeEvent(trailingEvent) ?? finalTokenUsage;
+      const trailingText = extractClaudeCodeStreamText(trailingEvent);
+      if (trailingText?.kind === "result") finalText = trailingText.text;
     }
-    const detail = stderr || stdout;
-    throw new Error(
-      detail
-        ? `Claude Code command failed: ${truncate(detail, 500)}`
-        : `Claude Code command failed with code ${exitCode}.`,
-    );
-  }
+    const exitCode = await closePromise;
+    watchdog.clear();
 
-  const text = finalText.trim() || accumulated.trim();
-  if (!text) {
-    throw new Error("Claude Code returned no final assistant message.");
+    if (exitCode !== 0) {
+      if (input.signal?.aborted) {
+        throw new Error("Claude Code request stopped by user.");
+      }
+      const stopped = watchdog.error();
+      if (stopped) throw stopped;
+      const detail = stderr || stdout;
+      throw new Error(
+        detail
+          ? `Claude Code command failed: ${truncate(detail, 500)}`
+          : `Claude Code command failed with code ${exitCode}.`,
+      );
+    }
+
+    const text = finalText.trim() || accumulated.trim();
+    if (!text) {
+      throw new Error("Claude Code returned no final assistant message.");
+    }
+    yield {
+      delta: yielded && text.startsWith(accumulated) ? text.slice(accumulated.length) : text,
+      accumulated: text,
+      done: true,
+      model: actualModel,
+      ...(finalTokenUsage ? { tokenUsage: finalTokenUsage } : {}),
+    };
+  } finally {
+    watchdog.clear();
+    input.signal?.removeEventListener("abort", abortFromCaller);
+    // A consumer that stops reading early, or a failed parse, leaves no CLI behind.
+    if (!closed) child.kill("SIGKILL");
   }
-  yield {
-    delta: yielded && text.startsWith(accumulated) ? text.slice(accumulated.length) : text,
-    accumulated: text,
-    done: true,
-    model: actualModel,
-    ...(finalTokenUsage ? { tokenUsage: finalTokenUsage } : {}),
-  };
 }
 
 function claudeCodeSafetyArgs(): string[] {

@@ -1,10 +1,11 @@
-import { mkdtemp, mkdir, writeFile, chmod, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, chmod, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { createCodexProcessEnv, createCodexLlm, probeCodexLlm } from "./llm-codex.js";
+import { CliWatchdogError } from "./cli-watchdog.js";
 
 describe("createCodexProcessEnv", () => {
   it("keeps only CLI-required environment fields and CODEX_HOME", () => {
@@ -139,3 +140,48 @@ process.stdout.write(JSON.stringify({type:"turn.completed",usage:{input_tokens:1
     assert.ok(!captured.args.includes('--dangerously-bypass-approvals-and-sandbox'));
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+describe("Codex CLI watchdog", () => {
+  for (const [mode, limits, stop] of [
+    ["silent", { idleTimeoutMs: 500, timeoutMs: 60_000 }, "stalled"],
+    ["chatty", { idleTimeoutMs: 60_000, timeoutMs: 1_000 }, "time-limit"],
+  ] as const) {
+    it(`ends a ${mode} CLI that never finishes with the ${stop} error and stops its process`, async () => {
+      const root = await mkdtemp(join(tmpdir(), "codex-watchdog-"));
+      try {
+        const pidsPath = join(root, "pids.txt");
+        const script = `#!/usr/bin/env node
+const { appendFileSync } = require("node:fs");
+if (process.argv[2] === "--version") { console.log("codex-cli 0.200.0"); process.exit(0); }
+appendFileSync(${JSON.stringify(pidsPath)}, process.pid + "\\n");
+console.log(JSON.stringify({type: "thread.started"}));
+setInterval(() => {
+  if (${JSON.stringify(mode)} === "chatty") console.log(JSON.stringify({type: "item.updated", item: {type: "reasoning"}}));
+}, 5);
+// Never outlive a broken test run.
+setTimeout(() => process.exit(3), 30_000);
+`;
+        const binaryPath = await writeFakeCodex(root, script);
+        const llm = createCodexLlm({ binaryPath, homePath: root, ...limits });
+        await assert.rejects(
+          llm.complete({ prompt: "Review supplied evidence only." }),
+          (error: unknown) => error instanceof CliWatchdogError && error.stop === stop && error.message.startsWith("Codex CLI "),
+        );
+        const pids = (await readFile(pidsPath, "utf8")).trim().split(/\r?\n/).map(Number);
+        for (const pid of pids) assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+      } finally { await rm(root, { recursive: true, force: true }); }
+    });
+  }
+});
+
+async function writeFakeCodex(root: string, script: string): Promise<string> {
+  let binaryPath = join(root, "codex");
+  if (process.platform === "win32") {
+    binaryPath += ".cmd";
+    const folder = join(root, "node_modules/@openai/codex/bin");
+    await mkdir(folder, { recursive: true });
+    await writeFile(join(folder, "codex.js"), script);
+    await writeFile(binaryPath, "@exit /b 99\r\n");
+  } else { await writeFile(binaryPath, script); await chmod(binaryPath, 0o755); }
+  return binaryPath;
+}

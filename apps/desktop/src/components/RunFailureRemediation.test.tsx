@@ -37,3 +37,14 @@ it("gives the organization recovery for a run with no organization with Microsof
   expect(screen.getByText("No organization with Microsoft 365")).toBeInTheDocument();
   expect(screen.queryByText("No tenant connected")).not.toBeInTheDocument();
 });
+
+it.each([
+  ["Claude Code stopped sending output for 90 seconds, so OpenAdminOS ended the request. Test the provider in Settings, then retry.", "Provider stopped responding"],
+  ["Codex CLI was still working after 15 minutes, the limit for one request, so OpenAdminOS ended it. Narrow the request or split it into smaller steps, then retry.", "Provider time limit reached"],
+])("gives a CLI watchdog stop its own recovery: %s", (error, title) => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText(title)).toBeInTheDocument();
+  expect(screen.queryByText("Request timed out")).not.toBeInTheDocument();
+  expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
+});
