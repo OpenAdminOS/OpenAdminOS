@@ -223,7 +223,10 @@ describe("append-only audit log in the export", () => {
 
   it("neutralizes CSV cells a spreadsheet would run as a formula", async () => {
     const fixture = await makeStoreFixture({
-      extraRuns: [{ ...oldRun(), id: "=HYPERLINK(\"https://example.invalid\")", agentSlug: "-cmd", tenantId: "@tenant" }],
+      extraRuns: [
+        { ...oldRun(), id: "=HYPERLINK(\"https://example.invalid\")", agentSlug: "-cmd", tenantId: "@tenant" },
+        { ...oldRun(), id: "run-spaced", agentSlug: "  +SUM(A1)", tenantId: "\t=1" },
+      ],
     });
     try {
       const rows = parseCsv((await fixture.store.exportAuditLog({ format: "csv" })).content);
@@ -233,7 +236,13 @@ describe("append-only audit log in the export", () => {
       assert.equal(row[header.indexOf("runId")], "'=HYPERLINK(\"https://example.invalid\")");
       assert.equal(row[header.indexOf("agentSlug")], "'-cmd");
       assert.equal(row[header.indexOf("tenantId")], "'@tenant");
-      assert.ok(rows.slice(1).every((cells) => cells.every((cell) => !/^[=+\-@\t\r]/.test(cell))));
+      // Leading whitespace does not hide a formula.
+      const spaced = rows.find((cells) => cells[header.indexOf("runId")] === "run-spaced");
+      assert.ok(spaced);
+      assert.equal(spaced[header.indexOf("agentSlug")], "'  +SUM(A1)");
+      assert.equal(spaced[header.indexOf("tenantId")], "'\t=1");
+      assert.ok(rows.slice(1).every((cells) => cells.every((cell) => !/^[\t\r]|^\s*[=+\-@]/.test(cell))));
+      assert.match(rows[1]?.[header.indexOf("retentionNote")] ?? "", /gets a leading apostrophe/);
     } finally {
       await fixture.cleanup();
     }
@@ -278,6 +287,33 @@ describe("audit log behind the state", () => {
       db.close();
       assert.deepEqual(recorded.map((row) => row.type), ["run.queued", "run.started", "run.completed"]);
       assert.equal(consents.count, 1);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("leaves events of no run out of the filter for runs no person started", async () => {
+    const fixture = await makeStoreFixture({ extraRuns: [{ ...oldRun(), id: "run-scheduled", trigger: "schedule" }] });
+    try {
+      await fixture.store.getAppState();
+      const internals = fixture.store as unknown as Internals;
+      internals.appendAuditEvents([{
+        id: "gateway:refused-1",
+        timestamp: "2026-07-05T11:00:00.000Z",
+        type: "gateway.request.refused",
+        source: "gateway",
+        tenantId: tenant.id,
+        agentSlug: "external-proposal",
+        initiator: "gateway",
+        details: { reason: "unknown client" },
+      }]);
+      const all = JSON.parse((await fixture.store.exportAuditLog({ format: "json" })).content) as { events: Array<{ id: string }> };
+      assert.ok(all.events.some((event) => event.id === "gateway:refused-1"));
+      const filtered = JSON.parse((await fixture.store.exportAuditLog({ format: "json", notStartedByPerson: true })).content) as {
+        events: Array<{ id: string; runId?: string }>;
+      };
+      assert.ok(filtered.events.length > 0);
+      assert.ok(filtered.events.every((event) => event.runId === "run-scheduled"));
     } finally {
       await fixture.cleanup();
     }
