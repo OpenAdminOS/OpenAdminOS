@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -136,6 +137,121 @@ describe("append-only audit log", () => {
       } finally {
         reopened.close();
       }
+    });
+  });
+});
+
+describe("audit log anchor", () => {
+  function storeWith(path: string, ids: string[]): void {
+    const store = new AuditLogStore(path);
+    store.append(ids.map((id) => event(id)));
+    store.close();
+  }
+
+  function bypass(path: string, sql: string): void {
+    const db = new DatabaseSync(path);
+    try {
+      db.exec("DROP TRIGGER IF EXISTS audit_log_refuse_delete");
+      db.exec(sql);
+    } finally {
+      db.close();
+    }
+  }
+
+  function assertIntegrityError(path: string, reason: RegExp): void {
+    const store = new AuditLogStore(path);
+    try {
+      assert.throws(() => store.readVerified(), (error) => {
+        assert.ok(error instanceof AuditLogIntegrityError);
+        assert.match(error.message, /^The audit log on this device failed its integrity check: /);
+        assert.match(error.message, reason);
+        assert.match(error.message, /Keep a copy of openadminos\.db and openadminos\.db-audit-anchor\.json from the app data folder/);
+        return true;
+      });
+    } finally {
+      store.close();
+    }
+  }
+
+  it("finds the newest entries removed, although the rows left still chain", async () => {
+    await withDatabase((path) => {
+      storeWith(path, ["a", "b", "c"]);
+      bypass(path, "DELETE FROM audit_log WHERE event_id = 'c'");
+      assertIntegrityError(path, /the newest entries this device recorded are missing/);
+    });
+  });
+
+  it("finds the oldest entries removed before their retention ended", async () => {
+    await withDatabase((path) => {
+      storeWith(path, ["a", "b", "c"]);
+      bypass(path, "DELETE FROM audit_log WHERE event_id = 'a'");
+      assertIntegrityError(path, /the oldest entries this device kept are missing/);
+    });
+  });
+
+  it("finds a table that was dropped and created again, and keeps reporting it after new appends", async () => {
+    await withDatabase((path) => {
+      storeWith(path, ["a", "b"]);
+      bypass(path, "DROP TABLE audit_log");
+      assertIntegrityError(path, /the audit log table is empty, but this device recorded 2 entries in it/);
+      // New rows in the new table do not move the anchor over the loss.
+      storeWith(path, ["c"]);
+      assertIntegrityError(path, /the newest entries this device recorded are missing/);
+    });
+  });
+
+  it("accepts a table and anchor left by the app, rows appended after the anchor, and a first open without one", async () => {
+    await withDatabase((path) => {
+      storeWith(path, ["a", "b"]);
+      // An upgrade: rows from before the anchor existed become its start.
+      rmSync(`${path}-audit-anchor.json`);
+      const upgraded = new AuditLogStore(path);
+      try {
+        assert.deepEqual(upgraded.readVerified().events.map((entry) => entry.id), ["a", "b"]);
+      } finally {
+        upgraded.close();
+      }
+      const anchorBefore = readFileSync(`${path}-audit-anchor.json`, "utf8");
+      // An append whose anchor write did not happen, as after a crash.
+      storeWith(path, ["c"]);
+      writeFileSync(`${path}-audit-anchor.json`, anchorBefore);
+      const store = new AuditLogStore(path);
+      try {
+        assert.deepEqual(store.readVerified().events.map((entry) => entry.id), ["a", "b", "c"]);
+        const anchor = JSON.parse(readFileSync(`${path}-audit-anchor.json`, "utf8")) as { rowCount: number };
+        assert.equal(anchor.rowCount, 3);
+      } finally {
+        store.close();
+      }
+    });
+  });
+
+  it("moves its start with a prune, and continues the chain after every row was pruned", async () => {
+    await withDatabase((path) => {
+      const old = new Date(Date.now() - (AUDIT_LOG_RETENTION_DAYS + 1) * DAY_MS);
+      const oldStore = new AuditLogStore(path, () => old);
+      oldStore.append([event("old-1"), event("old-2")]);
+      const lastPruned = oldStore.readVerified().chain.finalHash;
+      assert.equal(oldStore.pruneExpired(), 2);
+      assert.deepEqual(oldStore.readVerified().chain, { rowCount: 0, startHash: lastPruned, finalHash: lastPruned });
+      oldStore.close();
+      const store = new AuditLogStore(path);
+      try {
+        store.append([event("recent")]);
+        const { events, chain } = store.readVerified();
+        assert.deepEqual(events.map((entry) => entry.id), ["recent"]);
+        assert.equal(chain.startHash, lastPruned);
+      } finally {
+        store.close();
+      }
+    });
+  });
+
+  it("reports an anchor file that cannot be read", async () => {
+    await withDatabase((path) => {
+      storeWith(path, ["a"]);
+      writeFileSync(`${path}-audit-anchor.json`, "not json");
+      assertIntegrityError(path, /its anchor file openadminos\.db-audit-anchor\.json cannot be read/);
     });
   });
 });
