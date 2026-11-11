@@ -1186,7 +1186,9 @@ recorded twice. The run fingerprint that decides whether a run is recorded
 again covers only what its events show (status, timestamps, plan size and
 connector delivery lines), so plain log lines of a live run start no audit
 transaction. Hosted-provider consent is appended when it is given and also kept
-in the Chat database, so a failed append is imported later by its id. A refused
+in the Chat database; a failed append keeps it with the pending audit events
+below as well, so it is recorded later by its id even when the Chat database
+could not keep it either. A refused
 gateway proposal (`gateway.proposal.refused`, source `gateway`) is appended when
 it is refused. Every
 Microsoft Graph write (any method but GET) records `graph.write.attempted`
@@ -1202,8 +1204,9 @@ be recorded, the write is refused and nothing is sent. A result that cannot be
 recorded is reported in the run log of the run that sent it (connector sends
 too) and kept in `openadminos.db-audit-pending.json` next to the database; every
 later append records the kept results first, in the same transaction, and they
-are cleared only once recorded, also across a restart. Settings -> General
-counts them until then ("N Graph write results are not in the audit log yet"),
+are cleared only once recorded, also across a restart. The same file keeps a
+hosted-provider consent whose append failed. Settings -> General counts the kept
+events until then ("N audit events are not in the audit log yet"),
 whatever other appends succeed; a pending file that cannot be read is left in
 place, never overwritten, and named there. When the pending file cannot be
 written either (disk full, or an unreadable file still in its place), the

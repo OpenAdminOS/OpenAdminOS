@@ -1793,7 +1793,7 @@ export class AppStateStore {
    * Graph write that is recorded leaves it in place.
    */
   private auditLogFailure: { failedAt: string; message: string } | undefined;
-  /** A hosted-provider consent is only in the Chat database, so the next record imports it. */
+  /** A hosted-provider consent append failed: it is kept with the pending audit events, and the next record also imports the Chat database copy. */
   private auditConsentsPending = false;
   private readonly chatService: IntuneChatService;
   private readonly driftService: DriftService;
@@ -9077,8 +9077,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
   /**
    * What Settings shows about the audit log: the last append that failed,
-   * until the latest state is recorded in full, and the Graph write
-   * results kept until recorded, with whether some are only in memory.
+   * until the latest state is recorded in full, and the audit events
+   * (Graph write results and hosted-provider consents) kept until
+   * recorded, with whether some are only in memory.
    */
   async getAuditLogStatus(): Promise<AuditLogStatus> {
     const unrecorded = this.auditLog.unrecordedResults();
