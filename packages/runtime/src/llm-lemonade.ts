@@ -44,7 +44,7 @@ export function lemonadeUnlistedModelMessage(
   model: string,
   entry: OpenAiCompatibleModel | undefined,
 ): string {
-  if (entry?.recipe === "cloud") {
+  if (entry && isLemonadeCloudModel(entry)) {
     return `Lemonade sends ${model} to a cloud API, so OpenAdminOS does not use it as a local model. Choose a chat model that runs on this device.`;
   }
   if (entry) {
@@ -58,18 +58,26 @@ export function lemonadeUnlistedModelMessage(
  * Lemonade's /models lists only downloaded models, so a chat request never
  * starts a download. A model's deployment label is `chat` for an LLM;
  * embeddings, transcription, image and speech models carry other labels.
- * Lemonade can also route a model to a cloud API (`recipe: "cloud"`); those
- * are left out, because prompts sent to them leave the device even though
- * the endpoint is on loopback.
+ * Lemonade can also route a model to a cloud API (`recipe: "cloud"`, with a
+ * `cloud_provider`); those are left out, because prompts sent to them leave
+ * the device even though the endpoint is on loopback. Any cloud marker
+ * counts, so a cloud recipe spelled differently later is still left out.
  */
 export function lemonadeChatModelIds(data: OpenAiCompatibleModel[]): string[] {
   return data
     .filter((model) => {
       const labels = Array.isArray(model.labels) ? model.labels : [];
-      return labels.includes("chat") && model.recipe !== "cloud";
+      return labels.includes("chat") && !isLemonadeCloudModel(model);
     })
     .map((model) => model.id)
     .filter((id): id is string => typeof id === "string" && id.length > 0);
+}
+
+function isLemonadeCloudModel(model: OpenAiCompatibleModel): boolean {
+  return (
+    (typeof model.recipe === "string" && model.recipe.toLowerCase().startsWith("cloud")) ||
+    (model.cloud_provider !== undefined && model.cloud_provider !== null && model.cloud_provider !== "")
+  );
 }
 
 export function createLemonadeLlm(options: LemonadeProviderOptions = {}): RunLlmApi {

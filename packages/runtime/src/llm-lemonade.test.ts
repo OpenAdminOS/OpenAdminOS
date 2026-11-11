@@ -36,6 +36,8 @@ describe("lemonadeChatModelIds", () => {
         { id: "SD-Turbo", labels: ["image"], recipe: "sd-cpp" },
         { id: "Gemma-3-4b-it-GGUF", labels: ["chat", "vision"], recipe: "llamacpp" },
         { id: "openai.gpt-5", labels: ["chat"], recipe: "cloud" },
+        { id: "anthropic.claude", labels: ["chat"], recipe: "cloud-anthropic" },
+        { id: "routed", labels: ["chat"], recipe: "llamacpp", cloud_provider: "openrouter" },
         { id: "no-labels", recipe: "llamacpp" },
         { labels: ["chat"], recipe: "llamacpp" },
       ]),

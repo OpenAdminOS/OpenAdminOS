@@ -50,6 +50,8 @@ export interface OpenAiCompatibleModel {
   id?: string;
   labels?: unknown;
   recipe?: unknown;
+  /** Lemonade: set on a model it routes to a cloud provider. */
+  cloud_provider?: unknown;
 }
 
 export interface OpenAiCompatibleProviderOptions {
@@ -351,8 +353,10 @@ export async function probeOpenAiCompatibleLlm(
       };
     }
     const payload = (await response.json()) as ModelsResponse;
-    const data = Array.isArray(payload.data) ? payload.data : [];
-    const models = (server.chatModelIds ?? allModelIds)(data);
+    if (payload.data !== undefined && !Array.isArray(payload.data)) {
+      throw new TypeError("The model list is not an array.");
+    }
+    const models = (server.chatModelIds ?? allModelIds)(payload.data ?? []);
     return {
       ready: true,
       endpoint,
