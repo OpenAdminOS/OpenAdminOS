@@ -417,6 +417,11 @@ const GRAPH_HOSTS = new Set([
   "microsoftgraph.chinacloudapi.cn",
 ]);
 
+/** True for a Microsoft Graph host of the public or a national cloud. */
+export function isGraphHost(hostname: string): boolean {
+  return GRAPH_HOSTS.has(hostname);
+}
+
 const WRITE_METHODS = new Set<string>(["POST", "PATCH", "PUT", "DELETE"]);
 
 /**

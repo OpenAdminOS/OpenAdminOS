@@ -130,8 +130,8 @@ export const REGISTER = [
   {
     id: "apply-ignores-plan-change-since-review",
     path: "apps/desktop/electron/runs.ts",
-    find: "if (change.changed) throw new Error(planChangedSinceReviewCopy(change, kind));",
-    replace: "if (false) throw new Error(planChangedSinceReviewCopy(change, kind));",
+    find: "if (change.changed) throw new Error(planChangedSinceReviewCopy(",
+    replace: "if (false) throw new Error(planChangedSinceReviewCopy(",
     tests: ["apps/desktop/electron/runs-revalidation.test.ts"],
     why: "A plan whose actions changed in the tenant since review must not be applied.",
   },
@@ -150,6 +150,14 @@ export const REGISTER = [
     replace: 'if (request.method === "DELETE") throw new Error(PLAN_REVALIDATION_READ_ONLY_COPY);',
     tests: ["apps/desktop/electron/runs-revalidation.test.ts"],
     why: "The replan before apply has no write authority; any method but GET must be refused before it is sent.",
+  },
+  {
+    id: "revalidation-connector-lets-graph-writes-through",
+    path: "apps/desktop/electron/runs.ts",
+    find: 'if (method !== "GET" && isGraphHost(url.hostname)) {',
+    replace: 'if (method === "DELETE" && isGraphHost(url.hostname)) {',
+    tests: ["apps/desktop/electron/runs-revalidation.test.ts"],
+    why: "A connector's own Graph client, such as Outlook's, must not send a write during the replan before apply.",
   },
   {
     id: "revalidation-keys-retire-by-request",

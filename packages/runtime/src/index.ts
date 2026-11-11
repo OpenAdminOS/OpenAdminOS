@@ -152,6 +152,7 @@ export {
   createGraphAdapter,
   GraphWriteAuditError,
   GraphWriteUnauditedError,
+  isGraphHost,
   type GraphAdapterLogger,
   type GraphAdapterOptions,
   type GraphWriteAuditAttempt,

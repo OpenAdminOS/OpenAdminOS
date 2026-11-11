@@ -9,6 +9,7 @@ import {
   executeApply,
   executePlan,
   executeRun,
+  isGraphHost,
   tenantSatisfiesRequirement,
 } from "@openadminos/runtime";
 import {
@@ -169,6 +170,7 @@ export function planChangeSinceReview(
 export function planChangedSinceReviewCopy(
   change: ReturnType<typeof planChangeSinceReview>,
   kind: "office" | "agent",
+  options: { usesModel?: boolean } = {},
 ): string {
   const actions = (count: number) => `${count.toLocaleString("en-US")} ${count === 1 ? "action" : "actions"}`;
   const parts: string[] = [];
@@ -178,10 +180,14 @@ export function planChangedSinceReviewCopy(
   if (change.added > 0) parts.push(`${actions(change.added)} ${change.added === 1 ? "is" : "are"} new`);
   if (parts.length === 0) parts.push("the confirmation phrase is different");
   const what = parts.join(", and ");
+  const model = options.usesModel ? ` ${PLAN_REVALIDATION_MODEL_COPY}` : "";
   return kind === "office"
-    ? `The proposed actions changed since review: ${what}. Nothing was applied. Run the assignment again to review a fresh proposal.`
-    : `The planned actions changed since review: ${what}. Nothing was applied. Select Run again to review a fresh plan.`;
+    ? `The proposed actions changed since review: ${what}. Nothing was applied.${model} Run the assignment again to review a fresh proposal.`
+    : `The planned actions changed since review: ${what}. Nothing was applied.${model} Select Run again to review a fresh plan.`;
 }
+
+/** Added to the refusal when the agent called a model while planning. */
+export const PLAN_REVALIDATION_MODEL_COPY = "An agent that uses a model can plan differently on a second pass, even when the tenant has not changed.";
 
 /** Why a Graph write was refused while a confirmed plan is checked again. */
 export const PLAN_REVALIDATION_READ_ONLY_COPY = "Checking a plan before apply permits only Graph reads.";
@@ -197,6 +203,40 @@ export function readOnlyRevalidationGraph(graph: RunGraphApi): RunGraphApi {
       if (request.method !== "GET") throw new Error(PLAN_REVALIDATION_READ_ONLY_COPY);
       return graph.request(request);
     },
+  };
+}
+
+/**
+ * The connector transport for the replan before apply: requests to Graph
+ * other than GET are refused before they are sent, and everything else
+ * goes through `transport`, so its lifecycle guard and Graph write audit
+ * still apply. Without a transport it wraps the global fetch, so a
+ * connector never falls back to an unguarded one.
+ */
+export function readOnlyRevalidationTransport(
+  transport: { fetch?: typeof fetch; assertEgress?: () => void } | undefined,
+): { fetch: typeof fetch; assertEgress?: () => void } {
+  const base: typeof fetch = transport?.fetch ?? ((input, init) => fetch(input, init));
+  return {
+    ...transport,
+    fetch: (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+      const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+      if (method !== "GET" && isGraphHost(url.hostname)) {
+        throw new Error(`${method} ${url.pathname} was not sent. ${PLAN_REVALIDATION_READ_ONLY_COPY}`);
+      }
+      return base(input, init);
+    }) as typeof fetch,
+  };
+}
+
+/** `run` with the model usage of `source`, a later snapshot of the same run. */
+function withUsageOf(run: RunRecord, source: Pick<RunRecord, "tokens" | "usage">): RunRecord {
+  const { tokens: _tokens, usage: _usage, ...rest } = run;
+  return {
+    ...rest,
+    ...(source.tokens !== undefined ? { tokens: source.tokens } : {}),
+    ...(source.usage !== undefined ? { usage: source.usage } : {}),
   };
 }
 
@@ -1341,6 +1381,10 @@ export class RunService {
   }): Promise<void> {
     const controller = new AbortController();
     this.controllers.set(input.run.id, controller);
+    // The replan calls the model like any other phase, and those calls are
+    // billed. Its snapshots carry the run's usage so far plus its own, and
+    // that total stays on the run however apply ends.
+    let usage: Pick<RunRecord, "tokens" | "usage"> = input.run;
     try {
       assertRunCanApply(input.run);
       if ((await this.getRun(input.run.id))?.status === "cancelled") return;
@@ -1353,13 +1397,18 @@ export class RunService {
       // for every agent write run. Replanning has no mutation authority, and
       // a plan that differs from the confirmed one needs a fresh decision.
       const kind = input.run.office ? "office" : "agent";
+      const runContext = { runId: input.run.id, agentSlug: input.run.agentSlug, initiator: runInitiator(input.run) };
       const fresh = await executePlan({
         signal: controller.signal, run: { ...input.run, steps: [], logs: [] }, agent: input.agent,
         providerId: input.providerId, model: input.model, llm, tenant: selection.tenantSession,
         createGraph: (log) => readOnlyRevalidationGraph(selection.createGraph(log)),
         realWrites: false, connectorConfigs: await this.host.readConnectorConfigs(),
         connectorSecretsFor: (id) => this.host.connectorSecretsFor(id),
-        confirmCapability: async () => ({ approved: false, reason: "Revalidating a plan cannot send notifications or change external state." }), onProgress: () => {},
+        connectorTransport: readOnlyRevalidationTransport(this.host.connectorTransport?.(input.run.tenantId, runContext)),
+        confirmCapability: async () => ({ approved: false, reason: "Revalidating a plan cannot send notifications or change external state." }),
+        onProgress: (next) => {
+          usage = next;
+        },
       });
       controller.signal.throwIfAborted();
       if (fresh.status === "failed" || !fresh.plan) {
@@ -1368,7 +1417,7 @@ export class RunService {
           : `The plan could not be checked against the tenant before applying, so nothing was applied. ${fresh.error ?? "Select Run again to review a fresh plan."}`);
       }
       const change = planChangeSinceReview(input.plan, fresh.plan);
-      if (change.changed) throw new Error(planChangedSinceReviewCopy(change, kind));
+      if (change.changed) throw new Error(planChangedSinceReviewCopy(change, kind, { usesModel: (fresh.usage?.calls ?? 0) > 0 }));
       controller.signal.throwIfAborted();
       // Apply gets the reviewed plan, never the fresh one, and runs its
       // actions in the reviewed order; the fresh plan only decides
@@ -1376,7 +1425,7 @@ export class RunService {
       try {
         await executeApply({
           signal: controller.signal,
-          run: input.run,
+          run: withUsageOf(input.run, usage),
           agent: input.agent,
           providerId: input.providerId,
           model: input.model,
@@ -1386,7 +1435,7 @@ export class RunService {
           tenant: selection.tenantSession,
           connectorConfigs: await this.host.readConnectorConfigs(),
           connectorSecretsFor: (connectorId) => this.host.connectorSecretsFor(connectorId),
-        ...(input.run.tenantId && this.host.connectorTransport ? { connectorTransport: this.host.connectorTransport(input.run.tenantId, { runId: input.run.id, agentSlug: input.run.agentSlug, initiator: runInitiator(input.run) }) } : {}),
+          ...(this.host.connectorTransport ? { connectorTransport: this.host.connectorTransport(input.run.tenantId, runContext) } : {}),
           confirmCapability: (info) => requestConnectorConfirmation(info, controller.signal),
           realWrites: true,
           onProgress: (next) =>
@@ -1401,7 +1450,7 @@ export class RunService {
         });
       }
     } catch (error) {
-      await this.persistFailedSnapshot(input.run, input.agent, error);
+      await this.persistFailedSnapshot(withUsageOf(input.run, usage), input.agent, error);
     } finally {
       if (this.controllers.get(input.run.id) === controller) this.controllers.delete(input.run.id);
     }
@@ -1683,8 +1732,11 @@ export class RunService {
         });
         const logs = [...previous.logs];
         for (const log of run.logs) if (!logs.some((existing) => existing.id === log.id)) logs.push(log);
+        // Model calls made before the run stopped were billed, so a late
+        // snapshot that counts more of them keeps its usage.
+        const kept = (run.usage?.calls ?? 0) > (previous.usage?.calls ?? 0) ? withUsageOf(previous, run) : previous;
         await this.host.write({ ...persisted, runs: persisted.runs.map((existing) =>
-          existing.id === run.id ? { ...previous, steps, logs } : existing) });
+          existing.id === run.id ? { ...kept, steps, logs } : existing) });
         return;
       }
       if (previous && isTerminalRunStatus(previous.status) && !isTerminalRunStatus(run.status)) return;

@@ -14,10 +14,12 @@ import type {
 import { createQueuedRun, executePlan } from "@openadminos/runtime";
 
 import {
+  PLAN_REVALIDATION_MODEL_COPY,
   PLAN_REVALIDATION_READ_ONLY_COPY,
   planChangedSinceReviewCopy,
   planChangeSinceReview,
   readOnlyRevalidationGraph,
+  readOnlyRevalidationTransport,
   RunService,
   type RunPersistedState,
   type RunServiceHost,
@@ -65,6 +67,21 @@ definition:
       kind: manual
 `;
 
+/** The same agent with a model step before the plan. */
+const MANIFEST_WITH_MODEL = MANIFEST.replace(
+  "  - id: plan\n",
+  `  - id: review
+    format: llm
+    label: Review guest accounts
+    settings:
+      prompt: "Review {{ load.output | size }} guest accounts."
+  - id: plan
+`,
+);
+
+/** What the fake model reports for each call. */
+const CALL_USAGE = { promptTokens: 100, completionTokens: 20, totalTokens: 120, costUsd: 0.25 };
+
 interface Guest {
   id: string;
   displayName: string;
@@ -79,10 +96,13 @@ const guest = (id: string): Guest => ({ id, displayName: id, days: 91, departmen
  * tenant, then confirms it and waits for the run to settle. A change
  * that returns an Error makes every later tenant read fail with it.
  */
-async function confirmAfter(change: (guests: Guest[]) => Guest[] | Error) {
+async function confirmAfter(
+  change: (guests: Guest[]) => Guest[] | Error,
+  options: { withModel?: boolean; cancelDuringReplan?: boolean } = {},
+) {
   const dir = await mkdtemp(join(tmpdir(), "plan-revalidation-"));
   try {
-    await writeFile(join(dir, "manifest.yaml"), MANIFEST);
+    await writeFile(join(dir, "manifest.yaml"), options.withModel ? MANIFEST_WITH_MODEL : MANIFEST);
     const agent: AgentSummary = {
       id: "revalidation-fixture",
       slug: "revalidation-fixture",
@@ -117,15 +137,32 @@ async function confirmAfter(change: (guests: Guest[]) => Guest[] | Error) {
         throw new Error("Not used by this agent.");
       },
     };
-    const llm: RunLlmApi = {
-      available: false,
-      complete: async () => {
-        throw new Error("Unused");
-      },
-      async *stream() {
-        throw new Error("Unused");
-      },
-    };
+    let modelCalls = 0;
+    let service!: RunService;
+    let runId = "";
+    const llm: RunLlmApi = options.withModel
+      ? {
+          available: true,
+          defaultModel: "model-1",
+          complete: async () => {
+            throw new Error("The runtime streams.");
+          },
+          async *stream() {
+            modelCalls += 1;
+            yield { delta: "Reviewed.", accumulated: "Reviewed.", done: true, model: "model-1", tokenUsage: CALL_USAGE };
+            // The second call is the replan's: the admin cancels right after it.
+            if (options.cancelDuringReplan && modelCalls === 2) await service.cancelRun(runId);
+          },
+        }
+      : {
+          available: false,
+          complete: async () => {
+            throw new Error("Unused");
+          },
+          async *stream() {
+            throw new Error("Unused");
+          },
+        };
     const planned = await executePlan({
       agent,
       run: { ...createQueuedRun({ agent, providerId: "ollama" }), tenantId: "tenant-1" },
@@ -141,12 +178,17 @@ async function confirmAfter(change: (guests: Guest[]) => Guest[] | Error) {
       tenants: [],
       runs: [planned],
     };
+    runId = planned.id;
     let settled!: () => void;
     const done = new Promise<void>((resolve) => (settled = resolve));
+    // A cancelled run is not reported as finished: it has settled once the
+    // run's own snapshot lands after the cancel.
+    let cancelledWrites = 0;
     const host = {
       read: async () => state,
       write: async (next: RunPersistedState) => {
         state = next;
+        if (next.runs[0]?.status === "cancelled" && (cancelledWrites += 1) === 2) settled();
       },
       serialize: async <T>(task: () => Promise<T>) => task(),
       listProviders: async () => [],
@@ -165,9 +207,10 @@ async function confirmAfter(change: (guests: Guest[]) => Guest[] | Error) {
     const changed = change(guests);
     if (changed instanceof Error) readError = changed;
     else guests = changed;
-    await new RunService(host as unknown as RunServiceHost).confirmRun(planned.id, planned.plan!.confirmationPhrase);
+    service = new RunService(host as unknown as RunServiceHost);
+    await service.confirmRun(planned.id, planned.plan!.confirmationPhrase);
     await done;
-    return { run: state.runs[0]!, writes, revalidationReads: reads.length - readsWhenPlanned };
+    return { run: state.runs[0]!, writes, revalidationReads: reads.length - readsWhenPlanned, modelCalls };
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -234,6 +277,47 @@ describe("write plans are checked against the tenant before apply", () => {
     );
   });
 
+  it("counts the model calls of the replan in the run's usage when it applies", async () => {
+    const { run, writes, modelCalls } = await confirmAfter((guests) => guests, { withModel: true });
+    assert.equal(run.status, "completed", run.error);
+    assert.equal(writes.length, 2);
+    assert.ok(modelCalls >= 2, "the plan and the replan both call the model");
+    assert.deepEqual(
+      { calls: run.usage?.calls, promptTokens: run.usage?.promptTokens, costUsd: run.usage?.costUsd, tokens: run.tokens?.totalTokens },
+      { calls: modelCalls, promptTokens: 100 * modelCalls, costUsd: 0.25 * modelCalls, tokens: 120 * modelCalls },
+    );
+  });
+
+  it("counts the model calls of the replan in the run's usage when it refuses, and says a model can plan differently", async () => {
+    const { run, writes, modelCalls } = await confirmAfter(() => [guest("guest-a")], { withModel: true });
+    assert.equal(writes.length, 0, "no Graph write is sent");
+    assert.equal(run.status, "failed");
+    assert.equal(modelCalls, 2, "the plan and the replan each call the model once");
+    assert.deepEqual(
+      { calls: run.usage?.calls, promptTokens: run.usage?.promptTokens, costUsd: run.usage?.costUsd, tokens: run.tokens?.totalTokens },
+      { calls: 2, promptTokens: 200, costUsd: 0.5, tokens: 240 },
+    );
+    assert.equal(
+      run.error,
+      `The planned actions changed since review: 1 of the 2 actions you reviewed is no longer in the plan. Nothing was applied. ${PLAN_REVALIDATION_MODEL_COPY} Select Run again to review a fresh plan.`,
+    );
+    assert.equal(
+      PLAN_REVALIDATION_MODEL_COPY,
+      "An agent that uses a model can plan differently on a second pass, even when the tenant has not changed.",
+    );
+  });
+
+  it("counts the model calls of the replan in the run's usage when it is cancelled", async () => {
+    const { run, writes, modelCalls } = await confirmAfter((guests) => guests, { withModel: true, cancelDuringReplan: true });
+    assert.equal(run.status, "cancelled");
+    assert.equal(writes.length, 0, "no Graph write is sent");
+    assert.equal(modelCalls, 2);
+    assert.deepEqual(
+      { calls: run.usage?.calls, promptTokens: run.usage?.promptTokens, costUsd: run.usage?.costUsd },
+      { calls: 2, promptTokens: 200, costUsd: 0.5 },
+    );
+  });
+
   it("compares only what each action sends, and names a changed phrase", () => {
     const action = (id: string, path: string, extra: Record<string, unknown> = {}) => ({
       id, kind: "graph-write", label: path, request: { method: "PATCH" as const, path, body: { accountEnabled: false } }, ...extra,
@@ -295,5 +379,36 @@ describe("write plans are checked against the tenant before apply", () => {
     assert.deepEqual(sent, [], "no write reached the Graph client");
     assert.deepEqual(await graph.request({ method: "GET", path: "/users" }), { value: [] });
     assert.equal(sent.length, 1);
+  });
+
+  it("refuses a connector's Graph write during the replan before it is sent", async () => {
+    const sent: string[] = [];
+    let egressChecks = 0;
+    const transport = readOnlyRevalidationTransport({
+      fetch: (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        sent.push(`${init?.method ?? "GET"} ${String(input)}`);
+        return new Response("{}", { status: 200 });
+      }) as typeof fetch,
+      assertEgress: () => {
+        egressChecks += 1;
+      },
+    });
+    for (const method of ["POST", "PATCH", "PUT", "DELETE"]) {
+      await assert.rejects(
+        transport.fetch("https://graph.microsoft.com/v1.0/me/sendMail", { method, body: "{}" }),
+        { message: `${method} /v1.0/me/sendMail was not sent. ${PLAN_REVALIDATION_READ_ONLY_COPY}` },
+      );
+    }
+    await assert.rejects(
+      transport.fetch(new Request("https://graph.microsoft.us/v1.0/teams/team-1/channels/channel-1/messages", { method: "POST", body: "{}" })),
+      { message: `POST /v1.0/teams/team-1/channels/channel-1/messages was not sent. ${PLAN_REVALIDATION_READ_ONLY_COPY}` },
+    );
+    assert.deepEqual(sent, [], "no write reached the transport");
+
+    await transport.fetch("https://graph.microsoft.com/v1.0/me/mailFolders");
+    await transport.fetch("https://hooks.example.com/notify", { method: "POST", body: "{}" });
+    assert.deepEqual(sent, ["GET https://graph.microsoft.com/v1.0/me/mailFolders", "POST https://hooks.example.com/notify"]);
+    transport.assertEgress?.();
+    assert.equal(egressChecks, 1, "the transport's egress check still applies");
   });
 });

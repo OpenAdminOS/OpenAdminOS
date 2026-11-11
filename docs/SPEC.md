@@ -657,7 +657,12 @@ Concretely:
   available. No flags means only that the current rules found no match.
 - After typed confirmation and immediately before apply, every agent write run
   (ordinary runs and Agent Team assignments) plans again against the live
-  tenant with Graph reads only, retirement and connector changes denied. Each
+  tenant with Graph reads only, retirement and connector changes denied. A
+  connector that brings its own Graph client, such as Outlook, sends through a
+  transport that refuses every Graph request but GET before it is sent ("POST
+  /v1.0/me/sendMail was not sent. Checking a plan before apply permits only
+  Graph reads."), on top of the tenant's lifecycle guard and Graph write audit.
+  Each
   action is compared by what it sends, as a multiset in canonical JSON: its
   kind and request (method, path, body); for a retire, its
   `metadata.deviceId`; for any other action without a request, its metadata.
@@ -672,10 +677,15 @@ Concretely:
   review a fresh plan." Agent Team keeps its wording ("The proposed actions
   changed since review: ... Run the assignment again to review a fresh
   proposal."). A changed phrase with the same actions is named on its own.
+  When the agent called a model while planning, the refusal adds "An agent
+  that uses a model can plan differently on a second pass, even when the
+  tenant has not changed." before Run again.
   Planning again repeats the agent's model steps, including its LLM calls,
   because some agents derive their actions from model output and skipping
   those steps would change the plan; confirming a write run therefore costs
-  the planning again before apply. A plan whose requests depend on model text
+  the planning again before apply. Those calls count in the run's tokens,
+  call count and cost whether the run then applies, is refused, fails or is
+  cancelled. A plan whose requests depend on model text
   can be refused although the targets are unchanged; the refusal is safe and
   Run again prepares a new plan. System plans are applied as confirmed: a gateway
   proposal has no agent to plan it again, so the proposing client owns the
