@@ -145,16 +145,20 @@ describe("Codex CLI watchdog", () => {
   for (const [mode, limits, stop] of [
     ["silent", { idleTimeoutMs: 500, timeoutMs: 60_000 }, "stalled"],
     ["chatty", { idleTimeoutMs: 60_000, timeoutMs: 1_000 }, "time-limit"],
+    // No output at all, with the idle limit from the environment.
+    ["quiet", { timeoutMs: 60_000 }, "stalled"],
   ] as const) {
     it(`ends a ${mode} CLI that never finishes with the ${stop} error and stops its process`, async () => {
       const root = await mkdtemp(join(tmpdir(), "codex-watchdog-"));
+      const previous = process.env.OPENADMINOS_CODEX_IDLE_TIMEOUT_MS;
+      if (mode === "quiet") process.env.OPENADMINOS_CODEX_IDLE_TIMEOUT_MS = "500";
       try {
         const pidsPath = join(root, "pids.txt");
         const script = `#!/usr/bin/env node
 const { appendFileSync } = require("node:fs");
 if (process.argv[2] === "--version") { console.log("codex-cli 0.200.0"); process.exit(0); }
 appendFileSync(${JSON.stringify(pidsPath)}, process.pid + "\\n");
-console.log(JSON.stringify({type: "thread.started"}));
+if (${JSON.stringify(mode)} !== "quiet") console.log(JSON.stringify({type: "thread.started"}));
 setInterval(() => {
   if (${JSON.stringify(mode)} === "chatty") console.log(JSON.stringify({type: "item.updated", item: {type: "reasoning"}}));
 }, 5);
@@ -165,11 +169,19 @@ setTimeout(() => process.exit(3), 30_000);
         const llm = createCodexLlm({ binaryPath, homePath: root, ...limits });
         await assert.rejects(
           llm.complete({ prompt: "Review supplied evidence only." }),
-          (error: unknown) => error instanceof CliWatchdogError && error.stop === stop && error.message.startsWith("Codex CLI "),
+          (error: unknown) =>
+            error instanceof CliWatchdogError &&
+            error.stop === stop &&
+            error.message.startsWith("Codex CLI ") &&
+            error.message.includes(stop === "stalled" ? "OPENADMINOS_CODEX_IDLE_TIMEOUT_MS" : "OPENADMINOS_CODEX_TIMEOUT_MS"),
         );
         const pids = (await readFile(pidsPath, "utf8")).trim().split(/\r?\n/).map(Number);
         for (const pid of pids) assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
-      } finally { await rm(root, { recursive: true, force: true }); }
+      } finally {
+        if (previous === undefined) delete process.env.OPENADMINOS_CODEX_IDLE_TIMEOUT_MS;
+        else process.env.OPENADMINOS_CODEX_IDLE_TIMEOUT_MS = previous;
+        await rm(root, { recursive: true, force: true });
+      }
     });
   }
 });

@@ -29,12 +29,12 @@ const SUGGESTIONS: Suggestion[] = [
   {
     match: (e) => /stopped sending output for/i.test(e),
     title: "Provider stopped responding",
-    body: "The provider CLI went quiet partway through the reply, so it was stopped. This usually means a dropped connection, an expired sign-in, or a stuck CLI. Test the provider in Settings → LLM Providers, then re-run.",
+    body: "The provider CLI sent no output for longer than its silence limit, so it was stopped. This usually means a dropped connection, an expired sign-in, or a stuck CLI. Test the provider in Settings → LLM Providers, then re-run. If the model works without output for longer, set `OPENADMINOS_CLAUDE_CODE_IDLE_TIMEOUT_MS` or `OPENADMINOS_CODEX_IDLE_TIMEOUT_MS` higher, in milliseconds, and restart the app.",
   },
   {
     match: (e) => /the limit for one request/i.test(e),
     title: "Provider time limit reached",
-    body: "The provider was still producing output when it reached the limit for one request. Narrow the agent's scope or pick a faster model, then re-run.",
+    body: "The provider was still producing output when it reached the limit for one request. Narrow the agent's scope or pick a faster model, then re-run. To allow longer requests, set `OPENADMINOS_CLAUDE_CODE_TIMEOUT_MS` or `OPENADMINOS_CODEX_TIMEOUT_MS` higher, in milliseconds, and restart the app.",
   },
   {
     match: (e) => /timed out|timeout|aborted/i.test(e),

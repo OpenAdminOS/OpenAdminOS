@@ -1,6 +1,6 @@
 import { cliFailure, type CliFailure } from "./cli-provider.js";
 import { cliExecutablePath, cliSpawn, killCliProcess } from "./cli-invocation.js";
-import { startCliWatchdog, type CliWatchdogLimits } from "./cli-watchdog.js";
+import { cliWatchdogLimits, startCliWatchdog, type CliWatchdogLimits } from "./cli-watchdog.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -112,16 +112,12 @@ export function createClaudeCodeLlm(
 ): RunLlmApi {
   const homePath = resolveClaudeCodeConfig(options.homePath);
   const defaultModel = options.defaultModel ?? DEFAULT_CLAUDE_CODE_MODEL;
-  const configuredTimeout = Number.parseInt(
-    process.env.OPENADMINOS_CLAUDE_CODE_TIMEOUT_MS ?? "",
-    10,
-  );
-  const limits: CliWatchdogLimits = {
-    idleMs: options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS,
-    maxMs:
-      options.timeoutMs ??
-      (Number.isFinite(configuredTimeout) ? configuredTimeout : DEFAULT_TIMEOUT_MS),
-  };
+  const limits = cliWatchdogLimits({
+    idleMs: options.idleTimeoutMs,
+    maxMs: options.timeoutMs,
+    defaults: { idleMs: DEFAULT_IDLE_TIMEOUT_MS, maxMs: DEFAULT_TIMEOUT_MS },
+    env: { idleMs: "OPENADMINOS_CLAUDE_CODE_IDLE_TIMEOUT_MS", maxMs: "OPENADMINOS_CLAUDE_CODE_TIMEOUT_MS" },
+  });
   const binaryPathPromise = resolveClaudeCodeBinary(options.binaryPath);
 
   return {

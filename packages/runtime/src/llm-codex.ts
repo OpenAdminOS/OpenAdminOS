@@ -1,6 +1,6 @@
 import { cliFailure, type CliFailure } from "./cli-provider.js";
 import { cliExecutablePath, cliSpawn, killCliProcess } from "./cli-invocation.js";
-import { startCliWatchdog, type CliWatchdogLimits } from "./cli-watchdog.js";
+import { cliWatchdogLimits, startCliWatchdog, type CliWatchdogLimits } from "./cli-watchdog.js";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -87,13 +87,12 @@ const CODEX_ENV_ALLOWLIST = new Set([
 export function createCodexLlm(options: CodexProviderOptions = {}): RunLlmApi {
   const homePath = expandHome(options.homePath ?? process.env.CODEX_HOME ?? "~/.codex");
   const defaultModel = options.defaultModel;
-  const configuredTimeout = Number.parseInt(process.env.OPENADMINOS_CODEX_TIMEOUT_MS ?? "", 10);
-  const limits: CliWatchdogLimits = {
-    idleMs: options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS,
-    maxMs:
-      options.timeoutMs ??
-      (Number.isFinite(configuredTimeout) ? configuredTimeout : DEFAULT_TIMEOUT_MS),
-  };
+  const limits = cliWatchdogLimits({
+    idleMs: options.idleTimeoutMs,
+    maxMs: options.timeoutMs,
+    defaults: { idleMs: DEFAULT_IDLE_TIMEOUT_MS, maxMs: DEFAULT_TIMEOUT_MS },
+    env: { idleMs: "OPENADMINOS_CODEX_IDLE_TIMEOUT_MS", maxMs: "OPENADMINOS_CODEX_TIMEOUT_MS" },
+  });
   const binaryPathPromise = resolveCodexBinary(options.binaryPath);
 
   return {

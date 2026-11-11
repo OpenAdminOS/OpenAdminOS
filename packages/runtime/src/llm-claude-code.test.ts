@@ -213,6 +213,27 @@ describe("createClaudeCodeLlm", () => {
     }
   });
 
+  it("bounds the wait for the first output by the idle limit from the environment", fakeCli, async () => {
+    const fixture = await createUnfinishedClaudeCodeBinary("quiet");
+    const previous = process.env.OPENADMINOS_CLAUDE_CODE_IDLE_TIMEOUT_MS;
+    process.env.OPENADMINOS_CLAUDE_CODE_IDLE_TIMEOUT_MS = "500";
+    try {
+      const llm = createClaudeCodeLlm({ binaryPath: fixture.binaryPath, timeoutMs: 60_000 });
+      await assert.rejects(
+        llm.complete({ prompt: "Say hello." }),
+        (error: unknown) =>
+          error instanceof CliWatchdogError &&
+          error.stop === "stalled" &&
+          /set OPENADMINOS_CLAUDE_CODE_IDLE_TIMEOUT_MS to a higher limit/.test(error.message),
+      );
+      for (const pid of await fixture.readPids()) assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+    } finally {
+      if (previous === undefined) delete process.env.OPENADMINOS_CLAUDE_CODE_IDLE_TIMEOUT_MS;
+      else process.env.OPENADMINOS_CLAUDE_CODE_IDLE_TIMEOUT_MS = previous;
+      await fixture.cleanup();
+    }
+  });
+
   it("ends a CLI that keeps streaming past the hard cap with the time limit error", fakeCli, async () => {
     const fixture = await createUnfinishedClaudeCodeBinary("chatty");
     try {
@@ -230,8 +251,11 @@ describe("createClaudeCodeLlm", () => {
   });
 });
 
-/** A Claude Code stand-in that starts a reply and never finishes it. */
-async function createUnfinishedClaudeCodeBinary(mode: "silent" | "chatty"): Promise<{
+/**
+ * A Claude Code stand-in that never finishes a reply: "quiet" prints
+ * nothing, "silent" prints the init event only, "chatty" keeps streaming.
+ */
+async function createUnfinishedClaudeCodeBinary(mode: "quiet" | "silent" | "chatty"): Promise<{
   binaryPath: string;
   readPids(): Promise<number[]>;
   cleanup(): Promise<void>;
@@ -246,7 +270,7 @@ if (process.argv[2] === "--version") {
   process.exit(0);
 }
 appendFileSync(${JSON.stringify(pidsPath)}, process.pid + "\\n");
-console.log(JSON.stringify({type: "system", subtype: "init"}));
+if (${JSON.stringify(mode)} !== "quiet") console.log(JSON.stringify({type: "system", subtype: "init"}));
 setInterval(() => {
   if (${JSON.stringify(mode)} === "chatty") console.log(JSON.stringify({type: "assistant", message: {content: [{type: "text", text: "Hel"}]}}));
 }, 5);
