@@ -635,6 +635,25 @@ Concretely:
   informational. A failed or missing assessment says "Risk check could not run:
   <reason>. Review every action manually." and leaves typed confirmation
   available. No flags means only that the current rules found no match.
+- After typed confirmation and immediately before apply, every agent write run
+  (ordinary runs and Agent Team assignments) plans again against the live
+  tenant with Graph reads only, retirement and connector changes denied. The
+  fresh actions and confirmation phrase must equal the confirmed ones exactly
+  (canonical JSON). On any difference nothing is written and the run fails
+  with what changed, for example "The planned actions changed since review: 1
+  of the 2 actions you reviewed is no longer in the plan, and 2 actions are
+  new. Nothing was applied. Select Run again to review a fresh plan." Agent
+  Team keeps its wording ("The proposed actions changed since review: ... Run
+  the assignment again to review a fresh proposal."). Counts compare actions
+  without their position id, so a reorder or a changed phrase is named on its
+  own. Planning again repeats the agent's LLM steps, so a plan whose actions
+  depend on model text, or on values derived from the current time, can be
+  refused although the targets are unchanged; the refusal is safe and Run
+  again prepares a new plan. System plans are applied as confirmed: a gateway
+  proposal has no agent to plan it again, so the proposing client owns the
+  plan and the diff the admin confirmed is applied as-is, fail-stop; a
+  baseline rollback is built from local drift snapshots rather than a live
+  read, so rebuilding it would compare the snapshot with itself.
 - If you genuinely don't need an LLM (e.g. a pure data export), this product is the wrong tool; reach for `Get-MgDeviceManagementManagedDevice | Export-Csv` or a similar deterministic script instead.
 
 Microsoft Graph execution is beta-only for this project. The runtime and all
@@ -2625,8 +2644,9 @@ that slot, so independent work can proceed. The 5–120 minute execution allowan
 excludes queue and human waiting; model planning counts toward it. Approval has a
 separate configurable lease (10 minutes to 7 days, default one day). Expired proposals
 require a new assignment. Immediately before applying an approved team write, the
-runtime reruns its plan with Graph reads only and connector mutations denied. Changed
-actions or confirmation text fail without applying; a fresh proposal needs fresh
+runtime reruns its plan with Graph reads only and connector mutations denied, as it
+does for every agent write run (see Agent contract). Changed actions or confirmation
+text fail without applying, with counts of what changed; a fresh proposal needs fresh
 approval. Every destructive operation retains typed confirmation.
 
 Readiness checks cover the assigned tenant, model, provider, and installed workflows.

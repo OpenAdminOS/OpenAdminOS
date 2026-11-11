@@ -106,6 +106,57 @@ export class OrganizationBoundaryError extends Error {
 /** Why nothing new starts or applies for an organization that is being disconnected. */
 export const TENANT_DISCONNECTING_COPY = TENANT_CLOSED_COPY;
 
+/**
+ * How a fresh read-only plan differs from the one the admin confirmed.
+ * Actions are compared without their position id, as a multiset, so
+ * the counts say how many reviewed actions are gone and how many are
+ * new; any difference at all, order and phrase included, is a change.
+ */
+export function planChangeSinceReview(
+  reviewed: NonNullable<RunRecord["plan"]>,
+  fresh: NonNullable<RunRecord["plan"]>,
+): { changed: boolean; reviewed: number; removed: number; added: number; phraseChanged: boolean } {
+  const phraseChanged = fresh.confirmationPhrase !== reviewed.confirmationPhrase;
+  const changed = phraseChanged || stableStringify(fresh.actions) !== stableStringify(reviewed.actions);
+  const key = ({ id: _id, ...action }: WriteAction) => stableStringify(action);
+  const remaining = new Map<string, number>();
+  for (const action of fresh.actions) remaining.set(key(action), (remaining.get(key(action)) ?? 0) + 1);
+  let removed = 0;
+  for (const action of reviewed.actions) {
+    const left = remaining.get(key(action)) ?? 0;
+    if (left > 0) remaining.set(key(action), left - 1);
+    else removed += 1;
+  }
+  const added = [...remaining.values()].reduce((sum, count) => sum + count, 0);
+  return { changed, reviewed: reviewed.actions.length, removed, added, phraseChanged };
+}
+
+/**
+ * The refusal when the live tenant no longer gives the confirmed plan.
+ * Agent Team keeps its proposal wording; other runs point at Run again.
+ */
+export function planChangedSinceReviewCopy(
+  change: ReturnType<typeof planChangeSinceReview>,
+  kind: "office" | "agent",
+): string {
+  const actions = (count: number) => `${count.toLocaleString("en-US")} ${count === 1 ? "action" : "actions"}`;
+  const parts: string[] = [];
+  if (change.removed > 0) {
+    parts.push(`${change.removed.toLocaleString("en-US")} of the ${actions(change.reviewed)} you reviewed ${change.removed === 1 ? "is" : "are"} no longer in the plan`);
+  }
+  if (change.added > 0) parts.push(`${actions(change.added)} ${change.added === 1 ? "is" : "are"} new`);
+  if (parts.length === 0) {
+    parts.push(change.phraseChanged ? "the confirmation phrase is different" : `the ${actions(change.reviewed)} you reviewed are in a different order`);
+  }
+  const what = parts.join(", and ");
+  return kind === "office"
+    ? `The proposed actions changed since review: ${what}. Nothing was applied. Run the assignment again to review a fresh proposal.`
+    : `The planned actions changed since review: ${what}. Nothing was applied. Select Run again to review a fresh plan.`;
+}
+
+/** Why a Graph write was refused while a confirmed plan is checked again. */
+const PLAN_REVALIDATION_READ_ONLY_COPY = "Checking a plan before apply permits only Graph reads.";
+
 /** How many gateway proposals one paired client may have waiting for review at once. */
 export const GATEWAY_PENDING_PROPOSALS_PER_CLIENT = 5;
 /** How long an identical proposal is refused after the admin rejected it. */
@@ -1255,27 +1306,33 @@ export class RunService {
       const selection = await this.host.buildGraph(input.run.tenantId, input.agent.scopes, this.executionOptions(input.run, controller.signal));
       const llm = this.withOverlay(input.run, baseLlm, selection.tenantId, input.agent.slug);
       controller.signal.throwIfAborted();
-      if (input.run.office) {
-        // Re-read a team's proposal immediately before apply. Replanning has no
-        // mutation authority and changed actions require a fresh user decision.
-        const fresh = await executePlan({
-          signal: controller.signal, run: {...input.run,steps:[],logs:[]}, agent: input.agent,
-          providerId: input.providerId,model:input.model,llm,tenant:selection.tenantSession,
-          createGraph: log => {
-            const graph = selection.createGraph(log);
-            return {...graph,retireManagedDevice:async()=>{throw new Error("Proposal revalidation permits only Graph reads.");},request: async request => {
-              if (request.method !== "GET") throw new Error("Proposal revalidation permits only Graph reads.");
-              return graph.request(request);
-            }};
-          },
-          realWrites:false,connectorConfigs:await this.host.readConnectorConfigs(),
-          connectorSecretsFor: id => this.host.connectorSecretsFor(id),
-          confirmCapability: async()=>({approved:false,reason:"Revalidating a proposal cannot send notifications or change external state."}),onProgress:()=>{},
-        });
-        if (fresh.status === "failed" || !fresh.plan) throw new Error(`Proposal could not be revalidated. ${fresh.error ?? "Run the assignment again."}`);
-        if (stableStringify(fresh.plan.actions) !== stableStringify(input.plan.actions) || fresh.plan.confirmationPhrase !== input.plan.confirmationPhrase) throw new Error("The proposed actions changed since review. Nothing was applied. Run the assignment again to review a fresh proposal.");
-        controller.signal.throwIfAborted();
+      // Re-plan read-only against the live tenant immediately before apply,
+      // for every agent write run. Replanning has no mutation authority, and
+      // a plan that differs from the confirmed one needs a fresh decision.
+      const kind = input.run.office ? "office" : "agent";
+      const fresh = await executePlan({
+        signal: controller.signal, run: { ...input.run, steps: [], logs: [] }, agent: input.agent,
+        providerId: input.providerId, model: input.model, llm, tenant: selection.tenantSession,
+        createGraph: (log) => {
+          const graph = selection.createGraph(log);
+          return { ...graph, retireManagedDevice: async () => { throw new Error(PLAN_REVALIDATION_READ_ONLY_COPY); }, request: async (request) => {
+            if (request.method !== "GET") throw new Error(PLAN_REVALIDATION_READ_ONLY_COPY);
+            return graph.request(request);
+          } };
+        },
+        realWrites: false, connectorConfigs: await this.host.readConnectorConfigs(),
+        connectorSecretsFor: (id) => this.host.connectorSecretsFor(id),
+        confirmCapability: async () => ({ approved: false, reason: "Revalidating a plan cannot send notifications or change external state." }), onProgress: () => {},
+      });
+      controller.signal.throwIfAborted();
+      if (fresh.status === "failed" || !fresh.plan) {
+        throw new Error(kind === "office"
+          ? `Proposal could not be revalidated. ${fresh.error ?? "Run the assignment again."}`
+          : `The plan could not be checked against the tenant before applying, so nothing was applied. ${fresh.error ?? "Select Run again to review a fresh plan."}`);
       }
+      const change = planChangeSinceReview(input.plan, fresh.plan);
+      if (change.changed) throw new Error(planChangedSinceReviewCopy(change, kind));
+      controller.signal.throwIfAborted();
       try {
         await executeApply({
           signal: controller.signal,
@@ -1317,6 +1374,14 @@ export class RunService {
    * exact count of what was applied, and nothing after the failed
    * action is attempted. The stored plan is the only source of
    * requests; nothing is re-rendered at apply time.
+   *
+   * Unlike agent write runs, these plans are not re-planned before
+   * apply. A gateway proposal comes from outside with no agent to plan
+   * it again: the proposing client owns the plan, and the diff the admin
+   * confirmed is applied as-is. A rollback plan is built from the local
+   * drift snapshots, not a live read, so rebuilding it would compare the
+   * snapshot with itself. Splashtop plans apply only through the
+   * connection they were read through.
    */
   private async driveSystemApply(input: { run: RunRecord }): Promise<void> {
     if (input.run.origin === "splashtop-change") return this.driveSplashtopApply(input.run);
