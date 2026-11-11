@@ -425,6 +425,25 @@ handed to `spawn`, which would throw a synchronous `spawn EINVAL`. Provider
 probing is fail-soft: a single provider that cannot be checked is reported on its
 own card and never aborts app-state assembly, so it cannot fail tenant sign-in.
 
+Claude Code and Codex requests are bounded by a watchdog
+(`packages/runtime/src/cli-watchdog.ts`) instead of one wall clock: an idle
+limit restarted on every stdout chunk, counted from the start so it also bounds
+the wait for the first output, and a hard cap on the whole request. Claude Code
+streams partial messages, so its idle limit is 90 seconds; `codex exec --json`
+prints whole items and stays silent through a long reply, so Codex keeps 180
+seconds, the old total limit. Both are capped at 15 minutes. The idle limit is
+off when it is not below the cap. `OPENADMINOS_CLAUDE_CODE_IDLE_TIMEOUT_MS` and
+`OPENADMINOS_CODEX_IDLE_TIMEOUT_MS` override the idle limits, and
+`OPENADMINOS_CLAUDE_CODE_TIMEOUT_MS` and `OPENADMINOS_CODEX_TIMEOUT_MS` the
+caps, as a positive whole number of milliseconds in the environment OpenAdminOS
+starts with; any other value is ignored. The two stops end the CLI process and give distinct errors, each
+naming its variable: a stall says "Claude Code stopped sending output for 90
+seconds, so OpenAdminOS ended the request. Test the provider in Settings, then
+retry." and the cap says "Claude Code was still working after 15 minutes, the
+limit for one request, so OpenAdminOS ended it. Narrow the request or split it
+into smaller steps, then retry." Both timers stay referenced and are cleared in
+`finally`.
+
 ### Tenant cache preparation and Nova
 
 Nova can retrieve a new report and prepare its delivery in one request, such as
