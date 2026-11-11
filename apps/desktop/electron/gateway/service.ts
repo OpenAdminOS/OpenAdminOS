@@ -101,8 +101,15 @@ export interface GatewayServiceHost {
 export class GatewayService {
   private server: RunningGatewayServer | undefined;
   /**
-   * Every config change, and every listener start or stop, runs in this
-   * queue, so a change and the listener it starts stay in order. The
+   * Counts stops. A listener whose start began before the latest stop is
+   * closed as soon as it is up, so a stop that lands while one starts,
+   * such as Disconnect's, is never undone by it.
+   */
+  private stops = 0;
+  /**
+   * Every config change, and every listener start, runs in this queue,
+   * so a change and the listener it starts stay in order. A bare `stop`
+   * does not wait on it; see `stops`. The
    * read, change and write of the config itself happen in one
    * `updateConfig`, under the host lock, so a change can never write
    * back a config that another writer of the state file replaced.
@@ -132,14 +139,14 @@ export class GatewayService {
     port?: number;
   }): Promise<GatewayPublicStatus> {
     await this.withConfig(async () => {
-      const nextConfig = await this.changeConfig((config) => ({
+      await this.changeConfig((config) => ({
         ...config,
         enabled: true,
         port: input.port ?? config.port ?? DEFAULT_GATEWAY_PORT,
         boundTenantId: input.boundTenantId,
         clients: config.boundTenantId === input.boundTenantId ? config.clients : [],
       }));
-      await this.restart(nextConfig);
+      await this.restart(input.boundTenantId);
     });
     return this.getStatus();
   }
@@ -216,27 +223,37 @@ export class GatewayService {
     await this.withConfig(async () => {
       const config = await this.migratedConfig();
       if (config.enabled && config.boundTenantId) {
-        await this.restart(config);
+        await this.restart(config.boundTenantId);
       }
     });
   }
 
+  /**
+   * Close the listener. It takes no lock and does not wait for queued
+   * config changes, so it is safe to call from inside the host lock, and
+   * a listener still starting when it is called is closed once it is up.
+   */
   async stop(): Promise<void> {
-    if (this.server) {
-      await this.server.close();
-      this.server = undefined;
-    }
+    this.stops += 1;
+    const server = this.server;
+    this.server = undefined;
+    if (server) await server.close();
   }
 
   /**
-   * Resolve a presented token against the current client records, so a
-   * revoke applies to the next request. Hashes are compared in constant
-   * time and every record is checked. The config is read through the
+   * Resolve a presented token for the listener started for
+   * `listenerTenantId`. The config is read on every request, so a
+   * gateway turned off, unbound or bound to another tenant since that
+   * listener started refuses even a token that was valid, and a revoke
+   * applies to the next request. Hashes are compared in constant time
+   * and every record is checked. The config is read through the
    * migration, so the shared token of an earlier version is refused as
    * such even before anything else has read the config.
    */
-  async authenticate(token: string): Promise<GatewayAuthResult> {
+  async authenticate(token: string, listenerTenantId: string): Promise<GatewayAuthResult> {
     const config = await this.readConfig();
+    if (!config.enabled || !config.boundTenantId) return { kind: "gateway-off" };
+    if (config.boundTenantId !== listenerTenantId) return { kind: "other-organization" };
     const presented = Buffer.from(hashToken(token), "hex");
     let match: GatewayClientRecord | undefined;
     for (const client of config.clients) {
@@ -342,10 +359,17 @@ export class GatewayService {
     return next;
   }
 
-  private async restart(config: GatewayConfig): Promise<void> {
+  /**
+   * Start a listener for `boundTenantId`, replacing the current one. The
+   * binding is checked against the config as written now, not the
+   * snapshot that asked for the start, so a Disconnect that unbound the
+   * gateway in between starts nothing. Call it only inside `withConfig`.
+   */
+  private async restart(boundTenantId: string): Promise<void> {
     await this.stop();
-    if (!config.enabled || !config.boundTenantId) return;
-    const boundTenantId = config.boundTenantId;
+    const stopsBefore = this.stops;
+    const config = await this.migratedConfig();
+    if (!config.enabled || config.boundTenantId !== boundTenantId) return;
     const gatewayHost: GatewayHost = {
       tenantName: async () =>
         (await this.host.tenantName(boundTenantId)) ?? "the connected tenant",
@@ -370,10 +394,15 @@ export class GatewayService {
       },
       log: (message, metadata) => this.host.log(message, metadata),
     };
-    this.server = await startGatewayServer(gatewayHost, {
+    const server = await startGatewayServer(gatewayHost, {
       port: config.port,
-      authenticate: (token) => this.authenticate(token),
+      authenticate: (token) => this.authenticate(token, boundTenantId),
     });
+    if (this.stops !== stopsBefore) {
+      await server.close();
+      return;
+    }
+    this.server = server;
   }
 }
 

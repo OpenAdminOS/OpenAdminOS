@@ -29,7 +29,11 @@ export type GatewayAuthResult =
   | { kind: "client"; client: GatewayClientIdentity }
   /** The shared token from before per-client pairing. */
   | { kind: "legacy-token" }
-  | { kind: "unknown" };
+  | { kind: "unknown" }
+  /** The gateway is off or unbound now, whatever the token. */
+  | { kind: "gateway-off" }
+  /** The gateway is bound to another tenant than this listener serves. */
+  | { kind: "other-organization" };
 
 export type GatewayProposalResult =
   | {
@@ -49,6 +53,20 @@ export const GATEWAY_LEGACY_TOKEN_COPY =
 
 export const GATEWAY_UNKNOWN_TOKEN_COPY =
   "This gateway token is not paired with OpenAdminOS, or the client was revoked. In OpenAdminOS, open Settings, Gateway, enter a name for this client and select Pair client, then put the token shown in this client's MCP configuration as a Bearer token.";
+
+export const GATEWAY_OFF_COPY =
+  "The OpenAdminOS gateway is off, so it accepts no requests. Turning the gateway off, or disconnecting the organization it was bound to, revokes every paired client. In OpenAdminOS, open Settings, Gateway, select the organization and turn on Enable gateway, then pair this client again and put the new token in this client's MCP configuration.";
+
+export const GATEWAY_OTHER_ORGANIZATION_COPY =
+  "The OpenAdminOS gateway is now bound to another organization, so this connection no longer works. In OpenAdminOS, open Settings, Gateway, check the bound tenant, then pair this client again and put the new token in this client's MCP configuration.";
+
+/** The status, code and copy of each refused authentication. */
+const GATEWAY_REFUSALS: Record<Exclude<GatewayAuthResult["kind"], "client">, { status: number; code: string; error: string }> = {
+  "legacy-token": { status: 401, code: "legacy-shared-token", error: GATEWAY_LEGACY_TOKEN_COPY },
+  unknown: { status: 401, code: "unpaired-token", error: GATEWAY_UNKNOWN_TOKEN_COPY },
+  "gateway-off": { status: 403, code: "gateway-off", error: GATEWAY_OFF_COPY },
+  "other-organization": { status: 403, code: "gateway-other-organization", error: GATEWAY_OTHER_ORGANIZATION_COPY },
+};
 
 export interface GatewayHost {
   /** Human-readable tenant label for tool descriptions and errors. */
@@ -73,7 +91,10 @@ export interface GatewayHost {
 
 export interface GatewayServerOptions {
   port: number;
-  /** Resolve a presented Bearer token, reading the current client records. */
+  /**
+   * Resolve a presented Bearer token, reading the current config, so a
+   * gateway turned off, unbound or bound elsewhere refuses the request.
+   */
   authenticate(token: string): Promise<GatewayAuthResult>;
 }
 
@@ -247,14 +268,9 @@ export async function startGatewayServer(
         : { kind: "unknown" };
       if (auth.kind !== "client") {
         host.log("gateway request refused", { reason: auth.kind });
-        response.writeHead(401, { "content-type": "application/json" });
-        response.end(
-          JSON.stringify(
-            auth.kind === "legacy-token"
-              ? { error: GATEWAY_LEGACY_TOKEN_COPY, code: "legacy-shared-token" }
-              : { error: GATEWAY_UNKNOWN_TOKEN_COPY, code: "unpaired-token" },
-          ),
-        );
+        const refusal = GATEWAY_REFUSALS[auth.kind];
+        response.writeHead(refusal.status, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: refusal.error, code: refusal.code }));
         return;
       }
       // Stateless mode: one server + transport per request keeps every
