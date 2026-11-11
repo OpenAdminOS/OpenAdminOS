@@ -68,7 +68,7 @@ The JSON Schema is in the repository at [`schemas/policy.schema.json`](https://g
 | `lock` | List of setting keys | The settings the admin cannot change in the app. Without `lock`, every setting the file sets is locked. With `"lock": []`, the file only sets defaults. |
 | `$schema` | Link | Optional. For editors. |
 
-Provider ids: `ollama`, `apple-foundation` (Apple Intelligence), `lm-studio`, `anthropic` (Claude Code), `openai` (Codex), `copilot` (GitHub Copilot CLI), `gemini` (Gemini CLI), `azure-openai`.
+Provider ids: `ollama`, `apple-foundation` (Apple Intelligence), `lm-studio`, `lemonade`, `anthropic` (Claude Code), `openai` (Codex), `copilot` (GitHub Copilot CLI), `gemini` (Gemini CLI), `azure-openai`.
 
 Public reference ids: `microsoft-learn`, `kql-search`, `intuneautomation`, `release-communications`, `windowsforum`, `splashtop-kb` (Splashtop Docs MCP, the Help Center search), `splashtop-packr-kb` (Splashtop Agentic Packr Docs MCP), `endoflife-ai`.
 

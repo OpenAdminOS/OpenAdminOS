@@ -24,7 +24,7 @@ export const metadata: Metadata = pageMetadata({
 
 const PROVIDERS = [
   {
-    title: "Local: Ollama, LM Studio, Apple Foundation",
+    title: "Local: Ollama, LM Studio, Lemonade, Apple Foundation",
     text: "Run open-source models locally. Tenant data and prompts stay on this machine.",
   },
   {

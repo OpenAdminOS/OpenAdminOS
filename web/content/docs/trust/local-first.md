@@ -21,4 +21,4 @@ Run history, tenant configuration, installed agents, and app state are stored lo
 
 ## Local Providers
 
-Ollama, LM Studio, and Apple Foundation (on compatible Macs) are the local providers. Each keeps tenant prompts and responses on this device. See the LLM provider matrix for the full lineup and data-flow messaging.
+Ollama, LM Studio, Lemonade, and Apple Foundation (on compatible Macs) are the local providers. Each keeps tenant prompts and responses on this device. See the LLM provider matrix for the full lineup and data-flow messaging.

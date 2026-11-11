@@ -385,17 +385,22 @@ models, so a chat request never starts a download. Only models labelled `chat`
 are offered (embeddings, transcription, image and speech models carry other
 labels), and models with `recipe: "cloud"` are left out, because Lemonade sends
 their prompts to a cloud API even though its endpoint is on loopback. Lemonade
-is ready with at least one such model. Installed means its server or CLI is in
+is ready with at least one such model. Because Lemonade downloads an unlisted
+registry model on request and routes cloud models off the device, every chat
+request first reads the model list again and sends only a listed local chat
+model; a saved, policy-set or deleted model that is not listed is refused with
+the reason (cloud, not a chat model, or not downloaded). A managed policy model
+is never passed to a Lemonade that does not list it (PR #191 review round 1). Installed means its server or CLI is in
 the installers' locations: `/usr/local/bin/lemond` or the
 `ai.lemonadeserver.server` launch daemon on macOS,
 `%LOCALAPPDATA%\lemonade_server\bin\LemonadeServer.exe` or the Program Files
 equivalent on Windows, `/usr/bin/lemond`, `/opt/bin/lemond` or the snap on
 Linux, or `lemond` or `lemonade` on PATH. OpenAdminOS does not start Lemonade:
 on macOS and Linux it runs as a system service that needs admin rights to
-start, so an installed Lemonade that is not running names the command
-(`sudo launchctl kickstart -k system/ai.lemonadeserver.server`,
-`sudo systemctl start lemond`, or Lemonade Server from the Start menu on
-Windows) and offers Scan again; a running server without a chat model says to
+start, so an installed Lemonade that is not running names the command in
+the scan, Settings and the model choice (`sudo launchctl kickstart -k
+system/ai.lemonadeserver.server`, `sudo systemctl start lemond`, or Lemonade
+Server from the Start menu on Windows) and offers Scan again; a running server without a chat model says to
 download one and offers Scan again. A server that runs with `LEMONADE_API_KEY`
 answers 401, and the check says so: OpenAdminOS sends no Lemonade API key yet
 (open question). Lemonade's embeddable build (`lemond` bundled into an app and

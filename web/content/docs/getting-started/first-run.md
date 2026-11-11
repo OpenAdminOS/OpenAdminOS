@@ -13,6 +13,7 @@ One screen checks, all at once:
 
 - **Ollama**: installed, running, which models, and whether OpenAdmin 8B is pulled.
 - **LM Studio**: installed, server running, loaded models.
+- **Lemonade**: installed, server running, downloaded chat models. Models Lemonade sends to a cloud API are not offered. OpenAdminOS does not start Lemonade; when it is installed but stopped, the scan names the command for your system.
 - **Apple Intelligence** on a compatible Mac.
 - **Claude Code** and **Codex**: installed and signed in.
 - **GitHub Copilot CLI** (installed; its sign-in is checked when you select it), **Gemini CLI** (sign-in not confirmed until you test it), and a saved **Azure OpenAI** deployment.
@@ -64,6 +65,6 @@ After sign-in, OpenAdminOS shows which enterprise application was added to your 
 
 ## Provider Choice
 
-Local providers (Ollama, LM Studio, Apple Intelligence) keep prompts and tenant data on the device. Hosted providers (Claude Code, Codex, GitHub Copilot CLI, Gemini CLI, Azure OpenAI) send prompts off the device because the selected model is hosted. The CLI-backed providers reuse the vendor CLI's existing authentication instead of storing an API key.
+Local providers (Ollama, LM Studio, Lemonade, Apple Intelligence) keep prompts and tenant data on the device. Hosted providers (Claude Code, Codex, GitHub Copilot CLI, Gemini CLI, Azure OpenAI) send prompts off the device because the selected model is hosted. The CLI-backed providers reuse the vendor CLI's existing authentication instead of storing an API key.
 
 If you have not picked a provider, OpenAdminOS selects a ready local provider automatically. A detected hosted provider is suggested with a note about where data goes, and you choose it explicitly. The UI changes its data-residency messaging based on the active provider.
