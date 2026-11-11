@@ -1198,10 +1198,13 @@ audit log does not hold (a retention prune, Disconnect, a trimmed configuration
 list) is refused with a designed error ("This change was not saved: it removes
 N events the audit log has not recorded yet ... Nothing was removed.").
 Disconnect keeps the organization's Chat data, which holds its consents, until
-the audit log has recorded them. The import counts as done only when it covered
-the state the last write or read left. The last failed append is shown in
-Settings -> General under the audit log export, with what to do, until an
-append succeeds; a catch-up record runs at startup after the first read.
+the audit log has recorded them. The import counts as done, and a failed append as
+caught up, only when the state recorded is the one the last write or read left
+(the same snapshot), so recording an older state never hides a newer failure.
+The export and the startup catch-up read and record under the state lock, so
+no write lands between their read and their record. The last failed append is
+shown in Settings -> General under the audit log export, with what to do, until
+an append succeeds; a catch-up record runs at startup after the first read.
 
 An anchor file next to the database (`openadminos.db-audit-anchor.json`) holds
 the chain as the app last left it: the hash the oldest kept row is chained to,

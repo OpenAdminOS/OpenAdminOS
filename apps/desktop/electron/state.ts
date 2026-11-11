@@ -4577,26 +4577,29 @@ export class AppStateStore {
       throw new Error("Audit log export from date must be before the to date.");
     }
 
-    const persisted = await this.read();
+    // Records what a state written by an earlier version still shows;
+    // after that, every event was recorded when it happened. Under the
+    // state lock, so no write lands between the read and the record: the
+    // export records the latest state, never an older one over a newer
+    // failure. A failed integrity check keeps its own message; any other
+    // failure says that nothing was exported and what to do.
+    const { persisted, stored } = await this.serialize(async () => {
+      const persisted = await this.read();
+      try {
+        this.recordAuditLog(persisted);
+        return { persisted, stored: this.auditLog.readVerified() };
+      } catch (error) {
+        if (error instanceof AuditLogIntegrityError) throw error;
+        throw new Error(
+          `The audit log could not be read or brought up to date, so nothing was exported. ${errorText(error)} Check free disk space and permissions of the OpenAdminOS data folder, then export again.`,
+          { cause: error },
+        );
+      }
+    });
     const retentionPolicy = this.normalizeRunHistoryRetentionSettings(
       persisted.runHistoryRetention,
     );
     const generatedAt = new Date().toISOString();
-    // Records what a state written by an earlier version still shows;
-    // after that, every event was recorded when it happened. A failed
-    // integrity check keeps its own message; any other failure says that
-    // nothing was exported and what to do.
-    let stored: ReturnType<AuditLogStore["readVerified"]>;
-    try {
-      this.recordAuditLog(persisted);
-      stored = this.auditLog.readVerified();
-    } catch (error) {
-      if (error instanceof AuditLogIntegrityError) throw error;
-      throw new Error(
-        `The audit log could not be read or brought up to date, so nothing was exported. ${errorText(error)} Check free disk space and permissions of the OpenAdminOS data folder, then export again.`,
-        { cause: error },
-      );
-    }
     // Only events of a run: classified by who started it, recorded on the
     // event or, for an event recorded without one, taken from the run.
     // Events of no run, such as a refused gateway request, are left out.
@@ -9025,11 +9028,15 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       this.noteAuditLogFailure(error);
       throw error;
     }
-    // Complete only now: every caller passes the state the last write or
-    // read left, or one a write kept every source record of.
-    this.auditLogImported = true;
+    // Consents come from the Chat database, not from the state.
     this.auditConsentsPending = false;
-    this.auditLogFailure = undefined;
+    // The audit log is up to date only when this was the latest state: a
+    // state read before a later write may lack what that write's failed
+    // append missed, and recording it must not hide that failure.
+    if (state === this.lastReadSnapshot) {
+      this.auditLogImported = true;
+      this.auditLogFailure = undefined;
+    }
     for (const [runId, fingerprint] of fingerprints) this.auditedRuns.set(runId, fingerprint);
   }
 
@@ -9061,7 +9068,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * without waiting for a change.
    */
   async recordAuditLogAtStartup(): Promise<void> {
-    this.recordAuditLogSafely(await this.read());
+    // Under the state lock, so it records the latest state.
+    await this.serialize(async () => this.recordAuditLogSafely(await this.read()));
   }
 
   /**

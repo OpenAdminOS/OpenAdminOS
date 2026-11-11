@@ -320,9 +320,133 @@ describe("audit log behind the state", () => {
   });
 });
 
+describe("audit log records the latest state", () => {
+  function gate() {
+    let open!: () => void;
+    const opened = new Promise<void>((resolve) => (open = resolve));
+    return { opened, open };
+  }
+
+  it("does not let an export of an older state clear a newer failed append, so a later prune records the run first", async () => {
+    const live: RunRecord = {
+      id: "run-live",
+      agentSlug: agent.slug,
+      status: "running",
+      queuedAt: "2026-07-05T08:00:00.000Z",
+      startedAt: "2026-07-05T08:00:05.000Z",
+      providerId: "ollama",
+      model: "test-model",
+      tenantId: tenant.id,
+      steps: [],
+      logs: [],
+    };
+    const fixture = await makeStoreFixture({ extraRuns: [live] });
+    type Internals = {
+      auditLog: { append(events: Array<{ id: string }>): number };
+      read(): Promise<{ runs: RunRecord[] }>;
+      write(state: unknown): Promise<void>;
+      serialize<T>(task: () => Promise<T>): Promise<T>;
+    };
+    const internals = fixture.store as unknown as Internals;
+    try {
+      // Only the newest run is kept, so the next prune removes the live run once it finished.
+      await fixture.store.setRunHistoryRetentionSettings({ neverPrune: false, keepLastRuns: 1, keepDays: null });
+      const append = internals.auditLog.append.bind(internals.auditLog);
+      let failCompletion = true;
+      internals.auditLog.append = (events) => {
+        if (failCompletion && events.some((event) => event.id === "run:run-live:finished")) throw new Error("database or disk is full");
+        return append(events);
+      };
+      const serialize = internals.serialize.bind(fixture.store);
+      let locked = 0;
+      internals.serialize = (task) => serialize(async () => {
+        locked += 1;
+        try {
+          return await task();
+        } finally {
+          locked -= 1;
+        }
+      });
+      // The export's read is held after it read the state that shows the run running.
+      const read = internals.read.bind(fixture.store);
+      const reached = gate();
+      const release = gate();
+      let holdNext = true;
+      let readInsideLock = false;
+      internals.read = async () => {
+        const state = await read();
+        if (holdNext) {
+          holdNext = false;
+          readInsideLock = locked > 0;
+          reached.open();
+          await release.opened;
+        }
+        return state;
+      };
+      const exporting = fixture.store.exportAuditLog({ format: "json" });
+      await reached.opened;
+      // The run completes, and the append of its completion fails.
+      const completing = internals.serialize(async () => {
+        const state = await internals.read();
+        await internals.write({
+          ...state,
+          runs: state.runs.map((run) => run.id === "run-live" ? { ...run, status: "completed", finishedAt: "2026-07-05T08:00:15.000Z" } : run),
+        });
+      });
+      // An export outside the state lock lets the completion land while it
+      // holds the older state; under the lock the completion waits for it.
+      if (!readInsideLock) await completing;
+      release.open();
+      await exporting;
+      await completing;
+      assert.equal(readInsideLock, true, "the export reads and records under the state lock");
+      assert.match((await fixture.store.getAuditLogStatus()).lastFailure?.message ?? "", /database or disk is full/);
+
+      failCompletion = false;
+      const pruned = await fixture.store.pruneRunHistoryNow();
+      assert.equal(pruned.prunedCount, 2);
+      const db = new DatabaseSync(join(fixture.dir, "openadminos.db"), { readOnly: true });
+      const recorded = db.prepare("SELECT type FROM audit_log WHERE run_id = 'run-live' ORDER BY seq").all() as Array<{ type: string }>;
+      db.close();
+      assert.deepEqual(recorded.map((row) => row.type), ["run.queued", "run.started", "run.completed"]);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("keeps a newer failed append when an older state is recorded", async () => {
+    const fixture = await makeStoreFixture();
+    type Internals = {
+      auditLog: { append(events: unknown[]): number };
+      read(): Promise<{ runs: RunRecord[] }>;
+      recordAuditLog(state: unknown): void;
+    };
+    const internals = fixture.store as unknown as Internals;
+    try {
+      await fixture.store.setActiveProvider("openai");
+      const older = await internals.read();
+      const append = internals.auditLog.append.bind(internals.auditLog);
+      let failing = true;
+      internals.auditLog.append = (events) => {
+        if (failing) throw new Error("database or disk is full");
+        return append(events);
+      };
+      await fixture.store.setActiveProvider("ollama");
+      failing = false;
+      internals.recordAuditLog(older);
+      assert.ok((await fixture.store.getAuditLogStatus()).lastFailure, "the older state does not clear it");
+      internals.recordAuditLog(await internals.read());
+      assert.deepEqual(await fixture.store.getAuditLogStatus(), {});
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+});
+
 describe("connector Graph writes in the audit log", () => {
   type Internals = {
-    auditLog: { close(): void };
+    auditLog: { close(): void; append(events: Array<{ type: string }>): number };
+    serialize<T>(task: () => Promise<T>): Promise<T>;
     connectorTransport(
       tenantId: string,
       audit?: { runId: string; agentSlug: string; initiator: string },
