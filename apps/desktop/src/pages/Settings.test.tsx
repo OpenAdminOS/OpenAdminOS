@@ -16,6 +16,7 @@ import {
   type SetAzureOpenAIProviderConfigInput,
 } from "../shared/openAdminOS";
 import { PROVIDER_DETECTION_COPY } from "../copy";
+import { GATEWAY_TENANT_NOT_CONNECTED_COPY } from "../shared/gateway-copy";
 import { setAnswerFont } from "../styles/answer-font";
 import { setDensity } from "../styles/density";
 
@@ -74,6 +75,62 @@ describe("Settings provider section", () => {
     await user.click(screen.getByRole("button", { name: "csv" }));
     await user.click(screen.getByRole("button", { name: "Export audit log" }));
     await waitFor(() => expect(bridge.exportAuditLog).toHaveBeenLastCalledWith({ format: "csv", saveToFile: true }));
+    await user.click(screen.getByRole("checkbox", { name: /Only runs no person started/ }));
+    await user.click(screen.getByRole("button", { name: "Export audit log" }));
+    await waitFor(() => expect(bridge.exportAuditLog).toHaveBeenLastCalledWith({ format: "csv", saveToFile: true, notStartedByPerson: true }));
+  });
+
+  it("shows a failed audit log append with what to do, and clears it once the audit log records again", async () => {
+    const user = userEvent.setup();
+    const getAuditLogStatus = vi.fn()
+      .mockResolvedValueOnce({ lastFailure: { failedAt: "2026-11-11T09:00:00.000Z", message: "database or disk is full" } })
+      .mockResolvedValue({});
+    const bridge = makeMockBridge({ getAuditLogStatus });
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/general", bridge });
+    const notice = await screen.findByRole("alert");
+    expect(notice).toHaveTextContent("The audit log could not record an event");
+    expect(notice).toHaveTextContent("database or disk is full");
+    expect(notice).toHaveTextContent("Check free disk space and permissions of the OpenAdminOS data folder.");
+    await user.click(screen.getByRole("button", { name: "Export audit log" }));
+    await waitFor(() => expect(screen.queryByText("The audit log could not record an event")).not.toBeInTheDocument());
+  });
+
+  it("counts audit events the audit log has not recorded yet, until they are recorded", async () => {
+    const user = userEvent.setup();
+    const getAuditLogStatus = vi.fn()
+      .mockResolvedValueOnce({ unrecordedResults: { count: 2 } })
+      .mockResolvedValue({});
+    const bridge = makeMockBridge({ getAuditLogStatus });
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/general", bridge });
+    const notice = await screen.findByRole("alert");
+    expect(notice).toHaveTextContent("2 audit events are not in the audit log yet");
+    expect(notice).toHaveTextContent("A kept Graph write result means the write was sent and its attempt is recorded");
+    expect(notice).toHaveTextContent("recorded with the next audit log entry");
+    await user.click(screen.getByRole("button", { name: "Export audit log" }));
+    await waitFor(() => expect(screen.queryByText(/audit events are not in the audit log yet/)).not.toBeInTheDocument());
+  });
+
+  it("says when kept audit events are only in memory and what to do", async () => {
+    const bridge = makeMockBridge({
+      getAuditLogStatus: vi.fn(async () => ({ unrecordedResults: { count: 1, inMemoryOnly: true as const } })),
+    });
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/general", bridge });
+    const notice = await screen.findByRole("alert");
+    expect(notice).toHaveTextContent("1 audit event is not in the audit log yet");
+    expect(notice).toHaveTextContent(
+      "This event could not be saved to disk either, so it is only in memory and lost if OpenAdminOS quits before the audit log records it. Keep OpenAdminOS open and free disk space in the OpenAdminOS data folder. OpenAdminOS saves it to disk with the next audit log entry or when this page is opened again.",
+    );
+  });
+
+  it("names a file of kept audit events that cannot be read", async () => {
+    const bridge = makeMockBridge({
+      getAuditLogStatus: vi.fn(async () => ({ unrecordedResults: { count: 0, unreadableFile: "openadminos.db-audit-pending.json" } })),
+    });
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/general", bridge });
+    const notice = await screen.findByRole("alert");
+    expect(notice).toHaveTextContent("Kept audit events cannot be read");
+    expect(notice).toHaveTextContent("openadminos.db-audit-pending.json in the app data folder holds audit events kept from an earlier session and cannot be read");
+    expect(notice).toHaveTextContent("Keep a copy of it for review, then remove it and restart OpenAdminOS.");
   });
 
   it("requires a real Gemini test and shows CLI diagnostics before activation", async () => {
@@ -187,14 +244,19 @@ describe("Settings provider section", () => {
     }
   });
 
-  it("enables the gateway, shows its one-time token, revokes a client, and disables it", async () => {
+  it("enables the gateway, pairs a named client with a one-time token, revokes a client, and disables it", async () => {
     const user = userEvent.setup();
     const disabledStatus = {
       enabled: false,
       running: false,
       port: 47_891,
-      hasToken: false,
       clients: [],
+    };
+    const legacyClient = {
+      id: "client-old",
+      name: "Codex",
+      createdAt: "2026-08-20T10:00:00.000Z",
+      needsPairing: true as const,
     };
     const enabledStatus = {
       enabled: true,
@@ -202,31 +264,29 @@ describe("Settings provider section", () => {
       port: 47_891,
       listeningPort: 47_891,
       boundTenantId: "tenant-1",
-      hasToken: true,
-      clients: [
-        {
-          id: "client-1",
-          name: "Claude Code",
-          createdAt: "2026-08-28T10:00:00.000Z",
-        },
-      ],
+      clients: [legacyClient],
     };
-    const enableGateway = vi.fn(async () => ({
-      status: enabledStatus,
+    const claude = {
+      id: "client-1",
+      name: "Claude Code",
+      createdAt: "2026-08-28T10:00:00.000Z",
+    };
+    const pairedStatus = { ...enabledStatus, clients: [legacyClient, claude] };
+    const enableGateway = vi.fn(async () => enabledStatus);
+    const pairGatewayClient = vi.fn(async () => ({
+      status: pairedStatus,
+      client: claude,
       token: "OAO-Q7R4-LM2C",
     }));
     const revokeGatewayClient = vi.fn(async () => ({
-      ...enabledStatus,
-      clients: [],
+      ...pairedStatus,
+      clients: [legacyClient],
     }));
     const disableGateway = vi.fn(async () => disabledStatus);
     const bridge = makeMockBridge({
       getGatewayStatus: vi.fn(async () => disabledStatus),
       enableGateway,
-      regenerateGatewayToken: vi.fn(async () => ({
-        status: enabledStatus,
-        token: "OAO-REGENERATED",
-      })),
+      pairGatewayClient,
       revokeGatewayClient,
       disableGateway,
     });
@@ -242,20 +302,50 @@ describe("Settings provider section", () => {
     await waitFor(() => {
       expect(enableGateway).toHaveBeenCalledWith({ boundTenantId: "tenant-1" });
     });
-    expect(screen.getAllByText("OAO-Q7R4-LM2C")).toHaveLength(1);
     expect(screen.getByText("http://127.0.0.1:47891/")).toBeInTheDocument();
+    // A client from before per-client tokens is marked for pairing again.
+    expect(screen.getByText("Pair again")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Client name"), "Claude Code");
+    await user.click(screen.getByRole("button", { name: "Pair client" }));
+    await waitFor(() => {
+      expect(pairGatewayClient).toHaveBeenCalledWith({ name: "Claude Code" });
+    });
+    expect(screen.getByText("Pairing token for Claude Code")).toBeInTheDocument();
+    expect(screen.getAllByText("OAO-Q7R4-LM2C")).toHaveLength(1);
 
     await user.click(screen.getByRole("button", { name: "Revoke Claude Code" }));
     await user.click(screen.getByRole("button", { name: "Revoke client" }));
     await waitFor(() => {
       expect(revokeGatewayClient).toHaveBeenCalledWith("client-1");
     });
+    expect(screen.queryByText("OAO-Q7R4-LM2C")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Disable gateway" }));
     await user.click(screen.getByRole("button", { name: "Disable gateway now" }));
     await waitFor(() => {
       expect(disableGateway).toHaveBeenCalledOnce();
     });
+  });
+
+  it("says the organization is no longer connected when the gateway cannot bind to it", async () => {
+    const user = userEvent.setup();
+    const enableGateway = vi.fn(async () => {
+      throw new Error(`Error invoking remote method 'openadminos:enable-gateway': Error: ${GATEWAY_TENANT_NOT_CONNECTED_COPY}`);
+    });
+    const bridge = makeMockBridge({
+      getGatewayStatus: vi.fn(async () => ({ enabled: false, running: false, port: 47_891, clients: [] })),
+      enableGateway,
+      pairGatewayClient: vi.fn(),
+      revokeGatewayClient: vi.fn(),
+      disableGateway: vi.fn(),
+    });
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/gateway", bridge });
+
+    await user.click(await screen.findByRole("switch", { name: "Enable gateway" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe(GATEWAY_TENANT_NOT_CONNECTED_COPY);
+    expect(screen.queryByText(/Check that the port is available/)).not.toBeInTheDocument();
   });
 
   it("never moves focus away from the search while the section opens (design round)", async () => {

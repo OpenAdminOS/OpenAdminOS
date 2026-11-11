@@ -425,6 +425,31 @@ handed to `spawn`, which would throw a synchronous `spawn EINVAL`. Provider
 probing is fail-soft: a single provider that cannot be checked is reported on its
 own card and never aborts app-state assembly, so it cannot fail tenant sign-in.
 
+Claude Code and Codex requests are bounded by a watchdog
+(`packages/runtime/src/cli-watchdog.ts`) instead of one wall clock: an idle
+limit restarted on every stdout chunk, counted from the start so it also bounds
+the wait for the first output, and a hard cap on the whole request. The idle
+limit is paused while a `stream()` consumer holds a chunk, because unread
+output backs up in the pipe and the CLI waits on it, and restarts when the
+consumer asks for the next one; it ends with the output, and only the cap
+bounds the wait for the exit after that. Claude Code
+streams partial messages, so its idle limit is 90 seconds; `codex exec --json`
+prints whole items and stays silent through a long reply, so Codex keeps 180
+seconds, the old total limit. Both are capped at 15 minutes. The idle limit is
+off when it is not below the cap. `OPENADMINOS_CLAUDE_CODE_IDLE_TIMEOUT_MS` and
+`OPENADMINOS_CODEX_IDLE_TIMEOUT_MS` override the idle limits, and
+`OPENADMINOS_CLAUDE_CODE_TIMEOUT_MS` and `OPENADMINOS_CODEX_TIMEOUT_MS` the
+caps, as a positive whole number of milliseconds in the environment OpenAdminOS
+starts with, at most 2147483647, the longest a Node timer waits; any other value
+is ignored. Limits passed in code take the same check, and an invalid one falls
+back to the environment, then the default. The two stops end the CLI process and give distinct errors, each
+naming its variable: a stall says "Claude Code stopped sending output for 90
+seconds, so OpenAdminOS ended the request. Test the provider in Settings, then
+retry." and the cap says "Claude Code was still working after 15 minutes, the
+limit for one request, so OpenAdminOS ended it. Narrow the request or split it
+into smaller steps, then retry." Both timers stay referenced and are cleared in
+`finally`.
+
 ### Tenant cache preparation and Nova
 
 Nova can retrieve a new report and prepare its delivery in one request, such as
@@ -635,6 +660,50 @@ Concretely:
   informational. A failed or missing assessment says "Risk check could not run:
   <reason>. Review every action manually." and leaves typed confirmation
   available. No flags means only that the current rules found no match.
+- After typed confirmation and immediately before apply, every agent write run
+  (ordinary runs and Agent Team assignments) plans again against the live
+  tenant with Graph reads only, retirement and connector changes denied. A
+  connector that brings its own Graph client, such as Outlook, sends through a
+  transport that refuses every Graph request but GET before it is sent ("POST
+  /v1.0/me/sendMail was not sent. Checking a plan before apply permits only
+  Graph reads."), on top of the tenant's lifecycle guard and Graph write audit.
+  Each
+  action is compared by what it sends, as a multiset in canonical JSON: its
+  kind and request (method, path, body); for a retire, its
+  `metadata.deviceId`; for any other action without a request, its metadata.
+  Ids, labels, descriptions, the summary and the metadata of a Graph write do
+  not count, so "Inactive for 91 days" becoming "92 days" across a day
+  boundary, or regenerated ids, do not refuse. A pure reorder is not a change:
+  apply runs the reviewed plan in the reviewed order, never the fresh one. The
+  confirmation phrase must also be unchanged. On any difference nothing is
+  written and the run fails with what changed, for example "The planned
+  actions changed since review: 1 of the 2 actions you reviewed is no longer
+  in the plan, and 2 actions are new. Nothing was applied. Select Run again to
+  review a fresh plan." Agent Team keeps its wording ("The proposed actions
+  changed since review: ... Run the assignment again to review a fresh
+  proposal."). A changed phrase with the same actions is named on its own.
+  When the agent called a model while planning, the refusal adds "An agent
+  that uses a model can plan differently on a second pass, even when the
+  tenant has not changed." before Run again. A failure before apply starts,
+  such as the model, the Graph sign-in or a connector failing for that check,
+  says "Nothing was applied: <reason>".
+  The comparison relies on two rules (documented on `WriteAction.kind`):
+  an apply handler reads only an action's `request` and `metadata`, and apply
+  skips an action whose kind has no registered handler, never applying it;
+  only the registry's own entries count, so a kind such as "constructor" finds
+  none.
+  Planning again repeats the agent's model steps, including its LLM calls,
+  because some agents derive their actions from model output and skipping
+  those steps would change the plan; confirming a write run therefore costs
+  the planning again before apply. Those calls count in the run's tokens,
+  call count and cost whether the run then applies, is refused, fails or is
+  cancelled. A plan whose requests depend on model text
+  can be refused although the targets are unchanged; the refusal is safe and
+  Run again prepares a new plan. System plans are applied as confirmed: a gateway
+  proposal has no agent to plan it again, so the proposing client owns the
+  plan and the diff the admin confirmed is applied as-is, fail-stop; a
+  baseline rollback is built from local drift snapshots rather than a live
+  read, so rebuilding it would compare the snapshot with itself.
 - If you genuinely don't need an LLM (e.g. a pure data export), this product is the wrong tool; reach for `Get-MgDeviceManagementManagedDevice | Export-Csv` or a similar deterministic script instead.
 
 Microsoft Graph execution is beta-only for this project. The runtime and all
@@ -1094,23 +1163,133 @@ delete a run that is linked to or pinned in a Workspace, currently queued or
 running, or awaiting write confirmation. Settings surfaces the last prune result
 so local deletion is not silent.
 
+Audit events live in an append-only `audit_log` table in the app database
+(`openadminos.db`), written when each event happens, never rebuilt at export
+time. Each row stores the canonical JSON of the event, the hash of the row
+before it and its own SHA-256 (`previousHash + canonical JSON event`, the first
+row chained to 64 zeroes), computed on insert inside one transaction so the
+chain stays linear. SQLite triggers refuse every UPDATE and every replace, and
+refuse a DELETE unless it removes the oldest row and that row was recorded more
+than `AUDIT_LOG_RETENTION_DAYS` (3,650 days, the longest run-history retention
+Settings allows) ago; the store removes such rows oldest first, with every
+run-history prune (at startup, on the scheduler tick and by hand). The audit
+connection writes with `synchronous=FULL`, and both connections to the file wait
+up to 5 seconds on a busy database. Run-history
+pruning and Disconnect never delete audit rows: the audit of a disconnected
+organization, its runs and the disconnect itself outlive it (decided
+2026-11-11). Run events (queued, started, write confirmation requested,
+accepted and rejected, finished, connector deliveries in run logs),
+configuration changes and Nova connector deliveries are derived from each
+write to `state.json` and appended right after it, under event ids fixed by
+the run and event, so a missed append is made by the next write and nothing is
+recorded twice. The run fingerprint that decides whether a run is recorded
+again covers only what its events show (status, timestamps, plan size and
+connector delivery lines), so plain log lines of a live run start no audit
+transaction. Hosted-provider consent is appended when it is given and also kept
+in the Chat database; a failed append keeps it with the pending audit events
+below as well, so it is recorded later by its id even when the Chat database
+could not keep it either. A refused
+gateway proposal (`gateway.proposal.refused`, source `gateway`) is appended when
+it is refused. Every
+Microsoft Graph write (any method but GET) records `graph.write.attempted`
+before the request is sent and `graph.write.result` after it (ok or failed,
+HTTP status, Graph `request-id`, error class, requests sent, duration), sharing
+one attempt id, with the run id, tenant id, agent slug, initiator, method and
+path, and a SHA-256 digest of the body, never the body. This covers agent writes
+through the Graph adapter and the Graph sends of connectors with their own Graph
+client (Outlook `sendMail`, Teams messages), whose connector transport records
+them the same way. The Graph adapter refuses every write when it has no audit
+sink; only tests opt out with `unauditedWrites`. If the attempt cannot
+be recorded, the write is refused and nothing is sent. A result that cannot be
+recorded is reported in the run log of the run that sent it (connector sends
+too) and kept in `openadminos.db-audit-pending.json` next to the database; every
+later append records the kept results first, in the same transaction, and they
+are cleared only once recorded, also across a restart. The same file keeps a
+hosted-provider consent whose append failed. Settings -> General counts the kept
+events until then ("N audit events are not in the audit log yet"),
+whatever other appends succeed; a pending file that cannot be read is left in
+place, never overwritten, and named there. When the pending file cannot be
+written either (disk full, or an unreadable file still in its place), the
+result is only in memory: the run log error and Settings say it is lost if
+OpenAdminOS quits before it is recorded and to free disk space, and the file is
+tried again on every later append, every status read and on close. The last
+failed append shown in Settings clears only when the latest state is recorded
+in full, with the next change to settings or runs; a Graph write recorded in
+between leaves it, because it also makes the next state write record the
+previous state first. Every failure of the audit sink, a
+throw or a rejection of an async sink, is kept for that notice. On upgrade, the
+run history, configuration changes, Nova connector deliveries and consent
+events stored by earlier versions are imported, in time order, so nothing
+still on the device is lost; events of runs pruned before the upgrade cannot be
+recovered.
+
+Until that import, or any later append, has succeeded, the state is recorded
+again before each write, and a write that would remove records whose events the
+audit log does not hold (a retention prune, Disconnect, a trimmed configuration
+list) is refused with a designed error ("This change was not saved: it removes
+N events the audit log has not recorded yet ... Nothing was removed.").
+Disconnect keeps the organization's Chat data, which holds its consents, until
+the audit log has recorded them. The import counts as done, and a failed append as
+caught up, only when the state recorded is the one the last write or read left
+(the same snapshot), so recording an older state never hides a newer failure.
+The export and the startup catch-up read and record under the state lock, so
+no write lands between their read and their record. The last failed append is
+shown in Settings -> General under the audit log export, with what to do, until
+an append succeeds; a catch-up record runs at startup after the first read.
+
+An anchor file next to the database (`openadminos.db-audit-anchor.json`) holds
+the chain as the app last left it: the hash the oldest kept row is chained to,
+the newest hash and the row count. It is written durably after each append and
+with each prune. Verification checks the first row against its start, and the
+newest row and the count against its end, so rows removed from either end and a
+table dropped or emptied are designed integrity errors even though the rows
+left still chain, and later appends do not move the anchor over the loss. Rows
+newer than the anchor, as a crash between the commit and the anchor write
+leaves, are accepted. After a prune that removed every row, the chain goes on
+from the last hash it removed. A missing anchor is adopted only while the table
+is empty (a first open). The anchor ships with the table, so no released
+database holds rows without one: a missing anchor beside rows is a designed
+integrity error ("its anchor file ... is missing while the log holds N
+entries"), and appends and prunes do not write a new one over it. This detects changes made outside OpenAdminOS to the
+database alone; someone who can rewrite both files can hide a change. The
+`finalHash` of an export is the anchor an admin keeps outside the device.
+
+Runs carry `initiator`: `person`, `schedule`, `office` (an Agent Team
+assignment), `gateway` (a write gateway proposal) or `rollback` (a baseline
+rollback). A record written before it existed is read from its origin (Agent
+Team, gateway, rollback) and otherwise its trigger (manual means a person,
+schedule means a schedule). Run-scoped audit events carry the initiator.
+
 Audit log export lives in Settings -> General next to run-history retention.
 It is an explicit local save only, never an upload. The native save dialog writes
 host-generated audit content directly in the main process, so retained histories
 above the renderer text-file IPC limit remain exportable. Cancellation writes no
 file and the response contains metadata rather than the full audit payload.
-JSON and CSV exports include
-retained run-history events, write-confirmation request/accepted/rejected
-events without exporting the typed phrase content, connector delivery audit
-entries from `ConnectorAuditEntry`, and hosted-provider consent events recorded
-in the SQLite `audit_events` table from this version onward. The export header
-records the active run-history retention policy and the last prune result when
-present so missing old runs are explainable. Each exported event carries a
-SHA-256 hash chained as
+JSON and CSV exports read the `audit_log` table in the order events were
+recorded: run events, write-confirmation request/accepted/rejected events
+without the typed phrase content, Graph write attempts and results, connector
+delivery audit entries from `ConnectorAuditEntry`, and hosted-provider consent
+events. Events are listed in recorded order, not sorted by timestamp, so events
+imported at upgrade may follow newer ones; the export note says so. The export
+first records what the state shows and verifies the whole stored chain and its
+anchor; a broken chain or anchor is a designed error that names what failed
+and exports nothing, and a database that cannot be read is a designed error
+that says nothing was exported. The export header
+records the active run-history retention policy and the last prune result.
+Each exported event carries a SHA-256 hash chained as
 `previousHash + canonical JSON event without sha256`, starting from 64 zeroes;
-JSON records the start and final hash in `hashChain`, and CSV includes the hash
-and chain metadata columns. Signed or third-party cryptographic timestamps are
-deferred.
+JSON records the start and final hash in `hashChain` plus the verified stored
+chain (`hashChain.stored`), and CSV includes the hash and chain metadata
+columns and an `initiator` column. Without filters the export chain equals the
+stored chain. Exports can be limited to a date range and to runs no person
+started (Settings: "Only runs no person started"), which keeps only events
+with a run id whose initiator, recorded on the event or taken from the run, is
+not `person`, and leaves out events of no run such as a refused gateway
+request. A CSV cell whose first character, also after leading whitespace, is
+`=`, `+`, `-` or `@`, or that starts with a tab or a carriage return, is
+prefixed with `'` so a spreadsheet does not run it as a formula, and the export
+note says so; remove that prefix before verifying the chain from such a cell. Signed or third-party
+cryptographic timestamps are deferred.
 
 The export also includes configuration changes, with source
 `configuration-change`: Microsoft 365 connected (including a reconnect) and
@@ -1131,7 +1310,8 @@ identifiers and names needed to see what changed. Events are derived in the host
 by comparing the state before and after each write to `state.json`, so every
 flow records them, including organizations created and removed with their
 tenant. They are stored in `state.json` under `configurationAudit`, apart from
-run history, so run retention never prunes them; the newest 10,000 are kept.
+run history, so run retention never prunes them; the newest 10,000 are kept
+there, and each is also appended to the `audit_log` table when it is written.
 They never contain tokens, secrets, prompts or tenant content. Recording and
 export are free features.
 
@@ -1818,7 +1998,10 @@ enforced at choke points, not by each caller.
 - **Two phases, persisted.** Phase 1, under the state lock: the tenant closes (every
   lease signal fires) and one write removes the tenant with its runs, deliveries,
   active selection and gateway binding, and stores a removal record
-  (`tenantRemovals`). From here the organization is gone in the UI. Phase 2: drain
+  (`tenantRemovals`). A gateway bound to the tenant is turned off and every
+  paired client revoked in that write, as Disable does, and its listener is
+  stopped right after, so connecting the same tenant again never accepts an old
+  token; Settings shows the gateway off. From here the organization is gone in the UI. Phase 2: drain
   leased work with a bounded wait (15 seconds; past it, cleanup goes on because the
   choke points refuse anything the work could still do), remove the Microsoft
   sign-in, delete Agent Team and Chat data, then drop the record. If phase 2 fails
@@ -2581,8 +2764,9 @@ that slot, so independent work can proceed. The 5–120 minute execution allowan
 excludes queue and human waiting; model planning counts toward it. Approval has a
 separate configurable lease (10 minutes to 7 days, default one day). Expired proposals
 require a new assignment. Immediately before applying an approved team write, the
-runtime reruns its plan with Graph reads only and connector mutations denied. Changed
-actions or confirmation text fail without applying; a fresh proposal needs fresh
+runtime reruns its plan with Graph reads only and connector mutations denied, as it
+does for every agent write run (see Agent contract). Changed actions or confirmation
+text fail without applying, with counts of what changed; a fresh proposal needs fresh
 approval. Every destructive operation retains typed confirmation.
 
 Readiness checks cover the assigned tenant, model, provider, and installed workflows.
@@ -2949,7 +3133,11 @@ These are explicitly unresolved. Don't pick a default without asking.
 
 v0.5 adds four capability areas on top of the drift timeline; each maps to an acquirer-visible signal.
 
-**Governed MCP write-gateway.** A local, loopback-only (127.0.0.1) MCP server, off by default, authenticated by a single pairing token held in safeStorage and bound to exactly one tenant at enable time. External AI clients get the same read-only tool allowlist as Chat. The only write capability is `propose_write_plan`: proposed actions are validated against the bundled Graph endpoint catalog (unknown endpoints rejected), turned into a standard `WritePlan`, and queued as an `external-proposal` system run that requires the normal typed confirmation in the desktop app. No external client can apply a change; a proposal can only be reviewed, confirmed, or rejected by a human. Apply is fail-stop and shares the rollback apply path.
+**Governed MCP write-gateway.** A local, loopback-only (127.0.0.1) MCP server, off by default and bound to exactly one tenant at enable time. External AI clients get the same read-only tool allowlist as Chat. The only write capability is `propose_write_plan`: proposed actions are validated against the bundled Graph endpoint catalog (unknown endpoints rejected), turned into a standard `WritePlan`, and queued as an `external-proposal` system run that requires the normal typed confirmation in the desktop app. No external client can apply a change; a proposal can only be reviewed, confirmed, or rejected by a human. Apply is fail-stop and shares the rollback apply path.
+
+*Client identity.* Each client is paired in Settings, Gateway under a name the admin gives (Pair client). Pairing creates a client record (id, name, created time, SHA-256 hash of the client's own token); the token is shown once and stored nowhere, and a presented token is hashed and compared with every record in constant time. The name on a proposal and in run history comes from that record; the tool takes no client name. A client reads only the status of its own proposals. Revoke removes the record, so the token stops working on the next request; disabling the gateway revokes every client, enabling it for another tenant drops the clients of the previous one, and disconnecting the bound tenant turns the gateway off, unbinds it and revokes every client, so connecting the same tenant again never brings old clients back. Enabling checks, under the state file lock, that the tenant is connected and open, or is refused with "That organization is no longer connected on this device, so the gateway was not turned on. Select a connected organization, then turn on Enable gateway again.", shown as is in Settings, Gateway. Every request also reads the config: unless the gateway is on and bound to the tenant its listener was started for, it gets HTTP 403 with code `gateway-off` (off or unbound) or `gateway-other-organization` (bound to another tenant) and a message to turn the gateway on in Settings, Gateway and pair again, whatever the token. A request is authenticated from its headers before its body arrives, so every tool, reads and `propose_write_plan` alike, checks again when it runs that the gateway is on, bound to the listener's tenant and the client still paired; otherwise the tool returns the same designed refusal (`unpaired-token`, `gateway-off` or `gateway-other-organization`) as a tool error, and nothing is read or queued. A listener start checks the binding as written right before it starts, and a stop that lands while a listener starts closes it once it is up, so a Disconnect during an enable leaves no listener. The single shared token of earlier versions is not migrated, because every client held it and their names were self-reported: on upgrade its hash is kept and the raw token removed from safeStorage, a client that still presents it gets HTTP 401 with code `legacy-shared-token` and a message to pair again in Settings, Gateway, and client records from that time are listed with "Pair again" until they are paired again under the same name or revoked. Pairing, revoking, enabling, disabling and that upgrade step run in one queue in the gateway service, and each reads, changes and writes the gateway config in one host update under the state file lock (`updateGatewayConfig`), so overlapping changes never write snapshots over each other and a change never writes back a config that a tenant removal replaced: a pairing in flight while Disconnect turns the gateway off is refused with "Enable the gateway before pairing a client." Tenant removal applies the same unbind change inside its own lock. Token checks read the config through the upgrade step. Proposals queued before the upgrade carry no client id, so no client can read their status; they stay in the desktop app for review.
+
+*Proposal limits.* An identical proposal (same client, tenant and plan digest, the SHA-256 of the canonical ordered Graph requests, so titles and labels do not count) that is already awaiting confirmation is not queued again; the tool returns the waiting run with status `already-awaiting-confirmation`. A client may have at most 5 proposals awaiting confirmation (`GATEWAY_PENDING_PROPOSALS_PER_CLIENT`), and after the admin rejects a proposal the same plan from the same client is refused for 15 minutes (`GATEWAY_REJECTED_PROPOSAL_COOLDOWN_MS`). Both refusals return a tool error with status `refused`, a reason (`pending-limit` or `rejected-cooldown`) and a message that says what to do, and are recorded in the audit log as `gateway.proposal.refused` (source `gateway`, initiator `gateway`) with the client, reason and plan digest.
 
 **Retrieval.** Local documentation grounding ported from the model bench's `retrieve.mjs`: a locally installed index (Intune/Entra/Defender docs, matched to one embedding model) is cosine-ranked against the question, with source-file provenance on every hit. Query embedding hits a loopback embedding server and refuses any non-loopback endpoint, so a local provider never sends the question off-device. A missing index is a designed "not documentation-grounded yet" state, not an error. Index distribution uses GitHub release assets on a dedicated `docs-index-<date>` tag: release assets allow files just under 2 GiB and are downloaded with no bandwidth limit or charge, which suits a 264 MB index, while the marketing host caps static uploads at 100 MB on its lower tier and bills egress on blob storage. The index ships on its own tag so it can be rebuilt on the documentation's cadence without cutting an app release, and `scripts/publish-docs-index.mjs` generates the SHA-256 manifest and creates the release. Downloads are hash-verified and staged before replacing a working index. Machines without network access install the same files from a folder.
 

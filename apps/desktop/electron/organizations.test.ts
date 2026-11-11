@@ -8,6 +8,7 @@ import {
   agentCallsNoServiceApi,
   normalizeOrganizationName,
   reconcileOrganizations,
+  runInitiator,
   scheduleRunsInActiveOrganization,
   type AgentSummary,
   type OrganizationRecord,
@@ -1040,5 +1041,32 @@ describe("plan size history for a run stored with an empty tenant (Muse round 6)
     const assessment = (h.service as unknown as { assessPlan(run: RunRecord, state: RunPersistedState): RunRecord["riskAssessment"] }).assessPlan(run, h.state());
     assert.equal(assessment?.status, "complete");
     if (assessment?.status === "complete") assert.equal(assessment.flags.some((flag) => flag.id === "unusual-plan-size"), false);
+  });
+});
+
+describe("run initiator", () => {
+  it("stamps who started each run: a person, a schedule or an Agent Team assignment", async () => {
+    const h = twoOrganizations({ schedule: { ...schedule(), organizationId: `org-${woodgrove.id}` } }, woodgrove.id);
+    const manual = await h.service.startRun("find-inactive-devices");
+    const scheduled = await h.service.startRun("find-inactive-devices", { trigger: "schedule" });
+    const office = await h.service.startRun("find-inactive-devices", {
+      trigger: "schedule",
+      tenantId: woodgrove.id,
+      office: { missionId: "mission-1", personaId: "persona-1", step: 0 },
+    });
+    assert.deepEqual(
+      [manual, scheduled, office].map((run) => [run.trigger, run.initiator]),
+      [["manual", "person"], ["schedule", "schedule"], ["schedule", "office"]],
+    );
+  });
+
+  it("reads a record written before runs carried an initiator from its trigger and origin", () => {
+    assert.equal(runInitiator({ trigger: "manual" }), "person");
+    assert.equal(runInitiator({}), "person");
+    assert.equal(runInitiator({ trigger: "schedule" }), "schedule");
+    assert.equal(runInitiator({ trigger: "manual", origin: "external-proposal" }), "gateway");
+    assert.equal(runInitiator({ trigger: "manual", origin: "baseline-rollback" }), "rollback");
+    assert.equal(runInitiator({ trigger: "schedule", office: { missionId: "m", personaId: "p", step: 0 } }), "office");
+    assert.equal(runInitiator({ trigger: "manual", initiator: "gateway" }), "gateway");
   });
 });

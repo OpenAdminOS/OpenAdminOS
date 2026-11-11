@@ -1,7 +1,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 
-import { createGraphAdapter } from "./graph-adapter.js";
+import {
+  auditGraphWritesFetch,
+  createGraphAdapter,
+  GraphWriteAuditError,
+  GraphWriteUnauditedError,
+  isGraphHost,
+  type GraphWriteAuditSink,
+} from "./graph-adapter.js";
 import { GraphAccessDeniedError } from "@openadminos/agent-sdk";
 
 interface RecordedCall {
@@ -124,6 +132,7 @@ describe("createGraphAdapter", () => {
   it("does NOT retry POST on 5xx (avoids duplicating non-idempotent writes)", async () => {
     const calls: RecordedCall[] = [];
     const adapter = createGraphAdapter({
+      unauditedWrites: true,
       tokenProvider: async () => "t",
       maxRetries: 5,
       fetchImpl: mockFetch(
@@ -146,6 +155,7 @@ describe("createGraphAdapter", () => {
   it("does NOT retry the retire helper on 5xx", async () => {
     const calls: RecordedCall[] = [];
     const adapter = createGraphAdapter({
+      unauditedWrites: true,
       tokenProvider: async () => "t",
       maxRetries: 5,
       fetchImpl: mockFetch([new Response("boom", { status: 503 })], calls),
@@ -179,6 +189,7 @@ describe("createGraphAdapter", () => {
   it("retries on 429 regardless of method (rate-limit signal)", async () => {
     const calls: RecordedCall[] = [];
     const adapter = createGraphAdapter({
+      unauditedWrites: true,
       tokenProvider: async () => "t",
       maxRetries: 3,
       fetchImpl: mockFetch(
@@ -220,6 +231,7 @@ describe("createGraphAdapter", () => {
   it("serialises a JSON body and sets content-type for writes", async () => {
     const calls: RecordedCall[] = [];
     const adapter = createGraphAdapter({
+      unauditedWrites: true,
       tokenProvider: async () => "t",
       fetchImpl: mockFetch([jsonResponse({ ok: true })], calls),
     });
@@ -257,6 +269,7 @@ describe("createGraphAdapter", () => {
   it("encodes the device id when retiring (path-injection guard)", async () => {
     const calls: RecordedCall[] = [];
     const adapter = createGraphAdapter({
+      unauditedWrites: true,
       tokenProvider: async () => "t",
       fetchImpl: mockFetch(
         [new Response(null, { status: 204 })],
@@ -360,6 +373,7 @@ describe("createGraphAdapter transient network faults", () => {
   it("does NOT retry a POST that failed mid-flight", async () => {
     const calls: RecordedCall[] = [];
     const adapter = createGraphAdapter({
+      unauditedWrites: true,
       tokenProvider: async () => "t",
       maxRetries: 3,
       retryBackoffMs: 0,
@@ -440,6 +454,7 @@ describe("cancellation while acquiring a Graph token", () => {
     let finish!: (token: string) => void;
     let fetchCount = 0;
     const graph = createGraphAdapter({
+      unauditedWrites: true,
       signal: controller.signal,
       tokenProvider: () => new Promise<string>((resolve) => { finish = resolve; }),
       fetchImpl: async () => { fetchCount += 1; return new Response("{}"); },
@@ -450,5 +465,241 @@ describe("cancellation while acquiring a Graph token", () => {
     finish("late-token");
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(fetchCount, 0);
+  });
+});
+
+describe("Graph write audit", () => {
+  function recordingSink(events: unknown[], options: { failAttempted?: boolean; failResult?: boolean } = {}): GraphWriteAuditSink {
+    return {
+      attempted: async (attempt) => {
+        if (options.failAttempted) throw new Error("disk full");
+        events.push({ kind: "attempted", ...attempt });
+      },
+      result: async (result) => {
+        if (options.failResult) throw new Error("database closed");
+        events.push({ kind: "result", ...result });
+      },
+    };
+  }
+
+  it("records the attempt before the request is sent and the result after it, with one attempt id", async () => {
+    const events: Array<Record<string, unknown>> = [];
+    const calls: RecordedCall[] = [];
+    const adapter = createGraphAdapter({
+      tokenProvider: async () => "t",
+      writeAudit: {
+        attempted: async (attempt) => {
+          assert.equal(calls.length, 0, "the attempt is recorded before anything is sent");
+          events.push({ kind: "attempted", ...attempt });
+        },
+        result: async (result) => {
+          events.push({ kind: "result", ...result });
+        },
+      },
+      fetchImpl: mockFetch([
+        new Response(JSON.stringify({ id: "g1" }), { status: 201, headers: { "request-id": "req-1" } }),
+      ], calls),
+    });
+    await adapter.request({ method: "POST", path: "/groups", query: { $select: "id" }, body: { displayName: "Sales" } });
+    assert.equal(calls.length, 1);
+    assert.equal(events.length, 2);
+    const [attempted, result] = events;
+    assert.equal(attempted?.kind, "attempted");
+    assert.equal(attempted?.method, "POST");
+    assert.equal(attempted?.path, "/groups");
+    assert.equal(attempted?.bodyDigest, createHash("sha256").update(JSON.stringify({ displayName: "Sales" })).digest("hex"));
+    assert.doesNotMatch(JSON.stringify(events), /Sales/);
+    assert.equal(result?.attemptId, attempted?.attemptId);
+    assert.equal(result?.outcome, "ok");
+    assert.equal(result?.status, 201);
+    assert.equal(result?.requestId, "req-1");
+    assert.equal(result?.attempts, 1);
+  });
+
+  it("records a failed write with its status and error class", async () => {
+    const events: Array<Record<string, unknown>> = [];
+    const adapter = createGraphAdapter({
+      tokenProvider: async () => "t",
+      writeAudit: recordingSink(events),
+      fetchImpl: mockFetch([new Response("conflict", { status: 409, headers: { "client-request-id": "client-1" } })], []),
+    });
+    await assert.rejects(adapter.request({ method: "PATCH", path: "/users/u1", body: { city: "Berlin" } }), /HTTP 409/);
+    const result = events[1];
+    assert.equal(result?.outcome, "failed");
+    assert.equal(result?.status, 409);
+    assert.equal(result?.requestId, "client-1");
+    assert.equal(result?.errorClass, "http-error");
+  });
+
+  it("records a write that failed before it was sent as not-sent", async () => {
+    const events: Array<Record<string, unknown>> = [];
+    const calls: RecordedCall[] = [];
+    const adapter = createGraphAdapter({
+      tokenProvider: async () => { throw new Error("sign-in required"); },
+      writeAudit: recordingSink(events),
+      fetchImpl: mockFetch([], calls),
+    });
+    await assert.rejects(adapter.retireManagedDevice("device-1"), /sign-in required/);
+    assert.equal(calls.length, 0);
+    assert.equal(events[0]?.path, "/deviceManagement/managedDevices/device-1/retire");
+    assert.equal(events[1]?.errorClass, "not-sent");
+    assert.equal(events[1]?.attempts, 0);
+  });
+
+  it("refuses the write and sends nothing when the attempt cannot be recorded", async () => {
+    const calls: RecordedCall[] = [];
+    const adapter = createGraphAdapter({
+      tokenProvider: async () => "t",
+      writeAudit: recordingSink([], { failAttempted: true }),
+      fetchImpl: mockFetch([new Response(null, { status: 204 })], calls),
+    });
+    await assert.rejects(adapter.request({ method: "DELETE", path: "/groups/g1" }), (error) => {
+      assert.ok(error instanceof GraphWriteAuditError);
+      assert.match(error.message, /^DELETE \/groups\/g1 was not sent: the audit log could not record it\. disk full/);
+      return true;
+    });
+    assert.equal(calls.length, 0);
+  });
+
+  it("keeps a sent write's outcome when only its result cannot be recorded, and says so in the log", async () => {
+    const logs: string[] = [];
+    const adapter = createGraphAdapter({
+      tokenProvider: async () => "t",
+      writeAudit: recordingSink([], { failResult: true }),
+      log: (level, message) => { if (level === "warn") logs.push(message); },
+      fetchImpl: mockFetch([new Response(null, { status: 204 })], []),
+    });
+    await adapter.request({ method: "DELETE", path: "/groups/g1" });
+    assert.ok(logs.some((message) => /audit log could not record the result of DELETE \/groups\/g1/.test(message)));
+  });
+
+  it("refuses every write when no audit sink is given, unless unaudited writes are asked for", async () => {
+    const calls: RecordedCall[] = [];
+    const adapter = createGraphAdapter({
+      tokenProvider: async () => "t",
+      fetchImpl: mockFetch([jsonResponse({ value: [] })], calls),
+    });
+    for (const method of ["POST", "PATCH", "PUT", "DELETE"] as const) {
+      await assert.rejects(adapter.request({ method, path: "/groups/g1", body: {} }), (error) => {
+        assert.ok(error instanceof GraphWriteUnauditedError);
+        assert.match(error.message, new RegExp(`^${method} /groups/g1 was not sent: this Graph client has no audit log`));
+        return true;
+      });
+    }
+    await assert.rejects(adapter.retireManagedDevice("device-1"), GraphWriteUnauditedError);
+    assert.equal(calls.length, 0);
+    // Reads need no sink.
+    await adapter.request({ method: "GET", path: "/groups" });
+    assert.equal(calls.length, 1);
+
+    const optedOut = createGraphAdapter({
+      tokenProvider: async () => "t",
+      unauditedWrites: true,
+      fetchImpl: mockFetch([new Response(null, { status: 204 })], calls),
+    });
+    await optedOut.request({ method: "DELETE", path: "/groups/g1" });
+    assert.equal(calls.at(-1)?.method, "DELETE");
+  });
+
+  it("does not record reads", async () => {
+    const events: unknown[] = [];
+    const adapter = createGraphAdapter({
+      tokenProvider: async () => "t",
+      writeAudit: recordingSink(events),
+      fetchImpl: mockFetch([jsonResponse({ value: [] })], []),
+    });
+    await adapter.request({ method: "GET", path: "/groups" });
+    assert.equal(events.length, 0);
+  });
+});
+
+describe("isGraphHost", () => {
+  it("matches the Graph hosts in any case, with or without one trailing dot", () => {
+    for (const host of ["graph.microsoft.com", "graph.microsoft.com.", "GRAPH.MICROSOFT.COM.", "graph.microsoft.us.", "dod-graph.microsoft.us", "microsoftgraph.chinacloudapi.cn."]) {
+      assert.equal(isGraphHost(host), true, host);
+    }
+    for (const host of ["graph.microsoft.com..", "evilgraph.microsoft.com", "graph.microsoft.com.example.com", "slack.com", ""]) {
+      assert.equal(isGraphHost(host), false, host);
+    }
+  });
+});
+
+describe("auditGraphWritesFetch", () => {
+  function recordingSink(events: Array<Record<string, unknown>>, options: { failAttempted?: boolean } = {}): GraphWriteAuditSink {
+    return {
+      attempted: async (attempt) => {
+        if (options.failAttempted) throw new Error("database is closed");
+        events.push({ kind: "attempted", ...attempt });
+      },
+      result: async (result) => {
+        events.push({ kind: "result", ...result });
+      },
+    };
+  }
+
+  it("records a Graph write before it is sent and its result after, and passes reads and other hosts through", async () => {
+    const events: Array<Record<string, unknown>> = [];
+    const calls: RecordedCall[] = [];
+    const audited = auditGraphWritesFetch(
+      mockFetch([
+        new Response(null, { status: 202, headers: { "request-id": "req-1" } }),
+        jsonResponse({ value: [] }),
+        jsonResponse({ ok: true }),
+      ], calls),
+      recordingSink(events),
+    );
+    const body = JSON.stringify({ message: { subject: "Report" } });
+    await audited("https://graph.microsoft.com/beta/me/sendMail", { method: "POST", body });
+    await audited("https://graph.microsoft.com/beta/me", { method: "GET" });
+    await audited("https://slack.com/api/chat.postMessage", { method: "POST", body: "{}" });
+    assert.equal(calls.length, 3);
+    assert.equal(events.length, 2);
+    const [attempted, result] = events;
+    assert.deepEqual(attempted, {
+      kind: "attempted",
+      attemptId: result?.attemptId,
+      method: "POST",
+      path: "/me/sendMail",
+      bodyDigest: createHash("sha256").update(body).digest("hex"),
+    });
+    assert.equal(result?.outcome, "ok");
+    assert.equal(result?.status, 202);
+    assert.equal(result?.requestId, "req-1");
+    assert.equal(result?.attempts, 1);
+  });
+
+  it("records a write to the fully qualified Graph host with a trailing dot", async () => {
+    const events: Array<Record<string, unknown>> = [];
+    const audited = auditGraphWritesFetch(
+      mockFetch([new Response(null, { status: 202 }), new Response(null, { status: 202 })], []),
+      recordingSink(events),
+    );
+    await audited("https://graph.microsoft.com./beta/me/sendMail", { method: "POST", body: "{}" });
+    await audited("https://GRAPH.microsoft.us./v1.0/groups/g1", { method: "DELETE" });
+    assert.deepEqual(
+      events.map((event) => `${String(event.kind)} ${String(event.method)} ${String(event.path)}`),
+      ["attempted POST /me/sendMail", "result POST /me/sendMail", "attempted DELETE /groups/g1", "result DELETE /groups/g1"],
+    );
+  });
+
+  it("records a refused Graph write as failed with its class", async () => {
+    const events: Array<Record<string, unknown>> = [];
+    const audited = auditGraphWritesFetch(mockFetch([new Response("{}", { status: 403 })], []), recordingSink(events));
+    const response = await audited("https://graph.microsoft.com/v1.0/teams/t1/channels/c1/messages", { method: "POST", body: "{}" });
+    assert.equal(response.status, 403);
+    assert.equal(events[1]?.path, "/teams/t1/channels/c1/messages");
+    assert.equal(events[1]?.outcome, "failed");
+    assert.equal(events[1]?.errorClass, "access-denied");
+  });
+
+  it("sends nothing when the attempt cannot be recorded", async () => {
+    const calls: RecordedCall[] = [];
+    const audited = auditGraphWritesFetch(mockFetch([new Response(null, { status: 202 })], calls), recordingSink([], { failAttempted: true }));
+    await assert.rejects(audited("https://graph.microsoft.com/beta/me/sendMail", { method: "POST", body: "{}" }), (error) => {
+      assert.ok(error instanceof GraphWriteAuditError);
+      assert.match(error.message, /^POST \/me\/sendMail was not sent: the audit log could not record it\. database is closed/);
+      return true;
+    });
+    assert.equal(calls.length, 0);
   });
 });

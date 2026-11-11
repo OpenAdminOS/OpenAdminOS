@@ -23,7 +23,9 @@ import type {
   SecretAccessor,
   TenantRecord,
   WhatsAppWebSendResult,
+  RunInitiator,
 } from "@openadminos/agent-sdk";
+import { runInitiator } from "@openadminos/agent-sdk";
 import type { PublicClientApplication } from "@azure/msal-node";
 import { WHATSAPP_WEB_CONNECTOR_ID } from "@openadminos/connector-whatsapp-web";
 
@@ -94,7 +96,10 @@ export interface RunDeliveryHost {
    * every request and retry once the tenant is closing, and the check run
    * right before a send over a transport that is not fetch.
    */
-  connectorTransport?(tenantId: string): { fetch: typeof fetch; assertEgress: () => void };
+  connectorTransport?(
+    tenantId: string,
+    audit?: { runId: string; agentSlug: string; initiator: RunInitiator },
+  ): { fetch: typeof fetch; assertEgress: () => void };
   read(): Promise<RunDeliveryPersistedState>;
   write(state: RunDeliveryPersistedState): Promise<void>;
   serialize<T>(task: () => Promise<T>): Promise<T>;
@@ -143,7 +148,10 @@ export class RunDeliveryService {
 
   /** The guarded transport for this run's connector, when it has an organization. */
   private transportFor(run: RunRecord): { fetch?: typeof fetch; assertEgress?: () => void } {
-    return run.tenantId && this.host.connectorTransport ? this.host.connectorTransport(run.tenantId) : {};
+    // Graph writes of a delivery are audited as part of the run that sends the report.
+    return run.tenantId && this.host.connectorTransport
+      ? this.host.connectorTransport(run.tenantId, { runId: run.id, agentSlug: run.agentSlug, initiator: runInitiator(run) })
+      : {};
   }
 
   constructor(private readonly host: RunDeliveryHost) {}

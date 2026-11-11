@@ -35,6 +35,7 @@ import {
   resolveProviderDefaultModel,
   DEFAULT_AZURE_OPENAI_API_VERSION,
   type AuditLogExportFormat,
+  type AuditLogStatus,
   type AzureOpenAIProviderConfig,
   type ChatInvestigationMode,
   type ChatInvestigationSettings,
@@ -66,6 +67,7 @@ import {
   type UsageTelemetryPayload,
 } from "../shared/openAdminOS";
 import { UPDATE_UNAVAILABLE_DETAIL, isNightlyVersion } from "../shared/update-channel";
+import { GATEWAY_TENANT_NOT_CONNECTED_COPY } from "../shared/gateway-copy";
 import { copyTextToClipboard } from "../shared/clipboard";
 import { isProviderImplemented } from "../shared/providers";
 import { detectedHostedProviders } from "../shared/provider-detection";
@@ -2066,13 +2068,15 @@ function GatewaySection({
     useState<GatewayPublicStatus | null>(null);
   const [selectedTenantId, setSelectedTenantId] = useState(fallbackTenantId);
   const [portInput, setPortInput] = useState("");
-  const [pairingToken, setPairingToken] = useState<string | null>(null);
+  const [pairingToken, setPairingToken] = useState<
+    { clientName: string; token: string } | null
+  >(null);
+  const [clientNameInput, setClientNameInput] = useState("");
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [endpointCopied, setEndpointCopied] = useState(false);
   const [pendingConfirmation, setPendingConfirmation] = useState<
-    | { kind: "regenerate" }
     | { kind: "revoke"; clientId: string; clientName: string }
     | { kind: "disable" }
     | null
@@ -2081,7 +2085,7 @@ function GatewaySection({
     window.openAdminOS?.getGatewayStatus &&
       window.openAdminOS.enableGateway &&
       window.openAdminOS.disableGateway &&
-      window.openAdminOS.regenerateGatewayToken &&
+      window.openAdminOS.pairGatewayClient &&
       window.openAdminOS.revokeGatewayClient,
   );
 
@@ -2129,6 +2133,8 @@ function GatewaySection({
   const endpoint = listeningPort
     ? `http://127.0.0.1:${listeningPort}/`
     : undefined;
+  const pairedClientCount =
+    gatewayStatus?.clients.filter((client) => !client.needsPairing).length ?? 0;
 
   const enableGateway = async (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
@@ -2150,40 +2156,51 @@ function GatewaySection({
     setBusyAction("enable");
     setError(null);
     try {
-      const result = await api.enableGateway({
-        boundTenantId: selectedTenantId,
-        ...(parsedPort !== undefined ? { port: parsedPort } : {}),
-      });
-      setGatewayStatus(result.status);
-      setPairingToken(result.token);
+      setGatewayStatus(
+        await api.enableGateway({
+          boundTenantId: selectedTenantId,
+          ...(parsedPort !== undefined ? { port: parsedPort } : {}),
+        }),
+      );
     } catch (caught) {
+      // The organization went away: its own copy says what to do, and
+      // the port is not the problem.
       setError(
-        gatewayActionError(
-          "The gateway could not be enabled",
-          caught,
-          "Check that the port is available, then try again.",
-        ),
+        hostErrorMessage(caught) === GATEWAY_TENANT_NOT_CONNECTED_COPY
+          ? GATEWAY_TENANT_NOT_CONNECTED_COPY
+          : gatewayActionError(
+              "The gateway could not be enabled",
+              caught,
+              "Check that the port is available, then try again.",
+            ),
       );
     } finally {
       setBusyAction(null);
     }
   };
 
-  const regenerateToken = async () => {
+  const pairClient = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
     const api = window.openAdminOS;
-    if (!api?.regenerateGatewayToken || busyAction) return;
-    setBusyAction("regenerate");
+    if (!api?.pairGatewayClient || busyAction) return;
+    const name = clientNameInput.trim();
+    if (!name) {
+      setError("Enter a name for the client, for example Claude Code, then select Pair client.");
+      return;
+    }
+    setBusyAction("pair");
     setError(null);
     try {
-      const result = await api.regenerateGatewayToken();
+      const result = await api.pairGatewayClient({ name });
       setGatewayStatus(result.status);
-      setPairingToken(result.token);
+      setPairingToken({ clientName: result.client.name, token: result.token });
+      setClientNameInput("");
     } catch (caught) {
       setError(
         gatewayActionError(
-          "The pairing token could not be regenerated",
+          "The client could not be paired",
           caught,
-          "The existing token remains active. Try again after checking the gateway status.",
+          "No token was issued. Check the name, then try again.",
         ),
       );
     } finally {
@@ -2198,6 +2215,7 @@ function GatewaySection({
     setError(null);
     try {
       setGatewayStatus(await api.revokeGatewayClient(clientId));
+      setPairingToken(null);
     } catch (caught) {
       setError(
         gatewayActionError(
@@ -2251,9 +2269,7 @@ function GatewaySection({
 
   const confirmGatewayAction = async () => {
     if (!pendingConfirmation || busyAction) return;
-    if (pendingConfirmation.kind === "regenerate") {
-      await regenerateToken();
-    } else if (pendingConfirmation.kind === "revoke") {
+    if (pendingConfirmation.kind === "revoke") {
       await revokeClient(pendingConfirmation.clientId);
     } else {
       await disableGateway();
@@ -2408,8 +2424,8 @@ function GatewaySection({
                     mono
                   />
                   <GatewayFact
-                    label="Pairing token"
-                    value={gatewayStatus.hasToken ? "Configured" : "Not configured"}
+                    label="Paired clients"
+                    value={pairedClientCount.toLocaleString()}
                   />
                 </dl>
 
@@ -2447,17 +2463,18 @@ function GatewaySection({
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <h3 className="text-base font-medium text-[var(--color-text)]">
-                        Pairing token
+                        Pairing token for {pairingToken.clientName}
                       </h3>
                       <p className="mt-1 text-sm leading-5 text-[var(--color-text-soft)]">
-                        This token is shown once. Copy it now. You can regenerate a
-                        replacement later.
+                        This token is shown once and is not stored. Copy it now and
+                        set it as the Bearer token in this client's MCP configuration.
+                        To replace it, revoke the client and pair it again.
                       </p>
                     </div>
                     <Badge tone="warning">Shown once</Badge>
                   </div>
                   <OutputJsonBlock
-                    value={pairingToken}
+                    value={pairingToken.token}
                     copyLabel="Copy pairing token"
                     className="mt-4"
                   />
@@ -2472,25 +2489,45 @@ function GatewaySection({
                       Connected clients
                     </h3>
                     <p className="mt-1 text-sm leading-5 text-[var(--color-text-muted)]">
-                      {gatewayStatus.clients.length.toLocaleString()} paired client
-                      {gatewayStatus.clients.length === 1 ? "" : "s"} for this local gateway.
+                      {pairedClientCount.toLocaleString()} paired client
+                      {pairedClientCount === 1 ? "" : "s"} for this local gateway. Each
+                      client has its own token, and its proposals carry the name you
+                      give it here.
                     </p>
                   </div>
-                  <div className="max-w-[360px] text-right">
+                  <form
+                    onSubmit={(event) => void pairClient(event)}
+                    className="flex max-w-[360px] items-end gap-2"
+                  >
+                    <div>
+                      <label
+                        htmlFor="gateway-client-name"
+                        className="block text-xs font-medium text-[var(--color-text-muted)]"
+                      >
+                        Client name
+                      </label>
+                      <input
+                        id="gateway-client-name"
+                        name="gateway-client-name"
+                        type="text"
+                        autoComplete="off"
+                        maxLength={100}
+                        value={clientNameInput}
+                        onChange={(event) => setClientNameInput(event.target.value)}
+                        placeholder="Claude Code"
+                        disabled={busyAction !== null}
+                        className="mt-1.5 h-8 w-[180px] rounded-lg bg-[var(--color-bg-raised)] px-3 text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                      />
+                    </div>
                     <Button
-                      type="button"
+                      type="submit"
                       size="sm"
                       variant="secondary"
                       disabled={busyAction !== null}
-                      leadingIcon={<IconRefresh size={11} />}
-                      onClick={() => setPendingConfirmation({ kind: "regenerate" })}
                     >
-                      {busyAction === "regenerate" ? "Regenerating…" : "Regenerate token"}
+                      {busyAction === "pair" ? "Pairing…" : "Pair client"}
                     </Button>
-                    <p className="mt-1.5 text-xs leading-4 text-[var(--color-warning)]">
-                      Paired clients must re-pair after regeneration.
-                    </p>
-                  </div>
+                  </form>
                 </div>
               </div>
 
@@ -2506,11 +2543,14 @@ function GatewaySection({
                       className="flex flex-wrap items-center justify-between gap-4 px-5 py-3.5"
                     >
                       <div className="min-w-0">
-                        <div className="text-base font-medium text-[var(--color-text)]">
+                        <div className="flex flex-wrap items-center gap-2 text-base font-medium text-[var(--color-text)]">
                           {client.name}
+                          {client.needsPairing && <Badge tone="warning">Pair again</Badge>}
                         </div>
                         <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">
-                          Paired {formatDateTime(client.createdAt)}
+                          {client.needsPairing
+                            ? "Used the shared token from an earlier version, which no longer works. Pair it again under the same name to issue its own token."
+                            : `Paired ${formatDateTime(client.createdAt)}`}
                         </div>
                       </div>
                       <Button
@@ -2536,8 +2576,8 @@ function GatewaySection({
 
               <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[var(--color-border-soft)] px-5 py-4">
                 <p className="max-w-[560px] text-sm leading-5 text-[var(--color-text-muted)]">
-                  Disabling stops the loopback listener. Existing client records
-                  remain available when the gateway is enabled again.
+                  Disabling stops the loopback listener and revokes every paired
+                  client. Pair clients again after you enable it.
                 </p>
                 <Button
                   type="button"
@@ -2627,37 +2667,32 @@ function GatewayFact({
   );
 }
 
+/** The message the main process threw, without the wrapper Electron adds to it. */
+function hostErrorMessage(caught: unknown): string {
+  const raw = caught instanceof Error ? caught.message : String(caught);
+  return raw.replace(/^Error invoking remote method ['"][^'"]+['"]: (?:\w*Error: )?/, "").trim();
+}
+
 function gatewayActionError(
   prefix: string,
   caught: unknown,
   recovery: string,
 ): string {
-  const raw = caught instanceof Error ? caught.message : String(caught);
-  const reason = userFacingErrorReason(raw);
+  const reason = userFacingErrorReason(hostErrorMessage(caught));
   return reason ? `${prefix}: ${reason} ${recovery}` : `${prefix}. ${recovery}`;
 }
 
 function gatewayConfirmationCopy(
   confirmation:
-    | { kind: "regenerate" }
     | { kind: "revoke"; clientId: string; clientName: string }
     | { kind: "disable" }
     | null,
 ): { title: string; detail: string; confirmLabel: string; busyLabel: string } {
-  if (confirmation?.kind === "regenerate") {
-    return {
-      title: "Regenerate pairing token?",
-      detail:
-        "The current token will stop working. Every paired client must pair again with the replacement token.",
-      confirmLabel: "Regenerate pairing token",
-      busyLabel: "Regenerating…",
-    };
-  }
   if (confirmation?.kind === "revoke") {
     return {
       title: `Revoke ${confirmation.clientName}?`,
       detail:
-        "This client will lose gateway access immediately. It can connect again only after pairing with a valid token.",
+        "Its token stops working on the next request. It can connect again only after you pair it again and update its configuration with the new token.",
       confirmLabel: "Revoke client",
       busyLabel: "Revoking…",
     };
@@ -2665,7 +2700,7 @@ function gatewayConfirmationCopy(
   return {
     title: "Disable gateway?",
     detail:
-      "The loopback listener will stop. Existing client records remain available if the gateway is enabled again.",
+      "The loopback listener will stop and every paired client is revoked. After you enable the gateway again, pair each client again.",
     confirmLabel: "Disable gateway now",
     busyLabel: "Disabling…",
   };
@@ -2705,6 +2740,8 @@ function GeneralSection() {
   const [auditExportFormat, setAuditExportFormat] =
     useState<AuditLogExportFormat>("json");
   const [auditExportBusy, setAuditExportBusy] = useState(false);
+  const [auditExportNotStartedByPerson, setAuditExportNotStartedByPerson] = useState(false);
+  const [auditLogStatus, setAuditLogStatus] = useState<AuditLogStatus | null>(null);
   const [schedulerError, setSchedulerError] = useState<string | null>(null);
   const [companionError, setCompanionError] = useState<string | null>(null);
   const [sandboxError, setSandboxError] = useState<string | null>(null);
@@ -2752,6 +2789,21 @@ function GeneralSection() {
       .catch((error: unknown) => {
         if (!cancelled) {
           setSandboxError(error instanceof Error ? error.message : String(error));
+        }
+      });
+    api
+      .getAuditLogStatus()
+      .then((status) => {
+        if (!cancelled) setAuditLogStatus(status);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setAuditLogStatus({
+            lastFailure: {
+              failedAt: new Date().toISOString(),
+              message: `Its status could not be read. ${error instanceof Error ? error.message : String(error)}`,
+            },
+          });
         }
       });
     api
@@ -2930,7 +2982,11 @@ function GeneralSection() {
     setRunHistoryNotice(null);
     setAuditExportNotice(null);
     try {
-      const exported = await api.exportAuditLog({ format: auditExportFormat, saveToFile: true });
+      const exported = await api.exportAuditLog({
+        format: auditExportFormat,
+        saveToFile: true,
+        ...(auditExportNotStartedByPerson ? { notStartedByPerson: true } : {}),
+      });
       const saved = exported.savedFile;
       if (!saved) throw new Error("The desktop did not return a save result. Restart the app and try again.");
       if (saved.canceled) {
@@ -2942,11 +2998,17 @@ function GeneralSection() {
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      // A failed integrity check, or an audit log that could not be read,
+      // carries its own next step; another folder would not help.
       setRunHistoryError(
-        `Audit log export failed: ${message} Try again and choose a writable local folder in the save dialog.`,
+        /integrity check|nothing was exported/.test(message)
+          ? `Audit log export failed: ${message}`
+          : `Audit log export failed: ${message} Try again and choose a writable local folder in the save dialog.`,
       );
     } finally {
       setAuditExportBusy(false);
+      // An export records what the state shows, so a failure may be new or cleared.
+      void api.getAuditLogStatus().then(setAuditLogStatus).catch(() => undefined);
     }
   };
 
@@ -3140,16 +3202,24 @@ function GeneralSection() {
         />
         <SettingRow
           id="audit-log-export"
-          description="Exports retained run history, write-confirmation events, connector delivery audit entries, recorded hosted-provider consent acknowledgements, and changes to connections, organizations, provider, model, public references and schedule assignments. Old run records may already be absent because of retention. Those changes are kept independently of it."
+          description="Exports run events, write confirmations, Graph write attempts and results, connector deliveries, hosted-provider consent acknowledgements, and changes to connections, organizations, provider, model, public references and schedule assignments. Events are recorded when they happen and kept for 10 years, whatever run-history retention removes."
           control={
             <AuditLogExportControls
               format={auditExportFormat}
               busy={auditExportBusy}
+              notStartedByPerson={auditExportNotStartedByPerson}
+              onNotStartedByPersonChange={setAuditExportNotStartedByPerson}
               onFormatChange={setAuditExportFormat}
               onExport={() => void exportAuditLog()}
             />
           }
         />
+        {auditLogStatus?.lastFailure && (
+          <AuditLogFailureNotice failure={auditLogStatus.lastFailure} />
+        )}
+        {auditLogStatus?.unrecordedResults && (
+          <AuditLogUnrecordedResultsNotice unrecorded={auditLogStatus.unrecordedResults} />
+        )}
         {(runHistoryError || runHistoryNotice || driftError || driftNotice || auditExportNotice) && (
           <div
             role={runHistoryError || driftError ? "alert" : "status"}
@@ -3489,14 +3559,103 @@ function DriftRetentionControls({
   );
 }
 
+function AuditLogFailureNotice({
+  failure,
+}: {
+  failure: NonNullable<AuditLogStatus["lastFailure"]>;
+}) {
+  const failedAt = new Date(failure.failedAt);
+  return (
+    <div
+      role="alert"
+      className="border-b border-[var(--color-border-soft)] bg-[var(--color-warning-soft)] px-5 py-3"
+    >
+      <div className="flex items-start gap-2">
+        <IconWarning size={14} className="mt-0.5 shrink-0 text-[var(--color-warning)]" />
+        <div>
+          <div className="text-sm font-medium text-[var(--color-warning)]">
+            The audit log could not record an event
+          </div>
+          <p className="mt-1 text-sm leading-relaxed text-[var(--color-text-soft)]">
+            {Number.isNaN(failedAt.getTime()) ? "" : `${failedAt.toLocaleString()}: `}
+            {failure.message} Missed run and configuration events are recorded with the next
+            change, and a change that would remove them first is refused. Graph writes are not
+            sent while the audit log cannot record them. Check free disk space and permissions of
+            the OpenAdminOS data folder. This notice clears once the audit log records the next
+            change to settings or runs.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AuditLogUnrecordedResultsNotice({
+  unrecorded,
+}: {
+  unrecorded: NonNullable<AuditLogStatus["unrecordedResults"]>;
+}) {
+  const { count, unreadableFile, inMemoryOnly } = unrecorded;
+  return (
+    <div
+      role="alert"
+      className="border-b border-[var(--color-border-soft)] bg-[var(--color-warning-soft)] px-5 py-3"
+    >
+      <div className="flex items-start gap-2">
+        <IconWarning size={14} className="mt-0.5 shrink-0 text-[var(--color-warning)]" />
+        <div>
+          <div className="text-sm font-medium text-[var(--color-warning)]">
+            {count === 0
+              ? "Kept audit events cannot be read"
+              : count === 1
+                ? "1 audit event is not in the audit log yet"
+                : `${count.toLocaleString("en-US")} audit events are not in the audit log yet`}
+          </div>
+          {count > 0 && inMemoryOnly && (
+            <p className="mt-1 text-sm font-medium leading-relaxed text-[var(--color-warning)]">
+              {count === 1 ? "This event could" : "Some of these events could"} not be saved to
+              disk either, so {count === 1 ? "it is" : "they are"} only in memory and lost if
+              OpenAdminOS quits before the audit log records {count === 1 ? "it" : "them"}. Keep
+              OpenAdminOS open and free disk space in the OpenAdminOS data folder
+              {unreadableFile ? `, and move ${unreadableFile} out of it` : ""}. OpenAdminOS saves{" "}
+              {count === 1 ? "it" : "them"} to disk with the next audit log entry or when this page
+              is opened again.
+            </p>
+          )}
+          {count > 0 && (
+            <p className="mt-1 text-sm leading-relaxed text-[var(--color-text-soft)]">
+              {count === 1 ? "It is" : "They are"} kept on this device and recorded with the next
+              audit log entry. A kept Graph write result means the write was sent and its attempt is
+              recorded; a kept hosted-provider consent was given and is waiting to be recorded. Check free disk space
+              and permissions of the OpenAdminOS data folder. This notice clears once{" "}
+              {count === 1 ? "it is" : "they are"} recorded.
+            </p>
+          )}
+          {unreadableFile && (
+            <p className="mt-1 text-sm leading-relaxed text-[var(--color-text-soft)]">
+              {unreadableFile} in the app data folder holds audit events kept from an earlier session and
+              cannot be read, so they cannot be recorded. Keep a copy of it for review, then remove
+              it{inMemoryOnly ? "; do not quit OpenAdminOS while events are only in memory" : " and restart OpenAdminOS"}.
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AuditLogExportControls({
   format,
   busy,
+  notStartedByPerson,
+  onNotStartedByPersonChange,
   onFormatChange,
   onExport,
 }: {
   format: AuditLogExportFormat;
   busy: boolean;
+  notStartedByPerson: boolean;
+  onNotStartedByPersonChange: (value: boolean) => void;
   onFormatChange: (format: AuditLogExportFormat) => void;
   onExport: () => void;
 }) {
@@ -3527,6 +3686,26 @@ function AuditLogExportControls({
           );
         })}
       </div>
+      <label
+        htmlFor="audit-log-not-started-by-person"
+        className="flex items-start gap-2 rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+      >
+        <input
+          id="audit-log-not-started-by-person"
+          name="audit-log-not-started-by-person"
+          type="checkbox"
+          className="mt-0.5"
+          checked={notStartedByPerson}
+          disabled={busy}
+          onChange={(event) => onNotStartedByPersonChange(event.currentTarget.checked)}
+        />
+        <span>
+          Only runs no person started
+          <span className="block text-[var(--color-text-muted)]">
+            Schedules, Agent Team assignments, write gateway proposals and rollbacks.
+          </span>
+        </span>
+      </label>
       <div className="rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-xs leading-4 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
         Saved through the local file dialog. Nothing is uploaded. CSV includes the
         per-entry hash; JSON includes the full hash-chain header.

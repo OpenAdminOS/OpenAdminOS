@@ -119,7 +119,7 @@ import {
   trimForPrompt,
   updateJobTenantProgress,
 } from "../state-helpers.js";
-import { IntelligenceSqliteStore } from "./sqlite-store.js";
+import { IntelligenceSqliteStore, type HostedProviderConsentAuditRecord } from "./sqlite-store.js";
 import { runAgenticChat, type RunAgenticChatInput } from "./agentic-loop.js";
 import {
   GRAPH_CACHE_RESOURCES,
@@ -469,6 +469,8 @@ export interface ChatServiceHost {
    * for a Chat answer. Undefined when it has none.
    */
   splashtopChatContext?(tenant: TenantRecord): Promise<SplashtopChatContext | undefined>;
+  /** Appends a hosted-provider consent to the audit log. The Chat database keeps it either way. */
+  recordHostedProviderConsent?(record: HostedProviderConsentAuditRecord): void;
   readonly appVersion: string;
   readonly userDataPath: string | undefined;
   readonly intelligenceStore: IntelligenceSqliteStore | undefined;
@@ -761,25 +763,35 @@ export class IntuneChatService {
     workspaceContext?: WorkspacePromptContextSummary;
   }): void {
     const primaryTenantId = input.tenantIds[0];
-    if (!this.host.intelligenceStore || !primaryTenantId) return;
+    const store = this.host.intelligenceStore;
+    if (!primaryTenantId) return;
+    const consent: HostedProviderConsentAuditRecord = {
+      id: `event_${randomUUID()}`,
+      tenantId: primaryTenantId,
+      source: input.scope,
+      payload: {
+        tenantIds: input.tenantIds,
+        providerId: input.providerId,
+        ...(input.providerName ? { providerName: input.providerName } : {}),
+        ...(input.model ? { model: input.model } : {}),
+        acknowledgedAt: input.acknowledgedAt,
+        remember: input.remember === true,
+        ...(input.workspaceContext
+          ? { workspaceContext: input.workspaceContext }
+          : {}),
+      },
+      createdAt: input.acknowledgedAt,
+    };
+    // The Chat database keeps every consent, and the host appends it to the
+    // audit log. When that append fails, the next audit record imports it
+    // from the Chat database; the shared id keeps it from being recorded twice.
     try {
-      this.host.intelligenceStore.recordHostedProviderConsentAuditEvent({
-        id: `event_${randomUUID()}`,
-        tenantId: primaryTenantId,
-        source: input.scope,
-        payload: {
-          tenantIds: input.tenantIds,
-          providerId: input.providerId,
-          ...(input.providerName ? { providerName: input.providerName } : {}),
-          ...(input.model ? { model: input.model } : {}),
-          acknowledgedAt: input.acknowledgedAt,
-          remember: input.remember === true,
-          ...(input.workspaceContext
-            ? { workspaceContext: input.workspaceContext }
-            : {}),
-        },
-        createdAt: input.acknowledgedAt,
-      });
+      store?.recordHostedProviderConsentAuditEvent(consent);
+    } catch (error) {
+      console.warn("[audit] the Chat database could not keep a hosted-provider consent", error);
+    }
+    try {
+      this.host.recordHostedProviderConsent?.(consent);
     } catch (error) {
       console.warn("[audit] failed to record hosted-provider consent", error);
     }

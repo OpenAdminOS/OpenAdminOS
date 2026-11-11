@@ -518,6 +518,7 @@ export function makeMockBridge(
       versionsDeleted: 0,
       reason: "No drift history exceeded the retention policy.",
     })),
+    getAuditLogStatus: vi.fn(async () => ({})),
     exportAuditLog: vi.fn(async (input) => ({
       format: input.format,
       suggestedName: `openadminos-audit-log.${input.format}`,

@@ -982,6 +982,9 @@ export interface RunRecord {
     manualCount: number;
   };
   external?: {
+    /** The paired gateway client record; absent on proposals from before per-client pairing. */
+    clientId?: string;
+    /** The name the admin gave the client at pairing, never one the client sent. */
     clientName: string;
     requiredScopes: string[];
   };
@@ -1010,6 +1013,11 @@ export interface RunRecord {
   providerId?: ProviderId;
   model?: string;
   trigger?: "manual" | "schedule";
+  /**
+   * Who started the run. Records written before it existed have none;
+   * read them through `runInitiator`.
+   */
+  initiator?: RunInitiator;
   changeState?: "new" | "changed" | "unchanged";
   /**
    * Best-effort live LLM report text while a run is still executing.
@@ -1035,6 +1043,28 @@ export interface RunRecord {
   tokens?: LlmTokenUsage;
   /** Per-call totals for local forecasts; missing metrics stay unknown. Older runs have null usage. */
   usage?: RunModelUsage | null;
+}
+
+/**
+ * Who started a run: a person in the app, a schedule, an Agent Team
+ * assignment, a write-gateway client, or a baseline rollback.
+ */
+export type RunInitiator = "person" | "schedule" | "office" | "gateway" | "rollback";
+
+/**
+ * The initiator of a run. A record written before runs carried one is
+ * read from what it does carry: an Agent Team assignment, a gateway
+ * proposal or a rollback by its origin, otherwise by its trigger
+ * (manual means a person, schedule means a schedule).
+ */
+export function runInitiator(
+  run: Pick<RunRecord, "initiator" | "trigger" | "origin" | "office">,
+): RunInitiator {
+  if (run.initiator) return run.initiator;
+  if (run.office) return "office";
+  if (run.origin === "external-proposal") return "gateway";
+  if (run.origin === "baseline-rollback") return "rollback";
+  return run.trigger === "schedule" ? "schedule" : "person";
 }
 
 export interface RunModelUsage extends LlmTokenUsage {
@@ -1144,6 +1174,11 @@ export interface ExportAuditLogInput {
   from?: string;
   /** Inclusive ISO timestamp upper bound. */
   to?: string;
+  /**
+   * Only events of runs no person started (schedule, Agent Team, write
+   * gateway, rollback). Events that belong to no run are left out.
+   */
+  notStartedByPerson?: boolean;
 }
 
 export interface AuditLogHashChainSummary {
@@ -1163,6 +1198,26 @@ export interface AuditLogExportResult {
   hashChain: AuditLogHashChainSummary;
   from?: string;
   to?: string;
+}
+
+/** Whether the audit log on this device is recording. */
+export interface AuditLogStatus {
+  /**
+   * The last append that failed. It clears only when the audit log next
+   * records the app state in full, which the next change to settings or
+   * runs does. A Graph write recorded in between does not clear it,
+   * because it also marks that run and configuration events may be
+   * missing from the log.
+   */
+  lastFailure?: { failedAt: string; message: string };
+  /**
+   * Results of Graph writes that were sent but not recorded yet. They are
+   * kept on the device and cleared only when an append records them.
+   * `unreadableFile` names a file of kept results that cannot be read.
+   * `inMemoryOnly` says some of them could not be saved to disk either,
+   * so they are lost if the app quits before they are recorded.
+   */
+  unrecordedResults?: { count: number; unreadableFile?: string; inMemoryOnly?: true };
 }
 
 export interface TrustState {
@@ -2018,8 +2073,23 @@ export interface GatewayPublicStatus {
   port: number;
   listeningPort?: number;
   boundTenantId?: string;
-  hasToken: boolean;
-  clients: Array<{ id: string; name: string; createdAt: string }>;
+  clients: GatewayClientSummary[];
+}
+
+/**
+ * A paired gateway client. Each has its own token, shown once at
+ * pairing; the app keeps only its SHA-256 hash.
+ */
+export interface GatewayClientSummary {
+  id: string;
+  /** Given or accepted by the admin at pairing. */
+  name: string;
+  createdAt: string;
+  /**
+   * Recorded before per-client tokens, from the name the client sent.
+   * It has no token of its own and must be paired again.
+   */
+  needsPairing?: true;
 }
 
 // ─── Fleet drift status (v0.5) ───────────────────────────────────────────
@@ -3151,9 +3221,12 @@ export interface OpenAdminOSApi {
   enableGateway?(input: {
     boundTenantId: string;
     port?: number;
-  }): Promise<{ status: GatewayPublicStatus; token: string }>;
+  }): Promise<GatewayPublicStatus>;
   disableGateway?(): Promise<GatewayPublicStatus>;
-  regenerateGatewayToken?(): Promise<{ status: GatewayPublicStatus; token: string }>;
+  /** Pair one client under the given name; its token is returned only here. */
+  pairGatewayClient?(input: {
+    name: string;
+  }): Promise<{ status: GatewayPublicStatus; client: GatewayClientSummary; token: string }>;
   revokeGatewayClient?(clientId: string): Promise<GatewayPublicStatus>;
   /** Connect to a catalog MCP server, list its tools and record the install. */
   installMcpServer?(serverId: string): Promise<McpServerSummary[]>;
@@ -3215,6 +3288,7 @@ export interface OpenAdminOSApi {
   ): Promise<DriftRetentionSettings>;
   pruneDriftHistoryNow(): Promise<DriftHistoryPruneResult>;
   exportAuditLog(input: ExportAuditLogInput): Promise<AuditLogExportResult>;
+  getAuditLogStatus(): Promise<AuditLogStatus>;
   getChatInvestigationSettings(): Promise<ChatInvestigationSettings>;
   setChatInvestigationMode(mode: ChatInvestigationMode): Promise<ChatInvestigationSettings>;
   getSelfTrainingSettings(): Promise<SelfTrainingSettings>;
@@ -4329,6 +4403,16 @@ export type WriteActionSeverity = "default" | "destructive";
 
 export interface WriteAction {
   id: string;
+  /**
+   * The runtime handler that applies this action, from its handler
+   * registry ("graph-write", "retire-managed-device"). Apply skips an
+   * action whose kind has no registered handler and records it as
+   * failed; it is never applied. A handler may read only `request` and
+   * `metadata`, never `id`, `label`, `description` or `severity`. The
+   * check before apply compares reviewed and fresh plans by those two
+   * fields alone, so a new handler that read anything else would let a
+   * change slip past it.
+   */
   kind: string;
   label: string;
   description?: string;

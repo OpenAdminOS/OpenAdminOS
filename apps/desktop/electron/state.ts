@@ -33,8 +33,10 @@ import {
 import { dirname, join } from "node:path";
 import {
   acquireTokenSilent,
+  auditGraphWritesFetch,
   compareSemver,
   createGraphAdapter,
+  type GraphWriteAuditSink,
   createClaudeCodeLlm,
   createAzureOpenAiLlm,
   createCodexLlm,
@@ -90,6 +92,7 @@ import type {
   AgentCommunitySubmissionResult,
   AgentDraftPreflightResult,
   AuditLogExportResult,
+  AuditLogStatus,
   ConnectorAuditEntry,
   ExportAgentBundleResult,
   ExportAuditLogInput,
@@ -202,6 +205,7 @@ import {
   normalizeGraphScopeName,
   providerCatalog,
   resolveProviderDefaultModel,
+  runInitiator,
   graphAccessDenialFromError,
   requestedScopes,
   SERVICE_PARTS,
@@ -258,6 +262,7 @@ import {
 } from "@openadminos/connector-whatsapp-web";
 
 import { SafeStorageTokenCacheStore } from "./secret-store.js";
+import { csvCell } from "../src/shared/csv.js";
 import { defaultUpdateChannel } from "../src/shared/update-channel.js";
 import { SafeStorageConnectorSecretStore } from "./connector-secret-store.js";
 import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
@@ -283,7 +288,23 @@ import {
   refreshRegistry,
   validateRegistrySource,
 } from "./registry-client.js";
-import { IntelligenceSqliteStore } from "./intune-chat/sqlite-store.js";
+import { IntelligenceSqliteStore, type HostedProviderConsentAuditRecord } from "./intune-chat/sqlite-store.js";
+import {
+  AUDIT_CHAIN_START_HASH,
+  AUDIT_LOG_RETENTION_DAYS,
+  AuditLogBehindError,
+  AuditLogIntegrityError,
+  AuditLogStore,
+  canonicalJson,
+  chainHash,
+  graphWriteAuditSink,
+  trackedAuditSink,
+  type AuditLogActor,
+  type AuditLogChainSummary,
+  type AuditLogEvent,
+  type AuditLogEventSeed,
+  type AuditLogEventSource,
+} from "./audit-log.js";
 import { IntuneChatService, chatToolUseStatus, type IntuneChatStreamOptions } from "./intune-chat/service.js";
 import { mcpChatServerOf, mcpChatToolName, mcpPrivateTermsForTenant, type McpChatContext, type McpChatServer, type McpChatTool } from "./intune-chat/tools.js";
 import { TenantValueIndex } from "./intune-chat/tenant-values.js";
@@ -298,7 +319,7 @@ import type { SplashtopChatContext } from "./intune-chat/tools.js";
 import { isAllowedTool, McpHost, type McpToolInfo } from "./mcp/host.js";
 import { definitionForResource } from "./intune-chat/planner.js";
 import { DriftService } from "./intune-chat/drift/service.js";
-import { GatewayService } from "./gateway/service.js";
+import { GatewayService, type GatewayConfig, type GatewayConfigContext } from "./gateway/service.js";
 import {
   RetrievalIndex,
   ollamaEmbedQuery,
@@ -319,7 +340,7 @@ import {
   buildUsageTelemetryPayload,
   type UsageTelemetryPayload,
 } from "./telemetry/usage.js";
-import { OrganizationBoundaryError, RunService, type SplashtopRunClient } from "./runs.js";
+import { OrganizationBoundaryError, RunService, gatewayRejectionCoolingDown, type RunGraphExecution, type SplashtopRunClient } from "./runs.js";
 import { RunDeliveryService } from "./run-delivery.js";
 import {
   OUTLOOK_CONNECTOR_ID,
@@ -469,15 +490,11 @@ interface PersistedState {
   /** Why the last background pull failed, shown in Settings until a pull succeeds. */
   embeddingModelPullError?: string;
   /**
-   * MCP write-gateway configuration. The pairing token is never stored
-   * here; it lives in provider-style safeStorage. Off by default.
+   * MCP write-gateway configuration. Each paired client keeps only the
+   * SHA-256 hash of its own token; the token is shown once at pairing
+   * and stored nowhere. Off by default.
    */
-  gateway?: {
-    enabled: boolean;
-    port: number;
-    boundTenantId?: string;
-    clients: Array<{ id: string; name: string; createdAt: string }>;
-  };
+  gateway?: GatewayConfig;
   /**
    * Enables experimental MXC-backed code execution for preview script
    * agents. Undefined means "no saved preference yet" so the host may
@@ -771,208 +788,226 @@ export const NO_MICROSOFT_365_ORGANIZATION = (action: string) =>
 /** The tenant id pilot mode used for its sample tenant, before pilot mode was removed. */
 export const LEGACY_SAMPLE_TENANT_ID = "openadminos-sample-tenant";
 
+/** The saved gateway config, or the default when none was saved: off, port 8092, no clients. */
+function gatewayConfigOf(persisted: Pick<PersistedState, "gateway">): GatewayConfig {
+  return persisted.gateway ?? { enabled: false, port: 8092, clients: [] };
+}
+
+/**
+ * A gateway change for a removed tenant: a gateway bound to it is turned
+ * off and every paired client revoked, as Disable does, so connecting the
+ * same tenant again never brings its old clients back. A gateway bound to
+ * another tenant is left as it is.
+ */
+function gatewayUnboundFrom(tenantId: string): (config: GatewayConfig) => GatewayConfig {
+  return (config) => {
+    if (config.boundTenantId !== tenantId) return config;
+    const { boundTenantId: _removed, ...unbound } = config;
+    return { ...unbound, enabled: false, clients: [] };
+  };
+}
+
 /** A sample tenant written by an earlier version: marked "sample", or the pilot tenant's id. */
 function isLegacySampleTenant(tenant: TenantRecord): boolean {
   return (tenant as { kind?: unknown }).kind === "sample" || tenant.id === LEGACY_SAMPLE_TENANT_ID;
 }
 
 const AUDIT_LOG_SCHEMA_VERSION = 1;
-const AUDIT_CHAIN_START_HASH = "0".repeat(64);
 
-type AuditLogEventSource =
-  | "run-history"
-  | "connector-audit"
-  | "hosted-provider-consent"
-  | "configuration-change";
-
-interface AuditLogActor {
-  kind: "connected-admin" | "local-admin";
-  tenantId?: string;
-  tenantName?: string;
-  username?: string;
-  homeAccountId?: string;
+interface AuditLogContext {
+  tenantById: Map<string, TenantRecord>;
+  agentBySlug: Map<string, AgentSummary>;
 }
 
-interface AuditLogEventSeed {
-  id: string;
-  timestamp: string;
-  type: string;
-  source: AuditLogEventSource;
-  runId?: string;
-  tenantId?: string;
-  agentSlug?: string;
-  actor?: AuditLogActor;
-  details: Record<string, unknown>;
+function auditLogContext(state: Pick<PersistedState, "tenants" | "installedAgents">): AuditLogContext {
+  return {
+    tenantById: new Map(state.tenants.map((tenant) => [tenant.id, tenant])),
+    agentBySlug: new Map(state.installedAgents.map((agent) => [agent.slug || agent.id, agent])),
+  };
 }
 
-type AuditLogEvent = AuditLogEventSeed & { sha256: string };
-
-interface AuditLogBuildInput {
-  novaConnectorAudit?: PersistedState["novaConnectorAudit"];
-  configurationAudit?: PersistedState["configurationAudit"];
-  runs: RunRecord[];
-  tenants: TenantRecord[];
-  installedAgents: AgentSummary[];
-  hostedProviderConsentEvents: Array<{
-    id: string;
-    tenantId: string;
-    source: string;
-    payload: Record<string, unknown>;
-    createdAt: string;
-  }>;
-}
-
-function buildAuditLogEvents(input: AuditLogBuildInput): AuditLogEventSeed[] {
-  const tenantById = new Map(input.tenants.map((tenant) => [tenant.id, tenant]));
-  const agentBySlug = new Map(
-    input.installedAgents.map((agent) => [agent.slug || agent.id, agent]),
-  );
+/**
+ * The audit events a run record shows so far. Each id is fixed by the
+ * run and the event, so recording a run again adds only what is new.
+ */
+function runAuditEvents(run: RunRecord, context: AuditLogContext): AuditLogEventSeed[] {
+  const tenant = run.tenantId ? context.tenantById.get(run.tenantId) : undefined;
+  const agent = context.agentBySlug.get(run.agentSlug);
+  const runDetails = runAuditDetails(run, agent, tenant);
+  const base = {
+    runId: run.id,
+    ...(run.tenantId ? { tenantId: run.tenantId } : {}),
+    agentSlug: run.agentSlug,
+    initiator: runInitiator(run),
+  };
   const events: AuditLogEventSeed[] = [];
-
-  for (const run of input.runs) {
-    const tenant = run.tenantId ? tenantById.get(run.tenantId) : undefined;
-    const agent = agentBySlug.get(run.agentSlug);
-    const runDetails = runAuditDetails(run, agent, tenant);
+  events.push({
+    ...base,
+    id: `run:${run.id}:queued`,
+    timestamp: run.queuedAt,
+    type: "run.queued",
+    source: "run-history",
+    details: runDetails,
+  });
+  if (run.startedAt) {
     events.push({
-      id: `run:${run.id}:queued`,
-      timestamp: run.queuedAt,
-      type: "run.queued",
+      ...base,
+      id: `run:${run.id}:started`,
+      timestamp: run.startedAt,
+      type: "run.started",
       source: "run-history",
-      runId: run.id,
-      ...(run.tenantId ? { tenantId: run.tenantId } : {}),
-      agentSlug: run.agentSlug,
       details: runDetails,
     });
-    if (run.startedAt) {
-      events.push({
-        id: `run:${run.id}:started`,
-        timestamp: run.startedAt,
-        type: "run.started",
-        source: "run-history",
-        runId: run.id,
-        ...(run.tenantId ? { tenantId: run.tenantId } : {}),
-        agentSlug: run.agentSlug,
-        details: runDetails,
-      });
-    }
-    const confirmationRequestedAt = findConfirmationRequestedAt(run);
-    if (run.plan && run.plan.actions.length > 0 && confirmationRequestedAt) {
-      events.push({
-        id: `run:${run.id}:write-confirmation-requested`,
-        timestamp: confirmationRequestedAt,
-        type: "write.confirmation.requested",
-        source: "run-history",
-        runId: run.id,
-        ...(run.tenantId ? { tenantId: run.tenantId } : {}),
-        agentSlug: run.agentSlug,
-        details: writeConfirmationDetails(run, "requested"),
-      });
-    }
-    if (run.confirmedAt) {
-      events.push({
-        id: `run:${run.id}:write-confirmation-accepted`,
-        timestamp: run.confirmedAt,
-        type: "write.confirmation.accepted",
-        source: "run-history",
-        runId: run.id,
-        ...(run.tenantId ? { tenantId: run.tenantId } : {}),
-        agentSlug: run.agentSlug,
-        actor: actorForRun(run, tenant),
-        details: writeConfirmationDetails(run, "accepted"),
-      });
-    }
-    if (run.rejectedAt) {
-      events.push({
-        id: `run:${run.id}:write-confirmation-rejected`,
-        timestamp: run.rejectedAt,
-        type: "write.confirmation.rejected",
-        source: "run-history",
-        runId: run.id,
-        ...(run.tenantId ? { tenantId: run.tenantId } : {}),
-        agentSlug: run.agentSlug,
-        actor: actorForRun(run, tenant),
-        details: writeConfirmationDetails(run, "rejected"),
-      });
-    }
-    if (run.finishedAt) {
-      events.push({
-        id: `run:${run.id}:finished`,
-        timestamp: run.finishedAt,
-        type: `run.${run.status}`,
-        source: "run-history",
-        runId: run.id,
-        ...(run.tenantId ? { tenantId: run.tenantId } : {}),
-        agentSlug: run.agentSlug,
-        details: {
-          ...runDetails,
-          status: run.status,
-          durationMs: runDurationMs(run),
-          ...(run.error ? { error: run.error } : {}),
-          resultPresent: run.result !== undefined,
-          ...(run.result !== undefined
-            ? { resultDigest: digestUnknown(run.result) }
-            : {}),
-        },
-      });
-    }
-    for (const log of run.logs) {
-      const connectorAudit = readConnectorAuditEntry(log.metadata?.connectorAudit);
-      if (!connectorAudit) continue;
-      events.push({
-        id: `connector:${run.id}:${log.id}`,
-        timestamp: log.timestamp,
-        type: "connector.delivery",
-        source: "connector-audit",
-        runId: run.id,
-        ...(run.tenantId ? { tenantId: run.tenantId } : {}),
-        agentSlug: run.agentSlug,
-        details: {
-          logId: log.id,
-          logLevel: log.level,
-          logMessage: log.message,
-          ...connectorAudit,
-        },
-      });
-    }
   }
-
-  for (const delivery of input.novaConnectorAudit ?? []) {
-    events.push({ id: `nova-connector:${delivery.entry.idempotencyKey}`, timestamp: delivery.timestamp,
-      type: "connector.delivery", source: "connector-audit", tenantId: delivery.tenantId,
-      actor: actorForTenant(tenantById.get(delivery.tenantId)), details: { source: "nova", ...delivery.entry } });
-  }
-
-  for (const consent of input.hostedProviderConsentEvents) {
+  const confirmationRequestedAt = findConfirmationRequestedAt(run);
+  if (run.plan && run.plan.actions.length > 0 && confirmationRequestedAt) {
     events.push({
-      id: `hosted-provider-consent:${consent.id}`,
-      timestamp: consent.createdAt,
-      type: "hosted-provider.consent",
-      source: "hosted-provider-consent",
-      tenantId: consent.tenantId,
-      actor: actorForTenant(tenantById.get(consent.tenantId)),
+      ...base,
+      id: `run:${run.id}:write-confirmation-requested`,
+      timestamp: confirmationRequestedAt,
+      type: "write.confirmation.requested",
+      source: "run-history",
+      details: writeConfirmationDetails(run, "requested"),
+    });
+  }
+  if (run.confirmedAt) {
+    events.push({
+      ...base,
+      id: `run:${run.id}:write-confirmation-accepted`,
+      timestamp: run.confirmedAt,
+      type: "write.confirmation.accepted",
+      source: "run-history",
+      actor: actorForRun(run, tenant),
+      details: writeConfirmationDetails(run, "accepted"),
+    });
+  }
+  if (run.rejectedAt) {
+    events.push({
+      ...base,
+      id: `run:${run.id}:write-confirmation-rejected`,
+      timestamp: run.rejectedAt,
+      type: "write.confirmation.rejected",
+      source: "run-history",
+      actor: actorForRun(run, tenant),
+      details: writeConfirmationDetails(run, "rejected"),
+    });
+  }
+  if (run.finishedAt) {
+    events.push({
+      ...base,
+      id: `run:${run.id}:finished`,
+      timestamp: run.finishedAt,
+      type: `run.${run.status}`,
+      source: "run-history",
       details: {
-        source: consent.source,
-        ...consent.payload,
+        ...runDetails,
+        status: run.status,
+        durationMs: runDurationMs(run),
+        ...(run.error ? { error: run.error } : {}),
+        resultPresent: run.result !== undefined,
+        ...(run.result !== undefined
+          ? { resultDigest: digestUnknown(run.result) }
+          : {}),
       },
     });
   }
-
-  for (const change of input.configurationAudit ?? []) {
+  for (const log of run.logs) {
+    const connectorAudit = readConnectorAuditEntry(log.metadata?.connectorAudit);
+    if (!connectorAudit) continue;
     events.push({
-      id: `configuration:${change.id}`,
-      timestamp: change.timestamp,
-      type: change.type,
-      source: "configuration-change",
-      ...(change.tenantId ? { tenantId: change.tenantId } : {}),
+      ...base,
+      id: `connector:${run.id}:${log.id}`,
+      timestamp: log.timestamp,
+      type: "connector.delivery",
+      source: "connector-audit",
       details: {
-        ...(change.organizationId ? { organizationId: change.organizationId } : {}),
-        ...(change.organizationName ? { organizationName: change.organizationName } : {}),
-        ...change.details,
+        logId: log.id,
+        logLevel: log.level,
+        logMessage: log.message,
+        ...connectorAudit,
       },
     });
   }
+  return events;
+}
 
-  return events.sort(compareAuditEvents);
+/**
+ * What decides which audit events a run shows; an unchanged fingerprint
+ * adds no event. A plain log line changes nothing, so a live run's log
+ * does not start an audit transaction; only connector delivery lines do.
+ */
+function runAuditFingerprint(run: RunRecord): string {
+  let connectorLogs = 0;
+  let lastConnectorLogId = "";
+  for (const log of run.logs) {
+    if (log.metadata?.connectorAudit === undefined) continue;
+    connectorLogs += 1;
+    lastConnectorLogId = log.id;
+  }
+  return [
+    run.status,
+    run.startedAt ?? "",
+    run.confirmedAt ?? "",
+    run.rejectedAt ?? "",
+    run.finishedAt ?? "",
+    run.plan?.actions.length ?? "",
+    connectorLogs,
+    lastConnectorLogId,
+  ].join("|");
+}
+
+/** The ids of every audit event a state shows, to see what a write would remove. */
+function auditSourceEventIds(state: PersistedState): Set<string> {
+  const context = auditLogContext(state);
+  const ids = new Set<string>();
+  for (const run of state.runs) {
+    for (const event of runAuditEvents(run, context)) ids.add(event.id);
+  }
+  for (const change of state.configurationAudit ?? []) ids.add(configurationAuditEvent(change).id);
+  for (const delivery of state.novaConnectorAudit ?? []) ids.add(novaConnectorAuditEvent(delivery, context).id);
+  return ids;
+}
+
+function novaConnectorAuditEvent(
+  delivery: NonNullable<PersistedState["novaConnectorAudit"]>[number],
+  context: AuditLogContext,
+): AuditLogEventSeed {
+  return { id: `nova-connector:${delivery.entry.idempotencyKey}`, timestamp: delivery.timestamp,
+    type: "connector.delivery", source: "connector-audit", tenantId: delivery.tenantId,
+    actor: actorForTenant(context.tenantById.get(delivery.tenantId)), details: { source: "nova", ...delivery.entry } };
+}
+
+function hostedProviderConsentAuditEvent(
+  consent: HostedProviderConsentAuditRecord,
+  context: AuditLogContext,
+): AuditLogEventSeed {
+  return {
+    id: `hosted-provider-consent:${consent.id}`,
+    timestamp: consent.createdAt,
+    type: "hosted-provider.consent",
+    source: "hosted-provider-consent",
+    tenantId: consent.tenantId,
+    actor: actorForTenant(context.tenantById.get(consent.tenantId)),
+    details: {
+      source: consent.source,
+      ...consent.payload,
+    },
+  };
+}
+
+function configurationAuditEvent(change: ConfigurationAuditEvent): AuditLogEventSeed {
+  return {
+    id: `configuration:${change.id}`,
+    timestamp: change.timestamp,
+    type: change.type,
+    source: "configuration-change",
+    ...(change.tenantId ? { tenantId: change.tenantId } : {}),
+    details: {
+      ...(change.organizationId ? { organizationId: change.organizationId } : {}),
+      ...(change.organizationName ? { organizationName: change.organizationName } : {}),
+      ...change.details,
+    },
+  };
 }
 
 function runAuditDetails(
@@ -981,7 +1016,7 @@ function runAuditDetails(
   tenant: TenantRecord | undefined,
 ): Record<string, unknown> {
   return {
-    statusAtExport: run.status,
+    statusAtRecord: run.status,
     agentSlug: run.agentSlug,
     ...(agent?.name ? { agentName: agent.name } : {}),
     ...(agent?.mode ? { agentMode: agent.mode } : {}),
@@ -1111,6 +1146,8 @@ function compareAuditEvents(left: AuditLogEventSeed, right: AuditLogEventSeed): 
     "connector-audit": 1,
     "hosted-provider-consent": 2,
     "configuration-change": 3,
+    "graph-write": 4,
+    gateway: 5,
   };
   const sourceDiff = sourceOrder[left.source] - sourceOrder[right.source];
   if (sourceDiff !== 0) return sourceDiff;
@@ -1126,29 +1163,11 @@ function applyAuditHashChain(events: AuditLogEventSeed[]): {
 } {
   let previousHash = AUDIT_CHAIN_START_HASH;
   const hashed = events.map((event) => {
-    const sha256 = createHash("sha256")
-      .update(previousHash)
-      .update(canonicalJson(event))
-      .digest("hex");
+    const sha256 = chainHash(previousHash, canonicalJson(event));
     previousHash = sha256;
     return { ...event, sha256 };
   });
   return { events: hashed, finalHash: previousHash };
-}
-
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value) ?? "null";
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map((entry) => canonicalJson(entry)).join(",")}]`;
-  }
-  const record = value as Record<string, unknown>;
-  const entries = Object.keys(record)
-    .filter((key) => record[key] !== undefined)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`);
-  return `{${entries.join(",")}}`;
 }
 
 function digestText(value: string): string {
@@ -1443,15 +1462,19 @@ function auditLogSuggestedName(format: ExportAuditLogInput["format"], generatedA
   return `openadminos-audit-log-${stamp}.${format}`;
 }
 
-function serializeAuditLogJson(input: {
+interface AuditLogSerializeInput {
   generatedAt: string;
   from?: string;
   to?: string;
+  notStartedByPerson?: boolean;
   retentionPolicy: RunHistoryRetentionSettings;
   lastPruneResult?: RunHistoryPruneResult;
   events: AuditLogEvent[];
   finalHash: string;
-}): string {
+  storedChain: AuditLogChainSummary;
+}
+
+function serializeAuditLogJson(input: AuditLogSerializeInput): string {
   // TODO(ugur): Add signed timestamp/counter-signature support for compliance exports.
   return `${JSON.stringify(
     {
@@ -1460,6 +1483,7 @@ function serializeAuditLogJson(input: {
       filters: {
         ...(input.from ? { from: input.from } : {}),
         ...(input.to ? { to: input.to } : {}),
+        ...(input.notStartedByPerson ? { notStartedByPerson: true } : {}),
       },
       retention: {
         policy: input.retentionPolicy,
@@ -1473,6 +1497,16 @@ function serializeAuditLogJson(input: {
         entryHashInput:
           "previous entry sha256 hex + canonical JSON event without sha256",
         signedTimestamps: "not implemented",
+        // The chain stored on this device, verified before this export.
+        // Without filters, and with no row past retention deleted, the
+        // export chain is the stored chain.
+        stored: {
+          verified: true,
+          rowCount: input.storedChain.rowCount,
+          startHash: input.storedChain.startHash,
+          finalHash: input.storedChain.finalHash,
+          retentionDays: AUDIT_LOG_RETENTION_DAYS,
+        },
       },
       eventCount: input.events.length,
       events: input.events,
@@ -1482,15 +1516,7 @@ function serializeAuditLogJson(input: {
   )}\n`;
 }
 
-function serializeAuditLogCsv(input: {
-  generatedAt: string;
-  from?: string;
-  to?: string;
-  retentionPolicy: RunHistoryRetentionSettings;
-  lastPruneResult?: RunHistoryPruneResult;
-  events: AuditLogEvent[];
-  finalHash: string;
-}): string {
+function serializeAuditLogCsv(input: AuditLogSerializeInput): string {
   const columns = [
     "schemaVersion",
     "generatedAt",
@@ -1510,6 +1536,7 @@ function serializeAuditLogCsv(input: {
     "runId",
     "tenantId",
     "agentSlug",
+    "initiator",
     "actorJson",
     "detailsJson",
   ];
@@ -1535,6 +1562,7 @@ function serializeAuditLogCsv(input: {
       event.runId ?? "",
       event.tenantId ?? "",
       event.agentSlug ?? "",
+      event.initiator ?? "",
       event.actor ? canonicalJson(event.actor) : "",
       canonicalJson(event.details),
     ].map(csvCell).join(","),
@@ -1542,13 +1570,7 @@ function serializeAuditLogCsv(input: {
   return `${columns.join(",")}\n${rows.join("\n")}${rows.length > 0 ? "\n" : ""}`;
 }
 
-const AUDIT_RETENTION_NOTE = `Run history may omit records removed by the local retention policy. Configuration changes are kept independently of run retention, up to the newest ${CONFIGURATION_AUDIT_MAX_EVENTS.toLocaleString("en-US")}.`;
-
-function csvCell(value: unknown): string {
-  const text = String(value ?? "");
-  if (!/[",\r\n]/.test(text)) return text;
-  return `"${text.replace(/"/g, "\"\"")}"`;
-}
+const AUDIT_RETENTION_NOTE = `Audit events are recorded when they happen and listed in the order they were recorded, not sorted by timestamp: events imported from an earlier version at upgrade may follow newer ones. They are kept for ${AUDIT_LOG_RETENTION_DAYS.toLocaleString("en-US")} days, independent of run-history retention and of disconnecting an organization. Events of runs that retention removed before the audit log existed are not in it, nor configuration changes older than the newest ${CONFIGURATION_AUDIT_MAX_EVENTS.toLocaleString("en-US")} kept until then. In CSV, a cell that starts with =, +, - or @, also after spaces, or with a tab or carriage return, gets a leading apostrophe so a spreadsheet does not run it as a formula.`;
 
 export interface AppStateStoreOptions {
   filePath: string;
@@ -1624,6 +1646,8 @@ export interface AppStateStoreOptions {
       message: string,
       metadata?: Record<string, unknown>,
     ) => void;
+    /** The audit sink a factory that sends writes must record them in. */
+    writeAudit?: GraphWriteAuditSink;
   }): RunGraphApi;
   /**
    * Test hook for deterministic provider detection in host-level smoke tests.
@@ -1756,6 +1780,21 @@ export class AppStateStore {
   private readonly sandboxedCodeDefault: boolean;
   private readonly userDataPath: string | undefined;
   private readonly intelligenceStore: IntelligenceSqliteStore | undefined;
+  /** The append-only audit log; in memory when the host has no data folder. */
+  private readonly auditLog: AuditLogStore;
+  /** The fingerprint of each run as last recorded in the audit log. */
+  private readonly auditedRuns = new Map<string, string>();
+  /** Whether events stored before the audit log existed were imported in this process. */
+  private auditLogImported = false;
+  /**
+   * The last audit log append that failed, shown in Settings. Only a
+   * `recordAuditLog` of the latest state clears it: it also tells the
+   * next state write to record the previous state first, so a later
+   * Graph write that is recorded leaves it in place.
+   */
+  private auditLogFailure: { failedAt: string; message: string } | undefined;
+  /** A hosted-provider consent append failed: it is kept with the pending audit events, and the next record also imports the Chat database copy. */
+  private auditConsentsPending = false;
   private readonly chatService: IntuneChatService;
   private readonly driftService: DriftService;
   private readonly runService: RunService;
@@ -1848,6 +1887,7 @@ export class AppStateStore {
       this.interactiveSignIn = runInteractiveFlow;
       this.tenantCheckDeadlineMs = TENANT_CHECK_DEADLINE_MS;
       this.tenantDrainMs = TENANT_DRAIN_MS;
+      this.auditLog = new AuditLogStore(":memory:");
     } else {
       this.filePath = options.filePath;
       this.tokenStore = options.tokenStore;
@@ -1897,6 +1937,10 @@ export class AppStateStore {
       this.interactiveSignIn = options.interactiveSignIn ?? runInteractiveFlow;
       this.tenantCheckDeadlineMs = options.tenantCheckDeadlineMs ?? TENANT_CHECK_DEADLINE_MS;
       this.tenantDrainMs = options.tenantDrainMs ?? TENANT_DRAIN_MS;
+      this.auditLog = new AuditLogStore(
+        options.userDataPath ? join(options.userDataPath, "openadminos.db") : ":memory:",
+        () => this.clock(),
+      );
     }
     this.mcpCatalog = (typeof options === "string" ? undefined : options.mcpCatalog) ?? MCP_CATALOG;
     this.managedPolicy = typeof options === "string" ? undefined : options.managedPolicy;
@@ -1944,6 +1988,7 @@ export class AppStateStore {
       documentationIndexVersion: () => host.documentationIndexVersion(),
       mcpChatContext: (tenant) => host.mcpChatContext(tenant),
       splashtopChatContext: (tenant) => host.splashtopChatContext(tenant),
+      recordHostedProviderConsent: (consent) => host.recordHostedProviderConsent(consent),
       appVersion: this.appVersion,
       get userDataPath() {
         return host.userDataPath;
@@ -2011,7 +2056,8 @@ export class AppStateStore {
     this.runService = new RunService({
       tenantWritable: (tenantId) => this.tenantLifecycle.isWritable(tenantId),
       tenantLease: (tenantId, work) => this.withTenantLease(tenantId, work),
-      connectorTransport: (tenantId) => this.connectorTransport(tenantId),
+      // A run passes itself, so its connector Graph writes carry it in the audit log.
+      connectorTransport: (tenantId, audit?: GraphWriteAuditRunContext) => this.connectorTransport(tenantId, audit),
       read: () => host.read(),
       write: (state) => host.write(state as PersistedState),
       serialize: (task) => host.serialize(task),
@@ -2038,22 +2084,10 @@ export class AppStateStore {
       },
     });
     this.gatewayService = new GatewayService({
-      readConfig: async () => {
-        const persisted = await host.read();
-        return (
-          persisted.gateway ?? { enabled: false, port: 8092, clients: [] }
-        );
-      },
-      writeConfig: async (config) => {
-        await host.serialize(async () => {
-          const persisted = await host.read();
-          await host.write({ ...persisted, gateway: config });
-        });
-        host.emitStateChanged("gateway-config-changed");
-      },
-      readToken: () => this.gatewaySecrets().get("token"),
-      writeToken: (token) => this.gatewaySecrets().set("token", token),
-      clearToken: () => this.gatewaySecrets().remove("token"),
+      readConfig: async () => gatewayConfigOf(await host.read()),
+      updateConfig: (change) => host.updateGatewayConfig(change),
+      readLegacyToken: () => this.gatewaySecrets().get("token"),
+      clearLegacyToken: () => this.gatewaySecrets().remove("token"),
       tenantName: async (tenantId) => {
         const persisted = await host.read();
         return persisted.tenants.find((entry) => entry.id === tenantId)?.displayName;
@@ -2063,13 +2097,24 @@ export class AppStateStore {
       queueExternalProposal: (input) =>
         this.runService.startExternalProposalRun(input),
       getRun: (runId) => this.runService.getRun(runId),
+      recordAudit: (event) =>
+        this.appendAuditEvents([{
+          id: `gateway:${randomUUID()}`,
+          timestamp: event.timestamp,
+          type: event.type,
+          source: "gateway",
+          tenantId: event.tenantId,
+          agentSlug: "external-proposal",
+          initiator: "gateway",
+          details: { ...event.details },
+        }]),
       log: (message, metadata) =>
         console.info("[gateway]", message, metadata ?? ""),
     });
     this.runDeliveryService = new RunDeliveryService({
       tenantWritable: (tenantId) => this.tenantLifecycle.isWritable(tenantId),
       tenantLease: (tenantId, work) => this.withTenantLease(tenantId, () => work()),
-      connectorTransport: (tenantId) => this.connectorTransport(tenantId),
+      connectorTransport: (tenantId, audit) => this.connectorTransport(tenantId, audit),
       read: () => host.read(),
       write: (state) => host.write(state as PersistedState),
       serialize: (task) => host.serialize(task),
@@ -2146,6 +2191,7 @@ export class AppStateStore {
     void this.mcpHost.closeAll();
     this.officeServiceInstance?.close();
     this.intelligenceStore?.close();
+    this.auditLog.close();
   }
 
   private agentUpdatesRoot(): string | undefined {
@@ -2198,8 +2244,9 @@ export class AppStateStore {
     );
   }
 
-  // The gateway pairing token reuses the provider safeStorage vault
-  // under a reserved id so it never lands in plaintext state.json.
+  // The shared pairing token of earlier versions lived in the provider
+  // safeStorage vault under a reserved id. It is read once, to keep its
+  // hash for the "pair again" refusal, and then removed.
   private gatewaySecrets(): SecretAccessor {
     return (
       this.providerSecretsForOverride?.("__gateway__" as ProviderId) ??
@@ -2220,8 +2267,8 @@ export class AppStateStore {
     return this.gatewayService.disable();
   }
 
-  async regenerateGatewayToken() {
-    return this.gatewayService.regenerateToken();
+  async pairGatewayClient(input: { name: string }) {
+    return this.gatewayService.pairClient(input);
   }
 
   async revokeGatewayClient(clientId: string) {
@@ -3176,11 +3223,58 @@ export class AppStateStore {
    * request and retry once the tenant is closing, and the check a
    * connector runs right before a send that does not use fetch.
    */
-  private connectorTransport(tenantId: string): { fetch: typeof fetch; assertEgress: () => void } {
+  private connectorTransport(
+    tenantId: string,
+    audit?: GraphWriteAuditRunContext,
+  ): { fetch: typeof fetch; assertEgress: () => void } {
+    const tenant = this.lastReadSnapshot?.tenants.find((entry) => entry.id === tenantId);
+    // Connectors with their own Graph client, such as Outlook and Teams,
+    // record each Graph write in the audit log before it is sent, as the
+    // Graph adapter does. The lifecycle guard runs first, so a closing
+    // tenant is refused before anything is recorded or sent.
+    const audited = auditGraphWritesFetch(
+      (input, init) => fetch(input, init),
+      this.graphWriteAudit(tenantId, tenant, audit),
+      { log: (message) => this.warnGraphWriteAudit(message, audit?.runId) },
+    );
     return {
-      fetch: this.tenantLifecycle.guardedFetch(tenantId),
+      fetch: this.tenantLifecycle.guardedFetch(tenantId, audited),
       assertEgress: () => this.tenantLifecycle.assertWritable(tenantId, "connector send"),
     };
+  }
+
+  /**
+   * A result a connector send could not record goes to the run log of the
+   * run that sent it, like the warning of the Graph adapter, and to the
+   * console when no run sent it. Not awaited: the send may hold the lock.
+   */
+  private warnGraphWriteAudit(message: string, runId: string | undefined): void {
+    if (!runId) {
+      console.warn(`[graph] ${message}`);
+      return;
+    }
+    void this.runService.appendRunLog(runId, "warn", message).catch((error: unknown) => {
+      console.warn(`[graph] ${message} The run log could not record this warning. ${errorText(error)}`);
+    });
+  }
+
+  /**
+   * The audit sink for a tenant's Graph writes. A failed attempt refuses
+   * the write. A failed result is kept until an append records it, and
+   * Settings counts it until then. Every failure, also of an async sink,
+   * is kept for the warning in Settings.
+   */
+  private graphWriteAudit(
+    tenantId: string,
+    tenant: TenantRecord | undefined,
+    audit?: GraphWriteAuditRunContext,
+  ): GraphWriteAuditSink {
+    const sink = graphWriteAuditSink(this.auditLog, {
+      tenantId,
+      actor: actorForTenant(tenant, tenantId),
+      ...audit,
+    }, () => this.clock());
+    return trackedAuditSink(sink, (error) => this.noteAuditLogFailure(error));
   }
 
   /** The tenant's lifecycle phase: open, closing (Disconnect or its cleanup pending) or removed. */
@@ -3231,6 +3325,30 @@ export class AppStateStore {
     payload: unknown;
   }): void {
     this.chatService.recordLearningEventSafely(input);
+  }
+
+  /**
+   * Reads the gateway config, applies `change` and writes the result in
+   * one serialize, so a gateway change made from a config read earlier
+   * can never write back what another change, such as a tenant removal,
+   * replaced. `change` runs inside the lock and must not call serialize.
+   * When it throws, nothing is written.
+   */
+  private async updateGatewayConfig(
+    change: (config: GatewayConfig, context: GatewayConfigContext) => GatewayConfig,
+  ): Promise<GatewayConfig> {
+    const written = await this.serialize(async () => {
+      const persisted = await this.read();
+      const gateway = change(gatewayConfigOf(persisted), {
+        tenantConnected: (tenantId) =>
+          persisted.tenants.some((tenant) => tenant.id === tenantId) &&
+          this.tenantLifecycle.phase(tenantId) === "open",
+      });
+      await this.write({ ...persisted, gateway });
+      return gateway;
+    });
+    this.emitStateChanged("gateway-config-changed");
+    return written;
   }
 
   private serialize<T>(task: () => Promise<T>): Promise<T> {
@@ -4473,34 +4591,53 @@ export class AppStateStore {
       throw new Error("Audit log export from date must be before the to date.");
     }
 
-    const persisted = await this.read();
+    // Records what a state written by an earlier version still shows;
+    // after that, every event was recorded when it happened. Under the
+    // state lock, so no write lands between the read and the record: the
+    // export records the latest state, never an older one over a newer
+    // failure. A failed integrity check keeps its own message; any other
+    // failure says that nothing was exported and what to do.
+    const { persisted, stored } = await this.serialize(async () => {
+      const persisted = await this.read();
+      try {
+        this.recordAuditLog(persisted);
+        return { persisted, stored: this.auditLog.readVerified() };
+      } catch (error) {
+        if (error instanceof AuditLogIntegrityError) throw error;
+        throw new Error(
+          `The audit log could not be read or brought up to date, so nothing was exported. ${errorText(error)} Check free disk space and permissions of the OpenAdminOS data folder, then export again.`,
+          { cause: error },
+        );
+      }
+    });
     const retentionPolicy = this.normalizeRunHistoryRetentionSettings(
       persisted.runHistoryRetention,
     );
     const generatedAt = new Date().toISOString();
-    const allEvents = buildAuditLogEvents({
-      runs: persisted.runs,
-      novaConnectorAudit: persisted.novaConnectorAudit,
-      configurationAudit: persisted.configurationAudit,
-      tenants: persisted.tenants,
-      installedAgents: persisted.installedAgents,
-      hostedProviderConsentEvents:
-        this.intelligenceStore?.listHostedProviderConsentAuditEvents() ?? [],
-    });
-    const filteredEvents = allEvents.filter((event) =>
-      auditEventWithinRange(event, fromMs, toMs),
-    );
+    // Only events of a run: classified by who started it, recorded on the
+    // event or, for an event recorded without one, taken from the run.
+    // Events of no run, such as a refused gateway request, are left out.
+    const initiatorByRun = new Map(persisted.runs.map((run) => [run.id, runInitiator(run)]));
+    const filteredEvents = stored.events.filter((event) => {
+      if (!auditEventWithinRange(event, fromMs, toMs)) return false;
+      if (!input.notStartedByPerson) return true;
+      if (!event.runId) return false;
+      const initiator = event.initiator ?? initiatorByRun.get(event.runId);
+      return initiator !== undefined && initiator !== "person";
+    }).map(({ sha256: _stored, ...event }) => event);
     const { events, finalHash } = applyAuditHashChain(filteredEvents);
     const common = {
       generatedAt,
       ...(input.from ? { from: input.from } : {}),
       ...(input.to ? { to: input.to } : {}),
+      ...(input.notStartedByPerson ? { notStartedByPerson: true } : {}),
       retentionPolicy,
       ...(persisted.lastRunHistoryPrune
         ? { lastPruneResult: persisted.lastRunHistoryPrune }
         : {}),
       events,
       finalHash,
+      storedChain: stored.chain,
     };
     const content =
       input.format === "json"
@@ -4526,6 +4663,9 @@ export class AppStateStore {
   async pruneRunHistory(
     trigger: RunHistoryPruneTrigger,
   ): Promise<RunHistoryPruneResult> {
+    // Audit rows have their own retention window, pruned with run history
+    // at startup, on the scheduler tick and when pruned by hand.
+    this.pruneExpiredAuditLog();
     return this.serialize(async () => {
       const persisted = await this.read();
       const policy = this.normalizeRunHistoryRetentionSettings(
@@ -4572,9 +4712,11 @@ export class AppStateStore {
           ? Date.now() - policy.keepDays * 24 * 60 * 60 * 1000
           : undefined;
 
+      const pruneNowMs = Date.now();
       const pruneCandidates = persisted.runs
         .filter((run) => {
           if (protectedSets.all.has(run.id)) return false;
+          if (gatewayRejectionCoolingDown(run, pruneNowMs)) return false;
           const keptByCount = newestKeptIds?.has(run.id) === true;
           const keptByAge =
             cutoffMs !== undefined && runHistorySortMs(run) >= cutoffMs;
@@ -5739,6 +5881,7 @@ export class AppStateStore {
       // Removing this tenant also removes this record.
       tenantId,
       trigger: "schedule",
+      initiator: "schedule",
       summary,
       error: message,
       ...(accessDenial ? { accessDenial } : {}),
@@ -7787,6 +7930,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * or from Retry cleanup. The returned state lists pending cleanups.
    */
   async disconnectTenant(id: string): Promise<AppState> {
+    let gatewayUnbound = false;
     await this.serialize(async () => {
       const persisted = await this.read();
       const current = persisted.tenants.find((tenant) => tenant.id === id);
@@ -7818,10 +7962,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       if (deliveryQueue.length > 0) next.runDeliveryQueue = deliveryQueue;
       else delete next.runDeliveryQueue;
       if (persisted.activeTenantId === id) delete next.activeTenantId;
-      // The write gateway was bound to this tenant; it is not bound to any now.
-      if (persisted.gateway?.boundTenantId === id) {
-        const { boundTenantId: _removed, ...gateway } = persisted.gateway;
-        next.gateway = gateway;
+      // A write gateway bound to this tenant is turned off and its clients
+      // revoked. This runs under the same lock as updateGatewayConfig,
+      // which cannot be called here without waiting on itself.
+      if (persisted.gateway) {
+        next.gateway = gatewayUnboundFrom(id)(persisted.gateway);
+        gatewayUnbound = next.gateway !== persisted.gateway;
       }
       // Close before the write, so no work of the tenant can slip a change
       // in between. If the write fails, nothing was removed: reopen.
@@ -7835,6 +7981,15 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     });
     // A license check of the removed connection saves nothing.
     this.supersedeTenantCheck(id, "disconnected");
+    // The gateway was turned off with the write; its listener stops now.
+    // Until it has, every request is refused, because a token is checked
+    // against the config as written.
+    if (gatewayUnbound) {
+      await this.gatewayService.stop().catch((error: unknown) => {
+        console.warn("[gateway] the listener of the removed organization's gateway did not stop; it refuses every request and stops when the app quits:", errorText(error));
+      });
+      this.emitStateChanged("gateway-config-changed");
+    }
     // The organization is gone with this write, so its Splashtop token goes
     // now, whatever the rest of the cleanup does; cleanup sweeps again.
     await this.splashtop.sweep(await this.read()).catch((error: unknown) => {
@@ -7898,6 +8053,15 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         await this.officeService.purgeTenant(id);
       } catch (cause) {
         throw new Error(`Its Agent Team data could not be deleted. ${errorText(cause)}`, { cause });
+      }
+      // Its hosted-provider consents are deleted with the Chat data, so they
+      // go to the audit log first when it may not hold them yet.
+      if (!this.auditLogImported || this.auditConsentsPending) {
+        try {
+          this.recordAuditLog(await this.read());
+        } catch (cause) {
+          throw new Error(`Its Chat data was kept: the audit log could not record its hosted-provider consents first. ${errorText(cause)}`, { cause });
+        }
       }
       try {
         this.intelligenceStore?.purgeTenant(id);
@@ -8072,7 +8236,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   private async buildGraph(
     pinnedTenantId?: string,
     agentScopes?: string[],
-    execution?: { signal: AbortSignal; allowInteractive: boolean; onAuthRequired(): Promise<void> },
+    execution?: RunGraphExecution,
   ): Promise<{
     createGraph: (
       log: (
@@ -8182,11 +8346,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           };
     return {
       createGraph: (log) => this.graphFactory
-        ? this.graphFactory({ tenantId: tenant.id, scopes, log })
+        ? this.graphFactory({ tenantId: tenant.id, scopes, log, writeAudit: this.graphWriteAudit(tenant.id, tenant, execution?.audit) })
         : createGraphAdapter({ tokenProvider, log, signal: execution?.signal,
             // The Graph egress choke point: every request and retry for a
             // closing tenant is refused and aborted with its signal.
             fetchImpl: this.tenantLifecycle.guardedFetch(tenant.id),
+            // Every write is in the audit log before it is sent.
+            writeAudit: this.graphWriteAudit(tenant.id, tenant, execution?.audit),
             accessContext: (method, path) => ({
               requiredScopes: lookupEndpoint(method, path)?.scopesDelegated,
               entraTier: tenant.entraTier,
@@ -8490,13 +8656,26 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
             ...(typeof gateway.boundTenantId === "string"
               ? { boundTenantId: gateway.boundTenantId }
               : {}),
-            clients: gateway.clients.filter(
-              (client): client is { id: string; name: string; createdAt: string } =>
-                isPlainRecordValue(client) &&
-                typeof (client as Record<string, unknown>).id === "string" &&
-                typeof (client as Record<string, unknown>).name === "string" &&
-                typeof (client as Record<string, unknown>).createdAt === "string",
-            ),
+            ...(typeof gateway.legacyTokenHash === "string"
+              ? { legacyTokenHash: gateway.legacyTokenHash }
+              : {}),
+            clients: gateway.clients.flatMap((client) => {
+              if (!isPlainRecordValue(client)) return [];
+              const record = client as Record<string, unknown>;
+              if (
+                typeof record.id !== "string" ||
+                typeof record.name !== "string" ||
+                typeof record.createdAt !== "string"
+              ) {
+                return [];
+              }
+              return [{
+                id: record.id,
+                name: record.name,
+                createdAt: record.createdAt,
+                ...(typeof record.tokenHash === "string" ? { tokenHash: record.tokenHash } : {}),
+              }];
+            }),
           };
         }
       }
@@ -8824,6 +9003,159 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   /**
+   * Appends to the audit log the events a state shows that it does not
+   * hold yet: runs whose recorded fingerprint changed, and the newest
+   * configuration and Nova connector events. Event ids are fixed, so a
+   * missed append is made by the next call. The first call of a process
+   * also imports what was stored before the audit log existed.
+   */
+  private recordAuditLog(state: PersistedState): void {
+    const context = auditLogContext(state);
+    const events: AuditLogEventSeed[] = [];
+    const fingerprints = new Map<string, string>();
+    for (const run of state.runs) {
+      const fingerprint = runAuditFingerprint(run);
+      if (this.auditedRuns.get(run.id) === fingerprint) continue;
+      fingerprints.set(run.id, fingerprint);
+      events.push(...runAuditEvents(run, context));
+    }
+    // Both lists only grow at the end, so the events not yet recorded are
+    // the ones after the newest recorded one.
+    const unrecordedTail = <T>(entries: readonly T[], toEvent: (entry: T) => AuditLogEventSeed) => {
+      const tail: AuditLogEventSeed[] = [];
+      for (let index = entries.length - 1; index >= 0; index -= 1) {
+        const event = toEvent(entries[index] as T);
+        if (this.auditLog.has(event.id)) break;
+        tail.unshift(event);
+      }
+      return tail;
+    };
+    try {
+      events.push(...unrecordedTail(state.configurationAudit ?? [], configurationAuditEvent));
+      events.push(...unrecordedTail(state.novaConnectorAudit ?? [], (delivery) => novaConnectorAuditEvent(delivery, context)));
+      // The Chat database keeps every consent too; ids make a repeat a no-op.
+      if (!this.auditLogImported || this.auditConsentsPending) {
+        for (const consent of this.intelligenceStore?.listHostedProviderConsentAuditEvents() ?? []) {
+          events.push(hostedProviderConsentAuditEvent(consent, context));
+        }
+      }
+      this.auditLog.append(events.sort(compareAuditEvents));
+    } catch (error) {
+      this.noteAuditLogFailure(error);
+      throw error;
+    }
+    // Consents come from the Chat database, not from the state.
+    this.auditConsentsPending = false;
+    // The audit log is up to date only when this was the latest state: a
+    // state read before a later write may lack what that write's failed
+    // append missed, and recording it must not hide that failure.
+    if (state === this.lastReadSnapshot) {
+      this.auditLogImported = true;
+      this.auditLogFailure = undefined;
+    }
+    for (const [runId, fingerprint] of fingerprints) this.auditedRuns.set(runId, fingerprint);
+  }
+
+  /**
+   * Hosted-provider consent goes to the audit log when it is given; it is
+   * not part of state. The Chat database keeps it too, so a failed append
+   * is imported by the next record.
+   */
+  private recordHostedProviderConsent(consent: HostedProviderConsentAuditRecord): void {
+    const persisted = this.lastReadSnapshot;
+    const context = auditLogContext(persisted ?? { tenants: [], installedAgents: [] });
+    try {
+      // Kept with the pending audit events when the append fails, so the
+      // consent survives even when the Chat database could not keep it either.
+      this.auditLog.appendOrKeep([hostedProviderConsentAuditEvent(consent, context)]);
+    } catch (error) {
+      this.auditConsentsPending = true;
+      this.noteAuditLogFailure(error);
+      console.warn(`[audit] a hosted-provider consent is kept on this device until the audit log can record it. ${errorText(error)}`);
+    }
+  }
+
+  /**
+   * What Settings shows about the audit log: the last append that failed,
+   * until the latest state is recorded in full, and the audit events
+   * (Graph write results and hosted-provider consents) kept until
+   * recorded, with whether some are only in memory.
+   */
+  async getAuditLogStatus(): Promise<AuditLogStatus> {
+    const unrecorded = this.auditLog.unrecordedResults();
+    return {
+      ...(this.auditLogFailure ? { lastFailure: { ...this.auditLogFailure } } : {}),
+      ...(unrecorded ? { unrecordedResults: unrecorded } : {}),
+    };
+  }
+
+  /**
+   * At startup, after the first read: records what the state shows, so
+   * events a failed append missed in an earlier session are recorded
+   * without waiting for a change.
+   */
+  async recordAuditLogAtStartup(): Promise<void> {
+    // Under the state lock, so it records the latest state.
+    await this.serialize(async () => this.recordAuditLogSafely(await this.read()));
+  }
+
+  /**
+   * Deletes audit rows past the retention window. Runs with every
+   * run-history prune, at startup and on the scheduler tick.
+   */
+  private pruneExpiredAuditLog(): void {
+    try {
+      this.auditLog.pruneExpired();
+    } catch (error) {
+      this.noteAuditLogFailure(error);
+      console.warn(`[audit] expired audit log rows could not be removed; the next prune tries again. ${errorText(error)}`);
+    }
+  }
+
+  /**
+   * The audit events a write would remove that are not stored. Only
+   * asked while the audit log is behind the state it was given.
+   */
+  private unrecordedRemovals(previous: PersistedState, next: PersistedState): number {
+    const kept = auditSourceEventIds(next);
+    let count = 0;
+    for (const id of auditSourceEventIds(previous)) {
+      if (kept.has(id)) continue;
+      let stored = false;
+      try {
+        stored = this.auditLog.has(id);
+      } catch {
+        stored = false;
+      }
+      if (!stored) count += 1;
+    }
+    return count;
+  }
+
+  /** Appends events directly; a failure is kept for Settings and thrown. */
+  private appendAuditEvents(events: readonly AuditLogEventSeed[]): number {
+    try {
+      return this.auditLog.append(events);
+    } catch (error) {
+      this.noteAuditLogFailure(error);
+      throw error;
+    }
+  }
+
+  private noteAuditLogFailure(error: unknown): void {
+    this.auditLogFailure = { failedAt: this.clock().toISOString(), message: errorText(error) };
+  }
+
+  /** Records a write to state in the audit log; a failure is retried by the next write. */
+  private recordAuditLogSafely(state: PersistedState): void {
+    try {
+      this.recordAuditLog(state);
+    } catch (error) {
+      console.warn(`[audit] the audit log could not record this change yet; the next change records it. ${errorText(error)}`);
+    }
+  }
+
+  /**
    * Atomic write: serialize the new state to a unique sibling temp file, then
    * `rename` it over `state.json`. Rename is atomic on every
    * filesystem we target (APFS, ext4, NTFS), so a concurrent reader
@@ -8871,6 +9203,20 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     };
     if (reconciled.notice) state.organizationMigration = reconciled.notice;
     else delete state.organizationMigration;
+    // What the last state showed is recorded before a write, such as a
+    // retention prune or Disconnect, can remove it: on the first write of
+    // a process (records written before the audit log existed), and after
+    // any failed append.
+    const previous = this.lastReadSnapshot;
+    let behind: unknown;
+    if (previous && (!this.auditLogImported || this.auditLogFailure)) {
+      try {
+        this.recordAuditLog(previous);
+      } catch (error) {
+        behind = error;
+        console.warn(`[audit] the audit log could not record the current state before this change. ${errorText(error)}`);
+      }
+    }
     this.recordConfigurationChanges(state, audit);
     // Every file that holds audit history is flushed, not only the write
     // that added events: a later unflushed replacement could lose them.
@@ -8879,11 +9225,17 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const serialized = `${JSON.stringify(state, null, 2)}\n`;
     const tmpPath = `${this.filePath}.${randomUUID()}.tmp`;
     try {
+      // A write that removes what the audit log does not hold yet is refused.
+      if (behind !== undefined && previous) {
+        const unrecorded = this.unrecordedRemovals(previous, state);
+        if (unrecorded > 0) throw new AuditLogBehindError(unrecorded, behind);
+      }
       // Flushed through the handle that wrote it: Windows needs write access to flush.
       await writeFileDurably(tmpPath, serialized, { durable, mode: 0o600 });
       await atomicRename(tmpPath, this.filePath);
       this.writeGeneration += 1;
       this.lastReadSnapshot = state;
+      this.recordAuditLogSafely(state);
       if (this.migrationAuditInFlight) {
         this.migrationAuditInFlight = undefined;
         this.migrationAuditRecorded = true;
@@ -8903,6 +9255,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     }
   }
 }
+
+/** The run a Graph write belongs to, for its audit events. */
+type GraphWriteAuditRunContext = NonNullable<RunGraphExecution["audit"]>;
 
 /** Audit facts that belong to one write and are not visible in state, such as a key change. */
 interface WriteAudit {

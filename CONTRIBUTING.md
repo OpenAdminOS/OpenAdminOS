@@ -68,6 +68,18 @@ QA verifies the revision, metadata and manifest digests against the source files
 Catalog authenticity relies on the configured HTTPS source; the hashes ensure
 that downloaded manifests match that catalog, not independent publisher identity.
 
+## Mutation register for the safety guards
+
+`scripts/mutation-register.mjs` plants known defects in the write and audit guards (typed confirmation phrases, write limits, dry run, the organization boundary and exact phrase at confirm, the plan check before apply, connector confirmation, gateway tokens, the append-only audit log) and fails unless the named tests catch each one. Mutations are applied in memory as Node loads the file; nothing on disk is written. It runs in CI after the unit tests. Run it locally with Node 22:
+
+```
+npm run test:mutations                 # every entry
+npm run test:mutations -- <id> ...     # only the named entries
+npm run test:mutations -- --list       # print the register
+```
+
+Each entry reports `killed` (the tests caught it), `survived` (they did not) or `stale` (its `find` text no longer occurs exactly once, so the guarded code changed and the entry must be re-quoted). Add an entry when you add or change a check that keeps a write from happening without review, or keeps the audit trail intact: quote the exact guard expression, plant the smallest change that breaks it, and name the one to three test files that must fail. If the mutant survives, add the missing test. Only when that test is large may the entry carry `survivesUntil` naming the issue that owns it.
+
 ## Code of conduct
 
 See [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md). Short version: be the kind of person you'd want to work with.

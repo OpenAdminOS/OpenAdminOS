@@ -15,6 +15,7 @@ import {
   createClaudeCodeProcessEnv,
   probeClaudeCodeLlm,
 } from "./llm-claude-code.js";
+import { CliWatchdogError } from "./cli-watchdog.js";
 
 // Claude Code ships a native executable on Windows, so a Node script cannot
 // stand in for it there. The fixture runs on macOS and Linux.
@@ -154,7 +155,8 @@ describe("createClaudeCodeLlm", () => {
       assert.deepEqual(completion.tokenUsage, { promptTokens: 13, completionTokens: 2, totalTokens: 15, costUsd: 0.004 });
       const calls = await fixture.readCalls();
       const generation = calls.at(-1) ?? "";
-      assert.match(generation, /-p --output-format json/);
+      // Completions stream too, so the silence timer sees every token.
+      assert.match(generation, /-p --output-format stream-json --verbose --include-partial-messages/);
       assert.match(generation, /--safe-mode/);
       assert.match(generation, /--no-session-persistence/);
       assert.match(generation, /--permission-mode manual/);
@@ -197,7 +199,122 @@ describe("createClaudeCodeLlm", () => {
       await fixture.cleanup();
     }
   });
+
+  it("ends a CLI that goes silent with the stall error and stops its process", fakeCli, async () => {
+    const fixture = await createUnfinishedClaudeCodeBinary("silent");
+    try {
+      const llm = createClaudeCodeLlm({ binaryPath: fixture.binaryPath, idleTimeoutMs: 500, timeoutMs: 60_000 });
+      const stalled = (error: unknown) => error instanceof CliWatchdogError && error.stop === "stalled" && /^Claude Code stopped sending output/.test(error.message);
+      await assert.rejects(llm.complete({ prompt: "Say hello." }), stalled);
+      await assert.rejects(async () => { for await (const _chunk of llm.stream({ prompt: "Say hello." })) { /* consume */ } }, stalled);
+      for (const pid of await fixture.readPids()) assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("bounds the wait for the first output by the idle limit from the environment", fakeCli, async () => {
+    const fixture = await createUnfinishedClaudeCodeBinary("quiet");
+    const previous = process.env.OPENADMINOS_CLAUDE_CODE_IDLE_TIMEOUT_MS;
+    process.env.OPENADMINOS_CLAUDE_CODE_IDLE_TIMEOUT_MS = "500";
+    try {
+      const llm = createClaudeCodeLlm({ binaryPath: fixture.binaryPath, timeoutMs: 60_000 });
+      await assert.rejects(
+        llm.complete({ prompt: "Say hello." }),
+        (error: unknown) =>
+          error instanceof CliWatchdogError &&
+          error.stop === "stalled" &&
+          /set OPENADMINOS_CLAUDE_CODE_IDLE_TIMEOUT_MS to a higher limit/.test(error.message),
+      );
+      for (const pid of await fixture.readPids()) assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+    } finally {
+      if (previous === undefined) delete process.env.OPENADMINOS_CLAUDE_CODE_IDLE_TIMEOUT_MS;
+      else process.env.OPENADMINOS_CLAUDE_CODE_IDLE_TIMEOUT_MS = previous;
+      await fixture.cleanup();
+    }
+  });
+
+  it("does not count a stream consumer's pause as silence while the CLI keeps producing", fakeCli, async () => {
+    const fixture = await createUnfinishedClaudeCodeBinary("steady");
+    try {
+      const llm = createClaudeCodeLlm({ binaryPath: fixture.binaryPath, idleTimeoutMs: 200, timeoutMs: 60_000 });
+      const chunks: Array<{ accumulated: string; done: boolean }> = [];
+      for await (const chunk of llm.stream({ prompt: "Say hello." })) {
+        // Hold the first chunk three times the idle limit, as a slow
+        // consumer would, while the CLI keeps writing.
+        if (chunks.length === 0) await new Promise((resolve) => setTimeout(resolve, 600));
+        chunks.push(chunk);
+      }
+      assert.equal(chunks.at(-1)?.done, true);
+      assert.equal(chunks.at(-1)?.accumulated, "x".repeat(100));
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("ends a CLI that keeps streaming past the hard cap with the time limit error", fakeCli, async () => {
+    const fixture = await createUnfinishedClaudeCodeBinary("chatty");
+    try {
+      const llm = createClaudeCodeLlm({ binaryPath: fixture.binaryPath, idleTimeoutMs: 60_000, timeoutMs: 1_000 });
+      let chunks = 0;
+      await assert.rejects(
+        async () => { for await (const _chunk of llm.stream({ prompt: "Say hello." })) chunks += 1; },
+        (error: unknown) => error instanceof CliWatchdogError && error.stop === "time-limit" && /the limit for one request/.test(error.message),
+      );
+      assert.ok(chunks > 0, "the reply was still streaming when the cap ended it");
+      for (const pid of await fixture.readPids()) assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+    } finally {
+      await fixture.cleanup();
+    }
+  });
 });
+
+/**
+ * A Claude Code stand-in that never finishes a reply: "quiet" prints
+ * nothing, "silent" prints the init event only, "chatty" keeps streaming.
+ * "steady" streams 100 parts 10 ms apart, then finishes with a result.
+ */
+async function createUnfinishedClaudeCodeBinary(mode: "quiet" | "silent" | "chatty" | "steady"): Promise<{
+  binaryPath: string;
+  readPids(): Promise<number[]>;
+  cleanup(): Promise<void>;
+}> {
+  const root = await mkdtemp(join(tmpdir(), "openadminos claude-watchdog-"));
+  const binaryPath = join(root, "claude");
+  const pidsPath = join(root, "pids.txt");
+  const script = `#!/usr/bin/env node
+const { appendFileSync } = require("node:fs");
+if (process.argv[2] === "--version") {
+  console.log("2.1.201 (Claude Code)");
+  process.exit(0);
+}
+appendFileSync(${JSON.stringify(pidsPath)}, process.pid + "\\n");
+if (${JSON.stringify(mode)} !== "quiet") console.log(JSON.stringify({type: "system", subtype: "init"}));
+let parts = 0;
+setInterval(() => {
+  if (${JSON.stringify(mode)} === "chatty") console.log(JSON.stringify({type: "assistant", message: {content: [{type: "text", text: "Hel"}]}}));
+  if (${JSON.stringify(mode)} !== "steady") return;
+  parts += 1;
+  console.log(JSON.stringify({type: "assistant", message: {content: [{type: "text", text: "x".repeat(parts)}]}}));
+  if (parts === 100) {
+    process.stdout.write(JSON.stringify({type: "result", subtype: "success", result: "x".repeat(parts)}) + "\\n", () => process.exit(0));
+  }
+}, ${JSON.stringify(mode)} === "steady" ? 10 : 5);
+// Never outlive a broken test run.
+setTimeout(() => process.exit(3), 30_000);
+`;
+  await writeFile(binaryPath, script, "utf8");
+  await chmod(binaryPath, 0o755);
+  return {
+    binaryPath,
+    async readPids() {
+      return (await readFile(pidsPath, "utf8")).trim().split(/\r?\n/).map(Number);
+    },
+    cleanup() {
+      return rm(root, { recursive: true, force: true });
+    },
+  };
+}
 
 async function createFakeClaudeCodeBinary(defaultLogin = false): Promise<{
   binaryPath: string;

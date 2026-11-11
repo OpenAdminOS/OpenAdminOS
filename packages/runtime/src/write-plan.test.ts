@@ -71,6 +71,34 @@ describe("write plan safety", () => {
     });
   }
 
+  it("skips an action whose kind has no registered handler, including names an object inherits", async () => {
+    const fixture = makeWriteAgentFixture({ devices: [] });
+    try {
+      const manifest = parseAgentTemplate(readFileSync(join(fixture.agent.registryPath!, "manifest.yaml"), "utf8"));
+      const logs: string[] = [];
+      const ctx = {
+        graph: fixture.graph,
+        realWrites: true,
+        log: (_level: string, message: string) => { logs.push(message); },
+        step: async (_label: string, _detail: string | undefined, run: () => Promise<unknown>) => run(),
+      } as unknown as RunContext;
+      const plan: WritePlan = {
+        summary: "Review plan.",
+        confirmationPhrase: "RETIRE 4 DEVICES",
+        actions: [
+          ...["constructor", "toString", "made-up"].map((kind) => ({ id: kind, kind, label: `Action ${kind}`, metadata: { deviceId: kind } })),
+          { id: "retire", kind: "retire-managed-device", label: "Retire one", metadata: { deviceId: "device-1" } },
+        ],
+      };
+      const result = await runAgentTemplateApply(manifest, ctx, plan);
+      assert.deepEqual(fixture.retireCalls, ["device-1"]);
+      const failed = (result.result as { failed: Array<{ id: string; error: string }> }).failed;
+      assert.deepEqual(failed.map((entry) => entry.id), ["constructor", "toString", "made-up"]);
+      for (const entry of failed) assert.match(entry.error, /^No handler registered for action kind "/);
+      assert.equal(result.summary, "Executed 1 of 4 actions. 3 failed.");
+    } finally { fixture.cleanup(); }
+  });
+
   it("completes write agents whose plan has zero actions", async () => {
     const fixture = makeWriteAgentFixture({
       slug: "empty-write-agent",

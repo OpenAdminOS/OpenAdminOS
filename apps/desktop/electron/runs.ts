@@ -9,6 +9,7 @@ import {
   executeApply,
   executePlan,
   executeRun,
+  isGraphHost,
   tenantSatisfiesRequirement,
 } from "@openadminos/runtime";
 import {
@@ -23,11 +24,13 @@ import {
   unmappedScopesCopy,
   resolveProviderDefaultModel,
   resolveRunModel,
+  runInitiator,
   type AgentSummary,
   type IntuneChatMessage,
   type ProviderId,
   type ProviderSummary,
   type RunGraphApi,
+  type RunInitiator,
   type RunLlmApi,
   type RunLogLevel,
   type RunRecord,
@@ -104,7 +107,212 @@ export class OrganizationBoundaryError extends Error {
 /** Why nothing new starts or applies for an organization that is being disconnected. */
 export const TENANT_DISCONNECTING_COPY = TENANT_CLOSED_COPY;
 
+/**
+ * What an action would send to the tenant, without the words around it.
+ * A Graph write sends its request. A retire acts on `metadata.deviceId`
+ * only. Any other action without a request is applied from its
+ * metadata, so all of it counts. Ids, labels and descriptions do not:
+ * apply runs the reviewed plan, so they cannot change what is written.
+ */
+function writeEffectKey(action: WriteAction): string {
+  // Keyed by what the handler for this kind reads, never by which fields
+  // happen to be present: a retire that also carries a request still
+  // retires metadata.deviceId, so the request alone must not stand in for it.
+  // This relies on two rules of the SDK's WriteAction.kind: handlers read
+  // only `request` and `metadata`, and apply skips a kind with no
+  // registered handler (runAgentTemplateApply records it as failed and
+  // never applies it), so the last case below cannot miss a change that
+  // is written.
+  const request = action.request
+    ? {
+        method: action.request.method,
+        path: action.request.path,
+        ...(action.request.body !== undefined ? { body: action.request.body } : {}),
+      }
+    : null;
+  if (action.kind === "graph-write") {
+    return stableStringify({ kind: action.kind, request });
+  }
+  if (action.kind === "retire-managed-device") {
+    return stableStringify({ kind: action.kind, deviceId: action.metadata?.deviceId ?? null });
+  }
+  // Any other kind: everything a handler could read.
+  return stableStringify({ kind: action.kind, request, metadata: action.metadata ?? null });
+}
+
+/**
+ * How a fresh read-only plan differs from the one the admin confirmed.
+ * Actions are compared by what they send, as a multiset: the counts say
+ * how many reviewed actions are gone and how many are new. A pure
+ * reorder is not a change, because apply runs the reviewed plan in the
+ * reviewed order, not the fresh one. A different confirmation phrase is.
+ */
+export function planChangeSinceReview(
+  reviewed: NonNullable<RunRecord["plan"]>,
+  fresh: NonNullable<RunRecord["plan"]>,
+): { changed: boolean; reviewed: number; removed: number; added: number; phraseChanged: boolean } {
+  const phraseChanged = fresh.confirmationPhrase !== reviewed.confirmationPhrase;
+  const remaining = new Map<string, number>();
+  for (const action of fresh.actions) {
+    const key = writeEffectKey(action);
+    remaining.set(key, (remaining.get(key) ?? 0) + 1);
+  }
+  let removed = 0;
+  for (const action of reviewed.actions) {
+    const key = writeEffectKey(action);
+    const left = remaining.get(key) ?? 0;
+    if (left > 0) remaining.set(key, left - 1);
+    else removed += 1;
+  }
+  const added = [...remaining.values()].reduce((sum, count) => sum + count, 0);
+  return { changed: phraseChanged || removed > 0 || added > 0, reviewed: reviewed.actions.length, removed, added, phraseChanged };
+}
+
+/**
+ * The refusal when the live tenant no longer gives the confirmed plan.
+ * Agent Team keeps its proposal wording; other runs point at Run again.
+ */
+export function planChangedSinceReviewCopy(
+  change: ReturnType<typeof planChangeSinceReview>,
+  kind: "office" | "agent",
+  options: { usesModel?: boolean } = {},
+): string {
+  const actions = (count: number) => `${count.toLocaleString("en-US")} ${count === 1 ? "action" : "actions"}`;
+  const parts: string[] = [];
+  if (change.removed > 0) {
+    parts.push(`${change.removed.toLocaleString("en-US")} of the ${actions(change.reviewed)} you reviewed ${change.removed === 1 ? "is" : "are"} no longer in the plan`);
+  }
+  if (change.added > 0) parts.push(`${actions(change.added)} ${change.added === 1 ? "is" : "are"} new`);
+  if (parts.length === 0) parts.push("the confirmation phrase is different");
+  const what = parts.join(", and ");
+  const model = options.usesModel ? ` ${PLAN_REVALIDATION_MODEL_COPY}` : "";
+  return kind === "office"
+    ? `The proposed actions changed since review: ${what}. Nothing was applied.${model} Run the assignment again to review a fresh proposal.`
+    : `The planned actions changed since review: ${what}. Nothing was applied.${model} Select Run again to review a fresh plan.`;
+}
+
+/** Added to the refusal when the agent called a model while planning. */
+export const PLAN_REVALIDATION_MODEL_COPY = "An agent that uses a model can plan differently on a second pass, even when the tenant has not changed.";
+
+/** Why a Graph write was refused while a confirmed plan is checked again. */
+export const PLAN_REVALIDATION_READ_ONLY_COPY = "Checking a plan before apply permits only Graph reads.";
+
+/** The Graph client for the replan before apply: reads pass, every write is refused before it is sent. */
+export function readOnlyRevalidationGraph(graph: RunGraphApi): RunGraphApi {
+  return {
+    ...graph,
+    retireManagedDevice: async () => {
+      throw new Error(PLAN_REVALIDATION_READ_ONLY_COPY);
+    },
+    request: async (request) => {
+      if (request.method !== "GET") throw new Error(PLAN_REVALIDATION_READ_ONLY_COPY);
+      return graph.request(request);
+    },
+  };
+}
+
+/**
+ * The connector transport for the replan before apply: requests to Graph
+ * other than GET are refused before they are sent, and everything else
+ * goes through `transport`, so its lifecycle guard and Graph write audit
+ * still apply. Without a transport it wraps the global fetch, so a
+ * connector never falls back to an unguarded one.
+ */
+export function readOnlyRevalidationTransport(
+  transport: { fetch?: typeof fetch; assertEgress?: () => void } | undefined,
+): { fetch: typeof fetch; assertEgress?: () => void } {
+  const base: typeof fetch = transport?.fetch ?? ((input, init) => fetch(input, init));
+  return {
+    ...transport,
+    fetch: (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+      const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+      if (method !== "GET" && isGraphHost(url.hostname)) {
+        throw new Error(`${method} ${url.pathname} was not sent. ${PLAN_REVALIDATION_READ_ONLY_COPY}`);
+      }
+      return base(input, init);
+    }) as typeof fetch,
+  };
+}
+
+/**
+ * A failure of a write run before apply started, such as the model, the
+ * Graph sign-in or a connector failing for the replan: nothing was
+ * written, so the error says so unless it already does.
+ */
+function notAppliedError(error: unknown): unknown {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/nothing was applied/i.test(message)) return error;
+  return new Error(`Nothing was applied: ${message}`, { cause: error });
+}
+
+/** `run` with the model usage of `source`, a later snapshot of the same run. */
+function withUsageOf(run: RunRecord, source: Pick<RunRecord, "tokens" | "usage">): RunRecord {
+  const { tokens: _tokens, usage: _usage, ...rest } = run;
+  return {
+    ...rest,
+    ...(source.tokens !== undefined ? { tokens: source.tokens } : {}),
+    ...(source.usage !== undefined ? { usage: source.usage } : {}),
+  };
+}
+
+/** How many gateway proposals one paired client may have waiting for review at once. */
+export const GATEWAY_PENDING_PROPOSALS_PER_CLIENT = 5;
+/** How long an identical proposal is refused after the admin rejected it. */
+export const GATEWAY_REJECTED_PROPOSAL_COOLDOWN_MS = 15 * 60_000;
+
+/**
+ * A rejected gateway proposal whose cooldown is still running. Run history
+ * retention keeps it, because the cooldown is read from this record and
+ * pruning it would let the same proposal be queued again at once.
+ */
+export function gatewayRejectionCoolingDown(run: RunRecord, nowMs: number): boolean {
+  if (run.status !== "rejected" || !run.external?.clientId || !run.rejectedAt) return false;
+  const rejectedAtMs = Date.parse(run.rejectedAt);
+  return Number.isFinite(rejectedAtMs) && nowMs - rejectedAtMs < GATEWAY_REJECTED_PROPOSAL_COOLDOWN_MS;
+}
+
+/**
+ * Identifies what a gateway plan would change: the ordered Graph
+ * requests, not the client's labels or title, so renaming a rejected
+ * proposal does not make it a new one.
+ */
+export function externalPlanDigest(plan: NonNullable<RunRecord["plan"]>): string {
+  return createHash("sha256")
+    .update(stableStringify(plan.actions.map((action) => action.request ?? null)))
+    .digest("hex");
+}
+
+/** A gateway proposal the host refused to queue; the message goes back to the client. */
+export class GatewayProposalRefusedError extends Error {
+  override readonly name = "GatewayProposalRefusedError";
+  constructor(
+    readonly reason: "pending-limit" | "rejected-cooldown",
+    message: string,
+    readonly details: { planDigest: string; existingRunId?: string; retryAfter?: string },
+  ) {
+    super(message);
+  }
+}
+
+export function gatewayPendingLimitCopy(clientName: string): string {
+  return `${clientName} already has ${GATEWAY_PENDING_PROPOSALS_PER_CLIENT} proposals waiting for review in OpenAdminOS, the most one client can have. No new proposal was queued. Ask the admin to confirm or reject a waiting proposal, then propose again.`;
+}
+
+export function gatewayRejectedCooldownCopy(clientName: string, minutesLeft: number): string {
+  const window = GATEWAY_REJECTED_PROPOSAL_COOLDOWN_MS / 60_000;
+  return `The admin rejected an identical proposal from ${clientName} less than ${window} minutes ago. No new proposal was queued. Propose it again in ${minutesLeft} ${minutesLeft === 1 ? "minute" : "minutes"} at the earliest, or ask the admin what to change first.`;
+}
+
 /** What a Splashtop change run needs at apply: the team and a request bound to the organization's host and token. */
+/** How a run uses its Graph client: cancellation, sign-in, and what its writes are audited under. */
+export interface RunGraphExecution {
+  signal: AbortSignal;
+  allowInteractive: boolean;
+  onAuthRequired(): Promise<void>;
+  audit?: { runId: string; agentSlug: string; initiator: RunInitiator };
+}
+
 export interface SplashtopRunClient {
   teamId: number;
   /** Refuses anything but the request kinds the host plans, for this team. */
@@ -123,7 +331,7 @@ export interface RunServiceHost {
    */
   tenantLease?<T>(tenantId: string, work: (signal: AbortSignal) => Promise<T>): Promise<T>;
   /** The guarded connector transport for a tenant's runs (see tenant-lifecycle.ts). */
-  connectorTransport?(tenantId: string): { fetch: typeof fetch; assertEgress: () => void };
+  connectorTransport?(tenantId: string, audit?: RunGraphExecution["audit"]): { fetch: typeof fetch; assertEgress: () => void };
   read(): Promise<RunPersistedState>;
   write(state: RunPersistedState): Promise<void>;
   serialize<T>(task: () => Promise<T>): Promise<T>;
@@ -136,7 +344,7 @@ export interface RunServiceHost {
   buildGraph(
     pinnedTenantId?: string,
     agentScopes?: string[],
-    execution?: { signal: AbortSignal; allowInteractive: boolean; onAuthRequired(): Promise<void> },
+    execution?: RunGraphExecution,
   ): Promise<{
     createGraph: (
       log: (
@@ -574,6 +782,7 @@ export class RunService {
       if (options.retryOfRunId) queuedRun.retryOfRunId = options.retryOfRunId;
       if (pinnedTenantId) queuedRun.tenantId = pinnedTenantId;
       queuedRun.trigger = options.trigger ?? "manual";
+      queuedRun.initiator = options.office ? "office" : queuedRun.trigger === "schedule" ? "schedule" : "person";
       if (options.office) queuedRun.office = options.office;
       if (options.officeContext) {
         if ((!options.office && !options.retryOfRunId) || options.officeContext.tenantId !== pinnedTenantId || Buffer.byteLength(JSON.stringify(options.officeContext), "utf8") > 40000) throw new Error("Invalid team task context.");
@@ -681,6 +890,7 @@ export class RunService {
       status: "awaiting-confirmation",
       queuedAt,
       trigger: "manual",
+      initiator: "rollback",
       summary: input.plan.summary,
       steps: [],
       logs: [],
@@ -712,40 +922,78 @@ export class RunService {
    * Queue an external gateway proposal as a system run. The plan was
    * validated by the gateway host; it parks at the same typed
    * confirmation gate and can never apply without a human in the app.
+   * Under the state lock, an identical proposal (same client, tenant and
+   * plan digest) already waiting is returned instead of a second one; a
+   * client at the pending limit, or one re-proposing a plan the admin
+   * rejected within the cooldown window, is refused.
    */
   async startExternalProposalRun(input: {
     tenantId: string;
+    clientId: string;
     clientName: string;
     plan: NonNullable<RunRecord["plan"]>;
     requiredScopes: string[];
-  }): Promise<RunRecord> {
+  }): Promise<{ run: RunRecord; alreadyWaiting: boolean }> {
     if (input.plan.actions.length === 0) {
       throw new Error("A proposal needs at least one action.");
     }
+    const planDigest = externalPlanDigest(input.plan);
     const queuedAt = new Date().toISOString();
     const run: RunRecord = {
       id: `run_${randomUUID()}`,
       agentSlug: "external-proposal",
       origin: "external-proposal",
       external: {
+        clientId: input.clientId,
         clientName: input.clientName,
         requiredScopes: input.requiredScopes,
       },
       status: "awaiting-confirmation",
       queuedAt,
       trigger: "manual",
+      initiator: "gateway",
       summary: input.plan.summary,
       steps: [],
       logs: [],
       plan: input.plan,
       tenantId: input.tenantId,
     };
-    await this.host.serialize(async () => {
+    const existing = await this.host.serialize(async () => {
       this.assertTenantOpen(input.tenantId);
       const persisted = await this.host.read();
+      const fromClient = persisted.runs.filter(
+        (candidate) =>
+          candidate.origin === "external-proposal" &&
+          candidate.external?.clientId === input.clientId &&
+          candidate.tenantId === input.tenantId,
+      );
+      const pending = fromClient.filter((candidate) => candidate.status === "awaiting-confirmation");
+      const same = (candidate: RunRecord) =>
+        candidate.plan !== undefined && externalPlanDigest(candidate.plan) === planDigest;
+      const waiting = pending.find(same);
+      if (waiting) return waiting;
+      const nowMs = Date.parse(queuedAt);
+      const rejectedAtMs = fromClient
+        .filter((candidate) => candidate.status === "rejected" && candidate.rejectedAt && same(candidate))
+        .map((candidate) => Date.parse(candidate.rejectedAt!))
+        .filter((at) => Number.isFinite(at) && nowMs - at < GATEWAY_REJECTED_PROPOSAL_COOLDOWN_MS)
+        .sort((left, right) => right - left)[0];
+      if (rejectedAtMs !== undefined) {
+        const retryAtMs = rejectedAtMs + GATEWAY_REJECTED_PROPOSAL_COOLDOWN_MS;
+        throw new GatewayProposalRefusedError(
+          "rejected-cooldown",
+          gatewayRejectedCooldownCopy(input.clientName, Math.max(1, Math.ceil((retryAtMs - nowMs) / 60_000))),
+          { planDigest, retryAfter: new Date(retryAtMs).toISOString() },
+        );
+      }
+      if (pending.length >= GATEWAY_PENDING_PROPOSALS_PER_CLIENT) {
+        throw new GatewayProposalRefusedError("pending-limit", gatewayPendingLimitCopy(input.clientName), { planDigest });
+      }
       run.riskAssessment = this.assessPlan(run, persisted);
       await this.host.write({ ...persisted, runs: [run, ...persisted.runs] });
+      return undefined;
     });
+    if (existing) return { run: existing, alreadyWaiting: true };
     this.host.recordLearningEventSafely({
       tenantId: input.tenantId,
       agentSlug: "external-proposal",
@@ -758,7 +1006,7 @@ export class RunService {
       },
     });
     this.host.emitStateChanged("gateway-proposal-queued", run.id);
-    return run;
+    return { run, alreadyWaiting: false };
   }
 
   /**
@@ -785,6 +1033,7 @@ export class RunService {
       status: "awaiting-confirmation",
       queuedAt,
       trigger: "manual",
+      initiator: "person",
       summary: input.plan.summary,
       steps: [],
       logs: [],
@@ -1009,9 +1258,10 @@ export class RunService {
     return persisted.runs.find((run) => run.id === id);
   }
 
-  private executionOptions(run: RunRecord, signal: AbortSignal) {
+  private executionOptions(run: RunRecord, signal: AbortSignal): RunGraphExecution {
     return {
       signal,
+      audit: { runId: run.id, agentSlug: run.agentSlug, initiator: runInitiator(run) },
       allowInteractive: run.trigger !== "schedule",
       onAuthRequired: async () => {
         const message = "Waiting for Microsoft sign-in. Complete sign-in in your browser, or select Cancel run. This request expires after five minutes.";
@@ -1110,7 +1360,7 @@ export class RunService {
         ...(selection.tenantSession ? { tenant: selection.tenantSession } : {}),
         connectorConfigs: await this.host.readConnectorConfigs(),
         connectorSecretsFor: (connectorId) => this.host.connectorSecretsFor(connectorId),
-        ...(input.run.tenantId && this.host.connectorTransport ? { connectorTransport: this.host.connectorTransport(input.run.tenantId) } : {}),
+        ...(input.run.tenantId && this.host.connectorTransport ? { connectorTransport: this.host.connectorTransport(input.run.tenantId, { runId: input.run.id, agentSlug: input.run.agentSlug, initiator: runInitiator(input.run) }) } : {}),
         confirmCapability: (info) => requestConnectorConfirmation(info, controller.signal),
         realWrites: true,
         onProgress: (next) => this.queueRunSnapshot(stamp(next)),
@@ -1158,6 +1408,12 @@ export class RunService {
   }): Promise<void> {
     const controller = new AbortController();
     this.controllers.set(input.run.id, controller);
+    // The replan calls the model like any other phase, and those calls are
+    // billed. Its snapshots carry the run's usage so far plus its own, and
+    // that total stays on the run however apply ends.
+    let usage: Pick<RunRecord, "tokens" | "usage"> = input.run;
+    // Until apply starts, a failure has written nothing, and says so.
+    let applying = false;
     try {
       assertRunCanApply(input.run);
       if ((await this.getRun(input.run.id))?.status === "cancelled") return;
@@ -1166,31 +1422,40 @@ export class RunService {
       const selection = await this.host.buildGraph(input.run.tenantId, input.agent.scopes, this.executionOptions(input.run, controller.signal));
       const llm = this.withOverlay(input.run, baseLlm, selection.tenantId, input.agent.slug);
       controller.signal.throwIfAborted();
-      if (input.run.office) {
-        // Re-read a team's proposal immediately before apply. Replanning has no
-        // mutation authority and changed actions require a fresh user decision.
-        const fresh = await executePlan({
-          signal: controller.signal, run: {...input.run,steps:[],logs:[]}, agent: input.agent,
-          providerId: input.providerId,model:input.model,llm,tenant:selection.tenantSession,
-          createGraph: log => {
-            const graph = selection.createGraph(log);
-            return {...graph,retireManagedDevice:async()=>{throw new Error("Proposal revalidation permits only Graph reads.");},request: async request => {
-              if (request.method !== "GET") throw new Error("Proposal revalidation permits only Graph reads.");
-              return graph.request(request);
-            }};
-          },
-          realWrites:false,connectorConfigs:await this.host.readConnectorConfigs(),
-          connectorSecretsFor: id => this.host.connectorSecretsFor(id),
-          confirmCapability: async()=>({approved:false,reason:"Revalidating a proposal cannot send notifications or change external state."}),onProgress:()=>{},
-        });
-        if (fresh.status === "failed" || !fresh.plan) throw new Error(`Proposal could not be revalidated. ${fresh.error ?? "Run the assignment again."}`);
-        if (stableStringify(fresh.plan.actions) !== stableStringify(input.plan.actions) || fresh.plan.confirmationPhrase !== input.plan.confirmationPhrase) throw new Error("The proposed actions changed since review. Nothing was applied. Run the assignment again to review a fresh proposal.");
-        controller.signal.throwIfAborted();
+      // Re-plan read-only against the live tenant immediately before apply,
+      // for every agent write run. Replanning has no mutation authority, and
+      // a plan that differs from the confirmed one needs a fresh decision.
+      const kind = input.run.office ? "office" : "agent";
+      const runContext = { runId: input.run.id, agentSlug: input.run.agentSlug, initiator: runInitiator(input.run) };
+      const fresh = await executePlan({
+        signal: controller.signal, run: { ...input.run, steps: [], logs: [] }, agent: input.agent,
+        providerId: input.providerId, model: input.model, llm, tenant: selection.tenantSession,
+        createGraph: (log) => readOnlyRevalidationGraph(selection.createGraph(log)),
+        realWrites: false, connectorConfigs: await this.host.readConnectorConfigs(),
+        connectorSecretsFor: (id) => this.host.connectorSecretsFor(id),
+        connectorTransport: readOnlyRevalidationTransport(this.host.connectorTransport?.(input.run.tenantId, runContext)),
+        confirmCapability: async () => ({ approved: false, reason: "Revalidating a plan cannot send notifications or change external state." }),
+        onProgress: (next) => {
+          usage = next;
+        },
+      });
+      controller.signal.throwIfAborted();
+      if (fresh.status === "failed" || !fresh.plan) {
+        throw new Error(kind === "office"
+          ? `The proposal could not be checked against the tenant before applying, so nothing was applied. ${fresh.error ?? "Run the assignment again."}`
+          : `The plan could not be checked against the tenant before applying, so nothing was applied. ${fresh.error ?? "Select Run again to review a fresh plan."}`);
       }
+      const change = planChangeSinceReview(input.plan, fresh.plan);
+      if (change.changed) throw new Error(planChangedSinceReviewCopy(change, kind, { usesModel: (fresh.usage?.calls ?? 0) > 0 }));
+      controller.signal.throwIfAborted();
+      // Apply gets the reviewed plan, never the fresh one, and runs its
+      // actions in the reviewed order; the fresh plan only decides
+      // whether apply may start.
+      applying = true;
       try {
         await executeApply({
           signal: controller.signal,
-          run: input.run,
+          run: withUsageOf(input.run, usage),
           agent: input.agent,
           providerId: input.providerId,
           model: input.model,
@@ -1200,7 +1465,7 @@ export class RunService {
           tenant: selection.tenantSession,
           connectorConfigs: await this.host.readConnectorConfigs(),
           connectorSecretsFor: (connectorId) => this.host.connectorSecretsFor(connectorId),
-        ...(input.run.tenantId && this.host.connectorTransport ? { connectorTransport: this.host.connectorTransport(input.run.tenantId) } : {}),
+          ...(this.host.connectorTransport ? { connectorTransport: this.host.connectorTransport(input.run.tenantId, runContext) } : {}),
           confirmCapability: (info) => requestConnectorConfirmation(info, controller.signal),
           realWrites: true,
           onProgress: (next) =>
@@ -1215,7 +1480,7 @@ export class RunService {
         });
       }
     } catch (error) {
-      await this.persistFailedSnapshot(input.run, input.agent, error);
+      await this.persistFailedSnapshot(withUsageOf(input.run, usage), input.agent, applying ? error : notAppliedError(error));
     } finally {
       if (this.controllers.get(input.run.id) === controller) this.controllers.delete(input.run.id);
     }
@@ -1228,6 +1493,14 @@ export class RunService {
    * exact count of what was applied, and nothing after the failed
    * action is attempted. The stored plan is the only source of
    * requests; nothing is re-rendered at apply time.
+   *
+   * Unlike agent write runs, these plans are not re-planned before
+   * apply. A gateway proposal comes from outside with no agent to plan
+   * it again: the proposing client owns the plan, and the diff the admin
+   * confirmed is applied as-is. A rollback plan is built from the local
+   * drift snapshots, not a live read, so rebuilding it would compare the
+   * snapshot with itself. Splashtop plans apply only through the
+   * connection they were read through.
    */
   private async driveSystemApply(input: { run: RunRecord }): Promise<void> {
     if (input.run.origin === "splashtop-change") return this.driveSplashtopApply(input.run);
@@ -1489,8 +1762,11 @@ export class RunService {
         });
         const logs = [...previous.logs];
         for (const log of run.logs) if (!logs.some((existing) => existing.id === log.id)) logs.push(log);
+        // Model calls made before the run stopped were billed, so a late
+        // snapshot that counts more of them keeps its usage.
+        const kept = (run.usage?.calls ?? 0) > (previous.usage?.calls ?? 0) ? withUsageOf(previous, run) : previous;
         await this.host.write({ ...persisted, runs: persisted.runs.map((existing) =>
-          existing.id === run.id ? { ...previous, steps, logs } : existing) });
+          existing.id === run.id ? { ...kept, steps, logs } : existing) });
         return;
       }
       if (previous && isTerminalRunStatus(previous.status) && !isTerminalRunStatus(run.status)) return;

@@ -106,6 +106,13 @@ describe("tenant disconnect", () => {
           .get("tenant-1") as { count: number };
         assert.equal(row.count, 0, `${table} still contains tenant data`);
       }
+      // The append-only audit log outlives the disconnect, including the
+      // removed run and the disconnect itself.
+      const audited = inspected
+        .prepare(`SELECT type FROM audit_log WHERE tenant_id = ? ORDER BY seq`)
+        .all("tenant-1") as Array<{ type: string }>;
+      assert.ok(audited.some((row) => row.type === "run.queued"));
+      assert.ok(audited.some((row) => row.type === "microsoft365.disconnected"));
       assert.equal(
         (inspected.prepare(`SELECT COUNT(*) AS count FROM chat_conversations`).get() as { count: number }).count,
         0,
@@ -287,6 +294,95 @@ describe("Disconnect redesign: two phases with a removal record", () => {
       assert.equal(state.tenantCleanups, undefined);
       assert.equal(f.store.tenantPhase(tenant.id), "removed");
     } finally {
+      await f.close();
+    }
+  });
+
+  it("does not let a gateway pairing that overlaps Disconnect bring back the removed tenant's binding", async () => {
+    // The pairing is held in flight, after it started and before it writes,
+    // while Disconnect removes the tenant and unbinds the gateway.
+    const secretRead = gate();
+    let pairingInFlight = false;
+    const noSecret = { get: async () => undefined, set: async () => {}, remove: async () => {} };
+    const f = await fixture(
+      { gateway: { enabled: true, port: 0, boundTenantId: tenant.id, clients: [] } },
+      {
+        providerSecretsFor: (providerId: string) => providerId !== "__gateway__" ? noSecret : {
+          ...noSecret,
+          get: async () => {
+            pairingInFlight = true;
+            await secretRead.opened;
+            return undefined;
+          },
+        },
+      },
+    );
+    try {
+      const pairing = f.store.pairGatewayClient({ name: "Claude Code" }).then(() => undefined, (error: unknown) => error);
+      await until(() => pairingInFlight);
+      const disconnected = f.store.disconnectTenant(tenant.id);
+      await until(async () => (await stored(f.statePath)).tenants.length === 0);
+      secretRead.open();
+      const refused = await pairing;
+      await disconnected;
+      assert.ok(refused instanceof Error, "the pairing for the removed tenant is refused");
+      assert.match(refused.message, /^Enable the gateway before pairing a client\.$/);
+      const after = (await stored(f.statePath)).gateway as { boundTenantId?: string; clients: unknown[] } | undefined;
+      assert.equal(after?.boundTenantId, undefined, "the removed tenant's binding does not come back");
+      assert.deepEqual(after?.clients, [], "no client is paired for the removed tenant");
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("refuses to enable the gateway for a tenant that is not connected, or was disconnected", async () => {
+    const f = await fixture();
+    try {
+      await assert.rejects(f.store.enableGateway({ boundTenantId: "tenant-never-connected", port: 0 }), { message: /^That organization is no longer connected on this device/ });
+      await f.store.disconnectTenant(tenant.id);
+      await assert.rejects(f.store.enableGateway({ boundTenantId: tenant.id, port: 0 }), { message: /^That organization is no longer connected on this device/ });
+      const status = await f.store.getGatewayStatus();
+      assert.equal(status.enabled, false);
+      assert.equal(status.running, false);
+      assert.equal(status.boundTenantId, undefined);
+      assert.equal((await stored(f.statePath)).gateway?.boundTenantId, undefined);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("turns the gateway off and revokes its clients, so reconnecting the same tenant does not bring an old token back", async () => {
+    const network = recordFetch();
+    const f = await fixture({}, {
+      interactiveSignIn: async ({ scopes }: { scopes?: string[] }) => ({
+        account: { homeAccountId: tenant.homeAccountId, tenantId: tenant.id, username: tenant.username },
+        scopes: scopes ?? [],
+        accessToken: "token",
+      }),
+    });
+    const gateway = (f.store as unknown as { gatewayService: { authenticate(token: string, listenerTenantId: string): Promise<{ kind: string }> } }).gatewayService;
+    try {
+      await f.store.enableGateway({ boundTenantId: tenant.id, port: 0 });
+      const { token } = await f.store.pairGatewayClient({ name: "Claude Code" });
+      assert.equal((await gateway.authenticate(token, tenant.id)).kind, "client");
+      assert.equal((await f.store.getGatewayStatus()).running, true);
+
+      await f.store.disconnectTenant(tenant.id);
+      const connected = await f.store.connectTenant();
+      assert.deepEqual(connected.tenants.map((entry) => entry.id), [tenant.id]);
+
+      // Refused by the config as written, whatever the listener: no client is paired.
+      assert.notEqual((await gateway.authenticate(token, tenant.id)).kind, "client", "the old token is refused");
+      const status = await f.store.getGatewayStatus();
+      assert.equal(status.enabled, false);
+      assert.equal(status.running, false);
+      assert.equal(status.boundTenantId, undefined);
+      assert.deepEqual(status.clients, []);
+      const persisted = (await stored(f.statePath)).gateway as { enabled?: boolean; clients?: unknown[] } | undefined;
+      assert.equal(persisted?.enabled, false);
+      assert.deepEqual(persisted?.clients, []);
+    } finally {
+      network.restore();
       await f.close();
     }
   });

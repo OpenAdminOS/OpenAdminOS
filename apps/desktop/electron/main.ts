@@ -4689,6 +4689,10 @@ function validateExportAuditLogInput(value: unknown): ExportAuditLogInput {
     if (typeof value.saveToFile !== "boolean") throw new Error("Audit log saveToFile must be a boolean.");
     input.saveToFile = value.saveToFile;
   }
+  if (value.notStartedByPerson !== undefined) {
+    if (typeof value.notStartedByPerson !== "boolean") throw new Error("Audit log notStartedByPerson must be a boolean.");
+    if (value.notStartedByPerson) input.notStartedByPerson = true;
+  }
   const from = validateOptionalAuditLogBoundary(value.from, "from");
   const to = validateOptionalAuditLogBoundary(value.to, "to");
   if (from !== undefined) input.from = from;
@@ -5999,8 +6003,15 @@ function registerIpcHandlers() {
     handleTrusted(() => store.disableGateway()),
   );
   ipcMain.handle(
-    "openadminos:regenerate-gateway-token",
-    handleTrusted(() => store.regenerateGatewayToken()),
+    "openadminos:pair-gateway-client",
+    handleTrusted((_event, input: unknown) => {
+      if (!isPlainRecord(input)) {
+        throw new Error("Pair gateway client input must be an object.");
+      }
+      return store.pairGatewayClient({
+        name: requireBoundedString(input.name, "name", 100),
+      });
+    }),
   );
   ipcMain.handle(
     "openadminos:revoke-gateway-client",
@@ -6177,6 +6188,10 @@ function registerIpcHandlers() {
         ? dialog.showSaveDialog(mainWindow, options)
         : dialog.showSaveDialog(options));
     }),
+  );
+  ipcMain.handle(
+    "openadminos:get-audit-log-status",
+    handleTrusted(() => store.getAuditLogStatus()),
   );
   ipcMain.handle(
     "openadminos:get-self-training-settings",
@@ -7054,6 +7069,11 @@ if (!gotLock) {
     // Fetch registry index in the background after the window is ready.
     // Falls back to local filesystem agents until the fetch completes.
     void refreshRegistryInBackground("startup");
+    // Events a failed append missed in an earlier session are recorded
+    // now, not only with the next change.
+    void store.recordAuditLogAtStartup().catch((error) => {
+      console.warn("[audit] startup record failed:", error);
+    });
     void store.pruneRunHistory("startup").catch((error) => {
       console.warn("[run-history] startup prune failed:", error);
     });

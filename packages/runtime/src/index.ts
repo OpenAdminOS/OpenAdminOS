@@ -148,9 +148,18 @@ export {
   type TokenCacheStorage,
 } from "./msal.js";
 export {
+  auditGraphWritesFetch,
   createGraphAdapter,
+  GraphWriteAuditError,
+  GraphWriteUnauditedError,
+  isGraphHost,
   type GraphAdapterLogger,
   type GraphAdapterOptions,
+  type GraphWriteAuditAttempt,
+  type GraphWriteAuditResult,
+  type GraphWriteAuditSink,
+  type GraphWriteErrorClass,
+  type GraphWriteMethod,
 } from "./graph-adapter.js";
 export {
   detectEntraTier,
@@ -556,8 +565,8 @@ export interface ExecuteRunInput {
    * Called before every `notify`/`mutating`/`destructive` capability
    * invocation. The wrapper aborts the call when this returns
    * `{ approved: false }`. Phase 6 wires this to the preview-and-send
-   * modal; in this phase, callers that omit it auto-approve with an
-   * info-level log entry.
+   * modal. Callers that omit it fail closed: every such call is refused
+   * as a fatal error, with a failure audit entry and a warn-level log.
    */
   confirmCapability?: (
     info: ConnectorInvocationInfo,

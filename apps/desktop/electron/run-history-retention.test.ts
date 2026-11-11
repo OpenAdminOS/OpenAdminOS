@@ -63,6 +63,35 @@ describe("run history retention", () => {
     }
   });
 
+  it("keeps a rejected gateway proposal until its cooldown ends", async () => {
+    const rejectedProposal = (id: string, rejectedMinutesAgo: number): RunRecord => ({
+      ...run(id, "rejected", daysAgo(300)),
+      external: { clientId: "client-1", clientName: "Build agent", requiredScopes: [] },
+      rejectedAt: new Date(Date.now() - rejectedMinutesAgo * 60_000).toISOString(),
+    });
+    const fixture = await makeStoreFixture({
+      runs: [
+        rejectedProposal("run-cooling", 1),
+        rejectedProposal("run-cooled", 20),
+        run("run-recent", "completed", daysAgo(1)),
+      ],
+    });
+    try {
+      await fixture.store.setRunHistoryRetentionSettings({
+        neverPrune: false,
+        keepLastRuns: 1,
+        keepDays: 30,
+      });
+
+      await fixture.store.pruneRunHistoryNow();
+      const state = await fixture.store.getAppState();
+
+      assert.deepEqual(state.runs.map((entry) => entry.id).sort(), ["run-cooling", "run-recent"]);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
   it("respects never-prune even when runs exceed the count and age policy", async () => {
     const fixture = await makeStoreFixture({
       runs: [

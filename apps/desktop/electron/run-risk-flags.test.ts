@@ -88,7 +88,7 @@ describe("host write plan risk assessment", () => {
     const f = await fixture();
     try {
       const rollback = await f.service.startRollbackRun({ tenantId: "tenant-1", baselineId: "baseline", plan: plan(), requiredScopes: [], manualCount: 0 });
-      const external = await f.service.startExternalProposalRun({ tenantId: "tenant-1", clientName: "External client", plan: plan(), requiredScopes: [] });
+      const { run: external } = await f.service.startExternalProposalRun({ tenantId: "tenant-1", clientId: "client-1", clientName: "External client", plan: plan(), requiredScopes: [] });
       for (const pending of [rollback, external]) {
         assert.equal(pending.riskAssessment?.status, "complete");
         if (pending.riskAssessment?.status !== "complete") assert.fail("Missing assessment");
