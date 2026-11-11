@@ -392,6 +392,46 @@ describe("IntuneChat organization name", () => {
     expect(screen.getByPlaceholderText("Ask about OAOS Lab, or type / to run an agent")).toBeInTheDocument();
     expect(screen.queryByText("Contoso IT")).toBeNull();
   });
+
+  it("renames the tenant in the header of an earlier answer", async () => {
+    const user = userEvent.setup();
+    const conversation: IntuneChatConversation = {
+      id: "conversation-rename-1",
+      title: "Stale devices",
+      createdAt: "2026-08-06T10:00:00.000Z",
+      updatedAt: "2026-08-06T10:05:00.000Z",
+      tenantId: "tenant-1",
+      scopeKind: "single-tenant",
+    };
+    const bridge = makeMockBridge();
+    bridge.listIntuneChatConversations = vi.fn(async () => [conversation]);
+    bridge.getIntuneChatMessages = vi.fn(async () => [
+      {
+        id: "rename-answer-1",
+        conversationId: conversation.id,
+        role: "assistant" as const,
+        content: "WIN-01 has not synced in 40 days.",
+        createdAt: "2026-08-06T10:01:00.000Z",
+        status: "completed" as const,
+      },
+    ]);
+    renderRoute(
+      <>
+        <RenameProbe />
+        <IntuneChat />
+      </>,
+      { path: "/chat/:conversationId", route: "/chat/conversation-rename-1", bridge },
+    );
+
+    await screen.findByText(/WIN-01 has not synced in 40 days/);
+    const answer = () => document.querySelector<HTMLElement>("[data-message-id='rename-answer-1']")!;
+    expect(within(answer()).getByText("Contoso IT")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Rename organization" }));
+
+    expect(await within(answer()).findByText("OAOS Lab")).toBeInTheDocument();
+    expect(within(answer()).queryByText("Contoso IT")).toBeNull();
+  });
 });
 
 describe("IntuneChat new conversation routing", () => {
