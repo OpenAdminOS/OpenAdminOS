@@ -76,9 +76,10 @@ const guest = (id: string): Guest => ({ id, displayName: id, days: 91, departmen
 
 /**
  * Plans a write run against a fake tenant, lets the test change the
- * tenant, then confirms it and waits for the run to settle.
+ * tenant, then confirms it and waits for the run to settle. A change
+ * that returns an Error makes every later tenant read fail with it.
  */
-async function confirmAfter(change: (guests: Guest[]) => Guest[]) {
+async function confirmAfter(change: (guests: Guest[]) => Guest[] | Error) {
   const dir = await mkdtemp(join(tmpdir(), "plan-revalidation-"));
   try {
     await writeFile(join(dir, "manifest.yaml"), MANIFEST);
@@ -98,12 +99,14 @@ async function confirmAfter(change: (guests: Guest[]) => Guest[]) {
       registryPath: dir,
     };
     let guests = [guest("guest-a"), guest("guest-b")];
+    let readError: Error | undefined;
     const reads: GraphRequestInput[] = [];
     const writes: GraphRequestInput[] = [];
     const graph: RunGraphApi = {
       request: async (request) => {
         if (request.method === "GET") {
           reads.push(request);
+          if (readError) throw readError;
           return { value: structuredClone(guests) };
         }
         writes.push(request);
@@ -159,7 +162,9 @@ async function confirmAfter(change: (guests: Guest[]) => Guest[]) {
       processPendingRunDeliveries: async () => {},
     } satisfies Partial<RunServiceHost>;
     const readsWhenPlanned = reads.length;
-    guests = change(guests);
+    const changed = change(guests);
+    if (changed instanceof Error) readError = changed;
+    else guests = changed;
     await new RunService(host as unknown as RunServiceHost).confirmRun(planned.id, planned.plan!.confirmationPhrase);
     await done;
     return { run: state.runs[0]!, writes, revalidationReads: reads.length - readsWhenPlanned };
@@ -192,6 +197,14 @@ describe("write plans are checked against the tenant before apply", () => {
     assert.equal(writes.length, 0);
     assert.equal(run.status, "failed");
     assert.match(run.error ?? "", /2 of the 2 actions you reviewed are no longer in the plan\. Nothing was applied\./);
+  });
+
+  it("refuses a plan that could not be checked against the tenant and writes nothing", async () => {
+    const { run, writes, revalidationReads } = await confirmAfter(() => new Error("Graph is unavailable."));
+    assert.equal(revalidationReads, 1, "the plan is read again before apply");
+    assert.equal(writes.length, 0, "no Graph write is sent");
+    assert.equal(run.status, "failed");
+    assert.match(run.error ?? "", /^The plan could not be checked against the tenant before applying, so nothing was applied\. .*Graph is unavailable\./);
   });
 
   it("applies a plan whose wording changed but whose requests did not", async () => {
