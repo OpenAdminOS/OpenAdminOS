@@ -87,7 +87,8 @@ export function optionsFromProbes(
       if (probe.ready) {
         options.push({ providerId: probe.providerId, name, where: "local", whereLine: MODEL_CHOICE_COPY.localReady(modelDisplayName(model)), state: MODEL_CHOICE_COPY.ready, action: "open", ...(model ? { model } : {}) });
       } else if (probe.summary === "Installed, not running" && probe.providerId === "lemonade") {
-        options.push({ providerId: "lemonade", name, where: "local", whereLine: MODEL_CHOICE_COPY.localStartLemonade, state: MODEL_CHOICE_COPY.notRunning, action: "rescan" });
+        // The scan names the command for this OS.
+        options.push({ providerId: "lemonade", name, where: "local", whereLine: MODEL_CHOICE_COPY.localStartLemonade(probe.facts[0]), state: MODEL_CHOICE_COPY.notRunning, action: "rescan" });
       } else if (probe.summary === "Installed, not running") {
         options.push({ providerId: probe.providerId, name, where: "local", whereLine: MODEL_CHOICE_COPY.localStart(probe.providerId), state: MODEL_CHOICE_COPY.notRunning, action: "start" });
       } else {
@@ -140,7 +141,8 @@ export function optionsFromProviders(providers: readonly ProviderSummary[]): Cho
       } else if (provider.status === "connected" && provider.id === "lemonade") {
         options.push({ providerId: "lemonade", name, where: "local", whereLine: MODEL_CHOICE_COPY.localDownloadLemonadeModel, state: MODEL_CHOICE_COPY.noModel, action: "rescan" });
       } else if (provider.installed && provider.id === "lemonade") {
-        options.push({ providerId: "lemonade", name, where: "local", whereLine: MODEL_CHOICE_COPY.localStartLemonade, state: MODEL_CHOICE_COPY.notRunning, action: "rescan" });
+        // The provider check names the command for this OS.
+        options.push({ providerId: "lemonade", name, where: "local", whereLine: MODEL_CHOICE_COPY.localStartLemonade(provider.detail), state: MODEL_CHOICE_COPY.notRunning, action: "rescan" });
       } else if (provider.status === "connected" && provider.id === "ollama") {
         options.push({ providerId: "ollama", name, where: "local", whereLine: MODEL_CHOICE_COPY.localGetModel, state: MODEL_CHOICE_COPY.noModel, action: "get-model" });
       } else if (provider.installed && (provider.id === "ollama" || provider.id === "lm-studio")) {

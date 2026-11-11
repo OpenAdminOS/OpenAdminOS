@@ -50,8 +50,11 @@ export const MODEL_CHOICE_COPY = {
     id === "lm-studio" ? "On this device. OpenAdminOS starts its server." : "On this device. OpenAdminOS starts it for you.",
   localGetModel: "On this device. Get OpenAdmin 8B, a model trained for Intune and Entra work.",
   localLoadModel: "On this device. Load a model in LM Studio, then scan again.",
-  /** Lemonade runs as a system service on macOS and Linux, so OpenAdminOS does not start it. */
-  localStartLemonade: "On this device. Start Lemonade Server, then scan again.",
+  /**
+   * Lemonade runs as a system service on macOS and Linux, so OpenAdminOS does
+   * not start it; `hint` is the main process's command for this OS.
+   */
+  localStartLemonade: (hint: string | undefined) => `On this device. ${hint ?? "Start Lemonade Server, then scan again."}`,
   localDownloadLemonadeModel: "On this device. Download a chat model in Lemonade, then scan again.",
   chooseModel: "Choose a model",
   openChat: "Open Chat",

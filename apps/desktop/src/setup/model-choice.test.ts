@@ -91,6 +91,10 @@ describe("Lemonade in the choice", () => {
     ]);
     expect(actionLabel(options[0])).toBe("Scan again");
 
+    // The scan's command for this OS, when it has one.
+    const darwin = optionsFromProbes([probe("lemonade", "local", { summary: "Installed, not running", ready: false, facts: ["Start it with sudo launchctl kickstart -k system/ai.lemonadeserver.server, then scan again."] })], undefined);
+    expect(darwin[0]!.whereLine).toBe("On this device. Start it with sudo launchctl kickstart -k system/ai.lemonadeserver.server, then scan again.");
+
     const empty = optionsFromProbes([probe("lemonade", "local", { summary: "Running, no chat model", ready: false })], undefined);
     expect(empty[0]).toMatchObject({ action: "rescan", state: "No model yet", whereLine: "On this device. Download a chat model in Lemonade, then scan again." });
   });
@@ -105,7 +109,11 @@ describe("Lemonade in the choice", () => {
       ["apple-foundation", "open"],
     ]);
     expect(optionsFromProviders([{ ...lemonade, models: [], defaultModel: undefined }])[0]).toMatchObject({ action: "rescan", state: "No model yet" });
-    expect(optionsFromProviders([{ ...lemonade, status: "not-installed", models: [], defaultModel: undefined, installed: true }])[0]).toMatchObject({ action: "rescan", state: "Not running" });
+    expect(optionsFromProviders([{ ...lemonade, status: "not-installed", models: [], defaultModel: undefined, installed: true, detail: "Start it with sudo systemctl start lemond, then scan again." }])[0]).toMatchObject({
+      action: "rescan",
+      state: "Not running",
+      whereLine: "On this device. Start it with sudo systemctl start lemond, then scan again.",
+    });
     expect(optionsFromProviders([{ ...lemonade, status: "not-installed", models: [], defaultModel: undefined }])).toEqual([]);
   });
 });

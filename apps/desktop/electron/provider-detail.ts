@@ -256,6 +256,8 @@ interface LocalOpenAiServerCheck {
   classifyEndpoint(endpoint: string): LmStudioEndpointTrust;
   probe(options: LmStudioProviderOptions): Promise<LmStudioProbeResult>;
   notRunningDetail: string;
+  /** Replaces the probe's detail when the server refuses the connection. */
+  notRunningHint?: () => string;
 }
 
 const LM_STUDIO_CHECK: LocalOpenAiServerCheck = {
@@ -275,7 +277,20 @@ const LEMONADE_CHECK: LocalOpenAiServerCheck = {
   classifyEndpoint: classifyLemonadeEndpoint,
   probe: probeLemonadeLlm,
   notRunningDetail: "Lemonade isn't running. Start Lemonade Server, then try again.",
+  notRunningHint: () => lemonadeStartHint(),
 };
+
+/**
+ * How to start Lemonade by hand, as plain text (the model choice shows it
+ * as written). It installs as a system service on macOS (a launch daemon)
+ * and Linux (systemd), which an app cannot start without admin rights, and
+ * as a tray app on Windows.
+ */
+export function lemonadeStartHint(platform: NodeJS.Platform = process.platform): string {
+  if (platform === "win32") return "Start Lemonade Server from the Start menu, then scan again.";
+  if (platform === "darwin") return "Start it with sudo launchctl kickstart -k system/ai.lemonadeserver.server, then scan again.";
+  return "Start it with sudo systemctl start lemond, then scan again.";
+}
 
 export function checkLmStudio(provider: ProviderSummary, options: ScanCheckOptions = {}): Promise<ProviderSummary> {
   return checkLocalOpenAiServer(LM_STUDIO_CHECK, provider, options);
@@ -315,7 +330,10 @@ async function checkLocalOpenAiServer(
       status: probe.status === "error" ? "error" : "not-installed",
       ...(probe.status === "error" ? { checkFailed: true } : {}),
       ...(probe.status !== "error" && endpointTrust.isLocal && (await installedOnDisk(server.id)) ? { installed: true } : {}),
-      detail: lmStudioEndpointDetail(endpointTrust, probe.detail ?? server.notRunningDetail),
+      detail: lmStudioEndpointDetail(
+        endpointTrust,
+        (probe.status === "not-running" ? server.notRunningHint?.() : undefined) ?? probe.detail ?? server.notRunningDetail,
+      ),
       models: probe.models,
       defaultModel: probe.defaultModel,
     };

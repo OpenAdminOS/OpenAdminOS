@@ -17,7 +17,7 @@ import {
   scanProbeFromProvider,
   type ModelScanCheck,
 } from "./model-scan.js";
-import { checkAzureOpenAI, checkLmStudio, checkOllama } from "./provider-detail.js";
+import { checkAzureOpenAI, checkLemonade, checkLmStudio, checkOllama, lemonadeStartHint } from "./provider-detail.js";
 import { chmod, readFile } from "node:fs/promises";
 import { installedOnDisk, scanProviderCheck, runScanCheck } from "./model-scan.js";
 import { AppStateStore } from "./state.js";
@@ -1245,11 +1245,22 @@ describe("Lemonade in the scan", () => {
     const stopped = (platform: NodeJS.Platform) =>
       scanProbeFromProvider({ ...catalog("lemonade"), status: "not-installed", models: [] }, { installedOnDisk: true, platform });
     assert.equal(stopped("darwin").summary, "Installed, not running");
-    assert.deepEqual(stopped("darwin").facts, ["Start it with `sudo launchctl kickstart -k system/ai.lemonadeserver.server`, then scan again."]);
-    assert.deepEqual(stopped("linux").facts, ["Start it with `sudo systemctl start lemond`, then scan again."]);
+    assert.deepEqual(stopped("darwin").facts, ["Start it with sudo launchctl kickstart -k system/ai.lemonadeserver.server, then scan again."]);
+    assert.deepEqual(stopped("linux").facts, ["Start it with sudo systemctl start lemond, then scan again."]);
     assert.deepEqual(stopped("win32").facts, ["Start Lemonade Server from the Start menu, then scan again."]);
 
     assert.equal(scanProbeFromProvider({ ...catalog("lemonade"), status: "not-installed", models: [] }).state, "not-found");
+  });
+
+  it("names the start command for this OS in the provider detail when Lemonade refuses the connection", async () => {
+    delete process.env.OPENADMINOS_LEMONADE_URL;
+    globalThis.fetch = (async () => {
+      throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } });
+    }) as typeof fetch;
+    const provider = await checkLemonade(catalog("lemonade"));
+    assert.equal(provider.status, "not-installed");
+    assert.equal(provider.detail, lemonadeStartHint());
+    assert.doesNotMatch(provider.detail ?? "", /`/, "the model choice shows the detail as plain text");
   });
 
   it("finds an installed Lemonade from its installers' locations", async () => {

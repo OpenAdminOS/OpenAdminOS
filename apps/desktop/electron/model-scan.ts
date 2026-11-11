@@ -19,7 +19,7 @@ import {
 } from "@openadminos/runtime";
 
 import { LOCAL_AUTO_SELECT_ORDER, isProviderReady } from "../src/shared/provider-detection.js";
-import { checkAdditionalCli, checkAppleFoundation, checkClaudeCode, checkCodex, checkLemonade, checkLmStudio, checkOllama } from "./provider-detail.js";
+import { checkAdditionalCli, checkAppleFoundation, checkClaudeCode, checkCodex, checkLemonade, checkLmStudio, checkOllama, lemonadeStartHint } from "./provider-detail.js";
 
 /**
  * The first-launch model scan (SPEC.md 4a, first launch). Every check runs
@@ -195,17 +195,6 @@ export const SCAN_NAMES: Readonly<Record<ProviderId, string>> = {
   "azure-openai": "Azure OpenAI",
 };
 
-/**
- * How to start Lemonade by hand. It installs as a system service on macOS
- * (a launch daemon) and Linux (systemd), which an app cannot start without
- * admin rights, and as a tray app on Windows.
- */
-export function lemonadeStartHint(platform: NodeJS.Platform = process.platform): string {
-  if (platform === "win32") return "Start Lemonade Server from the Start menu, then scan again.";
-  if (platform === "darwin") return "Start it with `sudo launchctl kickstart -k system/ai.lemonadeserver.server`, then scan again.";
-  return "Start it with `sudo systemctl start lemond`, then scan again.";
-}
-
 /** Turns an existing provider check into a scan result line. */
 export function scanProbeFromProvider(
   provider: ProviderSummary,
@@ -299,7 +288,7 @@ export function scanProbeFromProvider(
   return { ...base, state: "found", ready: false, summary: "Installed, sign-in not confirmed", facts: [...version, ...(provider.detail ? [provider.detail] : [])] };
 }
 
-export { installedOnDisk } from "./provider-detail.js";
+export { installedOnDisk, lemonadeStartHint } from "./provider-detail.js";
 
 /**
  * The checks for this device, built on the existing provider detection.
