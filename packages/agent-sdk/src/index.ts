@@ -1200,6 +1200,12 @@ export interface AuditLogExportResult {
   to?: string;
 }
 
+/** Whether the audit log on this device is recording. */
+export interface AuditLogStatus {
+  /** The last append that failed, until an append succeeds again. */
+  lastFailure?: { failedAt: string; message: string };
+}
+
 export interface TrustState {
   label: string;
   detail: string;
@@ -3268,6 +3274,7 @@ export interface OpenAdminOSApi {
   ): Promise<DriftRetentionSettings>;
   pruneDriftHistoryNow(): Promise<DriftHistoryPruneResult>;
   exportAuditLog(input: ExportAuditLogInput): Promise<AuditLogExportResult>;
+  getAuditLogStatus(): Promise<AuditLogStatus>;
   getChatInvestigationSettings(): Promise<ChatInvestigationSettings>;
   setChatInvestigationMode(mode: ChatInvestigationMode): Promise<ChatInvestigationSettings>;
   getSelfTrainingSettings(): Promise<SelfTrainingSettings>;

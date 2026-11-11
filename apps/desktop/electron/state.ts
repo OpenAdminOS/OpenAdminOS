@@ -90,6 +90,7 @@ import type {
   AgentCommunitySubmissionResult,
   AgentDraftPreflightResult,
   AuditLogExportResult,
+  AuditLogStatus,
   ConnectorAuditEntry,
   ExportAgentBundleResult,
   ExportAuditLogInput,
@@ -288,6 +289,7 @@ import { IntelligenceSqliteStore, type HostedProviderConsentAuditRecord } from "
 import {
   AUDIT_CHAIN_START_HASH,
   AUDIT_LOG_RETENTION_DAYS,
+  AuditLogBehindError,
   AuditLogStore,
   canonicalJson,
   chainHash,
@@ -916,6 +918,18 @@ function runAuditFingerprint(run: RunRecord): string {
     run.plan?.actions.length ?? "",
     run.logs.length,
   ].join("|");
+}
+
+/** The ids of every audit event a state shows, to see what a write would remove. */
+function auditSourceEventIds(state: PersistedState): Set<string> {
+  const context = auditLogContext(state);
+  const ids = new Set<string>();
+  for (const run of state.runs) {
+    for (const event of runAuditEvents(run, context)) ids.add(event.id);
+  }
+  for (const change of state.configurationAudit ?? []) ids.add(configurationAuditEvent(change).id);
+  for (const delivery of state.novaConnectorAudit ?? []) ids.add(novaConnectorAuditEvent(delivery, context).id);
+  return ids;
 }
 
 function novaConnectorAuditEvent(
@@ -1742,6 +1756,10 @@ export class AppStateStore {
   private readonly auditedRuns = new Map<string, string>();
   /** Whether events stored before the audit log existed were imported in this process. */
   private auditLogImported = false;
+  /** The last audit log append that failed, shown in Settings until an append succeeds. */
+  private auditLogFailure: { failedAt: string; message: string } | undefined;
+  /** A hosted-provider consent is only in the Chat database, so the next record imports it. */
+  private auditConsentsPending = false;
   private readonly chatService: IntuneChatService;
   private readonly driftService: DriftService;
   private readonly runService: RunService;
@@ -2055,7 +2073,7 @@ export class AppStateStore {
         this.runService.startExternalProposalRun(input),
       getRun: (runId) => this.runService.getRun(runId),
       recordAudit: (event) =>
-        this.auditLog.append([{
+        this.appendAuditEvents([{
           id: `gateway:${randomUUID()}`,
           timestamp: event.timestamp,
           type: event.type,
@@ -4533,6 +4551,9 @@ export class AppStateStore {
   async pruneRunHistory(
     trigger: RunHistoryPruneTrigger,
   ): Promise<RunHistoryPruneResult> {
+    // Audit rows have their own retention window, pruned with run history
+    // at startup, on the scheduler tick and when pruned by hand.
+    this.pruneExpiredAuditLog();
     return this.serialize(async () => {
       const persisted = await this.read();
       const policy = this.normalizeRunHistoryRetentionSettings(
@@ -7907,6 +7928,15 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       } catch (cause) {
         throw new Error(`Its Agent Team data could not be deleted. ${errorText(cause)}`, { cause });
       }
+      // Its hosted-provider consents are deleted with the Chat data, so they
+      // go to the audit log first when it may not hold them yet.
+      if (!this.auditLogImported || this.auditConsentsPending) {
+        try {
+          this.recordAuditLog(await this.read());
+        } catch (cause) {
+          throw new Error(`Its Chat data was kept: the audit log could not record its hosted-provider consents first. ${errorText(cause)}`, { cause });
+        }
+      }
       try {
         this.intelligenceStore?.purgeTenant(id);
       } catch (cause) {
@@ -8878,23 +8908,104 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       }
       return tail;
     };
-    events.push(...unrecordedTail(state.configurationAudit ?? [], configurationAuditEvent));
-    events.push(...unrecordedTail(state.novaConnectorAudit ?? [], (delivery) => novaConnectorAuditEvent(delivery, context)));
-    if (!this.auditLogImported) {
-      for (const consent of this.intelligenceStore?.listHostedProviderConsentAuditEvents() ?? []) {
-        events.push(hostedProviderConsentAuditEvent(consent, context));
+    try {
+      events.push(...unrecordedTail(state.configurationAudit ?? [], configurationAuditEvent));
+      events.push(...unrecordedTail(state.novaConnectorAudit ?? [], (delivery) => novaConnectorAuditEvent(delivery, context)));
+      // The Chat database keeps every consent too; ids make a repeat a no-op.
+      if (!this.auditLogImported || this.auditConsentsPending) {
+        for (const consent of this.intelligenceStore?.listHostedProviderConsentAuditEvents() ?? []) {
+          events.push(hostedProviderConsentAuditEvent(consent, context));
+        }
       }
+      this.auditLog.append(events.sort(compareAuditEvents));
+    } catch (error) {
+      this.noteAuditLogFailure(error);
+      throw error;
     }
-    this.auditLog.append(events.sort(compareAuditEvents));
+    // Complete only now: every caller passes the state the last write or
+    // read left, or one a write kept every source record of.
     this.auditLogImported = true;
+    this.auditConsentsPending = false;
+    this.auditLogFailure = undefined;
     for (const [runId, fingerprint] of fingerprints) this.auditedRuns.set(runId, fingerprint);
   }
 
-  /** Hosted-provider consent goes to the audit log when it is given; it is not part of state. */
+  /**
+   * Hosted-provider consent goes to the audit log when it is given; it is
+   * not part of state. The Chat database keeps it too, so a failed append
+   * is imported by the next record.
+   */
   private recordHostedProviderConsent(consent: HostedProviderConsentAuditRecord): void {
     const persisted = this.lastReadSnapshot;
     const context = auditLogContext(persisted ?? { tenants: [], installedAgents: [] });
-    this.auditLog.append([hostedProviderConsentAuditEvent(consent, context)]);
+    try {
+      this.auditLog.append([hostedProviderConsentAuditEvent(consent, context)]);
+    } catch (error) {
+      this.auditConsentsPending = true;
+      this.noteAuditLogFailure(error);
+      console.warn(`[audit] a hosted-provider consent is kept in the Chat database until the audit log can record it. ${errorText(error)}`);
+    }
+  }
+
+  /** What Settings shows about the audit log: the last append that failed, until one succeeds. */
+  async getAuditLogStatus(): Promise<AuditLogStatus> {
+    return this.auditLogFailure ? { lastFailure: { ...this.auditLogFailure } } : {};
+  }
+
+  /**
+   * At startup, after the first read: records what the state shows, so
+   * events a failed append missed in an earlier session are recorded
+   * without waiting for a change.
+   */
+  async recordAuditLogAtStartup(): Promise<void> {
+    this.recordAuditLogSafely(await this.read());
+  }
+
+  /**
+   * Deletes audit rows past the retention window. Runs with every
+   * run-history prune, at startup and on the scheduler tick.
+   */
+  private pruneExpiredAuditLog(): void {
+    try {
+      this.auditLog.pruneExpired();
+    } catch (error) {
+      this.noteAuditLogFailure(error);
+      console.warn(`[audit] expired audit log rows could not be removed; the next prune tries again. ${errorText(error)}`);
+    }
+  }
+
+  /**
+   * The audit events a write would remove that are not stored. Only
+   * asked while the audit log is behind the state it was given.
+   */
+  private unrecordedRemovals(previous: PersistedState, next: PersistedState): number {
+    const kept = auditSourceEventIds(next);
+    let count = 0;
+    for (const id of auditSourceEventIds(previous)) {
+      if (kept.has(id)) continue;
+      let stored = false;
+      try {
+        stored = this.auditLog.has(id);
+      } catch {
+        stored = false;
+      }
+      if (!stored) count += 1;
+    }
+    return count;
+  }
+
+  /** Appends events directly; a failure is kept for Settings and thrown. */
+  private appendAuditEvents(events: readonly AuditLogEventSeed[]): number {
+    try {
+      return this.auditLog.append(events);
+    } catch (error) {
+      this.noteAuditLogFailure(error);
+      throw error;
+    }
+  }
+
+  private noteAuditLogFailure(error: unknown): void {
+    this.auditLogFailure = { failedAt: this.clock().toISOString(), message: errorText(error) };
   }
 
   /** Records a write to state in the audit log; a failure is retried by the next write. */
@@ -8954,9 +9065,20 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     };
     if (reconciled.notice) state.organizationMigration = reconciled.notice;
     else delete state.organizationMigration;
-    // What the state showed before this version is imported before a
-    // write, such as a retention prune, can remove it.
-    if (!this.auditLogImported && this.lastReadSnapshot) this.recordAuditLogSafely(this.lastReadSnapshot);
+    // What the last state showed is recorded before a write, such as a
+    // retention prune or Disconnect, can remove it: on the first write of
+    // a process (records written before the audit log existed), and after
+    // any failed append.
+    const previous = this.lastReadSnapshot;
+    let behind: unknown;
+    if (previous && (!this.auditLogImported || this.auditLogFailure)) {
+      try {
+        this.recordAuditLog(previous);
+      } catch (error) {
+        behind = error;
+        console.warn(`[audit] the audit log could not record the current state before this change. ${errorText(error)}`);
+      }
+    }
     this.recordConfigurationChanges(state, audit);
     // Every file that holds audit history is flushed, not only the write
     // that added events: a later unflushed replacement could lose them.
@@ -8965,6 +9087,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const serialized = `${JSON.stringify(state, null, 2)}\n`;
     const tmpPath = `${this.filePath}.${randomUUID()}.tmp`;
     try {
+      // A write that removes what the audit log does not hold yet is refused.
+      if (behind !== undefined && previous) {
+        const unrecorded = this.unrecordedRemovals(previous, state);
+        if (unrecorded > 0) throw new AuditLogBehindError(unrecorded, behind);
+      }
       // Flushed through the handle that wrote it: Windows needs write access to flush.
       await writeFileDurably(tmpPath, serialized, { durable, mode: 0o600 });
       await atomicRename(tmpPath, this.filePath);

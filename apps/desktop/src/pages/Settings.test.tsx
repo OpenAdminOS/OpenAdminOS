@@ -79,6 +79,21 @@ describe("Settings provider section", () => {
     await waitFor(() => expect(bridge.exportAuditLog).toHaveBeenLastCalledWith({ format: "csv", saveToFile: true, notStartedByPerson: true }));
   });
 
+  it("shows a failed audit log append with what to do, and clears it once the audit log records again", async () => {
+    const user = userEvent.setup();
+    const getAuditLogStatus = vi.fn()
+      .mockResolvedValueOnce({ lastFailure: { failedAt: "2026-11-11T09:00:00.000Z", message: "database or disk is full" } })
+      .mockResolvedValue({});
+    const bridge = makeMockBridge({ getAuditLogStatus });
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/general", bridge });
+    const notice = await screen.findByRole("alert");
+    expect(notice).toHaveTextContent("The audit log could not record an event");
+    expect(notice).toHaveTextContent("database or disk is full");
+    expect(notice).toHaveTextContent("Check free disk space and permissions of the OpenAdminOS data folder.");
+    await user.click(screen.getByRole("button", { name: "Export audit log" }));
+    await waitFor(() => expect(screen.queryByText("The audit log could not record an event")).not.toBeInTheDocument());
+  });
+
   it("requires a real Gemini test and shows CLI diagnostics before activation", async () => {
     const user = userEvent.setup();
     const bridge = makeMockBridge({

@@ -351,6 +351,8 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:prune-drift-history-now"),
   exportAuditLog: (input: ExportAuditLogInput) =>
     ipcRenderer.invoke("openadminos:export-audit-log", input),
+  getAuditLogStatus: () =>
+    ipcRenderer.invoke("openadminos:get-audit-log-status"),
   getChatInvestigationSettings: () =>
     ipcRenderer.invoke("openadminos:get-chat-investigation-settings"),
   setChatInvestigationMode: (mode) =>

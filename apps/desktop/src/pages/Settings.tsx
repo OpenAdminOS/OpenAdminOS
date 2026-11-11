@@ -35,6 +35,7 @@ import {
   resolveProviderDefaultModel,
   DEFAULT_AZURE_OPENAI_API_VERSION,
   type AuditLogExportFormat,
+  type AuditLogStatus,
   type AzureOpenAIProviderConfig,
   type ChatInvestigationMode,
   type ChatInvestigationSettings,
@@ -2730,6 +2731,7 @@ function GeneralSection() {
     useState<AuditLogExportFormat>("json");
   const [auditExportBusy, setAuditExportBusy] = useState(false);
   const [auditExportNotStartedByPerson, setAuditExportNotStartedByPerson] = useState(false);
+  const [auditLogStatus, setAuditLogStatus] = useState<AuditLogStatus | null>(null);
   const [schedulerError, setSchedulerError] = useState<string | null>(null);
   const [companionError, setCompanionError] = useState<string | null>(null);
   const [sandboxError, setSandboxError] = useState<string | null>(null);
@@ -2777,6 +2779,21 @@ function GeneralSection() {
       .catch((error: unknown) => {
         if (!cancelled) {
           setSandboxError(error instanceof Error ? error.message : String(error));
+        }
+      });
+    api
+      .getAuditLogStatus()
+      .then((status) => {
+        if (!cancelled) setAuditLogStatus(status);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setAuditLogStatus({
+            lastFailure: {
+              failedAt: new Date().toISOString(),
+              message: `Its status could not be read. ${error instanceof Error ? error.message : String(error)}`,
+            },
+          });
         }
       });
     api
@@ -2971,14 +2988,17 @@ function GeneralSection() {
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      // A failed integrity check carries its own next step; another folder would not help.
+      // A failed integrity check, or an audit log that could not be read,
+      // carries its own next step; another folder would not help.
       setRunHistoryError(
-        /integrity check/.test(message)
+        /integrity check|nothing was exported/.test(message)
           ? `Audit log export failed: ${message}`
           : `Audit log export failed: ${message} Try again and choose a writable local folder in the save dialog.`,
       );
     } finally {
       setAuditExportBusy(false);
+      // An export records what the state shows, so a failure may be new or cleared.
+      void api.getAuditLogStatus().then(setAuditLogStatus).catch(() => undefined);
     }
   };
 
@@ -3184,6 +3204,9 @@ function GeneralSection() {
             />
           }
         />
+        {auditLogStatus?.lastFailure && (
+          <AuditLogFailureNotice failure={auditLogStatus.lastFailure} />
+        )}
         {(runHistoryError || runHistoryNotice || driftError || driftNotice || auditExportNotice) && (
           <div
             role={runHistoryError || driftError ? "alert" : "status"}
@@ -3518,6 +3541,36 @@ function DriftRetentionControls({
         >
           {busy === "pruning" ? "Pruning" : "Prune now"}
         </Button>
+      </div>
+    </div>
+  );
+}
+
+function AuditLogFailureNotice({
+  failure,
+}: {
+  failure: NonNullable<AuditLogStatus["lastFailure"]>;
+}) {
+  const failedAt = new Date(failure.failedAt);
+  return (
+    <div
+      role="alert"
+      className="border-b border-[var(--color-border-soft)] bg-[var(--color-warning-soft)] px-5 py-3"
+    >
+      <div className="flex items-start gap-2">
+        <IconWarning size={14} className="mt-0.5 shrink-0 text-[var(--color-warning)]" />
+        <div>
+          <div className="text-sm font-medium text-[var(--color-warning)]">
+            The audit log could not record an event
+          </div>
+          <p className="mt-1 text-sm leading-relaxed text-[var(--color-text-soft)]">
+            {Number.isNaN(failedAt.getTime()) ? "" : `${failedAt.toLocaleString()}: `}
+            {failure.message} Missed run and configuration events are recorded with the next
+            change, and a change that would remove them first is refused. Graph writes are not
+            sent while the audit log cannot record them. Check free disk space and permissions of
+            the OpenAdminOS data folder. This notice clears once the audit log records again.
+          </p>
+        </div>
       </div>
     </div>
   );

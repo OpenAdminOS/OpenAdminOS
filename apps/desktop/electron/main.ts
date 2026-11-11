@@ -6190,6 +6190,10 @@ function registerIpcHandlers() {
     }),
   );
   ipcMain.handle(
+    "openadminos:get-audit-log-status",
+    handleTrusted(() => store.getAuditLogStatus()),
+  );
+  ipcMain.handle(
     "openadminos:get-self-training-settings",
     handleTrusted(() => store.getSelfTrainingSettings()),
   );
@@ -7065,6 +7069,11 @@ if (!gotLock) {
     // Fetch registry index in the background after the window is ready.
     // Falls back to local filesystem agents until the fetch completes.
     void refreshRegistryInBackground("startup");
+    // Events a failed append missed in an earlier session are recorded
+    // now, not only with the next change.
+    void store.recordAuditLogAtStartup().catch((error) => {
+      console.warn("[audit] startup record failed:", error);
+    });
     void store.pruneRunHistory("startup").catch((error) => {
       console.warn("[run-history] startup prune failed:", error);
     });

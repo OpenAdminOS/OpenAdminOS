@@ -67,6 +67,20 @@ export class AuditLogIntegrityError extends Error {
   }
 }
 
+/**
+ * A change to state would remove records whose audit events are not in
+ * the audit log yet, and the audit log could not record them first.
+ */
+export class AuditLogBehindError extends Error {
+  constructor(count: number, cause: unknown) {
+    super(
+      `This change was not saved: it removes ${count === 1 ? "1 event" : `${count.toLocaleString("en-US")} events`} the audit log has not recorded yet, and the audit log could not record them now. ${cause instanceof Error ? cause.message : String(cause)} Nothing was removed. Check free disk space and permissions of the OpenAdminOS data folder, then try again.`,
+      { cause },
+    );
+    this.name = "AuditLogBehindError";
+  }
+}
+
 export interface AuditLogChainSummary {
   rowCount: number;
   /** The hash the oldest kept row is chained to. */

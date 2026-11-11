@@ -15,7 +15,7 @@ import type {
 } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 
-import { AuditLogIntegrityError } from "./audit-log.js";
+import { AuditLogBehindError, AuditLogIntegrityError } from "./audit-log.js";
 import { IntelligenceSqliteStore } from "./intune-chat/sqlite-store.js";
 import { AppStateStore } from "./state.js";
 
@@ -234,6 +234,50 @@ describe("append-only audit log in the export", () => {
       assert.equal(row[header.indexOf("agentSlug")], "'-cmd");
       assert.equal(row[header.indexOf("tenantId")], "'@tenant");
       assert.ok(rows.slice(1).every((cells) => cells.every((cell) => !/^[=+\-@\t\r]/.test(cell))));
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+});
+
+describe("audit log behind the state", () => {
+  type Internals = {
+    auditLog: { append(events: unknown[]): number };
+    appendAuditEvents(events: unknown[]): number;
+  };
+
+  it("refuses a prune that would remove unrecorded runs while appends fail, and records them on the next attempt", async () => {
+    const fixture = await makeStoreFixture();
+    const internals = fixture.store as unknown as Internals;
+    const append = internals.auditLog.append.bind(internals.auditLog);
+    let failing = true;
+    internals.auditLog.append = (events) => {
+      if (failing) throw new Error("database or disk is full");
+      return append(events);
+    };
+    try {
+      await fixture.store.setRunHistoryRetentionSettings({ neverPrune: false, keepLastRuns: 1, keepDays: null });
+      const status = await fixture.store.getAuditLogStatus();
+      assert.match(status.lastFailure?.message ?? "", /database or disk is full/);
+
+      await assert.rejects(fixture.store.pruneRunHistoryNow(), (error) => {
+        assert.ok(error instanceof AuditLogBehindError);
+        assert.match(error.message, /^This change was not saved: it removes 3 events the audit log has not recorded yet, and the audit log could not record them now\. database or disk is full Nothing was removed\./);
+        return true;
+      });
+      const kept = JSON.parse(await readFile(join(fixture.dir, "state.json"), "utf8")) as { runs: RunRecord[] };
+      assert.deepEqual(kept.runs.map((run) => run.id).sort(), ["run-old", "run-write"]);
+
+      failing = false;
+      const pruned = await fixture.store.pruneRunHistoryNow();
+      assert.equal(pruned.prunedCount, 1);
+      assert.deepEqual(await fixture.store.getAuditLogStatus(), {});
+      const db = new DatabaseSync(join(fixture.dir, "openadminos.db"), { readOnly: true });
+      const recorded = db.prepare("SELECT type FROM audit_log WHERE run_id = 'run-old' ORDER BY seq").all() as Array<{ type: string }>;
+      const consents = db.prepare("SELECT COUNT(*) AS count FROM audit_log WHERE type = 'hosted-provider.consent'").get() as { count: number };
+      db.close();
+      assert.deepEqual(recorded.map((row) => row.type), ["run.queued", "run.started", "run.completed"]);
+      assert.equal(consents.count, 1);
     } finally {
       await fixture.cleanup();
     }
