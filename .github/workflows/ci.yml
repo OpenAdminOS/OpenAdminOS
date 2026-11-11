@@ -58,6 +58,9 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Mutation register
+        run: npm run test:mutations
+
       - name: Resolve msgraph skill
         run: |
           eval "$(bash scripts/setup-qa.sh)"

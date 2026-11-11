@@ -75,6 +75,10 @@ describe("gateway client pairing", () => {
         kind: "client",
         client: { id: claude.client.id, name: "Claude Code" },
       });
+      assert.deepEqual(await service.authenticate(codex.token), {
+        kind: "client",
+        client: { id: codex.client.id, name: "Codex" },
+      });
       assert.deepEqual(await service.authenticate("not-a-paired-token"), { kind: "unknown" });
 
       await service.revokeClient(claude.client.id);
