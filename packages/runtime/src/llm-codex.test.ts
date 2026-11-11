@@ -186,6 +186,38 @@ setTimeout(() => process.exit(3), 30_000);
   }
 });
 
+describe("Codex CLI watchdog and a slow consumer", () => {
+  it("does not count a stream consumer's pause as silence while the CLI keeps producing", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-slow-consumer-"));
+    try {
+      // 100 agent messages 10 ms apart, then a clean exit.
+      const script = `#!/usr/bin/env node
+if (process.argv[2] === "--version") { console.log("codex-cli 0.200.0"); process.exit(0); }
+let parts = 0;
+setInterval(() => {
+  parts += 1;
+  const line = JSON.stringify({type: "item.completed", item: {type: "agent_message", text: "x".repeat(parts)}}) + "\\n";
+  if (parts < 100) process.stdout.write(line);
+  else process.stdout.write(line, () => process.exit(0));
+}, 10);
+setTimeout(() => process.exit(3), 30_000);
+`;
+      const binaryPath = await writeFakeCodex(root, script);
+      const llm = createCodexLlm({ binaryPath, homePath: root, idleTimeoutMs: 200, timeoutMs: 60_000 });
+      const chunks: Array<{ accumulated: string; done: boolean }> = [];
+      for await (const chunk of llm.stream({ prompt: "Review supplied evidence only." })) {
+        // Hold the first chunk three times the idle limit while the CLI keeps writing.
+        if (chunks.length === 0) await new Promise((resolve) => setTimeout(resolve, 600));
+        chunks.push(chunk);
+      }
+      assert.equal(chunks.at(-1)?.done, true);
+      assert.equal(chunks.at(-1)?.accumulated, "x".repeat(100));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
 async function writeFakeCodex(root: string, script: string): Promise<string> {
   let binaryPath = join(root, "codex");
   if (process.platform === "win32") {

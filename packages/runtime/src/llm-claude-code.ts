@@ -441,6 +441,8 @@ async function* runClaudeCodeStream(input: {
           accumulated = next.text;
         }
         yielded = true;
+        // The consumer's time between chunks is not the CLI's silence.
+        watchdog.pauseIdle();
         yield {
           delta: next.kind === "delta" ? next.text : accumulated,
           accumulated,
@@ -448,8 +450,11 @@ async function* runClaudeCodeStream(input: {
           model: actualModel,
           ...(tokenUsage ? { tokenUsage } : {}),
         };
+        watchdog.touch();
       }
     }
+    // The output has ended; only the hard cap bounds the wait for the exit.
+    watchdog.endOutput();
 
     const trailingEvent = parseClaudeCodeJson(stdout);
     if (trailingEvent) {

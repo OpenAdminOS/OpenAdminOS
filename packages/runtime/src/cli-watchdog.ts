@@ -21,10 +21,10 @@ export interface CliWatchdogLimits {
 export const CLI_WATCHDOG_MAX_LIMIT_MS = 2_147_483_647;
 
 /**
- * The limits for one provider: an explicit option first, then a positive
- * whole number of milliseconds from the environment, up to
- * `CLI_WATCHDOG_MAX_LIMIT_MS`, then the default. A value that is not one
- * is ignored.
+ * The limits for one provider: an explicit option first, then the
+ * environment, then the default. Each must be a positive whole number of
+ * milliseconds up to `CLI_WATCHDOG_MAX_LIMIT_MS`; an option or variable
+ * that is not one is ignored, so the next source applies.
  */
 export function cliWatchdogLimits(input: {
   idleMs?: number;
@@ -34,15 +34,15 @@ export function cliWatchdogLimits(input: {
   environment?: NodeJS.ProcessEnv;
 }): CliWatchdogLimits {
   const environment = input.environment ?? process.env;
+  const valid = (value: number | undefined): number | undefined =>
+    value !== undefined && Number.isSafeInteger(value) && value > 0 && value <= CLI_WATCHDOG_MAX_LIMIT_MS ? value : undefined;
   const fromEnv = (name: string): number | undefined => {
     const raw = environment[name]?.trim() ?? "";
-    if (!/^\d+$/.test(raw)) return undefined;
-    const value = Number(raw);
-    return Number.isSafeInteger(value) && value > 0 && value <= CLI_WATCHDOG_MAX_LIMIT_MS ? value : undefined;
+    return /^\d+$/.test(raw) ? valid(Number(raw)) : undefined;
   };
   return {
-    idleMs: input.idleMs ?? fromEnv(input.env.idleMs) ?? input.defaults.idleMs,
-    maxMs: input.maxMs ?? fromEnv(input.env.maxMs) ?? input.defaults.maxMs,
+    idleMs: valid(input.idleMs) ?? fromEnv(input.env.idleMs) ?? input.defaults.idleMs,
+    maxMs: valid(input.maxMs) ?? fromEnv(input.env.maxMs) ?? input.defaults.maxMs,
     env: input.env,
   };
 }
@@ -60,6 +60,20 @@ export class CliWatchdogError extends Error {
 export interface CliWatchdog {
   /** Records output from the CLI and restarts the silence timer. */
   touch(): void;
+  /**
+   * Stops the silence timer until the next `touch`, for a wait the CLI
+   * does not cause: a consumer that has not asked for the next chunk
+   * yet. Unread output backs up in the pipe and the CLI waits on it,
+   * which is not silence. The hard cap keeps running.
+   */
+  pauseIdle(): void;
+  /**
+   * Stops the silence timer for good once the CLI's output has ended;
+   * `touch` no longer restarts it. The hard cap keeps running until
+   * `clear`, so a CLI that never exits after closing its output is
+   * still ended.
+   */
+  endOutput(): void;
   /** The designed error once the watchdog has ended the run, otherwise undefined. */
   error(): CliWatchdogError | undefined;
   /** Stops both timers. Call it in `finally`. */
@@ -78,6 +92,7 @@ export function startCliWatchdog(
   onStop: () => void,
 ): CliWatchdog {
   let stopped: CliWatchdogStop | undefined;
+  let outputEnded = false;
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   const watchIdle = limits.idleMs < limits.maxMs;
   const stop = (reason: CliWatchdogStop) => {
@@ -96,7 +111,14 @@ export function startCliWatchdog(
 
   return {
     touch() {
-      if (!stopped && watchIdle) armIdle();
+      if (!stopped && watchIdle && !outputEnded) armIdle();
+    },
+    pauseIdle() {
+      clearTimeout(idleTimer);
+    },
+    endOutput() {
+      outputEnded = true;
+      clearTimeout(idleTimer);
     },
     error() {
       if (stopped === "stalled") {

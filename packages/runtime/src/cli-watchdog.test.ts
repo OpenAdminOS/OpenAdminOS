@@ -56,6 +56,34 @@ describe("startCliWatchdog", () => {
     watchdog.clear();
   });
 
+  it("does not count a pause the consumer causes as silence, and restarts the silence timer on the next touch", () => {
+    let stops = 0;
+    const watchdog = startCliWatchdog("Claude Code", { idleMs: 1_000, maxMs: 60_000 }, () => { stops += 1; });
+    mock.timers.tick(999);
+    watchdog.pauseIdle();
+    mock.timers.tick(10_000);
+    assert.equal(stops, 0, "a consumer holding a chunk does not end the run");
+    watchdog.touch();
+    mock.timers.tick(999);
+    assert.equal(stops, 0);
+    mock.timers.tick(1);
+    assert.equal(watchdog.error()?.stop, "stalled");
+    watchdog.clear();
+  });
+
+  it("keeps only the hard cap once the output has ended", () => {
+    let stops = 0;
+    const watchdog = startCliWatchdog("Codex CLI", { idleMs: 1_000, maxMs: 60_000 }, () => { stops += 1; });
+    watchdog.endOutput();
+    watchdog.touch();
+    mock.timers.tick(59_999);
+    assert.equal(stops, 0, "no silence limit after the output ended");
+    mock.timers.tick(1);
+    assert.equal(stops, 1);
+    assert.equal(watchdog.error()?.stop, "time-limit");
+    watchdog.clear();
+  });
+
   it("stops nothing once cleared", () => {
     let stops = 0;
     const watchdog = startCliWatchdog("Claude Code", { idleMs: 1_000, maxMs: 5_000 }, () => { stops += 1; });
@@ -108,6 +136,26 @@ describe("cliWatchdogLimits", () => {
         JSON.stringify(value),
       );
     }
+  });
+
+  it("ignores an option that is not a positive whole number of milliseconds up to the timer limit", () => {
+    for (const value of [0, -5, 1.5, Number.NaN, Number.POSITIVE_INFINITY, CLI_WATCHDOG_MAX_LIMIT_MS + 1, 86_400_000_000]) {
+      assert.deepEqual(
+        cliWatchdogLimits({ idleMs: value, maxMs: value, defaults, env, environment: {} }),
+        { ...defaults, env },
+        String(value),
+      );
+      // The environment, then the default, applies in its place.
+      assert.deepEqual(
+        cliWatchdogLimits({ idleMs: value, maxMs: value, defaults, env, environment: { IDLE_MS: "300000" } }),
+        { idleMs: 300_000, maxMs: defaults.maxMs, env },
+        String(value),
+      );
+    }
+    assert.deepEqual(
+      cliWatchdogLimits({ idleMs: CLI_WATCHDOG_MAX_LIMIT_MS, maxMs: 1, defaults, env, environment: {} }),
+      { idleMs: CLI_WATCHDOG_MAX_LIMIT_MS, maxMs: 1, env },
+    );
   });
 
   it("takes the longest limit a Node timer can wait, and ignores a longer one", () => {

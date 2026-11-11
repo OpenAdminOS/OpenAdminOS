@@ -462,14 +462,19 @@ async function* runCodexExecStream(input: {
           }
         }
         yielded = true;
+        // The consumer's time between chunks is not the CLI's silence.
+        watchdog.pauseIdle();
         yield {
           delta: next.kind === "delta" ? next.text : accumulated,
           accumulated,
           done: false,
           model,
         };
+        watchdog.touch();
       }
     }
+    // The output has ended; only the hard cap bounds the wait for the exit.
+    watchdog.endOutput();
 
     tokenUsage = codexTokenUsage(parseCodexJsonLine(stdout)) ?? tokenUsage;
     const exitCode = await closePromise;

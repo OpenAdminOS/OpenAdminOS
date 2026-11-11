@@ -234,6 +234,24 @@ describe("createClaudeCodeLlm", () => {
     }
   });
 
+  it("does not count a stream consumer's pause as silence while the CLI keeps producing", fakeCli, async () => {
+    const fixture = await createUnfinishedClaudeCodeBinary("steady");
+    try {
+      const llm = createClaudeCodeLlm({ binaryPath: fixture.binaryPath, idleTimeoutMs: 200, timeoutMs: 60_000 });
+      const chunks: Array<{ accumulated: string; done: boolean }> = [];
+      for await (const chunk of llm.stream({ prompt: "Say hello." })) {
+        // Hold the first chunk three times the idle limit, as a slow
+        // consumer would, while the CLI keeps writing.
+        if (chunks.length === 0) await new Promise((resolve) => setTimeout(resolve, 600));
+        chunks.push(chunk);
+      }
+      assert.equal(chunks.at(-1)?.done, true);
+      assert.equal(chunks.at(-1)?.accumulated, "x".repeat(100));
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
   it("ends a CLI that keeps streaming past the hard cap with the time limit error", fakeCli, async () => {
     const fixture = await createUnfinishedClaudeCodeBinary("chatty");
     try {
@@ -254,8 +272,9 @@ describe("createClaudeCodeLlm", () => {
 /**
  * A Claude Code stand-in that never finishes a reply: "quiet" prints
  * nothing, "silent" prints the init event only, "chatty" keeps streaming.
+ * "steady" streams 100 parts 10 ms apart, then finishes with a result.
  */
-async function createUnfinishedClaudeCodeBinary(mode: "quiet" | "silent" | "chatty"): Promise<{
+async function createUnfinishedClaudeCodeBinary(mode: "quiet" | "silent" | "chatty" | "steady"): Promise<{
   binaryPath: string;
   readPids(): Promise<number[]>;
   cleanup(): Promise<void>;
@@ -271,9 +290,16 @@ if (process.argv[2] === "--version") {
 }
 appendFileSync(${JSON.stringify(pidsPath)}, process.pid + "\\n");
 if (${JSON.stringify(mode)} !== "quiet") console.log(JSON.stringify({type: "system", subtype: "init"}));
+let parts = 0;
 setInterval(() => {
   if (${JSON.stringify(mode)} === "chatty") console.log(JSON.stringify({type: "assistant", message: {content: [{type: "text", text: "Hel"}]}}));
-}, 5);
+  if (${JSON.stringify(mode)} !== "steady") return;
+  parts += 1;
+  console.log(JSON.stringify({type: "assistant", message: {content: [{type: "text", text: "x".repeat(parts)}]}}));
+  if (parts === 100) {
+    process.stdout.write(JSON.stringify({type: "result", subtype: "success", result: "x".repeat(parts)}) + "\\n", () => process.exit(0));
+  }
+}, ${JSON.stringify(mode)} === "steady" ? 10 : 5);
 // Never outlive a broken test run.
 setTimeout(() => process.exit(3), 30_000);
 `;
