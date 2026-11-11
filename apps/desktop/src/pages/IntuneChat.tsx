@@ -77,6 +77,7 @@ import {
   isManagedSettingLocked,
   managedLockedModel,
 } from "../shared/openAdminOS";
+import { csvCell } from "../shared/csv";
 import { copyTextToClipboard } from "../shared/clipboard";
 import { CHAT_COPY, FIRST_RUN_CHAT_COPY, HOSTED_CONFIRM_COPY, LOCAL_BOUNDARY_COPY, PROVIDER_COMPANIES, PROVIDER_DETECTION_COPY, PROVIDER_TOOL_NAMES, chatErrorCopy, deriveTrustCopy, promptsGoTo, providerDataLocation, providerDataLocationDetail, sendsThroughTool } from "../copy";
 import { ModelChoice, NoTenantChatHome, NotConnectedCard } from "../components/chat/ChatFirstRun";
@@ -4652,11 +4653,6 @@ function buildDeviceCsv(job: MultiTenantChatJob): string {
     row.sourceRefreshedAt ?? "",
   ]);
   return `${[header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n")}\n`;
-}
-
-function csvCell(value: string): string {
-  if (!/[",\n]/.test(value)) return value;
-  return `"${value.replace(/"/g, '""')}"`;
 }
 
 function safeFileName(value: string): string {
