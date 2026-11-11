@@ -114,14 +114,24 @@ export const TENANT_DISCONNECTING_COPY = TENANT_CLOSED_COPY;
  * apply runs the reviewed plan, so they cannot change what is written.
  */
 function writeEffectKey(action: WriteAction): string {
-  if (action.request) {
-    const { method, path, body } = action.request;
-    return stableStringify({ kind: action.kind, request: { method, path, ...(body !== undefined ? { body } : {}) } });
+  // Keyed by what the handler for this kind reads, never by which fields
+  // happen to be present: a retire that also carries a request still
+  // retires metadata.deviceId, so the request alone must not stand in for it.
+  const request = action.request
+    ? {
+        method: action.request.method,
+        path: action.request.path,
+        ...(action.request.body !== undefined ? { body: action.request.body } : {}),
+      }
+    : null;
+  if (action.kind === "graph-write") {
+    return stableStringify({ kind: action.kind, request });
   }
   if (action.kind === "retire-managed-device") {
     return stableStringify({ kind: action.kind, deviceId: action.metadata?.deviceId ?? null });
   }
-  return stableStringify({ kind: action.kind, metadata: action.metadata ?? null });
+  // Any other kind: everything a handler could read.
+  return stableStringify({ kind: action.kind, request, metadata: action.metadata ?? null });
 }
 
 /**
@@ -254,7 +264,7 @@ export interface RunServiceHost {
    */
   tenantLease?<T>(tenantId: string, work: (signal: AbortSignal) => Promise<T>): Promise<T>;
   /** The guarded connector transport for a tenant's runs (see tenant-lifecycle.ts). */
-  connectorTransport?(tenantId: string): { fetch: typeof fetch; assertEgress: () => void };
+  connectorTransport?(tenantId: string, audit?: RunGraphExecution["audit"]): { fetch: typeof fetch; assertEgress: () => void };
   read(): Promise<RunPersistedState>;
   write(state: RunPersistedState): Promise<void>;
   serialize<T>(task: () => Promise<T>): Promise<T>;
@@ -1283,7 +1293,7 @@ export class RunService {
         ...(selection.tenantSession ? { tenant: selection.tenantSession } : {}),
         connectorConfigs: await this.host.readConnectorConfigs(),
         connectorSecretsFor: (connectorId) => this.host.connectorSecretsFor(connectorId),
-        ...(input.run.tenantId && this.host.connectorTransport ? { connectorTransport: this.host.connectorTransport(input.run.tenantId) } : {}),
+        ...(input.run.tenantId && this.host.connectorTransport ? { connectorTransport: this.host.connectorTransport(input.run.tenantId, { runId: input.run.id, agentSlug: input.run.agentSlug, initiator: runInitiator(input.run) }) } : {}),
         confirmCapability: (info) => requestConnectorConfirmation(info, controller.signal),
         realWrites: true,
         onProgress: (next) => this.queueRunSnapshot(stamp(next)),
@@ -1376,7 +1386,7 @@ export class RunService {
           tenant: selection.tenantSession,
           connectorConfigs: await this.host.readConnectorConfigs(),
           connectorSecretsFor: (connectorId) => this.host.connectorSecretsFor(connectorId),
-        ...(input.run.tenantId && this.host.connectorTransport ? { connectorTransport: this.host.connectorTransport(input.run.tenantId) } : {}),
+        ...(input.run.tenantId && this.host.connectorTransport ? { connectorTransport: this.host.connectorTransport(input.run.tenantId, { runId: input.run.id, agentSlug: input.run.agentSlug, initiator: runInitiator(input.run) }) } : {}),
           confirmCapability: (info) => requestConnectorConfirmation(info, controller.signal),
           realWrites: true,
           onProgress: (next) =>

@@ -247,6 +247,16 @@ describe("write plans are checked against the tenant before apply", () => {
     const retires = { summary: "s", confirmationPhrase: "OFFBOARD 1 DEVICES", actions: [retire("device-a", "91")] };
     assert.equal(planChangeSinceReview(retires, { ...retires, actions: [retire("device-a", "92")] }).changed, false);
     assert.equal(planChangeSinceReview(retires, { ...retires, actions: [retire("device-b", "91")] }).changed, true);
+    // A retire that also carries a request still retires its deviceId, so an
+    // unchanged request must not hide a swapped device.
+    const retireWithRequest = (deviceId: string) => ({ ...retire(deviceId, "91"), request: { method: "POST" as const, path: "/deviceManagement/managedDevices/retire" } });
+    assert.equal(
+      planChangeSinceReview(
+        { ...retires, actions: [retireWithRequest("device-a")] },
+        { ...retires, actions: [retireWithRequest("device-b")] },
+      ).changed,
+      true,
+    );
 
     const rephrased = planChangeSinceReview(reviewed, { ...reviewed, confirmationPhrase: "APPLY TWO CHANGES" });
     assert.equal(rephrased.changed, true);
