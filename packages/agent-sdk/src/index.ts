@@ -4403,6 +4403,16 @@ export type WriteActionSeverity = "default" | "destructive";
 
 export interface WriteAction {
   id: string;
+  /**
+   * The runtime handler that applies this action, from its handler
+   * registry ("graph-write", "retire-managed-device"). Apply skips an
+   * action whose kind has no registered handler and records it as
+   * failed; it is never applied. A handler may read only `request` and
+   * `metadata`, never `id`, `label`, `description` or `severity`. The
+   * check before apply compares reviewed and fresh plans by those two
+   * fields alone, so a new handler that read anything else would let a
+   * change slip past it.
+   */
   kind: string;
   label: string;
   description?: string;

@@ -118,6 +118,11 @@ function writeEffectKey(action: WriteAction): string {
   // Keyed by what the handler for this kind reads, never by which fields
   // happen to be present: a retire that also carries a request still
   // retires metadata.deviceId, so the request alone must not stand in for it.
+  // This relies on two rules of the SDK's WriteAction.kind: handlers read
+  // only `request` and `metadata`, and apply skips a kind with no
+  // registered handler (runAgentTemplateApply records it as failed and
+  // never applies it), so the last case below cannot miss a change that
+  // is written.
   const request = action.request
     ? {
         method: action.request.method,

@@ -401,7 +401,7 @@ function validateWriteStepSettings(
   if (typeof settings.kind !== "string" || settings.kind.length === 0) {
     throw new ManifestValidationError(`${path}.kind`, "must be a non-empty string");
   }
-  if (!ACTION_HANDLERS[settings.kind]) {
+  if (!actionHandler(settings.kind)) {
     throw new ManifestValidationError(
       `${path}.kind`,
       `unknown action kind "${settings.kind}". Supported in v0.1: ${Object.keys(ACTION_HANDLERS).join(", ")}`,
@@ -741,7 +741,7 @@ export async function runAgentTemplateApply(
 
   for (const action of plan.actions) {
     ctx.signal?.throwIfAborted();
-    const handler = ACTION_HANDLERS[action.kind];
+    const handler = actionHandler(action.kind);
     if (!handler) {
       failed.push({
         id: action.id,
@@ -800,6 +800,20 @@ interface ActionHandlerResult {
 
 type ActionHandler = (action: WriteAction, ctx: RunContext) => Promise<ActionHandlerResult>;
 
+/**
+ * The handler registered for `kind`, or undefined. Only the registry's
+ * own entries count, so a kind such as "constructor" or "toString" finds
+ * no handler and its action is skipped, never applied.
+ */
+function actionHandler(kind: string): ActionHandler | undefined {
+  return Object.hasOwn(ACTION_HANDLERS, kind) ? ACTION_HANDLERS[kind] : undefined;
+}
+
+/**
+ * The action kind handler registry. A handler may read only the action's
+ * `request` and `metadata`: the check before apply compares plans by
+ * those fields (see WriteAction.kind in the SDK).
+ */
 const ACTION_HANDLERS: Record<string, ActionHandler> = {
   "retire-managed-device": async (action, ctx) => {
     const deviceId =
