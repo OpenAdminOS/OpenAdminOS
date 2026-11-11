@@ -1186,11 +1186,19 @@ through the Graph adapter and the Graph sends of connectors with their own Graph
 client (Outlook `sendMail`, Teams messages), whose connector transport records
 them the same way. The Graph adapter refuses every write when it has no audit
 sink; only tests opt out with `unauditedWrites`. If the attempt cannot
-be recorded, the write is refused and nothing is sent; a result that cannot be
-recorded is reported in the run log. On upgrade, the run history, configuration
-changes, Nova connector deliveries and consent events stored by earlier
-versions are imported, in time order, so nothing still on the device is
-lost; events of runs pruned before the upgrade cannot be recovered.
+be recorded, the write is refused and nothing is sent. A result that cannot be
+recorded is reported in the run log of the run that sent it (connector sends
+too) and kept in `openadminos.db-audit-pending.json` next to the database; every
+later append records the kept results first, in the same transaction, and they
+are cleared only once recorded, also across a restart. Settings -> General
+counts them until then ("N Graph write results are not in the audit log yet"),
+whatever other appends succeed; a pending file that cannot be read is left in
+place, never overwritten, and named there. Every failure of the audit sink, a
+throw or a rejection of an async sink, is kept for that notice. On upgrade, the
+run history, configuration changes, Nova connector deliveries and consent
+events stored by earlier versions are imported, in time order, so nothing
+still on the device is lost; events of runs pruned before the upgrade cannot be
+recovered.
 
 Until that import, or any later append, has succeeded, the state is recorded
 again before each write, and a write that would remove records whose events the

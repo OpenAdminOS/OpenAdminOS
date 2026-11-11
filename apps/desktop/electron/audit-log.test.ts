@@ -16,6 +16,7 @@ import {
   AuditLogStore,
   canonicalJson,
   graphWriteAuditSink,
+  trackedAuditSink,
   type AuditLogEventSeed,
 } from "./audit-log.js";
 
@@ -351,5 +352,149 @@ describe("Graph write audit sink", () => {
       return true;
     });
     assert.equal(sent, 0);
+  });
+});
+
+describe("tracked audit sink", () => {
+  it("notes a rejection of an async sink and refuses the write, as it does a throw", async () => {
+    const noted: string[] = [];
+    let sent = 0;
+    const sink = trackedAuditSink({
+      attempted: async () => {
+        throw new Error("database is locked");
+      },
+      result: () => {
+        throw new Error("disk I/O error");
+      },
+    }, (error) => noted.push(error instanceof Error ? error.message : String(error)));
+    const graph = createGraphAdapter({
+      tokenProvider: async () => "token",
+      writeAudit: sink,
+      fetchImpl: (async () => {
+        sent += 1;
+        return new Response(null, { status: 204 });
+      }) as typeof fetch,
+    });
+    await assert.rejects(graph.request({ method: "POST", path: "/groups", body: {} }), (error) => {
+      assert.ok(error instanceof GraphWriteAuditError);
+      return true;
+    });
+    assert.equal(sent, 0);
+    assert.throws(() => sink.result({ attemptId: "a", method: "POST", path: "/groups", outcome: "ok", attempts: 1, durationMs: 1 }), /disk I\/O error/);
+    assert.deepEqual(noted, ["database is locked", "disk I/O error"]);
+  });
+});
+
+describe("Graph write results the audit log could not record", () => {
+  function result(attemptId: string): AuditLogEventSeed {
+    return {
+      id: `graph-write:${attemptId}:result`,
+      timestamp: "2026-11-01T10:00:00.000Z",
+      type: "graph.write.result",
+      source: "graph-write",
+      tenantId: "tenant-1",
+      details: { attemptId, method: "POST", path: "/me/sendMail", outcome: "ok", status: 202, attempts: 1, durationMs: 5 },
+    };
+  }
+
+  /** A store whose appends fail while `failing` is set, as with a full disk. */
+  function failingStore(path: string): { store: AuditLogStore; fail(on: boolean): void } {
+    const store = new AuditLogStore(path);
+    const append = store.append.bind(store);
+    let failing = false;
+    store.append = (events) => {
+      if (failing) throw new Error("database or disk is full");
+      return append(events);
+    };
+    return { store, fail: (on) => (failing = on) };
+  }
+
+  it("keeps a result that cannot be appended, across a restart, until an append records it", async () => {
+    await withDatabase((path) => {
+      const first = failingStore(path);
+      first.store.append([event("before")]);
+      first.fail(true);
+      assert.throws(() => first.store.appendOrKeep([result("attempt-1")]), /database or disk is full/);
+      assert.deepEqual(first.store.unrecordedResults(), { count: 1 });
+      first.store.close();
+      assert.ok(existsSync(`${path}-audit-pending.json`));
+
+      const second = new AuditLogStore(path);
+      try {
+        assert.deepEqual(second.unrecordedResults(), { count: 1 });
+        // An unrelated append records the kept result first, in the same transaction.
+        assert.equal(second.append([event("after")]), 2);
+        assert.equal(second.unrecordedResults(), undefined);
+        assert.equal(existsSync(`${path}-audit-pending.json`), false);
+        assert.deepEqual(second.readVerified().events.map((entry) => entry.id), ["before", "graph-write:attempt-1:result", "after"]);
+      } finally {
+        second.close();
+      }
+    });
+  });
+
+  it("drops a kept result that is already stored when it loads", async () => {
+    await withDatabase((path) => {
+      const store = new AuditLogStore(path);
+      store.append([result("attempt-1")]);
+      store.close();
+      writeFileSync(`${path}-audit-pending.json`, JSON.stringify([result("attempt-1")]));
+      const reopened = new AuditLogStore(path);
+      try {
+        assert.equal(reopened.unrecordedResults(), undefined);
+        assert.equal(existsSync(`${path}-audit-pending.json`), false);
+      } finally {
+        reopened.close();
+      }
+    });
+  });
+
+  it("reports a file of kept results that cannot be read and never overwrites it", async () => {
+    await withDatabase((path) => {
+      writeFileSync(`${path}-audit-pending.json`, "not json");
+      const { store, fail } = failingStore(path);
+      try {
+        assert.deepEqual(store.unrecordedResults(), { count: 0, unreadableFile: "openadminos.db-audit-pending.json" });
+        fail(true);
+        assert.throws(() => store.appendOrKeep([result("attempt-2")]));
+        assert.deepEqual(store.unrecordedResults(), { count: 1, unreadableFile: "openadminos.db-audit-pending.json" });
+        assert.equal(readFileSync(`${path}-audit-pending.json`, "utf8"), "not json");
+      } finally {
+        store.close();
+      }
+    });
+  });
+
+  it("sends the write, says the result is kept, and records it with the next append", async () => {
+    const store = new AuditLogStore(":memory:");
+    const append = store.append.bind(store);
+    let failResults = true;
+    store.append = (events) => {
+      if (failResults && events.some((entry) => entry.type === "graph.write.result")) throw new Error("database or disk is full");
+      return append(events);
+    };
+    const warnings: string[] = [];
+    let sent = 0;
+    const graph = createGraphAdapter({
+      tokenProvider: async () => "token",
+      writeAudit: graphWriteAuditSink(store, { tenantId: "tenant-1", runId: "run-1" }),
+      log: (level, message) => {
+        if (level === "warn") warnings.push(message);
+      },
+      fetchImpl: (async () => {
+        sent += 1;
+        return new Response(null, { status: 204 });
+      }) as typeof fetch,
+    });
+    await graph.request({ method: "PATCH", path: "/users/user-1", body: { department: "Finance" } });
+    assert.equal(sent, 1);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0] ?? "", /^The audit log could not record the result of PATCH \/users\/user-1\. database or disk is full The request was sent\. Its result is kept on this device and recorded once the audit log can record again; Settings, General shows how many results wait\.$/);
+    assert.deepEqual(store.unrecordedResults(), { count: 1 });
+    failResults = false;
+    store.append([event("later")]);
+    assert.equal(store.unrecordedResults(), undefined);
+    assert.deepEqual(store.readVerified().events.map((entry) => entry.type), ["graph.write.attempted", "graph.write.result", "provider.changed"]);
+    store.close();
   });
 });

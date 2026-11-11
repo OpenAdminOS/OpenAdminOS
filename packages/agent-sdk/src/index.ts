@@ -1204,6 +1204,12 @@ export interface AuditLogExportResult {
 export interface AuditLogStatus {
   /** The last append that failed, until an append succeeds again. */
   lastFailure?: { failedAt: string; message: string };
+  /**
+   * Results of Graph writes that were sent but not recorded yet. They are
+   * kept on the device and cleared only when an append records them.
+   * `unreadableFile` names a file of kept results that cannot be read.
+   */
+  unrecordedResults?: { count: number; unreadableFile?: string };
 }
 
 export interface TrustState {

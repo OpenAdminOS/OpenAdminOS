@@ -528,6 +528,54 @@ describe("connector Graph writes in the audit log", () => {
       await fixture.cleanup();
     }
   });
+
+  it("warns in the run log when a sent Outlook mail's result cannot be recorded, and keeps it counted until it is", async () => {
+    const fixture = await makeStoreFixture();
+    const graph = stubGraph();
+    try {
+      await fixture.store.getAppState();
+      const internals = fixture.store as unknown as Internals;
+      const append = internals.auditLog.append.bind(internals.auditLog);
+      // The disk fills up after the attempt was recorded, and stays full.
+      let full = false;
+      let recovered = false;
+      internals.auditLog.append = (events) => {
+        if (!recovered && (full || events.some((event) => event.type === "graph.write.result"))) {
+          full = true;
+          throw new Error("database or disk is full");
+        }
+        return append(events);
+      };
+      await sendOutlookMail(internals.connectorTransport(tenant.id, { runId: "run-write", agentSlug: agent.slug, initiator: "person" }));
+      assert.equal(graph.sent.length, 1, "the mail was sent");
+      // The run log warning is queued on the state lock; this waits for it.
+      await internals.serialize(async () => undefined);
+      const run = (await fixture.store.getAppState()).runs.find((entry) => entry.id === "run-write");
+      const warning = run?.logs.find((log) => log.level === "warn");
+      assert.match(warning?.message ?? "", /^The audit log could not record the result of POST \/me\/sendMail\. database or disk is full The request was sent\. Its result is kept on this device and recorded once the audit log can record again; Settings, General shows how many results wait\.$/);
+      const status = await fixture.store.getAuditLogStatus();
+      assert.deepEqual(status.unrecordedResults, { count: 1 });
+      assert.match(status.lastFailure?.message ?? "", /database or disk is full/);
+
+      // Kept across a restart, and cleared only when the result is recorded.
+      recovered = true;
+      const reopened = new AppStateStore({ filePath: join(fixture.dir, "state.json"), tokenStore, userDataPath: fixture.dir, statsApiUrl: "" });
+      try {
+        assert.deepEqual((await reopened.getAuditLogStatus()).unrecordedResults, { count: 1 });
+        await reopened.setActiveProvider("openai");
+        assert.deepEqual(await reopened.getAuditLogStatus(), {});
+      } finally {
+        reopened.close();
+      }
+      const db = new DatabaseSync(join(fixture.dir, "openadminos.db"), { readOnly: true });
+      const types = db.prepare("SELECT type FROM audit_log WHERE source = 'graph-write' ORDER BY seq").all() as Array<{ type: string }>;
+      db.close();
+      assert.deepEqual(types.map((row) => row.type), ["graph.write.attempted", "graph.write.result"]);
+    } finally {
+      graph.restore();
+      await fixture.cleanup();
+    }
+  });
 });
 
 async function makeStoreFixture(options: { extraRuns?: RunRecord[] } = {}): Promise<{

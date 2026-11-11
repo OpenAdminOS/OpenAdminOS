@@ -33,6 +33,10 @@ import type { GraphWriteAuditSink } from "@openadminos/runtime";
  * files can hide a change. The finalHash of an export is the anchor an
  * admin keeps outside this device. A missing anchor is adopted only
  * for an empty table; beside rows it is an integrity error.
+ *
+ * A `graph.write.result` that cannot be appended is kept in a pending
+ * file next to the database until an append records it, so a write that
+ * was sent always ends with its result in the log.
  */
 
 /** The hash the first row is chained to. */
@@ -113,6 +117,30 @@ export interface AuditLogChainSummary {
 /** The anchor file is the database path with this suffix. */
 const AUDIT_ANCHOR_SUFFIX = "-audit-anchor.json";
 
+/** The file of results not recorded yet is the database path with this suffix. */
+const AUDIT_PENDING_SUFFIX = "-audit-pending.json";
+
+/**
+ * The result of a Graph write that was sent could not be appended. It is
+ * kept on the device and recorded with the next append that succeeds.
+ */
+export class AuditLogResultKeptError extends Error {
+  constructor(cause: unknown) {
+    super(
+      `${cause instanceof Error ? cause.message : String(cause)} The request was sent. Its result is kept on this device and recorded once the audit log can record again; Settings, General shows how many results wait.`,
+      { cause },
+    );
+    this.name = "AuditLogResultKeptError";
+  }
+}
+
+/** Results kept because the audit log could not record them yet. */
+export interface AuditLogUnrecordedResults {
+  count: number;
+  /** A pending file that could not be read; it is left in place for review. */
+  unreadableFile?: string;
+}
+
 /** The chain as the app last left it, kept outside the table. */
 interface AuditLogAnchor {
   version: 1;
@@ -141,6 +169,12 @@ export class AuditLogStore {
   private closed = false;
   /** Undefined for an in-memory log, which has nothing outside it to compare with. */
   private readonly anchorPath: string | undefined;
+  /** Undefined for an in-memory log, whose kept results live only in `pending`. */
+  private readonly pendingPath: string | undefined;
+  /** Events that could not be appended yet; every append records them first. */
+  private pending: AuditLogEventSeed[] = [];
+  /** The pending file could not be read, so it is never overwritten. */
+  private pendingUnreadable = false;
 
   /** `path` is the app database, or ":memory:" when the host has no data folder. */
   constructor(path: string, private readonly clock: () => Date = () => new Date()) {
@@ -158,10 +192,12 @@ export class AuditLogStore {
     }
     this.migrate();
     this.anchorPath = path === ":memory:" ? undefined : `${path}${AUDIT_ANCHOR_SUFFIX}`;
+    this.pendingPath = path === ":memory:" ? undefined : `${path}${AUDIT_PENDING_SUFFIX}`;
     // First run: the empty table becomes the anchor. The anchor ships with
     // the table, so a missing anchor beside rows was removed, and is left
     // missing for verification to report.
     if (this.anchorPath && !existsSync(this.anchorPath) && this.isEmpty()) this.writeAnchor();
+    this.loadPending();
   }
 
   close(): void {
@@ -221,13 +257,41 @@ export class AuditLogStore {
     return this.db.prepare("SELECT 1 FROM audit_log WHERE event_id = ?").get(eventId) !== undefined;
   }
 
+  /** What is kept because it could not be recorded yet. */
+  unrecordedResults(): AuditLogUnrecordedResults | undefined {
+    if (this.pending.length === 0 && !this.pendingUnreadable) return undefined;
+    return {
+      count: this.pending.length,
+      ...(this.pendingUnreadable && this.pendingPath ? { unreadableFile: basename(this.pendingPath) } : {}),
+    };
+  }
+
+  /**
+   * Appends like `append`; when that fails, the events are kept, in the
+   * pending file when there is one, and recorded by the next append that
+   * succeeds. Rethrows the failure.
+   */
+  appendOrKeep(events: readonly AuditLogEventSeed[]): number {
+    try {
+      return this.append(events);
+    } catch (error) {
+      const kept = new Set(this.pending.map((entry) => entry.id));
+      for (const event of events) if (!kept.has(event.id)) this.pending.push(event);
+      this.persistPending();
+      throw error;
+    }
+  }
+
   /**
    * Appends the events not stored yet, in the order given, in one
    * transaction, and returns how many were added. Each is chained to the
-   * row before it; the transaction keeps the chain linear.
+   * row before it; the transaction keeps the chain linear. Events kept
+   * by an earlier failed `appendOrKeep` go first, in the same transaction.
    */
   append(events: readonly AuditLogEventSeed[]): number {
-    if (events.length === 0) return 0;
+    const retried = this.pending;
+    const all = retried.length > 0 ? [...retried, ...events] : events;
+    if (all.length === 0) return 0;
     const exists = this.db.prepare("SELECT 1 FROM audit_log WHERE event_id = ?");
     const insert = this.db.prepare(
       `INSERT INTO audit_log (
@@ -250,7 +314,7 @@ export class AuditLogStore {
       // After a prune that removed every row, the chain goes on from the
       // newest hash it removed, which the anchor keeps.
       let previous = last?.sha256 ?? (anchor.holds && anchor.anchor ? anchor.anchor.lastHash : AUDIT_CHAIN_START_HASH);
-      for (const event of events) {
+      for (const event of all) {
         if (exists.get(event.id) !== undefined) continue;
         const json = canonicalJson(event);
         const sha256 = chainHash(previous, json);
@@ -278,6 +342,10 @@ export class AuditLogStore {
     // After the commit: an anchor behind the table, as after a crash in
     // between, is accepted and moved forward by the next append.
     if (added > 0 && anchorHolds) this.writeAnchorAfterCommit();
+    if (retried.length > 0) {
+      this.pending = this.pending.filter((entry) => !retried.includes(entry));
+      this.persistPending();
+    }
     return added;
   }
 
@@ -412,6 +480,40 @@ export class AuditLogStore {
     return this.db.prepare("SELECT 1 FROM audit_log LIMIT 1").get() === undefined;
   }
 
+  /** Loads the pending file; events stored since it was written are dropped. */
+  private loadPending(): void {
+    if (!this.pendingPath || !existsSync(this.pendingPath)) return;
+    let events: AuditLogEventSeed[] | undefined;
+    try {
+      const value = JSON.parse(readFileSync(this.pendingPath, "utf8")) as unknown;
+      if (Array.isArray(value) && value.every(isEventSeed)) events = value;
+    } catch {
+      // Unreadable below.
+    }
+    if (!events) {
+      this.pendingUnreadable = true;
+      console.warn(`[audit] ${basename(this.pendingPath)} cannot be read; it is left in place and Settings reports it.`);
+      return;
+    }
+    this.pending = events.filter((event) => !this.has(event.id));
+    if (this.pending.length !== events.length) this.persistPending();
+  }
+
+  /**
+   * Writes the pending events durably, or removes the file when none are
+   * left. A failure is only logged: the events stay in memory, and the
+   * next append records them or writes the file again.
+   */
+  private persistPending(): void {
+    if (!this.pendingPath || this.pendingUnreadable) return;
+    try {
+      if (this.pending.length === 0) rmSync(this.pendingPath, { force: true });
+      else writeFileDurablySync(this.pendingPath, `${JSON.stringify(this.pending)}\n`);
+    } catch (error) {
+      console.warn(`[audit] ${basename(this.pendingPath)} could not be updated; the events stay in memory until the audit log records them. ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   private readAnchor(): AnchorRead {
     if (!this.anchorPath || !existsSync(this.anchorPath)) return { kind: "missing" };
     try {
@@ -502,15 +604,58 @@ export function graphWriteAuditSink(
       }]);
     },
     result(result) {
-      store.append([{
-        ...base,
-        id: `graph-write:${result.attemptId}:result`,
-        timestamp: clock().toISOString(),
-        type: "graph.write.result",
-        details: { ...result },
-      }]);
+      // The write was sent, so its result is kept until it is recorded.
+      try {
+        store.appendOrKeep([{
+          ...base,
+          id: `graph-write:${result.attemptId}:result`,
+          timestamp: clock().toISOString(),
+          type: "graph.write.result",
+          details: { ...result },
+        }]);
+      } catch (error) {
+        throw new AuditLogResultKeptError(error);
+      }
     },
   };
+}
+
+/**
+ * Wraps a sink so every failure, a throw or a rejection of an async
+ * sink, is passed to `noteFailure` and then rethrown or rejected, so a
+ * failed attempt still refuses the write.
+ */
+export function trackedAuditSink(
+  sink: GraphWriteAuditSink,
+  noteFailure: (error: unknown) => void,
+): GraphWriteAuditSink {
+  const failed = (error: unknown): never => {
+    noteFailure(error);
+    throw error;
+  };
+  const tracked = <T>(record: (input: T) => void | Promise<void>) => (input: T): void | Promise<void> => {
+    let recorded: void | Promise<void>;
+    try {
+      recorded = record(input);
+    } catch (error) {
+      return failed(error);
+    }
+    return recorded instanceof Promise ? recorded.catch(failed) : recorded;
+  };
+  return { attempted: tracked(sink.attempted), result: tracked(sink.result) };
+}
+
+function isEventSeed(value: unknown): value is AuditLogEventSeed {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.id === "string" &&
+    typeof record.timestamp === "string" &&
+    typeof record.type === "string" &&
+    typeof record.source === "string" &&
+    record.details !== null &&
+    typeof record.details === "object"
+  );
 }
 
 export function chainHash(previousHash: string, canonicalEvent: string): string {

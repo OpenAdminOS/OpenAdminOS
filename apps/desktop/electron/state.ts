@@ -297,6 +297,7 @@ import {
   canonicalJson,
   chainHash,
   graphWriteAuditSink,
+  trackedAuditSink,
   type AuditLogActor,
   type AuditLogChainSummary,
   type AuditLogEvent,
@@ -3237,6 +3238,7 @@ export class AppStateStore {
     const audited = auditGraphWritesFetch(
       (input, init) => fetch(input, init),
       this.graphWriteAudit(tenantId, tenant, audit),
+      { log: (message) => this.warnGraphWriteAudit(message, audit?.runId) },
     );
     return {
       fetch: this.tenantLifecycle.guardedFetch(tenantId, audited),
@@ -3245,8 +3247,25 @@ export class AppStateStore {
   }
 
   /**
-   * The audit sink for a tenant's Graph writes. A failed append is kept
-   * for the warning in Settings, and a failed attempt refuses the write.
+   * A result a connector send could not record goes to the run log of the
+   * run that sent it, like the warning of the Graph adapter, and to the
+   * console when no run sent it. Not awaited: the send may hold the lock.
+   */
+  private warnGraphWriteAudit(message: string, runId: string | undefined): void {
+    if (!runId) {
+      console.warn(`[graph] ${message}`);
+      return;
+    }
+    void this.runService.appendRunLog(runId, "warn", message).catch((error: unknown) => {
+      console.warn(`[graph] ${message} The run log could not record this warning. ${errorText(error)}`);
+    });
+  }
+
+  /**
+   * The audit sink for a tenant's Graph writes. A failed attempt refuses
+   * the write. A failed result is kept until an append records it, and
+   * Settings counts it until then. Every failure, also of an async sink,
+   * is kept for the warning in Settings.
    */
   private graphWriteAudit(
     tenantId: string,
@@ -3258,15 +3277,7 @@ export class AppStateStore {
       actor: actorForTenant(tenant, tenantId),
       ...audit,
     }, () => this.clock());
-    const tracked = <T>(record: (input: T) => void | Promise<void>) => (input: T) => {
-      try {
-        record(input);
-      } catch (error) {
-        this.noteAuditLogFailure(error);
-        throw error;
-      }
-    };
-    return { attempted: tracked(sink.attempted), result: tracked(sink.result) };
+    return trackedAuditSink(sink, (error) => this.noteAuditLogFailure(error));
   }
 
   /** The tenant's lifecycle phase: open, closing (Disconnect or its cleanup pending) or removed. */
@@ -9057,9 +9068,16 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     }
   }
 
-  /** What Settings shows about the audit log: the last append that failed, until one succeeds. */
+  /**
+   * What Settings shows about the audit log: the last append that failed,
+   * until one succeeds, and the Graph write results kept until recorded.
+   */
   async getAuditLogStatus(): Promise<AuditLogStatus> {
-    return this.auditLogFailure ? { lastFailure: { ...this.auditLogFailure } } : {};
+    const unrecorded = this.auditLog.unrecordedResults();
+    return {
+      ...(this.auditLogFailure ? { lastFailure: { ...this.auditLogFailure } } : {}),
+      ...(unrecorded ? { unrecordedResults: unrecorded } : {}),
+    };
   }
 
   /**

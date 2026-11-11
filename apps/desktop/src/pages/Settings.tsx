@@ -3207,6 +3207,9 @@ function GeneralSection() {
         {auditLogStatus?.lastFailure && (
           <AuditLogFailureNotice failure={auditLogStatus.lastFailure} />
         )}
+        {auditLogStatus?.unrecordedResults && (
+          <AuditLogUnrecordedResultsNotice unrecorded={auditLogStatus.unrecordedResults} />
+        )}
         {(runHistoryError || runHistoryNotice || driftError || driftNotice || auditExportNotice) && (
           <div
             role={runHistoryError || driftError ? "alert" : "status"}
@@ -3570,6 +3573,48 @@ function AuditLogFailureNotice({
             sent while the audit log cannot record them. Check free disk space and permissions of
             the OpenAdminOS data folder. This notice clears once the audit log records again.
           </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AuditLogUnrecordedResultsNotice({
+  unrecorded,
+}: {
+  unrecorded: NonNullable<AuditLogStatus["unrecordedResults"]>;
+}) {
+  const { count, unreadableFile } = unrecorded;
+  return (
+    <div
+      role="alert"
+      className="border-b border-[var(--color-border-soft)] bg-[var(--color-warning-soft)] px-5 py-3"
+    >
+      <div className="flex items-start gap-2">
+        <IconWarning size={14} className="mt-0.5 shrink-0 text-[var(--color-warning)]" />
+        <div>
+          <div className="text-sm font-medium text-[var(--color-warning)]">
+            {count === 0
+              ? "Kept Graph write results cannot be read"
+              : count === 1
+                ? "1 Graph write result is not in the audit log yet"
+                : `${count.toLocaleString("en-US")} Graph write results are not in the audit log yet`}
+          </div>
+          {count > 0 && (
+            <p className="mt-1 text-sm leading-relaxed text-[var(--color-text-soft)]">
+              {count === 1 ? "The write was sent and its attempt is recorded. Its result is" : "The writes were sent and their attempts are recorded. Their results are"}{" "}
+              kept on this device and recorded with the next audit log entry. Check free disk space
+              and permissions of the OpenAdminOS data folder. This notice clears once{" "}
+              {count === 1 ? "it is" : "they are"} recorded.
+            </p>
+          )}
+          {unreadableFile && (
+            <p className="mt-1 text-sm leading-relaxed text-[var(--color-text-soft)]">
+              {unreadableFile} in the app data folder holds results kept from an earlier session and
+              cannot be read, so they cannot be recorded. Keep a copy of it for review, then remove
+              it and restart OpenAdminOS.
+            </p>
+          )}
         </div>
       </div>
     </div>

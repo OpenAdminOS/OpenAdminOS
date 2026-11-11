@@ -94,6 +94,32 @@ describe("Settings provider section", () => {
     await waitFor(() => expect(screen.queryByText("The audit log could not record an event")).not.toBeInTheDocument());
   });
 
+  it("counts Graph write results the audit log has not recorded yet, until they are recorded", async () => {
+    const user = userEvent.setup();
+    const getAuditLogStatus = vi.fn()
+      .mockResolvedValueOnce({ unrecordedResults: { count: 2 } })
+      .mockResolvedValue({});
+    const bridge = makeMockBridge({ getAuditLogStatus });
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/general", bridge });
+    const notice = await screen.findByRole("alert");
+    expect(notice).toHaveTextContent("2 Graph write results are not in the audit log yet");
+    expect(notice).toHaveTextContent("The writes were sent and their attempts are recorded.");
+    expect(notice).toHaveTextContent("recorded with the next audit log entry");
+    await user.click(screen.getByRole("button", { name: "Export audit log" }));
+    await waitFor(() => expect(screen.queryByText(/Graph write results are not in the audit log yet/)).not.toBeInTheDocument());
+  });
+
+  it("names a file of kept Graph write results that cannot be read", async () => {
+    const bridge = makeMockBridge({
+      getAuditLogStatus: vi.fn(async () => ({ unrecordedResults: { count: 0, unreadableFile: "openadminos.db-audit-pending.json" } })),
+    });
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/general", bridge });
+    const notice = await screen.findByRole("alert");
+    expect(notice).toHaveTextContent("Kept Graph write results cannot be read");
+    expect(notice).toHaveTextContent("openadminos.db-audit-pending.json in the app data folder holds results kept from an earlier session and cannot be read");
+    expect(notice).toHaveTextContent("Keep a copy of it for review, then remove it and restart OpenAdminOS.");
+  });
+
   it("requires a real Gemini test and shows CLI diagnostics before activation", async () => {
     const user = userEvent.setup();
     const bridge = makeMockBridge({
