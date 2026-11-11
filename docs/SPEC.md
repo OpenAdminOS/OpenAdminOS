@@ -1129,7 +1129,10 @@ row chained to 64 zeroes), computed on insert inside one transaction so the
 chain stays linear. SQLite triggers refuse every UPDATE and every replace, and
 refuse a DELETE unless it removes the oldest row and that row was recorded more
 than `AUDIT_LOG_RETENTION_DAYS` (3,650 days, the longest run-history retention
-Settings allows) ago; the store removes such rows oldest first. Run-history
+Settings allows) ago; the store removes such rows oldest first, with every
+run-history prune (at startup, on the scheduler tick and by hand). The audit
+connection writes with `synchronous=FULL`, and both connections to the file wait
+up to 5 seconds on a busy database. Run-history
 pruning and Disconnect never delete audit rows: the audit of a disconnected
 organization, its runs and the disconnect itself outlive it (decided
 2026-11-11). Run events (queued, started, write confirmation requested,
@@ -1137,19 +1140,52 @@ accepted and rejected, finished, connector deliveries in run logs),
 configuration changes and Nova connector deliveries are derived from each
 write to `state.json` and appended right after it, under event ids fixed by
 the run and event, so a missed append is made by the next write and nothing is
-recorded twice. Hosted-provider consent is appended when it is given, and a
-refused gateway proposal (`gateway.proposal.refused`, source `gateway`) when it
-is refused. Every
+recorded twice. The run fingerprint that decides whether a run is recorded
+again covers only what its events show (status, timestamps, plan size and
+connector delivery lines), so plain log lines of a live run start no audit
+transaction. Hosted-provider consent is appended when it is given and also kept
+in the Chat database, so a failed append is imported later by its id. A refused
+gateway proposal (`gateway.proposal.refused`, source `gateway`) is appended when
+it is refused. Every
 Microsoft Graph write (any method but GET) records `graph.write.attempted`
 before the request is sent and `graph.write.result` after it (ok or failed,
 HTTP status, Graph `request-id`, error class, requests sent, duration), sharing
 one attempt id, with the run id, tenant id, agent slug, initiator, method and
-path, and a SHA-256 digest of the body, never the body. If the attempt cannot
+path, and a SHA-256 digest of the body, never the body. This covers agent writes
+through the Graph adapter and the Graph sends of connectors with their own Graph
+client (Outlook `sendMail`, Teams messages), whose connector transport records
+them the same way. The Graph adapter refuses every write when it has no audit
+sink; only tests opt out with `unauditedWrites`. If the attempt cannot
 be recorded, the write is refused and nothing is sent; a result that cannot be
 recorded is reported in the run log. On upgrade, the run history, configuration
 changes, Nova connector deliveries and consent events stored by earlier
-versions are imported once, in time order, so nothing still on the device is
+versions are imported, in time order, so nothing still on the device is
 lost; events of runs pruned before the upgrade cannot be recovered.
+
+Until that import, or any later append, has succeeded, the state is recorded
+again before each write, and a write that would remove records whose events the
+audit log does not hold (a retention prune, Disconnect, a trimmed configuration
+list) is refused with a designed error ("This change was not saved: it removes
+N events the audit log has not recorded yet ... Nothing was removed.").
+Disconnect keeps the organization's Chat data, which holds its consents, until
+the audit log has recorded them. The import counts as done only when it covered
+the state the last write or read left. The last failed append is shown in
+Settings -> General under the audit log export, with what to do, until an
+append succeeds; a catch-up record runs at startup after the first read.
+
+An anchor file next to the database (`openadminos.db-audit-anchor.json`) holds
+the chain as the app last left it: the hash the oldest kept row is chained to,
+the newest hash and the row count. It is written durably after each append and
+with each prune. Verification checks the first row against its start, and the
+newest row and the count against its end, so rows removed from either end and a
+table dropped or emptied are designed integrity errors even though the rows
+left still chain, and later appends do not move the anchor over the loss. Rows
+newer than the anchor, as a crash between the commit and the anchor write
+leaves, are accepted. After a prune that removed every row, the chain goes on
+from the last hash it removed. A first open or an upgrade without an anchor
+takes the table as it is. This detects changes made outside OpenAdminOS to the
+database alone; someone who can rewrite both files can hide a change. The
+`finalHash` of an export is the anchor an admin keeps outside the device.
 
 Runs carry `initiator`: `person`, `schedule`, `office` (an Agent Team
 assignment), `gateway` (a write gateway proposal) or `rollback` (a baseline
@@ -1166,8 +1202,12 @@ JSON and CSV exports read the `audit_log` table in the order events were
 recorded: run events, write-confirmation request/accepted/rejected events
 without the typed phrase content, Graph write attempts and results, connector
 delivery audit entries from `ConnectorAuditEntry`, and hosted-provider consent
-events. The export first verifies the whole stored chain; a broken chain is a
-designed error that names the entry and exports nothing. The export header
+events. Events are listed in recorded order, not sorted by timestamp, so events
+imported at upgrade may follow newer ones; the export note says so. The export
+first records what the state shows and verifies the whole stored chain and its
+anchor; a broken chain or anchor is a designed error that names what failed
+and exports nothing, and a database that cannot be read is a designed error
+that says nothing was exported. The export header
 records the active run-history retention policy and the last prune result.
 Each exported event carries a SHA-256 hash chained as
 `previousHash + canonical JSON event without sha256`, starting from 64 zeroes;
@@ -1175,11 +1215,13 @@ JSON records the start and final hash in `hashChain` plus the verified stored
 chain (`hashChain.stored`), and CSV includes the hash and chain metadata
 columns and an `initiator` column. Without filters the export chain equals the
 stored chain. Exports can be limited to a date range and to runs no person
-started (Settings: "Only runs no person started"), which keeps only events of
-runs whose initiator is not `person` and leaves out events of no run. A CSV
-cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return is
-prefixed with `'` so a spreadsheet does not run it as a formula; remove that
-prefix before verifying the chain from such a cell. Signed or third-party
+started (Settings: "Only runs no person started"), which keeps only events
+with a run id whose initiator, recorded on the event or taken from the run, is
+not `person`, and leaves out events of no run such as a refused gateway
+request. A CSV cell whose first character, also after leading whitespace, is
+`=`, `+`, `-` or `@`, or that starts with a tab or a carriage return, is
+prefixed with `'` so a spreadsheet does not run it as a formula, and the export
+note says so; remove that prefix before verifying the chain from such a cell. Signed or third-party
 cryptographic timestamps are deferred.
 
 The export also includes configuration changes, with source
