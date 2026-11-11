@@ -148,8 +148,10 @@ export {
   type TokenCacheStorage,
 } from "./msal.js";
 export {
+  auditGraphWritesFetch,
   createGraphAdapter,
   GraphWriteAuditError,
+  GraphWriteUnauditedError,
   type GraphAdapterLogger,
   type GraphAdapterOptions,
   type GraphWriteAuditAttempt,

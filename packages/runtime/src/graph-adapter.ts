@@ -50,8 +50,14 @@ export interface GraphAdapterOptions {
    * Records every Graph write (any method but GET) in the host's audit
    * log: `attempted` before the request is sent, `result` after it.
    * When `attempted` rejects, the write is refused and nothing is sent.
+   * Without a sink, every write is refused unless `unauditedWrites` is set.
    */
   writeAudit?: GraphWriteAuditSink;
+  /**
+   * Sends writes without an audit sink. Only for tests and tools that
+   * never reach a tenant; the desktop host always passes `writeAudit`.
+   */
+  unauditedWrites?: boolean;
 }
 
 export type GraphWriteMethod = "POST" | "PATCH" | "PUT" | "DELETE";
@@ -110,6 +116,16 @@ export class GraphWriteAuditError extends Error {
       { cause },
     );
     this.name = "GraphWriteAuditError";
+  }
+}
+
+/** A write reached an adapter that has no audit sink, so it was not sent. */
+export class GraphWriteUnauditedError extends Error {
+  constructor(method: GraphWriteMethod, path: string) {
+    super(
+      `${method} ${path} was not sent: this Graph client has no audit log to record it, and OpenAdminOS sends no write it cannot record. This is a defect in OpenAdminOS. Report it with the name of the agent or connector that made the request.`,
+    );
+    this.name = "GraphWriteUnauditedError";
   }
 }
 
@@ -220,6 +236,7 @@ export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
         log: options.log,
         accessContext: options.accessContext,
         writeAudit: options.writeAudit,
+        unauditedWrites: options.unauditedWrites,
       });
     },
 
@@ -269,6 +286,7 @@ export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
         log: options.log,
         accessContext: options.accessContext,
         writeAudit: options.writeAudit,
+        unauditedWrites: options.unauditedWrites,
         ...(input.signal ? { signal: options.signal ? AbortSignal.any([options.signal, input.signal]) : input.signal } : {}),
       });
     },
@@ -322,6 +340,8 @@ interface GraphRequestInput {
   log?: GraphAdapterLogger;
   /** Audit sink for writes; see GraphAdapterOptions.writeAudit. */
   writeAudit?: GraphWriteAuditSink;
+  /** See GraphAdapterOptions.unauditedWrites. */
+  unauditedWrites?: boolean;
   /**
    * Caller cancellation. Distinct from the per-attempt timeout: when
    * this aborts the request is abandoned without a retry, because the
@@ -338,11 +358,15 @@ interface GraphExchange {
 }
 
 async function graphRequest<T>(input: GraphRequestInput): Promise<T> {
-  const sink = input.method === "GET" ? undefined : input.writeAudit;
   const exchange: GraphExchange = { attempts: 0 };
-  if (!sink) return sendGraphRequest<T>(input, exchange);
-  const method = input.method as GraphWriteMethod;
+  if (input.method === "GET") return sendGraphRequest<T>(input, exchange);
+  const method = input.method;
   const path = input.baseUrl ? shortenPath(input.url, input.baseUrl) : input.url.split("?")[0] ?? input.url;
+  const sink = input.writeAudit;
+  if (!sink) {
+    if (input.unauditedWrites === true) return sendGraphRequest<T>(input, exchange);
+    throw new GraphWriteUnauditedError(method, path);
+  }
   const attemptId = randomUUID();
   try {
     await sink.attempted({
@@ -383,6 +407,81 @@ async function graphRequest<T>(input: GraphRequestInput): Promise<T> {
     await record({ outcome: "failed", errorClass: classifyWriteFailure(error, exchange) });
     throw error;
   }
+}
+
+/** Microsoft Graph hosts of the public and national clouds. */
+const GRAPH_HOSTS = new Set([
+  "graph.microsoft.com",
+  "graph.microsoft.us",
+  "dod-graph.microsoft.us",
+  "microsoftgraph.chinacloudapi.cn",
+]);
+
+const WRITE_METHODS = new Set<string>(["POST", "PATCH", "PUT", "DELETE"]);
+
+/**
+ * A fetch that records every Graph write it sends in the audit sink, as
+ * the adapter does: `attempted` before the request and `result` after
+ * it. When `attempted` rejects, nothing is sent. Graph reads and other
+ * hosts pass through unchanged. Connectors that bring their own Graph
+ * client, such as Outlook and Teams, send through it.
+ */
+export function auditGraphWritesFetch(
+  base: typeof fetch,
+  sink: GraphWriteAuditSink,
+  options: { log?: (message: string) => void } = {},
+): typeof fetch {
+  return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+    const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+    if (!GRAPH_HOSTS.has(url.hostname) || method === "GET" || method === "HEAD" || method === "OPTIONS") {
+      return base(input, init);
+    }
+    const path = url.pathname.replace(/^\/(?:v1\.0|beta)(?=\/|$)/, "") || "/";
+    if (!WRITE_METHODS.has(method)) {
+      throw new Error(`${method} ${path} was not sent: OpenAdminOS sends Graph requests only as GET, POST, PATCH, PUT or DELETE.`);
+    }
+    const writeMethod = method as GraphWriteMethod;
+    const attemptId = randomUUID();
+    const body = init?.body;
+    try {
+      await sink.attempted({
+        attemptId,
+        method: writeMethod,
+        path,
+        ...(typeof body === "string" ? { bodyDigest: createHash("sha256").update(body).digest("hex") } : {}),
+      });
+    } catch (cause) {
+      throw new GraphWriteAuditError(writeMethod, path, cause);
+    }
+    const startMs = Date.now();
+    const record = async (result: Omit<GraphWriteAuditResult, "attemptId" | "method" | "path" | "attempts" | "durationMs">) => {
+      try {
+        await sink.result({ attemptId, method: writeMethod, path, ...result, attempts: 1, durationMs: Date.now() - startMs });
+      } catch (error) {
+        const message = `The audit log could not record the result of ${method} ${path}. ${describe(error)}`;
+        if (options.log) options.log(message);
+        else console.warn(`[graph] ${message}`);
+      }
+    };
+    let response: Response;
+    try {
+      response = await base(input, init);
+    } catch (error) {
+      await record({ outcome: "failed", errorClass: init?.signal?.aborted ? "cancelled" : "network-error" });
+      throw error;
+    }
+    const requestId = response.headers.get("request-id") ?? response.headers.get("client-request-id") ?? undefined;
+    await record({
+      outcome: response.ok ? "ok" : "failed",
+      status: response.status,
+      ...(requestId ? { requestId } : {}),
+      ...(response.ok
+        ? {}
+        : { errorClass: response.status === 401 ? "unauthorized" as const : response.status === 403 ? "access-denied" as const : "http-error" as const }),
+    });
+    return response;
+  }) as typeof fetch;
 }
 
 function classifyWriteFailure(error: unknown, exchange: GraphExchange): GraphWriteErrorClass {

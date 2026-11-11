@@ -2,7 +2,13 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 
-import { createGraphAdapter, GraphWriteAuditError, type GraphWriteAuditSink } from "./graph-adapter.js";
+import {
+  auditGraphWritesFetch,
+  createGraphAdapter,
+  GraphWriteAuditError,
+  GraphWriteUnauditedError,
+  type GraphWriteAuditSink,
+} from "./graph-adapter.js";
 import { GraphAccessDeniedError } from "@openadminos/agent-sdk";
 
 interface RecordedCall {
@@ -125,6 +131,7 @@ describe("createGraphAdapter", () => {
   it("does NOT retry POST on 5xx (avoids duplicating non-idempotent writes)", async () => {
     const calls: RecordedCall[] = [];
     const adapter = createGraphAdapter({
+      unauditedWrites: true,
       tokenProvider: async () => "t",
       maxRetries: 5,
       fetchImpl: mockFetch(
@@ -147,6 +154,7 @@ describe("createGraphAdapter", () => {
   it("does NOT retry the retire helper on 5xx", async () => {
     const calls: RecordedCall[] = [];
     const adapter = createGraphAdapter({
+      unauditedWrites: true,
       tokenProvider: async () => "t",
       maxRetries: 5,
       fetchImpl: mockFetch([new Response("boom", { status: 503 })], calls),
@@ -180,6 +188,7 @@ describe("createGraphAdapter", () => {
   it("retries on 429 regardless of method (rate-limit signal)", async () => {
     const calls: RecordedCall[] = [];
     const adapter = createGraphAdapter({
+      unauditedWrites: true,
       tokenProvider: async () => "t",
       maxRetries: 3,
       fetchImpl: mockFetch(
@@ -221,6 +230,7 @@ describe("createGraphAdapter", () => {
   it("serialises a JSON body and sets content-type for writes", async () => {
     const calls: RecordedCall[] = [];
     const adapter = createGraphAdapter({
+      unauditedWrites: true,
       tokenProvider: async () => "t",
       fetchImpl: mockFetch([jsonResponse({ ok: true })], calls),
     });
@@ -258,6 +268,7 @@ describe("createGraphAdapter", () => {
   it("encodes the device id when retiring (path-injection guard)", async () => {
     const calls: RecordedCall[] = [];
     const adapter = createGraphAdapter({
+      unauditedWrites: true,
       tokenProvider: async () => "t",
       fetchImpl: mockFetch(
         [new Response(null, { status: 204 })],
@@ -361,6 +372,7 @@ describe("createGraphAdapter transient network faults", () => {
   it("does NOT retry a POST that failed mid-flight", async () => {
     const calls: RecordedCall[] = [];
     const adapter = createGraphAdapter({
+      unauditedWrites: true,
       tokenProvider: async () => "t",
       maxRetries: 3,
       retryBackoffMs: 0,
@@ -441,6 +453,7 @@ describe("cancellation while acquiring a Graph token", () => {
     let finish!: (token: string) => void;
     let fetchCount = 0;
     const graph = createGraphAdapter({
+      unauditedWrites: true,
       signal: controller.signal,
       tokenProvider: () => new Promise<string>((resolve) => { finish = resolve; }),
       fetchImpl: async () => { fetchCount += 1; return new Response("{}"); },
@@ -559,6 +572,34 @@ describe("Graph write audit", () => {
     assert.ok(logs.some((message) => /audit log could not record the result of DELETE \/groups\/g1/.test(message)));
   });
 
+  it("refuses every write when no audit sink is given, unless unaudited writes are asked for", async () => {
+    const calls: RecordedCall[] = [];
+    const adapter = createGraphAdapter({
+      tokenProvider: async () => "t",
+      fetchImpl: mockFetch([jsonResponse({ value: [] })], calls),
+    });
+    for (const method of ["POST", "PATCH", "PUT", "DELETE"] as const) {
+      await assert.rejects(adapter.request({ method, path: "/groups/g1", body: {} }), (error) => {
+        assert.ok(error instanceof GraphWriteUnauditedError);
+        assert.match(error.message, new RegExp(`^${method} /groups/g1 was not sent: this Graph client has no audit log`));
+        return true;
+      });
+    }
+    await assert.rejects(adapter.retireManagedDevice("device-1"), GraphWriteUnauditedError);
+    assert.equal(calls.length, 0);
+    // Reads need no sink.
+    await adapter.request({ method: "GET", path: "/groups" });
+    assert.equal(calls.length, 1);
+
+    const optedOut = createGraphAdapter({
+      tokenProvider: async () => "t",
+      unauditedWrites: true,
+      fetchImpl: mockFetch([new Response(null, { status: 204 })], calls),
+    });
+    await optedOut.request({ method: "DELETE", path: "/groups/g1" });
+    assert.equal(calls.at(-1)?.method, "DELETE");
+  });
+
   it("does not record reads", async () => {
     const events: unknown[] = [];
     const adapter = createGraphAdapter({
@@ -568,5 +609,71 @@ describe("Graph write audit", () => {
     });
     await adapter.request({ method: "GET", path: "/groups" });
     assert.equal(events.length, 0);
+  });
+});
+
+describe("auditGraphWritesFetch", () => {
+  function recordingSink(events: Array<Record<string, unknown>>, options: { failAttempted?: boolean } = {}): GraphWriteAuditSink {
+    return {
+      attempted: async (attempt) => {
+        if (options.failAttempted) throw new Error("database is closed");
+        events.push({ kind: "attempted", ...attempt });
+      },
+      result: async (result) => {
+        events.push({ kind: "result", ...result });
+      },
+    };
+  }
+
+  it("records a Graph write before it is sent and its result after, and passes reads and other hosts through", async () => {
+    const events: Array<Record<string, unknown>> = [];
+    const calls: RecordedCall[] = [];
+    const audited = auditGraphWritesFetch(
+      mockFetch([
+        new Response(null, { status: 202, headers: { "request-id": "req-1" } }),
+        jsonResponse({ value: [] }),
+        jsonResponse({ ok: true }),
+      ], calls),
+      recordingSink(events),
+    );
+    const body = JSON.stringify({ message: { subject: "Report" } });
+    await audited("https://graph.microsoft.com/beta/me/sendMail", { method: "POST", body });
+    await audited("https://graph.microsoft.com/beta/me", { method: "GET" });
+    await audited("https://slack.com/api/chat.postMessage", { method: "POST", body: "{}" });
+    assert.equal(calls.length, 3);
+    assert.equal(events.length, 2);
+    const [attempted, result] = events;
+    assert.deepEqual(attempted, {
+      kind: "attempted",
+      attemptId: result?.attemptId,
+      method: "POST",
+      path: "/me/sendMail",
+      bodyDigest: createHash("sha256").update(body).digest("hex"),
+    });
+    assert.equal(result?.outcome, "ok");
+    assert.equal(result?.status, 202);
+    assert.equal(result?.requestId, "req-1");
+    assert.equal(result?.attempts, 1);
+  });
+
+  it("records a refused Graph write as failed with its class", async () => {
+    const events: Array<Record<string, unknown>> = [];
+    const audited = auditGraphWritesFetch(mockFetch([new Response("{}", { status: 403 })], []), recordingSink(events));
+    const response = await audited("https://graph.microsoft.com/v1.0/teams/t1/channels/c1/messages", { method: "POST", body: "{}" });
+    assert.equal(response.status, 403);
+    assert.equal(events[1]?.path, "/teams/t1/channels/c1/messages");
+    assert.equal(events[1]?.outcome, "failed");
+    assert.equal(events[1]?.errorClass, "access-denied");
+  });
+
+  it("sends nothing when the attempt cannot be recorded", async () => {
+    const calls: RecordedCall[] = [];
+    const audited = auditGraphWritesFetch(mockFetch([new Response(null, { status: 202 })], calls), recordingSink([], { failAttempted: true }));
+    await assert.rejects(audited("https://graph.microsoft.com/beta/me/sendMail", { method: "POST", body: "{}" }), (error) => {
+      assert.ok(error instanceof GraphWriteAuditError);
+      assert.match(error.message, /^POST \/me\/sendMail was not sent: the audit log could not record it\. database is closed/);
+      return true;
+    });
+    assert.equal(calls.length, 0);
   });
 });
