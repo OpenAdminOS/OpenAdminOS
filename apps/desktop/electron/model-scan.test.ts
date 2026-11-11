@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -19,7 +19,7 @@ import {
 } from "./model-scan.js";
 import { checkAzureOpenAI, checkLmStudio, checkOllama } from "./provider-detail.js";
 import { chmod, readFile } from "node:fs/promises";
-import { scanProviderCheck, runScanCheck } from "./model-scan.js";
+import { installedOnDisk, scanProviderCheck, runScanCheck } from "./model-scan.js";
 import { AppStateStore } from "./state.js";
 
 const catalog = (id: string) => providerCatalog.find((provider) => provider.id === id)!;
@@ -1173,3 +1173,110 @@ describe("review round 2: coordination and Start (items 3, 7, B)", () => {
     }
   });
 });
+
+describe("Lemonade in the scan", () => {
+  const originalFetch = globalThis.fetch;
+  const originalLemonade = process.env.OPENADMINOS_LEMONADE_URL;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    if (originalLemonade === undefined) delete process.env.OPENADMINOS_LEMONADE_URL;
+    else process.env.OPENADMINOS_LEMONADE_URL = originalLemonade;
+  });
+
+  it("checks Lemonade on its loopback port and reads its chat models", async () => {
+    delete process.env.OPENADMINOS_LEMONADE_URL;
+    const urls: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      urls.push(String(input instanceof Request ? input.url : input));
+      return new Response(JSON.stringify({
+        object: "list",
+        data: [
+          { id: "Qwen3-0.6B-GGUF", labels: ["chat", "reasoning"], recipe: "llamacpp" },
+          { id: "nomic-embed-text-v1-GGUF", labels: ["embeddings"], recipe: "llamacpp" },
+        ],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    const [probe] = await runModelScan({
+      checks: buildModelScanChecks({
+        catalog: [catalog("lemonade")],
+        check: (_id, signal, timeoutMs) => scanProviderCheck(catalog("lemonade"), { signal, timeoutMs }),
+        onDisk: async () => false,
+        platform: "linux",
+      }),
+    });
+    assert.deepEqual(urls, ["http://127.0.0.1:13305/v1/models"]);
+    assert.equal(probe!.name, "Lemonade");
+    assert.equal(probe!.where, "local");
+    assert.equal(probe!.target, "localhost:13305");
+    assert.equal(probe!.state, "found");
+    assert.equal(probe!.ready, true);
+    assert.equal(probe!.summary, "Running, 1 model");
+    assert.deepEqual(probe!.models, ["Qwen3-0.6B-GGUF"]);
+  });
+
+  it("does not contact a Lemonade endpoint outside this device", async () => {
+    let fetched = false;
+    let checked = false;
+    globalThis.fetch = (async () => {
+      fetched = true;
+      throw new Error("must not fetch");
+    }) as typeof fetch;
+    process.env.OPENADMINOS_LEMONADE_URL = "http://192.168.1.20:13305/v1";
+    const [probe] = await runModelScan({
+      checks: buildModelScanChecks({
+        catalog: [catalog("lemonade")],
+        check: async () => { checked = true; return catalog("lemonade"); },
+        platform: "linux",
+      }),
+    });
+    assert.equal(fetched, false);
+    assert.equal(checked, false);
+    assert.equal(probe!.summary, "Endpoint outside this device");
+    assert.equal(probe!.notContacted, true);
+  });
+
+  it("names the recovery for a running server without a chat model and for an installed one that is stopped", () => {
+    const empty = scanProbeFromProvider({ ...catalog("lemonade"), status: "connected", models: [] });
+    assert.equal(empty.state, "found");
+    assert.equal(empty.ready, false);
+    assert.equal(empty.summary, "Running, no chat model");
+    assert.deepEqual(empty.facts, ["Download a chat model in Lemonade, then scan again."]);
+
+    const stopped = (platform: NodeJS.Platform) =>
+      scanProbeFromProvider({ ...catalog("lemonade"), status: "not-installed", models: [] }, { installedOnDisk: true, platform });
+    assert.equal(stopped("darwin").summary, "Installed, not running");
+    assert.deepEqual(stopped("darwin").facts, ["Start it with `sudo launchctl kickstart -k system/ai.lemonadeserver.server`, then scan again."]);
+    assert.deepEqual(stopped("linux").facts, ["Start it with `sudo systemctl start lemond`, then scan again."]);
+    assert.deepEqual(stopped("win32").facts, ["Start Lemonade Server from the Start menu, then scan again."]);
+
+    assert.equal(scanProbeFromProvider({ ...catalog("lemonade"), status: "not-installed", models: [] }).state, "not-found");
+  });
+
+  it("finds an installed Lemonade from its installers' locations", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "oa-lemonade-"));
+    try {
+      assert.equal(await installedOnDisk("lemonade", { PATH: "", HOME: dir, LOCALAPPDATA: join(dir, "Local"), ProgramFiles: join(dir, "PF") }, "win32"), false);
+      const perUser = join(dir, "Local", "lemonade_server", "bin");
+      await mkdir(perUser, { recursive: true });
+      await writeFile(join(perUser, "LemonadeServer.exe"), "");
+      assert.equal(await installedOnDisk("lemonade", { PATH: "", HOME: dir, LOCALAPPDATA: join(dir, "Local"), ProgramFiles: join(dir, "PF") }, "win32"), true);
+
+      const bin = join(dir, "bin");
+      await mkdir(bin);
+      assert.equal(await installedOnDisk("lemonade", { PATH: bin, HOME: dir }, "linux"), (await Promise.all(["/usr/bin/lemond", "/opt/bin/lemond", "/snap/bin/lemonade-server"].map(exists))).some(Boolean));
+      await writeFile(join(bin, "lemonade"), "");
+      assert.equal(await installedOnDisk("lemonade", { PATH: bin, HOME: dir }, "linux"), true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}

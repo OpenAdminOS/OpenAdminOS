@@ -23,6 +23,7 @@ export const PROVIDER_DETECTION_COPY = {
 export const PROVIDER_TOOL_NAMES: Readonly<Partial<Record<string, string>>> = {
   ollama: "Ollama",
   "lm-studio": "LM Studio",
+  lemonade: "Lemonade",
   "apple-foundation": "Apple Intelligence",
   anthropic: "Claude Code",
   openai: "Codex",
@@ -49,6 +50,9 @@ export const MODEL_CHOICE_COPY = {
     id === "lm-studio" ? "On this device. OpenAdminOS starts its server." : "On this device. OpenAdminOS starts it for you.",
   localGetModel: "On this device. Get OpenAdmin 8B, a model trained for Intune and Entra work.",
   localLoadModel: "On this device. Load a model in LM Studio, then scan again.",
+  /** Lemonade runs as a system service on macOS and Linux, so OpenAdminOS does not start it. */
+  localStartLemonade: "On this device. Start Lemonade Server, then scan again.",
+  localDownloadLemonadeModel: "On this device. Download a chat model in Lemonade, then scan again.",
   chooseModel: "Choose a model",
   openChat: "Open Chat",
   use: (name: string) => `Use ${name}`,

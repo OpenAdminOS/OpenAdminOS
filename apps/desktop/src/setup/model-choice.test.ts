@@ -80,3 +80,32 @@ describe("the choice of what answers in Chat (design round, B)", () => {
     expect(optionsFromProviders([running("lm-studio", ["qwen3-8b"])])[0]).toMatchObject({ action: "open", state: "Ready", model: "qwen3-8b" });
   });
 });
+
+describe("Lemonade in the choice", () => {
+  it("offers Scan again, never Start, for a stopped Lemonade and one without a chat model", () => {
+    const options = optionsFromProbes([
+      probe("lemonade", "local", { summary: "Installed, not running", ready: false }),
+    ], undefined);
+    expect(options).toEqual([
+      expect.objectContaining({ providerId: "lemonade", name: "Lemonade", state: "Not running", action: "rescan", whereLine: "On this device. Start Lemonade Server, then scan again." }),
+    ]);
+    expect(actionLabel(options[0])).toBe("Scan again");
+
+    const empty = optionsFromProbes([probe("lemonade", "local", { summary: "Running, no chat model", ready: false })], undefined);
+    expect(empty[0]).toMatchObject({ action: "rescan", state: "No model yet", whereLine: "On this device. Download a chat model in Lemonade, then scan again." });
+  });
+
+  it("reads the same rows from the provider list, after LM Studio and before Apple Intelligence", () => {
+    const lemonade: ProviderSummary = { id: "lemonade", name: "Lemonade", description: "", isLocal: true, status: "connected", models: ["Qwen3-0.6B-GGUF"], defaultModel: "Qwen3-0.6B-GGUF" };
+    const lmStudio: ProviderSummary = { id: "lm-studio", name: "LM Studio", description: "", isLocal: true, status: "connected", models: ["m"], defaultModel: "m" };
+    const apple: ProviderSummary = { id: "apple-foundation", name: "Apple Intelligence", description: "", isLocal: true, status: "connected", models: ["SystemLanguageModel.default"] };
+    expect(optionsFromProviders([apple, lemonade, lmStudio]).map((option) => [option.providerId, option.action])).toEqual([
+      ["lm-studio", "open"],
+      ["lemonade", "open"],
+      ["apple-foundation", "open"],
+    ]);
+    expect(optionsFromProviders([{ ...lemonade, models: [], defaultModel: undefined }])[0]).toMatchObject({ action: "rescan", state: "No model yet" });
+    expect(optionsFromProviders([{ ...lemonade, status: "not-installed", models: [], defaultModel: undefined, installed: true }])[0]).toMatchObject({ action: "rescan", state: "Not running" });
+    expect(optionsFromProviders([{ ...lemonade, status: "not-installed", models: [], defaultModel: undefined }])).toEqual([]);
+  });
+});

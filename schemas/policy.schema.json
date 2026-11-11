@@ -76,7 +76,7 @@
   },
   "$defs": {
     "providerId": {
-      "enum": ["ollama", "apple-foundation", "lm-studio", "anthropic", "openai", "copilot", "gemini", "azure-openai"]
+      "enum": ["ollama", "apple-foundation", "lm-studio", "lemonade", "anthropic", "openai", "copilot", "gemini", "azure-openai"]
     },
     "publicReferenceId": {
       "enum": ["microsoft-learn", "kql-search", "intuneautomation", "release-communications", "windowsforum", "splashtop-kb", "splashtop-packr-kb", "endoflife-ai"]

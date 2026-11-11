@@ -10,6 +10,7 @@ export type ProviderId =
   | "ollama"
   | "apple-foundation"
   | "lm-studio"
+  | "lemonade"
   | "anthropic"
   | "openai"
   | "azure-openai"
@@ -4500,6 +4501,16 @@ export const providerCatalog: readonly ProviderSummary[] = [
     isLocal: true,
     status: "available",
     detail: "Waiting for LM Studio server check",
+    models: [],
+  },
+  {
+    id: "lemonade",
+    name: "Lemonade",
+    description:
+      "Use Lemonade Server's local OpenAI-compatible API. Prompts stay on this device when the endpoint is loopback.",
+    isLocal: true,
+    status: "available",
+    detail: "Waiting for Lemonade server check",
     models: [],
   },
   {

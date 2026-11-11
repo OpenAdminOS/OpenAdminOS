@@ -10,14 +10,16 @@ import type {
 } from "@openadminos/agent-sdk";
 import { resolveProviderDefaultModel } from "@openadminos/agent-sdk";
 import {
+  classifyLemonadeEndpoint,
   classifyLmStudioEndpoint,
   classifyOllamaEndpoint,
+  resolveLemonadeEndpoint,
   resolveLmStudioEndpoint,
   resolveOllamaEndpoint,
 } from "@openadminos/runtime";
 
 import { LOCAL_AUTO_SELECT_ORDER, isProviderReady } from "../src/shared/provider-detection.js";
-import { checkAdditionalCli, checkAppleFoundation, checkClaudeCode, checkCodex, checkLmStudio, checkOllama } from "./provider-detail.js";
+import { checkAdditionalCli, checkAppleFoundation, checkClaudeCode, checkCodex, checkLemonade, checkLmStudio, checkOllama } from "./provider-detail.js";
 
 /**
  * The first-launch model scan (SPEC.md 4a, first launch). Every check runs
@@ -26,7 +28,7 @@ import { checkAdditionalCli, checkAppleFoundation, checkClaudeCode, checkCodex, 
  * answer in time reports "could not check" with a retry, never a gap.
  *
  * Local only: a check reads local files, runs a local CLI's own version and
- * sign-in status commands, or calls a loopback port. An Ollama or LM Studio
+ * sign-in status commands, or calls a loopback port. An Ollama, LM Studio or Lemonade
  * endpoint that points off the device is not contacted, and no prompt is
  * sent to any provider.
  */
@@ -53,6 +55,7 @@ export function checkingProbe(check: Pick<ModelScanCheck, "providerId" | "name" 
 export const SCAN_TARGETS: Readonly<Record<ProviderId, string>> = {
   ollama: "localhost:11434",
   "lm-studio": "localhost:1234",
+  lemonade: "localhost:13305",
   "apple-foundation": "Apple Foundation helper",
   anthropic: "claude --version, claude auth status",
   openai: "codex --version, codex login status",
@@ -177,12 +180,13 @@ export function scanOutcome(
 }
 
 /** Hosted providers are offered in this order, whatever order their checks finished in. */
-const SCAN_ORDER: readonly ProviderId[] = ["ollama", "lm-studio", "apple-foundation", "anthropic", "openai", "copilot", "gemini", "azure-openai"];
+const SCAN_ORDER: readonly ProviderId[] = ["ollama", "lm-studio", "lemonade", "apple-foundation", "anthropic", "openai", "copilot", "gemini", "azure-openai"];
 
 /** Names as the admin knows them. */
 export const SCAN_NAMES: Readonly<Record<ProviderId, string>> = {
   ollama: "Ollama",
   "lm-studio": "LM Studio",
+  lemonade: "Lemonade",
   "apple-foundation": "Apple Intelligence",
   anthropic: "Claude Code",
   openai: "Codex",
@@ -191,10 +195,21 @@ export const SCAN_NAMES: Readonly<Record<ProviderId, string>> = {
   "azure-openai": "Azure OpenAI",
 };
 
+/**
+ * How to start Lemonade by hand. It installs as a system service on macOS
+ * (a launch daemon) and Linux (systemd), which an app cannot start without
+ * admin rights, and as a tray app on Windows.
+ */
+export function lemonadeStartHint(platform: NodeJS.Platform = process.platform): string {
+  if (platform === "win32") return "Start Lemonade Server from the Start menu, then scan again.";
+  if (platform === "darwin") return "Start it with `sudo launchctl kickstart -k system/ai.lemonadeserver.server`, then scan again.";
+  return "Start it with `sudo systemctl start lemond`, then scan again.";
+}
+
 /** Turns an existing provider check into a scan result line. */
 export function scanProbeFromProvider(
   provider: ProviderSummary,
-  extra: { installedOnDisk?: boolean; target?: string } = {},
+  extra: { installedOnDisk?: boolean; target?: string; platform?: NodeJS.Platform } = {},
 ): ModelScanProbe {
   const base = {
     providerId: provider.id,
@@ -212,7 +227,7 @@ export function scanProbeFromProvider(
     return { ...base, state: "could-not-check", ready: false, summary: "Could not check", facts: [provider.detail ?? `${base.name} did not answer as expected. Retry to check again.`] };
   }
 
-  if (provider.id === "ollama" || provider.id === "lm-studio") {
+  if (provider.id === "ollama" || provider.id === "lm-studio" || provider.id === "lemonade") {
     const openAdmin = provider.id === "ollama" && hasOpenAdmin8B(provider.models);
     if (ready) {
       return {
@@ -227,6 +242,9 @@ export function scanProbeFromProvider(
         ...(provider.id === "ollama" ? { hasOpenAdmin8B: openAdmin } : {}),
       };
     }
+    if (provider.status === "connected" && provider.id === "lemonade") {
+      return { ...base, state: "found", ready: false, summary: "Running, no chat model", facts: ["Download a chat model in Lemonade, then scan again."] };
+    }
     if (provider.status === "connected") {
       return { ...base, state: "found", ready: false, summary: "Running, no model loaded", facts: [provider.id === "ollama" ? "Pull a model, for example `ollama pull openadminos/openadmin-8b`, then scan again." : "Load a model in LM Studio, then scan again."] };
     }
@@ -240,7 +258,13 @@ export function scanProbeFromProvider(
         state: "found",
         ready: false,
         summary: "Installed, not running",
-        facts: [provider.id === "ollama" ? "Start it with `ollama serve`, then scan again." : "Start the LM Studio server, then scan again."],
+        facts: [
+          provider.id === "ollama"
+            ? "Start it with `ollama serve`, then scan again."
+            : provider.id === "lemonade"
+              ? lemonadeStartHint(extra.platform)
+              : "Start the LM Studio server, then scan again.",
+        ],
       };
     }
     return { ...base, state: "not-found", ready: false, summary: "Not installed", facts: [] };
@@ -286,15 +310,21 @@ export function buildModelScanChecks(input: {
   catalog: readonly ProviderSummary[];
   check: (providerId: ProviderId, signal: AbortSignal, timeoutMs: number) => Promise<ProviderSummary>;
   platform?: NodeJS.Platform;
-  /** Whether Ollama or LM Studio is installed, from local files. Injected in tests. */
-  onDisk?: (providerId: "ollama" | "lm-studio") => Promise<boolean>;
+  /** Whether Ollama, LM Studio or Lemonade is installed, from local files. Injected in tests. */
+  onDisk?: (providerId: "ollama" | "lm-studio" | "lemonade") => Promise<boolean>;
 }): ModelScanCheck[] {
   const platform = input.platform ?? process.platform;
   return input.catalog
     .filter((provider) => provider.id !== "apple-foundation" || platform === "darwin")
     .map((provider): ModelScanCheck => {
       const endpoint =
-        provider.id === "ollama" ? resolveOllamaEndpoint() : provider.id === "lm-studio" ? resolveLmStudioEndpoint() : undefined;
+        provider.id === "ollama"
+          ? resolveOllamaEndpoint()
+          : provider.id === "lm-studio"
+            ? resolveLmStudioEndpoint()
+            : provider.id === "lemonade"
+              ? resolveLemonadeEndpoint()
+              : undefined;
       const meta = {
         providerId: provider.id,
         name: SCAN_NAMES[provider.id] ?? provider.name,
@@ -304,8 +334,13 @@ export function buildModelScanChecks(input: {
       return {
         ...meta,
         async run(signal, timeoutMs) {
-          if (provider.id === "ollama" || provider.id === "lm-studio") {
-            const trust = provider.id === "ollama" ? classifyOllamaEndpoint(endpoint!) : classifyLmStudioEndpoint(endpoint!);
+          if (provider.id === "ollama" || provider.id === "lm-studio" || provider.id === "lemonade") {
+            const trust =
+              provider.id === "ollama"
+                ? classifyOllamaEndpoint(endpoint!)
+                : provider.id === "lm-studio"
+                  ? classifyLmStudioEndpoint(endpoint!)
+                  : classifyLemonadeEndpoint(endpoint!);
             if (!trust.isLocal) {
               return {
                 ...checkingProbe(meta),
@@ -319,7 +354,7 @@ export function buildModelScanChecks(input: {
               input.check(provider.id, signal, timeoutMs),
               input.onDisk ? input.onDisk(provider.id) : Promise.resolve(undefined),
             ]);
-            return scanProbeFromProvider(summary, { ...(onDisk !== undefined ? { installedOnDisk: onDisk } : {}), target: meta.target });
+            return scanProbeFromProvider(summary, { ...(onDisk !== undefined ? { installedOnDisk: onDisk } : {}), target: meta.target, platform });
           }
           return scanProbeFromProvider(await input.check(provider.id, signal, timeoutMs));
         },
@@ -343,6 +378,8 @@ export async function scanProviderCheck(
       return checkOllama(provider, { ...base, localOnly: true, timeoutMs: httpBudget(options.timeoutMs ?? MODEL_SCAN_TIMEOUT_MS) });
     case "lm-studio":
       return checkLmStudio(provider, { ...base, localOnly: true, timeoutMs: httpBudget(options.timeoutMs ?? MODEL_SCAN_TIMEOUT_MS) });
+    case "lemonade":
+      return checkLemonade(provider, { ...base, localOnly: true, timeoutMs: httpBudget(options.timeoutMs ?? MODEL_SCAN_TIMEOUT_MS) });
     case "anthropic":
       return checkClaudeCode(provider, base);
     case "openai":

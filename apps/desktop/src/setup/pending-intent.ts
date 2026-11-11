@@ -157,6 +157,7 @@ function isProviderId(value: unknown): value is ProviderId {
     value === "ollama" ||
     value === "apple-foundation" ||
     value === "lm-studio" ||
+    value === "lemonade" ||
     value === "anthropic" ||
     value === "openai" ||
     value === "copilot" ||

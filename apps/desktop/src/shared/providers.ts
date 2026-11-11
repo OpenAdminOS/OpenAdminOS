@@ -4,6 +4,7 @@ const IMPLEMENTED_PROVIDER_IDS: ReadonlySet<ProviderId> = new Set([
   "ollama",
   "apple-foundation",
   "lm-studio",
+  "lemonade",
   "anthropic",
   "openai",
   "azure-openai",

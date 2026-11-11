@@ -9,6 +9,7 @@ import { isProviderImplemented } from "./providers.js";
 export const LOCAL_AUTO_SELECT_ORDER: readonly ProviderId[] = [
   "ollama",
   "lm-studio",
+  "lemonade",
   "apple-foundation",
 ];
 
@@ -23,8 +24,9 @@ export function isProviderReady(provider: ProviderSummary | undefined): boolean 
   // Ollama counts only with a text-generation model. Azure OpenAI counts
   // only with a configured deployment: the catalog placeholder also reads
   // "available" before any check has run.
-  // LM Studio counts only with a loaded model: a running server with none cannot answer.
-  if ((provider.id === "ollama" || provider.id === "azure-openai" || provider.id === "lm-studio") && provider.models.length === 0) {
+  // LM Studio counts only with a loaded model and Lemonade only with a
+  // downloaded chat model: a running server with none cannot answer.
+  if ((provider.id === "ollama" || provider.id === "azure-openai" || provider.id === "lm-studio" || provider.id === "lemonade") && provider.models.length === 0) {
     return false;
   }
   return (
