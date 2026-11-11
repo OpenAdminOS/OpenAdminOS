@@ -909,8 +909,19 @@ function runAuditEvents(run: RunRecord, context: AuditLogContext): AuditLogEvent
   return events;
 }
 
-/** Changes a run's audit events can show; an unchanged fingerprint adds no event. */
+/**
+ * What decides which audit events a run shows; an unchanged fingerprint
+ * adds no event. A plain log line changes nothing, so a live run's log
+ * does not start an audit transaction; only connector delivery lines do.
+ */
 function runAuditFingerprint(run: RunRecord): string {
+  let connectorLogs = 0;
+  let lastConnectorLogId = "";
+  for (const log of run.logs) {
+    if (log.metadata?.connectorAudit === undefined) continue;
+    connectorLogs += 1;
+    lastConnectorLogId = log.id;
+  }
   return [
     run.status,
     run.startedAt ?? "",
@@ -918,7 +929,8 @@ function runAuditFingerprint(run: RunRecord): string {
     run.rejectedAt ?? "",
     run.finishedAt ?? "",
     run.plan?.actions.length ?? "",
-    run.logs.length,
+    connectorLogs,
+    lastConnectorLogId,
   ].join("|");
 }
 
