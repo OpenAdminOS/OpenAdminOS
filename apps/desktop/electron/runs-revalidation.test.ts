@@ -98,7 +98,7 @@ const guest = (id: string): Guest => ({ id, displayName: id, days: 91, departmen
  */
 async function confirmAfter(
   change: (guests: Guest[]) => Guest[] | Error,
-  options: { withModel?: boolean; cancelDuringReplan?: boolean } = {},
+  options: { withModel?: boolean; cancelDuringReplan?: boolean; applyHost?: { buildLlm?: Error; buildGraph?: Error } } = {},
 ) {
   const dir = await mkdtemp(join(tmpdir(), "plan-revalidation-"));
   try {
@@ -192,8 +192,14 @@ async function confirmAfter(
       },
       serialize: async <T>(task: () => Promise<T>) => task(),
       listProviders: async () => [],
-      buildLlm: async () => llm,
-      buildGraph: async () => ({ tenantId: "tenant-1", tenantSession: {} as never, createGraph: () => graph }),
+      buildLlm: async () => {
+        if (options.applyHost?.buildLlm) throw options.applyHost.buildLlm;
+        return llm;
+      },
+      buildGraph: async () => {
+        if (options.applyHost?.buildGraph) throw options.applyHost.buildGraph;
+        return { tenantId: "tenant-1", tenantSession: {} as never, createGraph: () => graph };
+      },
       selfTrainingPromptOverlay: () => undefined,
       readConnectorConfigs: async () => ({}),
       connectorSecretsFor: () => ({ get: async () => undefined, set: async () => {}, remove: async () => {} }),
@@ -248,6 +254,18 @@ describe("write plans are checked against the tenant before apply", () => {
     assert.equal(writes.length, 0, "no Graph write is sent");
     assert.equal(run.status, "failed");
     assert.match(run.error ?? "", /^The plan could not be checked against the tenant before applying, so nothing was applied\. .*Graph is unavailable\./);
+  });
+
+  it("says nothing was applied when the model or the Graph sign-in fails before the replan", async () => {
+    for (const [applyHost, reason] of [
+      [{ buildGraph: new Error("The Microsoft sign-in for Contoso expired. Reconnect it in Connections.") }, "The Microsoft sign-in for Contoso expired. Reconnect it in Connections."],
+      [{ buildLlm: new Error("Ollama isn't running. Start it with ollama serve, then try again.") }, "Ollama isn't running. Start it with ollama serve, then try again."],
+    ] as const) {
+      const { run, writes } = await confirmAfter((guests) => guests, { applyHost });
+      assert.equal(writes.length, 0, "no Graph write is sent");
+      assert.equal(run.status, "failed");
+      assert.equal(run.error, `Nothing was applied: ${reason}`);
+    }
   });
 
   it("applies a plan whose wording changed but whose requests did not", async () => {

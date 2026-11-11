@@ -230,6 +230,17 @@ export function readOnlyRevalidationTransport(
   };
 }
 
+/**
+ * A failure of a write run before apply started, such as the model, the
+ * Graph sign-in or a connector failing for the replan: nothing was
+ * written, so the error says so unless it already does.
+ */
+function notAppliedError(error: unknown): unknown {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/nothing was applied/i.test(message)) return error;
+  return new Error(`Nothing was applied: ${message}`, { cause: error });
+}
+
 /** `run` with the model usage of `source`, a later snapshot of the same run. */
 function withUsageOf(run: RunRecord, source: Pick<RunRecord, "tokens" | "usage">): RunRecord {
   const { tokens: _tokens, usage: _usage, ...rest } = run;
@@ -1396,6 +1407,8 @@ export class RunService {
     // billed. Its snapshots carry the run's usage so far plus its own, and
     // that total stays on the run however apply ends.
     let usage: Pick<RunRecord, "tokens" | "usage"> = input.run;
+    // Until apply starts, a failure has written nothing, and says so.
+    let applying = false;
     try {
       assertRunCanApply(input.run);
       if ((await this.getRun(input.run.id))?.status === "cancelled") return;
@@ -1424,7 +1437,7 @@ export class RunService {
       controller.signal.throwIfAborted();
       if (fresh.status === "failed" || !fresh.plan) {
         throw new Error(kind === "office"
-          ? `Proposal could not be revalidated. ${fresh.error ?? "Run the assignment again."}`
+          ? `The proposal could not be checked against the tenant before applying, so nothing was applied. ${fresh.error ?? "Run the assignment again."}`
           : `The plan could not be checked against the tenant before applying, so nothing was applied. ${fresh.error ?? "Select Run again to review a fresh plan."}`);
       }
       const change = planChangeSinceReview(input.plan, fresh.plan);
@@ -1433,6 +1446,7 @@ export class RunService {
       // Apply gets the reviewed plan, never the fresh one, and runs its
       // actions in the reviewed order; the fresh plan only decides
       // whether apply may start.
+      applying = true;
       try {
         await executeApply({
           signal: controller.signal,
@@ -1461,7 +1475,7 @@ export class RunService {
         });
       }
     } catch (error) {
-      await this.persistFailedSnapshot(withUsageOf(input.run, usage), input.agent, error);
+      await this.persistFailedSnapshot(withUsageOf(input.run, usage), input.agent, applying ? error : notAppliedError(error));
     } finally {
       if (this.controllers.get(input.run.id) === controller) this.controllers.delete(input.run.id);
     }
