@@ -131,7 +131,6 @@ type HostedChatConsentPrompt = {
   conversationId?: string | null;
   /** Absent when nothing is connected: the confirmation is bound to no tenant. */
   tenantId?: string;
-  tenantName?: string;
   providerId: ProviderId;
   providerName: string;
   model?: string;
@@ -742,7 +741,7 @@ function IntuneChatContent() {
         ...(conversationIdOverride !== undefined
           ? { conversationId: conversationIdOverride }
           : {}),
-        ...(activeTenant ? { tenantId: activeTenant.id, tenantName: activeTenant.displayName } : {}),
+        ...(activeTenant ? { tenantId: activeTenant.id } : {}),
         providerId: provider.id,
         providerName: provider.name,
         ...(activeModel ? { model: activeModel } : {}),
@@ -1684,6 +1683,8 @@ function IntuneChatContent() {
     {hostedConsentPrompt ? (
       <HostedChatConsentPanel
         prompt={hostedConsentPrompt}
+        // Read at render, so a rename while the panel is open shows here too.
+        tenantName={tenants.find((tenant) => tenant.id === hostedConsentPrompt.tenantId)?.displayName}
         remember={rememberHostedConsent}
         onRememberChange={setRememberHostedConsent}
         onClose={() => {
@@ -3906,8 +3907,10 @@ function HostedChatConsentPanel({
   onClose,
   onConfirm,
   onUseLocal,
+  tenantName,
 }: {
   prompt: HostedChatConsentPrompt;
+  tenantName?: string | undefined;
   remember: boolean;
   onRememberChange: (remember: boolean) => void;
   onClose: () => void;
@@ -3923,7 +3926,7 @@ function HostedChatConsentPanel({
   const noTenant = !prompt.tenantId;
   const company = PROVIDER_COMPANIES[prompt.providerId] ?? prompt.providerName;
   const tool = PROVIDER_TOOL_NAMES[prompt.providerId] ?? prompt.providerName;
-  const tenant = prompt.tenantName ?? "the active tenant";
+  const tenant = tenantName ?? "the active tenant";
   const workspace = prompt.workspaceContextSummary
     ? `${prompt.workspaceContextSummary.workspaceTitle} (${prompt.workspaceContextSummary.evidenceCount} evidence, ${prompt.workspaceContextSummary.noteCount} notes)`
     : undefined;

@@ -20,6 +20,7 @@ import type {
   SaveTextFileResult,
   WorkspaceSummary,
 } from "../shared/openAdminOS";
+import { tenantsNamedByOrganization } from "../shared/openAdminOS";
 import {
   buildConversationExportMarkdown,
   conversationCacheSummary,
@@ -332,7 +333,8 @@ export function ConversationWorkspaceProvider({ children }: { children: ReactNod
       const api = window.openAdminOS;
       if (!api) return;
       const messages = await api.getIntuneChatMessages(conversation.id);
-      const tenant = state.tenants.find((entry) => entry.id === conversation.tenantId);
+      // Named by its organization, as Chat names it.
+      const tenant = tenantsNamedByOrganization({ organizations: state.organizations, tenants: state.tenants }).find((entry) => entry.id === conversation.tenantId);
       const provider = state.providers.find((entry) => entry.id === state.activeProviderId);
       const result = await api.saveTextFile({
         suggestedName: `${safeFileName(conversation.title)}.md`,
@@ -348,7 +350,7 @@ export function ConversationWorkspaceProvider({ children }: { children: ReactNod
       if (!result.canceled) toast.success("Conversation exported.");
       return result;
     },
-    [cacheStatus, state.activeProviderId, state.providers, state.tenants, toast],
+    [cacheStatus, state.activeProviderId, state.organizations, state.providers, state.tenants, toast],
   );
 
   const moveToWorkspace = useCallback(
