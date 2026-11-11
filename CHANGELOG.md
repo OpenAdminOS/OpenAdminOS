@@ -97,13 +97,16 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Security
 
-- The audit log is an append-only SQLite table written when each event happens, hash chained on insert, with triggers that refuse changes and early deletes; every Microsoft Graph write is recorded before it is sent (and refused if it cannot be), run retention and Disconnect no longer remove audit history, runs record who started them, the export verifies the stored chain and can be limited to runs no person started, and CSV cells that a spreadsheet would run as a formula are prefixed with a quote.
-- Each MCP gateway client is paired under a name you give and gets its own token, kept only as a hash; proposals carry that name instead of one the client sends, revoke takes effect on the next request, the shared token of earlier versions is refused with a message to pair again, an identical waiting proposal is returned instead of queued twice, and a client is limited to 5 waiting proposals and cannot repeat a rejected one for 15 minutes.
+- The audit log is an append-only SQLite table written when each event happens, hash chained on insert, with triggers that refuse changes and early deletes; every Microsoft Graph write, Outlook and Teams sends included, is recorded in the audit log before it leaves the device and refused if the audit log cannot record it, the Graph adapter refuses writes without an audit sink, run retention and Disconnect no longer remove audit history, runs record who started them, the export verifies the stored chain and can be limited to runs no person started, and CSV cells that a spreadsheet would run as a formula are prefixed with a quote.
+- While the audit log is behind, a prune or Disconnect that would remove events it has not recorded is refused, and Settings shows the last failed append.
+- An anchor file next to the database lets the audit log export detect rows removed from either end of the log, or a dropped table.
+- The audit log is written with full sync, and its expired rows are pruned with run history.
+- Each MCP gateway client is paired under a name you give and gets its own token, kept only as a hash; proposals carry that name instead of one the client sends, revoke takes effect on the next request, the shared token of earlier versions is refused with a message to pair again, an identical waiting proposal is returned instead of queued twice, a client is limited to 5 waiting proposals and cannot repeat a rejected one for 15 minutes, and a pairing that overlaps Disconnect of the gateway's organization is refused instead of pairing a client for it.
 - Every agent write run, not only Agent Team assignments, plans again against the live tenant with reads only right before apply; if what the actions send or the phrase changed since review, nothing is written and the run says how many reviewed actions are gone and how many are new, with Run again to review a fresh plan. Wording, ids and order do not count. Gateway proposals and baseline rollbacks are applied as confirmed.
 - Confirming a write run repeats the agent's planning, including its model calls, before apply.
 - Gateway clients paired before this version must pair again in Settings, Gateway.
 - Gateway proposals queued before the upgrade have no client, so no client can read their status; they stay in the app for review.
-- A mutation register (`npm run test:mutations`, run in CI) plants 14 known defects in the confirmation phrase, write limit, dry run, confirm, plan check, connector confirmation, gateway token and audit log guards in memory, and fails unless the named tests catch each one.
+- A mutation register (`npm run test:mutations`, run in CI) plants 20 known defects in the confirmation phrase, write limit, dry run, confirm, plan check, connector confirmation, gateway token, Graph write audit and audit log guards in memory, and fails unless the named tests catch each one.
 
 ## [0.7.2] - 2026-10-25
 
