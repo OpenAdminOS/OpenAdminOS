@@ -109,6 +109,7 @@ describe("createLemonadeLlm", () => {
     let capturedUrl = "";
     let capturedBody: Record<string, unknown> | undefined;
     await withFetch(async (input, init) => {
+      if (String(input).endsWith("/models")) return listed("Qwen3-0.6B-GGUF");
       capturedUrl = String(input);
       capturedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
       return jsonResponse({
@@ -128,7 +129,7 @@ describe("createLemonadeLlm", () => {
       assert.deepEqual(completion.tokenUsage, { promptTokens: 26, completionTokens: 6, totalTokens: 32 });
     });
 
-    await withFetch(async () => new Response("model_not_found", { status: 404 }), async () => {
+    await withFetch(async (input) => (String(input).endsWith("/models") ? listed("Nope-GGUF") : new Response("model_not_found", { status: 404 })), async () => {
       await assert.rejects(
         createLemonadeLlm({ defaultModel: "Nope-GGUF" }).complete({ prompt: "x" }),
         /^Error: Lemonade responded with HTTP 404: model_not_found$/,
@@ -144,7 +145,8 @@ describe("createLemonadeLlm", () => {
   });
 
   it("streams deltas and keeps the requested model id, not the file path", async () => {
-    await withFetch(async () => {
+    await withFetch(async (input) => {
+      if (String(input).endsWith("/models")) return listed("Qwen3-0.6B-GGUF");
       const encoder = new TextEncoder();
       const path = "/Users/admin/.cache/huggingface/hub/models--unsloth--Qwen3-0.6B-GGUF/Qwen3-0.6B-Q4_0.gguf";
       const body = new ReadableStream<Uint8Array>({
@@ -171,6 +173,10 @@ describe("createLemonadeLlm", () => {
   });
 });
 
+function listed(id: string): Response {
+  return jsonResponse({ object: "list", data: [{ id, labels: ["chat"], recipe: "llamacpp" }] });
+}
+
 async function withFetch(
   fetchImpl: typeof fetch,
   run: () => Promise<void>,
@@ -190,3 +196,63 @@ function jsonResponse(body: unknown): Response {
     headers: { "content-type": "application/json" },
   });
 }
+
+describe("createLemonadeLlm sends only a listed chat model", () => {
+  const list = (data: unknown[]) => jsonResponse({ object: "list", data });
+
+  it("refuses a cloud-routed, a non-chat and an undownloaded model before any chat request", async () => {
+    const cases: Array<[string, RegExp]> = [
+      ["openai.gpt-5", /^Error: Lemonade sends openai\.gpt-5 to a cloud API, so OpenAdminOS does not use it as a local model\./],
+      ["nomic-embed-text-v1-GGUF", /^Error: nomic-embed-text-v1-GGUF is not a chat model in Lemonade\./],
+      ["Qwen3-8B-GGUF", /^Error: Lemonade has no downloaded chat model named Qwen3-8B-GGUF\. Download it in Lemonade or choose another model, then try again\.$/],
+    ];
+    for (const [model, message] of cases) {
+      const urls: string[] = [];
+      await withFetch(async (input) => {
+        urls.push(String(input));
+        return list([
+          { id: "Qwen3-0.6B-GGUF", labels: ["chat"], recipe: "llamacpp" },
+          { id: "openai.gpt-5", labels: ["chat"], recipe: "cloud" },
+          { id: "nomic-embed-text-v1-GGUF", labels: ["embeddings"], recipe: "llamacpp" },
+        ]);
+      }, async () => {
+        const llm = createLemonadeLlm({ defaultModel: model });
+        await assert.rejects(llm.complete({ prompt: "x" }), message);
+        await assert.rejects(async () => {
+          for await (const _ of llm.stream({ prompt: "x" })) { /* nothing is streamed */ }
+        }, message);
+      });
+      assert.deepEqual(urls, ["http://127.0.0.1:13305/v1/models", "http://127.0.0.1:13305/v1/models"], model);
+    }
+  });
+
+  it("checks the list on every request, then sends a listed model", async () => {
+    const urls: string[] = [];
+    await withFetch(async (input) => {
+      urls.push(String(input));
+      if (String(input).endsWith("/models")) return list([{ id: "Qwen3-0.6B-GGUF", labels: ["chat"], recipe: "llamacpp" }]);
+      return jsonResponse({ model: "Qwen3-0.6B-GGUF", choices: [{ message: { content: "OK" } }] });
+    }, async () => {
+      const llm = createLemonadeLlm({ defaultModel: "Qwen3-0.6B-GGUF" });
+      assert.equal((await llm.complete({ prompt: "x" })).text, "OK");
+      assert.equal((await llm.complete({ prompt: "y" })).text, "OK");
+    });
+    assert.deepEqual(urls, [
+      "http://127.0.0.1:13305/v1/models",
+      "http://127.0.0.1:13305/v1/chat/completions",
+      "http://127.0.0.1:13305/v1/models",
+      "http://127.0.0.1:13305/v1/chat/completions",
+    ]);
+  });
+
+  it("names the API key and an unreachable server from the list check", async () => {
+    await withFetch(async () => new Response("", { status: 401 }), async () => {
+      await assert.rejects(createLemonadeLlm({ defaultModel: "m" }).complete({ prompt: "x" }), /LEMONADE_API_KEY/);
+    });
+    await withFetch(async () => {
+      throw new TypeError("fetch failed", { cause: { code: "ECONNREFUSED" } });
+    }, async () => {
+      await assert.rejects(createLemonadeLlm({ defaultModel: "m" }).complete({ prompt: "x" }), /^Error: Lemonade not reachable at http:\/\/127\.0\.0\.1:13305\/v1\/models: fetch failed$/);
+    });
+  });
+});

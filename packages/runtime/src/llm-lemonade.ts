@@ -35,8 +35,23 @@ const LEMONADE: OpenAiCompatibleServer = {
         "Lemonade asks for an API key because LEMONADE_API_KEY is set where it runs. OpenAdminOS does not send Lemonade API keys, so start Lemonade without it, then try again."
       : undefined,
   chatModelIds: lemonadeChatModelIds,
+  unlistedModelMessage: lemonadeUnlistedModelMessage,
   streamNamesModel: false,
 };
+
+/** Why a model is not sent to Lemonade, with what to do instead. */
+export function lemonadeUnlistedModelMessage(
+  model: string,
+  entry: OpenAiCompatibleModel | undefined,
+): string {
+  if (entry?.recipe === "cloud") {
+    return `Lemonade sends ${model} to a cloud API, so OpenAdminOS does not use it as a local model. Choose a chat model that runs on this device.`;
+  }
+  if (entry) {
+    return `${model} is not a chat model in Lemonade. Choose a chat model, then try again.`;
+  }
+  return `Lemonade has no downloaded chat model named ${model}. Download it in Lemonade or choose another model, then try again.`;
+}
 
 /**
  * Keeps the downloaded models that answer chat completions on this device.

@@ -31,6 +31,14 @@ export interface OpenAiCompatibleServer {
   /** Keeps the ids of models that can answer a chat. Defaults to every id. */
   chatModelIds?: (data: OpenAiCompatibleModel[]) => string[];
   /**
+   * When set, every request first checks the model against a fresh model
+   * list, filtered by `chatModelIds`, and refuses an unlisted one with this
+   * message (`entry` is the server's record of it, when it has one).
+   * Lemonade downloads an unlisted registry model on request and routes
+   * cloud models off the device, so it sends only a listed model.
+   */
+  unlistedModelMessage?: (model: string, entry: OpenAiCompatibleModel | undefined) => string;
+  /**
    * Whether a streamed chunk's `model` field names the model. Lemonade puts
    * the model file path there, so its chunks keep the requested id.
    * Defaults to true.
@@ -107,6 +115,37 @@ export function createOpenAiCompatibleLlm(
     options.timeoutMs ??
     Number.parseInt(process.env[server.timeoutEnv] ?? String(DEFAULT_TIMEOUT_MS), 10);
   const url = `${endpoint.replace(/\/$/, "")}/chat/completions`;
+  const modelsUrl = `${endpoint.replace(/\/$/, "")}/models`;
+
+  const requestError = (error: unknown, target: string, callerSignal: AbortSignal | undefined): Error => {
+    if (error instanceof Error && error.name === "AbortError") {
+      if (callerSignal?.aborted) {
+        return new Error(`${name} request stopped by user.`);
+      }
+      return new Error(`${name} timed out after ${timeoutMs}ms at ${target}.`);
+    }
+    return new Error(`${name} not reachable at ${target}: ${describe(error)}`);
+  };
+
+  const ensureListed = async (model: string, signal: AbortSignal, callerSignal: AbortSignal | undefined) => {
+    if (!server.unlistedModelMessage) return;
+    let response: Response;
+    try {
+      response = await fetchLocal(modelsUrl, { signal });
+    } catch (error) {
+      throw requestError(error, modelsUrl, callerSignal);
+    }
+    if (!response.ok) {
+      throw new Error(
+        server.httpStatusDetail?.(response.status) ??
+          `${name} responded with HTTP ${response.status} at ${modelsUrl}.`,
+      );
+    }
+    const payload = (await response.json().catch(() => ({}))) as ModelsResponse;
+    const data = Array.isArray(payload.data) ? payload.data : [];
+    if ((server.chatModelIds ?? allModelIds)(data).includes(model)) return;
+    throw new Error(server.unlistedModelMessage(model, data.find((entry) => entry.id === model)));
+  };
 
   return {
     available: true,
@@ -129,20 +168,17 @@ export function createOpenAiCompatibleLlm(
 
       let response: Response;
       try {
-        response = await fetch(url, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(createChatRequestBody({ ...opts, model, stream: false })),
-          signal: controller.signal,
-        });
-      } catch (error) {
-        if (error instanceof Error && error.name === "AbortError") {
-          if (opts.signal?.aborted) {
-            throw new Error(`${name} request stopped by user.`);
-          }
-          throw new Error(`${name} timed out after ${timeoutMs}ms at ${url}.`);
+        await ensureListed(model, controller.signal, opts.signal);
+        try {
+          response = await fetch(url, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(createChatRequestBody({ ...opts, model, stream: false })),
+            signal: controller.signal,
+          });
+        } catch (error) {
+          throw requestError(error, url, opts.signal);
         }
-        throw new Error(`${name} not reachable at ${url}: ${describe(error)}`);
       } finally {
         clearTimeout(timer);
         opts.signal?.removeEventListener("abort", abortFromCaller);
@@ -184,22 +220,21 @@ export function createOpenAiCompatibleLlm(
 
       let response: Response;
       try {
-        response = await fetch(url, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(createChatRequestBody({ ...opts, model, stream: true })),
-          signal: controller.signal,
-        });
+        await ensureListed(model, controller.signal, opts.signal);
+        try {
+          response = await fetch(url, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(createChatRequestBody({ ...opts, model, stream: true })),
+            signal: controller.signal,
+          });
+        } catch (error) {
+          throw requestError(error, url, opts.signal);
+        }
       } catch (error) {
         clearTimeout(timer);
         opts.signal?.removeEventListener("abort", abortFromCaller);
-        if (error instanceof Error && error.name === "AbortError") {
-          if (opts.signal?.aborted) {
-            throw new Error(`${name} request stopped by user.`);
-          }
-          throw new Error(`${name} timed out after ${timeoutMs}ms at ${url}.`);
-        }
-        throw new Error(`${name} not reachable at ${url}: ${describe(error)}`);
+        throw error;
       }
 
       if (!response.ok) {
