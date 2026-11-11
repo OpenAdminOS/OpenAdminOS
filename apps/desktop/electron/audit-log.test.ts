@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -200,17 +200,17 @@ describe("audit log anchor", () => {
     });
   });
 
-  it("accepts a table and anchor left by the app, rows appended after the anchor, and a first open without one", async () => {
+  it("accepts a table and anchor left by the app, rows appended after the anchor, and a first open of an empty table", async () => {
     await withDatabase((path) => {
+      // A first open: the empty table becomes the anchor before any row.
+      new AuditLogStore(path).close();
+      assert.deepEqual(JSON.parse(readFileSync(`${path}-audit-anchor.json`, "utf8")), {
+        version: 1,
+        startHash: AUDIT_CHAIN_START_HASH,
+        lastHash: AUDIT_CHAIN_START_HASH,
+        rowCount: 0,
+      });
       storeWith(path, ["a", "b"]);
-      // An upgrade: rows from before the anchor existed become its start.
-      rmSync(`${path}-audit-anchor.json`);
-      const upgraded = new AuditLogStore(path);
-      try {
-        assert.deepEqual(upgraded.readVerified().events.map((entry) => entry.id), ["a", "b"]);
-      } finally {
-        upgraded.close();
-      }
       const anchorBefore = readFileSync(`${path}-audit-anchor.json`, "utf8");
       // An append whose anchor write did not happen, as after a crash.
       storeWith(path, ["c"]);
@@ -243,6 +243,43 @@ describe("audit log anchor", () => {
         assert.equal(chain.startHash, lastPruned);
       } finally {
         store.close();
+      }
+    });
+  });
+
+  it("reports a missing anchor beside rows, and appends and prunes do not anchor the table again", async () => {
+    await withDatabase((path) => {
+      storeWith(path, ["a", "b"]);
+      rmSync(`${path}-audit-anchor.json`);
+      assertIntegrityError(path, /its anchor file openadminos\.db-audit-anchor\.json is missing while the log holds 2 entries\. The anchor was removed outside OpenAdminOS/);
+      storeWith(path, ["c"]);
+      const store = new AuditLogStore(path);
+      try {
+        store.pruneExpired();
+      } finally {
+        store.close();
+      }
+      assert.equal(existsSync(`${path}-audit-anchor.json`), false);
+      assertIntegrityError(path, /is missing while the log holds 3 entries/);
+    });
+  });
+
+  it("adopts a missing anchor when the table is empty", async () => {
+    await withDatabase((path) => {
+      new AuditLogStore(path).close();
+      rmSync(`${path}-audit-anchor.json`);
+      const store = new AuditLogStore(path);
+      try {
+        assert.deepEqual(store.readVerified().chain, { rowCount: 0, startHash: AUDIT_CHAIN_START_HASH, finalHash: AUDIT_CHAIN_START_HASH });
+      } finally {
+        store.close();
+      }
+      storeWith(path, ["a"]);
+      const reopened = new AuditLogStore(path);
+      try {
+        assert.deepEqual(reopened.readVerified().events.map((entry) => entry.id), ["a"]);
+      } finally {
+        reopened.close();
       }
     });
   });

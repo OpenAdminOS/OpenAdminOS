@@ -1212,8 +1212,11 @@ table dropped or emptied are designed integrity errors even though the rows
 left still chain, and later appends do not move the anchor over the loss. Rows
 newer than the anchor, as a crash between the commit and the anchor write
 leaves, are accepted. After a prune that removed every row, the chain goes on
-from the last hash it removed. A first open or an upgrade without an anchor
-takes the table as it is. This detects changes made outside OpenAdminOS to the
+from the last hash it removed. A missing anchor is adopted only while the table
+is empty (a first open). The anchor ships with the table, so no released
+database holds rows without one: a missing anchor beside rows is a designed
+integrity error ("its anchor file ... is missing while the log holds N
+entries"), and appends and prunes do not write a new one over it. This detects changes made outside OpenAdminOS to the
 database alone; someone who can rewrite both files can hide a change. The
 `finalHash` of an export is the anchor an admin keeps outside the device.
 

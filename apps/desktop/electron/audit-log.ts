@@ -31,7 +31,8 @@ import type { GraphWriteAuditSink } from "@openadminos/runtime";
  * found even though the rows left still chain. It detects changes made
  * outside the app to the database alone; someone who rewrites both
  * files can hide a change. The finalHash of an export is the anchor an
- * admin keeps outside this device.
+ * admin keeps outside this device. A missing anchor is adopted only
+ * for an empty table; beside rows it is an integrity error.
  */
 
 /** The hash the first row is chained to. */
@@ -157,9 +158,10 @@ export class AuditLogStore {
     }
     this.migrate();
     this.anchorPath = path === ":memory:" ? undefined : `${path}${AUDIT_ANCHOR_SUFFIX}`;
-    // First run, or an upgrade from a version without the anchor: the
-    // table as it is now becomes the anchor.
-    if (this.anchorPath && !existsSync(this.anchorPath)) this.writeAnchor();
+    // First run: the empty table becomes the anchor. The anchor ships with
+    // the table, so a missing anchor beside rows was removed, and is left
+    // missing for verification to report.
+    if (this.anchorPath && !existsSync(this.anchorPath) && this.isEmpty()) this.writeAnchor();
   }
 
   close(): void {
@@ -315,6 +317,12 @@ export class AuditLogStore {
         throw new AuditLogIntegrityError(undefined, `its anchor file ${basename(this.anchorPath)} cannot be read.`);
       }
       if (read.kind === "missing") {
+        if (rows.length > 0) {
+          throw new AuditLogIntegrityError(
+            undefined,
+            `its anchor file ${basename(this.anchorPath)} is missing while the log holds ${rows.length === 1 ? "1 entry" : `${rows.length.toLocaleString("en-US")} entries`}. The anchor was removed outside OpenAdminOS, so entries removed from the log can no longer be found.`,
+          );
+        }
         this.writeAnchor();
       } else {
         const mismatch = this.anchorMismatch(read.anchor, { countRows: true });
@@ -356,7 +364,8 @@ export class AuditLogStore {
   private anchorState(): { holds: boolean; anchor?: AuditLogAnchor } {
     if (!this.anchorPath) return { holds: false };
     const read = this.readAnchor();
-    if (read.kind === "missing") return { holds: true };
+    // Adopted only by an empty table; beside rows it was removed.
+    if (read.kind === "missing") return { holds: this.isEmpty() };
     if (read.kind === "unreadable") return { holds: false };
     return { holds: this.anchorMismatch(read.anchor, { countRows: false }) === undefined, anchor: read.anchor };
   }
@@ -397,6 +406,10 @@ export class AuditLogStore {
       return `it holds ${between.count.toLocaleString("en-US")} entries where this device recorded ${anchor.rowCount.toLocaleString("en-US")}.`;
     }
     return undefined;
+  }
+
+  private isEmpty(): boolean {
+    return this.db.prepare("SELECT 1 FROM audit_log LIMIT 1").get() === undefined;
   }
 
   private readAnchor(): AnchorRead {
