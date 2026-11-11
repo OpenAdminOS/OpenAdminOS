@@ -312,6 +312,27 @@ export function activeOrganizationOf(state: {
 }
 
 /**
+ * The tenants with `displayName` set to their organization's name, so a
+ * surface that names a tenant shows the name the admin gave its
+ * organization and follows a rename.
+ */
+export function tenantsNamedByOrganization(state: {
+  organizations?: readonly OrganizationRecord[] | undefined;
+  tenants: readonly TenantRecord[];
+}): TenantRecord[] {
+  const names = new Map(
+    resolveOrganizations(state).flatMap((organization) => {
+      const tenantId = organization.connections.microsoft365?.tenantId;
+      return tenantId ? [[tenantId, organization.name] as const] : [];
+    }),
+  );
+  return state.tenants.map((tenant) => {
+    const name = names.get(tenant.id);
+    return name && name !== tenant.displayName ? { ...tenant, displayName: name } : tenant;
+  });
+}
+
+/**
  * True when a schedule may run now: it is assigned, and its organization
  * is the active one. Unassigned schedules and other organizations' wait.
  */

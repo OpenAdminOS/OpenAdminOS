@@ -72,6 +72,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Chat and the data boundary text show the organization's name instead of the tenant domain (Chat heading, composer, scope, answer headers, status strip tooltip), and follow a rename at once.
 - Chat keeps the local Microsoft docs index out of an answer when a docs server chosen for the question answers, as it already did for Microsoft Learn: a Splashtop question answered by the Splashtop servers no longer gets Microsoft passages about other topics. The index is searched only when no chosen server answers, and the step says which one did not ("Searched the local docs index, because KQL Search returned nothing").
 - Chat no longer treats a how-to as a tenant question because it says "my", "our" or "we": "how do I upload my first app?" stays a docs question when the model calls it one, so no Graph refresh runs, the docs answer is not sent back for tenant evidence, and no cached tenant rows go to the provider for an answer that does not use them. State words, tenant values and earlier tenant answers in the chat still make it a docs and tenant question.
 - Chat reads the article before it answers a how-to from an MCP docs server: when the model answers from search excerpts alone and the server can return the full article, it is asked once to read the best match first. The step of such a read names the article, and its sent text stays the exact id.

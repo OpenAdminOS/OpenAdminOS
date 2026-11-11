@@ -12,7 +12,7 @@ import { NOTHING_LEAVES_COPY, deriveToolHostsCopy, deriveTrustCopy, promptsGoTo,
 
 /** Voice runs on OpenAI's own service, not Codex; the same line as PR #175. */
 const VOICE_LOCATION_DETAIL = "Processing follows your OpenAI workspace's data residency setting.";
-import { resolveProviderDefaultModel, type AppState } from "../shared/openAdminOS";
+import { resolveProviderDefaultModel, tenantsNamedByOrganization, type AppState } from "../shared/openAdminOS";
 import { useAppState } from "./AppStateContext";
 
 export type DataBoundary =
@@ -79,8 +79,9 @@ export function chatToolHosts(state: Pick<AppState, "mcpServers" | "chatToolUse"
  * on Connections is tested against it.
  */
 export function deriveDataBoundary(state: AppState, voiceHosted = false): DataBoundary {
+  // Named by its organization, as the switcher and Chat name it.
   const activeTenant = state.activeTenantId
-    ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
+    ? tenantsNamedByOrganization(state).find((tenant) => tenant.id === state.activeTenantId)
     : undefined;
   const provider = state.providers.find((entry) => entry.id === state.activeProviderId);
   const model = resolveProviderDefaultModel(

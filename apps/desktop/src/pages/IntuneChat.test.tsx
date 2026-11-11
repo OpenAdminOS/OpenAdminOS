@@ -6,7 +6,7 @@ import { Route, Routes, useLocation } from "react-router";
 import IntuneChat, { createHostedBatchProviderConsent } from "./IntuneChat";
 import Agents from "./Agents";
 import { AppShell } from "../components/AppShell";
-import { DataBoundaryProvider } from "../state";
+import { DataBoundaryProvider, useAppState } from "../state";
 import {
   createAwaitingConfirmationRun,
   createMockAgent,
@@ -360,6 +360,102 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
     } finally {
       window.localStorage.removeItem("openadminos:intune-chat-hosted-consent:v2:no-tenant:openai:gpt-5");
     }
+  });
+});
+
+describe("IntuneChat organization name", () => {
+  function RenameProbe() {
+    const { renameOrganization } = useAppState();
+    return (
+      <button type="button" onClick={() => void renameOrganization("org-tenant-1", "OAOS Lab")}>
+        Rename organization
+      </button>
+    );
+  }
+
+  it("names the tenant by its organization and follows a rename", async () => {
+    const user = userEvent.setup();
+    renderRoute(
+      <>
+        <RenameProbe />
+        <IntuneChat />
+      </>,
+      { path: "/chat/:conversationId?", route: "/chat" },
+    );
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Contoso IT" })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Ask about Contoso IT, or type / to run an agent")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Rename organization" }));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "OAOS Lab" })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Ask about OAOS Lab, or type / to run an agent")).toBeInTheDocument();
+    expect(screen.queryByText("Contoso IT")).toBeNull();
+  });
+
+  it("opens with the organization's name when it differs from the tenant's", async () => {
+    const tenant = { ...createMockAppState().tenants[0]!, displayName: "sl6ll.onmicrosoft.com" };
+    const bridge = makeMockBridge(
+      {},
+      createMockAppState({
+        tenants: [tenant],
+        activeTenantId: tenant.id,
+        organizations: [
+          {
+            id: "org-tenant-1",
+            name: "OAOS Lab",
+            createdAt: tenant.addedAt,
+            connections: { microsoft365: { tenantId: tenant.id } },
+          },
+        ],
+      }),
+    );
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+
+    expect(await screen.findByRole("heading", { level: 1, name: "OAOS Lab" })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Ask about OAOS Lab, or type / to run an agent")).toBeInTheDocument();
+    expect(screen.getByLabelText("Scope: OAOS Lab")).toBeInTheDocument();
+    expect(screen.queryByText("sl6ll.onmicrosoft.com")).toBeNull();
+  });
+
+  it("renames the tenant in the header of an earlier answer", async () => {
+    const user = userEvent.setup();
+    const conversation: IntuneChatConversation = {
+      id: "conversation-rename-1",
+      title: "Stale devices",
+      createdAt: "2026-08-06T10:00:00.000Z",
+      updatedAt: "2026-08-06T10:05:00.000Z",
+      tenantId: "tenant-1",
+      scopeKind: "single-tenant",
+    };
+    const bridge = makeMockBridge();
+    bridge.listIntuneChatConversations = vi.fn(async () => [conversation]);
+    bridge.getIntuneChatMessages = vi.fn(async () => [
+      {
+        id: "rename-answer-1",
+        conversationId: conversation.id,
+        role: "assistant" as const,
+        content: "WIN-01 has not synced in 40 days.",
+        createdAt: "2026-08-06T10:01:00.000Z",
+        status: "completed" as const,
+      },
+    ]);
+    renderRoute(
+      <>
+        <RenameProbe />
+        <IntuneChat />
+      </>,
+      { path: "/chat/:conversationId", route: "/chat/conversation-rename-1", bridge },
+    );
+
+    await screen.findByText(/WIN-01 has not synced in 40 days/);
+    const answer = () => document.querySelector<HTMLElement>("[data-message-id='rename-answer-1']")!;
+    expect(within(answer()).getByText("Contoso IT")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Rename organization" }));
+
+    expect(await within(answer()).findByText("OAOS Lab")).toBeInTheDocument();
+    expect(within(answer()).queryByText("Contoso IT")).toBeNull();
   });
 });
 

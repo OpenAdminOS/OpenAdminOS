@@ -76,6 +76,7 @@ import {
   MANAGED_POLICY_SET_BY,
   isManagedSettingLocked,
   managedLockedModel,
+  tenantsNamedByOrganization,
 } from "../shared/openAdminOS";
 import { copyTextToClipboard } from "../shared/clipboard";
 import { CHAT_COPY, FIRST_RUN_CHAT_COPY, HOSTED_CONFIRM_COPY, LOCAL_BOUNDARY_COPY, PROVIDER_COMPANIES, PROVIDER_DETECTION_COPY, PROVIDER_TOOL_NAMES, chatErrorCopy, deriveTrustCopy, promptsGoTo, providerDataLocation, providerDataLocationDetail, sendsThroughTool } from "../copy";
@@ -130,7 +131,6 @@ type HostedChatConsentPrompt = {
   conversationId?: string | null;
   /** Absent when nothing is connected: the confirmation is bound to no tenant. */
   tenantId?: string;
-  tenantName?: string;
   providerId: ProviderId;
   providerName: string;
   model?: string;
@@ -321,8 +321,13 @@ function IntuneChatContent() {
   const followLatestRef = useRef(true);
   const restoreConversationScrollRef = useRef<string | null>(null);
 
+  // Chat names each tenant by its organization, so a rename shows here too.
+  const tenants = useMemo(
+    () => tenantsNamedByOrganization({ organizations: state.organizations, tenants: state.tenants }),
+    [state.organizations, state.tenants],
+  );
   const activeTenant = state.activeTenantId
-    ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
+    ? tenants.find((tenant) => tenant.id === state.activeTenantId)
     : undefined;
   const provider = state.providers.find((entry) => entry.id === state.activeProviderId);
   const activeModel = resolveProviderDefaultModel(
@@ -736,7 +741,7 @@ function IntuneChatContent() {
         ...(conversationIdOverride !== undefined
           ? { conversationId: conversationIdOverride }
           : {}),
-        ...(activeTenant ? { tenantId: activeTenant.id, tenantName: activeTenant.displayName } : {}),
+        ...(activeTenant ? { tenantId: activeTenant.id } : {}),
         providerId: provider.id,
         providerName: provider.name,
         ...(activeModel ? { model: activeModel } : {}),
@@ -1647,7 +1652,7 @@ function IntuneChatContent() {
     label: scopeLabel,
     scopeMode,
     onScopeModeChange: setScopeMode,
-    tenants: state.tenants,
+    tenants,
     activeTenantId: state.activeTenantId,
     selectedTenantIds,
     onToggleTenant: toggleTenantSelection,
@@ -1678,6 +1683,8 @@ function IntuneChatContent() {
     {hostedConsentPrompt ? (
       <HostedChatConsentPanel
         prompt={hostedConsentPrompt}
+        // Read at render, so a rename while the panel is open shows here too.
+        tenantName={tenants.find((tenant) => tenant.id === hostedConsentPrompt.tenantId)?.displayName}
         remember={rememberHostedConsent}
         onRememberChange={setRememberHostedConsent}
         onClose={() => {
@@ -2026,7 +2033,7 @@ function IntuneChatContent() {
                     conversations.find((entry) => entry.id === message.conversationId) ??
                     activeConversation;
                   const messageTenant = messageConversation?.tenantId
-                    ? state.tenants.find((tenant) => tenant.id === messageConversation.tenantId)
+                    ? tenants.find((tenant) => tenant.id === messageConversation.tenantId)
                     : activeTenant;
                   if (message.role === "assistant" && message.notConnected && message.id !== shownProgressMessageId) {
                     const question = previousUserPromptForMessage(displayedMessages, message);
@@ -2034,7 +2041,7 @@ function IntuneChatContent() {
                       <div key={message.id} data-message-id={message.id} className="mt-3 scroll-mt-[18px]">
                         <NotConnectedCard
                           notConnected={message.notConnected}
-                          tenants={state.tenants}
+                          tenants={tenants}
                           activeTenant={activeTenant}
                           {...(question && !sending ? { onAskAgain: () => void handleSend(question, message.conversationId) } : {})}
                         />
@@ -3900,8 +3907,10 @@ function HostedChatConsentPanel({
   onClose,
   onConfirm,
   onUseLocal,
+  tenantName,
 }: {
   prompt: HostedChatConsentPrompt;
+  tenantName?: string | undefined;
   remember: boolean;
   onRememberChange: (remember: boolean) => void;
   onClose: () => void;
@@ -3917,7 +3926,7 @@ function HostedChatConsentPanel({
   const noTenant = !prompt.tenantId;
   const company = PROVIDER_COMPANIES[prompt.providerId] ?? prompt.providerName;
   const tool = PROVIDER_TOOL_NAMES[prompt.providerId] ?? prompt.providerName;
-  const tenant = prompt.tenantName ?? "the active tenant";
+  const tenant = tenantName ?? "the active tenant";
   const workspace = prompt.workspaceContextSummary
     ? `${prompt.workspaceContextSummary.workspaceTitle} (${prompt.workspaceContextSummary.evidenceCount} evidence, ${prompt.workspaceContextSummary.noteCount} notes)`
     : undefined;
