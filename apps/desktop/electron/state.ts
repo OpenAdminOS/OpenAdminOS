@@ -33,8 +33,10 @@ import {
 import { dirname, join } from "node:path";
 import {
   acquireTokenSilent,
+  auditGraphWritesFetch,
   compareSemver,
   createGraphAdapter,
+  type GraphWriteAuditSink,
   createClaudeCodeLlm,
   createAzureOpenAiLlm,
   createCodexLlm,
@@ -1618,6 +1620,8 @@ export interface AppStateStoreOptions {
       message: string,
       metadata?: Record<string, unknown>,
     ) => void;
+    /** The audit sink a factory that sends writes must record them in. */
+    writeAudit?: GraphWriteAuditSink;
   }): RunGraphApi;
   /**
    * Test hook for deterministic provider detection in host-level smoke tests.
@@ -2021,7 +2025,8 @@ export class AppStateStore {
     this.runService = new RunService({
       tenantWritable: (tenantId) => this.tenantLifecycle.isWritable(tenantId),
       tenantLease: (tenantId, work) => this.withTenantLease(tenantId, work),
-      connectorTransport: (tenantId) => this.connectorTransport(tenantId),
+      // A run passes itself, so its connector Graph writes carry it in the audit log.
+      connectorTransport: (tenantId, audit?: GraphWriteAuditRunContext) => this.connectorTransport(tenantId, audit),
       read: () => host.read(),
       write: (state) => host.write(state as PersistedState),
       serialize: (task) => host.serialize(task),
@@ -2089,7 +2094,7 @@ export class AppStateStore {
     this.runDeliveryService = new RunDeliveryService({
       tenantWritable: (tenantId) => this.tenantLifecycle.isWritable(tenantId),
       tenantLease: (tenantId, work) => this.withTenantLease(tenantId, () => work()),
-      connectorTransport: (tenantId) => this.connectorTransport(tenantId),
+      connectorTransport: (tenantId, audit) => this.connectorTransport(tenantId, audit),
       read: () => host.read(),
       write: (state) => host.write(state as PersistedState),
       serialize: (task) => host.serialize(task),
@@ -3198,11 +3203,48 @@ export class AppStateStore {
    * request and retry once the tenant is closing, and the check a
    * connector runs right before a send that does not use fetch.
    */
-  private connectorTransport(tenantId: string): { fetch: typeof fetch; assertEgress: () => void } {
+  private connectorTransport(
+    tenantId: string,
+    audit?: GraphWriteAuditRunContext,
+  ): { fetch: typeof fetch; assertEgress: () => void } {
+    const tenant = this.lastReadSnapshot?.tenants.find((entry) => entry.id === tenantId);
+    // Connectors with their own Graph client, such as Outlook and Teams,
+    // record each Graph write in the audit log before it is sent, as the
+    // Graph adapter does. The lifecycle guard runs first, so a closing
+    // tenant is refused before anything is recorded or sent.
+    const audited = auditGraphWritesFetch(
+      (input, init) => fetch(input, init),
+      this.graphWriteAudit(tenantId, tenant, audit),
+    );
     return {
-      fetch: this.tenantLifecycle.guardedFetch(tenantId),
+      fetch: this.tenantLifecycle.guardedFetch(tenantId, audited),
       assertEgress: () => this.tenantLifecycle.assertWritable(tenantId, "connector send"),
     };
+  }
+
+  /**
+   * The audit sink for a tenant's Graph writes. A failed append is kept
+   * for the warning in Settings, and a failed attempt refuses the write.
+   */
+  private graphWriteAudit(
+    tenantId: string,
+    tenant: TenantRecord | undefined,
+    audit?: GraphWriteAuditRunContext,
+  ): GraphWriteAuditSink {
+    const sink = graphWriteAuditSink(this.auditLog, {
+      tenantId,
+      actor: actorForTenant(tenant, tenantId),
+      ...audit,
+    }, () => this.clock());
+    const tracked = <T>(record: (input: T) => void | Promise<void>) => (input: T) => {
+      try {
+        record(input);
+      } catch (error) {
+        this.noteAuditLogFailure(error);
+        throw error;
+      }
+    };
+    return { attempted: tracked(sink.attempted), result: tracked(sink.result) };
   }
 
   /** The tenant's lifecycle phase: open, closing (Disconnect or its cleanup pending) or removed. */
@@ -8220,17 +8262,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           };
     return {
       createGraph: (log) => this.graphFactory
-        ? this.graphFactory({ tenantId: tenant.id, scopes, log })
+        ? this.graphFactory({ tenantId: tenant.id, scopes, log, writeAudit: this.graphWriteAudit(tenant.id, tenant, execution?.audit) })
         : createGraphAdapter({ tokenProvider, log, signal: execution?.signal,
             // The Graph egress choke point: every request and retry for a
             // closing tenant is refused and aborted with its signal.
             fetchImpl: this.tenantLifecycle.guardedFetch(tenant.id),
             // Every write is in the audit log before it is sent.
-            writeAudit: graphWriteAuditSink(this.auditLog, {
-              tenantId: tenant.id,
-              actor: actorForTenant(tenant),
-              ...execution?.audit,
-            }, () => this.clock()),
+            writeAudit: this.graphWriteAudit(tenant.id, tenant, execution?.audit),
             accessContext: (method, path) => ({
               requiredScopes: lookupEndpoint(method, path)?.scopesDelegated,
               entraTier: tenant.entraTier,
@@ -9117,6 +9155,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     }
   }
 }
+
+/** The run a Graph write belongs to, for its audit events. */
+type GraphWriteAuditRunContext = NonNullable<RunGraphExecution["audit"]>;
 
 /** Audit facts that belong to one write and are not visible in state, such as a key change. */
 interface WriteAudit {

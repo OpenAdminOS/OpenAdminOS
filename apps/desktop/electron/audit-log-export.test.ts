@@ -13,7 +13,7 @@ import type {
   TenantRecord,
   WritePlan,
 } from "@openadminos/agent-sdk";
-import type { TokenCacheStorage } from "@openadminos/runtime";
+import { findConnectorFactory, noSecrets, type TokenCacheStorage } from "@openadminos/runtime";
 
 import { AuditLogBehindError, AuditLogIntegrityError } from "./audit-log.js";
 import { IntelligenceSqliteStore } from "./intune-chat/sqlite-store.js";
@@ -279,6 +279,92 @@ describe("audit log behind the state", () => {
       assert.deepEqual(recorded.map((row) => row.type), ["run.queued", "run.started", "run.completed"]);
       assert.equal(consents.count, 1);
     } finally {
+      await fixture.cleanup();
+    }
+  });
+});
+
+describe("connector Graph writes in the audit log", () => {
+  type Internals = {
+    auditLog: { close(): void };
+    connectorTransport(
+      tenantId: string,
+      audit?: { runId: string; agentSlug: string; initiator: string },
+    ): { fetch: typeof fetch; assertEgress(): void };
+  };
+
+  async function sendOutlookMail(transport: { fetch: typeof fetch; assertEgress(): void }): Promise<void> {
+    const factory = findConnectorFactory("outlook");
+    assert.ok(factory);
+    const instance = await factory.build({
+      tenant: { tenantId: tenant.id, username: tenant.username, acquireTokenForScopes: async () => "token" },
+      config: {},
+      secrets: noSecrets,
+      ...transport,
+      log: () => undefined,
+      idempotencyKeyFor: () => "run-write:step-mail:0",
+    });
+    const capabilities = instance.capabilities as { sendMail(args: Record<string, unknown>): Promise<unknown> };
+    await capabilities.sendMail({ to: ["admin@contoso.example"], subject: "Report", text: "Done." });
+  }
+
+  function stubGraph(): { sent: Array<{ url: string; method: string }>; restore(): void } {
+    const original = globalThis.fetch;
+    const sent: Array<{ url: string; method: string }> = [];
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const url = String(input);
+      // Local provider probes are not a service.
+      if (url.startsWith("http://127.0.0.1")) return new Response("{}", { status: 503 });
+      sent.push({ url, method: init?.method ?? "GET" });
+      return new Response(null, { status: 202, headers: { "request-id": "graph-request-1" } });
+    }) as typeof fetch;
+    return { sent, restore: () => { globalThis.fetch = original; } };
+  }
+
+  it("refuses an Outlook send while the audit log cannot record it, and sends nothing", async () => {
+    const fixture = await makeStoreFixture();
+    const graph = stubGraph();
+    try {
+      await fixture.store.getAppState();
+      const internals = fixture.store as unknown as Internals;
+      internals.auditLog.close();
+      await assert.rejects(sendOutlookMail(internals.connectorTransport(tenant.id)), /POST \/me\/sendMail was not sent: the audit log could not record it\./);
+      assert.deepEqual(graph.sent, []);
+    } finally {
+      graph.restore();
+      await fixture.cleanup();
+    }
+  });
+
+  it("records an Outlook send before it leaves and its result after, with tenant and run", async () => {
+    const fixture = await makeStoreFixture();
+    const graph = stubGraph();
+    try {
+      await fixture.store.getAppState();
+      const internals = fixture.store as unknown as Internals;
+      await sendOutlookMail(internals.connectorTransport(tenant.id, { runId: "run-write", agentSlug: agent.slug, initiator: "schedule" }));
+      assert.deepEqual(graph.sent, [{ url: "https://graph.microsoft.com/beta/me/sendMail", method: "POST" }]);
+      const db = new DatabaseSync(join(fixture.dir, "openadminos.db"), { readOnly: true });
+      const rows = db.prepare("SELECT type, run_id, tenant_id, initiator, event_json FROM audit_log WHERE source = 'graph-write' ORDER BY seq").all() as Array<{
+        type: string; run_id: string; tenant_id: string; initiator: string; event_json: string;
+      }>;
+      db.close();
+      assert.deepEqual(rows.map((row) => [row.type, row.run_id, row.tenant_id, row.initiator]), [
+        ["graph.write.attempted", "run-write", tenant.id, "schedule"],
+        ["graph.write.result", "run-write", tenant.id, "schedule"],
+      ]);
+      const attempted = JSON.parse(rows[0]!.event_json) as { details: Record<string, unknown>; actor: { username?: string } };
+      const result = JSON.parse(rows[1]!.event_json) as { details: Record<string, unknown> };
+      assert.equal(attempted.details.method, "POST");
+      assert.equal(attempted.details.path, "/me/sendMail");
+      assert.equal(typeof attempted.details.bodyDigest, "string");
+      assert.equal(attempted.actor.username, tenant.username);
+      assert.equal(result.details.attemptId, attempted.details.attemptId);
+      assert.equal(result.details.outcome, "ok");
+      assert.equal(result.details.status, 202);
+      assert.equal(result.details.requestId, "graph-request-1");
+    } finally {
+      graph.restore();
       await fixture.cleanup();
     }
   });
