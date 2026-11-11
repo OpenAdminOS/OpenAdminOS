@@ -1,5 +1,16 @@
 # Current active plan
 
+- [ ] Lemonade Server as a local provider (branch `providers/lemonade`, 2026-11-12). Request: analyze https://lemonade-server.ai/#embed and add support if applicable. Maintainer decisions: an external provider like LM Studio, not the embeddable `lemond` bundled into the installer; LM Studio's adapter becomes one shared OpenAI-compatible adapter.
+
+  Acceptance criteria:
+  1. A running Lemonade on loopback port 13305 with a downloaded chat model is found by the model scan, Settings, Providers and Chat's model choice, marked Local, with Lemonade's logo; selecting it answers in Chat with "Nothing left this device".
+  2. Only models labelled `chat` are offered; embedding, transcription, image and speech models and models with `recipe: "cloud"` are not.
+  3. A Lemonade endpoint off the device (`OPENADMINOS_LEMONADE_URL`) is never contacted by the scan and reads as hosted elsewhere, like LM Studio.
+  4. Installed but not running names the command for the OS and offers Scan again (no Start); running without a chat model says to download one and offers Scan again; a 401 names `LEMONADE_API_KEY`.
+  5. LM Studio's requests, copy and tests are unchanged by the shared adapter.
+  6. The policy schema, catalog and logo NOTICE include Lemonade; SPEC.md, CHANGELOG and the provider matrix describe it.
+  7. Typecheck, the runtime, electron and renderer suites and the docs check pass on Node 22.
+
 - [x] Chat answer routing fixes (branch `chat/answer-routing-fixes`, 2026-11-10). Request: fix everything found in the review of a Splashtop Agentic Packr chat ("how can I setup the agentic packr by splashtop", then "how do I upload my first app?").
 
   Acceptance criteria:
