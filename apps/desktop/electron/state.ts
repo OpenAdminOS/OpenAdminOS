@@ -318,7 +318,7 @@ import type { SplashtopChatContext } from "./intune-chat/tools.js";
 import { isAllowedTool, McpHost, type McpToolInfo } from "./mcp/host.js";
 import { definitionForResource } from "./intune-chat/planner.js";
 import { DriftService } from "./intune-chat/drift/service.js";
-import { GatewayService, type GatewayConfig } from "./gateway/service.js";
+import { GatewayService, type GatewayConfig, type GatewayConfigContext } from "./gateway/service.js";
 import {
   RetrievalIndex,
   ollamaEmbedQuery,
@@ -3337,10 +3337,16 @@ export class AppStateStore {
    * replaced. `change` runs inside the lock and must not call serialize.
    * When it throws, nothing is written.
    */
-  private async updateGatewayConfig(change: (config: GatewayConfig) => GatewayConfig): Promise<GatewayConfig> {
+  private async updateGatewayConfig(
+    change: (config: GatewayConfig, context: GatewayConfigContext) => GatewayConfig,
+  ): Promise<GatewayConfig> {
     const written = await this.serialize(async () => {
       const persisted = await this.read();
-      const gateway = change(gatewayConfigOf(persisted));
+      const gateway = change(gatewayConfigOf(persisted), {
+        tenantConnected: (tenantId) =>
+          persisted.tenants.some((tenant) => tenant.id === tenantId) &&
+          this.tenantLifecycle.phase(tenantId) === "open",
+      });
       await this.write({ ...persisted, gateway });
       return gateway;
     });

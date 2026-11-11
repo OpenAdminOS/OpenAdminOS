@@ -67,6 +67,7 @@ import {
   type UsageTelemetryPayload,
 } from "../shared/openAdminOS";
 import { UPDATE_UNAVAILABLE_DETAIL, isNightlyVersion } from "../shared/update-channel";
+import { GATEWAY_TENANT_NOT_CONNECTED_COPY } from "../shared/gateway-copy";
 import { copyTextToClipboard } from "../shared/clipboard";
 import { isProviderImplemented } from "../shared/providers";
 import { detectedHostedProviders } from "../shared/provider-detection";
@@ -2162,12 +2163,16 @@ function GatewaySection({
         }),
       );
     } catch (caught) {
+      // The organization went away: its own copy says what to do, and
+      // the port is not the problem.
       setError(
-        gatewayActionError(
-          "The gateway could not be enabled",
-          caught,
-          "Check that the port is available, then try again.",
-        ),
+        hostErrorMessage(caught) === GATEWAY_TENANT_NOT_CONNECTED_COPY
+          ? GATEWAY_TENANT_NOT_CONNECTED_COPY
+          : gatewayActionError(
+              "The gateway could not be enabled",
+              caught,
+              "Check that the port is available, then try again.",
+            ),
       );
     } finally {
       setBusyAction(null);
@@ -2662,13 +2667,18 @@ function GatewayFact({
   );
 }
 
+/** The message the main process threw, without the wrapper Electron adds to it. */
+function hostErrorMessage(caught: unknown): string {
+  const raw = caught instanceof Error ? caught.message : String(caught);
+  return raw.replace(/^Error invoking remote method ['"][^'"]+['"]: (?:\w*Error: )?/, "").trim();
+}
+
 function gatewayActionError(
   prefix: string,
   caught: unknown,
   recovery: string,
 ): string {
-  const raw = caught instanceof Error ? caught.message : String(caught);
-  const reason = userFacingErrorReason(raw);
+  const reason = userFacingErrorReason(hostErrorMessage(caught));
   return reason ? `${prefix}: ${reason} ${recovery}` : `${prefix}. ${recovery}`;
 }
 

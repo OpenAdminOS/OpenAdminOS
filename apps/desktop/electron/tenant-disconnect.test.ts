@@ -335,6 +335,22 @@ describe("Disconnect redesign: two phases with a removal record", () => {
     }
   });
 
+  it("refuses to enable the gateway for a tenant that is not connected, or was disconnected", async () => {
+    const f = await fixture();
+    try {
+      await assert.rejects(f.store.enableGateway({ boundTenantId: "tenant-never-connected", port: 0 }), { message: /^That organization is no longer connected on this device/ });
+      await f.store.disconnectTenant(tenant.id);
+      await assert.rejects(f.store.enableGateway({ boundTenantId: tenant.id, port: 0 }), { message: /^That organization is no longer connected on this device/ });
+      const status = await f.store.getGatewayStatus();
+      assert.equal(status.enabled, false);
+      assert.equal(status.running, false);
+      assert.equal(status.boundTenantId, undefined);
+      assert.equal((await stored(f.statePath)).gateway?.boundTenantId, undefined);
+    } finally {
+      await f.close();
+    }
+  });
+
   it("turns the gateway off and revokes its clients, so reconnecting the same tenant does not bring an old token back", async () => {
     const network = recordFetch();
     const f = await fixture({}, {

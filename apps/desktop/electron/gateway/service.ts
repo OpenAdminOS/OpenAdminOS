@@ -8,6 +8,7 @@ import type {
   WritePlan,
 } from "@openadminos/agent-sdk";
 
+import { GATEWAY_TENANT_NOT_CONNECTED_COPY } from "../../src/shared/gateway-copy.js";
 import { lookupEndpoint } from "../graph-catalog.js";
 import { GatewayProposalRefusedError } from "../runs.js";
 import {
@@ -46,6 +47,8 @@ export interface GatewayConfig {
 const DEFAULT_GATEWAY_PORT = 8092;
 const CLIENT_NAME_MAX_LENGTH = 100;
 
+export { GATEWAY_TENANT_NOT_CONNECTED_COPY };
+
 /** A gateway refusal written to the audit log. */
 export interface GatewayAuditEvent {
   type: "gateway.proposal.refused";
@@ -61,16 +64,25 @@ export interface GatewayAuditEvent {
   };
 }
 
+/** What a config change may check about the state file it is written to. */
+export interface GatewayConfigContext {
+  /** True when `tenantId` is a connected tenant of the state file and is open, not being disconnected. */
+  tenantConnected(tenantId: string): boolean;
+}
+
 export interface GatewayServiceHost {
   readConfig(): Promise<GatewayConfig>;
   /**
    * Reads the config, applies `change` and writes the result under the
    * host lock for the state file, so no other change, such as a tenant
    * removal unbinding the gateway, lands between the read and the write.
-   * Resolves with the config written. When `change` throws, nothing is
-   * written and the call rejects with its error.
+   * `context` answers from the state as read under that lock. Resolves
+   * with the config written. When `change` throws, nothing is written
+   * and the call rejects with its error.
    */
-  updateConfig(change: (config: GatewayConfig) => GatewayConfig): Promise<GatewayConfig>;
+  updateConfig(
+    change: (config: GatewayConfig, context: GatewayConfigContext) => GatewayConfig,
+  ): Promise<GatewayConfig>;
   /** The shared token an earlier version kept in safeStorage, if any. */
   readLegacyToken(): Promise<string | undefined>;
   clearLegacyToken(): Promise<void>;
@@ -132,20 +144,27 @@ export class GatewayService {
 
   /**
    * Enable with an explicit tenant binding. Clients are paired
-   * separately; clients paired for another tenant are dropped.
+   * separately; clients paired for another tenant are dropped. The
+   * tenant must be connected and open when the config is written, under
+   * the same lock as a Disconnect, or nothing is written.
    */
   async enable(input: {
     boundTenantId: string;
     port?: number;
   }): Promise<GatewayPublicStatus> {
     await this.withConfig(async () => {
-      await this.changeConfig((config) => ({
-        ...config,
-        enabled: true,
-        port: input.port ?? config.port ?? DEFAULT_GATEWAY_PORT,
-        boundTenantId: input.boundTenantId,
-        clients: config.boundTenantId === input.boundTenantId ? config.clients : [],
-      }));
+      await this.changeConfig((config, context) => {
+        if (!context.tenantConnected(input.boundTenantId)) {
+          throw new Error(GATEWAY_TENANT_NOT_CONNECTED_COPY);
+        }
+        return {
+          ...config,
+          enabled: true,
+          port: input.port ?? config.port ?? DEFAULT_GATEWAY_PORT,
+          boundTenantId: input.boundTenantId,
+          clients: config.boundTenantId === input.boundTenantId ? config.clients : [],
+        };
+      });
       await this.restart(input.boundTenantId);
     });
     return this.getStatus();
@@ -360,12 +379,14 @@ export class GatewayService {
    * safeStorage only once its hash is written. Call it only inside
    * `withConfig`.
    */
-  private async changeConfig(change?: (config: GatewayConfig) => GatewayConfig): Promise<GatewayConfig> {
+  private async changeConfig(
+    change?: (config: GatewayConfig, context: GatewayConfigContext) => GatewayConfig,
+  ): Promise<GatewayConfig> {
     const legacy = await this.host.readLegacyToken();
     if (!legacy && !change) return this.host.readConfig();
-    const next = await this.host.updateConfig((config) => {
+    const next = await this.host.updateConfig((config, context) => {
       const migrated = legacy ? { ...config, legacyTokenHash: hashToken(legacy) } : config;
-      return change ? change(migrated) : migrated;
+      return change ? change(migrated, context) : migrated;
     });
     if (legacy) await this.host.clearLegacyToken();
     return next;

@@ -16,6 +16,7 @@ import {
   type SetAzureOpenAIProviderConfigInput,
 } from "../shared/openAdminOS";
 import { PROVIDER_DETECTION_COPY } from "../copy";
+import { GATEWAY_TENANT_NOT_CONNECTED_COPY } from "../shared/gateway-copy";
 import { setAnswerFont } from "../styles/answer-font";
 import { setDensity } from "../styles/density";
 
@@ -313,6 +314,26 @@ describe("Settings provider section", () => {
     await waitFor(() => {
       expect(disableGateway).toHaveBeenCalledOnce();
     });
+  });
+
+  it("says the organization is no longer connected when the gateway cannot bind to it", async () => {
+    const user = userEvent.setup();
+    const enableGateway = vi.fn(async () => {
+      throw new Error(`Error invoking remote method 'openadminos:enable-gateway': Error: ${GATEWAY_TENANT_NOT_CONNECTED_COPY}`);
+    });
+    const bridge = makeMockBridge({
+      getGatewayStatus: vi.fn(async () => ({ enabled: false, running: false, port: 47_891, clients: [] })),
+      enableGateway,
+      pairGatewayClient: vi.fn(),
+      revokeGatewayClient: vi.fn(),
+      disableGateway: vi.fn(),
+    });
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/gateway", bridge });
+
+    await user.click(await screen.findByRole("switch", { name: "Enable gateway" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe(GATEWAY_TENANT_NOT_CONNECTED_COPY);
+    expect(screen.queryByText(/Check that the port is available/)).not.toBeInTheDocument();
   });
 
   it("never moves focus away from the search while the section opens (design round)", async () => {

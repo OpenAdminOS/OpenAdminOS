@@ -13,6 +13,7 @@ import {
 } from "./server.js";
 import {
   buildProposalPlan,
+  GATEWAY_TENANT_NOT_CONNECTED_COPY,
   GatewayService,
   type GatewayAuditEvent,
   type GatewayConfig,
@@ -29,8 +30,11 @@ function makeGateway(options: {
   /** Called when a request has authenticated, before its body is read. */
   onAuthenticated?: () => void;
   executeReadTool?: GatewayServiceHost["executeReadTool"];
+  /** Tenants connected and open in the state file; tenant-1 by default. */
+  connectedTenants?: string[];
 } = {}) {
   let config: GatewayConfig = { enabled: false, port: 0, clients: [], ...options.config };
+  const connectedTenants = new Set(options.connectedTenants ?? ["tenant-1"]);
   let legacyToken = options.legacyToken;
   const queued: Array<Parameters<GatewayServiceHost["queueExternalProposal"]>[0]> = [];
   const audit: GatewayAuditEvent[] = [];
@@ -43,7 +47,9 @@ function makeGateway(options: {
     // Like the host, the read, change and write happen under one lock.
     updateConfig: async (change) => {
       await yieldTurn();
-      config = structuredClone(change(structuredClone(config)));
+      config = structuredClone(change(structuredClone(config), {
+        tenantConnected: (tenantId) => connectedTenants.has(tenantId),
+      }));
       return structuredClone(config);
     },
     readLegacyToken: async () => {
@@ -77,7 +83,7 @@ function makeGateway(options: {
   const writeConfig = (change: (current: GatewayConfig) => GatewayConfig) => {
     config = structuredClone(change(structuredClone(config)));
   };
-  return { service, queued, audit, config: () => config, writeConfig, legacyToken: () => legacyToken };
+  return { service, queued, audit, config: () => config, writeConfig, connectedTenants, legacyToken: () => legacyToken };
 }
 
 /** Disconnect's change to the gateway config: off, unbound, no clients. */
@@ -389,18 +395,34 @@ describe("gateway client pairing", () => {
     }
   });
 
+  it("refuses to bind the gateway to a tenant that is not connected, and writes nothing", async () => {
+    const { service, config } = makeGateway({ connectedTenants: ["tenant-1"] });
+    const before = structuredClone(config());
+    await assert.rejects(service.enable({ boundTenantId: "tenant-gone", port: 0 }), { message: GATEWAY_TENANT_NOT_CONNECTED_COPY });
+    assert.deepEqual(config(), before, "the config is unchanged");
+    const status = await service.getStatus();
+    assert.equal(status.enabled, false);
+    assert.equal(status.running, false);
+    assert.equal(status.boundTenantId, undefined);
+  });
+
   it("starts no listener when a Disconnect lands while the gateway is being enabled", async () => {
     // Land the Disconnect at each point of the enable, so one of them falls
     // between the enable's write and its listener start.
     for (let turns = 0; turns < 12; turns += 1) {
-      const { service, config, writeConfig } = makeGateway();
+      const { service, config, writeConfig, connectedTenants } = makeGateway();
       const disconnectLater = async () => {
         for (let turn = 0; turn < turns; turn += 1) await yieldTurn();
+        connectedTenants.delete("tenant-1");
         writeConfig(disconnected);
         await service.stop();
       };
       try {
-        await Promise.all([service.enable({ boundTenantId: "tenant-1", port: 0 }), disconnectLater()]);
+        // A Disconnect that lands before the enable's write refuses it.
+        const enabling = service.enable({ boundTenantId: "tenant-1", port: 0 }).catch((error: unknown) => {
+          assert.equal((error as Error).message, GATEWAY_TENANT_NOT_CONNECTED_COPY);
+        });
+        await Promise.all([enabling, disconnectLater()]);
         const status = await service.getStatus();
         assert.equal(status.running, config().enabled, `Disconnect after ${turns} turns`);
       } finally {
