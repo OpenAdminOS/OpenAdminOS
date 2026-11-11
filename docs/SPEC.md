@@ -1147,7 +1147,10 @@ chain (`hashChain.stored`), and CSV includes the hash and chain metadata
 columns and an `initiator` column. Without filters the export chain equals the
 stored chain. Exports can be limited to a date range and to runs no person
 started (Settings: "Only runs no person started"), which keeps only events of
-runs whose initiator is not `person` and leaves out events of no run. Signed or third-party
+runs whose initiator is not `person` and leaves out events of no run. A CSV
+cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return is
+prefixed with `'` so a spreadsheet does not run it as a formula; remove that
+prefix before verifying the chain from such a cell. Signed or third-party
 cryptographic timestamps are deferred.
 
 The export also includes configuration changes, with source

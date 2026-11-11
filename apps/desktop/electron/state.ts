@@ -1526,7 +1526,9 @@ function serializeAuditLogCsv(input: AuditLogSerializeInput): string {
 const AUDIT_RETENTION_NOTE = `Audit events are recorded when they happen, in that order, and kept for ${AUDIT_LOG_RETENTION_DAYS.toLocaleString("en-US")} days, independent of run-history retention and of disconnecting an organization. Events of runs that retention removed before the audit log existed are not in it, nor configuration changes older than the newest ${CONFIGURATION_AUDIT_MAX_EVENTS.toLocaleString("en-US")} kept until then.`;
 
 function csvCell(value: unknown): string {
-  const text = String(value ?? "");
+  const raw = String(value ?? "");
+  // A spreadsheet runs a cell that starts with one of these as a formula.
+  const text = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
   if (!/[",\r\n]/.test(text)) return text;
   return `"${text.replace(/"/g, "\"\"")}"`;
 }

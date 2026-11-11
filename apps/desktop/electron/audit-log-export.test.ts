@@ -221,6 +221,23 @@ describe("append-only audit log in the export", () => {
     }
   });
 
+  it("neutralizes CSV cells a spreadsheet would run as a formula", async () => {
+    const fixture = await makeStoreFixture({
+      extraRuns: [{ ...oldRun(), id: "=HYPERLINK(\"https://example.invalid\")", agentSlug: "-cmd", tenantId: "@tenant" }],
+    });
+    try {
+      const rows = parseCsv((await fixture.store.exportAuditLog({ format: "csv" })).content);
+      const header = rows[0] ?? [];
+      const row = rows.find((cells) => cells[header.indexOf("runId")]?.includes("HYPERLINK"));
+      assert.ok(row);
+      assert.equal(row[header.indexOf("runId")], "'=HYPERLINK(\"https://example.invalid\")");
+      assert.equal(row[header.indexOf("agentSlug")], "'-cmd");
+      assert.equal(row[header.indexOf("tenantId")], "'@tenant");
+      assert.ok(rows.slice(1).every((cells) => cells.every((cell) => !/^[=+\-@\t\r]/.test(cell))));
+    } finally {
+      await fixture.cleanup();
+    }
+  });
 });
 
 async function makeStoreFixture(options: { extraRuns?: RunRecord[] } = {}): Promise<{
