@@ -428,7 +428,11 @@ own card and never aborts app-state assembly, so it cannot fail tenant sign-in.
 Claude Code and Codex requests are bounded by a watchdog
 (`packages/runtime/src/cli-watchdog.ts`) instead of one wall clock: an idle
 limit restarted on every stdout chunk, counted from the start so it also bounds
-the wait for the first output, and a hard cap on the whole request. Claude Code
+the wait for the first output, and a hard cap on the whole request. The idle
+limit is paused while a `stream()` consumer holds a chunk, because unread
+output backs up in the pipe and the CLI waits on it, and restarts when the
+consumer asks for the next one; it ends with the output, and only the cap
+bounds the wait for the exit after that. Claude Code
 streams partial messages, so its idle limit is 90 seconds; `codex exec --json`
 prints whole items and stays silent through a long reply, so Codex keeps 180
 seconds, the old total limit. Both are capped at 15 minutes. The idle limit is
@@ -437,7 +441,8 @@ off when it is not below the cap. `OPENADMINOS_CLAUDE_CODE_IDLE_TIMEOUT_MS` and
 `OPENADMINOS_CLAUDE_CODE_TIMEOUT_MS` and `OPENADMINOS_CODEX_TIMEOUT_MS` the
 caps, as a positive whole number of milliseconds in the environment OpenAdminOS
 starts with, at most 2147483647, the longest a Node timer waits; any other value
-is ignored. The two stops end the CLI process and give distinct errors, each
+is ignored. Limits passed in code take the same check, and an invalid one falls
+back to the environment, then the default. The two stops end the CLI process and give distinct errors, each
 naming its variable: a stall says "Claude Code stopped sending output for 90
 seconds, so OpenAdminOS ended the request. Test the provider in Settings, then
 retry." and the cap says "Claude Code was still working after 15 minutes, the
@@ -679,7 +684,14 @@ Concretely:
   proposal."). A changed phrase with the same actions is named on its own.
   When the agent called a model while planning, the refusal adds "An agent
   that uses a model can plan differently on a second pass, even when the
-  tenant has not changed." before Run again.
+  tenant has not changed." before Run again. A failure before apply starts,
+  such as the model, the Graph sign-in or a connector failing for that check,
+  says "Nothing was applied: <reason>".
+  The comparison relies on two rules (documented on `WriteAction.kind`):
+  an apply handler reads only an action's `request` and `metadata`, and apply
+  skips an action whose kind has no registered handler, never applying it;
+  only the registry's own entries count, so a kind such as "constructor" finds
+  none.
   Planning again repeats the agent's model steps, including its LLM calls,
   because some agents derive their actions from model output and skipping
   those steps would change the plan; confirming a write run therefore costs
@@ -1193,7 +1205,15 @@ later append records the kept results first, in the same transaction, and they
 are cleared only once recorded, also across a restart. Settings -> General
 counts them until then ("N Graph write results are not in the audit log yet"),
 whatever other appends succeed; a pending file that cannot be read is left in
-place, never overwritten, and named there. Every failure of the audit sink, a
+place, never overwritten, and named there. When the pending file cannot be
+written either (disk full, or an unreadable file still in its place), the
+result is only in memory: the run log error and Settings say it is lost if
+OpenAdminOS quits before it is recorded and to free disk space, and the file is
+tried again on every later append, every status read and on close. The last
+failed append shown in Settings clears only when the latest state is recorded
+in full, with the next change to settings or runs; a Graph write recorded in
+between leaves it, because it also makes the next state write record the
+previous state first. Every failure of the audit sink, a
 throw or a rejection of an async sink, is kept for that notice. On upgrade, the
 run history, configuration changes, Nova connector deliveries and consent
 events stored by earlier versions are imported, in time order, so nothing
@@ -3112,7 +3132,7 @@ v0.5 adds four capability areas on top of the drift timeline; each maps to an ac
 
 **Governed MCP write-gateway.** A local, loopback-only (127.0.0.1) MCP server, off by default and bound to exactly one tenant at enable time. External AI clients get the same read-only tool allowlist as Chat. The only write capability is `propose_write_plan`: proposed actions are validated against the bundled Graph endpoint catalog (unknown endpoints rejected), turned into a standard `WritePlan`, and queued as an `external-proposal` system run that requires the normal typed confirmation in the desktop app. No external client can apply a change; a proposal can only be reviewed, confirmed, or rejected by a human. Apply is fail-stop and shares the rollback apply path.
 
-*Client identity.* Each client is paired in Settings, Gateway under a name the admin gives (Pair client). Pairing creates a client record (id, name, created time, SHA-256 hash of the client's own token); the token is shown once and stored nowhere, and a presented token is hashed and compared with every record in constant time. The name on a proposal and in run history comes from that record; the tool takes no client name. A client reads only the status of its own proposals. Revoke removes the record, so the token stops working on the next request; disabling the gateway revokes every client, enabling it for another tenant drops the clients of the previous one, and disconnecting the bound tenant turns the gateway off, unbinds it and revokes every client, so connecting the same tenant again never brings old clients back. Every request also reads the config: unless the gateway is on and bound to the tenant its listener was started for, it gets HTTP 403 with code `gateway-off` (off or unbound) or `gateway-other-organization` (bound to another tenant) and a message to turn the gateway on in Settings, Gateway and pair again, whatever the token. A listener start checks the binding as written right before it starts, and a stop that lands while a listener starts closes it once it is up, so a Disconnect during an enable leaves no listener. The single shared token of earlier versions is not migrated, because every client held it and their names were self-reported: on upgrade its hash is kept and the raw token removed from safeStorage, a client that still presents it gets HTTP 401 with code `legacy-shared-token` and a message to pair again in Settings, Gateway, and client records from that time are listed with "Pair again" until they are paired again under the same name or revoked. Pairing, revoking, enabling, disabling and that upgrade step run in one queue in the gateway service, and each reads, changes and writes the gateway config in one host update under the state file lock (`updateGatewayConfig`), so overlapping changes never write snapshots over each other and a change never writes back a config that a tenant removal replaced: a pairing in flight while Disconnect turns the gateway off is refused with "Enable the gateway before pairing a client." Tenant removal applies the same unbind change inside its own lock. Token checks read the config through the upgrade step. Proposals queued before the upgrade carry no client id, so no client can read their status; they stay in the desktop app for review.
+*Client identity.* Each client is paired in Settings, Gateway under a name the admin gives (Pair client). Pairing creates a client record (id, name, created time, SHA-256 hash of the client's own token); the token is shown once and stored nowhere, and a presented token is hashed and compared with every record in constant time. The name on a proposal and in run history comes from that record; the tool takes no client name. A client reads only the status of its own proposals. Revoke removes the record, so the token stops working on the next request; disabling the gateway revokes every client, enabling it for another tenant drops the clients of the previous one, and disconnecting the bound tenant turns the gateway off, unbinds it and revokes every client, so connecting the same tenant again never brings old clients back. Enabling checks, under the state file lock, that the tenant is connected and open, or is refused with "That organization is no longer connected on this device, so the gateway was not turned on. Select a connected organization, then turn on Enable gateway again.", shown as is in Settings, Gateway. Every request also reads the config: unless the gateway is on and bound to the tenant its listener was started for, it gets HTTP 403 with code `gateway-off` (off or unbound) or `gateway-other-organization` (bound to another tenant) and a message to turn the gateway on in Settings, Gateway and pair again, whatever the token. A request is authenticated from its headers before its body arrives, so every tool, reads and `propose_write_plan` alike, checks again when it runs that the gateway is on, bound to the listener's tenant and the client still paired; otherwise the tool returns the same designed refusal (`unpaired-token`, `gateway-off` or `gateway-other-organization`) as a tool error, and nothing is read or queued. A listener start checks the binding as written right before it starts, and a stop that lands while a listener starts closes it once it is up, so a Disconnect during an enable leaves no listener. The single shared token of earlier versions is not migrated, because every client held it and their names were self-reported: on upgrade its hash is kept and the raw token removed from safeStorage, a client that still presents it gets HTTP 401 with code `legacy-shared-token` and a message to pair again in Settings, Gateway, and client records from that time are listed with "Pair again" until they are paired again under the same name or revoked. Pairing, revoking, enabling, disabling and that upgrade step run in one queue in the gateway service, and each reads, changes and writes the gateway config in one host update under the state file lock (`updateGatewayConfig`), so overlapping changes never write snapshots over each other and a change never writes back a config that a tenant removal replaced: a pairing in flight while Disconnect turns the gateway off is refused with "Enable the gateway before pairing a client." Tenant removal applies the same unbind change inside its own lock. Token checks read the config through the upgrade step. Proposals queued before the upgrade carry no client id, so no client can read their status; they stay in the desktop app for review.
 
 *Proposal limits.* An identical proposal (same client, tenant and plan digest, the SHA-256 of the canonical ordered Graph requests, so titles and labels do not count) that is already awaiting confirmation is not queued again; the tool returns the waiting run with status `already-awaiting-confirmation`. A client may have at most 5 proposals awaiting confirmation (`GATEWAY_PENDING_PROPOSALS_PER_CLIENT`), and after the admin rejects a proposal the same plan from the same client is refused for 15 minutes (`GATEWAY_REJECTED_PROPOSAL_COOLDOWN_MS`). Both refusals return a tool error with status `refused`, a reason (`pending-limit` or `rejected-cooldown`) and a message that says what to do, and are recorded in the audit log as `gateway.proposal.refused` (source `gateway`, initiator `gateway`) with the client, reason and plan digest.
 
