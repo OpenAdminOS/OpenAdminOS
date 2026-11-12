@@ -38,6 +38,8 @@ describe("lemonadeChatModelIds", () => {
         { id: "openai.gpt-5", labels: ["chat"], recipe: "cloud" },
         { id: "anthropic.claude", labels: ["chat"], recipe: "cloud-anthropic" },
         { id: "routed", labels: ["chat"], recipe: "llamacpp", cloud_provider: "openrouter" },
+        { id: "spaced", labels: ["chat"], recipe: " Cloud " },
+        { id: "catalog-only", labels: ["chat"], recipe: "llamacpp", downloaded: false },
         { id: "no-labels", recipe: "llamacpp" },
         { labels: ["chat"], recipe: "llamacpp" },
       ]),

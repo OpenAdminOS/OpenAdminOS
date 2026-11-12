@@ -67,7 +67,8 @@ export function lemonadeChatModelIds(data: OpenAiCompatibleModel[]): string[] {
   return data
     .filter((model) => {
       const labels = Array.isArray(model.labels) ? model.labels : [];
-      return labels.includes("chat") && !isLemonadeCloudModel(model);
+      // A listed model Lemonade marks as not downloaded would be downloaded on request.
+      return labels.includes("chat") && model.downloaded !== false && !isLemonadeCloudModel(model);
     })
     .map((model) => model.id)
     .filter((id): id is string => typeof id === "string" && id.length > 0);
@@ -75,7 +76,7 @@ export function lemonadeChatModelIds(data: OpenAiCompatibleModel[]): string[] {
 
 function isLemonadeCloudModel(model: OpenAiCompatibleModel): boolean {
   return (
-    (typeof model.recipe === "string" && model.recipe.toLowerCase().startsWith("cloud")) ||
+    (typeof model.recipe === "string" && model.recipe.trim().toLowerCase().startsWith("cloud")) ||
     (model.cloud_provider !== undefined && model.cloud_provider !== null && model.cloud_provider !== "")
   );
 }

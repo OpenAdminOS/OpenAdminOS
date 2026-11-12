@@ -39,9 +39,9 @@ export interface OpenAiCompatibleServer {
    */
   unlistedModelMessage?: (model: string, entry: OpenAiCompatibleModel | undefined) => string;
   /**
-   * Whether a streamed chunk's `model` field names the model. Lemonade puts
-   * the model file path there, so its chunks keep the requested id.
-   * Defaults to true.
+   * Whether a response's `model` field names the model. Lemonade puts the
+   * model file path there in streamed chunks, so its responses keep the
+   * requested id. Defaults to true.
    */
   streamNamesModel?: boolean;
 }
@@ -50,6 +50,7 @@ export interface OpenAiCompatibleModel {
   id?: string;
   labels?: unknown;
   recipe?: unknown;
+  downloaded?: unknown;
   /** Lemonade: set on a model it routes to a cloud provider. */
   cloud_provider?: unknown;
 }
@@ -209,7 +210,7 @@ export function createOpenAiCompatibleLlm(
       const tokenUsage = tokenUsageFrom(payload);
       return {
         text,
-        model: payload.model ?? model,
+        model: (server.streamNamesModel ?? true) ? payload.model ?? model : model,
         ...(tokenUsage ? { tokenUsage } : {}),
       };
     },
