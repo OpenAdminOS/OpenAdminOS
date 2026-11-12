@@ -305,6 +305,21 @@ describe("Settings, Nova, across an organization switch", () => {
     expect(screen.getByLabelText("Nova instructions for Contoso")).toHaveValue("Contoso rules.");
   });
 
+  it("shows a records reply stamped for another organization as a failed read with a retry, not as loading", async () => {
+    const { answer } = setupSwitch();
+    const user = userEvent.setup();
+    await answer("org-a", view({ addendum: "Northwind rules." }), recordsFor("org-a", "Northwind kiosks are in Berlin"));
+    await user.click(screen.getByRole("button", { name: "Switch to Contoso" }));
+    // The main process answered for the previous organization.
+    await answer("org-b", view({ addendum: "" }), recordsFor("org-a", "Northwind kiosks are in Berlin"));
+    expect(await screen.findByText(/Notes for Contoso could not be loaded: The notes and follow-ups returned were for another organization\./)).toBeInTheDocument();
+    expect(screen.queryByText("Loading notes for Contoso.")).toBeNull();
+    expect(screen.queryByText("Northwind kiosks are in Berlin")).toBeNull();
+    await user.click(screen.getAllByRole("button", { name: "Try again" })[0]!);
+    await answer("org-b", view({ addendum: "" }), recordsFor("org-b", "Contoso laptops are in Munich"));
+    expect(await screen.findByText("Contoso laptops are in Munich")).toBeInTheDocument();
+  });
+
   it("shows a failed read for the new organization with a retry, not the previous organization's data", async () => {
     const { answer } = setupSwitch();
     const user = userEvent.setup();

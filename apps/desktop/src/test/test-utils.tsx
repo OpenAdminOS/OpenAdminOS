@@ -456,7 +456,8 @@ export function makeMockBridge(
       revisions: [],
       migratedFromLocalStorage: true,
     })),
-    novaRecords: vi.fn(async () => ({ notes: [], followUps: [] })),
+    // Stamped like the main process: for the organization active at the call.
+    novaRecords: vi.fn(async () => ({ ...(appState.activeTenantId ? { tenantId: appState.activeTenantId } : {}), ...(appState.activeOrganizationId ? { organizationId: appState.activeOrganizationId } : {}), notes: [], followUps: [] })),
     startGraphCachePreload: vi.fn(async () => {}),
     cancelGraphCachePreload: vi.fn(async () => {}),
     refreshGraphCache: vi.fn(async () => ({

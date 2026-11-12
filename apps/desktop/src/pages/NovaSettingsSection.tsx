@@ -151,7 +151,12 @@ export function NovaSettingsSection() {
       .catch((caught) => { if (current()) setProfileLoadError(hostError(caught)); });
     void api
       .novaRecords?.({ action: "list" })
-      .then((next) => { if (current() && (next.organizationId ?? undefined) === organizationId) setRecords(next); })
+      .then((next) => {
+        if (!current()) return;
+        // A reply for another organization is not shown, and the page does not wait on it either.
+        if ((next.organizationId ?? undefined) === organizationId) setRecords(next);
+        else setRecordsLoadError("The notes and follow-ups returned were for another organization.");
+      })
       .catch((caught) => { if (current()) setRecordsLoadError(hostError(caught)); });
     void api
       .listConnectors?.()
