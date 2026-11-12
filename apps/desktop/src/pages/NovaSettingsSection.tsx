@@ -42,6 +42,12 @@ const FOLLOW_UP_STATE_TEXT: Record<NovaFollowUp["status"], string> = {
   failed: "Started, but Chat did not return an answer.",
 };
 
+/** The stored reason names why a provider skip happened (policy, endpoint); the generic text is the fallback. */
+function followUpStateText(followUp: NovaFollowUp): string {
+  if (followUp.status === "skipped-provider" && followUp.reason) return `Not run: ${followUp.reason}`;
+  return FOLLOW_UP_STATE_TEXT[followUp.status];
+}
+
 function utc(value: string): string {
   return `${value.slice(0, 16).replace("T", " ")} UTC`;
 }
@@ -714,7 +720,7 @@ function FollowUpList({ followUps, busy, onCancel }: { followUps: NovaFollowUp[]
           <div className="min-w-0">
             <p className="text-sm text-[var(--color-text)]">{followUp.question}</p>
             <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-              {followUp.status === "pending" ? `Due ${utc(followUp.dueAt)}` : `${FOLLOW_UP_STATE_TEXT[followUp.status]}${followUp.finishedAt ? ` · ${utc(followUp.finishedAt)}` : ""}`}
+              {followUp.status === "pending" ? `Due ${utc(followUp.dueAt)}` : `${followUpStateText(followUp)}${followUp.finishedAt ? ` · ${utc(followUp.finishedAt)}` : ""}`}
               {" · "}{followUp.providerId}{followUp.model ? ` · ${followUp.model}` : ""}
             </p>
             {followUp.status === "failed" && followUp.reason ? <p className="mt-1 text-xs text-[var(--color-danger)]">{followUp.reason}</p> : null}
