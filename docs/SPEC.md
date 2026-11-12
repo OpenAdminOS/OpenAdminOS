@@ -400,7 +400,9 @@ on macOS and Linux it runs as a system service that needs admin rights to
 start, so an installed Lemonade that is not running names the command in
 the scan, Settings and the model choice (`sudo launchctl kickstart -k
 system/ai.lemonadeserver.server`, `sudo systemctl start lemond`, or Lemonade
-Server from the Start menu on Windows) and offers Scan again; a running server without a chat model says to
+Server from the Start menu on Windows) and offers Scan again (Settings,
+Providers shows a provider's check detail in its details whenever the runtime
+is installed but stopped or its check failed, for every provider); a running server without a chat model says to
 download one and offers Scan again. A server that runs with `LEMONADE_API_KEY`
 answers 401, and the check says so: OpenAdminOS sends no Lemonade API key yet
 (open question). Lemonade's embeddable build (`lemond` bundled into an app and

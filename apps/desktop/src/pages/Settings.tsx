@@ -734,6 +734,10 @@ function ProviderRow({
       {expanded ? (
         <div className="border-t border-[var(--color-border-soft)] bg-[var(--color-bg-raised)]/30 px-5 py-4">
           <p className="max-w-[720px] text-sm leading-5 text-[var(--color-text-soft)]">{provider.description}</p>
+          {/* The check's own recovery: how to start an installed runtime, or why the check failed. */}
+          {implemented && provider.detail && ((provider.status === "not-installed" && provider.installed) || provider.status === "error") ? (
+            <p className="mt-2 max-w-[720px] text-sm leading-5 text-[var(--color-text)]">{provider.detail}</p>
+          ) : null}
           {provider.cli && implemented ? (
             <dl className="mt-3 grid gap-3 sm:grid-cols-3">
               <ProviderFact label="CLI version" value={provider.cli.version ?? "Not detected"} />
