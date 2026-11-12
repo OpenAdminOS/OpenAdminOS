@@ -18,6 +18,12 @@ export interface NovaActionHost {
   /** The tenant of the active organization now, read when an action runs. */
   activeTenantId(): Promise<string | undefined>;
   /**
+   * Where a provider is reached now, for providers that can be pointed
+   * elsewhere under the same id (Ollama, LM Studio, Azure OpenAI). A voice
+   * session that started on one endpoint does not go on with another.
+   */
+  providerEndpoint?(providerId: ProviderId): Promise<string | undefined>;
+  /**
    * Run an approved action under its tenant's lease: refused once the
    * organization is being disconnected, drained by Disconnect, and the
    * signal fires when it starts closing, so a multi-part send stops.

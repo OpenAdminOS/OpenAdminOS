@@ -16,3 +16,10 @@ export const NOVA_NOTES_UNREADABLE_NOTICE =
 
 /** The app-state change reason sent when the main process ends a hosted voice session. */
 export const NOVA_SESSION_ENDED_REASON = "nova-session-ended";
+
+/** Said when a voice session ends because its organization, its connection or the reasoning provider changed. */
+export const NOVA_SESSION_CONTEXT_CHANGED =
+  "The organization, its connection or the reasoning provider changed after this voice session started, so the session ended. Start Nova again.";
+
+/** The app-state change reason sent when the main process ends a voice session because its context changed. */
+export const NOVA_SESSION_CONTEXT_ENDED_REASON = "nova-session-context-ended";

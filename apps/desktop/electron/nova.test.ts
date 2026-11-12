@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { novaSettingsHost } from "./nova-test-settings.js";
 import { it } from "node:test";
+import { NOVA_VOICE_CONSENT_NOT_KEPT } from "./nova-actions.js";
 import {
   NovaService,
   buildNovaInstructions,
@@ -462,7 +463,14 @@ it("keeps a valid voice session usable after an investigation failure", async ()
         ? { status: "failed", content: "", error: "Search is temporarily unavailable. Retry later." }
         : { status: "completed", content: "42 devices" },
     } as SendIntuneChatMessageResult;
-  }, async () => Response.json({ transport: { sdp: "answer" } }));
+  }, async () => Response.json({ transport: { sdp: "answer" } }), {
+    profile: async () => defaultNovaSettings(),
+    recordVoiceConsent: () => {},
+    activeTenantId: async () => f.state.activeTenantId,
+    connectors: async () => [],
+    send: async () => ({}),
+    startRun: async () => { throw new Error("not used"); },
+  });
   await nova.handle({ action: "configure", apiKey: "test-key" });
   const { sessionId } = await nova.handle({ action: "start", mode: "openai", tenantId: "tenant-a", consent: true, sdp: "v=0" });
   const first = await nova.handle({ action: "answer", sessionId: sessionId!, text: "Research macOS" });
@@ -474,6 +482,15 @@ it("keeps a valid voice session usable after an investigation failure", async ()
   assert.equal(inputs[1]?.conversationId, "recoverable-conversation");
   await nova.handle({ action: "stop" });
   await assert.rejects(nova.handle({ action: "answer", sessionId: sessionId!, text: "Continue" }), /changed|expired/);
+});
+
+it("does not start hosted voice without anything to record its consent", async () => {
+  const f = fixture();
+  const requests: string[] = [];
+  const nova = new NovaService(f.secrets, async () => f.state, async () => ({}) as SendIntuneChatMessageResult, async (url) => { requests.push(String(url)); return Response.json({ transport: { sdp: "answer" } }); });
+  await nova.handle({ action: "configure", apiKey: "test-key" });
+  await assert.rejects(nova.handle({ action: "start", mode: "openai", tenantId: "tenant-a", consent: true, sdp: "v=0" }), { message: NOVA_VOICE_CONSENT_NOT_KEPT });
+  assert.equal(requests.length, 0);
 });
 
 it("recovers from a question deadline without renewing or invalidating the session", async t => {

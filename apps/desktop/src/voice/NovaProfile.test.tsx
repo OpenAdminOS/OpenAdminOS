@@ -176,6 +176,30 @@ it("closes the hosted audio when the main process ends the session after a setti
   expect(bridge.nova).toHaveBeenCalledWith({ action: "stop" });
 });
 
+it("closes the hosted audio and says why when the main process ends the session after a provider or organization change", async () => {
+  const dc = stubHostedSession();
+  const listeners: Array<(info: { reason: string }) => void> = [];
+  const bridge = makeMockBridge({
+    nova: vi.fn(async (input) => {
+      if (input.action === "status") return { hasKey: true };
+      if (input.action === "start") return { sessionId: "voice-session", sdp: "v=0" };
+      return {};
+    }),
+    onAppStateChanged: vi.fn((next: (info: { reason: string }) => void) => { listeners.push(next); return () => undefined; }),
+  });
+  renderRoute(<Nova />, { bridge, route: "/cache", path: "/cache" });
+  const user = userEvent.setup();
+  act(openNovaPanel);
+  await user.click(await screen.findByRole("checkbox"));
+  await user.click(screen.getByRole("button", { name: "Start Nova" }));
+  await waitFor(() => expect(dc.onmessage).toBeTypeOf("function"));
+  act(() => dc.onmessage!({ data: JSON.stringify({ type: "session.started" }) }));
+  act(() => { for (const listener of listeners) listener({ reason: "nova-session-context-ended" }); });
+  expect(await screen.findByText(/the reasoning provider changed after this voice session started/)).toBeInTheDocument();
+  expect(dc.send.mock.calls.some(([event]) => String(event).includes("session.close"))).toBe(true);
+  expect(bridge.nova).toHaveBeenCalledWith({ action: "stop" });
+});
+
 it("says when the voice settings on this device could not be moved, keeps them, and tries again", async () => {
   localStorage.setItem("nova.voice-mode", "local");
   const migrate = vi.fn()

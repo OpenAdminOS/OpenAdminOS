@@ -1769,13 +1769,22 @@ function errorText(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
 
+/** The state change reason sent when Disconnect closes a tenant, before its data is removed. */
+export const TENANT_CLOSING_REASON = "tenant-closing";
+
 /**
- * Where a local-capable provider is reached, for Nova follow-ups: Ollama
- * and LM Studio can be pointed off this device under the same provider id.
+ * Where a provider is reached, for Nova follow-ups and voice sessions:
+ * Ollama and LM Studio can be pointed off this device, and Azure OpenAI at
+ * another resource or deployment, all under the same provider id.
  */
-function novaProviderEndpoint(providerId: ProviderId): string | undefined {
+function novaProviderEndpoint(providerId: ProviderId, persisted?: Pick<PersistedState, "providerConfigs">): string | undefined {
   if (providerId === "ollama") return resolveOllamaEndpoint().replace(/\/$/, "");
   if (providerId === "lm-studio") return resolveLmStudioEndpoint().replace(/\/$/, "");
+  if (providerId === "azure-openai") {
+    const azure = persisted?.providerConfigs?.azureOpenAI;
+    // No saved resource is its own value, so saving one later is a change.
+    return azure ? `${azure.endpoint.trim().replace(/\/$/, "")}#${azure.deployment.trim()}` : "azure-openai:unset";
+  }
   return undefined;
 }
 
@@ -7269,6 +7278,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     };
   }
 
+  /** Where a provider is reached now; see novaProviderEndpoint. */
+  async novaProviderEndpoint(providerId: ProviderId): Promise<string | undefined> {
+    return novaProviderEndpoint(providerId, providerId === "azure-openai" ? await this.read() : undefined);
+  }
+
   /** Nova's follow-up store, for its action host. */
   novaFollowUpsHost(): NonNullable<import("./nova-actions.js").NovaActionHost["followUps"]> {
     return {
@@ -7291,7 +7305,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const organizationId = state.activeOrganizationId;
     const hosted = !provider?.isLocal;
     const acknowledgedAt = this.clock().toISOString();
-    const endpoint = novaProviderEndpoint(input.providerId);
+    const endpoint = await this.novaProviderEndpoint(input.providerId);
     // Where the provider runs is part of the follow-up: a local provider
     // moved off this device later does not get the question. A hosted
     // provider's consent is kept before the follow-up is stored; when no
@@ -7376,6 +7390,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       const state = await this.getAppState();
       const provider = state.providers.find((entry) => entry.id === state.activeProviderId);
       const activeModel = resolveProviderDefaultModel(provider, state.activeModelByProviderId).model;
+      const activeEndpoint = await this.novaProviderEndpoint(state.activeProviderId);
       const lockedModel = managedLockedModel(this.managedPolicy, followUp.providerId);
       const providerAllowed = managedProviderAllowed(this.managedPolicy, followUp.providerId) && (!lockedModel || lockedModel === followUp.model);
       const decision = novaFollowUpFireDecision(followUp, {
@@ -7386,15 +7401,15 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         activeProviderId: state.activeProviderId,
         ...(activeModel ? { activeModel } : {}),
         activeProviderLocal: provider?.isLocal === true,
-        ...(novaProviderEndpoint(state.activeProviderId) ? { activeProviderEndpoint: novaProviderEndpoint(state.activeProviderId) } : {}),
+        ...(activeEndpoint ? { activeProviderEndpoint: activeEndpoint } : {}),
         providerAllowed,
       });
       let reason: string | undefined;
       if (decision === "skipped-provider" && !providerAllowed) reason = NOVA_FOLLOW_UP_PROVIDER_NOT_ALLOWED;
       else if (decision === "skipped-provider" && state.activeProviderId === followUp.providerId &&
-          ((provider?.isLocal === true) !== followUp.providerLocal || (followUp.providerEndpoint ?? undefined) !== novaProviderEndpoint(followUp.providerId)))
+          ((provider?.isLocal === true) !== followUp.providerLocal || (followUp.providerEndpoint ?? undefined) !== activeEndpoint))
         reason = NOVA_FOLLOW_UP_PROVIDER_MOVED;
-      return { decision, provider, ...(reason ? { reason } : {}) };
+      return { decision, provider, ...(activeEndpoint ? { endpoint: activeEndpoint } : {}), ...(reason ? { reason } : {}) };
     };
     try {
       const first = await decide();
@@ -7442,7 +7457,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
                   signal: AbortSignal.any([signal, controller.signal]),
                   scope: { tenantId: followUp.tenantId, providerId: followUp.providerId, ...(followUp.model ? { model: followUp.model } : {}), isLocal: provider?.isLocal === true },
                   // Checked against the stored follow-up instead of the five-minute window of a typed send.
-                  scheduledConsent: (check) => this.novaFollowUpConsentMatches(followUp.id, check),
+                  scheduledConsent: (check) => this.novaFollowUpConsentMatches(followUp.id, check, fresh.endpoint),
                 },
               ),
               timedOut,
@@ -7474,9 +7489,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   /**
    * Whether a hosted Chat call at fire time is the one the admin consented
    * to on the card: the running follow-up, its organization, provider,
-   * model, consent time and, for Ollama and LM Studio, endpoint.
+   * model, consent time and, for Ollama, LM Studio and Azure OpenAI, the
+   * endpoint read inside the lease just before the call.
    */
-  private novaFollowUpConsentMatches(id: string, check: { tenantId?: string; providerId: ProviderId; model?: string; acknowledgedAt: string }): boolean {
+  private novaFollowUpConsentMatches(id: string, check: { tenantId?: string; providerId: ProviderId; model?: string; acknowledgedAt: string }, endpoint: string | undefined): boolean {
     const current = this.novaFollowUps.get(id);
     return (
       current !== undefined &&
@@ -7487,7 +7503,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       check.tenantId === current.tenantId &&
       check.providerId === current.providerId &&
       check.model === current.model &&
-      (current.providerEndpoint ?? undefined) === novaProviderEndpoint(current.providerId)
+      (current.providerEndpoint ?? undefined) === (endpoint ?? undefined)
     );
   }
 
@@ -8533,6 +8549,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       // Close before the write, so no work of the tenant can slip a change
       // in between. If the write fails, nothing was removed: reopen.
       this.tenantLifecycle.close(id);
+      // A Nova voice session in this organization ends now, before the write.
+      this.emitStateChanged(TENANT_CLOSING_REASON);
       try {
         await this.write(next);
       } catch (cause) {

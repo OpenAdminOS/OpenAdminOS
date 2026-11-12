@@ -333,6 +333,66 @@ describe("Nova hosted sessions after a settings change, without another question
     assert.equal(f.consents.length, 0);
   });
 
+  it("sends nothing when the provider is switched while a hosted start reads its connectors, with no change announced", async () => {
+    const f = fixture();
+    let release: (() => void) | undefined;
+    f.host.connectors = async () => { await new Promise<void>((resolve) => { release = resolve; }); return []; };
+    const starting = start(f, "openai");
+    for (let index = 0; index < 100 && !release; index += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.ok(release, "the start is reading its connectors");
+    const state = f.state as unknown as { activeProviderId: string; providers: unknown[] };
+    state.providers.push({ id: "lm-studio", name: "LM Studio", isLocal: true, status: "connected", models: ["qwen"] });
+    state.activeProviderId = "lm-studio";
+    release!();
+    await assert.rejects(starting, /tenant or provider changed/);
+    assert.equal(f.requests.some((request) => request.url.includes("/live/sessions")), false, "nothing went to OpenAI");
+    assert.equal(f.consents.length, 0);
+  });
+
+  it("sends nothing when the organization is disconnected while a hosted start reads its key, with no change announced", async () => {
+    const f = fixture();
+    let release: (() => void) | undefined;
+    let closed = false;
+    f.host.activeTenantId = async () => (closed ? undefined : "tenant-a");
+    const nova = f.nova as unknown as { secrets: SecretAccessor };
+    const get = nova.secrets.get;
+    nova.secrets = { ...nova.secrets, get: async (key) => { await new Promise<void>((resolve) => { release = resolve; }); return get(key); } };
+    const starting = start(f, "openai");
+    for (let index = 0; index < 100 && !release; index += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.ok(release, "the start is reading the API key");
+    closed = true;
+    release!();
+    await assert.rejects(starting, /tenant or provider changed/);
+    assert.equal(f.requests.some((request) => request.url.includes("/live/sessions")), false, "nothing went to OpenAI");
+    assert.equal(f.consents.length, 0);
+  });
+
+  it("sends nothing when the provider endpoint moved while a hosted start reads its connectors", async () => {
+    const f = fixture();
+    let endpoint = "http://127.0.0.1:11434";
+    f.host.providerEndpoint = async () => endpoint;
+    let release: (() => void) | undefined;
+    f.host.connectors = async () => { await new Promise<void>((resolve) => { release = resolve; }); return []; };
+    const starting = start(f, "openai");
+    for (let index = 0; index < 100 && !release; index += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.ok(release);
+    endpoint = "http://10.0.0.5:11434";
+    release!();
+    await assert.rejects(starting, /tenant or provider changed/);
+    assert.equal(f.consents.length, 0);
+  });
+
+  it("ends a live session when its provider or model changes", async () => {
+    const f = fixture();
+    const sessionId = await start(f);
+    assert.equal(await f.nova.sessionContextChanged(), false, "nothing changed");
+    const state = f.state as unknown as { activeProviderId: string; providers: unknown[] };
+    state.providers.push({ id: "lm-studio", name: "LM Studio", isLocal: true, status: "connected", models: ["qwen"] });
+    state.activeProviderId = "lm-studio";
+    assert.equal(await f.nova.sessionContextChanged(), true);
+    await assert.rejects(f.nova.handle({ action: "answer", sessionId, text: "How many devices?" }));
+  });
+
   it("ends the session when the settings cannot be read", async () => {
     const f = fixture();
     await start(f, "openai");

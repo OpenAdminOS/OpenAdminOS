@@ -17,7 +17,7 @@ import {
   type NovaAnswerLink,
 } from "@openadminos/agent-sdk";
 import { OPEN_NOVA_EVENT, type OpenNovaDetail } from "../shared/nova-panel";
-import { NOVA_SESSION_ENDED_REASON, NOVA_SESSION_PROFILE_CHANGED } from "../shared/nova-session";
+import { NOVA_SESSION_CONTEXT_CHANGED, NOVA_SESSION_CONTEXT_ENDED_REASON, NOVA_SESSION_ENDED_REASON, NOVA_SESSION_PROFILE_CHANGED } from "../shared/nova-session";
 import "./nova.css";
 
 /** What each Nova card names, explains and asks to confirm. Nothing happens before the click. */
@@ -302,13 +302,15 @@ export function Nova({
     setPhase("idle");
   }, [api, endActivities]);
   // The main process ends a hosted voice session when its instructions or
-  // notes change; the audio and the connection to OpenAI close here at once.
+  // notes change, and any session when its organization, connection or
+  // provider changes; the audio and the connection to OpenAI close here at once.
   useEffect(() => {
     if (!api?.onAppStateChanged) return;
     return api.onAppStateChanged((info) => {
-      if (info.reason !== NOVA_SESSION_ENDED_REASON || !sessionId.current) return;
+      const ended = info.reason === NOVA_SESSION_ENDED_REASON ? NOVA_SESSION_PROFILE_CHANGED : info.reason === NOVA_SESSION_CONTEXT_ENDED_REASON ? NOVA_SESSION_CONTEXT_CHANGED : undefined;
+      if (!ended || !sessionId.current) return;
       stop();
-      setError(NOVA_SESSION_PROFILE_CHANGED);
+      setError(ended);
     });
   }, [api, stop]);
   useEffect(() => {

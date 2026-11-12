@@ -567,6 +567,30 @@ describe("a Nova follow-up run", () => {
     }
   });
 
+  it("does not ask Azure OpenAI at another resource or deployment than the one the click consented to", async () => {
+    let now = new Date();
+    const azure = () => [{ id: "azure-openai", name: "Azure OpenAI", isLocal: false, status: "connected", models: ["gpt-ops"], defaultModel: "gpt-ops" } as never];
+    const { store, dir } = await makeStore({ clock: () => now, activeProviderId: "azure-openai", extra: { providerListFactory: azure, graphFactory: graph([]) } });
+    try {
+      await store.setAzureOpenAIConfig({ endpoint: "https://contoso.openai.azure.com/", deployment: "gpt-ops", apiVersion: "" });
+      assert.equal(await store.novaProviderEndpoint("azure-openai"), "https://contoso.openai.azure.com#gpt-ops");
+      const followUp = await store.novaFollowUpsHost().create({ tenantId: contoso.id, question: "Check device compliance", providerId: "azure-openai", model: "gpt-ops", delayMinutes: 1 });
+      assert.equal(followUp.providerEndpoint, "https://contoso.openai.azure.com#gpt-ops");
+      // Same provider id, another deployment.
+      await store.setAzureOpenAIConfig({ endpoint: "https://contoso.openai.azure.com/", deployment: "gpt-other", apiVersion: "" });
+      now = new Date(now.getTime() + 61_000);
+      const conversations = (await store.listIntuneChatConversations()).length;
+      await store.fireDueNovaFollowUps();
+      const done = (await store.handleNovaRecords({ action: "list" })).followUps.find((entry) => entry.id === followUp.id);
+      assert.equal(done?.status, "skipped-provider");
+      assert.match(done?.reason ?? "", /runs somewhere else/);
+      assert.equal((await store.listIntuneChatConversations()).length, conversations);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("leaves no conversation and no completed event when the organization is disconnected while it runs", async () => {
     let now = new Date();
     let release: (() => void) | undefined;

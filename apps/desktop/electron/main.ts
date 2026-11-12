@@ -1,7 +1,7 @@
 import { runNotificationTitle, tokenCachePartition } from "./state-helpers.js";
 import { saveAuditLogExport } from "./save-audit-log-export.js";
 import { NovaService } from "./nova.js";
-import { NOVA_SESSION_ENDED_REASON } from "../src/shared/nova-session.js";
+import { NOVA_SESSION_CONTEXT_ENDED_REASON, NOVA_SESSION_ENDED_REASON } from "../src/shared/nova-session.js";
 import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
 import { officeFullscreen } from "./office-fullscreen.js";
 import { runOfficeRehearsal } from "./office-rehearsal.js";
@@ -41,7 +41,7 @@ import { readFile, stat, writeFile } from "node:fs/promises";
 import { arch as osArch, release as osRelease } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, win32 } from "node:path";
-import { AppStateStore } from "./state.js";
+import { AppStateStore, TENANT_CLOSING_REASON } from "./state.js";
 import { loadManagedPolicy, resolveManagedPolicyPaths } from "./managed-policy.js";
 import { MCP_CATALOG } from "./mcp/catalog.js";
 import { SafeStorageTokenCacheStore } from "./secret-store.js";
@@ -5712,7 +5712,7 @@ function registerIpcHandlers() {
     () => store.getAppState(),
     (input, options) => store.streamIntuneChatMessage(input, event => options.onEvent?.(event), { ...options, voice: true }),
     fetch,
-    { classifyCommand: (text, context, options) => store.classifyNovaCommand(text, context, options), connectors: () => store.listConnectors(), send: input => store.sendNovaConnector(input), startRun: (slug, options) => store.startRun(slug, options, { activeOrganizationOnly: true }), activeTenantId: () => store.activeTenantId(), tenantLease: (tenantId, work) => store.withTenantLease(tenantId, work), profile: (tenantId) => store.novaProfile(tenantId), applyProfileProposal: (patch, assertUnchanged) => store.applyNovaProfileProposal(patch, assertUnchanged), recordVoiceConsent: input => store.recordNovaVoiceConsent(input), notes: store.novaNotesHost(), followUps: store.novaFollowUpsHost() },
+    { classifyCommand: (text, context, options) => store.classifyNovaCommand(text, context, options), connectors: () => store.listConnectors(), send: input => store.sendNovaConnector(input), startRun: (slug, options) => store.startRun(slug, options, { activeOrganizationOnly: true }), activeTenantId: () => store.activeTenantId(), providerEndpoint: (providerId) => store.novaProviderEndpoint(providerId), tenantLease: (tenantId, work) => store.withTenantLease(tenantId, work), profile: (tenantId) => store.novaProfile(tenantId), applyProfileProposal: (patch, assertUnchanged) => store.applyNovaProfileProposal(patch, assertUnchanged), recordVoiceConsent: input => store.recordNovaVoiceConsent(input), notes: store.novaNotesHost(), followUps: store.novaFollowUpsHost() },
   );
   ipcMain.handle("openadminos:nova", handleTrusted((event, input: import("@openadminos/agent-sdk").NovaRequest, streamId?: unknown) => {
     const safeStreamId = streamId === undefined ? undefined : requireBoundedString(streamId, "Nova streamId", 128);
@@ -6441,8 +6441,8 @@ function registerIpcHandlers() {
       ),
     ),
   );
-  ipcMain.handle("openadminos:set-active-provider", handleTrusted((_event, id: unknown) =>
-    store.setActiveProvider(validateProviderId(id)),
+  ipcMain.handle("openadminos:set-active-provider", handleTrusted(async (_event, id: unknown) =>
+    afterNovaContextChange(await store.setActiveProvider(validateProviderId(id)), { tellPanel: true }),
   ),
   );
   ipcMain.handle(
@@ -6455,8 +6455,8 @@ function registerIpcHandlers() {
   );
   ipcMain.handle(
     "openadminos:set-active-model",
-    handleTrusted((_event, providerId: unknown, model: unknown) =>
-      store.setActiveModel(validateProviderId(providerId), validateActiveModel(model)),
+    handleTrusted(async (_event, providerId: unknown, model: unknown) =>
+      afterNovaContextChange(await store.setActiveModel(validateProviderId(providerId), validateActiveModel(model)), { tellPanel: true }),
     ),
   );
   ipcMain.handle("openadminos:office-fullscreen", handleTrusted((event, active: unknown) => {
@@ -6530,7 +6530,7 @@ function registerIpcHandlers() {
   ipcMain.handle("openadminos:connect-tenant", handleTrusted(async (_event, input?: unknown) => {
     const state = await store.connectTenant(validateConnectTenantOptions(input));
     void registerSchedulerIfReady("tenant");
-    return state;
+    return afterNovaContextChange(state, { tellPanel: true });
   }));
   ipcMain.handle(
     "openadminos:add-tenant-access",
@@ -6566,17 +6566,21 @@ function registerIpcHandlers() {
     "openadminos:cancel-connect-tenant",
     handleTrusted(() => store.cancelConnectTenant()),
   );
-  // A Nova voice session belongs to one organization: switching ends it, and
-  // a hosted start in progress checks again before it sends anything. The
-  // panel closes its audio itself when the active organization changes.
-  const afterOrganizationSwitch = async <T,>(state: T): Promise<T> => {
+  // A Nova voice session belongs to one organization, its connection and
+  // one reasoning provider: a change to any of them ends it, and a hosted
+  // start in progress checks again before it sends anything. The panel
+  // closes its audio itself when the active organization changes; for the
+  // other changes it is told.
+  const afterNovaContextChange = async <T,>(state: T, options: { tellPanel: boolean }): Promise<T> => {
     try {
-      await novaService?.activeOrganizationChanged();
+      const ended = await novaService?.sessionContextChanged();
+      if (ended && options.tellPanel) mainWindow?.webContents.send("openadminos:app-state-changed", { reason: NOVA_SESSION_CONTEXT_ENDED_REASON });
     } catch (error) {
-      console.warn("[nova] the voice session could not be checked after an organization switch", error);
+      console.warn("[nova] the voice session could not be checked after a change of organization, connection or provider", error);
     }
     return state;
   };
+  const afterOrganizationSwitch = <T,>(state: T): Promise<T> => afterNovaContextChange(state, { tellPanel: false });
   ipcMain.handle("openadminos:set-active-tenant", handleTrusted(async (_event, id: unknown) =>
     afterOrganizationSwitch(await store.setActiveTenant(requireBoundedString(id, "tenantId", 256))),
   ),
@@ -6603,9 +6607,13 @@ function registerIpcHandlers() {
   ipcMain.handle("openadminos:dismiss-organization-migration-notice", handleTrusted(() =>
     store.dismissOrganizationMigrationNotice(),
   ));
-  ipcMain.handle("openadminos:disconnect-tenant", handleTrusted((_event, id: unknown) =>
-    store.disconnectTenant(requireBoundedString(id, "tenantId", 256)),
-  ),
+  ipcMain.handle("openadminos:disconnect-tenant", handleTrusted(async (_event, id: unknown) => {
+    // A session in the organization being disconnected ends when the tenant
+    // closes, not after the cleanup.
+    // The tenant closing ends it through the state change below; the check
+    // runs again when Disconnect returns.
+    return afterNovaContextChange(await store.disconnectTenant(requireBoundedString(id, "tenantId", 256)), { tellPanel: true });
+  }),
   );
   ipcMain.handle("openadminos:retry-tenant-cleanup", handleTrusted((_event, id: unknown) =>
     store.retryTenantCleanup(requireBoundedString(id, "tenantId", 256)),
@@ -7006,6 +7014,11 @@ if (!gotLock) {
       },
       onStateChanged: (info) => {
         mainWindow?.webContents.send("openadminos:app-state-changed", info);
+        if (info.reason === TENANT_CLOSING_REASON) {
+          void novaService?.sessionContextChanged().then((ended) => {
+            if (ended) mainWindow?.webContents.send("openadminos:app-state-changed", { reason: NOVA_SESSION_CONTEXT_ENDED_REASON });
+          }, (error: unknown) => console.warn("[nova] the voice session could not be checked after a Disconnect", error));
+        }
         // A hosted voice session given instructions or notes that changed ends now, not at its next question.
         if (info.reason === "nova-profile-changed" || info.reason === "nova-records-changed") {
           void novaService?.revalidateHostedSession().then((ended) => {

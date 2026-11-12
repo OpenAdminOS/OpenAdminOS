@@ -88,6 +88,8 @@ export class NovaService {
     providerId: AppState["activeProviderId"];
     model?: string;
     reasoningIsLocal: boolean;
+    /** Where the reasoning provider was reached at start, for providers that can be pointed elsewhere. */
+    endpoint?: string;
     mode: "openai" | "local";
     conversationId?: string;
     lastEvidence?: string;
@@ -150,49 +152,66 @@ export class NovaService {
   }
 
   /**
-   * Ends a live session bound to an organization that is no longer active,
-   * and makes a hosted start in progress check again before it sends
-   * anything. Called after the active organization or tenant changed.
-   * Returns true when it ended a session.
+   * Ends a live session whose context is gone: another organization is
+   * active, its organization was disconnected, or the reasoning provider,
+   * model, locality or endpoint changed. A hosted start in progress checks
+   * again before it sends anything. Called after an organization switch,
+   * a provider or model switch, Connect and Disconnect. Returns true when
+   * it ended a session.
    */
-  async activeOrganizationChanged(): Promise<boolean> {
+  async sessionContextChanged(): Promise<boolean> {
     this.profileChanges += 1;
     const session = this.session;
     if (!session) return false;
-    const state = await this.state();
-    if (session !== this.session || state.activeTenantId === session.tenantId) return false;
+    const [state, activeTenantId, endpoint] = await Promise.all([this.state(), this.writableActiveTenant(), this.providerEndpoint(session.providerId)]);
+    if (session !== this.session || !sessionContextDiffers(session, state, activeTenantId, endpoint)) return false;
     this.invalidate();
     return true;
   }
 
-  /** Counts settings, notes and organization changes, so a hosted start that read the profile before one notices it. */
+  /** The same check after an organization switch; see sessionContextChanged. */
+  async activeOrganizationChanged(): Promise<boolean> {
+    return this.sessionContextChanged();
+  }
+
+  /** The active tenant now, or undefined while it is being disconnected. */
+  private async writableActiveTenant(): Promise<string | undefined> {
+    if (!this.actions) return (await this.state()).activeTenantId;
+    return this.actions.activeTenantId();
+  }
+
+  private async providerEndpoint(providerId: AppState["activeProviderId"]): Promise<string | undefined> {
+    return this.actions?.providerEndpoint ? this.actions.providerEndpoint(providerId) : undefined;
+  }
+
+  /** Counts settings, notes, organization and provider changes, so a hosted start that read before one notices it. */
   private profileChanges = 0;
 
   /**
    * Run by a hosted start before it records the consent and sends the
-   * request: when the settings, notes or active organization changed since
-   * the start last looked, it reads again and refuses when what the session
-   * would send is no longer so. Returns only when nothing changed since its
-   * last check, with no wait after it, so the caller can send at once.
+   * request. It always reads the state, the settings and the notes again
+   * and refuses when the organization, its connection, the provider,
+   * model, locality or endpoint, or what the session would send changed.
+   * A change announced during that read makes it read again. It returns
+   * the fresh state and settings with no wait after its last read, so the
+   * caller records the consent and sends at once, from that snapshot.
    */
-  private async confirmHostedStartCurrent(session: NonNullable<NovaService["session"]>, seen: { changes: number; checked?: boolean }): Promise<void> {
+  private async confirmHostedStartCurrent(session: NonNullable<NovaService["session"]>): Promise<{ state: AppState; settings?: NovaSettings }> {
     for (let attempt = 0; attempt < 5; attempt += 1) {
       session.controller.signal.throwIfAborted();
-      // The first call always checks; later calls check when something changed.
-      if (seen.checked && this.profileChanges === seen.changes) return;
-      seen.checked = true;
-      seen.changes = this.profileChanges;
-      const [fresh, latest] = await Promise.all([this.readSessionProfile(session.tenantId).catch(() => undefined), this.state()]);
+      const changes = this.profileChanges;
+      const [fresh, latest, activeTenantId, endpoint] = await Promise.all([
+        this.readSessionProfile(session.tenantId).catch(() => undefined),
+        this.state(),
+        this.writableActiveTenant(),
+        this.providerEndpoint(session.providerId),
+      ]);
       session.controller.signal.throwIfAborted();
       if (session !== this.session) throw new Error("Nova was stopped or this question was replaced. Start a new conversation.");
-      if (
-        latest.activeTenantId !== session.tenantId ||
-        latest.activeProviderId !== session.providerId ||
-        selectedNovaModel(latest) !== session.model ||
-        latest.providers.find((p) => p.id === session.providerId)?.isLocal !== session.reasoningIsLocal
-      )
-        throw new Error("Nova's tenant or provider changed. Start a new conversation.");
+      if (sessionContextDiffers(session, latest, activeTenantId, endpoint)) throw new Error("Nova's tenant or provider changed. Start a new conversation.");
       if (session.hostedProfile && hostedProfileChanged(session.hostedProfile, fresh)) throw new Error(NOVA_SESSION_PROFILE_CHANGED);
+      // Nothing was announced during the read: what was read is current.
+      if (this.profileChanges === changes) return { state: latest, ...(fresh?.settings ? { settings: fresh.settings } : {}) };
     }
     // Settings that keep changing while Nova starts: nothing is sent.
     throw new Error(NOVA_SESSION_PROFILE_CHANGED);
@@ -284,9 +303,9 @@ export class NovaService {
           "Confirm hosted agent context sharing before starting Nova.",
         );
       // The profile shapes the prompts of this session; without it, Nova does not start.
-      const changesBeforeRead = this.profileChanges;
       // The session belongs to the organization and provider active when it was asked for.
-      const identity = { tenantId: state.activeTenantId, providerId: state.activeProviderId, model: selectedNovaModel(state), reasoningIsLocal: provider?.isLocal === true };
+      const endpoint = await this.providerEndpoint(state.activeProviderId);
+      const identity = { tenantId: state.activeTenantId, providerId: state.activeProviderId, model: selectedNovaModel(state), reasoningIsLocal: provider?.isLocal === true, ...(endpoint ? { endpoint } : {}) };
       const { settings, profile, notesUnreadable } = await this.readSessionProfile(identity.tenantId);
       if (generation !== this.generation) throw new Error("Nova was stopped or this question was replaced. Start a new conversation.");
       // Only the notes that fit the block are sent, recorded in the consent and watched for changes.
@@ -309,8 +328,7 @@ export class NovaService {
         if (input.mode === "local") return { sessionId: session.id, ...notice };
         // A change while the profile was read did not reach this session;
         // it is checked again here and once more right before sending.
-        const seen: { changes: number; checked?: boolean } = { changes: changesBeforeRead };
-        await this.confirmHostedStartCurrent(session, seen);
+        await this.confirmHostedStartCurrent(session);
         if (
           typeof input.sdp !== "string" ||
           input.sdp.length > 65536 ||
@@ -325,13 +343,13 @@ export class NovaService {
         const name = session.name;
         const connectors = await this.actions?.connectors().catch(() => undefined);
         session.controller.signal.throwIfAborted();
-        // Nothing awaits between this check and the request below.
-        await this.confirmHostedStartCurrent(session, seen);
-        if (this.profileChanges !== seen.changes) throw new Error(NOVA_SESSION_PROFILE_CHANGED);
+        // Nothing awaits between this check and the request below, which is
+        // built from the state and settings this check read.
+        const current = await this.confirmHostedStartCurrent(session);
         // The consent is on this device before audio or context is sent; when no store kept it, nothing is sent.
-        if (this.actions && !this.actions.recordVoiceConsent) throw new Error(NOVA_VOICE_CONSENT_NOT_KEPT);
+        if (!this.actions?.recordVoiceConsent) throw new Error(NOVA_VOICE_CONSENT_NOT_KEPT);
         {
-          this.actions?.recordVoiceConsent?.({
+          this.actions.recordVoiceConsent({
             tenantId: session.tenantId,
             sessionId: session.id,
             acknowledgedAt: new Date().toISOString(),
@@ -359,7 +377,7 @@ export class NovaService {
               session: {
                 model: NOVA_VOICE_MODEL,
                 delegation: { type: "client" },
-                instructions: buildNovaInstructions(state, name, true, connectors, settings, profileBlock),
+                instructions: buildNovaInstructions(current.state, name, true, connectors, current.settings ?? settings, profileBlock),
               },
               transport: { type: "webrtc", sdp: input.sdp },
             }),
@@ -986,6 +1004,24 @@ function listInWords(items: readonly string[]): string {
  * never move or replace a fixed line; the ability lines follow the
  * settings, and the code checks the same settings again on every action.
  */
+/** Whether a session's organization, connection or reasoning provider is no longer what it started with. */
+function sessionContextDiffers(
+  session: { tenantId: string; providerId: AppState["activeProviderId"]; model?: string; reasoningIsLocal: boolean; endpoint?: string },
+  state: AppState,
+  writableActiveTenantId: string | undefined,
+  endpoint: string | undefined,
+): boolean {
+  return (
+    state.activeTenantId !== session.tenantId ||
+    writableActiveTenantId !== session.tenantId ||
+    !state.tenants.some((tenant) => tenant.id === session.tenantId) ||
+    state.activeProviderId !== session.providerId ||
+    selectedNovaModel(state) !== session.model ||
+    state.providers.find((p) => p.id === session.providerId)?.isLocal !== session.reasoningIsLocal ||
+    (endpoint ?? undefined) !== (session.endpoint ?? undefined)
+  );
+}
+
 export function buildNovaInstructions(
   state: AppState,
   name: string,
