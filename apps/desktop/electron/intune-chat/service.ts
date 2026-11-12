@@ -100,6 +100,7 @@ import {
   resourceStalenessMs,
   GRAPH_REFRESH_CONCURRENCY,
   fetchGraphCachePages,
+  GRAPH_CACHE_ROW_LIMIT,
   hashTenantId,
   intuneChatProviderBudget,
   isGraphCacheStatusStale,
@@ -1894,7 +1895,11 @@ export class IntuneChatService {
           },
           signal,
           complete,
-          request.windowField ? GRAPH_CACHE_LOG_ROW_LIMIT : undefined,
+          // A quick refresh keeps the usual sample size; a complete one
+          // collects the whole window up to the log row limit.
+          request.windowField
+            ? complete ? GRAPH_CACHE_LOG_ROW_LIMIT : GRAPH_CACHE_ROW_LIMIT
+            : undefined,
         );
         signal?.throwIfAborted();
         const existing = store.getGraphCacheStatus(tenant.id, [definition])[0];

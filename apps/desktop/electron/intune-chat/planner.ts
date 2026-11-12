@@ -1,5 +1,4 @@
 import {
-  GRAPH_CACHE_LOG_ROW_LIMIT,
   GRAPH_CACHE_LOG_WINDOW_DAYS,
   isGraphCacheLogResource,
 } from "@openadminos/agent-sdk";
@@ -1013,6 +1012,25 @@ export function definitionForResource(
   return definition;
 }
 
+/**
+ * Log resources hold a recent window (GRAPH_CACHE_LOG_WINDOW_DAYS), so the
+ * model is told what a count over them covers. Returns an empty object for
+ * every other resource, to spread into a status block.
+ */
+export function logWindowCoverage(status: {
+  resource: string;
+  rows: number;
+  pageLimitReached?: boolean;
+}): { coverage?: string } {
+  if (!isGraphCacheLogResource(status.resource)) return {};
+  const days = GRAPH_CACHE_LOG_WINDOW_DAYS;
+  return {
+    coverage: status.pageLimitReached
+      ? `Newest ${status.rows.toLocaleString("en-US")} entries from the ${days} days before refreshedAt. Older entries in that window and all older logs were not collected, so counts are not totals for the ${days} days.`
+      : `All entries from the ${days} days before refreshedAt. Older logs were not collected, so counts cover only those ${days} days.`,
+  };
+}
+
 export function pathForResource(resource: GraphCacheResourceKind): {
   path: string;
   select?: string[];
@@ -1735,13 +1753,7 @@ export function buildAnswerPack(input: {
         pageLimitReached: status.pageLimitReached,
         // Log resources hold a recent window, so a count describes the
         // window, never all retained logs.
-        ...(isGraphCacheLogResource(status.resource)
-          ? {
-              coverage: status.pageLimitReached
-                ? `Newest ${GRAPH_CACHE_LOG_ROW_LIMIT.toLocaleString("en-US")} entries from the ${GRAPH_CACHE_LOG_WINDOW_DAYS} days before refreshedAt; older entries in that window were not collected.`
-                : `All entries from the ${GRAPH_CACHE_LOG_WINDOW_DAYS} days before refreshedAt; older logs were not collected.`,
-            }
-          : {}),
+        ...logWindowCoverage(status),
         selectedRows: selectedRows.length,
         includedSampleRows: sampleRows.length,
         omittedCachedRows: Math.max(0, status.rows - selectedRows.length),

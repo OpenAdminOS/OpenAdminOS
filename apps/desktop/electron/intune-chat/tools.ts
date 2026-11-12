@@ -14,7 +14,7 @@ import type {
   SplashtopReadToolName,
 } from "@openadminos/agent-sdk";
 
-import { graphAccessDenialFromError, graphAccessDenialText, missingServiceCopy, omittedSnapshotsCopy } from "@openadminos/agent-sdk";
+import { GRAPH_CACHE_LOG_WINDOW_DAYS, graphAccessDenialFromError, graphAccessDenialText, isGraphCacheLogResource, missingServiceCopy, omittedSnapshotsCopy } from "@openadminos/agent-sdk";
 import { fenceTenantData } from "@openadminos/runtime";
 
 import { lookupEndpoint, searchEndpoints } from "../graph-catalog.js";
@@ -28,6 +28,7 @@ import { graphCacheRequestFromNextLink, resourceStalenessMs, unwrapGraphCollecti
 import {
   GRAPH_CACHE_RESOURCES,
   definitionForResource,
+  logWindowCoverage,
   pathForResource,
 } from "./planner.js";
 import { DRIFT_TRACKED_RESOURCES } from "./drift/tracked-resources.js";
@@ -1291,6 +1292,7 @@ function listCachedResources(ctx: IntuneChatToolContext, params: unknown): unkno
         stale,
         pages: resource.pages,
         pageLimitReached: resource.pageLimitReached,
+        ...logWindowCoverage(resource),
         lastError: resource.lastError,
       };
     }),
@@ -1363,7 +1365,7 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
       emptyHint = {
         cachedRowsForResource,
         ...(availableFields ? { availableFields } : {}),
-        note: `No row matched this filter, but this ${resource} snapshot holds ${cachedRowsForResource} cached rows. Report no matches in this snapshot, not an empty tenant. The validated filter matched no cached rows. This is not proof of the current tenant-wide count; check snapshot coverage and freshness.`,
+        note: `No row matched this filter, but this ${resource} snapshot holds ${cachedRowsForResource} cached rows. Report no matches in this snapshot, not an empty tenant. The validated filter matched no cached rows. This is not proof of the current tenant-wide count; check snapshot coverage and freshness.${isGraphCacheLogResource(resource) ? ` The snapshot covers only the last ${GRAPH_CACHE_LOG_WINDOW_DAYS} days of ${resource}, so older entries are not in it.` : ""}`,
       };
     } else {
       emptyHint = {
@@ -1375,7 +1377,7 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
 
   return {
     resource,
-    snapshot,
+    snapshot: snapshot ? { ...snapshot, ...logWindowCoverage(snapshot) } : snapshot,
     totalCount: result.totalCount,
     returnedRows: result.returnedRows,
     limit: result.limit,

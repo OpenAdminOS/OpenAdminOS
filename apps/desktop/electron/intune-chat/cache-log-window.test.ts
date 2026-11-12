@@ -114,3 +114,10 @@ it("collects log resources as a capped recent window instead of every retained r
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+it("tells the model which window a log snapshot covers, and nothing for other resources", async () => {
+  const { logWindowCoverage } = await import("./planner.js");
+  assert.match(logWindowCoverage({ resource: "signIns", rows: 10_000, pageLimitReached: true }).coverage!, /^Newest 10,000 entries from the 7 days/);
+  assert.match(logWindowCoverage({ resource: "intuneAuditEvents", rows: 40, pageLimitReached: false }).coverage!, /^All entries from the 7 days/);
+  assert.deepEqual(logWindowCoverage({ resource: "managedDevices", rows: 1000, pageLimitReached: true }), {});
+});
