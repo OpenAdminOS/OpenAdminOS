@@ -1,6 +1,11 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
-import type { AppState, ConnectorSummary, EffectiveNovaProfile, ManagedPolicyStatus, NovaActionPreview, NovaProfile, ProviderId, RunRecord, StartRunOptions } from '@openadminos/agent-sdk';
+import type { AppState, ConnectorSummary, EffectiveNovaProfile, ManagedPolicyStatus, NovaActionPreview, NovaCapabilityName, NovaProfile, NovaProfilePatch, ProviderId, RunRecord, StartRunOptions } from '@openadminos/agent-sdk';
+import { applyNovaProfilePatch, novaCapabilityAllowed, novaCapabilityOffMessage, novaConnectorSendAllowed } from './nova-profile.js';
+import type { NovaProfileProposal, NovaProposableCapability } from '../src/shared/nova-command.js';
+
+/** Nova's settings with the IT policy, as `NovaActionHost.profile` reads them. */
+export interface NovaSettings { profile: NovaProfile | undefined; effective: EffectiveNovaProfile; policy: ManagedPolicyStatus | undefined }
 
 export interface NovaActionHost {
   classifyCommand?(text: string, context: import("../src/shared/nova-command.js").NovaCommandContext, options: Pick<import("./nova.js").NovaChatOptions, "scope" | "signal">): Promise<string>;
@@ -15,10 +20,42 @@ export interface NovaActionHost {
    * signal fires when it starts closing, so a multi-part send stops.
    */
   tenantLease?<T>(tenantId: string, work: (signal: AbortSignal) => Promise<T>): Promise<T>;
-  /** Nova's settings now, with the IT policy applied, read when Nova acts. */
-  profile?(): Promise<{ profile: NovaProfile | undefined; effective: EffectiveNovaProfile; policy: ManagedPolicyStatus | undefined }>;
+  /**
+   * Nova's settings now, with the IT policy applied. Read again for every
+   * action, at preparation and at the click, so a switch turned off in
+   * between stops it. A failed read refuses the action.
+   */
+  profile(): Promise<NovaSettings>;
+  /** Saves a settings change the admin confirmed on a Nova card. The IT policy is applied again. */
+  applyProfileProposal?(patch: NovaProfilePatch): Promise<void>;
   /** Records the consent to send audio and shared context to OpenAI for one voice session. Never throws. */
-  recordVoiceConsent?(input: { tenantId: string; sessionId: string; acknowledgedAt: string; voiceModel: string; reasoningProviderId: ProviderId; reasoningModel?: string }): void;
+  recordVoiceConsent?(input: { tenantId: string; sessionId: string; acknowledgedAt: string; voiceModel: string; reasoningProviderId: ProviderId; reasoningModel?: string; includesProfile: boolean; includesMemory: boolean }): void;
+}
+
+/** Said when Nova's settings cannot be read: Nova then does not act. */
+export const NOVA_SETTINGS_UNREADABLE =
+  'Nova could not read its settings, so nothing was sent, started or opened. Open Settings, Nova, check it loads, then ask again.';
+
+/** Nova's settings for one action. Throws the designed refusal when they cannot be read. */
+export async function readNovaSettings(host: Pick<NovaActionHost, 'profile'>): Promise<NovaSettings> {
+  try {
+    const settings = await host.profile();
+    if (!settings?.effective) throw new Error('No settings returned.');
+    return settings;
+  } catch {
+    throw new Error(NOVA_SETTINGS_UNREADABLE);
+  }
+}
+
+/** Refuses with the designed message when an ability is turned off now. */
+export async function requireNovaCapability(host: Pick<NovaActionHost, 'profile'>, name: NovaCapabilityName): Promise<void> {
+  const { profile, policy } = await readNovaSettings(host);
+  if (!novaCapabilityAllowed(profile, policy, name)) throw new Error(novaCapabilityOffMessage(policy, name));
+}
+
+async function requireConnectorSend(host: Pick<NovaActionHost, 'profile'>, connectorId: string, connectorName: string): Promise<void> {
+  const { profile, policy } = await readNovaSettings(host);
+  if (!novaConnectorSendAllowed(profile, policy, connectorId)) throw new Error(novaCapabilityOffMessage(policy, 'connectorSends', connectorName));
 }
 
 /** Run an approved action under its tenant's lease, with both signals. */
@@ -92,16 +129,19 @@ export async function prepareNovaAction(text: string | NovaActionIntent, evidenc
     const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
     const candidates = state.installedAgents.filter(a => normalize(a.name) === normalize(intent.name) || normalize(a.slug) === normalize(intent.name));
     if (candidates.length !== 1) throw new Error('Name one installed agent exactly. Open Agents to see the available names.');
+    await requireNovaCapability(host, 'startAgents');
     const agent = candidates[0]!;
     return { preview: { id, title: `Run ${agent.name}`, target: state.tenants.find(t => t.id === tenantId)?.displayName || 'Selected tenant', body: `Run ${agent.name} against the selected tenant. Write plans require their normal review. Existing saved result-delivery routes may send notifications when the run finishes.`, kind: 'run' }, execute: outer => leased(host, tenantId, outer, async signal => {
       signal.throwIfAborted();
       await assertStillActive(host, tenantId);
+      await requireNovaCapability(host, 'startAgents');
       const run = await host.startRun(agent.slug, { tenantId, providerId: state.activeProviderId });
       return { text: `${agent.name} was queued. Follow its progress in Runs; any required approvals remain in the app.`, route: `/runs/${run.id}` };
     }) };
   }
   const connector = (await host.connectors()).find(c => c.descriptor.id === intent.connectorId);
   if (!connector) throw new Error('This connector is unavailable. Open Connectors to configure a supported destination.');
+  await requireConnectorSend(host, intent.connectorId, connector.descriptor.name);
   const setupIssue = novaConnectorSetupIssue(connector);
   if (setupIssue) throw new Error(setupIssue);
   if (!evidence?.trim()) throw new Error('What should I send? There is no completed result to share yet. Ask for a report and a destination together, for example: send me an email with the list of non-compliant devices.');
@@ -135,6 +175,7 @@ export async function prepareNovaAction(text: string | NovaActionIntent, evidenc
   const deliveryNote = parts.length > 1 ? `This report will be sent as ${parts.length} numbered messages, in order. Review the full content below. If a send fails, remaining messages stop without automatic retries.` : undefined;
   return { preview: { id, kind: 'send', title: `Send via ${connector.descriptor.name}`, target, body: evidence, ...(deliveryNote ? { deliveryNote } : {}) }, execute: outer => leased(host, tenantId, outer, async signal => {
     await assertStillActive(host, tenantId);
+    await requireConnectorSend(host, intent.connectorId, connector.descriptor.name);
     let accepted = 0;
     try {
       for (const [index, part] of parts.entries()) {
@@ -151,4 +192,68 @@ export async function prepareNovaAction(text: string | NovaActionIntent, evidenc
     }
     return { text: intent.connectorId === 'outlook' ? 'Outlook accepted the email for sending. Delivery to the recipient is not yet confirmed.' : `${connector.descriptor.name} accepted ${parts.length === 1 ? 'the message' : `all ${parts.length} messages`} to ${target}. Recipient delivery is not yet confirmed.` };
   }) };
+}
+
+const CAPABILITY_TITLES: Record<NovaProposableCapability, string> = {
+  webSearch: 'Web search',
+  startAgents: 'Starting agents',
+  navigation: 'Opening pages',
+};
+
+/** Said when the setting changed between the card and the click. */
+export const NOVA_PROFILE_CHANGED =
+  'Nova settings changed after Nova prepared this. Nothing was changed. Ask Nova again to see the current values.';
+
+/**
+ * A card for a change to Nova's own settings. The change is checked
+ * against the IT policy and the limits now, and again at the click. It
+ * can turn an ability off, never on.
+ */
+export async function prepareNovaProfileChange(change: NovaProfileProposal, host: NovaActionHost): Promise<PreparedNovaAction> {
+  if (!host.applyProfileProposal) throw new Error('Nova cannot change its settings in this app session. Open Settings, Nova, to change them.');
+  const settings = await readNovaSettings(host);
+  const { effective, profile, policy } = settings;
+  let patch: NovaProfilePatch;
+  let title: string, target: string, body: string, previousBody: string;
+  const current = (read: NovaSettings) =>
+    change.field === 'instructions' ? read.effective.instructions
+      : change.field === 'greetingName' ? read.effective.greetingName
+        : String(read.effective.capabilities[change.capability]);
+  if (change.field === 'instructions') {
+    const next = change.mode === 'append' && effective.instructions.trim() ? `${effective.instructions.trim()}\n${change.text}` : change.text;
+    patch = { instructions: next };
+    title = change.mode === 'append' ? 'Add to Nova standing instructions' : 'Replace Nova standing instructions';
+    target = 'Settings, Nova, standing instructions';
+    body = next;
+    previousBody = effective.instructions || 'None';
+  } else if (change.field === 'greetingName') {
+    patch = { greetingName: change.text };
+    title = 'Change Nova greeting name';
+    target = 'Settings, Nova, greeting name';
+    body = change.text;
+    previousBody = effective.greetingName || 'None';
+  } else {
+    if (!effective.capabilities[change.capability]) throw new Error(`${CAPABILITY_TITLES[change.capability]} is already off for Nova. Nothing was changed.`);
+    patch = { capabilities: { [change.capability]: false } };
+    title = `Turn off ${CAPABILITY_TITLES[change.capability].toLowerCase()} for Nova`;
+    target = 'Settings, Nova, abilities';
+    body = `${CAPABILITY_TITLES[change.capability]}: off. Turn it on again in Settings, Nova.`;
+    previousBody = `${CAPABILITY_TITLES[change.capability]}: on`;
+  }
+  // The same checks Settings makes; a locked or too long value is refused here, before the card.
+  applyNovaProfilePatch(profile, patch, policy, { now: new Date().toISOString(), newId: () => 'proposal', organizationIds: [], via: 'nova-proposal' });
+  const before = current(settings);
+  return {
+    preview: { id: randomUUID(), kind: 'profile', title, target, body, previousBody },
+    execute: async (signal) => {
+      signal.throwIfAborted();
+      if (current(await readNovaSettings(host)) !== before) throw new Error(NOVA_PROFILE_CHANGED);
+      await host.applyProfileProposal!(patch);
+      return {
+        text: change.field === 'capability'
+          ? `${CAPABILITY_TITLES[change.capability]} is now off for Nova.`
+          : 'Saved in Settings, Nova. Nova uses it from the next conversation.',
+      };
+    },
+  };
 }

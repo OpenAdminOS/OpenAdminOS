@@ -1,4 +1,5 @@
 import { assertVoicePromptBudget, clipVoiceText, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
+import { NOVA_PROFILE_BLOCK_END } from "../nova-profile.js";
 import { MAX_PROMISE_NUDGES, looksLikeUnkeptPromise } from "./unkept-promise.js";
 import type {
   GraphCacheResourceKind,
@@ -146,6 +147,8 @@ const DOCS_TOOL_PROTOCOL = [
 
 export interface RunAgenticChatInput {
   voice?: boolean;
+  /** Nova's profile data block, voice only: after the voice rules, before the fixed tool rules. */
+  voiceProfile?: string;
   /** The first answer of a new chat: the final JSON may carry a short `title`. */
   askTitle?: boolean;
   promptByteLimit?: number;
@@ -877,6 +880,7 @@ function buildAgenticSystemPrompt(input: RunAgenticChatInput, questionKind: Intu
   return [
     buildIntuneChatSystemPrompt(input.providerIsLocal, Boolean(input.tools.webSearch), Boolean(input.voice)),
     input.voice ? VOICE_ANSWER_INSTRUCTIONS : "",
+    ...(input.voice && input.voiceProfile ? [input.voiceProfile, NOVA_PROFILE_BLOCK_END] : []),
     "",
     input.noTenant
       ? "No organization is active, so there is no tenant data to read. A request to explain a product, or to write a query or script the admin runs themselves, is docs. Choose tenant or mixed only when the answer needs facts about the admin's own tenant."

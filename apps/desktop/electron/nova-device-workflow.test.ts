@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { novaSettingsHost } from "./nova-test-settings.js";
 import { it } from 'node:test';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -31,7 +32,7 @@ it('answers the reported fleet conversation through real SQLite and prepares the
   try {
     const nova = new NovaService({ get: async () => undefined, set: async () => {}, remove: async () => {} }, () => store.getAppState(),
       (input, options) => store.streamIntuneChatMessage(input, event => options.onEvent?.(event), { ...options, voice: true }), fetch,
-      { activeTenantId: () => store.activeTenantId(), connectors: async () => [{ descriptor: { id: 'whatsapp-web', name: 'WhatsApp' }, config: {} } as never, { descriptor: { id: 'outlook', name: 'Outlook' }, status: 'connected', config: { defaultRecipients: 'admin@example.test' } } as never, { descriptor: { id: 'teams', name: 'Teams' }, status: 'connected', config: { defaultTeamId: 'team', defaultTeamName: 'Test team', defaultChannelId: 'channel', defaultChannelName: 'General' } } as never], send: async () => { sends++; }, startRun: (...args) => store.startRun(...args) });
+      { ...novaSettingsHost, activeTenantId: () => store.activeTenantId(), connectors: async () => [{ descriptor: { id: 'whatsapp-web', name: 'WhatsApp' }, config: {} } as never, { descriptor: { id: 'outlook', name: 'Outlook' }, status: 'connected', config: { defaultRecipients: 'admin@example.test' } } as never, { descriptor: { id: 'teams', name: 'Teams' }, status: 'connected', config: { defaultTeamId: 'team', defaultTeamName: 'Test team', defaultChannelId: 'channel', defaultChannelName: 'General' } } as never], send: async () => { sends++; }, startRun: (...args) => store.startRun(...args) });
     const { sessionId } = await nova.handle({ action: 'start', mode: 'local', tenantId: 'test', consent: false });
     const ask = (text: string) => nova.handle({ action: 'answer', sessionId: sessionId!, text });
     const combined = await ask('Can you send me an email with the list of non-compliant devices');

@@ -6960,6 +6960,15 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * refused change leaves the profile as it was.
    */
   async handleNovaProfile(request: unknown): Promise<NovaProfileView> {
+    return this.changeNovaProfile(request, "settings");
+  }
+
+  /** Saves a settings change the admin confirmed on a Nova card, with the same checks as Settings. */
+  async applyNovaProfileProposal(patch: unknown): Promise<void> {
+    await this.changeNovaProfile({ action: "save", patch }, "nova-proposal");
+  }
+
+  private async changeNovaProfile(request: unknown, via: "settings" | "nova-proposal"): Promise<NovaProfileView> {
     if (!isStateRecord(request) || typeof request.action !== "string") throw new Error("Nova settings received no request.");
     const action = request.action;
     if (action === "get") {
@@ -6973,6 +6982,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         now: this.clock().toISOString(),
         newId: () => randomUUID(),
         organizationIds: (persisted.organizations ?? []).map((organization) => organization.id),
+        via,
       };
       const next =
         action === "save"
@@ -7009,7 +7019,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * every hosted-provider consent: in the Chat database and the audit log,
    * and with the pending audit events when the audit log cannot take it.
    */
-  recordNovaVoiceConsent(input: { tenantId: string; sessionId: string; acknowledgedAt: string; voiceModel: string; reasoningProviderId: ProviderId; reasoningModel?: string }): void {
+  recordNovaVoiceConsent(input: { tenantId: string; sessionId: string; acknowledgedAt: string; voiceModel: string; reasoningProviderId: ProviderId; reasoningModel?: string; includesProfile: boolean; includesMemory: boolean }): void {
     const consent: HostedProviderConsentAuditRecord = {
       id: `event_${randomUUID()}`,
       tenantId: input.tenantId,
@@ -7022,6 +7032,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         sessionId: input.sessionId,
         reasoningProviderId: input.reasoningProviderId,
         ...(input.reasoningModel ? { reasoningModel: input.reasoningModel } : {}),
+        // Whether the standing instructions and confirmed notes go to OpenAI in this session.
+        includesProfile: input.includesProfile,
+        includesMemory: input.includesMemory,
         acknowledgedAt: input.acknowledgedAt,
         remember: false,
       },

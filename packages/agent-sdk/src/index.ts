@@ -2194,9 +2194,24 @@ export interface NovaConversationTurn {
   text: string;
 }
 
+/**
+ * What a Nova card asks the admin to confirm: a connector send, an agent
+ * run, or a change to Nova's own settings. Nothing happens until the
+ * click; voice never confirms.
+ */
+export type NovaActionKind = "send" | "run" | "profile";
+
 export interface NovaActionPreview {
-  id: string; kind: "send" | "run"; title: string; target: string; body: string;
+  id: string; kind: NovaActionKind; title: string; target: string; body: string;
   deliveryNote?: string;
+  /** A settings change: the value it replaces, shown beside the new one. */
+  previousBody?: string;
+}
+
+/** A page Nova points to in its answer, opened only when the admin clicks it. */
+export interface NovaAnswerLink {
+  label: string;
+  route: string;
 }
 
 export type NovaRequest =
@@ -2221,6 +2236,8 @@ export interface NovaResponse {
   /** Full local result for visual review; never sent to the speech model automatically. */
   displayText?: string;
   pendingAction?: NovaActionPreview;
+  /** Pages the answer refers to, offered as links; never opened automatically. */
+  links?: NovaAnswerLink[];
   /** A failed answer, with the session still valid for the next question. */
   answerError?: string;
   route?: string;

@@ -2,6 +2,7 @@ import { voiceDeviceEvidenceAnswer, voiceDeviceEvidenceIntent } from "./voice-de
 import type { WebSearch } from "./web-search.js";
 import { voiceConversationContext, voiceInventoryAnswer, voiceAppPlatformCountAnswer, voiceDeviceSummaryAnswer, voiceResourcesForQuestion, compactVoiceAnswerPack, assertVoicePromptBudget, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
 import { randomUUID } from "node:crypto";
+import { NOVA_PROFILE_BLOCK_END, novaProfilePromptBlock, type NovaProfilePromptInput } from "../nova-profile.js";
 import { fenceTenantData, withTenantDataOutputFilter } from "@openadminos/runtime";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -492,6 +493,8 @@ export interface IntuneChatStreamOptions {
   webSearch?: WebSearch;
   voice?: boolean;
   voiceHistory?: import("@openadminos/agent-sdk").NovaConversationTurn[];
+  /** Nova's profile for the voice prompt; built here within a share of the voice budget. */
+  voiceProfile?: Omit<NovaProfilePromptInput, "byteLimit">;
   signal?: AbortSignal;
   /** Pin delegated voice work before fetching data or invoking a provider. */
   scope?: { tenantId: string; providerId: ProviderId; model?: string; isLocal?: boolean };
@@ -2569,6 +2572,7 @@ export class IntuneChatService {
       ? undefined
       : boundedConversationMemory(history);
     const voiceByteLimit = providerId === "apple-foundation" ? 3000 : VOICE_PROMPT_BYTE_LIMIT;
+    const voiceProfile = options.voice && options.voiceProfile ? novaProfilePromptBlock({ ...options.voiceProfile, byteLimit: Math.floor(voiceByteLimit / 4) }) : "";
     const planned = planChatContext(voiceContext?.planningQuestion ?? content);
     const directResources = voiceDeviceEvidenceIntent(content) ? ["managedDevices" as const] : voiceResourcesForQuestion(content);
     if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
@@ -2947,7 +2951,7 @@ export class IntuneChatService {
           generatedAt: answerGeneratedAt,
           limits: chatBudget.answerPackLimits,
         });
-        const system = [buildIntuneChatSystemPrompt(provider?.isLocal === true, false, Boolean(options.voice)), options.voice ? VOICE_ANSWER_INSTRUCTIONS : ""].filter(Boolean).join("\n");
+        const system = [buildIntuneChatSystemPrompt(provider?.isLocal === true, false, Boolean(options.voice)), options.voice ? VOICE_ANSWER_INSTRUCTIONS : "", voiceProfile, voiceProfile ? NOVA_PROFILE_BLOCK_END : ""].filter(Boolean).join("\n");
         const streamDocumentation = options.voice
           ? await this.retrieveDocumentationSafely(content)
           : answerPlan?.sources.kind === "tenant" ? [] : await this.searchDocsIndex(modelQuestion, steps);
@@ -3031,7 +3035,7 @@ export class IntuneChatService {
               ...(selectedModel ? { model: selectedModel } : {}),
               llm,
               tools: { ...this.buildChatToolContext(tenant, options.signal), webSearch: options.webSearch, ...mcp, tenantObservations },
-              ...(options.voice ? { voice: true, promptByteLimit: voiceByteLimit, observationCharBudget: 6000 } : {}),
+              ...(options.voice ? { voice: true, promptByteLimit: voiceByteLimit, observationCharBudget: 6000, ...(voiceProfile ? { voiceProfile } : {}) } : {}),
               plannedResources: planned.resources,
               smallTalk: isSmallTalk(content),
               agentSuggestions: options.voice ? [] : agentSuggestions,
