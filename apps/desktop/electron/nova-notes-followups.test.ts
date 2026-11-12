@@ -58,7 +58,9 @@ function fixture(options: { profile?: NovaProfile; memoryOff?: boolean } = {}) {
   };
   const nova = new NovaService(
     secrets,
-    async () => state,
+    // A copy per read, as production's getAppState() returns a new snapshot:
+    // a change made after a read is not visible through that read.
+    async () => structuredClone(state),
     async (_input, chatOption) => {
       chatOptions.push(chatOption);
       return { conversation: { id: "conversation-a" }, assistantMessage: { content: "42 devices", status: "completed" } } as SendIntuneChatMessageResult;
@@ -473,6 +475,48 @@ describe("Nova hosted sessions after a settings change, without another question
     await assert.rejects(f.nova.handle({ action: "answer", sessionId, text: "How many devices?" }), { message: NOVA_SESSION_CONTEXT_CHANGED });
     assert.equal(f.chatOptions.length, 0, "nothing was asked");
     await assert.rejects(f.nova.handle({ action: "answer", sessionId, text: "How many devices?" }), /tenant or provider changed/);
+  });
+
+  it("refuses a question and a card click when a reconnect or provider switch lands while the request reads its settings", async () => {
+    for (const change of ["reconnect", "provider"] as const) {
+      const f = fixture();
+      const mutable = f.state as unknown as { tenants: Array<Record<string, unknown>>; activeProviderId: string; providers: Array<Record<string, unknown>> };
+      mutable.tenants[0] = { ...mutable.tenants[0], connectionId: "connection-1", username: "admin@northwind.example", homeAccountId: "home-1" };
+      mutable.providers.push({ id: "lmstudio", name: "LM Studio", isLocal: true, status: "connected", models: ["qwen"] });
+      const sessionId = await start(f);
+      const prepared = await f.nova.handle({ action: "answer", sessionId, text: "Check compliance again in an hour" });
+      assert.equal(prepared.pendingAction?.kind, "follow-up");
+      const read = f.host.profile;
+      f.host.profile = async (...args) => {
+        // The change lands after the request read the app state, while it
+        // reads settings and notes, and before any context-change check ran.
+        if (change === "reconnect") mutable.tenants[0] = { ...mutable.tenants[0], connectionId: "connection-2", username: "other@northwind.example", homeAccountId: "home-2" };
+        else mutable.activeProviderId = "lmstudio";
+        return read(...args);
+      };
+      await assert.rejects(
+        f.nova.handle({ action: "decide-action", sessionId, actionId: prepared.pendingAction!.id, approved: true }),
+        { message: `${NOVA_SESSION_CONTEXT_CHANGED} No follow-up was set.` },
+        change,
+      );
+      assert.equal(f.followUps.list("tenant-a").length, 0, change);
+      assert.equal(f.chatOptions.length, 0, change);
+    }
+    for (const change of ["reconnect", "provider"] as const) {
+      const f = fixture();
+      const mutable = f.state as unknown as { tenants: Array<Record<string, unknown>>; activeProviderId: string; providers: Array<Record<string, unknown>> };
+      mutable.tenants[0] = { ...mutable.tenants[0], connectionId: "connection-1", homeAccountId: "home-1" };
+      mutable.providers.push({ id: "lmstudio", name: "LM Studio", isLocal: true, status: "connected", models: ["qwen"] });
+      const sessionId = await start(f);
+      const read = f.host.profile;
+      f.host.profile = async (...args) => {
+        if (change === "reconnect") mutable.tenants[0] = { ...mutable.tenants[0], connectionId: "connection-2", homeAccountId: "home-2" };
+        else mutable.activeProviderId = "lmstudio";
+        return read(...args);
+      };
+      await assert.rejects(f.nova.handle({ action: "answer", sessionId, text: "How many devices?" }), { message: NOVA_SESSION_CONTEXT_CHANGED }, change);
+      assert.equal(f.chatOptions.length, 0, `${change}: nothing was asked`);
+    }
   });
 
   it("refuses a card click after the provider endpoint moved, before the endpoint check ran, and says what happened to the card", async () => {

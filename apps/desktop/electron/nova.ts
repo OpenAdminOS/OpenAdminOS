@@ -444,11 +444,14 @@ export class NovaService {
         this.writableActiveTenant(),
         this.providerEndpoint(session.providerId),
       ]);
+      // App state read after the settings, notes and endpoint reads, so a
+      // reconnect or provider switch that landed during them is seen here.
+      const current = await this.state();
       if (session !== this.session) throw new Error("Nova was stopped or this question was replaced. Start a new conversation.");
       // The same identity check as after a Connect, Disconnect or provider
       // save, made per request: a question or click that arrives before that
       // check finished does not run on another sign-in or endpoint.
-      if (sessionContextDiffers(session, state, activeTenantId, endpoint)) {
+      if (sessionContextDiffers(session, current, activeTenantId, endpoint)) {
         const card = input.action === "decide-action" ? session.pendingAction : undefined;
         this.invalidate();
         this.endedCard = undefined;
