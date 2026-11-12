@@ -1,4 +1,5 @@
 import { voiceDeviceEvidenceAnswer, voiceDeviceEvidenceIntent } from "./voice-device-evidence.js";
+import { MAX_PROMISE_NUDGES, PROMISE_REPAIR_PROMPT, looksLikeUnkeptPromise } from "./unkept-promise.js";
 import type { WebSearch } from "./web-search.js";
 import { voiceConversationContext, voiceInventoryAnswer, voiceAppPlatformCountAnswer, voiceDeviceSummaryAnswer, voiceResourcesForQuestion, compactVoiceAnswerPack, assertVoicePromptBudget, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
 import { randomUUID } from "node:crypto";
@@ -2964,22 +2965,31 @@ export class IntuneChatService {
         if (options.voice) answerPack = compactVoiceAnswerPack(answerPack, voiceByteLimit - overhead);
         const prompt = buildAnswerPrompt(answerPack, documentation);
         if (options.voice) assertVoicePromptBudget(system, prompt, voiceByteLimit);
-        for await (const chunk of llm.stream({
-          system,
-          prompt,
-          ...(selectedModel ? { model: selectedModel } : {}),
-          temperature: 0.2,
-          maxTokens: chatBudget.maxTokens,
-          signal: options.signal,
-        })) {
-          if (isCancelled()) {
-            break;
+        // An answer that only promises work is asked again, at most twice; the last answer is kept.
+        let attemptPrompt = prompt;
+        for (let nudge = 0; ; nudge += 1) {
+          for await (const chunk of llm.stream({
+            system,
+            prompt: attemptPrompt,
+            ...(selectedModel ? { model: selectedModel } : {}),
+            temperature: 0.2,
+            maxTokens: chatBudget.maxTokens,
+            signal: options.signal,
+          })) {
+            if (isCancelled()) {
+              break;
+            }
+            responseModel = chunk.model;
+            assistantContent = chunk.accumulated;
+            if (assistantContent.trim()) finishAnswerStep.writing();
+            // No Learn call runs on this path, so the live text is relabelled the same way as the stored one.
+            emitLive(relabelUnverifiedLearn(assistantContent, false), chunk.delta);
           }
-          responseModel = chunk.model;
-          assistantContent = chunk.accumulated;
-          if (assistantContent.trim()) finishAnswerStep.writing();
-          // No Learn call runs on this path, so the live text is relabelled the same way as the stored one.
-          emitLive(relabelUnverifiedLearn(assistantContent, false), chunk.delta);
+          if (isCancelled() || nudge >= MAX_PROMISE_NUDGES || !looksLikeUnkeptPromise(assistantContent)) break;
+          const repaired = `${prompt}\n\nYour previous reply:\n${assistantContent.trim()}\n\n${PROMISE_REPAIR_PROMPT}`;
+          // A voice prompt keeps its byte budget; without room for the repair, the answer stands.
+          if (options.voice && Buffer.byteLength(system) + Buffer.byteLength(repaired) > voiceByteLimit) break;
+          attemptPrompt = repaired;
         }
         assistantContent = relabelUnverifiedLearn(assistantContent.trim(), false);
         emitDelta(assistantContent, "");

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { MAX_PROMISE_NUDGES, PROMISE_REPAIR_PROMPT, completeWithPromiseNudge, looksLikeUnkeptPromise } from "./unkept-promise.js";
+import { MAX_PROMISE_NUDGES, PROMISE_REPAIR_PROMPT, completeWithPromiseNudge, eachAttemptWithin, looksLikeUnkeptPromise } from "./unkept-promise.js";
 
 describe("unkept promise", () => {
   it("finds answers that only announce work", () => {
@@ -14,6 +14,8 @@ describe("unkept promise", () => {
       "Give me a moment. I'm going to verify the assignments.",
       "Sure. Let me go and check the Autopilot profiles for you.",
       "I’ll look into it.",
+      "Okay, let me check the compliance policies.",
+      "Got it. I'm checking the sign-in logs now.",
     ]) {
       assert.equal(looksLikeUnkeptPromise(answer), true, answer);
     }
@@ -31,6 +33,11 @@ describe("unkept promise", () => {
       "- WIN-01: noncompliant\n- WIN-02: compliant\nI'll check the rest next.",
       "Write this query: \"let me check the logs\" is how the help text starts.",
       "```kql\n// I'll check this later\nSigninLogs\n```",
+      "All devices are compliant. I'll check the app installs next.",
+      "All devices are compliant, and I'll check the app installs next.",
+      "Yes. Let's verify it in Devices.",
+      "Open Devices, then let's check the compliance column.",
+      "BitLocker is off on the pilot laptops. Let me check the policy assignment next.",
       "",
       "The tenant has no Windows Update rings assigned to the pilot group, so the devices in it receive updates on the default schedule. That matches what the compliance report shows. Let me know which ring you plan to use.",
     ]) {
@@ -60,5 +67,28 @@ describe("unkept promise", () => {
     }, "Admin question");
     assert.equal(calls, 1);
     assert.match(answer, /Three devices/);
+  });
+});
+
+describe("attempt bounds", () => {
+  const pause = (ms: number) => new Promise<void>((resolve) => { const timer = setTimeout(resolve, ms); void timer; });
+
+  it("gives every repair turn its own time, so nudges do not turn an answer into a timeout", async () => {
+    const replies = ["I'll check that now.", "Let me look.", "Three devices are noncompliant."];
+    let calls = 0;
+    // Each attempt takes 60% of the bound; the three together take 180%.
+    const answer = await completeWithPromiseNudge(eachAttemptWithin(async () => { await pause(300); return replies[calls++]!; }, 500, "timed out"), "Admin question");
+    assert.equal(answer, "Three devices are noncompliant.");
+    assert.equal(calls, 3);
+  });
+
+  it("ends an attempt that does not answer in time with the designed message and aborts its call", async () => {
+    let aborted = false;
+    const bounded = eachAttemptWithin((_prompt, signal) => new Promise<string>((resolve) => {
+      const timer = setTimeout(() => resolve("late"), 2000);
+      signal.addEventListener("abort", () => { aborted = true; clearTimeout(timer); resolve("aborted"); });
+    }), 50, "The assigned provider did not answer within one minute.");
+    await assert.rejects(bounded("Admin question"), /did not answer within one minute/);
+    assert.equal(aborted, true);
   });
 });

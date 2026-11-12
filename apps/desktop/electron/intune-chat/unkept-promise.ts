@@ -14,7 +14,7 @@ const PROMISE_VERBS =
 /** Work announced for later in this turn: "let me check", "I'll look into it", "I am querying". */
 const PROMISE = new RegExp(
   [
-    `\\b(?:let me|let's|allow me to)\\s+(?:now\\s+|quickly\\s+|first\\s+|just\\s+)?(?:go\\s+(?:and\\s+)?)?${PROMISE_VERBS}\\b`,
+    `\\b(?:let me|allow me to)\\s+(?:now\\s+|quickly\\s+|first\\s+|just\\s+)?(?:go\\s+(?:and\\s+)?)?${PROMISE_VERBS}\\b`,
     `\\bi(?:'ll|’ll| will| am going to|'m going to|’m going to| shall)\\s+(?:now\\s+|quickly\\s+|first\\s+|just\\s+|go\\s+(?:and\\s+)?)*${PROMISE_VERBS}\\b`,
     `\\bi(?:'m|’m| am)\\s+(?:now\\s+|currently\\s+|just\\s+)?(?:checking|looking|querying|searching|investigating|finding|retrieving|pulling|running|getting|verifying|fetching|reviewing|digging|gathering|analy[sz]ing|examining|confirming|inspecting|scanning|researching|working)\\b`,
     "^(?:one|just a|wait a)\\s+(?:moment|second|sec|minute)\\b",
@@ -43,28 +43,37 @@ function sentences(text: string): string[] {
     .filter(Boolean);
 }
 
+/** Acknowledgements that carry no result: "Sure.", "Okay, ", "Got it." */
+const FILLER =
+  /^(?:(?:sure|ok(?:ay)?|yes|yeah|alright|all right|of course|certainly|absolutely|got it|understood|right|no problem|thanks|thank you|good question|great question|on it|and|then|first|now|so)\b[\s,.!:;…-]*)*$/i;
+
+function isFiller(text: string): boolean {
+  return FILLER.test(text.trim());
+}
+
 /**
- * True when the answer announces work it has not done and says nothing
- * else of substance. An answer that reports results and mentions a later
- * step, or offers to do more, is a finished answer.
+ * True only for a progress message: every sentence either announces work
+ * ("I'll check that now.") or acknowledges the question ("Sure."). Any
+ * sentence or clause with a result, an offer, a number or a list makes it
+ * a finished answer, also when it mentions a later step.
  */
 export function looksLikeUnkeptPromise(answer: string): boolean {
   const text = withoutQuotedText(answer).trim();
   if (!text) return false;
-  let promised = false;
-  const rest: string[] = [];
-  for (const sentence of sentences(text)) {
-    // A sentence that carries a number or runs long reports something.
-    if (PROMISE.test(sentence) && !CONDITIONAL.test(sentence) && !/\d/.test(sentence) && sentence.length <= 200) promised = true;
-    else rest.push(sentence);
-  }
-  if (!promised) return false;
-  const remainder = rest.join(" ").trim();
-  // Substance besides the promise: results, numbers or a list.
-  if (remainder.length >= 160) return false;
-  if (/\d/.test(remainder)) return false;
   if (/^\s*(?:[-*•]|\d+[.)])\s+/m.test(answer)) return false;
-  return true;
+  let promised = false;
+  for (const sentence of sentences(text)) {
+    if (isFiller(sentence)) continue;
+    const match = PROMISE.exec(sentence);
+    // A sentence without a promise, with a number, or long enough to report
+    // something is substance, so the answer is finished.
+    if (!match || CONDITIONAL.test(sentence) || /\d/.test(sentence) || sentence.length > 200) return false;
+    // A result clause before the promise in the same sentence ("All devices
+    // are compliant, and I'll check the apps next.") is substance too.
+    if (!isFiller(sentence.slice(0, match.index))) return false;
+    promised = true;
+  }
+  return promised;
 }
 
 /** The repair turn for a single-call model, such as an Agent Team answer. */
@@ -86,4 +95,35 @@ export async function completeWithPromiseNudge(
     answer = await complete(`${prompt}\n\nYour previous reply:\n${answer}\n\n${PROMISE_REPAIR_PROMPT}`);
   }
   return answer;
+}
+
+/**
+ * Bounds each model call on its own, so a repair turn gets the same time
+ * as the first answer instead of sharing it. With `MAX_PROMISE_NUDGES`
+ * the whole answer is bounded by three times `timeoutMs`. `outer` stops
+ * every attempt, for example when the organization is being disconnected.
+ */
+export function eachAttemptWithin(
+  complete: (prompt: string, signal: AbortSignal) => Promise<string>,
+  timeoutMs: number,
+  timeoutMessage: string,
+  outer?: AbortSignal,
+): (prompt: string) => Promise<string> {
+  return async (prompt) => {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        // Settle as timed out first: a call that answers its abort must not win the race.
+        reject(new Error(timeoutMessage));
+        controller.abort(new Error(timeoutMessage));
+      }, timeoutMs);
+    });
+    const signal = outer ? AbortSignal.any([controller.signal, outer]) : controller.signal;
+    try {
+      return await Promise.race([complete(prompt, signal), timedOut]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
 }
