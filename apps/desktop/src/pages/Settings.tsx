@@ -2,7 +2,7 @@ import { ProviderLogo } from "../components/ProviderLogo";
 import { THEMES, useAppearance } from "../styles/appearance";
 import { useAnswerFont } from "../styles/answer-font";
 import { useDensity } from "../styles/density";
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { PageHeader } from "../components/AppShell";
 import { Select } from "../components/Select";
@@ -21,6 +21,7 @@ import {
   IconHash,
   IconLogo,
   IconLock,
+  IconMicrophone,
   IconRefresh,
   IconSearch,
   IconSettings,
@@ -78,7 +79,6 @@ import { useAppState, useUpdateStateOptional } from "../state";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import {
-  SETTINGS_ITEMS,
   promptsGoTo,
   providerDataLocationDetail,
   SETTINGS_SECTIONS,
@@ -89,10 +89,11 @@ import {
   type SettingsLinkResult,
   type SettingsSearchResult,
   userFacingErrorReason,
-  type SettingsItemId,
   type SettingsSectionId,
 } from "../copy";
 import { DataSettingsSection } from "./Cache";
+import { NovaSettingsSection } from "./NovaSettingsSection";
+import { SettingRow, SettingsFilterContext } from "./SettingRow";
 import {
   Badge,
   Button as UiButton,
@@ -122,6 +123,7 @@ function settingsSectionIcon(section: SettingsSectionId) {
     case "providers": return <IconCloud size={14} />;
     case "data": return <IconHardDrive size={14} />;
     case "chat": return <IconChat size={14} />;
+    case "nova": return <IconMicrophone size={14} />;
     case "gateway": return <IconHash size={14} />;
     case "general": return <IconSettings size={14} />;
     case "appearance": return <IconSparkle size={14} />;
@@ -147,16 +149,6 @@ function scrollWithinSettings(
   if (typeof root.scrollTo === "function") root.scrollTo({ top, behavior: "auto" });
   else root.scrollTop = top;
 }
-
-interface SettingsFilterValue {
-  query: string;
-  sectionMatch: boolean;
-}
-
-const SettingsFilterContext = createContext<SettingsFilterValue>({
-  query: "",
-  sectionMatch: false,
-});
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -496,6 +488,9 @@ export default function Settings() {
             </SettingsPageSection>
             <SettingsPageSection id="chat" visible={visibleSectionIds.has("chat")} query={settingsQuery}>
               <ChatSettingsSectionV2 />
+            </SettingsPageSection>
+            <SettingsPageSection id="nova" visible={visibleSectionIds.has("nova")} query={settingsQuery}>
+              <NovaSettingsSection />
             </SettingsPageSection>
             <SettingsPageSection id="gateway" visible={visibleSectionIds.has("gateway")} query={settingsQuery}>
               <GatewaySection tenants={state.tenants} activeTenantId={state.activeTenantId} />
@@ -4998,62 +4993,6 @@ function SectionTitle({ title, subtitle }: { title: string; subtitle: string }) 
       <p className="mt-1 max-w-[640px] text-base leading-relaxed text-[var(--color-text-soft)]">
         {subtitle}
       </p>
-    </div>
-  );
-}
-
-function SettingRow({
-  id,
-  label,
-  description,
-  control,
-  stacked = false,
-}: {
-  id?: SettingsItemId;
-  label?: string;
-  description?: string;
-  control: React.ReactNode;
-  /** Place a wide, multi-field control below the label instead of beside it. */
-  stacked?: boolean;
-}) {
-  const { query, sectionMatch } = useContext(SettingsFilterContext);
-  const catalogEntry = id ? SETTINGS_ITEMS[id] : undefined;
-  const renderedLabel = catalogEntry?.title ?? label;
-  const renderedDescription = description ?? catalogEntry?.description;
-  const normalizedQuery = query.trim().toLocaleLowerCase();
-  const searchTerms = normalizedQuery.split(/\s+/).filter(Boolean);
-  const rowHaystack = [
-    renderedLabel,
-    renderedDescription,
-    ...(catalogEntry?.keywords ?? []),
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLocaleLowerCase();
-  const matches =
-    !normalizedQuery ||
-    sectionMatch ||
-    searchTerms.every((term) => rowHaystack.includes(term));
-  if (!matches) return null;
-  return (
-    <div
-      id={id ? `setting-${id}` : undefined}
-      tabIndex={id ? -1 : undefined}
-      className={`setting-row scroll-mt-6 border-b border-[var(--color-border-soft)] last:border-b-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${normalizedQuery ? "bg-[var(--color-accent-soft)]/35" : ""}`}
-    >
-      <div
-        className={`grid items-center gap-4 px-0 py-[var(--row-y)] ${stacked ? "" : "sm:grid-cols-[minmax(220px,1fr)_minmax(0,auto)]"}`}
-      >
-        <div className="min-w-0">
-          <div className="text-[14px] font-medium text-[var(--color-text)]">
-            {renderedLabel}
-          </div>
-          <div className="mt-0.5 text-[13px] leading-5 text-[var(--color-text-muted)]">
-            {renderedDescription}
-          </div>
-        </div>
-        <div className={`min-w-0 ${stacked ? "w-full" : "justify-self-start sm:justify-self-end"}`}>{control}</div>
-      </div>
     </div>
   );
 }

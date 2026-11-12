@@ -14,8 +14,9 @@ import {
   type GraphCacheStatus,
   type NovaActivity,
   type NovaActionPreview,
+  type NovaAnswerLink,
 } from "@openadminos/agent-sdk";
-import { OPEN_NOVA_EVENT } from "../shared/nova-panel";
+import { OPEN_NOVA_EVENT, type OpenNovaDetail } from "../shared/nova-panel";
 import "./nova.css";
 
 export function Nova({
@@ -23,16 +24,24 @@ export function Nova({
 }: {
   onHostedChange?: (active: boolean) => void;
 }) {
-  const { state } = useAppState();
+  const { state, refresh } = useAppState();
   const location = useLocation(),
     navigate = useNavigate();
-  const [open, setOpen] = useState(false),
-    [mode, setMode] = useState<"openai" | "local">(() =>
-      localStorage.getItem("nova.voice-mode") === "local" ? "local" : "openai",
-    );
-  const [name, setName] = useState(
-    () => localStorage.getItem("nova.greeting-name") || "",
-  );
+  const [open, setOpen] = useState(false);
+  // Voice mode and greeting name live in Nova's settings in the main process.
+  const profile = state.novaProfile;
+  const allowedModes = profile?.allowedVoiceModes ?? ["openai", "local"];
+  const voiceOff = allowedModes.length === 0;
+  const [modeOverride, setModeOverride] = useState<"openai" | "local">();
+  const mode: "openai" | "local" = modeOverride ?? profile?.voiceMode ?? allowedModes[0] ?? "local";
+  const name = profile?.greetingName ?? "";
+  const [nameDraft, setNameDraft] = useState<string>();
+  const [links, setLinks] = useState<NovaAnswerLink[]>([]);
+  const [shortcutNotice, setShortcutNotice] = useState("");
+  const queuedShortcut = useRef<string | undefined>(undefined);
+  /** Asks the live session a typed request, such as a shortcut picked in the palette. */
+  const askTyped = useRef<(text: string) => void>(() => {});
+  const requestShortcut = useRef<(shortcut: string) => void>(() => {});
   const [key, setKey] = useState(""),
     [hasKey, setHasKey] = useState(false),
     [consent, setConsent] = useState(false);
@@ -128,6 +137,41 @@ export function Nova({
   const timeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined),
     blobUrl = useRef("");
   const api = window.openAdminOS;
+  useEffect(() => {
+    if (modeOverride && profile?.voiceMode === modeOverride) setModeOverride(undefined);
+  }, [modeOverride, profile?.voiceMode]);
+  // Move the values this device kept in local storage into Nova's settings, once.
+  useEffect(() => {
+    if (!api?.novaProfile) return;
+    let storedMode: string | null, storedName: string | null;
+    try {
+      storedMode = localStorage.getItem("nova.voice-mode");
+      storedName = localStorage.getItem("nova.greeting-name");
+    } catch { return; }
+    if (storedMode === null && storedName === null) return;
+    void api.novaProfile({
+      action: "migrate",
+      ...(storedMode === "local" || storedMode === "openai" ? { voiceMode: storedMode } : {}),
+      ...(storedName?.trim() ? { greetingName: storedName.trim().slice(0, 40) } : {}),
+    }).then(() => {
+      try {
+        localStorage.removeItem("nova.voice-mode");
+        localStorage.removeItem("nova.greeting-name");
+      } catch { /* The next start tries again; the move is idempotent. */ }
+      void refresh();
+    }).catch((caught) => console.warn("[nova] the voice settings on this device were not moved yet", caught));
+  }, [api, refresh]);
+  const saveProfile = async (patch: Parameters<NonNullable<typeof api>["novaProfile"]>[0] & { action: "save" }) => {
+    if (!api?.novaProfile) return false;
+    try {
+      await api.novaProfile(patch);
+      await refresh();
+      return true;
+    } catch (caught) {
+      setError(voiceErrorMessage(caught));
+      return false;
+    }
+  };
   const decideAction = async (approved: boolean) => {
     if (!pendingAction || actionBusy || !api) return;
     const token = generation.current;
@@ -157,6 +201,8 @@ export function Nova({
     setActionBusy(false);
     setPendingAction(undefined);
     interruptCurrent.current = () => {};
+    askTyped.current = () => {};
+    setLinks([]);
     endActivities("stopped");
     liveReady.current = false;
     setConsent(false);
@@ -300,7 +346,11 @@ export function Nova({
     }
   }
   useEffect(() => {
-    const openPanel = () => setOpen(true);
+    const openPanel = (event?: Event) => {
+      setOpen(true);
+      const shortcut = (event as CustomEvent<OpenNovaDetail | undefined> | undefined)?.detail?.shortcut;
+      if (shortcut) requestShortcut.current(shortcut);
+    };
     const keydown = (e: KeyboardEvent) => {
       if (e.altKey && e.code === "KeyV") {
         e.preventDefault();
@@ -492,48 +542,62 @@ export function Nova({
               throw new Error(
                 "No speech recognized. Try again closer to the microphone.",
               );
-            appendSpeech("user", heard.text);
-            const activityId = `local-${++itemSequence.current}`;
-            const answer = await api.nova({
-              action: "answer",
-              sessionId: sessionId.current,
-              text: heard.text,
-            }, event => { if (token === generation.current) recordActivity(activityId, event); });
-            if (token !== generation.current) return;
-            setPendingAction(answer.pendingAction);
-            setError(answer.answerError || "");
-            appendSpeech("assistant", answer.text || "No answer returned.");
-            recordActivity(activityId, { kind: "answer", status: answer.answerError ? "failed" : "completed", message: answer.answerError || (answer.pendingAction ? "Awaiting your review" : "Result retrieved") }, answer.displayText || answer.text);
-            setConversation(answer.conversationId);
-            if (answer.route) {
-              setExpanded(false);
-              navigate(answer.route);
-            }
-            const speech = await api.nova({
-              action: "speak",
-              sessionId: sessionId.current,
-              text: (answer.text || "").slice(0, 5000),
-            });
-            if (token !== generation.current) return;
-            blobUrl.current = URL.createObjectURL(
-              new Blob([new Uint8Array(speech.audio || [])], {
-                type: "audio/wav",
-              }),
-            );
-            output.current!.src = blobUrl.current;
-            setPhase("speaking");
-            output.current!.onerror = () =>
-              fail(
-                new Error(
-                  "Local speech could not be played. Check Kokoro's WAV output and your audio device, then retry.",
-                ),
-              );
-            output.current!.onended = () => {
-              if (token === generation.current) { if (answer.pendingAction) setPhase("listening"); else stop(); }
-            };
-            await output.current!.play();
+            await respond(heard.text);
           })().catch(fail);
         };
+        // A typed request answered and spoken once, then the session ends as after speech.
+        const respond = async (text: string) => {
+          appendSpeech("user", text);
+          const activityId = `local-${++itemSequence.current}`;
+          const answer = await api.nova({
+            action: "answer",
+            sessionId: sessionId.current,
+            text,
+          }, event => { if (token === generation.current) recordActivity(activityId, event); });
+          if (token !== generation.current) return;
+          setPendingAction(answer.pendingAction);
+          setError(answer.answerError || "");
+          appendSpeech("assistant", answer.text || "No answer returned.");
+          recordActivity(activityId, { kind: "answer", status: answer.answerError ? "failed" : "completed", message: answer.answerError || (answer.pendingAction ? "Awaiting your review" : "Result retrieved") }, answer.displayText || answer.text);
+          setConversation(answer.conversationId);
+          setLinks(answer.links ?? []);
+          if (answer.route) {
+            setExpanded(false);
+            navigate(answer.route);
+          }
+          const speech = await api.nova({
+            action: "speak",
+            sessionId: sessionId.current,
+            text: (answer.text || "").slice(0, 5000),
+          });
+          if (token !== generation.current) return;
+          blobUrl.current = URL.createObjectURL(
+            new Blob([new Uint8Array(speech.audio || [])], {
+              type: "audio/wav",
+            }),
+          );
+          output.current!.src = blobUrl.current;
+          setPhase("speaking");
+          output.current!.onerror = () =>
+            fail(
+              new Error(
+                "Local speech could not be played. Check Kokoro's WAV output and your audio device, then retry.",
+              ),
+            );
+          output.current!.onended = () => {
+            if (token === generation.current) { if (answer.pendingAction) setPhase("listening"); else stop(); }
+          };
+          await output.current!.play();
+        };
+        const queued = queuedShortcut.current;
+        if (queued) {
+          // A shortcut picked before the session started runs instead of a recording.
+          queuedShortcut.current = undefined;
+          setShortcutNotice("");
+          setPhase("thinking");
+          void respond(`Run shortcut ${queued}`).catch(fail);
+          return;
+        }
         rec.start();
         setPhase("listening");
         timeout.current = setTimeout(() => {
@@ -626,10 +690,15 @@ export function Nova({
         const { text, history } = request;
         if (actionRequest) dc.send(JSON.stringify({ type: "session.instructions.append", delegation_id: id,
           content: "Wait for the app result before answering this request. Do not claim a send or agent run succeeded unless the result confirms it." }));
+        deliver(id, activityId, text, history);
+      };
+      // One request to the app, with its result spoken through the live session.
+      const deliver = (id: string | null, activityId: string, text: string, history: { role: "user" | "assistant"; text: string }[]) => {
         if (output.current) output.current.muted = false;
         ++actionRevision.current;
         setActionBusy(false);
         setPendingAction(undefined);
+        setLinks([]);
         endActivities("replaced");
         completedResult.current = undefined;
         const revision = ++answerRevision;
@@ -656,6 +725,7 @@ export function Nova({
           setPendingAction(answer.pendingAction);
           setError(answer.answerError || "");
           setConversation(answer.conversationId);
+          setLinks(answer.links ?? []);
           if (answer.route) {
             setExpanded(false);
             navigate(answer.route);
@@ -676,6 +746,13 @@ export function Nova({
         })().catch((error) => {
           if (revision === answerRevision) fail(error);
         });
+      };
+      askTyped.current = (text: string) => {
+        if (token !== generation.current || dc.readyState !== "open") return;
+        appendSpeech("user", text);
+        dc.send(JSON.stringify({ type: "session.instructions.append", delegation_id: null,
+          content: "The admin ran a saved shortcut from the app. Wait for its result, then speak it. Do not start a second lookup." }));
+        deliver(null, `typed-${++itemSequence.current}`, text, []);
       };
       const scheduleRequest = (id: string | null, anchor: string) => {
         if (id !== null) delegationByAnchor.set(anchor, id);
@@ -708,6 +785,12 @@ export function Nova({
             liveReady.current = true;
             clearTimeout(timeout.current);
             setPhase("listening");
+            const queued = queuedShortcut.current;
+            if (queued) {
+              queuedShortcut.current = undefined;
+              setShortcutNotice("");
+              askTyped.current(`Run shortcut ${queued}`);
+            }
           } else if (
             event.type === "session.input_transcript.delta" ||
             event.type === "session.output_transcript.delta"
@@ -805,6 +888,19 @@ export function Nova({
     }
   }
   const active = phase !== "idle";
+  requestShortcut.current = (shortcut: string) => {
+    setShortcutNotice("");
+    if (!active) {
+      queuedShortcut.current = shortcut;
+      setShortcutNotice(`Start Nova to run ${shortcut}. Nothing runs until you start a session.`);
+      return;
+    }
+    if (mode === "local") {
+      setError(`Local voice is listening. Say run ${shortcut}, or stop Nova and pick the shortcut again.`);
+      return;
+    }
+    askTyped.current(`Run shortcut ${shortcut}`);
+  };
   useEffect(() => {
     onHostedChange?.(active && mode === "openai");
     return () => onHostedChange?.(false);
@@ -932,6 +1028,8 @@ export function Nova({
               size="sm"
               onClick={() => {
                 stop();
+                queuedShortcut.current = undefined;
+                setShortcutNotice("");
                 setOpen(false);
               }}
             >
@@ -950,24 +1048,29 @@ export function Nova({
           </p>
           {!active && (
             <>
+              {voiceOff ? (
+                <p role="status" className="text-xs">Nova voice is turned off by your IT department. Chat still answers.</p>
+              ) : (
               <label className="nova-field">
                 Voice provider
                 <select
                   value={mode}
-                  disabled={savingKey}
+                  disabled={savingKey || profile?.locked.voiceMode}
                   onChange={(e) => {
+                    const next = e.target.value as "local" | "openai";
                     stop();
-                    setMode(e.target.value as "local" | "openai");
-                    localStorage.setItem("nova.voice-mode", e.target.value);
+                    setModeOverride(next);
                     setConnectionCheck("");
                     setConsent(false);
                     setError("");
+                    void saveProfile({ action: "save", patch: { voiceMode: next } }).then((saved) => { if (!saved) setModeOverride(undefined); });
                   }}
                 >
-                  <option value="openai">OpenAI · GPT-Live-1</option>
-                  <option value="local">Local · whisper.cpp + Kokoro</option>
+                  {allowedModes.includes("openai") && <option value="openai">OpenAI · GPT-Live-1</option>}
+                  {allowedModes.includes("local") && <option value="local">Local · whisper.cpp + Kokoro</option>}
                 </select>
               </label>
+              )}
               <div className="nova-readiness">
                 <p>
                   <strong>Tenant reasoning</strong> ·{" "}
@@ -1008,6 +1111,7 @@ export function Nova({
             disabled={
               !active &&
               (!reasoningReady ||
+                voiceOff ||
                 checking ||
                 savingKey ||
                 !state.activeTenantId ||
@@ -1095,11 +1199,16 @@ export function Nova({
           {showCaptions && <NovaConversation items={conversationItems} onClose={() => toggleConversation(false)}
             onEvidence={conversation ? () => { setExpanded(false); navigate(`/chat/${conversation}`); } : undefined} />}
           {pendingAction && <section className="nova-action-review" aria-label="Review Nova action">
-            <h2>{pendingAction.title}</h2><p><strong>Destination:</strong> {pendingAction.target}</p>
-            <p>{pendingAction.kind === "send" ? "This sends the content below outside this app through your configured connector." : "The agent uses the selected tenant. Write plans still require their normal approval."}</p>
+            <h2>{pendingAction.title}</h2><p><strong>{pendingAction.kind === "profile" ? "Setting" : "Destination"}:</strong> {pendingAction.target}</p>
+            <p>{pendingAction.kind === "send" ? "This sends the content below outside this app through your configured connector." : pendingAction.kind === "profile" ? "This changes Nova's settings on this device. Nothing changes until you confirm." : "The agent uses the selected tenant. Write plans still require their normal approval."}</p>
             {pendingAction.deliveryNote && <p>{pendingAction.deliveryNote}</p>}
-            <MarkdownPreview source={pendingAction.body} numberedSections={false} className="nova-action-body nova-markdown" />
-            <div><Button disabled={actionBusy} onClick={() => void decideAction(true)}>{actionBusy ? "Submitting…" : pendingAction.kind === "send" ? "Confirm send" : "Confirm run"}</Button>
+            {pendingAction.kind === "profile" ? <>
+              <p><strong>Now</strong></p>
+              <pre className="nova-action-body" aria-label="Current value">{pendingAction.previousBody ?? "None"}</pre>
+              <p><strong>After the change</strong></p>
+              <pre className="nova-action-body" aria-label="New value">{pendingAction.body}</pre>
+            </> : <MarkdownPreview source={pendingAction.body} numberedSections={false} className="nova-action-body nova-markdown" />}
+            <div><Button disabled={actionBusy} onClick={() => void decideAction(true)}>{actionBusy ? "Submitting…" : pendingAction.kind === "send" ? "Confirm send" : pendingAction.kind === "profile" ? "Confirm change" : "Confirm run"}</Button>
             <Button variant="secondary" disabled={actionBusy} onClick={() => void decideAction(false)}>Cancel</Button></div>
           </section>}
           <audio ref={output} hidden />
@@ -1132,6 +1241,16 @@ export function Nova({
               Open evidence in Chat
             </Button>
           )}
+          {links.length > 0 && (
+            <div className="nova-links flex flex-wrap justify-center gap-2" aria-label="Pages in this answer">
+              {links.map((link) => (
+                <Button key={link.route} size="sm" variant="secondary" onClick={() => { setExpanded(false); navigate(link.route); }}>
+                  {link.label}
+                </Button>
+              ))}
+            </div>
+          )}
+          {shortcutNotice && <p role="status" className="text-xs text-center">{shortcutNotice}</p>}
           {!active && (
             <div className="nova-readiness">
               <p>
@@ -1176,6 +1295,7 @@ export function Nova({
               />{" "}
               Allow audio, relevant tenant context and public web research queries
               to the selected hosted providers for this session.
+              {" "}Your Nova instructions and this organization's confirmed notes, when set, go to OpenAI too.
             </label>
           )}
           {!active && (settings || (mode === "openai" && !hasKey)) && (
@@ -1183,11 +1303,12 @@ export function Nova({
               <label className="nova-field">
                 Greeting name
                 <input
-                  value={name}
+                  value={nameDraft ?? name}
                   maxLength={40}
-                  onChange={(e) => {
-                    setName(e.target.value);
-                    localStorage.setItem("nova.greeting-name", e.target.value);
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  onBlur={() => {
+                    if (nameDraft === undefined || nameDraft.trim() === name) { setNameDraft(undefined); return; }
+                    void saveProfile({ action: "save", patch: { greetingName: nameDraft } }).then(() => setNameDraft(undefined));
                   }}
                 />
               </label>

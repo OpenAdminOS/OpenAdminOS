@@ -338,3 +338,30 @@ it("opens the agent preflight instead of setup when no organization is active", 
   expect(bridge.startRun).not.toHaveBeenCalled();
   expect(screen.queryByRole("radio", { name: "OpenAdminOS app" })).not.toBeInTheDocument();
 });
+
+describe("Command Palette Nova shortcuts", () => {
+  it("lists Nova shortcuts and opens Nova with the chosen one", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    const opened = vi.fn();
+    window.addEventListener("openadminos:open-nova", opened);
+    renderRoute(<CommandPalette open onClose={onClose} />, {
+      path: "/",
+      route: "/",
+      bridge: makeMockBridge({}, createMockAppState({
+        novaProfile: {
+          allowedVoiceModes: ["openai", "local"], greetingName: "", instructions: "", instructionsSource: "none", addendum: "",
+          capabilities: { webSearch: true, startAgents: true, navigation: true }, connectorSends: {}, memoryEnabled: true, memoryPaused: false,
+          locked: { voiceMode: false, instructions: false, capabilities: { webSearch: false, startAgents: false, navigation: false }, connectorSends: false, memory: false },
+          shortcuts: [{ id: "s1", name: "Morning check", prompt: "How many devices are noncompliant?", createdAt: "2026-11-12T08:00:00.000Z" }],
+        },
+      })),
+    });
+    await user.type(screen.getByRole("combobox", { name: "Search commands, agents, or pages" }), "morning");
+    await user.click(await screen.findByRole("option", { name: /Nova: run Morning check/ }));
+    expect(onClose).toHaveBeenCalled();
+    expect(opened).toHaveBeenCalledOnce();
+    expect((opened.mock.calls[0]![0] as CustomEvent).detail).toEqual({ shortcut: "Morning check" });
+    window.removeEventListener("openadminos:open-nova", opened);
+  });
+});
