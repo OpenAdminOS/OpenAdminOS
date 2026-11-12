@@ -1327,6 +1327,8 @@ export interface AppState {
   novaProfile?: EffectiveNovaProfile;
   /** Nova follow-ups waiting to run, on this device. */
   novaFollowUpsPending?: number;
+  /** Why Nova's notes and follow-ups are unavailable on this device, when openadminos.db cannot be opened. */
+  novaRecordsUnavailable?: string;
   /** Splashtop connections of the organizations on this device. Never holds a token. */
   splashtopConnections?: SplashtopConnectionSummary[];
 }

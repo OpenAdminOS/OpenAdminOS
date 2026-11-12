@@ -33,6 +33,11 @@ export class NovaMemoryError extends Error {
 
 export const NOVA_NOTES_FULL =
   `This organization has ${NOVA_NOTES_PER_ORGANIZATION} Nova notes. Forget one in Settings, Nova, before adding another.`;
+export const NOVA_NOTES_OFF_BY_POLICY =
+  "Your IT department turned Nova notes off. You can forget notes, but not confirm or edit them.";
+/** Said when openadminos.db cannot be opened: notes and follow-ups are off, the rest of the app works. */
+export const NOVA_RECORDS_UNAVAILABLE =
+  "Nova notes and follow-ups are unavailable: OpenAdminOS could not open openadminos.db on this device. Check that the app data folder is writable and has free space, then restart OpenAdminOS.";
 export const NOVA_NOTE_NOT_FOUND =
   "That note is no longer on this device. Reopen Settings, Nova, to see the current notes.";
 
@@ -206,6 +211,17 @@ export class NovaMemory {
     const note = this.require(id);
     this.db.prepare("DELETE FROM nova_memory_notes WHERE id = ?").run(id);
     this.record(note, "forgotten", `nova-memory:${id}:forgotten`);
+  }
+
+  /**
+   * Forgets a note only while it is still proposed, when its Nova card is
+   * cancelled. A note confirmed or edited in Settings meanwhile stays.
+   */
+  discardProposed(id: string): void {
+    const note = this.get(id);
+    if (!note || note.reviewState !== "proposed") return;
+    const changed = this.db.prepare("DELETE FROM nova_memory_notes WHERE id = ? AND review_state = 'proposed'").run(id).changes;
+    if (Number(changed) === 1) this.record(note, "forgotten", `nova-memory:${id}:forgotten`);
   }
 
   /** Removes proposed notes past their review window. Returns how many. */

@@ -4,14 +4,15 @@ import { describe, it } from "node:test";
 import type { AppState, NovaProfile, SecretAccessor, SendIntuneChatMessageResult } from "@openadminos/agent-sdk";
 
 import type { AuditLogEventSeed } from "./audit-log.js";
-import type { NovaActionHost } from "./nova-actions.js";
+import { prepareNovaFollowUp, type NovaActionHost } from "./nova-actions.js";
 import { NovaFollowUps } from "./nova-followups.js";
 import { NovaMemory, openNovaDatabase } from "./nova-memory.js";
-import { NovaService, type NovaChatOptions } from "./nova.js";
+import { NOVA_SESSION_PROFILE_CHANGED, NovaService, type NovaChatOptions } from "./nova.js";
 import { defaultNovaSettings } from "./nova-test-settings.js";
 import { novaCommand, parseNovaCommand } from "../src/shared/nova-command.js";
 
 function fixture(options: { profile?: NovaProfile; memoryOff?: boolean } = {}) {
+  const live = { profile: options.profile };
   const values = new Map<string, string>([["api-key", "test-key"]]);
   const secrets: SecretAccessor = { get: async (k) => values.get(k), set: async (k, v) => { values.set(k, v); }, remove: async (k) => { values.delete(k); } };
   const state = {
@@ -31,7 +32,7 @@ function fixture(options: { profile?: NovaProfile; memoryOff?: boolean } = {}) {
   const chatOptions: NovaChatOptions[] = [];
   const requests: Array<{ url: string; body?: string }> = [];
   const settings = () => {
-    const base = defaultNovaSettings(options.profile);
+    const base = defaultNovaSettings(live.profile);
     return options.memoryOff ? { ...base, effective: { ...base.effective, memoryEnabled: false, locked: { ...base.effective.locked, memory: true } } } : base;
   };
   const host: NovaActionHost = {
@@ -46,6 +47,7 @@ function fixture(options: { profile?: NovaProfile; memoryOff?: boolean } = {}) {
       propose: async (input) => memory.propose({ ...input, organizationId: "org-a" }),
       confirm: async (id) => memory.confirm(id),
       forget: async (id) => memory.forget(id),
+      discardProposed: async (id) => memory.discardProposed(id),
     },
     followUps: {
       check: async (minutes) => followUps.checkLimits(minutes),
@@ -65,7 +67,7 @@ function fixture(options: { profile?: NovaProfile; memoryOff?: boolean } = {}) {
     },
     host,
   );
-  return { nova, memory, followUps, events, consents, chatOptions, requests, state };
+  return { nova, memory, followUps, events, consents, chatOptions, requests, state, host, live };
 }
 
 async function start(f: ReturnType<typeof fixture>, mode: "local" | "openai" = "local") {
@@ -120,6 +122,17 @@ describe("Nova notes", () => {
     assert.ok(f.events.some((event) => event.type === "nova.memory-note-forgotten"));
   });
 
+  it("keeps a note confirmed in Settings when its card is cancelled afterwards", async () => {
+    const f = fixture();
+    const sessionId = await start(f);
+    const prepared = await f.nova.handle({ action: "answer", sessionId, text: "Remember that we never wipe kiosks." });
+    const [note] = f.memory.list("tenant-a");
+    f.memory.confirm(note!.id);
+    await f.nova.handle({ action: "decide-action", sessionId, actionId: prepared.pendingAction!.id, approved: false });
+    assert.equal(f.memory.list("tenant-a")[0]?.reviewState, "confirmed");
+    assert.equal(f.events.some((event) => event.type === "nova.memory-note-forgotten"), false);
+  });
+
   it("keeps notes out when the IT policy turns them off, and stores none", async () => {
     const f = fixture({ memoryOff: true });
     const confirmed = f.memory.propose({ tenantId: "tenant-a", text: "Kept but unused", source: "user-said" });
@@ -155,6 +168,50 @@ describe("Nova notes", () => {
   });
 });
 
+describe("Nova settings changed during a session", () => {
+  it("leaves a note paused or forgotten mid-session out of the next local answer", async () => {
+    const f = fixture();
+    const note = f.memory.propose({ tenantId: "tenant-a", text: "Kiosks are in Berlin", source: "user-said" });
+    f.memory.confirm(note.id);
+    const sessionId = await start(f);
+    await f.nova.handle({ action: "answer", sessionId, text: "How many devices?" });
+    assert.deepEqual(f.chatOptions.at(-1)!.voiceProfile?.notes, ["Kiosks are in Berlin"]);
+    f.live.profile = { memoryPaused: true };
+    await f.nova.handle({ action: "answer", sessionId, text: "How many devices now?" });
+    assert.equal(f.chatOptions.at(-1)!.voiceProfile?.notes, undefined);
+    f.live.profile = undefined;
+    f.memory.forget(note.id);
+    let calls = f.chatOptions.length;
+    await f.nova.handle({ action: "answer", sessionId, text: "How many Windows devices are there?" });
+    assert.equal(f.chatOptions.length, calls + 1);
+    assert.equal(f.chatOptions.at(-1)!.voiceProfile?.notes, undefined);
+    f.live.profile = { instructions: "Answer in German." };
+    calls = f.chatOptions.length;
+    await f.nova.handle({ action: "answer", sessionId, text: "How many macOS devices are there?" });
+    assert.equal(f.chatOptions.length, calls + 1);
+    assert.equal(f.chatOptions.at(-1)!.voiceProfile?.effective.instructions, "Answer in German.");
+  });
+
+  it("ends a hosted session whose notes were forgotten or whose instructions changed, and keeps one that only gained a note", async () => {
+    const f = fixture();
+    const note = f.memory.propose({ tenantId: "tenant-a", text: "Kiosks are in Berlin", source: "user-said" });
+    f.memory.confirm(note.id);
+    let sessionId = await start(f, "openai");
+    const added = f.memory.propose({ tenantId: "tenant-a", text: "Laptops are in Munich", source: "user-said" });
+    f.memory.confirm(added.id);
+    await f.nova.handle({ action: "answer", sessionId, text: "How many devices?" });
+    f.memory.forget(note.id);
+    await assert.rejects(f.nova.handle({ action: "answer", sessionId, text: "How many devices now?" }), { message: NOVA_SESSION_PROFILE_CHANGED });
+    await assert.rejects(f.nova.handle({ action: "answer", sessionId, text: "Still there?" }), /Start a new conversation/);
+    sessionId = await start(f, "openai");
+    f.live.profile = { instructions: "Answer in German." };
+    await assert.rejects(f.nova.handle({ action: "answer", sessionId, text: "How many devices?" }), { message: NOVA_SESSION_PROFILE_CHANGED });
+    sessionId = await start(f, "openai");
+    f.live.profile = { instructions: "Answer in German.", memoryPaused: true };
+    await assert.rejects(f.nova.handle({ action: "answer", sessionId, text: "How many devices?" }), { message: NOVA_SESSION_PROFILE_CHANGED });
+  });
+});
+
 describe("Nova follow-ups", () => {
   it("sets nothing until the click, then one read-only follow-up in the organization", async () => {
     const f = fixture();
@@ -184,5 +241,12 @@ describe("Nova follow-ups", () => {
     for (let index = 0; index < 5; index += 1) f.followUps.create({ tenantId: "tenant-a", question: "Check", providerId: "ollama", delayMinutes: 60 });
     const full = await f.nova.handle({ action: "answer", sessionId, text: "Check compliance again in an hour" });
     assert.match(full.answerError!, /already have 5 pending follow-ups/);
+  });
+
+  it("refuses an over-long or empty question before the card, not after the click", async () => {
+    const f = fixture();
+    await assert.rejects(prepareNovaFollowUp({ question: "Check ".repeat(120), minutes: 60 }, f.state, f.host), /at most 600 characters/);
+    await assert.rejects(prepareNovaFollowUp({ question: "   ", minutes: 60 }, f.state, f.host), /needs a question/);
+    assert.equal(f.followUps.pendingCount(), 0);
   });
 });

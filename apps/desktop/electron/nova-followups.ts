@@ -35,7 +35,16 @@ export const NOVA_FOLLOW_UP_TOO_SOON = "A follow-up needs at least 1 minute. Say
 export const NOVA_FOLLOW_UP_TOO_LATE = "A follow-up can be at most 7 days ahead. Say an earlier time.";
 export const NOVA_FOLLOW_UPS_FULL = `You already have ${NOVA_FOLLOW_UPS_PENDING_MAX} pending follow-ups. Cancel one in Settings, Nova, first.`;
 export const NOVA_FOLLOW_UPS_DAILY_LIMIT = `Nova already set ${NOVA_FOLLOW_UPS_PER_DAY} follow-ups in the last 24 hours. Try again later.`;
+export const NOVA_FOLLOW_UP_PROVIDER_NOT_ALLOWED = "Your IT department no longer allows this provider or model. Nothing was asked.";
 export const NOVA_FOLLOW_UP_NOT_FOUND = "That follow-up is no longer on this device. Reopen Settings, Nova, to see the current ones.";
+
+/** The question as stored: one trimmed line within the limit. Throws the designed refusal otherwise. */
+export function novaFollowUpQuestion(value: unknown): string {
+  const question = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+  if (!question) throw new NovaFollowUpError("A follow-up needs a question.");
+  if (question.length > NOVA_FOLLOW_UP_QUESTION_MAX_LENGTH) throw new NovaFollowUpError(`A follow-up question can have at most ${NOVA_FOLLOW_UP_QUESTION_MAX_LENGTH} characters. Shorten it and ask again.`);
+  return question;
+}
 
 /** Throws the designed refusal for a delay outside 1 minute to 7 days. */
 export function checkFollowUpDelay(minutes: number): void {
@@ -113,6 +122,8 @@ export interface NovaFollowUpFireContext {
   tenantConnected: boolean;
   activeProviderId: ProviderId;
   activeModel?: string;
+  /** The IT policy still allows the follow-up's provider and model. Absent counts as allowed. */
+  providerAllowed?: boolean;
 }
 
 /**
@@ -127,6 +138,7 @@ export function novaFollowUpFireDecision(
   if (context.now.getTime() - Date.parse(followUp.dueAt) > NOVA_FOLLOW_UP_LATE_MS) return "missed";
   if (!context.tenantConnected || context.activeTenantId !== followUp.tenantId) return "skipped-organization";
   if (followUp.organizationId && context.activeOrganizationId !== followUp.organizationId) return "skipped-organization";
+  if (context.providerAllowed === false) return "skipped-provider";
   if (context.activeProviderId !== followUp.providerId || (context.activeModel ?? undefined) !== (followUp.model ?? undefined)) return "skipped-provider";
   return "run";
 }
@@ -150,7 +162,10 @@ export class NovaFollowUps {
       conversation_id TEXT,
       reason TEXT
     );
-    CREATE INDEX IF NOT EXISTS nova_followups_due ON nova_followups (status, due_at);`);
+    CREATE INDEX IF NOT EXISTS nova_followups_due ON nova_followups (status, due_at);
+    -- When each follow-up was set, for the daily limit. Only times, no
+    -- tenant data: kept through pruning and Disconnect, and dropped after a day.
+    CREATE TABLE IF NOT EXISTS nova_followup_creations (created_at TEXT NOT NULL);`);
   }
 
   /** Throws the designed refusal when a new follow-up with this delay would be over a limit. */
@@ -159,14 +174,13 @@ export class NovaFollowUps {
     const pending = (this.db.prepare("SELECT COUNT(*) AS count FROM nova_followups WHERE status IN ('pending', 'running')").get() as { count: number }).count;
     if (pending >= NOVA_FOLLOW_UPS_PENDING_MAX) throw new NovaFollowUpError(NOVA_FOLLOW_UPS_FULL);
     const since = new Date(this.clock().getTime() - DAY_MS).toISOString();
-    const today = (this.db.prepare("SELECT COUNT(*) AS count FROM nova_followups WHERE created_at > ?").get(since) as { count: number }).count;
+    this.db.prepare("DELETE FROM nova_followup_creations WHERE created_at <= ?").run(since);
+    const today = (this.db.prepare("SELECT COUNT(*) AS count FROM nova_followup_creations WHERE created_at > ?").get(since) as { count: number }).count;
     if (today >= NOVA_FOLLOW_UPS_PER_DAY) throw new NovaFollowUpError(NOVA_FOLLOW_UPS_DAILY_LIMIT);
   }
 
   create(input: NovaFollowUpInput): NovaFollowUp {
-    const question = typeof input.question === "string" ? input.question.replace(/\s+/g, " ").trim() : "";
-    if (!question) throw new NovaFollowUpError("A follow-up needs a question.");
-    if (question.length > NOVA_FOLLOW_UP_QUESTION_MAX_LENGTH) throw new NovaFollowUpError(`A follow-up question can have at most ${NOVA_FOLLOW_UP_QUESTION_MAX_LENGTH} characters.`);
+    const question = novaFollowUpQuestion(input.question);
     this.options.assertWritable?.(input.tenantId, "Nova follow-up");
     this.checkLimits(input.delayMinutes);
     const now = this.clock();
@@ -185,6 +199,7 @@ export class NovaFollowUps {
       .prepare(`INSERT INTO nova_followups (id, tenant_id, organization_id, question, provider_id, model, due_at, status, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`)
       .run(followUp.id, followUp.tenantId, followUp.organizationId ?? null, followUp.question, followUp.providerId, followUp.model ?? null, followUp.dueAt, followUp.createdAt);
+    this.db.prepare("INSERT INTO nova_followup_creations (created_at) VALUES (?)").run(followUp.createdAt);
     this.record(followUp, "created");
     this.prune(followUp.tenantId);
     return followUp;
@@ -283,8 +298,8 @@ export class NovaFollowUps {
       type: AUDIT_TYPE[change],
       source: "nova",
       tenantId: followUp.tenantId,
-      // A follow-up runs on its own time, like a schedule.
-      initiator: "schedule",
+      // The admin sets and cancels a follow-up with a click; it runs on its own time, like a schedule.
+      initiator: change === "created" || change === "cancelled" ? "person" : "schedule",
       details: {
         followUpId: followUp.id,
         ...(followUp.organizationId ? { organizationId: followUp.organizationId } : {}),

@@ -241,6 +241,7 @@ import {
   type AppState,
   isManagedSettingLocked,
   managedLockedModel,
+  managedNovaMemoryOff,
   managedProviderAllowed,
   managedPublicReferenceAllowed,
   type ManagedPolicyStatus,
@@ -303,8 +304,8 @@ import {
   validateRegistrySource,
 } from "./registry-client.js";
 import { IntelligenceSqliteStore, type HostedProviderConsentAuditRecord } from "./intune-chat/sqlite-store.js";
-import { NovaMemory, NovaMemoryError, openNovaDatabase } from "./nova-memory.js";
-import { novaFollowUpFireDecision, NovaFollowUpError, NovaFollowUps } from "./nova-followups.js";
+import { NOVA_NOTES_OFF_BY_POLICY, NOVA_RECORDS_UNAVAILABLE, NovaMemory, NovaMemoryError, openNovaDatabase } from "./nova-memory.js";
+import { NOVA_FOLLOW_UP_PROVIDER_NOT_ALLOWED, novaFollowUpFireDecision, NovaFollowUpError, NovaFollowUps } from "./nova-followups.js";
 import { NOVA_FOLLOW_UP_PROVIDER_CHANGED } from "./nova-actions.js";
 import {
   AUDIT_CHAIN_START_HASH,
@@ -1654,6 +1655,8 @@ export interface AppStateStoreOptions {
   sandboxedCodeDefault?: boolean;
   /** Writable userData directory used for the registry cache. */
   userDataPath?: string;
+  /** Test hook: opens openadminos.db for Nova's notes and follow-ups. */
+  openNovaDatabase?: (path: string) => import("node:sqlite").DatabaseSync;
   /**
    * Test hook for host-level chat/cache smoke tests. Production code
    * leaves this unset so Graph always flows through MSAL + Graph adapter.
@@ -1802,10 +1805,15 @@ export class AppStateStore {
   private readonly intelligenceStore: IntelligenceSqliteStore | undefined;
   /** The append-only audit log; in memory when the host has no data folder. */
   private readonly auditLog: AuditLogStore;
-  /** Nova's notes and follow-ups, in openadminos.db. */
-  private readonly novaDb: import("node:sqlite").DatabaseSync;
-  private readonly novaMemory: NovaMemory;
-  private readonly novaFollowUps: NovaFollowUps;
+  /**
+   * Nova's notes and follow-ups, in openadminos.db. Opened at launch and
+   * again on use after a failure, so a database that cannot be opened
+   * turns only these off, with a designed message, and the app starts.
+   */
+  private novaStoresInstance: { db: import("node:sqlite").DatabaseSync; memory: NovaMemory; followUps: NovaFollowUps } | undefined;
+  private novaStoresFailedAt: number | undefined;
+  private readonly novaDatabasePath: string;
+  private readonly openNovaDatabaseAt: (path: string) => import("node:sqlite").DatabaseSync;
   private novaFollowUpsFiring = false;
   /** The fingerprint of each run as last recorded in the audit log. */
   private readonly auditedRuns = new Map<string, string>();
@@ -1967,16 +1975,12 @@ export class AppStateStore {
         () => this.clock(),
       );
     }
-    this.novaDb = openNovaDatabase(typeof options !== "string" && options.userDataPath ? join(options.userDataPath, "openadminos.db") : ":memory:");
-    const novaAudit = (events: AuditLogEventSeed[]) => this.recordNovaAudit(events);
-    const novaWritable = (tenantId: string, what: string) => this.tenantLifecycle.assertWritable(tenantId, what);
-    this.novaMemory = new NovaMemory(this.novaDb, { audit: novaAudit, assertWritable: novaWritable, clock: () => this.clock() });
-    this.novaFollowUps = new NovaFollowUps(this.novaDb, { audit: novaAudit, assertWritable: novaWritable, clock: () => this.clock() });
-    // A follow-up still marked running was cut off by a quit; it did not finish.
+    this.novaDatabasePath = typeof options !== "string" && options.userDataPath ? join(options.userDataPath, "openadminos.db") : ":memory:";
+    this.openNovaDatabaseAt = (typeof options !== "string" && options.openNovaDatabase) || openNovaDatabase;
     try {
-      this.novaFollowUps.recoverInterrupted();
-    } catch (error) {
-      console.warn("[nova] interrupted follow-ups could not be marked", errorText(error));
+      this.novaStores();
+    } catch {
+      // Logged by novaStores; Settings, Nova and Nova's answers say notes and follow-ups are unavailable.
     }
     this.mcpCatalog = (typeof options === "string" ? undefined : options.mcpCatalog) ?? MCP_CATALOG;
     this.managedPolicy = typeof options === "string" ? undefined : options.managedPolicy;
@@ -2226,13 +2230,55 @@ export class AppStateStore {
   tickOffice() { return this.officeService.tick(); }
   reportOfficeError(error: unknown) { this.officeService.reportError(error); }
 
+  /** Nova's note and follow-up stores. Throws the designed message when openadminos.db cannot be opened. */
+  private novaStores(): NonNullable<AppStateStore["novaStoresInstance"]> {
+    if (this.novaStoresInstance) return this.novaStoresInstance;
+    const now = this.clock().getTime();
+    // Retry at most once a minute; Settings and the state read call this often.
+    if (this.novaStoresFailedAt !== undefined && now - this.novaStoresFailedAt < 60_000) throw new NovaMemoryError(NOVA_RECORDS_UNAVAILABLE);
+    let db: import("node:sqlite").DatabaseSync | undefined;
+    try {
+      db = this.openNovaDatabaseAt(this.novaDatabasePath);
+      const audit = (events: AuditLogEventSeed[]) => this.recordNovaAudit(events);
+      const assertWritable = (tenantId: string, what: string) => this.tenantLifecycle.assertWritable(tenantId, what);
+      const memory = new NovaMemory(db, { audit, assertWritable, clock: () => this.clock() });
+      const followUps = new NovaFollowUps(db, { audit, assertWritable, clock: () => this.clock() });
+      // A follow-up still marked running was cut off by a quit; it did not finish.
+      try {
+        followUps.recoverInterrupted();
+      } catch (error) {
+        console.warn("[nova] interrupted follow-ups could not be marked", errorText(error));
+      }
+      this.novaStoresInstance = { db, memory, followUps };
+      this.novaStoresFailedAt = undefined;
+      return this.novaStoresInstance;
+    } catch (error) {
+      try {
+        db?.close();
+      } catch {
+        // Already unusable.
+      }
+      this.novaStoresFailedAt = now;
+      console.warn(`[nova] notes and follow-ups are unavailable: openadminos.db could not be opened. ${errorText(error)}`);
+      throw new NovaMemoryError(NOVA_RECORDS_UNAVAILABLE);
+    }
+  }
+
+  private get novaMemory(): NovaMemory {
+    return this.novaStores().memory;
+  }
+
+  private get novaFollowUps(): NovaFollowUps {
+    return this.novaStores().followUps;
+  }
+
   close(): void {
     this.whatsappWebClientInstance?.dispose();
     void this.gatewayService.stop();
     void this.mcpHost.closeAll();
     this.officeServiceInstance?.close();
     this.intelligenceStore?.close();
-    this.novaDb.close();
+    this.novaStoresInstance?.db.close();
     this.auditLog.close();
   }
 
@@ -3669,7 +3715,8 @@ export class AppStateStore {
       const pending = this.novaFollowUps.pendingCount();
       if (pending > 0) state.novaFollowUpsPending = pending;
     } catch (error) {
-      console.warn("[nova] pending follow-ups could not be counted", errorText(error));
+      if (error instanceof NovaMemoryError) state.novaRecordsUnavailable = error.message;
+      else console.warn("[nova] pending follow-ups could not be counted", errorText(error));
     }
     if (persisted.organizationMigration) {
       state.organizationMigration = persisted.organizationMigration;
@@ -6997,11 +7044,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   /** Saves a settings change the admin confirmed on a Nova card, with the same checks as Settings. */
-  async applyNovaProfileProposal(patch: unknown): Promise<void> {
-    await this.changeNovaProfile({ action: "save", patch }, "nova-proposal");
+  async applyNovaProfileProposal(patch: unknown, assertUnchanged: (effective: EffectiveNovaProfile) => void): Promise<void> {
+    await this.changeNovaProfile({ action: "save", patch }, "nova-proposal", assertUnchanged);
   }
 
-  private async changeNovaProfile(request: unknown, via: "settings" | "nova-proposal"): Promise<NovaProfileView> {
+  private async changeNovaProfile(request: unknown, via: "settings" | "nova-proposal", assertUnchanged?: (effective: EffectiveNovaProfile) => void): Promise<NovaProfileView> {
     if (!isStateRecord(request) || typeof request.action !== "string") throw new Error("Nova settings received no request.");
     const action = request.action;
     if (action === "get") {
@@ -7011,6 +7058,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     if (action !== "save" && action !== "revert" && action !== "migrate") throw new Error("Nova settings do not know this request.");
     const view = await this.serialize(async () => {
       const persisted = await this.read();
+      assertUnchanged?.(effectiveNovaProfile(persisted.novaProfile, this.managedPolicy, this.activeOrganizationIdOf(persisted)));
       const context = {
         now: this.clock().toISOString(),
         newId: () => randomUUID(),
@@ -7115,10 +7163,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         break;
       case "note-confirm":
         ownNote();
+        if (managedNovaMemoryOff(this.managedPolicy)) throw new NovaMemoryError(NOVA_NOTES_OFF_BY_POLICY);
         this.novaMemory.confirm(id);
         break;
       case "note-edit":
         ownNote();
+        if (managedNovaMemoryOff(this.managedPolicy)) throw new NovaMemoryError(NOVA_NOTES_OFF_BY_POLICY);
         this.novaMemory.edit(id, request.text);
         break;
       case "note-forget":
@@ -7158,6 +7208,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       },
       confirm: async (id) => this.novaMemory.confirm(id),
       forget: async (id) => this.novaMemory.forget(id),
+      discardProposed: async (id) => this.novaMemory.discardProposed(id),
     };
   }
 
@@ -7247,6 +7298,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       const state = await this.getAppState();
       const provider = state.providers.find((entry) => entry.id === state.activeProviderId);
       const activeModel = resolveProviderDefaultModel(provider, state.activeModelByProviderId).model;
+      const lockedModel = managedLockedModel(this.managedPolicy, followUp.providerId);
+      const providerAllowed = managedProviderAllowed(this.managedPolicy, followUp.providerId) && (!lockedModel || lockedModel === followUp.model);
       const decision = novaFollowUpFireDecision(followUp, {
         now: this.clock(),
         ...(state.activeTenantId ? { activeTenantId: state.activeTenantId } : {}),
@@ -7254,7 +7307,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         tenantConnected: state.tenants.some((tenant) => tenant.id === followUp.tenantId) && this.tenantLifecycle.isWritable(followUp.tenantId),
         activeProviderId: state.activeProviderId,
         ...(activeModel ? { activeModel } : {}),
+        providerAllowed,
       });
+      if (decision === "skipped-provider" && !providerAllowed) return finish(decision, { reason: NOVA_FOLLOW_UP_PROVIDER_NOT_ALLOWED });
       if (decision !== "run") return finish(decision);
       const result = await this.withTenantLease(followUp.tenantId, (signal) =>
         this.chatService.streamIntuneChatMessage(

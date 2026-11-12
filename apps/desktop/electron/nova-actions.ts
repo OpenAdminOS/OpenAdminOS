@@ -4,6 +4,7 @@ import type { AppState, ConnectorSummary, EffectiveNovaProfile, ManagedPolicySta
 import { organizationForTenant, resolveProviderDefaultModel } from '@openadminos/agent-sdk';
 import { applyNovaProfilePatch, novaCapabilityAllowed, novaCapabilityOffMessage, novaConnectorSendAllowed, novaShortcutPromptIssue } from './nova-profile.js';
 import { novaNoteText } from './nova-memory.js';
+import { novaFollowUpQuestion } from './nova-followups.js';
 import type { NovaProfileProposal, NovaProposableCapability } from '../src/shared/nova-command.js';
 
 /** Nova's settings with the IT policy, as `NovaActionHost.profile` reads them. */
@@ -28,8 +29,13 @@ export interface NovaActionHost {
    * between stops it. A failed read refuses the action.
    */
   profile(): Promise<NovaSettings>;
-  /** Saves a settings change the admin confirmed on a Nova card. The IT policy is applied again. */
-  applyProfileProposal?(patch: NovaProfilePatch): Promise<void>;
+  /**
+   * Saves a settings change the admin confirmed on a Nova card. The IT
+   * policy is applied again. `assertUnchanged` runs inside the same
+   * serialized write with the settings as stored, and throws when they
+   * changed since the card was prepared.
+   */
+  applyProfileProposal?(patch: NovaProfilePatch, assertUnchanged: (effective: EffectiveNovaProfile) => void): Promise<void>;
   /** Nova's notes of one organization. Absent: Nova keeps no notes in this app session. */
   notes?: {
     /** Confirmed and edited notes for the prompt, newest first. */
@@ -38,6 +44,8 @@ export interface NovaActionHost {
     propose(input: { tenantId: string; text: string; source: NovaNoteSource; sessionId?: string; conversationId?: string; turnId?: string }): Promise<NovaNote>;
     confirm(id: string): Promise<NovaNote>;
     forget(id: string): Promise<void>;
+    /** Forgets a note only while it is still proposed: a note confirmed or edited in Settings meanwhile stays. */
+    discardProposed(id: string): Promise<void>;
   };
   /** One-time follow-up questions. Absent: Nova sets none in this app session. */
   followUps?: {
@@ -234,7 +242,7 @@ export async function prepareNovaProfileChange(change: NovaProfileProposal, host
   const { effective, profile, policy } = settings;
   let patch: NovaProfilePatch;
   let title: string, target: string, body: string, previousBody: string;
-  const current = (read: NovaSettings) =>
+  const current = (read: Pick<NovaSettings, 'effective'>) =>
     change.field === 'instructions' ? read.effective.instructions
       : change.field === 'greetingName' ? read.effective.greetingName
         : String(read.effective.capabilities[change.capability]);
@@ -267,7 +275,10 @@ export async function prepareNovaProfileChange(change: NovaProfileProposal, host
     execute: async (signal) => {
       signal.throwIfAborted();
       if (current(await readNovaSettings(host)) !== before) throw new Error(NOVA_PROFILE_CHANGED);
-      await host.applyProfileProposal!(patch);
+      // Checked again inside the write, so a Settings save in between is never overwritten.
+      await host.applyProfileProposal!(patch, (effective) => {
+        if (current({ effective }) !== before) throw new Error(NOVA_PROFILE_CHANGED);
+      });
       return {
         text: change.field === 'capability'
           ? `${CAPABILITY_TITLES[change.capability]} is now off for Nova.`
@@ -328,7 +339,7 @@ export async function prepareNovaNote(
       await notes.confirm(note.id);
       return { text: `Nova will remember this in ${name} from the next conversation. Review notes in Settings, Nova.` };
     },
-    cancel: () => notes.forget(note.id),
+    cancel: () => notes.discardProposed(note.id),
   };
 }
 
@@ -348,7 +359,9 @@ export async function prepareNovaFollowUp(
   if (!host.followUps) throw new Error('Nova cannot set follow-ups in this app session. Reopen the latest app build and try again.');
   if (!state.activeTenantId) throw new Error('Select an organization first. A follow-up runs in the organization it was set in.');
   const tenantId = state.activeTenantId;
-  const readOnlyIssue = novaShortcutPromptIssue(input.question);
+  // The same checks the click makes, so a card is never shown for a question that cannot be set.
+  const question = novaFollowUpQuestion(input.question);
+  const readOnlyIssue = novaShortcutPromptIssue(question);
   if (readOnlyIssue) throw new Error('A follow-up can only ask a read-only question again. Remove the request to send, run, schedule, change or remember something. Nothing was set.');
   await host.followUps.check(input.minutes);
   const provider = state.providers.find(p => p.id === state.activeProviderId);
@@ -366,13 +379,13 @@ export async function prepareNovaFollowUp(
       kind: 'follow-up',
       title: `Ask again in ${delay}`,
       target: name,
-      body: input.question,
+      body: question,
       deliveryNote: `Runs once at about ${due.toISOString().slice(0, 16).replace('T', ' ')} UTC with ${provider?.name ?? providerId}${model ? ` · ${model}` : ''}${provider && !provider.isLocal ? ', a hosted provider' : ''}. The answer appears in Chat. Read-only. Sending the result anywhere still needs your click.`,
     },
     execute: async (signal) => {
       signal.throwIfAborted();
       await assertStillActive(host, tenantId);
-      const created = await followUps.create({ tenantId, question: input.question, providerId, ...(model ? { model } : {}), delayMinutes: input.minutes });
+      const created = await followUps.create({ tenantId, question, providerId, ...(model ? { model } : {}), delayMinutes: input.minutes });
       return { text: `Set. Nova asks this again at about ${created.dueAt.slice(0, 16).replace('T', ' ')} UTC in ${name}. Cancel it in Settings, Nova.` };
     },
   };

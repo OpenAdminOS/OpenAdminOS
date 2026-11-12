@@ -10,6 +10,7 @@ import type { TokenCacheStorage } from "@openadminos/runtime";
 
 import { loadManagedPolicy } from "./managed-policy.js";
 import { MCP_CATALOG } from "./mcp/catalog.js";
+import { NOVA_PROFILE_CHANGED, prepareNovaProfileChange, type NovaActionHost } from "./nova-actions.js";
 import { AppStateStore } from "./state.js";
 
 const tokenStore: TokenCacheStorage = { read: async () => "", write: async () => undefined };
@@ -35,7 +36,7 @@ const contoso = {
   addedAt: "2026-09-01T08:00:00.000Z",
 };
 
-async function makeStore(options: { policy?: ManagedPolicyStatus; clock?: () => Date } = {}) {
+async function makeStore(options: { policy?: ManagedPolicyStatus; clock?: () => Date; extra?: Partial<ConstructorParameters<typeof AppStateStore>[0] & object> } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-nova-records-"));
   const statePath = join(dir, "state.json");
   await writeFile(
@@ -62,6 +63,7 @@ async function makeStore(options: { policy?: ManagedPolicyStatus; clock?: () => 
     appVersion: "0.8.0",
     ...(options.policy ? { managedPolicy: options.policy } : {}),
     ...(options.clock ? { clock: options.clock } : {}),
+    ...(options.extra ?? {}),
   });
   return { store, dir, statePath, dbPath: join(dir, "openadminos.db") };
 }
@@ -150,6 +152,182 @@ describe("Nova notes and follow-ups in the store", () => {
       const persisted = JSON.parse(await readFile(statePath, "utf8")) as { novaProfile?: { addenda?: Record<string, string> } };
       assert.equal(persisted.novaProfile?.addenda?.["org-contoso"], undefined);
     } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to confirm or edit a note while the IT policy turns notes off, and still forgets it", async () => {
+    const { store, dir } = await makeStore({ policy: await policyOf({ novaMemory: "off" }) });
+    try {
+      const note = await store.novaNotesHost().propose({ tenantId: contoso.id, text: "Kiosks are in Berlin", source: "user-said" });
+      await assert.rejects(store.handleNovaRecords({ action: "note-confirm", id: note.id }), /IT department turned Nova notes off/);
+      await assert.rejects(store.handleNovaRecords({ action: "note-edit", id: note.id, text: "Kiosks are in Munich" }), /IT department turned Nova notes off/);
+      assert.equal((await store.handleNovaRecords({ action: "list" })).notes[0]?.reviewState, "proposed");
+      assert.deepEqual((await store.handleNovaRecords({ action: "note-forget", id: note.id })).notes, []);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("starts without notes and follow-ups when openadminos.db cannot be opened, and says why", async () => {
+    const { store, dir } = await makeStore({ extra: { openNovaDatabase: () => { throw new Error("database disk image is malformed"); } } });
+    try {
+      const state = await store.getAppState();
+      assert.equal(state.activeTenantId, contoso.id);
+      assert.match(state.novaRecordsUnavailable ?? "", /could not open openadminos\.db/);
+      await assert.rejects(store.handleNovaRecords({ action: "list" }), /notes and follow-ups are unavailable/);
+      await assert.rejects(store.novaNotesHost().propose({ tenantId: contoso.id, text: "Kiosks", source: "user-said" }), /notes and follow-ups are unavailable/);
+      await store.fireDueNovaFollowUps();
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips a due follow-up when the IT policy no longer allows its provider", async () => {
+    let now = new Date("2026-11-12T10:00:00.000Z");
+    let policy = await policyOf({});
+    const { store, dir } = await makeStore({ clock: () => now, policy });
+    try {
+      const state = await store.getAppState();
+      const model = state.providers.find((entry) => entry.id === state.activeProviderId)?.models?.[0];
+      const followUp = await store.novaFollowUpsHost().create({ tenantId: contoso.id, question: "Check compliance", providerId: state.activeProviderId, ...(model ? { model } : {}), delayMinutes: 5 });
+      policy = (await policyOf({ allowedProviders: ["anthropic"] }))!;
+      // The store reads its policy object; replace its values as a reload would.
+      Object.assign((store as unknown as { managedPolicy: ManagedPolicyStatus }).managedPolicy, policy);
+      now = new Date("2026-11-12T10:06:00.000Z");
+      await store.fireDueNovaFollowUps();
+      const done = (await store.handleNovaRecords({ action: "list" })).followUps.find((entry) => entry.id === followUp.id);
+      assert.equal(done?.status, "skipped-provider");
+      assert.match(done?.reason ?? "", /IT department no longer allows this provider/);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("a Nova settings card", () => {
+  it("does not overwrite a Settings save made between the card and its write", async () => {
+    const { store, dir } = await makeStore();
+    try {
+      await store.handleNovaProfile({ action: "save", patch: { instructions: "Answer in English." } });
+      const host = {
+        profile: () => store.novaProfile(),
+        // A Settings save lands after the click's first check and before the card's write.
+        applyProfileProposal: async (patch, assertUnchanged) => {
+          await store.handleNovaProfile({ action: "save", patch: { instructions: "Answer in German." } });
+          await store.applyNovaProfileProposal(patch, assertUnchanged);
+        },
+      } as Pick<NovaActionHost, "profile" | "applyProfileProposal"> as NovaActionHost;
+      const prepared = await prepareNovaProfileChange({ field: "instructions", mode: "replace", text: "Answer briefly." }, host);
+      await assert.rejects(prepared.execute(new AbortController().signal), { message: NOVA_PROFILE_CHANGED });
+      assert.equal((await store.novaProfile()).effective.instructions, "Answer in German.");
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("a Nova follow-up run", () => {
+  const providers = () => [{ id: "ollama", name: "Ollama", isLocal: true, status: "connected", models: ["test"], defaultModel: "test" } as never];
+  const graph = (requests: string[]) => () => ({
+    listManagedDevices: async () => [],
+    retireManagedDevice: async () => { throw new Error("A follow-up must not write."); },
+    request: async (input: { method: string; path: string }) => {
+      requests.push(`${input.method} ${input.path}`);
+      if (input.path === "/deviceManagement/managedDevices") return { value: [{ id: "one", deviceName: "Device A", complianceState: "noncompliant" }] };
+      return { value: [] };
+    },
+  }) as never;
+
+  it("asks once in its organization, lands in a new Chat conversation, sends nothing, and audits in order", async () => {
+    let now = new Date();
+    const requests: string[] = [];
+    let streams = 0;
+    const { store, dir, dbPath } = await makeStore({
+      clock: () => now,
+      extra: {
+        providerListFactory: providers,
+        graphFactory: graph(requests),
+        llmFactory: () => ({
+          available: true,
+          complete: async () => ({ text: "Device A is noncompliant.", model: "test" }),
+          async *stream() { streams += 1; yield { delta: "Device A is noncompliant.", accumulated: "Device A is noncompliant.", done: true, model: "test" }; },
+        }) as never,
+      },
+    });
+    let closed = false;
+    const close = () => { if (!closed) { closed = true; store.close(); } };
+    try {
+      const before = (await store.listIntuneChatConversations()).length;
+      const followUp = await store.novaFollowUpsHost().create({ tenantId: contoso.id, question: "Check device compliance", providerId: "ollama", model: "test", delayMinutes: 1 });
+      now = new Date(now.getTime() + 61_000);
+      await store.fireDueNovaFollowUps();
+      const done = (await store.handleNovaRecords({ action: "list" })).followUps.find((entry) => entry.id === followUp.id);
+      assert.equal(done?.status, "completed", done?.reason);
+      const conversations = await store.listIntuneChatConversations();
+      assert.equal(conversations.length, before + 1);
+      const conversation = conversations.find((entry) => entry.id === done?.conversationId);
+      assert.equal(conversation?.title, "Follow-up: Check device compliance");
+      assert.equal(conversation?.tenantId, contoso.id);
+      assert.ok(requests.every((request) => request.startsWith("GET ")), requests.join(", "));
+      close();
+      const db = new DatabaseSync(dbPath, { readOnly: true });
+      const rows = db.prepare("SELECT type, initiator FROM audit_log WHERE type LIKE 'nova.followup.%' ORDER BY seq").all() as { type: string; initiator: string }[];
+      db.close();
+      assert.deepEqual(rows.map((row) => `${row.type}:${row.initiator}`), ["nova.followup.created:person", "nova.followup.started:schedule", "nova.followup.completed:schedule"]);
+      assert.ok(streams >= 1, "the follow-up asked the model");
+    } finally {
+      close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves no conversation and no completed event when the organization is disconnected while it runs", async () => {
+    let now = new Date();
+    let release: (() => void) | undefined;
+    const { store, dir, dbPath } = await makeStore({
+      clock: () => now,
+      extra: {
+        providerListFactory: providers,
+        graphFactory: () => ({
+          listManagedDevices: async () => [],
+          retireManagedDevice: async () => { throw new Error("A follow-up must not write."); },
+          request: async () => {
+            await new Promise<void>((resolve) => { release = resolve; });
+            return { value: [] };
+          },
+        }) as never,
+        llmFactory: () => ({ available: true, complete: async () => ({ text: "Nothing.", model: "test" }), async *stream() { yield { delta: "Nothing.", accumulated: "Nothing.", done: true, model: "test" }; } }) as never,
+      },
+    });
+    let closed = false;
+    const close = () => { if (!closed) { closed = true; store.close(); } };
+    try {
+      const before = (await store.listIntuneChatConversations()).length;
+      const followUp = await store.novaFollowUpsHost().create({ tenantId: contoso.id, question: "Check device compliance", providerId: "ollama", model: "test", delayMinutes: 1 });
+      now = new Date(now.getTime() + 61_000);
+      const firing = store.fireDueNovaFollowUps();
+      for (let index = 0; index < 100 && !release; index += 1) await new Promise((resolve) => setImmediate(resolve));
+      assert.ok(release, "the follow-up reached Graph before the Disconnect");
+      const disconnecting = store.disconnectTenant(contoso.id);
+      for (let index = 0; index < 20; index += 1) await new Promise((resolve) => setImmediate(resolve));
+      release?.();
+      await firing;
+      await disconnecting;
+      assert.equal((await store.listIntuneChatConversations()).length, before);
+      close();
+      const db = new DatabaseSync(dbPath, { readOnly: true });
+      const types = (db.prepare("SELECT type FROM audit_log WHERE type LIKE 'nova.followup.%' AND json_extract(event_json, '$.details.followUpId') = ? ORDER BY seq").all(followUp.id) as { type: string }[]).map((row) => row.type);
+      db.close();
+      assert.equal(types.includes("nova.followup.completed"), false, types.join(", "));
+      assert.equal(types[0], "nova.followup.created");
+      assert.deepEqual(types, ["nova.followup.created", "nova.followup.started", "nova.followup.failed"]);
+    } finally {
+      close();
       await rm(dir, { recursive: true, force: true });
     }
   });

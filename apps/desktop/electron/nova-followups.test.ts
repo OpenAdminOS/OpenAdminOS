@@ -41,6 +41,19 @@ describe("Nova follow-ups", () => {
     assert.doesNotThrow(() => store.create(input));
   });
 
+  it("keeps the daily count through pruning and a Disconnect purge", () => {
+    const { store, advance } = followUps();
+    for (let index = 0; index < 20; index += 1) {
+      store.cancel(store.create(input).id);
+      advance(1000);
+    }
+    assert.equal(store.purgeTenant("t1"), 20);
+    assert.throws(() => store.create(input), { message: NOVA_FOLLOW_UPS_DAILY_LIMIT });
+    assert.throws(() => store.create({ ...input, tenantId: "t2" }), { message: NOVA_FOLLOW_UPS_DAILY_LIMIT });
+    advance(86_400_001);
+    assert.doesNotThrow(() => store.create(input));
+  });
+
   it("is due at its time, runs once, and audits each step as a schedule", () => {
     const { store, events, advance } = followUps();
     const followUp = store.create(input);
@@ -56,7 +69,9 @@ describe("Nova follow-ups", () => {
     assert.equal(done?.status, "completed");
     assert.equal(done?.conversationId, "conv-1");
     assert.deepEqual(events.map((event) => event.type), ["nova.followup.created", "nova.followup.started", "nova.followup.completed"]);
-    assert.ok(events.every((event) => event.initiator === "schedule" && event.source === "nova" && event.details.question === "Check compliance"));
+    // A click set it; it ran on its own time.
+    assert.deepEqual(events.map((event) => event.initiator), ["person", "schedule", "schedule"]);
+    assert.ok(events.every((event) => event.source === "nova" && event.details.question === "Check compliance"));
   });
 
   it("cancels only a pending follow-up", () => {
@@ -65,7 +80,7 @@ describe("Nova follow-ups", () => {
     store.cancel(followUp.id);
     assert.equal(store.get(followUp.id)?.status, "cancelled");
     assert.throws(() => store.cancel(followUp.id), /already finished/);
-    assert.ok(events.some((event) => event.type === "nova.followup.cancelled"));
+    assert.equal(events.find((event) => event.type === "nova.followup.cancelled")?.initiator, "person");
     assert.equal(store.pendingCount(), 0);
   });
 
@@ -100,6 +115,8 @@ describe("Nova follow-ups", () => {
     assert.equal(novaFollowUpFireDecision(followUp, { ...context, tenantConnected: false }), "skipped-organization");
     assert.equal(novaFollowUpFireDecision(followUp, { ...context, activeProviderId: "anthropic" }), "skipped-provider");
     assert.equal(novaFollowUpFireDecision(followUp, { ...context, activeModel: "other" }), "skipped-provider");
+    assert.equal(novaFollowUpFireDecision(followUp, { ...context, providerAllowed: false }), "skipped-provider");
+    assert.equal(novaFollowUpFireDecision(followUp, { ...context, providerAllowed: true }), "run");
     assert.equal(novaFollowUpFireDecision(followUp, { ...context, now: new Date("2026-11-12T12:00:01.000Z") }), "missed");
   });
 });

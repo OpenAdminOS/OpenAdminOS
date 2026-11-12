@@ -58,6 +58,16 @@ function requireVoiceModeAllowed(state: AppState, mode: unknown): void {
   }
 }
 
+/** Said when a hosted voice session ends because its instructions or notes changed. */
+export const NOVA_SESSION_PROFILE_CHANGED =
+  "Nova settings or notes changed after this voice session started, so the session ended. OpenAI received the earlier instructions and notes at the start; a new session gets the current ones. Start Nova again.";
+
+/** The parts of the profile a hosted voice prompt carries, besides notes. */
+function hostedProfileKey(profile: Omit<NovaProfilePromptInput, "byteLimit">): string {
+  const { instructions, instructionsSource, addendum } = profile.effective;
+  return JSON.stringify([instructions, instructionsSource, addendum]);
+}
+
 export class NovaService {
   private generation = 0;
   private answerRevision = 0;
@@ -72,14 +82,40 @@ export class NovaService {
     conversationId?: string;
     lastEvidence?: string;
     commandContext?: { request: string; at: number };
-    /** The profile, read once at session start, for the reasoning prompt. */
+    /** The profile for the reasoning prompt, read again before each answer. */
     profile?: Omit<NovaProfilePromptInput, "byteLimit">;
+    /** What the hosted voice prompt was given at start: its instructions and notes. */
+    hostedProfile?: { instructions: string; notes: string[] };
     pendingAction?: PreparedNovaAction;
     actionPreparedAt?: number;
     consent: boolean;
     name: string;
     controller: AbortController;
   };
+  /**
+   * Nova's settings and the confirmed notes of one organization, for a
+   * prompt. A failed settings read refuses; notes that cannot be read are
+   * left out with a warning, and the answer goes on without them.
+   */
+  private async readSessionProfile(tenantId: string): Promise<{
+    settings?: NovaSettings;
+    notes: string[];
+    profile?: Omit<NovaProfilePromptInput, "byteLimit">;
+  }> {
+    const settings = this.actions ? await readNovaSettings(this.actions) : undefined;
+    // Confirmed notes of this organization join the profile; proposed ones never do.
+    let notes: string[] = [];
+    if (settings?.effective.memoryEnabled && this.actions?.notes) {
+      try {
+        notes = await this.actions.notes.promptNotes(tenantId);
+      } catch (error) {
+        console.warn("[nova] notes could not be read; Nova answers without them", error);
+      }
+    }
+    const profile = settings ? { effective: settings.effective, ...(notes.length > 0 ? { notes } : {}) } : undefined;
+    return { ...(settings ? { settings } : {}), notes, ...(profile ? { profile } : {}) };
+  }
+
   constructor(
     private readonly secrets: SecretAccessor,
     private readonly state: () => Promise<AppState>,
@@ -166,19 +202,8 @@ export class NovaService {
           "Confirm hosted agent context sharing before starting Nova.",
         );
       // The profile shapes the prompts of this session; without it, Nova does not start.
-      const settings = this.actions ? await readNovaSettings(this.actions) : undefined;
+      const { settings, notes, profile } = await this.readSessionProfile(state.activeTenantId);
       if (generation !== this.generation) throw new Error("Nova was stopped or this question was replaced. Start a new conversation.");
-      // Confirmed notes of this organization join the profile; proposed ones never do.
-      let notes: string[] = [];
-      if (settings?.effective.memoryEnabled && this.actions?.notes) {
-        try {
-          notes = await this.actions.notes.promptNotes(state.activeTenantId);
-        } catch (error) {
-          console.warn("[nova] notes could not be read; this session starts without them", error);
-        }
-      }
-      if (generation !== this.generation) throw new Error("Nova was stopped or this question was replaced. Start a new conversation.");
-      const profile = settings ? { effective: settings.effective, ...(notes.length > 0 ? { notes } : {}) } : undefined;
       const profileBlock = profile ? novaProfilePromptBlock({ ...profile, byteLimit: NOVA_VOICE_PROFILE_BYTE_LIMIT }) : "";
       const greetingName = settings?.effective.greetingName || (typeof input.name === "string" ? input.name.trim().slice(0, 40) : "");
       this.session?.controller.abort();
@@ -192,6 +217,7 @@ export class NovaService {
         consent: input.consent === true,
         name: greetingName,
         ...(profile ? { profile } : {}),
+        ...(input.mode === "openai" && profile ? { hostedProfile: { instructions: hostedProfileKey(profile), notes } } : {}),
         controller: new AbortController(),
       };
       this.session = session;
@@ -281,6 +307,24 @@ export class NovaService {
       throw new Error(
         "Nova's tenant or provider changed. Start a new conversation.",
       );
+    if (input.action === "answer" || input.action === "decide-action") {
+      // Settings and notes read now, not at session start: a note paused,
+      // edited or forgotten in the meantime stays out of the next answer.
+      const fresh = await this.readSessionProfile(session.tenantId);
+      if (session !== this.session) throw new Error("Nova was stopped or this question was replaced. Start a new conversation.");
+      // The hosted voice prompt cannot be taken back. When what it was given
+      // changed or was removed, the session ends instead of using it further.
+      if (session.hostedProfile && fresh.profile && (
+        hostedProfileKey(fresh.profile) !== session.hostedProfile.instructions ||
+        session.hostedProfile.notes.some((note) => !fresh.notes.includes(note))
+      )) {
+        session.controller.abort();
+        this.session = undefined;
+        throw new Error(NOVA_SESSION_PROFILE_CHANGED);
+      }
+      if (fresh.profile) session.profile = fresh.profile;
+      else delete session.profile;
+    }
     if (introduction) return { text: NOVA_INTRODUCTION };
     if (audienceReply !== undefined) return { text: audienceReply || "I'm listening." };
     if (input.action === "interrupt") {
