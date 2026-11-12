@@ -337,8 +337,9 @@ export function novaProfileView(profile: NovaProfile | undefined, policy: Manage
 
 /**
  * Undefined when a shortcut prompt only asks for information; otherwise
- * why it cannot be saved. Shortcuts run on Nova's read-only research path,
- * and this check keeps a saved prompt from reading as a command.
+ * why it cannot be saved. This is a wording check and a first filter only:
+ * the guarantee is that shortcuts and follow-ups reach nothing but Nova's
+ * read-only research path, whatever their words.
  */
 export function novaShortcutPromptIssue(prompt: string): string | undefined {
   const command = novaCommand(prompt);
@@ -349,6 +350,10 @@ export function novaShortcutPromptIssue(prompt: string): string | undefined {
   if (/\b(?:remember|remind|forget|schedule|again in|every (?:day|hour|week|morning|evening|night|monday|tuesday|wednesday|thursday|friday|saturday|sunday|other|few|\d+)|each (?:day|hour|week|morning|evening|night))\b/i.test(prompt)) {
     return NOVA_SHORTCUT_NOT_READ_ONLY;
   }
+  // Asking again later ("ask me again about compliance in an hour"). A
+  // question about a period ("which certificates expire in 30 days") stays readable.
+  const later = "\\bin\\s+(?:an?|one|two|three|a few|few|\\d+)\\s+(?:minutes?|hours?|days?|weeks?)\\b";
+  if (new RegExp(`\\b(?:again|later|back)\\b[^.?!]{0,60}${later}`, "i").test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
   const politely = "^\\s*(?:(?:can|could|would|will) you\\s+|please\\s+)*";
   if (new RegExp(`${politely}(?:check|ask|run|do|look|try|repeat)\\b[^.?!]{0,60}\\b(?:tomorrow|tonight|later today|next week)\\b`, "i").test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
   if (/\b(?:daily|hourly|nightly|weekly|monthly)(?:\s+at\b|\s*[.?!]*\s*$)/i.test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
@@ -358,22 +363,24 @@ export function novaShortcutPromptIssue(prompt: string): string | undefined {
   // message the device showed", "email address") it stays readable.
   if (/\b(?:send|forward|whatsapp|slack|dm|ping|tweet)\s+(?:me|us|it|this|that|these|those|them|the|a|an|my|our|to|him|her|everyone|everybody|out)\b/i.test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
   if (/\b(?:email|e-mail|mail|message|text|post|share)\s+(?:me|us|him|her|everyone|everybody)\b/i.test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
-  if (/\b(?:deliver|publish|dispatch|notify)\b/i.test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
   // Delivery as a gerund with where it goes ("sharing the list in Slack"),
   // and handing a result to someone or putting it somewhere ("give the
   // summary to the team", "put the result in Teams"). "The sharing
   // settings" names no destination and stays readable.
   const destination =
-    "(?:(?:a|an|the|my|our)\\s+)?(?:slack|teams|outlook|email|e-mail|mail|whatsapp|sms|channel|chat|ticket|servicenow|jira|team|manager|helpdesk)|me|us|him|her|everyone|everybody";
-  const delivered = `[^.?!]{0,60}\\b(?:to|in|into|on|via|with)\\s+(?:${destination})\\b`;
+    "(?:(?:a|an|the|my|our)\\s+)?(?:slack|teams|outlook|email|e-mail|mail|whatsapp|sms|channel|chat|ticket|servicenow|jira|sharepoint|onedrive|team|manager|helpdesk)|me|us|him|her|everyone|everybody";
+  const delivered = `[^.?!]{0,60}\\b(?:to|in|into|on|via|with|by)\\s+(?:${destination})\\b`;
   if (new RegExp(`\\b(?:sending|forwarding|sharing|posting|emailing|e-mailing|mailing|messaging|texting|slacking|pinging|delivering|publishing|notifying)\\b${delivered}`, "i").test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
   if (new RegExp(`\\b(?:give|hand|pass|put|drop|paste|copy|place)\\b${delivered}`, "i").test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
-  // Write verbs as the request itself, or chained onto a question. As nouns
-  // ("update rings", "the lock screen") they stay readable.
-  const writeVerb = "(?:run|start|launch|execute|trigger|kick\\s+off|fire\\s+off|spin\\s+up|turn\\s+(?:on|off)|switch\\s+(?:on|off)|delete|remove|retire|wipe|disable|enable|reset|reboot|restart|sync|lock|unlock|unassign|assign|create|update|change|set|rename|block|unblock|revoke|approve|install|uninstall|deploy|move|add|save|store|record|send|email(?!\\s+address)|e-mail|message|post|share|text)";
-  if (new RegExp(`${politely}${writeVerb}\\b`, "i").test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
-  if (new RegExp(`\\b(?:and|then|also)\\s+(?:please\\s+)?${writeVerb}\\b`, "i").test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
-  if (/\b(?:delete|retire|wipe|revoke)\b/i.test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
+  // Write and delivery verbs in verb position: as the request of any
+  // sentence, chained onto a question, after a comma or a modal ("Which
+  // devices are noncompliant? Create a ticket for each."). As nouns ("a
+  // pending wipe", "the notify owner setting", "revoke actions", "update
+  // rings") they stay readable.
+  const writeVerb = "(?:run|start|launch|execute|trigger|kick\\s+off|fire\\s+off|spin\\s+up|turn\\s+(?:on|off)|switch\\s+(?:on|off)|delete|remove|retire|wipe|disable|enable|reset|reboot|restart|sync|lock|unlock|unassign|assign|create|update|change|set|rename|block|unblock|revoke|approve|install|uninstall|deploy|move|add|save|store|record|send|forward|upload|deliver|publish|dispatch|notify|email(?!\\s+address)|e-mail|message|post|share|text)";
+  const verbPosition = `(?:${politely}|\\b(?:and|then|also|please)\\s+(?:please\\s+)?|,\\s*(?:please\\s+)?|\\b(?:can|could|would|will|should|must|shall)\\s+(?:you\\s+)?(?:please\\s+)?)${writeVerb}\\b`;
+  const sentences = prompt.split(/(?<=[.?!])\s+|\n+/).map((sentence) => sentence.trim()).filter(Boolean);
+  if (sentences.some((sentence) => new RegExp(verbPosition, "i").test(sentence))) return NOVA_SHORTCUT_NOT_READ_ONLY;
   return undefined;
 }
 

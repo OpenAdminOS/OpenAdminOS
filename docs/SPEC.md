@@ -761,11 +761,14 @@ Nova says so, and without an active organization it refuses.
 of 600 characters), saved only when the question reads as read-only. "Run
 morning check" by voice, or the command palette entry "Nova: run ...", runs the
 saved question on the research path only, after checking it again; with no session the palette entry waits
-until the admin starts one, so consent stays a click. The save check is a wording
-check (verbs, gerunds and "give, put or hand it to" a destination), so a
-wording it misses can be saved; the guarantee is structural: a shortcut only
-ever reaches the read-only research path, which cannot send, run or write
-(round 3 review, 2026-11-12).
+until the admin starts one, so consent stays a click. The save check, also used
+for follow-up questions, is a wording check: write and delivery verbs in verb
+position in any sentence (at its start, after "and", "then", "please", a comma
+or a modal), gerunds and "give, put or hand it to" a destination, and asking
+again later. The same words as nouns ("a pending wipe", "revoke actions") stay
+allowed. A wording it misses can be saved; the guarantee is structural: a
+shortcut or a follow-up only ever reaches the read-only research path, which
+cannot send, run or write (round 3 and 4 reviews, 2026-11-12).
 
 **IT policy.** Four keys in `policy.json`: `novaVoiceModes` (the voice modes
 allowed; an empty list turns Nova voice off; a policy without Nova keys allows

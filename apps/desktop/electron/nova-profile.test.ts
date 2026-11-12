@@ -238,6 +238,13 @@ describe("Nova profile", () => {
       "Check compliance and put the result in Teams",
       "Summarize the stale devices, posting it in the channel",
       "Hand the list of expiring secrets to my manager",
+      // A write as the second sentence, delivery by a channel, asking again later.
+      "Which devices are noncompliant? Create a ticket for each.",
+      "Check compliance, forwarding findings by email",
+      "Upload the compliance report to SharePoint",
+      "Ask me again about compliance in an hour",
+      "Which devices are stale, then notify the helpdesk",
+      "Could you publish the summary?",
     ]) {
       assert.equal(novaShortcutPromptIssue(prompt), NOVA_SHORTCUT_NOT_READ_ONLY, prompt);
     }
@@ -256,6 +263,12 @@ describe("Nova profile", () => {
       "Which apps put the most load on the devices?",
       "Which policies give users local admin rights?",
       "Show the sharing settings of the SharePoint sites",
+      // Write and delivery words as nouns.
+      "Show devices with a pending wipe",
+      "Show the notify owner setting of the compliance policy",
+      "How many revoke actions happened this week?",
+      "Which certificates expire in 30 days?",
+      "List the retire requests from last week",
     ]) {
       assert.equal(novaShortcutPromptIssue(prompt), undefined, prompt);
     }
