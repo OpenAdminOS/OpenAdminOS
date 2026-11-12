@@ -37,6 +37,8 @@ export const NOVA_FOLLOW_UPS_FULL = `You already have ${NOVA_FOLLOW_UPS_PENDING_
 export const NOVA_FOLLOW_UPS_DAILY_LIMIT = `Nova already set ${NOVA_FOLLOW_UPS_PER_DAY} follow-ups in the last 24 hours. Try again later.`;
 export const NOVA_FOLLOW_UP_PROVIDER_NOT_ALLOWED = "Your IT department no longer allows this provider or model. Nothing was asked.";
 export const NOVA_FOLLOW_UP_PROVIDER_MOVED = "The provider now runs somewhere else than when this follow-up was set, for example off this device. Nothing was asked. Ask Nova again to set it with the current provider.";
+export const NOVA_FOLLOW_UP_RUN_MS = 5 * 60_000;
+export const NOVA_FOLLOW_UP_TIMED_OUT = "The follow-up did not finish within 5 minutes, so it was stopped. Nothing was sent. Ask Nova again, or ask in Chat.";
 export const NOVA_FOLLOW_UP_NOT_FOUND = "That follow-up is no longer on this device. Reopen Settings, Nova, to see the current ones.";
 
 /** The question as stored: one trimmed line within the limit. Throws the designed refusal otherwise. */
@@ -209,7 +211,11 @@ export class NovaFollowUps {
     if (today >= NOVA_FOLLOW_UPS_PER_DAY) throw new NovaFollowUpError(NOVA_FOLLOW_UPS_DAILY_LIMIT);
   }
 
-  create(input: NovaFollowUpInput): NovaFollowUp {
+  /**
+   * `beforeInsert` runs after the limits pass and before anything is
+   * stored: when it throws, no follow-up and no creation count is left.
+   */
+  create(input: NovaFollowUpInput, beforeInsert?: (followUp: NovaFollowUp) => void): NovaFollowUp {
     const question = novaFollowUpQuestion(input.question);
     this.options.assertWritable?.(input.tenantId, "Nova follow-up");
     this.checkLimits(input.delayMinutes);
@@ -228,6 +234,7 @@ export class NovaFollowUps {
       ...(input.providerEndpoint ? { providerEndpoint: input.providerEndpoint } : {}),
       ...(input.consentAcknowledgedAt ? { consentAcknowledgedAt: input.consentAcknowledgedAt } : {}),
     };
+    beforeInsert?.(followUp);
     this.db
       .prepare(`INSERT INTO nova_followups (id, tenant_id, organization_id, question, provider_id, model, due_at, status, created_at, provider_local, provider_endpoint, consent_acknowledged_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`)

@@ -305,8 +305,8 @@ import {
 } from "./registry-client.js";
 import { IntelligenceSqliteStore, type HostedProviderConsentAuditRecord } from "./intune-chat/sqlite-store.js";
 import { NOVA_NOTES_OFF_BY_POLICY, NOVA_RECORDS_UNAVAILABLE, NovaMemory, NovaMemoryError, openNovaDatabase } from "./nova-memory.js";
-import { NOVA_FOLLOW_UP_PROVIDER_MOVED, NOVA_FOLLOW_UP_PROVIDER_NOT_ALLOWED, novaFollowUpFireDecision, NovaFollowUpError, NovaFollowUps } from "./nova-followups.js";
-import { NOVA_FOLLOW_UP_PROVIDER_CHANGED, NOVA_ORGANIZATION_CHANGED, NOVA_VOICE_CONSENT_NOT_KEPT } from "./nova-actions.js";
+import { NOVA_FOLLOW_UP_PROVIDER_MOVED, NOVA_FOLLOW_UP_PROVIDER_NOT_ALLOWED, NOVA_FOLLOW_UP_RUN_MS, NOVA_FOLLOW_UP_TIMED_OUT, novaFollowUpFireDecision, NovaFollowUpError, NovaFollowUps } from "./nova-followups.js";
+import { NOVA_FOLLOW_UP_CONSENT_NOT_KEPT, NOVA_FOLLOW_UP_PROVIDER_CHANGED, NOVA_ORGANIZATION_CHANGED, NOVA_VOICE_CONSENT_NOT_KEPT } from "./nova-actions.js";
 import {
   AUDIT_CHAIN_START_HASH,
   AUDIT_LOG_RETENTION_DAYS,
@@ -419,7 +419,7 @@ import {
   tokenCachePartition,
 } from "./state-helpers.js";
 import { lookupEndpoint } from "./graph-catalog.js";
-import { TenantLifecycle } from "./tenant-lifecycle.js";
+import { TenantClosedError, TenantLifecycle } from "./tenant-lifecycle.js";
 import { filterClosedTenantChanges, sanitizeTenantRemovals, tenantCleanupPendingMessage, tenantRemovalFor, type TenantRemovalRecord } from "./tenant-removal.js";
 export { __agentDraftTestUtils } from "./agent-draft-helpers.js";
 
@@ -1655,6 +1655,8 @@ export interface AppStateStoreOptions {
   sandboxedCodeDefault?: boolean;
   /** Writable userData directory used for the registry cache. */
   userDataPath?: string;
+  /** Test hook: how long one follow-up may take. Production uses 5 minutes. */
+  novaFollowUpRunMs?: number;
   /** Test hook: opens openadminos.db for Nova's notes and follow-ups. */
   openNovaDatabase?: (path: string) => import("node:sqlite").DatabaseSync;
   /**
@@ -1871,6 +1873,7 @@ export class AppStateStore {
   private readonly providerSecretStore: SafeStorageProviderSecretStore | undefined;
   private readonly allowDevRegistrySource: boolean;
   private readonly clock: () => Date;
+  private readonly novaFollowUpRunMs: number;
   private readonly interactiveSignIn: typeof runInteractiveFlow;
   private tenantConnectController: AbortController | undefined;
   /** Tenant checks and license probes in progress, by tenant ID. */
@@ -1926,6 +1929,7 @@ export class AppStateStore {
       this.providerSecretsForOverride = undefined;
       this.providerSecretStore = undefined;
       this.allowDevRegistrySource = false;
+      this.novaFollowUpRunMs = NOVA_FOLLOW_UP_RUN_MS;
       this.clock = () => new Date();
       this.interactiveSignIn = runInteractiveFlow;
       this.tenantCheckDeadlineMs = TENANT_CHECK_DEADLINE_MS;
@@ -1976,6 +1980,7 @@ export class AppStateStore {
           )
         : undefined;
       this.allowDevRegistrySource = options.allowDevRegistrySource === true;
+      this.novaFollowUpRunMs = options.novaFollowUpRunMs ?? NOVA_FOLLOW_UP_RUN_MS;
       this.clock = options.clock ?? (() => new Date());
       this.interactiveSignIn = options.interactiveSignIn ?? runInteractiveFlow;
       this.tenantCheckDeadlineMs = options.tenantCheckDeadlineMs ?? TENANT_CHECK_DEADLINE_MS;
@@ -7277,15 +7282,17 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const acknowledgedAt = this.clock().toISOString();
     const endpoint = novaProviderEndpoint(input.providerId);
     // Where the provider runs is part of the follow-up: a local provider
-    // moved off this device later does not get the question.
+    // moved off this device later does not get the question. A hosted
+    // provider's consent is kept before the follow-up is stored; when no
+    // store keeps it, nothing is set.
     const followUp = this.novaFollowUps.create({
       ...input,
       ...(organizationId ? { organizationId } : {}),
       providerLocal: !hosted,
       ...(endpoint ? { providerEndpoint: endpoint } : {}),
       ...(hosted ? { consentAcknowledgedAt: acknowledgedAt } : {}),
-    });
-    if (provider && hosted) {
+    }, (planned) => {
+      if (!hosted) return;
       const consent: HostedProviderConsentAuditRecord = {
         id: `event_${randomUUID()}`,
         tenantId: input.tenantId,
@@ -7293,23 +7300,28 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         payload: {
           tenantIds: [input.tenantId],
           providerId: input.providerId,
-          providerName: provider.name,
+          providerName: provider?.name ?? input.providerId,
           ...(input.model ? { model: input.model } : {}),
           ...(endpoint ? { endpoint } : {}),
-          followUpId: followUp.id,
-          dueAt: followUp.dueAt,
+          followUpId: planned.id,
+          dueAt: planned.dueAt,
           acknowledgedAt,
           remember: false,
         },
         createdAt: acknowledgedAt,
       };
+      let keptInChat = false;
       try {
-        this.intelligenceStore?.recordHostedProviderConsentAuditEvent(consent);
+        if (this.intelligenceStore) {
+          this.intelligenceStore.recordHostedProviderConsentAuditEvent(consent);
+          keptInChat = true;
+        }
       } catch (error) {
         console.warn("[audit] the Chat database could not keep a Nova follow-up consent", error);
       }
-      this.recordHostedProviderConsent(consent);
-    }
+      const kept = this.recordHostedProviderConsent(consent);
+      if (!keptInChat && !kept) throw new Error(NOVA_FOLLOW_UP_CONSENT_NOT_KEPT);
+    });
     this.emitStateChanged("nova-records-changed");
     return followUp;
   }
@@ -7370,24 +7382,54 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           ((provider?.isLocal === true) !== followUp.providerLocal || (followUp.providerEndpoint ?? undefined) !== novaProviderEndpoint(followUp.providerId)))
         return finish(decision, { reason: NOVA_FOLLOW_UP_PROVIDER_MOVED });
       if (decision !== "run") return finish(decision);
-      // Claimed with no wait after the decision; the started event is recorded now, right before Chat is asked.
-      if (!this.novaFollowUps.claim(followUp.id)) return;
-      from = "running";
-      const result = await this.withTenantLease(followUp.tenantId, (signal) =>
-        this.chatService.streamIntuneChatMessage(
-          {
-            content: followUp.question,
-            refreshIfStale: true,
-            // The consent is the one given with the click on the card, for this provider where it ran then.
-            ...(followUp.providerLocal === false && followUp.consentAcknowledgedAt
-              ? { hostedProviderConsent: { tenantId: followUp.tenantId, providerId: followUp.providerId, ...(followUp.model ? { model: followUp.model } : {}), acknowledgedAt: followUp.consentAcknowledgedAt } }
-              : {}),
-          },
-          () => undefined,
-          // Bounded like a Nova question: a follow-up that hangs ends as failed.
-          { signal: AbortSignal.any([signal, AbortSignal.timeout(5 * 60_000)]), scope: { tenantId: followUp.tenantId, providerId: followUp.providerId, ...(followUp.model ? { model: followUp.model } : {}), isLocal: provider?.isLocal === true } },
-        ),
-      );
+      // The lease is taken before the claim: a Disconnect that began after
+      // the decision refuses it and the follow-up is skipped, never started.
+      // The started event is recorded right before Chat is asked.
+      const runMs = this.novaFollowUpRunMs;
+      let result: SendIntuneChatMessageResult | undefined;
+      try {
+        result = await this.withTenantLease(followUp.tenantId, async (signal) => {
+          if (!this.novaFollowUps.claim(followUp.id)) return undefined;
+          from = "running";
+          const controller = new AbortController();
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          const timedOut = new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              // Settled as timed out first: a call that ignores its signal cannot hold later follow-ups.
+              reject(new Error(NOVA_FOLLOW_UP_TIMED_OUT));
+              controller.abort(new Error(NOVA_FOLLOW_UP_TIMED_OUT));
+            }, runMs);
+          });
+          try {
+            return await Promise.race([
+              this.chatService.streamIntuneChatMessage(
+                {
+                  content: followUp.question,
+                  refreshIfStale: true,
+                  // The consent is the one given with the click on the card, for this provider where it ran then.
+                  ...(followUp.providerLocal === false && followUp.consentAcknowledgedAt
+                    ? { hostedProviderConsent: { tenantId: followUp.tenantId, providerId: followUp.providerId, ...(followUp.model ? { model: followUp.model } : {}), acknowledgedAt: followUp.consentAcknowledgedAt } }
+                    : {}),
+                },
+                () => undefined,
+                {
+                  signal: AbortSignal.any([signal, controller.signal]),
+                  scope: { tenantId: followUp.tenantId, providerId: followUp.providerId, ...(followUp.model ? { model: followUp.model } : {}), isLocal: provider?.isLocal === true },
+                  // Checked against the stored follow-up instead of the five-minute window of a typed send.
+                  scheduledConsent: (check) => this.novaFollowUpConsentMatches(followUp.id, check),
+                },
+              ),
+              timedOut,
+            ]);
+          } finally {
+            clearTimeout(timer);
+          }
+        });
+      } catch (error) {
+        if (from === "pending" && error instanceof TenantClosedError) return finish("skipped-organization");
+        throw error;
+      }
+      if (!result) return;
       const conversationId = result.conversation.id;
       try {
         await this.chatService.renameIntuneChatConversation(conversationId, `Follow-up: ${followUp.question}`.slice(0, 120));
@@ -7400,6 +7442,26 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     } catch (error) {
       finish("failed", { reason: errorText(error).slice(0, 300) });
     }
+  }
+
+  /**
+   * Whether a hosted Chat call at fire time is the one the admin consented
+   * to on the card: the running follow-up, its organization, provider,
+   * model, consent time and, for Ollama and LM Studio, endpoint.
+   */
+  private novaFollowUpConsentMatches(id: string, check: { tenantId?: string; providerId: ProviderId; model?: string; acknowledgedAt: string }): boolean {
+    const current = this.novaFollowUps.get(id);
+    return (
+      current !== undefined &&
+      current.status === "running" &&
+      current.providerLocal === false &&
+      current.consentAcknowledgedAt !== undefined &&
+      check.acknowledgedAt === current.consentAcknowledgedAt &&
+      check.tenantId === current.tenantId &&
+      check.providerId === current.providerId &&
+      check.model === current.model &&
+      (current.providerEndpoint ?? undefined) === novaProviderEndpoint(current.providerId)
+    );
   }
 
   async dismissManagedPolicyNotice(): Promise<AppState> {

@@ -499,6 +499,13 @@ export interface IntuneChatStreamOptions {
   signal?: AbortSignal;
   /** Pin delegated voice work before fetching data or invoking a provider. */
   scope?: { tenantId: string; providerId: ProviderId; model?: string; isLocal?: boolean };
+  /**
+   * Main process only, for a Nova follow-up: its hosted consent was given
+   * on the card when it was set, so it is checked against the stored
+   * follow-up instead of the five-minute window of a typed send. The
+   * renderer's Chat IPC never passes options.
+   */
+  scheduledConsent?: (check: { tenantId?: string; providerId: ProviderId; model?: string; acknowledgedAt: string }) => boolean;
 }
 
 /**
@@ -2535,12 +2542,13 @@ export class IntuneChatService {
     let consentVerified = provider?.isLocal !== false;
     const verifyConsent = () => {
       if (consentVerified) return;
-      this.requireHostedChatConsent(input, noTenant ? undefined : tenant, provider, providerId, workspaceContext?.summary, selectedModel);
+      this.requireHostedChatConsent(input, noTenant ? undefined : tenant, provider, providerId, workspaceContext?.summary, selectedModel, options.scheduledConsent);
       consentVerified = true;
     };
     if (reachesModel) verifyConsent();
     // The consent audit is per tenant; a no-tenant send has none to record against.
-    if (provider?.isLocal === false && input.hostedProviderConsent && !noTenant) {
+    // A follow-up's consent was recorded when it was set; the fire time adds none.
+    if (provider?.isLocal === false && input.hostedProviderConsent && !noTenant && !options.scheduledConsent) {
       this.recordHostedProviderConsentSafely({
         tenantIds: [tenant.id],
         providerId,
@@ -3702,6 +3710,7 @@ export class IntuneChatService {
     providerId: ProviderId,
     workspaceContext?: WorkspacePromptContextSummary,
     model?: string,
+    scheduled?: IntuneChatStreamOptions["scheduledConsent"],
   ): void {
     if (provider?.isLocal !== false) {
       return;
@@ -3745,7 +3754,10 @@ export class IntuneChatService {
 
     const acknowledgedAt = Date.parse(consent.acknowledgedAt);
     const now = Date.now();
-    if (
+    if (scheduled) {
+      if (!Number.isFinite(acknowledgedAt) || !scheduled({ ...(tenant ? { tenantId: tenant.id } : {}), providerId, ...(model ? { model } : {}), acknowledgedAt: consent.acknowledgedAt }))
+        throw new Error("This follow-up's consent does not match its organization, provider or model now. Nothing was asked. Ask Nova again to set it.");
+    } else if (
       !Number.isFinite(acknowledgedAt) ||
       now - acknowledgedAt > 5 * 60 * 1000 ||
       acknowledgedAt - now > 60 * 1000

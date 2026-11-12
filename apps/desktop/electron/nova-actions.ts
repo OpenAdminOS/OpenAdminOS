@@ -65,6 +65,10 @@ export interface NovaActionHost {
 export const NOVA_VOICE_CONSENT_NOT_KEPT =
   'Nova could not record your consent on this device, so nothing was sent to OpenAI. Open Settings, Audit log, check that it can record, then start Nova again.';
 
+/** Said when the consent for a hosted follow-up could not be kept on this device. */
+export const NOVA_FOLLOW_UP_CONSENT_NOT_KEPT =
+  'Nova could not record your consent for this follow-up on this device, so nothing was set. Open Settings, Audit log, check that it can record, then ask again.';
+
 /** Said when Nova's settings cannot be read: Nova then does not act. */
 export const NOVA_SETTINGS_UNREADABLE =
   'Nova could not read its settings, so nothing was sent, started or opened. Open Settings, Nova, check it loads, then ask again.';
