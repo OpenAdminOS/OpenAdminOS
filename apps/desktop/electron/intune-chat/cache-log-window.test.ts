@@ -169,3 +169,10 @@ it("drops log snapshots cached before the window policy once, and keeps other re
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+it("the shared Chat system prompt states the log window with its limits", async () => {
+  const { buildIntuneChatSystemPrompt } = await import("../state-helpers.js");
+  for (const local of [true, false]) {
+    assert.match(buildIntuneChatSystemPrompt(local), /cached only for the last 7 days before their refreshedAt, newest first, at most 10,000 entries/);
+  }
+});

@@ -1287,13 +1287,14 @@ function listCachedResources(ctx: IntuneChatToolContext, params: unknown): unkno
         nowMs - refreshedMs > (staleAfterMs ?? resourceStalenessMs(resource.resource));
       return {
         resource: resource.resource,
+        // Kept near the front: compaction drops trailing fields first.
+        ...logWindowCoverage(resource),
         label: resource.label,
         rows: resource.rows,
         refreshedAt: resource.refreshedAt,
         stale,
         pages: resource.pages,
         pageLimitReached: resource.pageLimitReached,
-        ...logWindowCoverage(resource),
         lastError: resource.lastError,
       };
     }),
@@ -1378,7 +1379,10 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
 
   return {
     resource,
-    snapshot: snapshot ? { ...snapshot, ...logWindowCoverage(snapshot) } : snapshot,
+    // Kept at the front, outside the snapshot: compaction drops trailing
+    // and nested fields first.
+    ...(snapshot ? logWindowCoverage(snapshot) : {}),
+    snapshot,
     totalCount: result.totalCount,
     returnedRows: result.returnedRows,
     limit: result.limit,
@@ -1580,12 +1584,12 @@ async function refreshResource(
   const result = await ctx.refreshResource(resource);
   return {
     resource: result.resource,
+    ...(result.ok ? logWindowCoverage({ ...result, pageLimitReached: result.pageLimitReached === true }) : {}),
     label: result.label,
     ok: result.ok,
     rows: result.rows,
     pages: result.pages,
     pageLimitReached: result.pageLimitReached,
-    ...(result.ok ? logWindowCoverage({ ...result, pageLimitReached: result.pageLimitReached === true }) : {}),
     refreshedAt: result.refreshedAt,
     error: result.error,
   };
