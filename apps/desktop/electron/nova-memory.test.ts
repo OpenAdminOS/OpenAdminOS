@@ -125,3 +125,26 @@ describe("Nova notes", () => {
     assert.equal(store.list("t2").length, 1);
   });
 });
+
+describe("Nova notes past their window and on Disconnect", () => {
+  it("refuses to confirm or edit a proposed note past its 30 days, also from a stale view", () => {
+    const { store, advance } = memory();
+    const first = store.propose({ tenantId: "t1", text: "Kiosks are in Berlin", source: "user-said" });
+    const second = store.propose({ tenantId: "t1", text: "Laptops are in Munich", source: "user-said" });
+    advance(45 * 86_400_000);
+    assert.throws(() => store.confirm(first.id), /no longer|gone|not found/i);
+    assert.throws(() => store.edit(second.id, "Laptops are in Hamburg"), /no longer|gone|not found/i);
+    assert.deepEqual(store.promptNotes("t1"), []);
+  });
+
+  it("keeps a disconnected tenant's notes when the purge events cannot be kept on disk", () => {
+    const store = new NovaMemory(openNovaDatabase(":memory:"), {
+      audit: () => undefined,
+      auditDurably: () => { throw new Error("audit log and pending file unavailable"); },
+    });
+    store.confirm(store.propose({ tenantId: "t1", text: "Kiosks are in Berlin", source: "user-said" }).id);
+    assert.throws(() => store.purgeTenant("t1"), /pending file unavailable/);
+    assert.equal(store.list("t1").length, 1, "nothing is deleted without its audit events");
+  });
+});
+

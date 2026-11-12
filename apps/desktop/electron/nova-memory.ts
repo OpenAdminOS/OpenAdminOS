@@ -107,6 +107,8 @@ export interface NovaNoteProposal {
 export interface NovaMemoryOptions {
   /** Records audit events; keeps them when the audit log cannot take them now. Never throws. */
   audit: (events: AuditLogEventSeed[]) => void;
+  /** Records audit events that must be on disk before data is deleted; throws when they are not. Defaults to `audit`. */
+  auditDurably?: (events: AuditLogEventSeed[]) => void;
   /** Throws when the tenant is being disconnected: nothing is written for it then. */
   assertWritable?: (tenantId: string, what: string) => void;
   clock?: () => Date;
@@ -182,6 +184,8 @@ export class NovaMemory {
 
   /** The admin confirmed a proposed note with a click. A confirmed note no longer expires. */
   confirm(id: string): NovaNote {
+    // A proposal past its review window is gone, also when a stale view still shows it.
+    this.expire();
     const note = this.require(id);
     if (note.reviewState !== "proposed") return note;
     this.options.assertWritable?.(note.tenantId, "Nova note");
@@ -194,6 +198,7 @@ export class NovaMemory {
 
   /** The admin rewrote a note in Settings. An edited note counts as reviewed. */
   edit(id: string, value: unknown): NovaNote {
+    this.expire();
     const note = this.require(id);
     const text = novaNoteText(value);
     if (text === note.text && note.reviewState !== "proposed") return note;
@@ -209,6 +214,7 @@ export class NovaMemory {
   /** Deletes a note at the admin's request. */
   forget(id: string): void {
     const note = this.require(id);
+    this.options.assertWritable?.(note.tenantId, "Nova note");
     this.db.prepare("DELETE FROM nova_memory_notes WHERE id = ?").run(id);
     this.record(note, "forgotten", `nova-memory:${id}:forgotten`);
   }
@@ -259,7 +265,8 @@ export class NovaMemory {
   purgeTenant(tenantId: string): number {
     const rows = this.db.prepare("SELECT * FROM nova_memory_notes WHERE tenant_id = ?").all(tenantId) as unknown as NoteRow[];
     if (rows.length === 0) return 0;
-    this.options.audit(rows.map((row) => this.event(noteOf(row), "purged", `nova-memory:${row.id}:purged`, { text: undefined })));
+    // On disk before the rows go; otherwise this throws and Disconnect retries the cleanup.
+    (this.options.auditDurably ?? this.options.audit)(rows.map((row) => this.event(noteOf(row), "purged", `nova-memory:${row.id}:purged`, { text: undefined })));
     this.db.prepare("DELETE FROM nova_memory_notes WHERE tenant_id = ?").run(tenantId);
     return rows.length;
   }

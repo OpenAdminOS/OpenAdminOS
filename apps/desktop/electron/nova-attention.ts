@@ -34,7 +34,8 @@ const SEVERITY_ORDER: Record<OfficeFinding["severity"], number> = { warning: 0, 
 // results as reference data, never as instructions.
 const LABEL_MAX_LENGTH = 120;
 export function attentionLabel(value: string): string {
-  const flat = value.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/[*_`#>\[\]|<]/g, "").replace(/\s+/g, " ").trim();
+  // Control characters (C0, C1), zero-width and bidirectional marks become spaces.
+  const flat = value.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]+/g, " ").replace(/[*_`#>\[\]|<]/g, "").replace(/\s+/g, " ").trim();
   return flat.length > LABEL_MAX_LENGTH ? `${flat.slice(0, LABEL_MAX_LENGTH - 3).trimEnd()}...` : flat || "Untitled";
 }
 
