@@ -1,6 +1,6 @@
 # Current active plan
 
-- [ ] Lemonade Server as a local provider (branch `providers/lemonade`, 2026-11-12). Request: analyze https://lemonade-server.ai/#embed and add support if applicable. Maintainer decisions: an external provider like LM Studio, not the embeddable `lemond` bundled into the installer; LM Studio's adapter becomes one shared OpenAI-compatible adapter.
+- [x] Lemonade Server as a local provider (branch `providers/lemonade`, 2026-11-12). Request: analyze https://lemonade-server.ai/#embed and add support if applicable. Maintainer decisions: an external provider like LM Studio, not the embeddable `lemond` bundled into the installer; LM Studio's adapter becomes one shared OpenAI-compatible adapter.
 
   Acceptance criteria:
   1. A running Lemonade on loopback port 13305 with a downloaded chat model is found by the model scan, Settings, Providers and Chat's model choice, marked Local, with Lemonade's logo; selecting it answers in Chat with "Nothing left this device".
@@ -10,6 +10,8 @@
   5. LM Studio's requests, copy and tests are unchanged by the shared adapter.
   6. The policy schema, catalog and logo NOTICE include Lemonade; SPEC.md, CHANGELOG and the provider matrix describe it.
   7. Typecheck, the runtime, electron and renderer suites and the docs check pass on Node 22.
+
+  Review (2026-11-12, PR #191): all seven met. Typecheck clean; runtime 310 pass (2 skipped), electron 1330, renderer 741 on Node 22; docs check and qa pass. Live against lemond v2026.46.2 (portable macOS build from a temp folder, Qwen3-0.6B-GGUF): the scan found Lemonade, Chat answered with "Nothing left this device", Settings showed it Connected then Not installed after the server stopped, light and dark checked; an undownloaded registry model was refused without a download. A Claude evaluator, GPT-6.1-Sol (three rounds) and Muse Wonder Full (two rounds) reviewed the whole diff. Fixed from review: a managed policy or saved model could bypass the chat filter (every Lemonade request now checks the fresh model list, and the policy fallback skips Lemonade), the OS start command was missing outside the scan (now in Settings, which shows a provider's recovery detail, and both model choices), an unreadable model list read as a missing model, docs and the home page named only three local providers, cloud markers and `downloaded: false` hardening, a non-array LM Studio list is a failed check again. Open for the maintainer: sending a Lemonade API key, a Start button on Windows, and a row in Chat's model choice for a failed local check (LM Studio has the same gap).
 
 - [x] Chat answer routing fixes (branch `chat/answer-routing-fixes`, 2026-11-10). Request: fix everything found in the review of a Splashtop Agentic Packr chat ("how can I setup the agentic packr by splashtop", then "how do I upload my first app?").
 
