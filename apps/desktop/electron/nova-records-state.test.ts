@@ -10,7 +10,7 @@ import type { TokenCacheStorage } from "@openadminos/runtime";
 
 import { loadManagedPolicy } from "./managed-policy.js";
 import { MCP_CATALOG } from "./mcp/catalog.js";
-import { NOVA_FOLLOW_UP_CONSENT_NOT_KEPT, NOVA_PROFILE_CHANGED, prepareNovaProfileChange, type NovaActionHost } from "./nova-actions.js";
+import { NOVA_FOLLOW_UP_CONSENT_NOT_KEPT, NOVA_FOLLOW_UP_PROVIDER_CHANGED, NOVA_PROFILE_CHANGED, prepareNovaProfileChange, type NovaActionHost } from "./nova-actions.js";
 import { NOVA_NOTES_OFF_BY_POLICY } from "./nova-memory.js";
 import { NOVA_FOLLOW_UP_TIMED_OUT, NovaFollowUps } from "./nova-followups.js";
 import { AppStateStore } from "./state.js";
@@ -359,6 +359,30 @@ describe("a Nova follow-up run", () => {
       assert.equal(matches({ ...exact, model: "other" }), false);
       assert.equal(matches({ ...exact, providerId: "openai" }), false);
       assert.equal(matches({ ...exact, tenantId: "22222222-2222-2222-2222-222222222222" }), false);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("sets no follow-up when the provider is switched while the card's click reads where the provider runs", async () => {
+    const both = () => [
+      { id: "ollama", name: "Ollama", isLocal: true, status: "connected", models: ["test"], defaultModel: "test" },
+      { id: "anthropic", name: "Claude Code", isLocal: false, status: "connected", models: ["test"], defaultModel: "test" },
+    ] as never;
+    const { store, dir } = await makeStore({ extra: { providerListFactory: both, graphFactory: graph([]), llmFactory: answering } });
+    try {
+      const read = store.novaProviderEndpoint.bind(store);
+      store.novaProviderEndpoint = async (providerId) => {
+        const endpoint = await read(providerId);
+        await store.setActiveProvider("anthropic");
+        return endpoint;
+      };
+      await assert.rejects(
+        store.novaFollowUpsHost().create({ tenantId: contoso.id, question: "Check device compliance", providerId: "ollama", model: "test", delayMinutes: 5 }),
+        { message: NOVA_FOLLOW_UP_PROVIDER_CHANGED },
+      );
+      assert.deepEqual((await store.handleNovaRecords({ action: "list" })).followUps, []);
     } finally {
       store.close();
       await rm(dir, { recursive: true, force: true });

@@ -7318,6 +7318,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * recorded as a consent with the follow-up.
    */
   private async createNovaFollowUp(input: { tenantId: string; question: string; providerId: ProviderId; model?: string; delayMinutes: number }) {
+    // Every read comes first and the checks on the last one follow with no
+    // wait before the follow-up is stored, so a switch during a read is seen.
+    const endpoint = await this.novaProviderEndpoint(input.providerId);
     const state = await this.getAppState();
     if (state.activeTenantId !== input.tenantId) throw new Error("The active organization changed after Nova prepared this. Nothing was set.");
     const provider = state.providers.find((entry) => entry.id === state.activeProviderId);
@@ -7326,7 +7329,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const organizationId = state.activeOrganizationId;
     const hosted = !provider?.isLocal;
     const acknowledgedAt = this.clock().toISOString();
-    const endpoint = await this.novaProviderEndpoint(input.providerId);
     // Where the provider runs is part of the follow-up: a local provider
     // moved off this device later does not get the question. A hosted
     // provider's consent is kept before the follow-up is stored; when no
