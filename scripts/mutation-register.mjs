@@ -247,6 +247,47 @@ export const REGISTER = [
     tests: ["apps/desktop/electron/audit-log.test.ts"],
     why: "A row whose content no longer matches its hash must fail verification and block export.",
   },
+  {
+    id: "nova-run-skips-click-check",
+    path: "apps/desktop/electron/nova-actions.ts",
+    find: "      await requireNovaCapability(host, 'startAgents');\n      const run = await host.startRun(",
+    replace: "      const run = await host.startRun(",
+    tests: ["apps/desktop/electron/nova-capabilities.test.ts"],
+    why: "Starting agents turned off after the card was prepared must stop the run at the click.",
+  },
+  {
+    id: "nova-send-skips-click-check",
+    path: "apps/desktop/electron/nova-actions.ts",
+    anchor: "execute: outer => leased(host, tenantId, outer, async signal => {\n    await assertStillActive(host, tenantId);",
+    find: "    await requireConnectorSend(host, intent.connectorId, connector.descriptor.name);\n    let accepted = 0;",
+    replace: "    let accepted = 0;",
+    tests: ["apps/desktop/electron/nova-capabilities.test.ts"],
+    why: "A connector send turned off after the card was prepared must stop the send at the click.",
+  },
+  {
+    id: "nova-note-stored-confirmed",
+    path: "apps/desktop/electron/nova-memory.ts",
+    find: "VALUES (?, ?, ?, ?, 'proposed', ?, ?, ?, ?, ?, ?)",
+    replace: "VALUES (?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?, ?)",
+    tests: ["apps/desktop/electron/nova-memory.test.ts", "apps/desktop/electron/nova-notes-followups.test.ts"],
+    why: "A note Nova prepares waits for review; only the click confirms it.",
+  },
+  {
+    id: "nova-prompt-reads-proposed-notes",
+    path: "apps/desktop/electron/nova-memory.ts",
+    find: "review_state IN ('confirmed', 'edited') ORDER BY",
+    replace: "review_state IN ('proposed', 'confirmed', 'edited') ORDER BY",
+    tests: ["apps/desktop/electron/nova-memory.test.ts", "apps/desktop/electron/nova-notes-followups.test.ts"],
+    why: "A proposed note must never reach a prompt.",
+  },
+  {
+    id: "nova-follow-up-ignores-organization",
+    path: "apps/desktop/electron/nova-followups.ts",
+    find: "if (!context.tenantConnected || context.activeTenantId !== followUp.tenantId) return \"skipped-organization\";",
+    replace: "if (!context.tenantConnected) return \"skipped-organization\";",
+    tests: ["apps/desktop/electron/nova-followups.test.ts"],
+    why: "A follow-up runs only in the organization it was set in, never in the one active at its time.",
+  },
 ];
 
 /**
