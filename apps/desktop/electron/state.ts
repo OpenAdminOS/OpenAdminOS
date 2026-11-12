@@ -1655,8 +1655,11 @@ export interface AppStateStoreOptions {
   sandboxedCodeDefault?: boolean;
   /** Writable userData directory used for the registry cache. */
   userDataPath?: string;
-  /** Test hook: how long one follow-up may take. Production uses 5 minutes. */
-  novaFollowUpRunMs?: number;
+  /**
+   * Test hook: how long one follow-up may take, or a bound per follow-up so a
+   * test can cut only the call that hangs. Production uses 5 minutes.
+   */
+  novaFollowUpRunMs?: number | ((followUp: import("@openadminos/agent-sdk").NovaFollowUp) => number);
   /** Test hook: opens openadminos.db for Nova's notes and follow-ups. */
   openNovaDatabase?: (path: string) => import("node:sqlite").DatabaseSync;
   /**
@@ -1895,7 +1898,7 @@ export class AppStateStore {
   private readonly providerSecretStore: SafeStorageProviderSecretStore | undefined;
   private readonly allowDevRegistrySource: boolean;
   private readonly clock: () => Date;
-  private readonly novaFollowUpRunMs: number;
+  private readonly novaFollowUpRunMs: number | ((followUp: import("@openadminos/agent-sdk").NovaFollowUp) => number);
   private readonly interactiveSignIn: typeof runInteractiveFlow;
   private tenantConnectController: AbortController | undefined;
   /** Tenant checks and license probes in progress, by tenant ID. */
@@ -7453,7 +7456,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       // Inside the lease the decision is taken again on the state now, so a
       // provider or organization switched in between is a skip too; the
       // claim and the started event follow it with no wait.
-      const runMs = this.novaFollowUpRunMs;
+      const runMs = typeof this.novaFollowUpRunMs === "function" ? this.novaFollowUpRunMs(followUp) : this.novaFollowUpRunMs;
       let skipped: Awaited<ReturnType<typeof decide>> | undefined;
       let result: SendIntuneChatMessageResult | undefined;
       try {

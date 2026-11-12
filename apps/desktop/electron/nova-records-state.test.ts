@@ -441,12 +441,15 @@ describe("a Nova follow-up run", () => {
   it("stops a follow-up whose Chat call ignores its signal, so later follow-ups still run", async () => {
     let now = new Date();
     let calls = 0;
+    let firstId: string | undefined;
     const { store, dir } = await makeStore({
       clock: () => now,
       extra: {
         providerListFactory: providers,
         graphFactory: graph([]),
-        novaFollowUpRunMs: 50,
+        // Only the hung call gets a short bound. The healthy one gets a bound
+        // no loaded runner reaches, so its result never depends on timing.
+        novaFollowUpRunMs: (followUp: { id: string }) => (followUp.id === firstId ? 50 : 120_000),
         llmFactory: () => ({
           available: true,
           complete: async () => ({ text: "Nothing.", model: "test" }),
@@ -461,6 +464,7 @@ describe("a Nova follow-up run", () => {
     });
     try {
       const first = await store.novaFollowUpsHost().create({ tenantId: contoso.id, question: "Check device compliance", providerId: "ollama", model: "test", delayMinutes: 1 });
+      firstId = first.id;
       const second = await store.novaFollowUpsHost().create({ tenantId: contoso.id, question: "Check app installs", providerId: "ollama", model: "test", delayMinutes: 2 });
       now = new Date(now.getTime() + 121_000);
       await store.fireDueNovaFollowUps();
