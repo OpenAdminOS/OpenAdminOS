@@ -53,6 +53,35 @@ install `gnome-keyring` if your desktop session does not already provide Secret
 Service. KDE users can use KWallet. OpenAdminOS refuses Electron's unprotected
 `basic_text` fallback for tenant tokens.
 
+## Nightly builds
+
+Every change to `main` that touches the app is published as a signed nightly
+prerelease, named like `v0.7.3-nightly.20261112175700` (the next stable version
+plus the UTC build time). Nightlies are signed and notarized like stable
+releases but get less testing, so try them on a test organization first.
+
+- **Turn them on:** Settings > About > **Get nightly builds**. The app then
+  updates to newer nightlies and to newer stable releases. A badge in the status
+  strip marks a nightly build. Write confirmation and every other safeguard work
+  the same as in a stable release.
+- **Go back to stable:** turn **Get nightly builds** off. The app installs the
+  current stable release, even if it is older than the nightly.
+- **Download one directly:** the [nightly releases on
+  GitHub](https://github.com/OpenAdminOS/OpenAdminOS/releases?q=nightly&expanded=true).
+  Linux packages are attached there only; the apt repository carries stable
+  releases.
+
+Each nightly's release notes describe that build only: the pull requests and
+commits since the previous release, and the changelog entries they added. To
+see everything waiting for the next stable release, read the `[Unreleased]`
+section of [CHANGELOG.md](https://github.com/OpenAdminOS/OpenAdminOS/blob/main/CHANGELOG.md).
+Stable release notes list all changes since the previous stable release.
+
+To try a change from a nightly, read its release notes, then follow the linked
+pull request or the feature's page in these docs. Report problems on [GitHub
+issues](https://github.com/OpenAdminOS/OpenAdminOS/issues) with the nightly's
+version from Settings > About.
+
 ## Requirements
 
 - A Microsoft 365 tenant where you can approve the required Graph permissions.
