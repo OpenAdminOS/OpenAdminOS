@@ -174,7 +174,7 @@ describe("Intune Chat agentic loop", () => {
       const replies = [
         '```json\n{"tool":"query_cache","params":{"resource":"managedDevices","limit":1}}\n```',
         '```json\n{"final":true,"answer":"Let me check that."}\n```',
-        '```json\n{"final":true,"answer":"I am checking the device inventory."}\n```',
+        '```json\n{"final":true,"answer":"I will check the device inventory."}\n```',
         '```json\n{"final":true,"answer":"I will look into it."}\n```',
       ];
       const llm = scriptedLlm(replies);

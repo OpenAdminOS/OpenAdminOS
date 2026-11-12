@@ -9,20 +9,35 @@
 export const MAX_PROMISE_NUDGES = 2;
 
 const PROMISE_VERBS =
-  "(?:check|look|query|search|investigate|find|retrieve|pull|run|get|verify|fetch|review|dig|gather|analy[sz]e|examine|confirm|inspect|scan|research|figure|work)";
+  "(?:check|look|see|take\\s+a\\s+(?:quick\\s+)?look|query|search|investigate|find|retrieve|pull|run|get|verify|fetch|review|dig|gather|analy[sz]e|examine|confirm|inspect|scan|research|figure|work)";
 
-/** Work announced for later in this turn: "let me check", "I'll look into it", "I am querying". */
+/**
+ * Work announced for later, in forward-looking words only: "let me check",
+ * "I'll look into it", "I'm going to verify", "one moment". A present
+ * progressive ("I am getting a 403 response") is not one: it often reports
+ * what was found.
+ */
 const PROMISE = new RegExp(
   [
     `\\b(?:let me|allow me to)\\s+(?:now\\s+|quickly\\s+|first\\s+|just\\s+)?(?:go\\s+(?:and\\s+)?)?${PROMISE_VERBS}\\b`,
     `\\bi(?:'ll|’ll| will| am going to|'m going to|’m going to| shall)\\s+(?:now\\s+|quickly\\s+|first\\s+|just\\s+|go\\s+(?:and\\s+)?)*${PROMISE_VERBS}\\b`,
-    `\\bi(?:'m|’m| am)\\s+(?:now\\s+|currently\\s+|just\\s+)?(?:checking|looking|querying|searching|investigating|finding|retrieving|pulling|running|getting|verifying|fetching|reviewing|digging|gathering|analy[sz]ing|examining|confirming|inspecting|scanning|researching|working)\\b`,
     "^(?:one|just a|wait a)\\s+(?:moment|second|sec|minute)\\b",
     "\\bgive me\\s+(?:a\\s+)?(?:moment|second|sec|minute|few)\\b",
     "\\b(?:hold on|stand by|bear with me|working on it|checking now|looking now)\\b",
   ].join("|"),
   "i",
 );
+
+/** "Checking now", "Checking the devices now", "I'm checking that now": the whole clause announces the check. */
+const CHECKING_NOW = /^(?:i(?:'m|’m| am)\s+)?(?:just\s+|still\s+)?(?:checking|looking)\b[^.!?]*?\bnow$/i;
+
+/**
+ * Work under way, in the present progressive: "I'm pulling the data",
+ * "I am getting a 403 response". Neither a promise nor a result on its
+ * own: next to a promise ("One moment, I'm pulling the data.") the answer
+ * is still a progress message, alone it is not one.
+ */
+const PROGRESS = /^(?:i(?:'m|’m| am)\s+)?(?:now\s+|currently\s+|just\s+|still\s+)?(?:checking|looking|querying|searching|investigating|finding|retrieving|pulling|running|getting|verifying|fetching|reviewing|digging|gathering|analy[sz]ing|examining|confirming|inspecting|scanning|researching|working)\b/i;
 
 /** A promise that depends on the admin, or an offer, is not unkept work. */
 const CONDITIONAL =
@@ -61,8 +76,10 @@ function clauses(text: string): string[] {
 }
 
 /**
- * True only for a short progress message: every clause either announces
- * work ("I'll check that now.") or acknowledges the question ("Sure.").
+ * True only for a short progress message: at least one clause announces
+ * work in forward-looking words ("I'll check that now.", "Let me see."),
+ * and every other clause acknowledges the question ("Sure.") or describes
+ * work under way ("I'm pulling the data").
  * Any other clause is substance: a result, an offer, a list or a code
  * block finishes the answer, also when it mentions a later step. Numbers
  * inside the announced work ("I'll check the Windows 11 devices.") do not
@@ -78,10 +95,19 @@ export function looksLikeUnkeptPromise(answer: string): boolean {
   let promised = false;
   for (const clause of clauses(withoutInlineQuotes(raw))) {
     if (isFiller(clause)) continue;
+    if (CHECKING_NOW.test(clause)) {
+      promised = true;
+      continue;
+    }
+    // A promise counts only with nothing but an acknowledgement before it.
     const match = PROMISE.exec(clause);
-    // A clause without a promise is substance; so is one with anything but an acknowledgement before its promise.
-    if (!match || !isFiller(clause.slice(0, match.index))) return false;
-    promised = true;
+    if (match && isFiller(clause.slice(0, match.index))) {
+      promised = true;
+      continue;
+    }
+    // Work under way is neutral; any other clause is substance.
+    if (PROGRESS.test(clause)) continue;
+    return false;
   }
   return promised;
 }

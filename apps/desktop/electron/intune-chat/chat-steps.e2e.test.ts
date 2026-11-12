@@ -446,7 +446,7 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       assert.equal(prompts.length - before, 3);
       assert.equal(kept.content, "I'll check that now.");
 
-      script(["I am checking the compliance policies.", "Three policies apply to the Macs."]);
+      script(["I will check the compliance policies.", "Three policies apply to the Macs."]);
       before = prompts.length;
       const voice = (await store.streamIntuneChatMessage({ content: "Which compliance policies apply to our Macs?" }, () => {}, { voice: true })).assistantMessage;
       assert.equal(voice.content, "Three policies apply to the Macs.");

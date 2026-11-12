@@ -8,7 +8,6 @@ describe("unkept promise", () => {
     for (const answer of [
       "I'll check that now.",
       "Let me look into the device inventory.",
-      "I am checking the compliance policies.",
       "I will now query the sign-in logs.",
       "One moment, I'm pulling the data.",
       "Give me a moment. I'm going to verify the assignments.",
@@ -21,6 +20,10 @@ describe("unkept promise", () => {
       "Let me check the Microsoft 365 sign-in logs.",
       "I will check the Windows 11 devices that have not synced in 30 days.",
       "One moment, I'm checking.",
+      "Checking the devices now.",
+      "Checking now.",
+      "I'll take a look.",
+      "Let me see.",
     ]) {
       assert.equal(looksLikeUnkeptPromise(answer), true, answer);
     }
@@ -53,6 +56,11 @@ describe("unkept promise", () => {
       "I'll check the apps next and the compliance review is complete.",
       "I'll verify the apps next and the devices are already compliant.",
       "I'll check the sign-in logs now, so the devices are done.",
+      // The present progressive reports what was found; alone it is not a promise.
+      "I am getting a 403 Forbidden response from Microsoft Graph",
+      "I am finding no devices matching that filter.",
+      "I am checking the compliance policies.",
+      "Checking now: 12 devices are non-compliant.",
       // A code block or a list is substance, also next to a promise.
       "```kql\nSigninLogs | take 10\n```\nI'll run this next.",
       "1. WIN-01\n2. WIN-02\nLet me check the rest.",
