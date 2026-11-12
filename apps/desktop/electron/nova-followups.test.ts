@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import type { AuditLogEventSeed } from "./audit-log.js";
 import {
+  NOVA_FOLLOW_UP_NOT_STORED,
   NOVA_FOLLOW_UP_TOO_LATE,
   NOVA_FOLLOW_UP_TOO_SOON,
   NOVA_FOLLOW_UPS_DAILY_LIMIT,
@@ -15,13 +16,26 @@ import { openNovaDatabase } from "./nova-memory.js";
 function followUps(start = "2026-11-12T10:00:00.000Z") {
   let now = new Date(start);
   const events: AuditLogEventSeed[] = [];
-  const store = new NovaFollowUps(openNovaDatabase(":memory:"), { audit: (batch) => events.push(...batch), clock: () => now });
-  return { store, events, advance: (ms: number) => { now = new Date(now.getTime() + ms); }, now: () => now };
+  const db = openNovaDatabase(":memory:");
+  const store = new NovaFollowUps(db, { audit: (batch) => events.push(...batch), clock: () => now });
+  return { store, db, events, advance: (ms: number) => { now = new Date(now.getTime() + ms); }, now: () => now };
 }
 
 const input = { tenantId: "t1", organizationId: "o1", question: "Check compliance", providerId: "ollama" as const, model: "llama3", delayMinutes: 60, providerLocal: true, providerEndpoint: "http://127.0.0.1:11434" };
 
 describe("Nova follow-ups", () => {
+  it("stores a follow-up and its daily count together or not at all, with no created event on a failure", () => {
+    const { store, db, events } = followUps();
+    db.exec("CREATE TRIGGER full_disk BEFORE INSERT ON nova_followup_creations BEGIN SELECT RAISE(ABORT, 'database or disk is full'); END;");
+    assert.throws(() => store.create(input), { message: NOVA_FOLLOW_UP_NOT_STORED });
+    assert.deepEqual(store.list("t1"), []);
+    assert.equal(events.some((event) => event.type === "nova.followup.created"), false);
+    db.exec("DROP TRIGGER full_disk");
+    store.create(input);
+    assert.equal(store.list("t1").length, 1);
+    assert.equal(events.filter((event) => event.type === "nova.followup.created").length, 1);
+  });
+
   it("refuses a delay under 1 minute or over 7 days", () => {
     const { store } = followUps();
     assert.throws(() => store.create({ ...input, delayMinutes: 0 }), { message: NOVA_FOLLOW_UP_TOO_SOON });

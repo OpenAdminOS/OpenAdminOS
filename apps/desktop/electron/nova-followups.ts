@@ -25,8 +25,8 @@ const FINISHED_KEPT = 20;
 const DAY_MS = 86_400_000;
 
 export class NovaFollowUpError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = "NovaFollowUpError";
   }
 }
@@ -39,6 +39,10 @@ export const NOVA_FOLLOW_UP_PROVIDER_NOT_ALLOWED = "Your IT department no longer
 export const NOVA_FOLLOW_UP_PROVIDER_MOVED = "The provider now runs somewhere else than when this follow-up was set, for example off this device. Nothing was asked. Ask Nova again to set it with the current provider.";
 export const NOVA_FOLLOW_UP_RUN_MS = 5 * 60_000;
 export const NOVA_FOLLOW_UP_TIMED_OUT = "The follow-up did not finish within 5 minutes, so it was stopped. Nothing was sent. Ask Nova again, or ask in Chat.";
+/** Said when the follow-up could not be stored on this device. */
+export const NOVA_FOLLOW_UP_NOT_STORED =
+  "Nova could not store this follow-up on this device, so nothing was set. Check that the app can write its data folder, then ask Nova again.";
+
 export const NOVA_FOLLOW_UP_NOT_FOUND = "That follow-up is no longer on this device. Reopen Settings, Nova, to see the current ones.";
 
 /** The question as stored: one trimmed line within the limit. Throws the designed refusal otherwise. */
@@ -235,11 +239,20 @@ export class NovaFollowUps {
       ...(input.consentAcknowledgedAt ? { consentAcknowledgedAt: input.consentAcknowledgedAt } : {}),
     };
     beforeInsert?.(followUp);
-    this.db
-      .prepare(`INSERT INTO nova_followups (id, tenant_id, organization_id, question, provider_id, model, due_at, status, created_at, provider_local, provider_endpoint, consent_acknowledged_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`)
-      .run(followUp.id, followUp.tenantId, followUp.organizationId ?? null, followUp.question, followUp.providerId, followUp.model ?? null, followUp.dueAt, followUp.createdAt, input.providerLocal ? 1 : 0, input.providerEndpoint ?? null, input.consentAcknowledgedAt ?? null);
-    this.db.prepare("INSERT INTO nova_followup_creations (created_at) VALUES (?)").run(followUp.createdAt);
+    // The follow-up and its place in the daily count are stored together or
+    // not at all; the created event is recorded only once both are.
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db
+        .prepare(`INSERT INTO nova_followups (id, tenant_id, organization_id, question, provider_id, model, due_at, status, created_at, provider_local, provider_endpoint, consent_acknowledged_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`)
+        .run(followUp.id, followUp.tenantId, followUp.organizationId ?? null, followUp.question, followUp.providerId, followUp.model ?? null, followUp.dueAt, followUp.createdAt, input.providerLocal ? 1 : 0, input.providerEndpoint ?? null, input.consentAcknowledgedAt ?? null);
+      this.db.prepare("INSERT INTO nova_followup_creations (created_at) VALUES (?)").run(followUp.createdAt);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw new NovaFollowUpError(NOVA_FOLLOW_UP_NOT_STORED, { cause: error });
+    }
     this.record(followUp, "created");
     this.prune(followUp.tenantId);
     return followUp;
