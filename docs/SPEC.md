@@ -518,7 +518,10 @@ a school tenant): every refresh collects the last 7 days with a `$filter` on the
 event time, newest first, at most 10,000 rows and within the memory budget. A window
 that reaches the limit is stored as capped and counts as a successful refresh, not
 as needing attention; Settings, Data shows the window under the row count, and Chat
-context states it so counts are never read as all retained logs. Collecting every
+context (the answer pack, the cache tools and the system prompt) states it so counts
+are never read as all retained logs. Log snapshots cached before this decision carry
+no window marker and are removed once by a store migration, so the next refresh
+collects real windows. Collecting every
 retained log is not possible in large tenants: the Entra reporting API allows five
 requests per ten seconds per app and tenant, and a month of sign-ins exceeds the
 memory budget. Concurrent resource requests remain bounded; overlapping refreshes
