@@ -1136,7 +1136,8 @@ export function pathForResource(resource: GraphCacheResourceKind): {
           "location",
           "appliedConditionalAccessPolicies",
         ],
-        query: { "$top": "1000" },
+        // Explicit order: a capped window must hold the newest entries.
+        query: { "$top": "1000", "$orderby": "createdDateTime desc" },
         windowField: "createdDateTime",
       };
     case "directoryAudits":
@@ -1155,7 +1156,8 @@ export function pathForResource(resource: GraphCacheResourceKind): {
           "targetResources",
           "additionalDetails",
         ],
-        query: { "$top": "1000" },
+        // Explicit order: a capped window must hold the newest entries.
+        query: { "$top": "1000", "$orderby": "activityDateTime desc" },
         windowField: "activityDateTime",
       };
     case "intuneAuditEvents":

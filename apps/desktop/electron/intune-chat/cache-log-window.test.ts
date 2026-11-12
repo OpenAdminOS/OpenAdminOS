@@ -75,11 +75,13 @@ it("collects log resources as a capped recent window instead of every retained r
       ["intuneAuditEvents", true, false],
     ]);
     assert.match(firstQueries.get("/auditLogs/directoryAudits")!.$filter!, /^activityDateTime ge /);
+    assert.equal(firstQueries.get("/auditLogs/directoryAudits")!.$orderby, "activityDateTime desc");
     const signInQuery = firstQueries.get("/auditLogs/signIns")!;
     const intuneQuery = firstQueries.get("/deviceManagement/auditEvents")!;
     assert.match(signInQuery.$filter!, /^createdDateTime ge \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
     assert.match(intuneQuery.$filter!, /^activityDateTime ge \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
     assert.equal(intuneQuery.$orderby, "activityDateTime desc");
+    assert.equal(signInQuery.$orderby, "createdDateTime desc");
     const since = Date.parse(signInQuery.$filter!.split(" ge ")[1]!);
     const expected = Date.now() - GRAPH_CACHE_LOG_WINDOW_DAYS * 24 * 60 * 60 * 1000;
     assert.ok(Math.abs(since - expected) < 60_000, "the window starts seven days back");
