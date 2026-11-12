@@ -78,6 +78,15 @@ describe("Settings, Nova", () => {
     expect(within(select).queryByText(/OpenAI/)).not.toBeInTheDocument();
   });
 
+  it("shows organization instructions read-only while the IT department locks the instructions, and the profile limits", async () => {
+    setup(view({ instructions: "IT text.", instructionsSource: "policy", locked: { voiceMode: false, instructions: true, capabilities: { webSearch: false, startAgents: false, navigation: false }, connectorSends: false, memory: false } }));
+    const addendum = await screen.findByLabelText(/^Nova instructions for /);
+    expect(addendum).toHaveAttribute("readonly");
+    expect(screen.queryByRole("button", { name: /^Save for / })).not.toBeInTheDocument();
+    expect(screen.getByText(/instructions for one organization are not used/)).toBeInTheDocument();
+    expect(screen.getByText(/A small on-device model, such as Apple Intelligence, gets a shortened version/)).toBeInTheDocument();
+  });
+
   it("turns abilities and sends per connector on and off", async () => {
     const { novaProfile } = setup(view(), [slack]);
     const user = userEvent.setup();

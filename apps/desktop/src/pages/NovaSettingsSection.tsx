@@ -20,6 +20,10 @@ import { useAppState } from "../state";
 import { NOVA_SEND_CONNECTOR_IDS } from "../shared/nova-session";
 import { SettingRow } from "./SettingRow";
 const INSTRUCTIONS_MAX = 4000;
+
+/** How much of the profile each model receives, and what is shortened first when it does not fit. */
+export const NOVA_PROFILE_LIMITS_TEXT =
+  "Nova gives most models all of the instructions, the organization instructions and recent notes. A small on-device model, such as Apple Intelligence, gets a shortened version: the oldest notes are left out first, then the organization instructions and these instructions are cut at the end. Nova says so when a conversation starts.";
 const ADDENDUM_MAX = 1000;
 const NAME_MAX = 40;
 const SHORTCUT_NAME_MAX = 40;
@@ -360,6 +364,7 @@ export function NovaSettingsSection() {
                   </div>
                 ) : null}
               </div>
+              <p className="text-xs leading-5 text-[var(--color-text-muted)]">{NOVA_PROFILE_LIMITS_TEXT}</p>
             </div>
           }
         />
@@ -367,31 +372,35 @@ export function NovaSettingsSection() {
           id="nova-organization-addendum"
           stacked
           description={
-            organization
-              ? `Applies only while ${organization.name} is the active organization.`
-              : "Select an organization to add instructions that apply to it only."
+            locked.instructions
+              ? "Your IT department set Nova's instructions, so instructions for one organization are not used."
+              : organization
+                ? `Applies only while ${organization.name} is the active organization.`
+                : "Select an organization to add instructions that apply to it only."
           }
           control={
             organization && !organizationReady ? (
               notLoaded("Nova instructions", profileLoadError)
             ) : organization ? (
               <div className="grid gap-2">
+                {locked.instructions ? <SetByItBadge className="justify-self-start" /> : null}
                 <textarea
                   aria-label={`Nova instructions for ${organization.name}`}
                   className={`${inputClass} min-h-[72px] resize-y leading-5`}
                   value={addendum}
-                  disabled={blocked}
+                  readOnly={locked.instructions}
+                  disabled={blocked && !locked.instructions}
                   onChange={(event) => setAddendum(event.target.value)}
                 />
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <Counter value={addendum} max={ADDENDUM_MAX} />
-                  <UiButton
+                  {locked.instructions ? null : <UiButton
                     size="sm"
                     disabled={blocked || addendum === effective.addendum || addendum.length > ADDENDUM_MAX}
                     onClick={() => void save({ addendum: { organizationId: organization.id, text: addendum } }, `Saved for ${organization.name}.`)}
                   >
                     Save for {organization.name}
-                  </UiButton>
+                  </UiButton>}
                 </div>
               </div>
             ) : (
@@ -464,7 +473,7 @@ export function NovaSettingsSection() {
                         <UiButton
                           size="sm"
                           variant="ghost"
-                          disabled={blocked || revision.text === current || (revision.scope === "user" && locked.instructions)}
+                          disabled={blocked || revision.text === current || locked.instructions}
                           onClick={() => void run({ action: "revert", revisionId: revision.id }, "Version restored.", [revision.scope === "user" ? "instructions" : "addendum"])}
                         >
                           {revision.text === current ? "Current" : "Restore"}

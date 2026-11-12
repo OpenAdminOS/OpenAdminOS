@@ -307,6 +307,9 @@ export function effectiveNovaProfile(
   }
   const sendsPolicy = policy?.values.novaCapabilities?.connectorSends;
   const memoryOff = managedNovaMemoryOff(policy);
+  // Instructions the IT department locked replace the admin's own, the
+  // organization instructions too: those are kept and not used.
+  const instructionsLocked = instructions.locked && policy?.values.novaInstructions !== undefined;
   return {
     ...(voiceMode ? { voiceMode } : {}),
     allowedVoiceModes,
@@ -314,7 +317,7 @@ export function effectiveNovaProfile(
     instructions: instructions.instructions,
     instructionsSource: instructions.instructionsSource,
     ...(organizationId ? { organizationId } : {}),
-    addendum: organizationId ? (profile?.addenda?.[organizationId] ?? "") : "",
+    addendum: organizationId && !instructionsLocked ? (profile?.addenda?.[organizationId] ?? "") : "",
     capabilities,
     connectorSends: { ...(profile?.connectorSends ?? {}) },
     // The same resolver as the check at preparation and at the click.
@@ -328,7 +331,7 @@ export function effectiveNovaProfile(
     shortcuts: [...(profile?.shortcuts ?? [])],
     locked: {
       voiceMode: policy?.values.novaVoiceModes !== undefined && allowedVoiceModes.length <= 1,
-      instructions: instructions.locked && policy?.values.novaInstructions !== undefined,
+      instructions: instructionsLocked,
       capabilities: lockedCapabilities,
       connectorSends: sendsPolicy === false || (sendsPolicy === true && isManagedSettingLocked(policy, "novaCapabilities")),
       memory: memoryOff,
@@ -436,9 +439,12 @@ function setInstructions(profile: NovaProfile, value: unknown, policy: ManagedPo
   addRevision(profile, { scope: "user", text, via: context.via ?? "settings" }, context);
 }
 
-function setAddendum(profile: NovaProfile, value: unknown, context: NovaProfileChangeContext): void {
+function setAddendum(profile: NovaProfile, value: unknown, policy: ManagedPolicyStatus | undefined, context: NovaProfileChangeContext): void {
   if (!isRecord(value) || typeof value.organizationId !== "string" || typeof value.text !== "string") {
     throw new NovaProfileError("An organization addendum needs the organization and its text.");
+  }
+  if (isManagedSettingLocked(policy, "novaInstructions") && policy?.values.novaInstructions !== undefined) {
+    throw new ManagedPolicyError(novaSettingLockedMessage("the organization instructions"));
   }
   rejectUnknownKeys(value, ["organizationId", "text"], "The addendum");
   const { organizationId } = value;
@@ -560,7 +566,7 @@ export function applyNovaProfilePatch(
     else delete profile.greetingName;
   }
   if (change.instructions !== undefined) setInstructions(profile, change.instructions, policy, context);
-  if (change.addendum !== undefined) setAddendum(profile, change.addendum, context);
+  if (change.addendum !== undefined) setAddendum(profile, change.addendum, policy, context);
   if (change.capabilities !== undefined) setCapabilities(profile, change.capabilities, policy);
   if (change.connectorSends !== undefined) setConnectorSends(profile, change.connectorSends, policy);
   if (change.saveShortcut !== undefined) saveShortcut(profile, change.saveShortcut, context);
@@ -664,11 +670,11 @@ export function novaProfilePromptBlock(input: NovaProfilePromptInput): string {
  * The block of `novaProfilePromptBlock` with the notes that survived the
  * byte limit, so a consent or a hosted session records only what it sent.
  */
-export function novaProfilePromptParts(input: NovaProfilePromptInput): { block: string; notes: string[]; adminText: boolean } {
+export function novaProfilePromptParts(input: NovaProfilePromptInput): { block: string; notes: string[]; adminText: boolean; clipped: boolean } {
   const instructions = input.effective.instructions.trim();
   let addendum = input.effective.addendum.trim();
   const notes = (input.notes ?? []).map((note) => note.trim()).filter(Boolean);
-  if (!instructions && !addendum && notes.length === 0) return { block: "", notes: [], adminText: false };
+  if (!instructions && !addendum && notes.length === 0) return { block: "", notes: [], adminText: false, clipped: false };
   let standing = instructions;
   const render = () => {
     const data: Record<string, unknown> = {};
@@ -681,7 +687,7 @@ export function novaProfilePromptParts(input: NovaProfilePromptInput): { block: 
   let block = render();
   // Whether instructions or the organization's instructions survived clipping, for the consent record.
   const adminText = () => Boolean(standing || addendum);
-  if (limit === undefined || Buffer.byteLength(block) <= limit) return { block, notes, adminText: adminText() };
+  if (limit === undefined || Buffer.byteLength(block) <= limit) return { block, notes, adminText: adminText(), clipped: false };
   while (notes.length > 0 && Buffer.byteLength(block) > limit) {
     notes.pop();
     block = render();
@@ -696,5 +702,24 @@ export function novaProfilePromptParts(input: NovaProfilePromptInput): { block: 
     clip(over * 2);
     block = render();
   }
-  return Buffer.byteLength(block) <= limit ? { block, notes, adminText: adminText() } : { block: clipToBytes(NOVA_PROFILE_BLOCK_INTRO, limit), notes: [], adminText: false };
+  return Buffer.byteLength(block) <= limit ? { block, notes, adminText: adminText(), clipped: true } : { block: clipToBytes(NOVA_PROFILE_BLOCK_INTRO, limit), notes: [], adminText: false, clipped: true };
 }
+
+/**
+ * Bytes of the profile block in Nova's prompts: room for the longest
+ * instructions (4,000 characters) and organization instructions (1,000)
+ * with their framing, and some notes. Hosted voice and reasoning models
+ * get the same room, on top of the room for the question and its
+ * evidence. A small on-device model gets less, inside its own budget.
+ */
+export const NOVA_PROFILE_BYTE_LIMIT = 8000;
+const NOVA_SMALL_MODEL_PROFILE_BYTE_LIMIT = 750;
+
+/** The profile room for a reasoning provider; see NOVA_PROFILE_BYTE_LIMIT. */
+export function novaReasoningProfileByteLimit(providerId: string | undefined): number {
+  return providerId === "apple-foundation" ? NOVA_SMALL_MODEL_PROFILE_BYTE_LIMIT : NOVA_PROFILE_BYTE_LIMIT;
+}
+
+/** Shown once per voice session when a prompt got a shortened profile. */
+export const NOVA_PROFILE_SHORTENED_NOTICE =
+  "This model gets a shortened version of Nova's instructions and notes: the oldest notes are left out first, then the organization instructions and the standing instructions are cut at the end. Settings, Nova, explains the limits.";

@@ -27,8 +27,10 @@ import {
   revertNovaInstructions,
   sanitizeNovaProfile,
   NOVA_PROFILE_BLOCK_INTRO,
+  NOVA_PROFILE_BYTE_LIMIT,
   novaProfilePromptBlock,
   novaProfilePromptParts,
+  novaReasoningProfileByteLimit,
 } from "./nova-profile.js";
 import { AppStateStore } from "./state.js";
 
@@ -154,6 +156,19 @@ describe("Nova profile", () => {
     assert.equal(effective.locked.voiceMode, true);
     assert.equal(effective.capabilities.webSearch, false);
     assert.equal(effective.locked.capabilities.webSearch, true);
+  });
+
+  it("keeps organization instructions unchangeable and unused while the IT department locks the instructions", async () => {
+    const policy = await policyOf({ novaInstructions: "IT text." });
+    const stored = applyNovaProfilePatch(undefined, { addendum: { organizationId: "org-a", text: "Contoso uses kiosks." } }, undefined, context());
+    assert.throws(() => applyNovaProfilePatch(stored, { addendum: { organizationId: "org-a", text: "Mine." } }, policy, context()), ManagedPolicyError);
+    const revision = stored.revisions!.find((entry) => entry.scope === "organization")!;
+    const cleared = applyNovaProfilePatch(stored, { addendum: { organizationId: "org-a", text: "" } }, undefined, context());
+    assert.throws(() => revertNovaInstructions(cleared, revision.id, policy, context()), ManagedPolicyError);
+    const effective = effectiveNovaProfile(stored, policy, "org-a");
+    assert.equal(effective.addendum, "", "the admin's organization instructions are kept and not used");
+    assert.equal(effectiveNovaProfile(stored, undefined, "org-a").addendum, "Contoso uses kiosks.");
+    assert.equal(novaProfilePromptBlock({ effective }).includes("Contoso uses kiosks."), false);
   });
 
   it("uses unlocked policy instructions until the admin writes their own", async () => {
@@ -581,6 +596,18 @@ describe("Nova profile prompt block", () => {
       organizationAddendum: "Northwind uses Autopilot.",
       confirmedNotes: ["Kiosk devices are shared."],
     });
+  });
+
+  it("gives a full-size model the longest instructions and organization instructions in full, and says when a small model gets less", () => {
+    const instructions = "Answer in short sentences and name the source of each fact. ".repeat(80).slice(0, 4000);
+    const addendum = "Contoso pilots Windows 11 in Berlin with kiosks. ".repeat(30).slice(0, 1000);
+    const effective = { ...effectiveNovaProfile({ instructions, addenda: { "org-a": addendum } }, undefined, "org-a") };
+    const full = novaProfilePromptParts({ effective, notes: ["Kiosks are in Berlin."], byteLimit: novaReasoningProfileByteLimit("ollama") });
+    assert.equal(full.clipped, false);
+    assert.ok(full.block.includes(instructions.trim()) && full.block.includes(addendum.trim()));
+    assert.equal(novaReasoningProfileByteLimit("ollama"), NOVA_PROFILE_BYTE_LIMIT);
+    const small = novaProfilePromptParts({ effective, byteLimit: novaReasoningProfileByteLimit("apple-foundation") });
+    assert.equal(small.clipped, true);
   });
 
   it("stays within its byte limit: oldest notes first, then the addendum and the instructions are clipped", () => {

@@ -8,7 +8,7 @@ import { searchPublicWeb, type WebSearch } from "./intune-chat/web-search.js";
 import { randomUUID } from "node:crypto";
 import { managedNovaVoiceModeAllowed, resolveProviderDefaultModel } from "@openadminos/agent-sdk";
 import { ManagedPolicyError, novaVoiceModeNotAllowedMessage } from "./managed-policy.js";
-import { allowedNovaVoiceModes, NOVA_PROFILE_BLOCK_END, novaCapabilityAllowed, novaCapabilityOffMessage, novaConnectorSendAllowed, novaProfilePromptParts, novaShortcutPromptIssue, type NovaProfilePromptInput } from "./nova-profile.js";
+import { allowedNovaVoiceModes, NOVA_PROFILE_BLOCK_END, NOVA_PROFILE_BYTE_LIMIT, NOVA_PROFILE_SHORTENED_NOTICE, novaReasoningProfileByteLimit, novaCapabilityAllowed, novaCapabilityOffMessage, novaConnectorSendAllowed, novaProfilePromptParts, novaShortcutPromptIssue, type NovaProfilePromptInput } from "./nova-profile.js";
 import { NOVA_NOTES_UNREADABLE_NOTICE, NOVA_SESSION_PROFILE_CHANGED } from "../src/shared/nova-session.js";
 import type {
   AppState,
@@ -46,7 +46,7 @@ export interface NovaChatOptions {
 export const NOVA_VOICE_MODEL = "gpt-live-1";
 
 /** Upper bound of the profile block in the hosted voice instructions, in UTF-8 bytes. */
-export const NOVA_VOICE_PROFILE_BYTE_LIMIT = 8000;
+export const NOVA_VOICE_PROFILE_BYTE_LIMIT = NOVA_PROFILE_BYTE_LIMIT;
 
 /** Said when an organization has to be active for Nova to read what waits for the admin. */
 export const NOVA_ATTENTION_NEEDS_ORGANIZATION =
@@ -309,8 +309,15 @@ export class NovaService {
       const { settings, profile, notesUnreadable } = await this.readSessionProfile(identity.tenantId);
       if (generation !== this.generation) throw new Error("Nova was stopped or this question was replaced. Start a new conversation.");
       // Only the notes that fit the block are sent, recorded in the consent and watched for changes.
-      const { block: profileBlock, notes, adminText } = profile ? novaProfilePromptParts({ ...profile, byteLimit: NOVA_VOICE_PROFILE_BYTE_LIMIT }) : { block: "", notes: [] as string[], adminText: false };
-      const notice = notesUnreadable ? { notice: NOVA_NOTES_UNREADABLE_NOTICE } : {};
+      const profileParts = profile ? novaProfilePromptParts({ ...profile, byteLimit: NOVA_VOICE_PROFILE_BYTE_LIMIT }) : { block: "", notes: [] as string[], adminText: false, clipped: false };
+      const { block: profileBlock, notes, adminText } = profileParts;
+      // A prompt that gets a shortened profile says so once, at the start.
+      const shortened = Boolean(profile) && (
+        (input.mode === "openai" && profileParts.clipped) ||
+        novaProfilePromptParts({ ...profile!, byteLimit: novaReasoningProfileByteLimit(identity.providerId) }).clipped
+      );
+      const notices = [notesUnreadable ? NOVA_NOTES_UNREADABLE_NOTICE : "", shortened ? NOVA_PROFILE_SHORTENED_NOTICE : ""].filter(Boolean);
+      const notice = notices.length > 0 ? { notice: notices.join(" ") } : {};
       const greetingName = settings?.effective.greetingName || (typeof input.name === "string" ? input.name.trim().slice(0, 40) : "");
       this.session?.controller.abort();
       const session = {

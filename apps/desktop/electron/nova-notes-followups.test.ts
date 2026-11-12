@@ -9,7 +9,7 @@ import { NovaFollowUps } from "./nova-followups.js";
 import { NovaMemory, openNovaDatabase } from "./nova-memory.js";
 import { NOVA_NOTES_UNREADABLE_NOTICE, NOVA_SESSION_PROFILE_CHANGED, NovaService, type NovaChatOptions } from "./nova.js";
 import { defaultNovaSettings } from "./nova-test-settings.js";
-import { effectiveNovaProfile } from "./nova-profile.js";
+import { NOVA_PROFILE_SHORTENED_NOTICE, effectiveNovaProfile } from "./nova-profile.js";
 import { novaCommand, parseNovaCommand } from "../src/shared/nova-command.js";
 
 function fixture(options: { profile?: NovaProfile; memoryOff?: boolean } = {}) {
@@ -438,6 +438,17 @@ describe("Nova hosted voice consent", () => {
     assert.ok(unsent, "some notes did not fit");
     f.memory.forget(unsent.id);
     assert.equal(await f.nova.revalidateHostedSession(), false);
+  });
+
+  it("says once, at the start, when the reasoning model gets a shortened profile", async () => {
+    const f = fixture({ profile: { instructions: "Answer in short sentences and name the source of each fact. ".repeat(60).slice(0, 3000) } });
+    const full = await f.nova.handle({ action: "start", mode: "local", tenantId: "tenant-a" });
+    assert.equal(full.notice, undefined, "a full-size model gets all of it");
+    const state = f.state as unknown as { activeProviderId: string; providers: unknown[] };
+    state.providers.push({ id: "apple-foundation", name: "Apple Intelligence", isLocal: true, status: "connected", models: ["apple"] });
+    state.activeProviderId = "apple-foundation";
+    const small = await f.nova.handle({ action: "start", mode: "local", tenantId: "tenant-a" });
+    assert.equal(small.notice, NOVA_PROFILE_SHORTENED_NOTICE);
   });
 
   it("tells the admin when the notes could not be read at the start", async () => {

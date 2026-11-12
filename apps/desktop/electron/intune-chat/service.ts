@@ -3,7 +3,7 @@ import { MAX_PROMISE_NUDGES, PROMISE_REPAIR_PROMPT, looksLikeUnkeptPromise } fro
 import type { WebSearch } from "./web-search.js";
 import { voiceConversationContext, voiceInventoryAnswer, voiceAppPlatformCountAnswer, voiceDeviceSummaryAnswer, voiceResourcesForQuestion, compactVoiceAnswerPack, assertVoicePromptBudget, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
 import { randomUUID } from "node:crypto";
-import { NOVA_PROFILE_BLOCK_END, novaProfilePromptBlock, type NovaProfilePromptInput } from "../nova-profile.js";
+import { NOVA_PROFILE_BLOCK_END, novaProfilePromptBlock, novaReasoningProfileByteLimit, type NovaProfilePromptInput } from "../nova-profile.js";
 import { fenceTenantData, withTenantDataOutputFilter } from "@openadminos/runtime";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -2593,8 +2593,12 @@ export class IntuneChatService {
     const conversationMemory = options.voice
       ? undefined
       : boundedConversationMemory(history);
-    const voiceByteLimit = providerId === "apple-foundation" ? 3000 : VOICE_PROMPT_BYTE_LIMIT;
-    const voiceProfile = options.voice && options.voiceProfile ? novaProfilePromptBlock({ ...options.voiceProfile, byteLimit: Math.floor(voiceByteLimit / 4) }) : "";
+    // The profile has its own room: on a full-size model it is added to the
+    // room for the question and its evidence; a small on-device model keeps
+    // its total and gives the profile a part of it.
+    const smallVoiceModel = providerId === "apple-foundation";
+    const voiceProfile = options.voice && options.voiceProfile ? novaProfilePromptBlock({ ...options.voiceProfile, byteLimit: novaReasoningProfileByteLimit(providerId) }) : "";
+    const voiceByteLimit = smallVoiceModel ? 3000 : VOICE_PROMPT_BYTE_LIMIT + Buffer.byteLength(voiceProfile) + (voiceProfile ? Buffer.byteLength(NOVA_PROFILE_BLOCK_END) + 2 : 0);
     const planned = planChatContext(voiceContext?.planningQuestion ?? content);
     const directResources = voiceDeviceEvidenceIntent(content) ? ["managedDevices" as const] : voiceResourcesForQuestion(content);
     if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
