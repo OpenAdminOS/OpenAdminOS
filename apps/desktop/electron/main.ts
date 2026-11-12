@@ -5709,7 +5709,7 @@ function registerIpcHandlers() {
     () => store.getAppState(),
     (input, options) => store.streamIntuneChatMessage(input, event => options.onEvent?.(event), { ...options, voice: true }),
     fetch,
-    { classifyCommand: (text, context, options) => store.classifyNovaCommand(text, context, options), connectors: () => store.listConnectors(), send: input => store.sendNovaConnector(input), startRun: (slug, options) => store.startRun(slug, options, { activeOrganizationOnly: true }), activeTenantId: () => store.activeTenantId(), tenantLease: (tenantId, work) => store.withTenantLease(tenantId, work), profile: () => store.novaProfile(), applyProfileProposal: patch => store.applyNovaProfileProposal(patch), recordVoiceConsent: input => store.recordNovaVoiceConsent(input) },
+    { classifyCommand: (text, context, options) => store.classifyNovaCommand(text, context, options), connectors: () => store.listConnectors(), send: input => store.sendNovaConnector(input), startRun: (slug, options) => store.startRun(slug, options, { activeOrganizationOnly: true }), activeTenantId: () => store.activeTenantId(), tenantLease: (tenantId, work) => store.withTenantLease(tenantId, work), profile: () => store.novaProfile(), applyProfileProposal: patch => store.applyNovaProfileProposal(patch), recordVoiceConsent: input => store.recordNovaVoiceConsent(input), notes: store.novaNotesHost(), followUps: store.novaFollowUpsHost() },
   );
   ipcMain.handle("openadminos:nova", handleTrusted((event, input: import("@openadminos/agent-sdk").NovaRequest, streamId?: unknown) => {
     const safeStreamId = streamId === undefined ? undefined : requireBoundedString(streamId, "Nova streamId", 128);
@@ -5718,6 +5718,7 @@ function registerIpcHandlers() {
     });
   }));
   ipcMain.handle("openadminos:nova-profile", handleTrusted((_event, request: unknown) => store.handleNovaProfile(request)));
+  ipcMain.handle("openadminos:nova-records", handleTrusted((_event, request: unknown) => store.handleNovaRecords(request)));
   ipcMain.handle("openadminos:start-graph-cache-preload", handleTrusted((_event, options?: unknown) => store.startGraphCachePreload(validateRefreshGraphCacheOptions(options))));
   ipcMain.handle("openadminos:cancel-graph-cache-preload", handleTrusted((_event, tenantId: unknown) => store.cancelGraphCachePreload(requireBoundedString(tenantId, "tenantId", 256))));
   ipcMain.handle(
@@ -6856,6 +6857,7 @@ if (!gotLock) {
   app.on("second-instance", (_event, argv) => {
     if (argv.includes(BACKGROUND_SCHEDULER_ARG)) {
       void store?.fireDueSchedules();
+      void store?.fireDueNovaFollowUps();
       void store?.refreshDueGraphCaches();
       return;
     }
@@ -7091,6 +7093,7 @@ if (!gotLock) {
     // up immediately.
     if (isBackgroundSchedulerLaunch) {
       void store.fireDueSchedules();
+      void store.fireDueNovaFollowUps();
       void store.refreshDueGraphCaches();
     }
     // One Office coordinator owns all persona work, independent of the renderer.
@@ -7113,6 +7116,7 @@ if (!gotLock) {
     const SCHEDULER_TICK_MS = 60_000;
     setInterval(() => {
       void store.fireDueSchedules();
+      void store.fireDueNovaFollowUps();
       void store.refreshDueGraphCaches();
       void store.processPendingRunDeliveries();
       void store.pruneRunHistory("scheduler").catch((error) => {

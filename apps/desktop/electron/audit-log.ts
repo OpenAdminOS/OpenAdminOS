@@ -58,7 +58,8 @@ export type AuditLogEventSource =
   | "hosted-provider-consent"
   | "configuration-change"
   | "graph-write"
-  | "gateway";
+  | "gateway"
+  | "nova";
 
 export interface AuditLogActor {
   kind: "connected-admin" | "local-admin";

@@ -1,7 +1,7 @@
 import { isNovaIntroduction, novaAudienceReply, NOVA_INTRODUCTION } from "../src/shared/nova-conversation.js";
 import { novaStopCommand } from "../src/shared/nova-transcript.js";
 import { novaContextualCommand, novaConnectorReply, novaDeliveryRequest, novaPages, novaClarifications, parseNovaCommand, type NovaCommand } from "../src/shared/nova-command.js";
-import { NOVA_SETTINGS_UNREADABLE, novaConnectorSetupIssue, prepareNovaAction, prepareNovaProfileChange, readNovaSettings, requireNovaCapability, type NovaActionHost, type NovaSettings, type PreparedNovaAction } from "./nova-actions.js";
+import { NOVA_SETTINGS_UNREADABLE, novaConnectorSetupIssue, prepareNovaAction, prepareNovaFollowUp, prepareNovaNote, prepareNovaProfileChange, readNovaSettings, requireNovaCapability, type NovaActionHost, type NovaSettings, type PreparedNovaAction } from "./nova-actions.js";
 import { novaAttention } from "./nova-attention.js";
 import { clipVoiceText } from "./intune-chat/voice-context.js";
 import { searchPublicWeb, type WebSearch } from "./intune-chat/web-search.js";
@@ -168,7 +168,17 @@ export class NovaService {
       // The profile shapes the prompts of this session; without it, Nova does not start.
       const settings = this.actions ? await readNovaSettings(this.actions) : undefined;
       if (generation !== this.generation) throw new Error("Nova was stopped or this question was replaced. Start a new conversation.");
-      const profile = settings ? { effective: settings.effective } : undefined;
+      // Confirmed notes of this organization join the profile; proposed ones never do.
+      let notes: string[] = [];
+      if (settings?.effective.memoryEnabled && this.actions?.notes) {
+        try {
+          notes = await this.actions.notes.promptNotes(state.activeTenantId);
+        } catch (error) {
+          console.warn("[nova] notes could not be read; this session starts without them", error);
+        }
+      }
+      if (generation !== this.generation) throw new Error("Nova was stopped or this question was replaced. Start a new conversation.");
+      const profile = settings ? { effective: settings.effective, ...(notes.length > 0 ? { notes } : {}) } : undefined;
       const profileBlock = profile ? novaProfilePromptBlock({ ...profile, byteLimit: NOVA_VOICE_PROFILE_BYTE_LIMIT }) : "";
       const greetingName = settings?.effective.greetingName || (typeof input.name === "string" ? input.name.trim().slice(0, 40) : "");
       this.session?.controller.abort();
@@ -211,8 +221,7 @@ export class NovaService {
             reasoningProviderId: session.providerId,
             ...(session.model ? { reasoningModel: session.model } : {}),
             includesProfile: profileBlock.length > 0,
-            // Confirmed notes join the profile block once Nova keeps notes.
-            includesMemory: false,
+            includesMemory: notes.length > 0 && profileBlock.length > 0,
           });
         } catch (error) {
           console.warn("[audit] the Nova voice consent could not be recorded", error);
@@ -286,11 +295,19 @@ export class NovaService {
       if (!action || action.preview.id !== input.actionId || Date.now() - (session.actionPreparedAt ?? 0) > 300000) throw new Error("This action expired. Ask Nova to prepare it again.");
       session.commandContext = undefined;
       session.pendingAction = undefined; // consume before any asynchronous work: no replay or duplicate sends
-      if (input.approved !== true) return { text: "Action cancelled. Nothing was sent or started." };
+      if (input.approved !== true) {
+        try {
+          await action.cancel?.();
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : "It could not be removed.";
+          return { text: `Cancelled. The proposed note stays in Settings, Nova, for review: ${reason}`, answerError: reason };
+        }
+        return { text: action.preview.kind === "remember" ? "Cancelled. Nova did not keep the note." : action.preview.kind === "follow-up" ? "Cancelled. No follow-up was set." : "Action cancelled. Nothing was sent or started." };
+      }
       const controller = new AbortController();
       this.pendingAnswer = controller;
       const signal = AbortSignal.any([controller.signal, session.controller.signal]);
-      onActivity?.({ kind: "action", status: "running", message: action.preview.kind === "send" ? "Sending approved message." : action.preview.kind === "profile" ? "Saving the approved settings change." : "Starting approved agent." });
+      onActivity?.({ kind: "action", status: "running", message: ({ send: "Sending approved message.", profile: "Saving the approved settings change.", remember: "Saving the approved note.", "follow-up": "Setting the approved follow-up.", run: "Starting approved agent." } as const)[action.preview.kind] });
       try {
         const result = await action.execute(signal);
         onActivity?.({ kind: "answer", status: "completed", message: result.text });
@@ -394,6 +411,34 @@ export class NovaService {
         } catch (error) {
           if (error instanceof Error && error.message === "This request was replaced.") throw error;
           const failure = error instanceof Error ? error.message : "Nova could not prepare this settings change.";
+          return { text: failure, answerError: failure };
+        }
+      }
+      if (command.kind === "remember" || command.kind === "follow-up") {
+        if (!this.actions) return { text: "Nova actions are unavailable in this app session. Reopen the latest app build and try again.", answerError: "Nova actions are unavailable." };
+        const latest = await this.state();
+        if (!latest.activeTenantId || latest.activeTenantId !== session.tenantId)
+          return { text: NOVA_ATTENTION_NEEDS_ORGANIZATION, answerError: NOVA_ATTENTION_NEEDS_ORGANIZATION };
+        try {
+          const prepared = command.kind === "remember"
+            ? await prepareNovaNote({ text: command.text, source: command.source, sessionId: session.id, ...(session.conversationId ? { conversationId: session.conversationId } : {}), turnId: randomUUID() }, latest, this.actions)
+            : await prepareNovaFollowUp({ question: command.question, minutes: command.minutes }, latest, this.actions);
+          if (revision !== this.answerRevision || session !== this.session || session.controller.signal.aborted) {
+            await prepared.cancel?.().catch(() => undefined);
+            throw new Error("This request was replaced.");
+          }
+          session.pendingAction = prepared;
+          session.actionPreparedAt = Date.now();
+          return {
+            text: command.kind === "remember"
+              ? "Review the note in Nova, then confirm. Nova does not use it until you do."
+              : "Review the follow-up in Nova, then confirm. Nothing is set until you do.",
+            pendingAction: prepared.preview,
+            displayText: prepared.preview.body,
+          };
+        } catch (error) {
+          if (error instanceof Error && error.message === "This request was replaced.") throw error;
+          const failure = error instanceof Error ? error.message : "Nova could not prepare this.";
           return { text: failure, answerError: failure };
         }
       }

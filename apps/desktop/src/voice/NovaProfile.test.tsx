@@ -121,3 +121,32 @@ it("runs a shortcut picked before the session once it starts, shows links, and r
   await user.click(screen.getByRole("button", { name: "Confirm change" }));
   await waitFor(() => expect(bridge.nova).toHaveBeenCalledWith({ action: "decide-action", sessionId: "voice-session", actionId: "a1", approved: true }, expect.any(Function)));
 });
+
+it("reviews a note on its own card and shows pending follow-ups", async () => {
+  const dc = stubHostedSession();
+  let finish!: (value: NovaResponse) => void;
+  const bridge = makeMockBridge({
+    nova: vi.fn(async (input) => {
+      if (input.action === "status") return { hasKey: true };
+      if (input.action === "start") return { sessionId: "voice-session", sdp: "v=0" };
+      if (input.action === "answer") return new Promise<NovaResponse>((resolve) => { finish = resolve; });
+      return {};
+    }),
+  }, createMockAppState({ novaFollowUpsPending: 2, novaProfile: effective({ shortcuts: [{ id: "s1", name: "Morning check", prompt: "How many devices?", createdAt: "2026-11-12T08:00:00.000Z" }] }) }));
+  renderRoute(<Nova />, { bridge, route: "/cache", path: "/cache" });
+  const user = userEvent.setup();
+  act(() => openNovaShortcut("Morning check"));
+  expect(await screen.findByRole("button", { name: "2 follow-ups pending" })).toBeInTheDocument();
+  await user.click(screen.getByRole("checkbox"));
+  await user.click(screen.getByRole("button", { name: "Start Nova" }));
+  await waitFor(() => expect(dc.onmessage).toBeTypeOf("function"));
+  act(() => dc.onmessage!({ data: JSON.stringify({ type: "session.started" }) }));
+  await waitFor(() => expect(bridge.nova).toHaveBeenCalledWith(expect.objectContaining({ action: "answer" }), expect.any(Function)));
+  await act(async () => finish({ text: "Review the note.", pendingAction: { id: "n1", kind: "remember", title: "Remember for Nova", target: "Northwind", body: "Kiosks are in Berlin", deliveryNote: "You asked for this note in Nova." } }));
+  const card = screen.getByRole("region", { name: "Review Nova action" });
+  expect(card).toHaveTextContent("Organization: Northwind");
+  expect(card).toHaveTextContent("Until you confirm, it waits for review in Settings, Nova.");
+  expect(screen.getByLabelText("Note")).toHaveTextContent("Kiosks are in Berlin");
+  await user.click(screen.getByRole("button", { name: "Confirm note" }));
+  await waitFor(() => expect(bridge.nova).toHaveBeenCalledWith({ action: "decide-action", sessionId: "voice-session", actionId: "n1", approved: true }, expect.any(Function)));
+});

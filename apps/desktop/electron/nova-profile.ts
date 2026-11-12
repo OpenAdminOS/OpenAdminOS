@@ -252,6 +252,26 @@ function instructionsState(profile: NovaProfile | undefined, policy: ManagedPoli
   return { instructions: "", instructionsSource: "none", locked };
 }
 
+/**
+ * The profile without the addenda, and their versions, of organizations
+ * that are disconnected. Unchanged when it holds none of them.
+ */
+export function novaProfileWithoutOrganizations(profile: NovaProfile | undefined, organizationIds: readonly string[]): NovaProfile | undefined {
+  if (!profile || organizationIds.length === 0) return profile;
+  const removed = new Set(organizationIds);
+  const hasAddendum = Object.keys(profile.addenda ?? {}).some((id) => removed.has(id));
+  const hasRevision = (profile.revisions ?? []).some((revision) => revision.scope === "organization" && removed.has(revision.organizationId ?? ""));
+  if (!hasAddendum && !hasRevision) return profile;
+  const next: NovaProfile = { ...profile };
+  const addenda = Object.fromEntries(Object.entries(profile.addenda ?? {}).filter(([id]) => !removed.has(id)));
+  if (Object.keys(addenda).length > 0) next.addenda = addenda;
+  else delete next.addenda;
+  const revisions = (profile.revisions ?? []).filter((revision) => !(revision.scope === "organization" && removed.has(revision.organizationId ?? "")));
+  if (revisions.length > 0) next.revisions = revisions;
+  else delete next.revisions;
+  return next;
+}
+
 /** The profile with defaults and the IT policy applied, for the active organization. */
 export function effectiveNovaProfile(
   profile: NovaProfile | undefined,

@@ -1,0 +1,188 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
+import type { AppState, NovaProfile, SecretAccessor, SendIntuneChatMessageResult } from "@openadminos/agent-sdk";
+
+import type { AuditLogEventSeed } from "./audit-log.js";
+import type { NovaActionHost } from "./nova-actions.js";
+import { NovaFollowUps } from "./nova-followups.js";
+import { NovaMemory, openNovaDatabase } from "./nova-memory.js";
+import { NovaService, type NovaChatOptions } from "./nova.js";
+import { defaultNovaSettings } from "./nova-test-settings.js";
+import { novaCommand, parseNovaCommand } from "../src/shared/nova-command.js";
+
+function fixture(options: { profile?: NovaProfile; memoryOff?: boolean } = {}) {
+  const values = new Map<string, string>([["api-key", "test-key"]]);
+  const secrets: SecretAccessor = { get: async (k) => values.get(k), set: async (k, v) => { values.set(k, v); }, remove: async (k) => { values.delete(k); } };
+  const state = {
+    activeTenantId: "tenant-a",
+    activeProviderId: "ollama",
+    activeOrganizationId: "org-a",
+    organizations: [{ id: "org-a", name: "Northwind", createdAt: "", connections: { microsoft365: { tenantId: "tenant-a" } } }],
+    tenants: [{ id: "tenant-a", displayName: "Northwind" }],
+    providers: [{ id: "ollama", name: "Ollama", isLocal: true, status: "connected", models: ["llama3"] }],
+    installedAgents: [],
+  } as unknown as AppState;
+  const events: AuditLogEventSeed[] = [];
+  const db = openNovaDatabase(":memory:");
+  const memory = new NovaMemory(db, { audit: (batch) => events.push(...batch) });
+  const followUps = new NovaFollowUps(db, { audit: (batch) => events.push(...batch) });
+  const consents: Array<Record<string, unknown>> = [];
+  const chatOptions: NovaChatOptions[] = [];
+  const requests: Array<{ url: string; body?: string }> = [];
+  const settings = () => {
+    const base = defaultNovaSettings(options.profile);
+    return options.memoryOff ? { ...base, effective: { ...base.effective, memoryEnabled: false, locked: { ...base.effective.locked, memory: true } } } : base;
+  };
+  const host: NovaActionHost = {
+    profile: async () => settings(),
+    activeTenantId: async () => state.activeTenantId,
+    connectors: async () => [],
+    send: async () => { throw new Error("Nova must not send in these tests."); },
+    startRun: async () => { throw new Error("Nova must not start runs in these tests."); },
+    recordVoiceConsent: (input) => { consents.push(input); },
+    notes: {
+      promptNotes: async (tenantId) => (settings().effective.memoryEnabled ? memory.promptNotes(tenantId) : []),
+      propose: async (input) => memory.propose({ ...input, organizationId: "org-a" }),
+      confirm: async (id) => memory.confirm(id),
+      forget: async (id) => memory.forget(id),
+    },
+    followUps: {
+      check: async (minutes) => followUps.checkLimits(minutes),
+      create: async (input) => followUps.create({ ...input, organizationId: "org-a" }),
+    },
+  };
+  const nova = new NovaService(
+    secrets,
+    async () => state,
+    async (_input, chatOption) => {
+      chatOptions.push(chatOption);
+      return { conversation: { id: "conversation-a" }, assistantMessage: { content: "42 devices", status: "completed" } } as SendIntuneChatMessageResult;
+    },
+    async (url, init) => {
+      requests.push({ url: String(url), body: init?.body ? String(init.body) : undefined });
+      return Response.json({ transport: { sdp: "answer" } });
+    },
+    host,
+  );
+  return { nova, memory, followUps, events, consents, chatOptions, requests, state };
+}
+
+async function start(f: ReturnType<typeof fixture>, mode: "local" | "openai" = "local") {
+  const { sessionId } = await f.nova.handle({ action: "start", mode, tenantId: "tenant-a", consent: mode === "openai", ...(mode === "openai" ? { sdp: "v=0" } : {}) });
+  return sessionId!;
+}
+
+describe("Nova commands for notes and follow-ups", () => {
+  it("reads remember and check-again requests, and leaves other wordings alone", () => {
+    assert.deepEqual(novaCommand("Remember that the Berlin office uses the Kiosk profile."), { kind: "remember", text: "the Berlin office uses the Kiosk profile.", source: "user-said" });
+    assert.equal(novaCommand("Remember to check the Berlin devices")?.kind === "remember", false);
+    assert.deepEqual(novaCommand("Check compliance again in an hour"), { kind: "follow-up", question: "Check compliance", minutes: 60 });
+    assert.deepEqual(novaCommand("In 30 minutes, look at the failed app installs again"), { kind: "follow-up", question: "Look at the failed app installs", minutes: 30 });
+    assert.deepEqual(novaCommand("recheck the encryption report again in 2 days"), { kind: "follow-up", question: "Check the encryption report", minutes: 2880 });
+    assert.equal(novaCommand("Send the compliance report every day")?.kind, "clarify");
+    assert.deepEqual(parseNovaCommand('{"kind":"follow-up","question":"Check compliance","minutes":90}', { agents: [] }), { kind: "follow-up", question: "Check compliance", minutes: 90 });
+    assert.deepEqual(parseNovaCommand('{"kind":"remember","text":"We use Autopilot for every new laptop"}', { agents: [] }), { kind: "remember", text: "We use Autopilot for every new laptop", source: "nova-proposed" });
+    assert.equal(parseNovaCommand(`{"kind":"remember","text":"${"x".repeat(301)}"}`, { agents: [] }).kind, "clarify");
+  });
+});
+
+describe("Nova notes", () => {
+  it("stores a note for review when it prepares the card, and only the click confirms it", async () => {
+    const f = fixture();
+    const sessionId = await start(f);
+    const prepared = await f.nova.handle({ action: "answer", sessionId, text: "Remember that the Berlin office uses the Kiosk profile." });
+    assert.equal(prepared.pendingAction?.kind, "remember");
+    assert.equal(prepared.pendingAction?.target, "Northwind");
+    assert.equal(prepared.pendingAction?.body, "the Berlin office uses the Kiosk profile.");
+    assert.match(prepared.pendingAction?.deliveryNote ?? "", /You asked for this note/);
+    const [note] = f.memory.list("tenant-a");
+    assert.equal(note?.reviewState, "proposed");
+    assert.equal(note?.sessionId, sessionId);
+    assert.ok(note?.turnId);
+    assert.deepEqual(f.memory.promptNotes("tenant-a"), []);
+    const spoken = await f.nova.handle({ action: "answer", sessionId, text: "Yes" });
+    assert.match(spoken.text!, /Use the confirmation button/);
+    assert.equal(f.memory.list("tenant-a")[0]?.reviewState, "proposed");
+    const done = await f.nova.handle({ action: "decide-action", sessionId, actionId: spoken.pendingAction!.id, approved: true });
+    assert.match(done.text!, /Nova will remember this in Northwind/);
+    assert.equal(f.memory.list("tenant-a")[0]?.reviewState, "confirmed");
+    assert.deepEqual(f.memory.promptNotes("tenant-a"), ["the Berlin office uses the Kiosk profile."]);
+  });
+
+  it("forgets the note when the card is cancelled", async () => {
+    const f = fixture();
+    const sessionId = await start(f);
+    const prepared = await f.nova.handle({ action: "answer", sessionId, text: "Remember that we never wipe kiosks." });
+    const cancelled = await f.nova.handle({ action: "decide-action", sessionId, actionId: prepared.pendingAction!.id, approved: false });
+    assert.match(cancelled.text!, /did not keep the note/);
+    assert.deepEqual(f.memory.list("tenant-a"), []);
+    assert.ok(f.events.some((event) => event.type === "nova.memory-note-forgotten"));
+  });
+
+  it("keeps notes out when the IT policy turns them off, and stores none", async () => {
+    const f = fixture({ memoryOff: true });
+    const confirmed = f.memory.propose({ tenantId: "tenant-a", text: "Kept but unused", source: "user-said" });
+    f.memory.confirm(confirmed.id);
+    const sessionId = await start(f);
+    const refused = await f.nova.handle({ action: "answer", sessionId, text: "Remember that Contoso owns the kiosks." });
+    assert.match(refused.answerError!, /IT department turned Nova notes off/);
+    assert.equal(f.memory.list("tenant-a").length, 1);
+    await f.nova.handle({ action: "answer", sessionId, text: "How many devices?" });
+    assert.equal(f.chatOptions.at(-1)!.voiceProfile?.notes, undefined);
+  });
+
+  it("refuses a note while notes are paused", async () => {
+    const f = fixture({ profile: { memoryPaused: true } });
+    const sessionId = await start(f);
+    const refused = await f.nova.handle({ action: "answer", sessionId, text: "Remember that Contoso owns the kiosks." });
+    assert.match(refused.answerError!, /notes are paused/);
+    assert.deepEqual(f.memory.list("tenant-a"), []);
+  });
+
+  it("gives confirmed notes, never proposed ones, to the hosted and the local prompt, and says so in the consent", async () => {
+    const f = fixture();
+    const confirmed = f.memory.propose({ tenantId: "tenant-a", text: "Kiosks are in Berlin", source: "user-said" });
+    f.memory.confirm(confirmed.id);
+    f.memory.propose({ tenantId: "tenant-a", text: "Unreviewed guess", source: "nova-proposed" });
+    const sessionId = await start(f, "openai");
+    const body = JSON.parse(f.requests.find((request) => request.url.includes("/live/sessions"))!.body!);
+    assert.match(body.session.instructions, /Kiosks are in Berlin/);
+    assert.doesNotMatch(body.session.instructions, /Unreviewed guess/);
+    assert.equal(f.consents[0]!.includesMemory, true);
+    await f.nova.handle({ action: "answer", sessionId, text: "How many devices?" });
+    assert.deepEqual(f.chatOptions.at(-1)!.voiceProfile?.notes, ["Kiosks are in Berlin"]);
+  });
+});
+
+describe("Nova follow-ups", () => {
+  it("sets nothing until the click, then one read-only follow-up in the organization", async () => {
+    const f = fixture();
+    const sessionId = await start(f);
+    const prepared = await f.nova.handle({ action: "answer", sessionId, text: "Check compliance again in an hour" });
+    assert.equal(prepared.pendingAction?.kind, "follow-up");
+    assert.equal(prepared.pendingAction?.target, "Northwind");
+    assert.equal(prepared.pendingAction?.body, "Check compliance");
+    assert.match(prepared.pendingAction?.deliveryNote ?? "", /Read-only\. Sending the result anywhere still needs your click\./);
+    assert.match(prepared.pendingAction?.deliveryNote ?? "", /Ollama · llama3/);
+    assert.equal(f.followUps.pendingCount(), 0);
+    const done = await f.nova.handle({ action: "decide-action", sessionId, actionId: prepared.pendingAction!.id, approved: true });
+    assert.match(done.text!, /Nova asks this again/);
+    const [followUp] = f.followUps.list("tenant-a");
+    assert.equal(followUp?.question, "Check compliance");
+    assert.equal(followUp?.status, "pending");
+    assert.equal(followUp?.model, "llama3");
+  });
+
+  it("refuses a follow-up that would send or run something, and one over the limits", async () => {
+    const f = fixture();
+    const sessionId = await start(f);
+    const sends = await f.nova.handle({ action: "answer", sessionId, text: "Check compliance and email the result again in an hour" });
+    assert.notEqual(sends.pendingAction?.kind, "follow-up");
+    const late = await f.nova.handle({ action: "answer", sessionId, text: "Check compliance again in 8 days" });
+    assert.match(late.answerError!, /at most 7 days/);
+    for (let index = 0; index < 5; index += 1) f.followUps.create({ tenantId: "tenant-a", question: "Check", providerId: "ollama", delayMinutes: 60 });
+    const full = await f.nova.handle({ action: "answer", sessionId, text: "Check compliance again in an hour" });
+    assert.match(full.answerError!, /already have 5 pending follow-ups/);
+  });
+});

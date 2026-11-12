@@ -19,6 +19,29 @@ import {
 import { OPEN_NOVA_EVENT, type OpenNovaDetail } from "../shared/nova-panel";
 import "./nova.css";
 
+/** What each Nova card names, explains and asks to confirm. Nothing happens before the click. */
+const NOVA_ACTION_TARGET_LABEL: Record<NovaActionPreview["kind"], string> = {
+  send: "Destination",
+  run: "Destination",
+  profile: "Setting",
+  remember: "Organization",
+  "follow-up": "Organization",
+};
+const NOVA_ACTION_EXPLANATION: Record<NovaActionPreview["kind"], string> = {
+  send: "This sends the content below outside this app through your configured connector.",
+  run: "The agent uses the selected tenant. Write plans still require their normal approval.",
+  profile: "This changes Nova's settings on this device. Nothing changes until you confirm.",
+  remember: "Nova keeps this note on this device and reads it in this organization's conversations. In hosted voice, confirmed notes go to OpenAI with the conversation. Until you confirm, it waits for review in Settings, Nova.",
+  "follow-up": "Nova asks this question once more at the time below, in this organization only. It reads, it does not change or send anything.",
+};
+const NOVA_ACTION_CONFIRM: Record<NovaActionPreview["kind"], string> = {
+  send: "Confirm send",
+  run: "Confirm run",
+  profile: "Confirm change",
+  remember: "Confirm note",
+  "follow-up": "Confirm follow-up",
+};
+
 export function Nova({
   onHostedChange,
 }: {
@@ -1195,20 +1218,31 @@ export function Nova({
                 Voice settings
               </button>
             )}
+            {state.novaFollowUpsPending ? (
+              <button
+                type="button"
+                className="nova-followups-pending"
+                onClick={() => { setExpanded(false); navigate("/settings/nova"); }}
+              >
+                {state.novaFollowUpsPending === 1 ? "1 follow-up pending" : `${state.novaFollowUpsPending} follow-ups pending`}
+              </button>
+            ) : null}
           </div>
           {showCaptions && <NovaConversation items={conversationItems} onClose={() => toggleConversation(false)}
             onEvidence={conversation ? () => { setExpanded(false); navigate(`/chat/${conversation}`); } : undefined} />}
           {pendingAction && <section className="nova-action-review" aria-label="Review Nova action">
-            <h2>{pendingAction.title}</h2><p><strong>{pendingAction.kind === "profile" ? "Setting" : "Destination"}:</strong> {pendingAction.target}</p>
-            <p>{pendingAction.kind === "send" ? "This sends the content below outside this app through your configured connector." : pendingAction.kind === "profile" ? "This changes Nova's settings on this device. Nothing changes until you confirm." : "The agent uses the selected tenant. Write plans still require their normal approval."}</p>
+            <h2>{pendingAction.title}</h2><p><strong>{NOVA_ACTION_TARGET_LABEL[pendingAction.kind]}:</strong> {pendingAction.target}</p>
+            <p>{NOVA_ACTION_EXPLANATION[pendingAction.kind]}</p>
             {pendingAction.deliveryNote && <p>{pendingAction.deliveryNote}</p>}
             {pendingAction.kind === "profile" ? <>
               <p><strong>Now</strong></p>
               <pre className="nova-action-body" aria-label="Current value">{pendingAction.previousBody ?? "None"}</pre>
               <p><strong>After the change</strong></p>
               <pre className="nova-action-body" aria-label="New value">{pendingAction.body}</pre>
-            </> : <MarkdownPreview source={pendingAction.body} numberedSections={false} className="nova-action-body nova-markdown" />}
-            <div><Button disabled={actionBusy} onClick={() => void decideAction(true)}>{actionBusy ? "Submitting…" : pendingAction.kind === "send" ? "Confirm send" : pendingAction.kind === "profile" ? "Confirm change" : "Confirm run"}</Button>
+            </> : pendingAction.kind === "remember" || pendingAction.kind === "follow-up"
+              ? <pre className="nova-action-body" aria-label={pendingAction.kind === "remember" ? "Note" : "Question"}>{pendingAction.body}</pre>
+              : <MarkdownPreview source={pendingAction.body} numberedSections={false} className="nova-action-body nova-markdown" />}
+            <div><Button disabled={actionBusy} onClick={() => void decideAction(true)}>{actionBusy ? "Submitting…" : NOVA_ACTION_CONFIRM[pendingAction.kind]}</Button>
             <Button variant="secondary" disabled={actionBusy} onClick={() => void decideAction(false)}>Cancel</Button></div>
           </section>}
           <audio ref={output} hidden />

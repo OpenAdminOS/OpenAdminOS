@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router";
 
 import { SetByItBadge } from "../components/ManagedPolicy";
 import { Button as UiButton, Switch } from "../components/ui";
 import type {
   ConnectorSummary,
   NovaCapabilityName,
+  NovaFollowUp,
   NovaInstructionRevision,
+  NovaNote,
   NovaProfilePatch,
   NovaProfileView,
+  NovaRecordsRequest,
+  NovaRecordsView,
   NovaShortcut,
   NovaVoiceMode,
 } from "../shared/openAdminOS";
@@ -21,6 +26,23 @@ const ADDENDUM_MAX = 1000;
 const NAME_MAX = 40;
 const SHORTCUT_NAME_MAX = 40;
 const SHORTCUT_PROMPT_MAX = 600;
+const NOTE_MAX = 300;
+
+/** What a follow-up state means, as the main process records it. */
+const FOLLOW_UP_STATE_TEXT: Record<NovaFollowUp["status"], string> = {
+  pending: "Pending",
+  running: "Running now",
+  completed: "Answered in Chat",
+  cancelled: "Cancelled",
+  "skipped-organization": "Not run: the organization it was set in was not active or not connected at that time.",
+  "skipped-provider": "Not run: the agent provider or model changed after it was set.",
+  missed: "Not run: OpenAdminOS was not running within an hour of its time.",
+  failed: "Started, but Chat did not return an answer.",
+};
+
+function utc(value: string): string {
+  return `${value.slice(0, 16).replace("T", " ")} UTC`;
+}
 
 const CAPABILITIES: { id: NovaCapabilityName; label: string; description: string }[] = [
   { id: "webSearch", label: "Web search", description: "Hosted voice may search the public web. Searches go to OpenAI." },
@@ -73,6 +95,8 @@ export function NovaSettingsSection() {
   const [instructions, setInstructions] = useState("");
   const [addendum, setAddendum] = useState("");
   const [shortcutDraft, setShortcutDraft] = useState<{ id?: string; name: string; prompt: string }>();
+  const [records, setRecords] = useState<NovaRecordsView>();
+  const [noteDraft, setNoteDraft] = useState<{ id: string; text: string }>();
   const organization = state.organizations?.find((entry) => entry.id === state.activeOrganizationId);
 
   const adopt = useCallback((next: NovaProfileView) => {
@@ -88,6 +112,10 @@ export function NovaSettingsSection() {
     void api
       .novaProfile({ action: "get" })
       .then((next) => { if (!cancelled) adopt(next); })
+      .catch((caught) => { if (!cancelled) setError(hostError(caught)); });
+    void api
+      .novaRecords?.({ action: "list" })
+      .then((next) => { if (!cancelled) setRecords(next); })
       .catch((caught) => { if (!cancelled) setError(hostError(caught)); });
     void api
       .listConnectors?.()
@@ -114,6 +142,23 @@ export function NovaSettingsSection() {
     }
   };
   const save = (patch: NovaProfilePatch, done = "Saved.") => run({ action: "save", patch }, done);
+  const record = async (request: NovaRecordsRequest, done: string) => {
+    if (!api?.novaRecords) return false;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      setRecords(await api.novaRecords(request));
+      setNotice(done);
+      await refresh();
+      return true;
+    } catch (caught) {
+      setError(hostError(caught));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
 
   if (!view) {
     return (
@@ -140,7 +185,7 @@ export function NovaSettingsSection() {
       <p className="mb-3 text-sm leading-5 text-[var(--color-text-muted)]">
         Nova uses these settings in every conversation on this device. Instructions shape how it answers. They cannot approve
         actions, choose destinations or skip a confirmation.
-        {effective.voiceMode === "openai" ? " In hosted voice, the instructions and the organization notes go to OpenAI with the conversation." : ""}
+        {effective.voiceMode === "openai" ? " In hosted voice, the instructions and the organization's confirmed notes go to OpenAI with the conversation." : ""}
       </p>
       <div className="overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
         <SettingRow
@@ -239,7 +284,7 @@ export function NovaSettingsSection() {
             organization ? (
               <div className="grid gap-2">
                 <textarea
-                  aria-label={`Nova notes for ${organization.name}`}
+                  aria-label={`Nova instructions for ${organization.name}`}
                   className={`${inputClass} min-h-[72px] resize-y leading-5`}
                   value={addendum}
                   disabled={busy}
@@ -314,7 +359,7 @@ export function NovaSettingsSection() {
                     <li key={revision.id} className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <span className="text-xs text-[var(--color-text-muted)]">
-                          {revision.scope === "user" ? "Standing instructions" : `Notes for ${organization?.name ?? "this organization"}`} · {versionLabel(revision)}
+                          {revision.scope === "user" ? "Standing instructions" : `Instructions for ${organization?.name ?? "this organization"}`} · {versionLabel(revision)}
                         </span>
                         <UiButton
                           size="sm"
@@ -350,7 +395,63 @@ export function NovaSettingsSection() {
             />
           }
         />
-        {/* Notes and follow-ups for the active organization are listed after the shortcuts. */}
+        <SettingRow
+          id="nova-notes"
+          stacked
+          description={
+            organization
+              ? `Facts Nova keeps for ${organization.name}. A note Nova proposes waits here for review and reaches no conversation until you confirm it; unconfirmed notes are removed after 30 days. Disconnecting the organization deletes its notes.`
+              : "Select an organization to see the notes Nova keeps for it."
+          }
+          control={
+            <div className="grid gap-2">
+              <div className="flex items-center justify-between gap-3">
+                <Switch
+                  className="flex-1"
+                  checked={effective.memoryEnabled}
+                  disabled={busy || locked.memory}
+                  onCheckedChange={(checked) => void save({ memoryPaused: !checked }, checked ? "Notes resumed." : "Notes paused. Nova reads and keeps none until you resume them.")}
+                  label="Use notes"
+                  description={locked.memory ? "Your IT department turned Nova notes off. Existing notes are kept and not used." : "While paused, Nova reads no notes and keeps no new ones."}
+                />
+                {locked.memory ? <SetByItBadge /> : null}
+              </div>
+              {organization ? (
+                <NoteList
+                  notes={records?.notes ?? []}
+                  draft={noteDraft}
+                  busy={busy}
+                  onDraft={setNoteDraft}
+                  onConfirm={(note) => void record({ action: "note-confirm", id: note.id }, "Note confirmed.")}
+                  onSave={async (draft) => {
+                    if (await record({ action: "note-edit", id: draft.id, text: draft.text }, "Note saved.")) setNoteDraft(undefined);
+                  }}
+                  onForget={(note) => void record({ action: "note-forget", id: note.id }, "Note forgotten.")}
+                />
+              ) : null}
+            </div>
+          }
+        />
+        <SettingRow
+          id="nova-follow-ups"
+          stacked
+          description={
+            organization
+              ? `Say “check compliance again in an hour” to Nova. Each runs once, read-only, in ${organization.name} with the provider and model set at the time, and its answer appears in Chat.`
+              : "Select an organization to see its follow-ups."
+          }
+          control={
+            organization ? (
+              <FollowUpList
+                followUps={records?.followUps ?? []}
+                busy={busy}
+                onCancel={(followUp) => void record({ action: "follow-up-cancel", id: followUp.id }, "Follow-up cancelled.")}
+              />
+            ) : (
+              <span className="text-sm text-[var(--color-text-muted)]">No organization is active.</span>
+            )
+          }
+        />
       </div>
       {error ? (
         <div role="alert" className="mt-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
@@ -422,5 +523,93 @@ function ShortcutList({
         </UiButton>
       )}
     </div>
+  );
+}
+
+function NoteList({
+  notes,
+  draft,
+  busy,
+  onDraft,
+  onConfirm,
+  onSave,
+  onForget,
+}: {
+  notes: NovaNote[];
+  draft?: { id: string; text: string };
+  busy: boolean;
+  onDraft: (draft?: { id: string; text: string }) => void;
+  onConfirm: (note: NovaNote) => void;
+  onSave: (draft: { id: string; text: string }) => Promise<void>;
+  onForget: (note: NovaNote) => void;
+}) {
+  if (notes.length === 0) return <span className="text-sm text-[var(--color-text-muted)]">No notes yet. Say “remember that …” to Nova.</span>;
+  return (
+    <ul className="grid gap-2" aria-label="Nova notes">
+      {notes.map((note) => (
+        <li key={note.id} className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]">
+          {draft?.id === note.id ? (
+            <form className="grid gap-2" aria-label="Edit note" onSubmit={(event) => { event.preventDefault(); void onSave(draft); }}>
+              <textarea
+                aria-label="Note"
+                className={`${inputClass} min-h-[56px] resize-y`}
+                value={draft.text}
+                maxLength={NOTE_MAX}
+                onChange={(event) => onDraft({ ...draft, text: event.target.value })}
+              />
+              <div className="flex items-center justify-between gap-2">
+                <Counter value={draft.text} max={NOTE_MAX} />
+                <div className="flex gap-1">
+                  <UiButton type="button" size="sm" variant="ghost" disabled={busy} onClick={() => onDraft(undefined)}>Cancel</UiButton>
+                  <UiButton type="submit" size="sm" disabled={busy || !draft.text.trim() || draft.text.length > NOTE_MAX}>Save note</UiButton>
+                </div>
+              </div>
+            </form>
+          ) : (
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="whitespace-pre-wrap text-sm text-[var(--color-text)]">{note.text}</p>
+                <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                  {note.reviewState === "proposed"
+                    ? `Waiting for review · ${note.source === "user-said" ? "you asked for it" : "worded by Nova"} · ${utc(note.createdAt)}${note.expiresAt ? ` · removed ${utc(note.expiresAt)} unless confirmed` : ""}`
+                    : `${note.reviewState === "edited" ? "Edited" : "Confirmed"} ${utc(note.reviewedAt ?? note.createdAt)} · ${note.source === "user-said" ? "you asked for it" : "worded by Nova"}`}
+                </p>
+              </div>
+              <div className="flex gap-1">
+                {note.reviewState === "proposed" ? <UiButton size="sm" disabled={busy} onClick={() => onConfirm(note)}>Confirm</UiButton> : null}
+                <UiButton size="sm" variant="ghost" disabled={busy} onClick={() => onDraft({ id: note.id, text: note.text })}>Edit</UiButton>
+                <UiButton size="sm" variant="ghost" disabled={busy} onClick={() => onForget(note)}>Forget</UiButton>
+              </div>
+            </div>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function FollowUpList({ followUps, busy, onCancel }: { followUps: NovaFollowUp[]; busy: boolean; onCancel: (followUp: NovaFollowUp) => void }) {
+  if (followUps.length === 0) return <span className="text-sm text-[var(--color-text-muted)]">No follow-ups.</span>;
+  return (
+    <ul className="grid gap-2" aria-label="Nova follow-ups">
+      {followUps.map((followUp) => (
+        <li key={followUp.id} className="flex flex-wrap items-start justify-between gap-2 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]">
+          <div className="min-w-0">
+            <p className="text-sm text-[var(--color-text)]">{followUp.question}</p>
+            <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+              {followUp.status === "pending" ? `Due ${utc(followUp.dueAt)}` : `${FOLLOW_UP_STATE_TEXT[followUp.status]}${followUp.finishedAt ? ` · ${utc(followUp.finishedAt)}` : ""}`}
+              {" · "}{followUp.providerId}{followUp.model ? ` · ${followUp.model}` : ""}
+            </p>
+            {followUp.status === "failed" && followUp.reason ? <p className="mt-1 text-xs text-[var(--color-danger)]">{followUp.reason}</p> : null}
+          </div>
+          <div className="flex gap-1">
+            {followUp.conversationId ? (
+              <Link className="text-sm text-[var(--color-accent)] underline-offset-2 hover:underline" to={`/chat/${followUp.conversationId}`}>Open in Chat</Link>
+            ) : null}
+            {followUp.status === "pending" ? <UiButton size="sm" variant="ghost" disabled={busy} onClick={() => onCancel(followUp)}>Cancel</UiButton> : null}
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }

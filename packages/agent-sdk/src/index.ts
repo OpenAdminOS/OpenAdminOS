@@ -1325,6 +1325,8 @@ export interface AppState {
   managedPolicy?: ManagedPolicyStatus;
   /** Nova's settings with defaults and the IT policy applied. */
   novaProfile?: EffectiveNovaProfile;
+  /** Nova follow-ups waiting to run, on this device. */
+  novaFollowUpsPending?: number;
   /** Splashtop connections of the organizations on this device. Never holds a token. */
   splashtopConnections?: SplashtopConnectionSummary[];
 }
@@ -2196,10 +2198,11 @@ export interface NovaConversationTurn {
 
 /**
  * What a Nova card asks the admin to confirm: a connector send, an agent
- * run, or a change to Nova's own settings. Nothing happens until the
- * click; voice never confirms.
+ * run, a change to Nova's own settings, a note to remember, or a one-time
+ * follow-up question. Nothing happens until the click; voice never
+ * confirms.
  */
-export type NovaActionKind = "send" | "run" | "profile";
+export type NovaActionKind = "send" | "run" | "profile" | "remember" | "follow-up";
 
 export interface NovaActionPreview {
   id: string; kind: NovaActionKind; title: string; target: string; body: string;
@@ -2336,6 +2339,72 @@ export interface NovaProfilePatch {
   deleteShortcut?: string;
   memoryPaused?: boolean;
 }
+
+/** Who put a note into words: the admin, or Nova from the conversation. */
+export type NovaNoteSource = "user-said" | "nova-proposed";
+/** A proposed note waits for review and never reaches a prompt; confirmed and edited ones do. */
+export type NovaNoteReviewState = "proposed" | "confirmed" | "edited";
+
+/** A fact Nova keeps for one organization, kept in openadminos.db on this device. */
+export interface NovaNote {
+  id: string;
+  tenantId: string;
+  organizationId?: string;
+  text: string;
+  reviewState: NovaNoteReviewState;
+  source: NovaNoteSource;
+  /** Where it came from: the Nova session, its Chat conversation and the turn. */
+  sessionId?: string;
+  conversationId?: string;
+  turnId?: string;
+  createdAt: string;
+  reviewedAt?: string;
+  /** A proposed note expires unless it is confirmed first. */
+  expiresAt?: string;
+}
+
+export type NovaFollowUpStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "cancelled"
+  | "skipped-organization"
+  | "skipped-provider"
+  | "missed"
+  | "failed";
+
+/** A one-time read-only question Nova asks again later, in the organization it was set in. */
+export interface NovaFollowUp {
+  id: string;
+  tenantId: string;
+  organizationId?: string;
+  question: string;
+  providerId: ProviderId;
+  model?: string;
+  dueAt: string;
+  status: NovaFollowUpStatus;
+  createdAt: string;
+  finishedAt?: string;
+  /** The Chat conversation that holds the answer. */
+  conversationId?: string;
+  /** Why it did not run or did not finish. */
+  reason?: string;
+}
+
+/** Nova's notes and follow-ups of the active organization, as Settings shows them. */
+export interface NovaRecordsView {
+  tenantId?: string;
+  organizationId?: string;
+  notes: NovaNote[];
+  followUps: NovaFollowUp[];
+}
+
+export type NovaRecordsRequest =
+  | { action: "list" }
+  | { action: "note-confirm"; id: string }
+  | { action: "note-edit"; id: string; text: string }
+  | { action: "note-forget"; id: string }
+  | { action: "follow-up-cancel"; id: string };
 
 export type NovaProfileRequest =
   | { action: "get" }
@@ -3306,6 +3375,7 @@ export interface OpenAdminOSApi {
   getMultiTenantAgentBatch(id: string): Promise<MultiTenantAgentBatch | undefined>;
   nova(input: NovaRequest, onActivity?: (activity: NovaActivity) => void): Promise<NovaResponse>;
   novaProfile(request: NovaProfileRequest): Promise<NovaProfileView>;
+  novaRecords(request: NovaRecordsRequest): Promise<NovaRecordsView>;
   startGraphCachePreload(options?: RefreshGraphCacheOptions): Promise<void>;
   cancelGraphCachePreload(tenantId: string): Promise<void>;
   refreshGraphCache(options?: RefreshGraphCacheOptions): Promise<GraphCacheRefreshResult>;

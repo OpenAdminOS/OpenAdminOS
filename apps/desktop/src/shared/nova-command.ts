@@ -17,6 +17,8 @@ export type NovaCommand =
   | { kind: 'attention' }
   | { kind: 'profile-change'; change: NovaProfileProposal }
   | { kind: 'shortcut'; name: string }
+  | { kind: 'remember'; text: string; source: 'user-said' | 'nova-proposed' }
+  | { kind: 'follow-up'; question: string; minutes: number }
   | { kind: 'research' };
 export interface NovaCommandContext {
   previousRequest?: string;
@@ -69,6 +71,68 @@ function proposal(change: Extract<NovaProfileProposal, { text: string }>): NovaC
   return { kind: 'profile-change', change };
 }
 
+/** Longest note Nova keeps; Settings and the main process apply the same limit. */
+const NOTE_TEXT_MAX = 300;
+/** Longest follow-up question; the main process applies the same limit. */
+const FOLLOW_UP_QUESTION_MAX = 600;
+/** Upper bound of a parsed delay; the main process refuses anything over 7 days with its own message. */
+const FOLLOW_UP_MINUTES_MAX = 100_000;
+
+/**
+ * "Remember that the Berlin office uses the Kiosk profile." The admin's
+ * own words become a note for review. "Remember to ..." asks for a
+ * reminder, not a fact, and is not a note.
+ */
+export function novaRememberCommand(text: string): NovaCommand | undefined {
+  const q = conversationalText(text).replace(/^(?:please\s+|(?:can|could|would) you\s+)+/i, '').trim();
+  const match = /^(?:remember|note|keep in mind|make a note)(?: that| this| the following)?(?:[:,]\s*|\s+)(.+)$/is.exec(q);
+  if (!match || /^to\b/i.test(match[1]!.trim())) return undefined;
+  const note = match[1]!.trim().replace(/,?\s+please(?=[.!]*$)/i, '').trim();
+  if (!note) return undefined;
+  return { kind: 'remember', text: note, source: 'user-said' };
+}
+
+const DELAY_AMOUNT = String.raw`(\d{1,5}|an?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty[- ]five|ninety)`;
+const DELAY_UNIT = String.raw`(minutes?|mins?|hours?|hrs?|days?)`;
+const RECHECK_VERB = String.raw`(check|re-?check|look at|look into|review)`;
+
+/** The delay in minutes for "an hour", "30 minutes", "two days". */
+export function parseFollowUpDelay(amount: string, unit: string): number | undefined {
+  const words: Record<string, number> = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, fifteen: 15, twenty: 20, thirty: 30, 'forty-five': 45, 'forty five': 45, ninety: 90 };
+  const value = amount.trim().toLowerCase();
+  const count = /^\d+$/.test(value) ? Number(value) : words[value];
+  if (!count) return undefined;
+  const u = unit.trim().toLowerCase();
+  const factor = /^(?:minutes?|mins?)$/.test(u) ? 1 : /^(?:hours?|hrs?)$/.test(u) ? 60 : /^days?$/.test(u) ? 1440 : undefined;
+  return factor === undefined ? undefined : count * factor;
+}
+
+/**
+ * "Check compliance again in an hour", "in 30 minutes, look at the
+ * failed apps again": one read-only question asked again once. Only this
+ * form is a follow-up; other scheduling still asks to clarify.
+ */
+export function novaFollowUpCommand(text: string): NovaCommand | undefined {
+  const q = requestText(text).replace(/^(?:please\s+|(?:can|could|would) you\s+)+/i, '').replace(/,?\s+please$/i, '').replace(/[?.!]+$/, '').trim();
+  const after = new RegExp(String.raw`^${RECHECK_VERB}\s+(.+?)\s+again\s+in\s+${DELAY_AMOUNT}\s+${DELAY_UNIT}$`, 'i').exec(q);
+  const before = new RegExp(String.raw`^in\s+${DELAY_AMOUNT}\s+${DELAY_UNIT},?\s+${RECHECK_VERB}\s+(.+?)(?:\s+again)?$`, 'i').exec(q);
+  const verb = after?.[1] ?? before?.[3];
+  const topic = (after?.[2] ?? before?.[4])?.trim();
+  const amount = after?.[3] ?? before?.[1];
+  const unit = after?.[4] ?? before?.[2];
+  if (!verb || !topic || !amount || !unit) return undefined;
+  const minutes = parseFollowUpDelay(amount, unit);
+  if (minutes === undefined) return undefined;
+  const lead = verb.toLowerCase().replace(/^re-?check$/, 'check');
+  return followUp(`${lead.charAt(0).toUpperCase()}${lead.slice(1)} ${topic}`, minutes);
+}
+
+function followUp(question: string, minutes: number): NovaCommand {
+  const text = question.replace(/\s+/g, ' ').trim();
+  if (!text || text.length > FOLLOW_UP_QUESTION_MAX || !Number.isInteger(minutes) || minutes < 0 || minutes > FOLLOW_UP_MINUTES_MAX) return { kind: 'clarify', reason: 'unavailable' };
+  return { kind: 'follow-up', question: text, minutes };
+}
+
 /** "What needs me?" and close wordings: the open findings and approvals of the active organization. */
 export function novaAttentionCommand(text: string): boolean {
   const q = requestText(text).replace(/[?.!]+$/, '').trim();
@@ -83,6 +147,10 @@ export function novaCommand(text: string): NovaCommand | undefined {
   // Never interpret quoted examples, negation or conditional instructions as an action.
   if (/^(?:["“']|if\b|when\b|don't\b|do not\b|never\b|the (?:report|user|document)\b)/i.test(q)) return { kind: 'research' };
   if (novaAttentionCommand(text)) return { kind: 'attention' };
+  const remember = novaRememberCommand(text);
+  if (remember) return remember;
+  const recheck = novaFollowUpCommand(text);
+  if (recheck) return recheck;
   const profileChange = novaProfileChangeCommand(text);
   if (profileChange) return profileChange;
   const commandWords = /\b(?:send(?:ing)?|shar(?:e|ing)|post(?:ing)?|email(?:ing)?|messag(?:e|ing)|run(?:ning)?|start(?:ing)?|launch(?:ing)?|forward(?:ing)?|deliver(?:ed|ing)?|publish|dispatch|schedule|delete|retire|wipe|disable)\b/i;
@@ -125,6 +193,12 @@ export function parseNovaCommand(raw: string, context: NovaCommandContext): Nova
   if (value.kind === 'capabilities' && keys('topic') && ['connectors','agents','tenant','general'].includes(String(value.topic))) return { kind: 'capabilities', topic: value.topic as 'connectors' | 'agents' | 'tenant' | 'general' };
   if (value.kind === 'clarify' && keys('reason') && Object.hasOwn(novaClarifications, String(value.reason))) return { kind: 'clarify', reason: value.reason as keyof typeof novaClarifications };
   if (value.kind === 'attention' && keys()) return { kind: 'attention' };
+  if (value.kind === 'remember' && keys('text') && typeof value.text === 'string') {
+    const text = value.text.trim();
+    return text && text.length <= NOTE_TEXT_MAX ? { kind: 'remember', text, source: 'nova-proposed' } : invalid;
+  }
+  if (value.kind === 'follow-up' && keys('question', 'minutes') && typeof value.question === 'string' && typeof value.minutes === 'number')
+    return followUp(value.question, value.minutes);
   if (value.kind === 'profile-change') {
     if (value.field === 'instructions' && keys('field', 'mode', 'text') && (value.mode === 'append' || value.mode === 'replace') && typeof value.text === 'string')
       return proposal({ field: 'instructions', mode: value.mode, text: value.text.trim() });
@@ -152,7 +226,9 @@ Allowed shapes:
 {"kind":"profile-change","field":"instructions","mode":"append|replace","text":string} ONLY when the user explicitly asks to change Nova's standing instructions or lasting preferences (for example: from now on, always answer in German). text is the instruction in the user's words, without the request wording.
 {"kind":"profile-change","field":"greetingName","text":string} when the user asks Nova to call them by a name.
 {"kind":"profile-change","field":"capability","capability":"webSearch|startAgents|navigation","enabled":false} when the user asks to turn off one of Nova's abilities. Turning one on is {"kind":"clarify","reason":"enable"}.
-{"kind":"clarify","reason":"ambiguous|destination|approval"}. Clarify missing connector, named recipient, multiple actions/destinations, conditional/scheduled/destructive actions, ambiguous agent, or missing context. Use reason=approval ONLY for an explicit yes/confirm/go ahead response. Unsupported actions, including scheduling, disabling, retiring or deleting, use reason=ambiguous and must not suggest an existing approval button. Approval or yes/go ahead must NEVER become a send/run.
+{"kind":"remember","text":string} ONLY when the user asks Nova to keep a fact about their environment or work for later conversations (for example: keep in mind that the Berlin office uses the Kiosk profile). text is the fact in the user's words, at most 300 characters. A request to be reminded to do something is not a fact.
+{"kind":"follow-up","question":string,"minutes":integer} ONLY when the user asks Nova to look at one read-only question again once, after a stated delay (for example: check compliance again in an hour). question is the read-only question without the timing; minutes is the delay. Never for sends, runs, changes, or repeating schedules.
+{"kind":"clarify","reason":"ambiguous|destination|approval"}. Clarify missing connector, named recipient, multiple actions/destinations, conditional/scheduled/destructive actions, ambiguous agent, or missing context. Use reason=approval ONLY for an explicit yes/confirm/go ahead response. Unsupported actions, including repeating schedules, scheduled sends or runs, disabling, retiring or deleting, use reason=ambiguous and must not suggest an existing approval button. Approval or yes/go ahead must NEVER become a send/run.
 Quoted, hypothetical, explanatory or negated commands are not actions. PreviousRequest is supplied only for a short follow-up or correction; use it to resolve the topic, never as approval. If the current user changes only the connector, preserve the previous report and self/default meaning unless explicitly changed. Unrelated new questions replace it. Do not turn requests for instructions (how do I...) into actions. App connector usage instructions are capabilities; general instructions are research. Statements like I wonder whether the cached results are current are research. Never open a page just because it was mentioned.`;
 
 /** Connector-only clarification replies are app commands, never a public-web topic. */
