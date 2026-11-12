@@ -149,6 +149,56 @@ describe("Intune Chat agentic loop", () => {
     } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
   });
 
+  it("asks a Chat answer that only promises work to do the work", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "chat-unfinished-"));
+    const store = seededStore(dir);
+    try {
+      const result = await runAgenticChat(baseInput(store, scriptedLlm([
+        '```json\n{"final":true,"answer":"I\'ll check the device inventory now."}\n```',
+        '```json\n{"tool":"query_cache","params":{"resource":"managedDevices","limit":1}}\n```',
+        '```json\n{"final":true,"answer":"WIN-01 is in the cached inventory."}\n```',
+      ])));
+      assert.equal(result.ok, true);
+      assert.equal(result.answer, "WIN-01 is in the cached inventory.");
+      assert.equal(result.toolTrace[0]?.tool, "query_cache");
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it("keeps a Chat answer after two promise nudges instead of falling back", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "chat-unfinished-"));
+    const store = seededStore(dir);
+    try {
+      let calls = 0;
+      const replies = [
+        '```json\n{"tool":"query_cache","params":{"resource":"managedDevices","limit":1}}\n```',
+        '```json\n{"final":true,"answer":"Let me check that."}\n```',
+        '```json\n{"final":true,"answer":"I am checking the device inventory."}\n```',
+        '```json\n{"final":true,"answer":"I will look into it."}\n```',
+      ];
+      const llm = scriptedLlm(replies);
+      const counted: RunLlmApi = { ...llm, async complete(options) { calls += 1; return llm.complete(options); } };
+      const result = await runAgenticChat(baseInput(store, counted));
+      assert.equal(result.ok, true);
+      assert.equal(result.answer, "I will look into it.");
+      assert.equal(calls, 4);
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it("accepts a Chat answer that reports results and mentions a later step", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "chat-finished-"));
+    const store = seededStore(dir);
+    try {
+      const answer = "Checked 1 device; WIN-01 is in the cached inventory. I'll check again tomorrow if you ask.";
+      const result = await runAgenticChat(baseInput(store, scriptedLlm([
+        '```json\n{"tool":"query_cache","params":{"resource":"managedDevices","limit":1}}\n```',
+        `\`\`\`json\n${JSON.stringify({ final: true, answer })}\n\`\`\``,
+        '```json\n{"final":true,"answer":"unused"}\n```',
+      ])));
+      assert.equal(result.ok, true);
+      assert.equal(result.answer, answer);
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
   it("repairs a salvaged tool call with missing parameters before accepting an answer", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
     const store = seededStore(dir);

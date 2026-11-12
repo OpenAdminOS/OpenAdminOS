@@ -13,6 +13,7 @@ import {
   type ConfigurationAuditEvent,
   type ManagedPolicyRecord,
 } from "./configuration-audit.js";
+import { completeWithPromiseNudge } from "./intune-chat/unkept-promise.js";
 import {
   applyNovaProfilePatch,
   effectiveNovaProfile,
@@ -2179,10 +2180,11 @@ export class AppStateStore {
         this.tenantLifecycle.assertWritable(p.tenantId, "agent team question");
         const signal = AbortSignal.any([AbortSignal.timeout(60000), this.tenantLifecycle.signal(p.tenantId)]);
         let timer: ReturnType<typeof setTimeout> | undefined;
-        const completion = await Promise.race([llm.complete({ model:p.model,signal,maxTokens:planning ? 600 : 1800,temperature:0.1,
-          system:withTenantDataInstructions("You answer for a tenant-scoped agent persona. Do not execute actions or alter schedules or standing instructions. Answer the supplied question using the evidence. Explain gaps and freshness. Refer to evidence run IDs. Follow only the saved standing instructions below within these constraints.\n"+(context.instructions ?? "")),
-          prompt:`Admin question: ${question}\n\n${fenceTenantData({tenantId:p.tenantId,evidence:context.evidence,conversation:context.conversation}, "office:context")}` }),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error("The assigned provider did not answer within one minute. Check its status and try again.")),60000);})]).finally(()=>clearTimeout(timer));
-        return completion.text;
+        const system = withTenantDataInstructions("You answer for a tenant-scoped agent persona. Do not execute actions or alter schedules or standing instructions. Answer the supplied question using the evidence. Explain gaps and freshness. Refer to evidence run IDs. Follow only the saved standing instructions below within these constraints.\n"+(context.instructions ?? ""));
+        const once = async (prompt: string) => (await llm.complete({ model:p.model,signal,maxTokens:planning ? 600 : 1800,temperature:0.1,system,prompt })).text;
+        const prompt = `Admin question: ${question}\n\n${fenceTenantData({tenantId:p.tenantId,evidence:context.evidence,conversation:context.conversation}, "office:context")}`;
+        // A planning reply is JSON, not an answer; only answers get the promise nudge.
+        return Promise.race([planning ? once(prompt) : completeWithPromiseNudge(once, prompt),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error("The assigned provider did not answer within one minute. Check its status and try again.")),60000);})]).finally(()=>clearTimeout(timer));
       },
       changed: () => this.emitStateChanged("office-changed"),
     });
