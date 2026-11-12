@@ -19,7 +19,7 @@ function followUps(start = "2026-11-12T10:00:00.000Z") {
   return { store, events, advance: (ms: number) => { now = new Date(now.getTime() + ms); }, now: () => now };
 }
 
-const input = { tenantId: "t1", organizationId: "o1", question: "Check compliance", providerId: "ollama" as const, model: "llama3", delayMinutes: 60 };
+const input = { tenantId: "t1", organizationId: "o1", question: "Check compliance", providerId: "ollama" as const, model: "llama3", delayMinutes: 60, providerLocal: true, providerEndpoint: "http://127.0.0.1:11434" };
 
 describe("Nova follow-ups", () => {
   it("refuses a delay under 1 minute or over 7 days", () => {
@@ -106,9 +106,46 @@ describe("Nova follow-ups", () => {
     assert.equal(events[0]!.details.reason, "The organization was disconnected.");
   });
 
+  it("keeps a disconnected tenant's follow-ups when the cancel events cannot be kept on disk", () => {
+    const db = openNovaDatabase(":memory:");
+    const store = new NovaFollowUps(db, { audit: () => undefined, auditDurably: () => { throw new Error("audit log and pending file unavailable"); } });
+    store.create(input);
+    assert.throws(() => store.purgeTenant("t1"), /pending file unavailable/);
+    assert.equal(store.list("t1").length, 1, "nothing is deleted without its audit events");
+  });
+
+  it("stores where its provider ran and audits it", () => {
+    const { store, events } = followUps();
+    const followUp = store.create(input);
+    assert.equal(store.get(followUp.id)?.providerLocal, true);
+    assert.equal(store.get(followUp.id)?.providerEndpoint, "http://127.0.0.1:11434");
+    assert.equal(events[0]!.details.providerLocal, true);
+  });
+
+  it("does not run when its local provider now runs off this device or at another endpoint", () => {
+    const followUp = { tenantId: "t1", organizationId: "o1", providerId: "ollama" as const, model: "llama3", dueAt: "2026-11-12T11:00:00.000Z", providerLocal: true, providerEndpoint: "http://127.0.0.1:11434" };
+    const context = { now: new Date("2026-11-12T11:00:30.000Z"), activeTenantId: "t1", activeOrganizationId: "o1", tenantConnected: true, activeProviderId: "ollama" as const, activeModel: "llama3", activeProviderLocal: true, activeProviderEndpoint: "http://127.0.0.1:11434" };
+    assert.equal(novaFollowUpFireDecision(followUp, context), "run");
+    // Loopback Ollama set later to a remote host keeps the provider id and model.
+    assert.equal(novaFollowUpFireDecision(followUp, { ...context, activeProviderLocal: false, activeProviderEndpoint: "https://ollama.example.com" }), "skipped-provider");
+    assert.equal(novaFollowUpFireDecision(followUp, { ...context, activeProviderEndpoint: "http://127.0.0.1:11500" }), "skipped-provider");
+    // The same endpoint no longer counted as on this device, for example a LAN address.
+    assert.equal(novaFollowUpFireDecision(followUp, { ...context, activeProviderLocal: false }), "skipped-provider");
+    // A hosted provider has no endpoint; one set while it was hosted does not run on a local one.
+    const hosted = { ...followUp, providerId: "anthropic" as const, providerLocal: false, providerEndpoint: undefined };
+    const hostedContext = { ...context, activeProviderId: "anthropic" as const, activeProviderEndpoint: undefined };
+    assert.equal(novaFollowUpFireDecision(hosted, { ...hostedContext, activeProviderLocal: false }), "run");
+    assert.equal(novaFollowUpFireDecision(hosted, { ...hostedContext, activeProviderLocal: true }), "skipped-provider");
+    const { providerLocal: _unknown, ...unrecorded } = hosted;
+    assert.equal(novaFollowUpFireDecision(unrecorded, { ...hostedContext, activeProviderLocal: false }), "skipped-provider");
+    // A follow-up from a build that did not record where its provider ran runs nowhere.
+    const { providerLocal: _local, providerEndpoint: _endpoint, ...legacy } = followUp;
+    assert.equal(novaFollowUpFireDecision(legacy, context), "skipped-provider");
+  });
+
   it("runs only in its organization, with its provider and model, within an hour", () => {
-    const followUp = { tenantId: "t1", organizationId: "o1", providerId: "ollama" as const, model: "llama3", dueAt: "2026-11-12T11:00:00.000Z" };
-    const context = { now: new Date("2026-11-12T11:00:30.000Z"), activeTenantId: "t1", activeOrganizationId: "o1", tenantConnected: true, activeProviderId: "ollama" as const, activeModel: "llama3" };
+    const followUp = { tenantId: "t1", organizationId: "o1", providerId: "ollama" as const, model: "llama3", dueAt: "2026-11-12T11:00:00.000Z", providerLocal: true };
+    const context = { now: new Date("2026-11-12T11:00:30.000Z"), activeTenantId: "t1", activeOrganizationId: "o1", tenantConnected: true, activeProviderId: "ollama" as const, activeModel: "llama3", activeProviderLocal: true };
     assert.equal(novaFollowUpFireDecision(followUp, context), "run");
     assert.equal(novaFollowUpFireDecision(followUp, { ...context, activeTenantId: "t2" }), "skipped-organization");
     assert.equal(novaFollowUpFireDecision(followUp, { ...context, activeOrganizationId: "o2" }), "skipped-organization");

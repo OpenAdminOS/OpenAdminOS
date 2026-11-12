@@ -36,6 +36,7 @@ export const NOVA_FOLLOW_UP_TOO_LATE = "A follow-up can be at most 7 days ahead.
 export const NOVA_FOLLOW_UPS_FULL = `You already have ${NOVA_FOLLOW_UPS_PENDING_MAX} pending follow-ups. Cancel one in Settings, Nova, first.`;
 export const NOVA_FOLLOW_UPS_DAILY_LIMIT = `Nova already set ${NOVA_FOLLOW_UPS_PER_DAY} follow-ups in the last 24 hours. Try again later.`;
 export const NOVA_FOLLOW_UP_PROVIDER_NOT_ALLOWED = "Your IT department no longer allows this provider or model. Nothing was asked.";
+export const NOVA_FOLLOW_UP_PROVIDER_MOVED = "The provider now runs somewhere else than when this follow-up was set, for example off this device. Nothing was asked. Ask Nova again to set it with the current provider.";
 export const NOVA_FOLLOW_UP_NOT_FOUND = "That follow-up is no longer on this device. Reopen Settings, Nova, to see the current ones.";
 
 /** The question as stored: one trimmed line within the limit. Throws the designed refusal otherwise. */
@@ -65,6 +66,9 @@ interface FollowUpRow {
   finished_at: string | null;
   conversation_id: string | null;
   reason: string | null;
+  provider_local: number | null;
+  provider_endpoint: string | null;
+  consent_acknowledged_at: string | null;
 }
 
 function followUpOf(row: FollowUpRow): NovaFollowUp {
@@ -81,6 +85,9 @@ function followUpOf(row: FollowUpRow): NovaFollowUp {
     ...(row.finished_at ? { finishedAt: row.finished_at } : {}),
     ...(row.conversation_id ? { conversationId: row.conversation_id } : {}),
     ...(row.reason ? { reason: row.reason } : {}),
+    ...(row.provider_local === null ? {} : { providerLocal: row.provider_local === 1 }),
+    ...(row.provider_endpoint ? { providerEndpoint: row.provider_endpoint } : {}),
+    ...(row.consent_acknowledged_at ? { consentAcknowledgedAt: row.consent_acknowledged_at } : {}),
   };
 }
 
@@ -91,11 +98,19 @@ export interface NovaFollowUpInput {
   providerId: ProviderId;
   model?: string;
   delayMinutes: number;
+  /** Whether the provider ran on this device when the follow-up was set. */
+  providerLocal: boolean;
+  /** The endpoint of Ollama or LM Studio then. */
+  providerEndpoint?: string;
+  /** When the admin consented to a hosted provider for this follow-up. */
+  consentAcknowledgedAt?: string;
 }
 
 export interface NovaFollowUpsOptions {
   /** Records audit events; keeps them when the audit log cannot take them now. Never throws. */
   audit: (events: AuditLogEventSeed[]) => void;
+  /** Records audit events that must be on disk before data is deleted; throws when they are not. Defaults to `audit`. */
+  auditDurably?: (events: AuditLogEventSeed[]) => void;
   assertWritable?: (tenantId: string, what: string) => void;
   clock?: () => Date;
 }
@@ -122,17 +137,23 @@ export interface NovaFollowUpFireContext {
   tenantConnected: boolean;
   activeProviderId: ProviderId;
   activeModel?: string;
+  /** Whether the active provider runs on this device now. */
+  activeProviderLocal?: boolean;
+  /** The endpoint of the active Ollama or LM Studio now. */
+  activeProviderEndpoint?: string;
   /** The IT policy still allows the follow-up's provider and model. Absent counts as allowed. */
   providerAllowed?: boolean;
 }
 
 /**
  * Whether a due follow-up runs: only in the organization it was set in,
- * while that is active and connected, with the same provider and model,
- * and within an hour of its time.
+ * while that is active and connected, with the same provider and model
+ * running where it ran then (on this device or not, at the same endpoint),
+ * and within an hour of its time. A follow-up that does not record where
+ * its provider ran does not run.
  */
 export function novaFollowUpFireDecision(
-  followUp: Pick<NovaFollowUp, "tenantId" | "organizationId" | "providerId" | "model" | "dueAt">,
+  followUp: Pick<NovaFollowUp, "tenantId" | "organizationId" | "providerId" | "model" | "dueAt" | "providerLocal" | "providerEndpoint">,
   context: NovaFollowUpFireContext,
 ): "run" | "missed" | "skipped-organization" | "skipped-provider" {
   if (context.now.getTime() - Date.parse(followUp.dueAt) > NOVA_FOLLOW_UP_LATE_MS) return "missed";
@@ -140,6 +161,8 @@ export function novaFollowUpFireDecision(
   if (followUp.organizationId && context.activeOrganizationId !== followUp.organizationId) return "skipped-organization";
   if (context.providerAllowed === false) return "skipped-provider";
   if (context.activeProviderId !== followUp.providerId || (context.activeModel ?? undefined) !== (followUp.model ?? undefined)) return "skipped-provider";
+  if (followUp.providerLocal === undefined || context.activeProviderLocal !== followUp.providerLocal) return "skipped-provider";
+  if ((followUp.providerEndpoint ?? undefined) !== (context.activeProviderEndpoint ?? undefined)) return "skipped-provider";
   return "run";
 }
 
@@ -160,12 +183,19 @@ export class NovaFollowUps {
       created_at TEXT NOT NULL,
       finished_at TEXT,
       conversation_id TEXT,
-      reason TEXT
+      reason TEXT,
+      provider_local INTEGER,
+      provider_endpoint TEXT,
+      consent_acknowledged_at TEXT
     );
     CREATE INDEX IF NOT EXISTS nova_followups_due ON nova_followups (status, due_at);
     -- When each follow-up was set, for the daily limit. Only times, no
     -- tenant data: kept through pruning and Disconnect, and dropped after a day.
     CREATE TABLE IF NOT EXISTS nova_followup_creations (created_at TEXT NOT NULL);`);
+    // Tables from builds before these columns existed get them; their rows run nowhere (see the fire decision).
+    const columns = new Set((db.prepare("PRAGMA table_info(nova_followups)").all() as { name: string }[]).map((column) => column.name));
+    for (const [name, type] of [["provider_local", "INTEGER"], ["provider_endpoint", "TEXT"], ["consent_acknowledged_at", "TEXT"]] as const)
+      if (!columns.has(name)) db.exec(`ALTER TABLE nova_followups ADD COLUMN ${name} ${type}`);
   }
 
   /** Throws the designed refusal when a new follow-up with this delay would be over a limit. */
@@ -194,11 +224,14 @@ export class NovaFollowUps {
       dueAt: new Date(now.getTime() + Math.round(input.delayMinutes) * 60_000).toISOString(),
       status: "pending",
       createdAt: now.toISOString(),
+      providerLocal: input.providerLocal,
+      ...(input.providerEndpoint ? { providerEndpoint: input.providerEndpoint } : {}),
+      ...(input.consentAcknowledgedAt ? { consentAcknowledgedAt: input.consentAcknowledgedAt } : {}),
     };
     this.db
-      .prepare(`INSERT INTO nova_followups (id, tenant_id, organization_id, question, provider_id, model, due_at, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`)
-      .run(followUp.id, followUp.tenantId, followUp.organizationId ?? null, followUp.question, followUp.providerId, followUp.model ?? null, followUp.dueAt, followUp.createdAt);
+      .prepare(`INSERT INTO nova_followups (id, tenant_id, organization_id, question, provider_id, model, due_at, status, created_at, provider_local, provider_endpoint, consent_acknowledged_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`)
+      .run(followUp.id, followUp.tenantId, followUp.organizationId ?? null, followUp.question, followUp.providerId, followUp.model ?? null, followUp.dueAt, followUp.createdAt, input.providerLocal ? 1 : 0, input.providerEndpoint ?? null, input.consentAcknowledgedAt ?? null);
     this.db.prepare("INSERT INTO nova_followup_creations (created_at) VALUES (?)").run(followUp.createdAt);
     this.record(followUp, "created");
     this.prune(followUp.tenantId);
@@ -275,7 +308,8 @@ export class NovaFollowUps {
     const events = rows
       .filter((row) => row.status === "pending" || row.status === "running")
       .map((row) => this.event({ ...followUpOf(row), status: "cancelled", reason: "The organization was disconnected." }, "cancelled"));
-    if (events.length > 0) this.options.audit(events);
+    // On disk before the rows go; otherwise this throws and Disconnect retries the cleanup.
+    if (events.length > 0) (this.options.auditDurably ?? this.options.audit)(events);
     this.db.prepare("DELETE FROM nova_followups WHERE tenant_id = ?").run(tenantId);
     return rows.length;
   }
@@ -307,6 +341,8 @@ export class NovaFollowUps {
         dueAt: followUp.dueAt,
         providerId: followUp.providerId,
         ...(followUp.model ? { model: followUp.model } : {}),
+        ...(followUp.providerLocal === undefined ? {} : { providerLocal: followUp.providerLocal }),
+        ...(followUp.providerEndpoint ? { providerEndpoint: followUp.providerEndpoint } : {}),
         status: change === "created" ? "pending" : change === "started" ? "running" : change,
         ...(followUp.conversationId ? { conversationId: followUp.conversationId } : {}),
         ...(followUp.reason ? { reason: followUp.reason } : {}),
