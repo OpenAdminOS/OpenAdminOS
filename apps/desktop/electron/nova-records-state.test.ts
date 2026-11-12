@@ -94,6 +94,33 @@ describe("Nova notes and follow-ups in the store", () => {
     }
   });
 
+  it("announces every note change made from a Nova card and every expiry", async () => {
+    let now = new Date();
+    const reasons: string[] = [];
+    const { store, dir } = await makeStore({ clock: () => now, extra: { onStateChanged: ({ reason }) => reasons.push(reason) } });
+    try {
+      const notes = store.novaNotesHost();
+      const count = () => reasons.filter((reason) => reason === "nova-records-changed").length;
+      const first = await notes.propose({ tenantId: contoso.id, text: "Kiosks are in Berlin", source: "user-said" });
+      assert.equal(count(), 1);
+      await notes.confirm(first.id, contoso.id);
+      assert.equal(count(), 2);
+      await notes.forget(first.id);
+      assert.equal(count(), 3);
+      const second = await notes.propose({ tenantId: contoso.id, text: "Laptops are in Munich", source: "nova-proposed" });
+      await notes.discardProposed(second.id);
+      assert.equal(count(), 5);
+      await notes.propose({ tenantId: contoso.id, text: "Printers are in Hamburg", source: "nova-proposed" });
+      now = new Date(now.getTime() + 31 * 24 * 60 * 60_000);
+      const before = count();
+      await store.fireDueNovaFollowUps();
+      assert.equal(count(), before + 1, "the expiry is announced");
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("gives no notes to a prompt when the IT policy turns notes off", async () => {
     const { store, dir } = await makeStore({ policy: await policyOf({ novaMemory: "off" }) });
     try {

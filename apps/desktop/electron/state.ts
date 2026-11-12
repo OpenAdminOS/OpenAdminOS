@@ -7233,6 +7233,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
   /** Nova's note store, for its action host. Notes are read and written for the given tenant only. */
   novaNotesHost(): NonNullable<import("./nova-actions.js").NovaActionHost["notes"]> {
+    // Every change from a Nova card is announced, so an open Settings page lists it.
+    const changed = <T>(value: T): T => {
+      this.emitStateChanged("nova-records-changed");
+      return value;
+    };
     return {
       promptNotes: async (tenantId) => {
         const { effective } = await this.novaProfile();
@@ -7242,7 +7247,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         const persisted = await this.read();
         if (persisted.activeTenantId !== input.tenantId) throw new Error("The active organization changed. Nothing was stored.");
         const organizationId = organizationForTenant(persisted.organizations ?? [], input.tenantId)?.id;
-        return this.novaMemory.propose({ ...input, ...(organizationId ? { organizationId } : {}) });
+        return changed(this.novaMemory.propose({ ...input, ...(organizationId ? { organizationId } : {}) }));
       },
       confirm: async (id, tenantId) => {
         const { effective } = await this.novaProfile();
@@ -7251,10 +7256,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         if (persisted.activeTenantId !== tenantId) throw new Error(NOVA_ORGANIZATION_CHANGED);
         if (!effective.memoryEnabled) throw new NovaMemoryError(managedNovaMemoryOff(this.managedPolicy) ? NOVA_NOTES_OFF_BY_POLICY : "Nova notes are paused. Resume them in Settings, Nova, then confirm again.");
         if (this.novaMemory.get(id)?.tenantId !== tenantId) throw new NovaMemoryError("That note belongs to another organization or is gone. Reopen Settings, Nova.");
-        return this.novaMemory.confirm(id);
+        return changed(this.novaMemory.confirm(id));
       },
-      forget: async (id) => this.novaMemory.forget(id),
-      discardProposed: async (id) => this.novaMemory.discardProposed(id),
+      forget: async (id) => changed(this.novaMemory.forget(id)),
+      discardProposed: async (id) => changed(this.novaMemory.discardProposed(id)),
     };
   }
 
@@ -7338,7 +7343,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     this.novaFollowUpsFiring = true;
     try {
       try {
-        this.novaMemory.expire();
+        if (this.novaMemory.expire() > 0) this.emitStateChanged("nova-records-changed");
       } catch (error) {
         console.warn("[nova] proposed notes could not be expired", errorText(error));
       }
