@@ -11,6 +11,7 @@ import type { TokenCacheStorage } from "@openadminos/runtime";
 import { loadManagedPolicy } from "./managed-policy.js";
 import { MCP_CATALOG } from "./mcp/catalog.js";
 import { NOVA_PROFILE_CHANGED, prepareNovaProfileChange, type NovaActionHost } from "./nova-actions.js";
+import { NOVA_NOTES_OFF_BY_POLICY } from "./nova-memory.js";
 import { AppStateStore } from "./state.js";
 
 const tokenStore: TokenCacheStorage = { read: async () => "", write: async () => undefined };
@@ -96,7 +97,8 @@ describe("Nova notes and follow-ups in the store", () => {
     try {
       const notes = store.novaNotesHost();
       const note = await notes.propose({ tenantId: contoso.id, text: "Kept but unused", source: "user-said" });
-      await notes.confirm(note.id);
+      // Confirming is refused at the write while IT turns notes off.
+      await assert.rejects(notes.confirm(note.id, contoso.id), { message: NOVA_NOTES_OFF_BY_POLICY });
       assert.deepEqual(await notes.promptNotes(contoso.id), []);
       assert.equal((await store.handleNovaRecords({ action: "list" })).notes.length, 1);
     } finally {
@@ -135,7 +137,7 @@ describe("Nova notes and follow-ups in the store", () => {
     const { store, dir, dbPath, statePath } = await makeStore();
     try {
       const note = await store.novaNotesHost().propose({ tenantId: contoso.id, text: "Kiosks are in Berlin", source: "user-said" });
-      await store.novaNotesHost().confirm(note.id);
+      await store.novaNotesHost().confirm(note.id, contoso.id);
       const state = await store.getAppState();
       const model = state.providers.find((entry) => entry.id === state.activeProviderId)?.models?.[0];
       await store.novaFollowUpsHost().create({ tenantId: contoso.id, question: "Check compliance", providerId: state.activeProviderId, ...(model ? { model } : {}), delayMinutes: 30 });
@@ -201,6 +203,28 @@ describe("Nova notes and follow-ups in the store", () => {
       const done = (await store.handleNovaRecords({ action: "list" })).followUps.find((entry) => entry.id === followUp.id);
       assert.equal(done?.status, "skipped-provider");
       assert.match(done?.reason ?? "", /IT department no longer allows this provider/);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("Nova records of another organization", () => {
+  it("refuses to confirm, edit or forget another organization's note, or cancel its follow-up", async () => {
+    const { store, dir, dbPath } = await makeStore();
+    try {
+      await store.handleNovaRecords({ action: "list" });
+      const db = new DatabaseSync(dbPath);
+      db.prepare("INSERT INTO nova_memory_notes (id, tenant_id, organization_id, text, review_state, source, created_at) VALUES ('note_other', 'tenant-other', 'org-other', 'Other note', 'proposed', 'user-said', ?)").run(new Date().toISOString());
+      db.prepare("INSERT INTO nova_followups (id, tenant_id, organization_id, question, provider_id, due_at, status, created_at, provider_local) VALUES ('followup_other', 'tenant-other', 'org-other', 'Check', 'ollama', ?, 'pending', ?, 1)").run(new Date(Date.now() + 3_600_000).toISOString(), new Date().toISOString());
+      db.close();
+      for (const request of [{ action: "note-confirm", id: "note_other" }, { action: "note-edit", id: "note_other", text: "Mine now" }, { action: "note-forget", id: "note_other" }])
+        await assert.rejects(store.handleNovaRecords(request), /another organization or is gone/);
+      await assert.rejects(store.handleNovaRecords({ action: "follow-up-cancel", id: "followup_other" }), /another organization or is gone/);
+      await assert.rejects(store.novaNotesHost().confirm("note_other", contoso.id), /another organization or is gone/);
+      const view = await store.handleNovaRecords({ action: "list" });
+      assert.deepEqual([view.notes.length, view.followUps.length], [0, 0]);
     } finally {
       store.close();
       await rm(dir, { recursive: true, force: true });
@@ -281,6 +305,37 @@ describe("a Nova follow-up run", () => {
       assert.deepEqual(rows.map((row) => `${row.type}:${row.initiator}`), ["nova.followup.created:person", "nova.followup.started:schedule", "nova.followup.completed:schedule"]);
       assert.ok(streams >= 1, "the follow-up asked the model");
     } finally {
+      close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not ask a local provider that now runs at another endpoint, and records no started event for it", async () => {
+    let now = new Date();
+    const { store, dir, dbPath } = await makeStore({ clock: () => now, extra: { providerListFactory: providers, graphFactory: graph([]) } });
+    const before = process.env.OPENAGENTS_OLLAMA_URL;
+    let closed = false;
+    const close = () => { if (!closed) { closed = true; store.close(); } };
+    try {
+      const followUp = await store.novaFollowUpsHost().create({ tenantId: contoso.id, question: "Check device compliance", providerId: "ollama", model: "test", delayMinutes: 1 });
+      assert.equal(followUp.providerLocal, true);
+      // Same provider id and model, now pointed off this device.
+      process.env.OPENAGENTS_OLLAMA_URL = "https://ollama.example.com";
+      now = new Date(now.getTime() + 61_000);
+      const conversations = (await store.listIntuneChatConversations()).length;
+      await store.fireDueNovaFollowUps();
+      const done = (await store.handleNovaRecords({ action: "list" })).followUps.find((entry) => entry.id === followUp.id);
+      assert.equal(done?.status, "skipped-provider");
+      assert.match(done?.reason ?? "", /runs somewhere else/);
+      assert.equal((await store.listIntuneChatConversations()).length, conversations);
+      close();
+      const db = new DatabaseSync(dbPath, { readOnly: true });
+      const types = (db.prepare("SELECT type FROM audit_log WHERE type LIKE 'nova.followup.%' ORDER BY seq").all() as { type: string }[]).map((row) => row.type);
+      db.close();
+      assert.deepEqual(types, ["nova.followup.created", "nova.followup.skipped"]);
+    } finally {
+      if (before === undefined) delete process.env.OPENAGENTS_OLLAMA_URL;
+      else process.env.OPENAGENTS_OLLAMA_URL = before;
       close();
       await rm(dir, { recursive: true, force: true });
     }

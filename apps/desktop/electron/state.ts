@@ -305,8 +305,8 @@ import {
 } from "./registry-client.js";
 import { IntelligenceSqliteStore, type HostedProviderConsentAuditRecord } from "./intune-chat/sqlite-store.js";
 import { NOVA_NOTES_OFF_BY_POLICY, NOVA_RECORDS_UNAVAILABLE, NovaMemory, NovaMemoryError, openNovaDatabase } from "./nova-memory.js";
-import { NOVA_FOLLOW_UP_PROVIDER_NOT_ALLOWED, novaFollowUpFireDecision, NovaFollowUpError, NovaFollowUps } from "./nova-followups.js";
-import { NOVA_FOLLOW_UP_PROVIDER_CHANGED } from "./nova-actions.js";
+import { NOVA_FOLLOW_UP_PROVIDER_MOVED, NOVA_FOLLOW_UP_PROVIDER_NOT_ALLOWED, novaFollowUpFireDecision, NovaFollowUpError, NovaFollowUps } from "./nova-followups.js";
+import { NOVA_FOLLOW_UP_PROVIDER_CHANGED, NOVA_ORGANIZATION_CHANGED, NOVA_VOICE_CONSENT_NOT_KEPT } from "./nova-actions.js";
 import {
   AUDIT_CHAIN_START_HASH,
   AUDIT_LOG_RETENTION_DAYS,
@@ -1767,6 +1767,16 @@ function errorText(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
 
+/**
+ * Where a local-capable provider is reached, for Nova follow-ups: Ollama
+ * and LM Studio can be pointed off this device under the same provider id.
+ */
+function novaProviderEndpoint(providerId: ProviderId): string | undefined {
+  if (providerId === "ollama") return resolveOllamaEndpoint().replace(/\/$/, "");
+  if (providerId === "lm-studio") return resolveLmStudioEndpoint().replace(/\/$/, "");
+  return undefined;
+}
+
 export class AppStateStore {
   /**
    * The lifecycle of each tenant (open, closing, removed) and the one place
@@ -2240,9 +2250,10 @@ export class AppStateStore {
     try {
       db = this.openNovaDatabaseAt(this.novaDatabasePath);
       const audit = (events: AuditLogEventSeed[]) => this.recordNovaAudit(events);
+      const auditDurably = (events: AuditLogEventSeed[]) => this.recordAuditDurably(events);
       const assertWritable = (tenantId: string, what: string) => this.tenantLifecycle.assertWritable(tenantId, what);
-      const memory = new NovaMemory(db, { audit, assertWritable, clock: () => this.clock() });
-      const followUps = new NovaFollowUps(db, { audit, assertWritable, clock: () => this.clock() });
+      const memory = new NovaMemory(db, { audit, auditDurably, assertWritable, clock: () => this.clock() });
+      const followUps = new NovaFollowUps(db, { audit, auditDurably, assertWritable, clock: () => this.clock() });
       // A follow-up still marked running was cut off by a quit; it did not finish.
       try {
         followUps.recoverInterrupted();
@@ -7121,16 +7132,38 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       },
       createdAt: input.acknowledgedAt,
     };
+    let keptInChat = false;
     try {
-      this.intelligenceStore?.recordHostedProviderConsentAuditEvent(consent);
+      if (this.intelligenceStore) {
+        this.intelligenceStore.recordHostedProviderConsentAuditEvent(consent);
+        keptInChat = true;
+      }
     } catch (error) {
       console.warn("[audit] the Chat database could not keep a Nova voice consent", error);
     }
-    this.recordHostedProviderConsent(consent);
+    const kept = this.recordHostedProviderConsent(consent);
+    // Audio, instructions and notes go to OpenAI only with the consent on this device.
+    if (!keptInChat && !kept) throw new Error(NOVA_VOICE_CONSENT_NOT_KEPT);
   }
 
   private activeOrganizationIdOf(persisted: PersistedState): string | undefined {
     return organizationForTenant(persisted.organizations ?? [], persisted.activeTenantId)?.id;
+  }
+
+  /**
+   * Like `recordNovaAudit`, for events that must be on disk before the data
+   * they describe is deleted: throws when the audit log refused them and the
+   * pending file could not keep them either.
+   */
+  private recordAuditDurably(events: AuditLogEventSeed[]): void {
+    if (events.length === 0) return;
+    try {
+      this.auditLog.appendOrKeep(events);
+    } catch (error) {
+      this.noteAuditLogFailure(error);
+      if (!this.auditLog.pendingPersisted()) throw new Error(`The audit log could not record this, and this device could not keep the events either. Nothing was deleted. ${errorText(error)}`);
+      console.warn(`[audit] Nova events are kept on this device until the audit log can record them. ${errorText(error)}`);
+    }
   }
 
   /** Nova's audit events go to the audit log, or stay pending on this device when it cannot take them now. */
@@ -7206,7 +7239,15 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         const organizationId = organizationForTenant(persisted.organizations ?? [], input.tenantId)?.id;
         return this.novaMemory.propose({ ...input, ...(organizationId ? { organizationId } : {}) });
       },
-      confirm: async (id) => this.novaMemory.confirm(id),
+      confirm: async (id, tenantId) => {
+        const { effective } = await this.novaProfile();
+        const persisted = await this.read();
+        // Checked with no wait before the write: a switch in between refuses the click.
+        if (persisted.activeTenantId !== tenantId) throw new Error(NOVA_ORGANIZATION_CHANGED);
+        if (!effective.memoryEnabled) throw new NovaMemoryError(managedNovaMemoryOff(this.managedPolicy) ? NOVA_NOTES_OFF_BY_POLICY : "Nova notes are paused. Resume them in Settings, Nova, then confirm again.");
+        if (this.novaMemory.get(id)?.tenantId !== tenantId) throw new NovaMemoryError("That note belongs to another organization or is gone. Reopen Settings, Nova.");
+        return this.novaMemory.confirm(id);
+      },
       forget: async (id) => this.novaMemory.forget(id),
       discardProposed: async (id) => this.novaMemory.discardProposed(id),
     };
@@ -7232,9 +7273,19 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const model = resolveProviderDefaultModel(provider, state.activeModelByProviderId).model;
     if (state.activeProviderId !== input.providerId || model !== input.model) throw new Error(NOVA_FOLLOW_UP_PROVIDER_CHANGED);
     const organizationId = state.activeOrganizationId;
-    const followUp = this.novaFollowUps.create({ ...input, ...(organizationId ? { organizationId } : {}) });
-    if (provider && !provider.isLocal) {
-      const acknowledgedAt = this.clock().toISOString();
+    const hosted = !provider?.isLocal;
+    const acknowledgedAt = this.clock().toISOString();
+    const endpoint = novaProviderEndpoint(input.providerId);
+    // Where the provider runs is part of the follow-up: a local provider
+    // moved off this device later does not get the question.
+    const followUp = this.novaFollowUps.create({
+      ...input,
+      ...(organizationId ? { organizationId } : {}),
+      providerLocal: !hosted,
+      ...(endpoint ? { providerEndpoint: endpoint } : {}),
+      ...(hosted ? { consentAcknowledgedAt: acknowledgedAt } : {}),
+    });
+    if (provider && hosted) {
       const consent: HostedProviderConsentAuditRecord = {
         id: `event_${randomUUID()}`,
         tenantId: input.tenantId,
@@ -7244,6 +7295,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           providerId: input.providerId,
           providerName: provider.name,
           ...(input.model ? { model: input.model } : {}),
+          ...(endpoint ? { endpoint } : {}),
           followUpId: followUp.id,
           dueAt: followUp.dueAt,
           acknowledgedAt,
@@ -7278,20 +7330,22 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       } catch (error) {
         console.warn("[nova] proposed notes could not be expired", errorText(error));
       }
-      for (const followUp of this.novaFollowUps.due()) {
-        if (!this.novaFollowUps.claim(followUp.id)) continue;
-        await this.runNovaFollowUp(followUp);
-      }
+      for (const followUp of this.novaFollowUps.due()) await this.runNovaFollowUp(followUp);
     } catch (error) {
-      console.warn("[nova] follow-ups could not be checked", errorText(error));
+      // An unusable openadminos.db was reported once when it failed to open.
+      if (!(error instanceof NovaMemoryError && error.message === NOVA_RECORDS_UNAVAILABLE))
+        console.warn("[nova] follow-ups could not be checked", errorText(error));
     } finally {
       this.novaFollowUpsFiring = false;
     }
   }
 
   private async runNovaFollowUp(followUp: import("@openadminos/agent-sdk").NovaFollowUp): Promise<void> {
+    // Decided on the pending row: a skipped or missed follow-up is never
+    // marked running and has no started event.
+    let from: "pending" | "running" = "pending";
     const finish = (status: "completed" | "skipped-organization" | "skipped-provider" | "missed" | "failed", detail: { conversationId?: string; reason?: string } = {}) => {
-      this.novaFollowUps.finish(followUp.id, status, { ...detail, from: "running" });
+      this.novaFollowUps.finish(followUp.id, status, { ...detail, from });
       this.emitStateChanged("nova-records-changed");
     };
     try {
@@ -7307,17 +7361,26 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         tenantConnected: state.tenants.some((tenant) => tenant.id === followUp.tenantId) && this.tenantLifecycle.isWritable(followUp.tenantId),
         activeProviderId: state.activeProviderId,
         ...(activeModel ? { activeModel } : {}),
+        activeProviderLocal: provider?.isLocal === true,
+        ...(novaProviderEndpoint(state.activeProviderId) ? { activeProviderEndpoint: novaProviderEndpoint(state.activeProviderId) } : {}),
         providerAllowed,
       });
       if (decision === "skipped-provider" && !providerAllowed) return finish(decision, { reason: NOVA_FOLLOW_UP_PROVIDER_NOT_ALLOWED });
+      if (decision === "skipped-provider" && state.activeProviderId === followUp.providerId &&
+          ((provider?.isLocal === true) !== followUp.providerLocal || (followUp.providerEndpoint ?? undefined) !== novaProviderEndpoint(followUp.providerId)))
+        return finish(decision, { reason: NOVA_FOLLOW_UP_PROVIDER_MOVED });
       if (decision !== "run") return finish(decision);
+      // Claimed with no wait after the decision; the started event is recorded now, right before Chat is asked.
+      if (!this.novaFollowUps.claim(followUp.id)) return;
+      from = "running";
       const result = await this.withTenantLease(followUp.tenantId, (signal) =>
         this.chatService.streamIntuneChatMessage(
           {
             content: followUp.question,
             refreshIfStale: true,
-            ...(provider && !provider.isLocal
-              ? { hostedProviderConsent: { tenantId: followUp.tenantId, providerId: followUp.providerId, ...(followUp.model ? { model: followUp.model } : {}), acknowledgedAt: this.clock().toISOString() } }
+            // The consent is the one given with the click on the card, for this provider where it ran then.
+            ...(followUp.providerLocal === false && followUp.consentAcknowledgedAt
+              ? { hostedProviderConsent: { tenantId: followUp.tenantId, providerId: followUp.providerId, ...(followUp.model ? { model: followUp.model } : {}), acknowledgedAt: followUp.consentAcknowledgedAt } }
               : {}),
           },
           () => undefined,
@@ -9479,17 +9542,23 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * not part of state. The Chat database keeps it too, so a failed append
    * is imported by the next record.
    */
-  private recordHostedProviderConsent(consent: HostedProviderConsentAuditRecord): void {
+  /**
+   * Records a hosted-provider consent in the audit log. Returns whether it
+   * is on disk: recorded, or kept in the pending file.
+   */
+  private recordHostedProviderConsent(consent: HostedProviderConsentAuditRecord): boolean {
     const persisted = this.lastReadSnapshot;
     const context = auditLogContext(persisted ?? { tenants: [], installedAgents: [] });
     try {
       // Kept with the pending audit events when the append fails, so the
       // consent survives even when the Chat database could not keep it either.
       this.auditLog.appendOrKeep([hostedProviderConsentAuditEvent(consent, context)]);
+      return true;
     } catch (error) {
       this.auditConsentsPending = true;
       this.noteAuditLogFailure(error);
       console.warn(`[audit] a hosted-provider consent is kept on this device until the audit log can record it. ${errorText(error)}`);
+      return this.auditLog.pendingPersisted();
     }
   }
 

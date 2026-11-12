@@ -77,6 +77,28 @@ describe("Nova abilities are enforced in code", () => {
     await assert.rejects(prepareNovaAction("send this via Slack", "Report", state, f.host), /by your IT department/);
   });
 
+  it("opens the run page after a confirmed run only while Nova may open pages", async () => {
+    const on = host();
+    const prepared = await prepareNovaAction("run Find inactive devices", undefined, state, on.host);
+    assert.equal((await prepared!.execute(new AbortController().signal)).route, "/runs/run-1");
+    const off = host({ profile: { capabilities: { navigation: false } } });
+    const queued = await (await prepareNovaAction("run Find inactive devices", undefined, state, off.host))!.execute(new AbortController().signal);
+    assert.equal(queued.route, undefined);
+    assert.match(queued.text, /was queued/);
+    assert.equal(off.runs.length, 1);
+  });
+
+  it("shows connector sends as the click checks them, with the IT policy applied", () => {
+    // A saved switch the policy now overrides: Settings shows what the check does.
+    const effective = effectiveNovaProfile({ connectorSends: { slack: false } }, policy({ novaCapabilities: { connectorSends: true } }, ["novaCapabilities"]));
+    assert.deepEqual(effective.connectorSendStates?.slack, { allowed: true, locked: true });
+    const unlocked = effectiveNovaProfile({ connectorSends: { slack: false } }, undefined);
+    assert.deepEqual(unlocked.connectorSendStates?.slack, { allowed: false, locked: false });
+    assert.deepEqual(unlocked.connectorSendStates?.outlook, { allowed: true, locked: false });
+    const listed = effectiveNovaProfile(undefined, policy({ novaCapabilities: { connectorSends: ["outlook"] } }));
+    assert.deepEqual(listed.connectorSendStates?.slack, { allowed: false, locked: true });
+  });
+
   it("fails closed when the settings cannot be read", async () => {
     const f = host();
     f.fail();

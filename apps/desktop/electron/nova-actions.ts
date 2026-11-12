@@ -42,7 +42,8 @@ export interface NovaActionHost {
     promptNotes(tenantId: string): Promise<string[]>;
     /** Stores a note for review; it reaches no prompt until confirmed. */
     propose(input: { tenantId: string; text: string; source: NovaNoteSource; sessionId?: string; conversationId?: string; turnId?: string }): Promise<NovaNote>;
-    confirm(id: string): Promise<NovaNote>;
+    /** Confirms a proposed note of `tenantId`, refused unless that organization is still active at the write. */
+    confirm(id: string, tenantId: string): Promise<NovaNote>;
     forget(id: string): Promise<void>;
     /** Forgets a note only while it is still proposed: a note confirmed or edited in Settings meanwhile stays. */
     discardProposed(id: string): Promise<void>;
@@ -53,9 +54,16 @@ export interface NovaActionHost {
     check(delayMinutes: number): Promise<void>;
     create(input: { tenantId: string; question: string; providerId: ProviderId; model?: string; delayMinutes: number }): Promise<NovaFollowUp>;
   };
-  /** Records the consent to send audio and shared context to OpenAI for one voice session. Never throws. */
+  /**
+   * Records the consent to send audio and shared context to OpenAI for one
+   * voice session. Throws when no store kept it: the session does not start.
+   */
   recordVoiceConsent?(input: { tenantId: string; sessionId: string; acknowledgedAt: string; voiceModel: string; reasoningProviderId: ProviderId; reasoningModel?: string; includesProfile: boolean; includesMemory: boolean }): void;
 }
+
+/** Said when the consent for a hosted voice session could not be kept on this device. */
+export const NOVA_VOICE_CONSENT_NOT_KEPT =
+  'Nova could not record your consent on this device, so nothing was sent to OpenAI. Open Settings, Audit log, check that it can record, then start Nova again.';
 
 /** Said when Nova's settings cannot be read: Nova then does not act. */
 export const NOVA_SETTINGS_UNREADABLE =
@@ -163,7 +171,12 @@ export async function prepareNovaAction(text: string | NovaActionIntent, evidenc
       await assertStillActive(host, tenantId);
       await requireNovaCapability(host, 'startAgents');
       const run = await host.startRun(agent.slug, { tenantId, providerId: state.activeProviderId });
-      return { text: `${agent.name} was queued. Follow its progress in Runs; any required approvals remain in the app.`, route: `/runs/${run.id}` };
+      // The run page opens only while Nova may open pages; the run is queued either way.
+      const navigation = await readNovaSettings(host).then(({ profile, policy }) => novaCapabilityAllowed(profile, policy, 'navigation'), () => false);
+      return {
+        text: `${agent.name} was queued. Follow its progress in Runs; any required approvals remain in the app.`,
+        ...(navigation ? { route: `/runs/${run.id}` } : {}),
+      };
     }) };
   }
   const connector = (await host.connectors()).find(c => c.descriptor.id === intent.connectorId);
@@ -336,7 +349,7 @@ export async function prepareNovaNote(
       await assertStillActive(host, tenantId);
       const settings = await readNovaSettings(host);
       if (!settings.effective.memoryEnabled) throw new Error(novaNotesOffMessage(settings.effective));
-      await notes.confirm(note.id);
+      await notes.confirm(note.id, tenantId);
       return { text: `Nova will remember this in ${name} from the next conversation. Review notes in Settings, Nova.` };
     },
     cancel: () => notes.discardProposed(note.id),

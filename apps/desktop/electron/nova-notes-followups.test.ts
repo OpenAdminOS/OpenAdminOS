@@ -4,10 +4,10 @@ import { describe, it } from "node:test";
 import type { AppState, NovaProfile, SecretAccessor, SendIntuneChatMessageResult } from "@openadminos/agent-sdk";
 
 import type { AuditLogEventSeed } from "./audit-log.js";
-import { prepareNovaFollowUp, type NovaActionHost } from "./nova-actions.js";
+import { NOVA_VOICE_CONSENT_NOT_KEPT, prepareNovaFollowUp, type NovaActionHost } from "./nova-actions.js";
 import { NovaFollowUps } from "./nova-followups.js";
 import { NovaMemory, openNovaDatabase } from "./nova-memory.js";
-import { NOVA_SESSION_PROFILE_CHANGED, NovaService, type NovaChatOptions } from "./nova.js";
+import { NOVA_NOTES_UNREADABLE_NOTICE, NOVA_SESSION_PROFILE_CHANGED, NovaService, type NovaChatOptions } from "./nova.js";
 import { defaultNovaSettings } from "./nova-test-settings.js";
 import { novaCommand, parseNovaCommand } from "../src/shared/nova-command.js";
 
@@ -51,7 +51,7 @@ function fixture(options: { profile?: NovaProfile; memoryOff?: boolean } = {}) {
     },
     followUps: {
       check: async (minutes) => followUps.checkLimits(minutes),
-      create: async (input) => followUps.create({ ...input, organizationId: "org-a" }),
+      create: async (input) => followUps.create({ ...input, organizationId: "org-a", providerLocal: true }),
     },
   };
   const nova = new NovaService(
@@ -212,6 +212,84 @@ describe("Nova settings changed during a session", () => {
   });
 });
 
+describe("Nova hosted sessions after a settings change, without another question", () => {
+  it("ends the session when a note it received is forgotten or paused, and keeps it otherwise", async () => {
+    const f = fixture();
+    const note = f.memory.propose({ tenantId: "tenant-a", text: "Kiosks are in Berlin", source: "user-said" });
+    f.memory.confirm(note.id);
+    let sessionId = await start(f, "openai");
+    // A new note was not given to OpenAI, so it changes nothing.
+    f.memory.confirm(f.memory.propose({ tenantId: "tenant-a", text: "Laptops are in Munich", source: "user-said" }).id);
+    assert.equal(await f.nova.revalidateHostedSession(), false);
+    f.memory.forget(note.id);
+    assert.equal(await f.nova.revalidateHostedSession(), true);
+    await assert.rejects(f.nova.handle({ action: "answer", sessionId, text: "How many devices?" }), /Start a new conversation/);
+    sessionId = await start(f, "openai");
+    f.live.profile = { memoryPaused: true };
+    assert.equal(await f.nova.revalidateHostedSession(), true);
+    // A local session holds no prompt at OpenAI; it reads notes per answer instead.
+    f.live.profile = undefined;
+    sessionId = await start(f, "local");
+    f.live.profile = { instructions: "Answer in German." };
+    assert.equal(await f.nova.revalidateHostedSession(), false);
+    void sessionId;
+  });
+
+  it("ends the session when the settings cannot be read", async () => {
+    const f = fixture();
+    await start(f, "openai");
+    f.host.profile = async () => { throw new Error("state.json unreadable"); };
+    assert.equal(await f.nova.revalidateHostedSession(), true);
+  });
+});
+
+describe("Nova sends", () => {
+  it("refuses a connector Nova may not send to before any tenant research", async () => {
+    const f = fixture({ profile: { connectorSends: { slack: false } } });
+    f.host.connectors = async () => [{ descriptor: { id: "slack", name: "Slack" }, status: "connected", config: { defaultChannel: "C1" } }] as never;
+    const sessionId = await start(f);
+    const calls = f.chatOptions.length;
+    const answer = await f.nova.handle({ action: "answer", sessionId, text: "Send me the noncompliant devices via Slack" });
+    assert.match(answer.answerError ?? "", /Sending through Slack is turned off/);
+    assert.equal(f.chatOptions.length, calls, "no tenant research ran for a message that cannot be sent");
+  });
+});
+
+describe("Nova hosted voice consent", () => {
+  it("does not start hosted voice when the consent was kept nowhere", async () => {
+    const f = fixture();
+    f.host.recordVoiceConsent = () => { throw new Error(NOVA_VOICE_CONSENT_NOT_KEPT); };
+    await assert.rejects(start(f, "openai"), { message: NOVA_VOICE_CONSENT_NOT_KEPT });
+    assert.equal(f.requests.some((request) => request.url.includes("/live/sessions")), false, "nothing went to OpenAI");
+    delete f.host.recordVoiceConsent;
+    await assert.rejects(start(f, "openai"), { message: NOVA_VOICE_CONSENT_NOT_KEPT });
+    assert.equal(f.requests.length, 0);
+  });
+
+  it("records and watches only the notes that fit the hosted prompt", async () => {
+    // Long instructions and notes of three-byte characters leave room for only some notes.
+    const f = fixture({ profile: { instructions: "Answer with care. ".repeat(222).trim() } });
+    for (let index = 0; index < 6; index += 1) f.memory.confirm(f.memory.propose({ tenantId: "tenant-a", text: `Note ${index} ${"€".repeat(280)}`, source: "user-said" }).id);
+    await start(f, "openai");
+    const body = JSON.parse(f.requests.find((request) => request.url.includes("/live/sessions"))!.body!);
+    const sent = f.memory.list("tenant-a").filter((note) => body.session.instructions.includes(JSON.stringify(note.text).slice(1, -1)));
+    assert.equal(f.consents[0]!.includesMemory, sent.length > 0);
+    // Forgetting a note OpenAI never received does not end the session.
+    assert.ok(sent.length > 0, "some notes fit");
+    const unsent = f.memory.list("tenant-a").find((note) => !sent.some((entry) => entry.id === note.id));
+    assert.ok(unsent, "some notes did not fit");
+    f.memory.forget(unsent.id);
+    assert.equal(await f.nova.revalidateHostedSession(), false);
+  });
+
+  it("tells the admin when the notes could not be read at the start", async () => {
+    const f = fixture();
+    f.host.notes!.promptNotes = async () => { throw new Error("openadminos.db locked"); };
+    const started = await f.nova.handle({ action: "start", mode: "local", tenantId: "tenant-a", consent: false });
+    assert.equal(started.notice, NOVA_NOTES_UNREADABLE_NOTICE);
+  });
+});
+
 describe("Nova follow-ups", () => {
   it("sets nothing until the click, then one read-only follow-up in the organization", async () => {
     const f = fixture();
@@ -238,7 +316,7 @@ describe("Nova follow-ups", () => {
     assert.notEqual(sends.pendingAction?.kind, "follow-up");
     const late = await f.nova.handle({ action: "answer", sessionId, text: "Check compliance again in 8 days" });
     assert.match(late.answerError!, /at most 7 days/);
-    for (let index = 0; index < 5; index += 1) f.followUps.create({ tenantId: "tenant-a", question: "Check", providerId: "ollama", delayMinutes: 60 });
+    for (let index = 0; index < 5; index += 1) f.followUps.create({ tenantId: "tenant-a", question: "Check", providerId: "ollama", delayMinutes: 60, providerLocal: true });
     const full = await f.nova.handle({ action: "answer", sessionId, text: "Check compliance again in an hour" });
     assert.match(full.answerError!, /already have 5 pending follow-ups/);
   });

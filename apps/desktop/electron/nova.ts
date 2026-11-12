@@ -1,14 +1,15 @@
 import { isNovaIntroduction, novaAudienceReply, NOVA_INTRODUCTION } from "../src/shared/nova-conversation.js";
 import { novaStopCommand } from "../src/shared/nova-transcript.js";
 import { novaContextualCommand, novaConnectorReply, novaDeliveryRequest, novaPages, novaClarifications, parseNovaCommand, type NovaCommand } from "../src/shared/nova-command.js";
-import { NOVA_SETTINGS_UNREADABLE, novaConnectorSetupIssue, prepareNovaAction, prepareNovaFollowUp, prepareNovaNote, prepareNovaProfileChange, readNovaSettings, requireNovaCapability, type NovaActionHost, type NovaSettings, type PreparedNovaAction } from "./nova-actions.js";
+import { NOVA_SETTINGS_UNREADABLE, NOVA_VOICE_CONSENT_NOT_KEPT, novaConnectorSetupIssue, prepareNovaAction, prepareNovaFollowUp, prepareNovaNote, prepareNovaProfileChange, readNovaSettings, requireNovaCapability, type NovaActionHost, type NovaSettings, type PreparedNovaAction } from "./nova-actions.js";
 import { novaAttention } from "./nova-attention.js";
 import { clipVoiceText } from "./intune-chat/voice-context.js";
 import { searchPublicWeb, type WebSearch } from "./intune-chat/web-search.js";
 import { randomUUID } from "node:crypto";
 import { managedNovaVoiceModeAllowed, resolveProviderDefaultModel } from "@openadminos/agent-sdk";
 import { ManagedPolicyError, novaVoiceModeNotAllowedMessage } from "./managed-policy.js";
-import { allowedNovaVoiceModes, NOVA_PROFILE_BLOCK_END, novaCapabilityAllowed, novaConnectorSendAllowed, novaProfilePromptBlock, type NovaProfilePromptInput } from "./nova-profile.js";
+import { allowedNovaVoiceModes, NOVA_PROFILE_BLOCK_END, novaCapabilityAllowed, novaCapabilityOffMessage, novaConnectorSendAllowed, novaProfilePromptParts, novaShortcutPromptIssue, type NovaProfilePromptInput } from "./nova-profile.js";
+import { NOVA_NOTES_UNREADABLE_NOTICE, NOVA_SESSION_PROFILE_CHANGED } from "../src/shared/nova-session.js";
 import type {
   AppState,
   ConnectorSummary,
@@ -58,14 +59,23 @@ function requireVoiceModeAllowed(state: AppState, mode: unknown): void {
   }
 }
 
-/** Said when a hosted voice session ends because its instructions or notes changed. */
-export const NOVA_SESSION_PROFILE_CHANGED =
-  "Nova settings or notes changed after this voice session started, so the session ended. OpenAI received the earlier instructions and notes at the start; a new session gets the current ones. Start Nova again.";
+export { NOVA_NOTES_UNREADABLE_NOTICE, NOVA_SESSION_PROFILE_CHANGED };
 
 /** The parts of the profile a hosted voice prompt carries, besides notes. */
 function hostedProfileKey(profile: Omit<NovaProfilePromptInput, "byteLimit">): string {
   const { instructions, instructionsSource, addendum } = profile.effective;
   return JSON.stringify([instructions, instructionsSource, addendum]);
+}
+
+/**
+ * Whether a hosted session was given something that is no longer so: other
+ * instructions, or a note now edited, forgotten, paused or turned off. A
+ * profile that cannot be read counts as changed.
+ */
+function hostedProfileChanged(hosted: { instructions: string; notes: string[] }, fresh: { profile?: Omit<NovaProfilePromptInput, "byteLimit">; notes: string[] } | undefined): boolean {
+  if (!fresh?.profile) return true;
+  const current = new Set(fresh.notes.map((note) => note.trim()));
+  return hostedProfileKey(fresh.profile) !== hosted.instructions || hosted.notes.some((note) => !current.has(note));
 }
 
 export class NovaService {
@@ -101,19 +111,39 @@ export class NovaService {
     settings?: NovaSettings;
     notes: string[];
     profile?: Omit<NovaProfilePromptInput, "byteLimit">;
+    notesUnreadable?: boolean;
   }> {
     const settings = this.actions ? await readNovaSettings(this.actions) : undefined;
     // Confirmed notes of this organization join the profile; proposed ones never do.
     let notes: string[] = [];
+    let notesUnreadable = false;
     if (settings?.effective.memoryEnabled && this.actions?.notes) {
       try {
         notes = await this.actions.notes.promptNotes(tenantId);
       } catch (error) {
+        notesUnreadable = true;
         console.warn("[nova] notes could not be read; Nova answers without them", error);
       }
     }
     const profile = settings ? { effective: settings.effective, ...(notes.length > 0 ? { notes } : {}) } : undefined;
-    return { ...(settings ? { settings } : {}), notes, ...(profile ? { profile } : {}) };
+    return { ...(settings ? { settings } : {}), notes, ...(profile ? { profile } : {}), ...(notesUnreadable ? { notesUnreadable } : {}) };
+  }
+
+  /**
+   * Ends the live hosted voice session when what it was given changed: its
+   * instructions, or a note it received that is now edited, forgotten,
+   * paused or turned off. The OpenAI prompt cannot be taken back, so the
+   * session stops instead. Called when Nova's settings or notes change.
+   * Returns true when it ended a session.
+   */
+  async revalidateHostedSession(): Promise<boolean> {
+    const session = this.session;
+    if (!session?.hostedProfile) return false;
+    const fresh = await this.readSessionProfile(session.tenantId).catch(() => undefined);
+    if (session !== this.session) return false;
+    if (!hostedProfileChanged(session.hostedProfile, fresh)) return false;
+    this.invalidate();
+    return true;
   }
 
   constructor(
@@ -202,9 +232,11 @@ export class NovaService {
           "Confirm hosted agent context sharing before starting Nova.",
         );
       // The profile shapes the prompts of this session; without it, Nova does not start.
-      const { settings, notes, profile } = await this.readSessionProfile(state.activeTenantId);
+      const { settings, profile, notesUnreadable } = await this.readSessionProfile(state.activeTenantId);
       if (generation !== this.generation) throw new Error("Nova was stopped or this question was replaced. Start a new conversation.");
-      const profileBlock = profile ? novaProfilePromptBlock({ ...profile, byteLimit: NOVA_VOICE_PROFILE_BYTE_LIMIT }) : "";
+      // Only the notes that fit the block are sent, recorded in the consent and watched for changes.
+      const { block: profileBlock, notes } = profile ? novaProfilePromptParts({ ...profile, byteLimit: NOVA_VOICE_PROFILE_BYTE_LIMIT }) : { block: "", notes: [] as string[] };
+      const notice = notesUnreadable ? { notice: NOVA_NOTES_UNREADABLE_NOTICE } : {};
       const greetingName = settings?.effective.greetingName || (typeof input.name === "string" ? input.name.trim().slice(0, 40) : "");
       this.session?.controller.abort();
       const session = {
@@ -222,7 +254,7 @@ export class NovaService {
       };
       this.session = session;
       try {
-        if (input.mode === "local") return { sessionId: session.id };
+        if (input.mode === "local") return { sessionId: session.id, ...notice };
         if (
           typeof input.sdp !== "string" ||
           input.sdp.length > 65536 ||
@@ -237,8 +269,9 @@ export class NovaService {
         const name = session.name;
         const connectors = await this.actions?.connectors().catch(() => undefined);
         session.controller.signal.throwIfAborted();
-        // The consent is in the audit log before audio or context is sent.
-        try {
+        // The consent is on this device before audio or context is sent; when no store kept it, nothing is sent.
+        if (this.actions && !this.actions.recordVoiceConsent) throw new Error(NOVA_VOICE_CONSENT_NOT_KEPT);
+        {
           this.actions?.recordVoiceConsent?.({
             tenantId: session.tenantId,
             sessionId: session.id,
@@ -247,10 +280,8 @@ export class NovaService {
             reasoningProviderId: session.providerId,
             ...(session.model ? { reasoningModel: session.model } : {}),
             includesProfile: profileBlock.length > 0,
-            includesMemory: notes.length > 0 && profileBlock.length > 0,
+            includesMemory: notes.length > 0,
           });
-        } catch (error) {
-          console.warn("[audit] the Nova voice consent could not be recorded", error);
         }
         const response = await this.request(
           "https://api.openai.com/v1/live/sessions",
@@ -287,7 +318,7 @@ export class NovaService {
             "OpenAI did not return an audio connection. Stop and retry.",
           );
         session.controller.signal.throwIfAborted();
-        return { sessionId: session.id, sdp: result.transport.sdp };
+        return { sessionId: session.id, sdp: result.transport.sdp, ...notice };
       } catch (error) {
         session.controller.abort();
         if (this.session === session) this.session = undefined;
@@ -314,12 +345,8 @@ export class NovaService {
       if (session !== this.session) throw new Error("Nova was stopped or this question was replaced. Start a new conversation.");
       // The hosted voice prompt cannot be taken back. When what it was given
       // changed or was removed, the session ends instead of using it further.
-      if (session.hostedProfile && fresh.profile && (
-        hostedProfileKey(fresh.profile) !== session.hostedProfile.instructions ||
-        session.hostedProfile.notes.some((note) => !fresh.notes.includes(note))
-      )) {
-        session.controller.abort();
-        this.session = undefined;
+      if (session.hostedProfile && hostedProfileChanged(session.hostedProfile, fresh)) {
+        this.invalidate();
         throw new Error(NOVA_SESSION_PROFILE_CHANGED);
       }
       if (fresh.profile) session.profile = fresh.profile;
@@ -491,6 +518,11 @@ export class NovaService {
         const name = command.name;
         const shortcut = shortcuts.find(entry => entry.name === name);
         if (!shortcut) return { text: `There is no shortcut named ${name}. Open Settings, Nova, to see your shortcuts.`, answerError: "Shortcut not found." };
+        // Checked again when it runs, in case it was saved by an older build.
+        if (novaShortcutPromptIssue(shortcut.prompt)) {
+          const refusal = `Shortcut ${shortcut.name} asks for more than a read-only answer, so Nova did not run it. Edit it in Settings, Nova.`;
+          return { text: refusal, answerError: refusal };
+        }
         // A shortcut is a saved read-only question: the research path, never a command.
         researchText = shortcut.prompt;
         onActivity?.({ kind: "action", status: "running", message: `Running shortcut ${shortcut.name}.` });
@@ -544,6 +576,16 @@ export class NovaService {
           session.commandContext = { request: JSON.stringify(intent).slice(0, 1200), at: Date.now() };
           return { text: setupIssue, answerError: setupIssue };
         }
+        // A connector Nova may not send to is refused before any tenant research for the message.
+        let sendRefusal: string | undefined;
+        try {
+          const { profile, policy } = await readNovaSettings(this.actions);
+          if (!novaConnectorSendAllowed(profile, policy, intent.connectorId)) sendRefusal = novaCapabilityOffMessage(policy, "connectorSends", connector?.descriptor.name);
+        } catch (error) {
+          sendRefusal = error instanceof Error ? error.message : NOVA_SETTINGS_UNREADABLE;
+        }
+        if (revision !== this.answerRevision || session !== this.session) throw new Error("This request was replaced.");
+        if (sendRefusal) return { text: sendRefusal, answerError: sendRefusal };
       }
       const voiceHistory = normalizeNovaHistory(input.history);
       const controller = new AbortController();

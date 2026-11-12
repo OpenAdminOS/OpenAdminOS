@@ -1,6 +1,7 @@
 import { runNotificationTitle, tokenCachePartition } from "./state-helpers.js";
 import { saveAuditLogExport } from "./save-audit-log-export.js";
 import { NovaService } from "./nova.js";
+import { NOVA_SESSION_ENDED_REASON } from "../src/shared/nova-session.js";
 import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
 import { officeFullscreen } from "./office-fullscreen.js";
 import { runOfficeRehearsal } from "./office-rehearsal.js";
@@ -309,6 +310,8 @@ let mainWindow: BrowserWindow | null = null;
 let companionWindow: BrowserWindow | null = null;
 let menuBarTray: Tray | null = null;
 let store: AppStateStore;
+/** The Nova service, once IPC is registered: settings changes check its live voice session. */
+let novaService: NovaService | undefined;
 const activeNotifications = new Set<Notification>();
 // Wall-clock timestamp of the most recent background registry refresh
 // attempt. Used to rate-limit focus-triggered refreshes so alt-tabbing
@@ -5704,7 +5707,7 @@ function registerIpcHandlers() {
       store.getMultiTenantAgentBatch(requireBoundedString(id, "batchId", 128)),
     ),
   );
-  const nova = new NovaService(
+  const nova = novaService = new NovaService(
     new SafeStorageProviderSecretStore(join(app.getPath("userData"), "providers", "secrets")).forProvider("nova"),
     () => store.getAppState(),
     (input, options) => store.streamIntuneChatMessage(input, event => options.onEvent?.(event), { ...options, voice: true }),
@@ -6992,6 +6995,12 @@ if (!gotLock) {
       },
       onStateChanged: (info) => {
         mainWindow?.webContents.send("openadminos:app-state-changed", info);
+        // A hosted voice session given instructions or notes that changed ends now, not at its next question.
+        if (info.reason === "nova-profile-changed" || info.reason === "nova-records-changed") {
+          void novaService?.revalidateHostedSession().then((ended) => {
+            if (ended) mainWindow?.webContents.send("openadminos:app-state-changed", { reason: NOVA_SESSION_ENDED_REASON });
+          }, (error: unknown) => console.warn("[nova] the voice session could not be checked after a settings change", error));
+        }
       },
       ...(isFirstRunCapture
         ? {
