@@ -1069,3 +1069,59 @@ describe("stop during a streamed reply", () => {
     } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
   });
 });
+
+// Criterion 7 of the Nova plan: a shortcut turn (a voice question) and a
+// follow-up run (a Chat question) reach this loop, and this loop is the
+// whole tool set they get. It offers only reads, and a request for any
+// send, start, note or write tool is refused before anything runs.
+describe("the tool set behind Nova shortcuts and follow-ups", () => {
+  const READ_TOOLS = new Set(["list_cached_resources", "query_cache", "find_graph_endpoint", "graph_get", "refresh_resource", "query_drift", "web_search"]);
+  const WRITE_ASKS = ["send_message", "connector_send", "start_run", "run_agent", "remember_note", "create_follow_up", "graph_post", "retire_managed_device"];
+
+  for (const voice of [true, false]) {
+    it(`offers only read tools and refuses send, run, note and write tools (${voice ? "shortcut turn, voice" : "follow-up run, Chat"})`, async () => {
+      const dir = await mkdtemp(join(tmpdir(), "openadminos-nova-tools-"));
+      const store = seededStore(dir);
+      try {
+        for (const asked of WRITE_ASKS) {
+          const methods: string[] = [];
+          const tools = toolContext(store);
+          tools.graphForScopes = async (): Promise<RunGraphApi> => ({
+            request: async (input: { method?: string }) => { methods.push(input.method ?? "GET"); return { value: [] }; },
+            listManagedDevices: async () => [],
+            retireManagedDevice: async () => { throw new Error("A Nova shortcut or follow-up must not write."); },
+          }) as RunGraphApi;
+          const systems: string[] = [];
+          const replies = [
+            JSON.stringify({ tool: asked, params: { to: "slack", text: "summary" } }),
+            JSON.stringify({ tool: "graph_get", params: { path: "/deviceManagement/managedDevices" } }),
+            JSON.stringify({ final: true, answer: "No devices are noncompliant." }),
+          ];
+          let index = 0;
+          const llm: RunLlmApi = {
+            available: true,
+            async complete(options) {
+              systems.push(options.system ?? "");
+              return { text: replies[Math.min(index++, replies.length - 1)]!, model: "test" };
+            },
+            async *stream() {},
+          };
+          const result = await runAgenticChat({ ...baseInput(store, llm), tools, ...(voice ? { voice: true } : {}) });
+          // Every tool the prompt offers is a read tool.
+          assert.ok(systems.length > 0);
+          for (const system of systems) {
+            const offered = [...system.matchAll(/^- ([a-z_]+)[: {]/gm)].map((match) => match[1]!);
+            assert.ok(offered.includes("graph_get"), `${asked}: the prompt lists its tools`);
+            for (const name of offered) assert.ok(READ_TOOLS.has(name), `${asked}: offered ${name}`);
+            assert.equal(system.includes(`- ${asked}`), false, `${asked} is not offered`);
+          }
+          // The asked-for tool never ran; only the read did, and only with GET.
+          const ran = (result.toolTrace ?? []).map((entry: { tool: string }) => entry.tool);
+          assert.equal(ran.includes(asked as never), false, `${asked} did not run: ${ran.join(", ")}`);
+          assert.ok(ran.includes("graph_get" as never), `${asked}: the read after the refusal ran`);
+          assert.ok(methods.every((method) => method === "GET"), `${asked}: ${methods.join(", ")}`);
+        }
+      } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+    });
+  }
+});
