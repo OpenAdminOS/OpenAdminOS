@@ -1074,6 +1074,9 @@ describe("stop during a streamed reply", () => {
 // follow-up run (a Chat question) reach this loop, and this loop is the
 // whole tool set they get. It offers only reads, and a request for any
 // send, start, note or write tool is refused before anything runs.
+// Scope: the built-in tools. MCP and Splashtop tools are not part of this
+// context; the Splashtop set is read-only and MCP servers are reference
+// servers, and a side-effecting tool added there needs its own test.
 describe("the tool set behind Nova shortcuts and follow-ups", () => {
   const READ_TOOLS = new Set(["list_cached_resources", "query_cache", "find_graph_endpoint", "graph_get", "refresh_resource", "query_drift", "web_search"]);
   const WRITE_ASKS = ["send_message", "connector_send", "start_run", "run_agent", "remember_note", "create_follow_up", "graph_post", "retire_managed_device"];

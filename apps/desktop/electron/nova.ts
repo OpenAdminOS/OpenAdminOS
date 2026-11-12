@@ -439,14 +439,15 @@ export class NovaService {
     if (input.action === "answer" || input.action === "decide-action") {
       // Settings and notes read now, not at session start: a note paused,
       // edited or forgotten in the meantime stays out of the next answer.
-      const [fresh, activeTenantId, endpoint] = await Promise.all([
-        this.readSessionProfile(session.tenantId),
+      const fresh = await this.readSessionProfile(session.tenantId);
+      // App state, the writable tenant and the endpoint are read after the
+      // settings and notes, so a reconnect, provider switch or endpoint save
+      // that landed during those reads is seen here.
+      const [current, activeTenantId, endpoint] = await Promise.all([
+        this.state(),
         this.writableActiveTenant(),
         this.providerEndpoint(session.providerId),
       ]);
-      // App state read after the settings, notes and endpoint reads, so a
-      // reconnect or provider switch that landed during them is seen here.
-      const current = await this.state();
       if (session !== this.session) throw new Error("Nova was stopped or this question was replaced. Start a new conversation.");
       // The same identity check as after a Connect, Disconnect or provider
       // save, made per request: a question or click that arrives before that

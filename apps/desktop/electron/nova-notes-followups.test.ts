@@ -519,6 +519,23 @@ describe("Nova hosted sessions after a settings change, without another question
     }
   });
 
+  it("refuses a question when the provider endpoint is saved while the request reads its notes", async () => {
+    const f = fixture();
+    let endpoint = "https://original.openai.azure.com#gpt";
+    f.host.providerEndpoint = async () => endpoint;
+    const sessionId = await start(f);
+    const read = f.host.profile;
+    f.host.profile = async (...args) => {
+      // The save lands after the request started its reads, so an endpoint
+      // read alongside the settings would still see the old resource.
+      await new Promise((resolve) => setImmediate(resolve));
+      endpoint = "https://different.openai.azure.com#gpt";
+      return read(...args);
+    };
+    await assert.rejects(f.nova.handle({ action: "answer", sessionId, text: "How many devices?" }), { message: NOVA_SESSION_CONTEXT_CHANGED });
+    assert.equal(f.chatOptions.length, 0, "nothing was asked");
+  });
+
   it("refuses a card click after the provider endpoint moved, before the endpoint check ran, and says what happened to the card", async () => {
     const f = fixture();
     let endpoint = "https://original.openai.azure.com#gpt";
