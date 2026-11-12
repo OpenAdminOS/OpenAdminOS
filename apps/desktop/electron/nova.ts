@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { managedNovaVoiceModeAllowed, resolveProviderDefaultModel } from "@openadminos/agent-sdk";
 import { ManagedPolicyError, novaVoiceModeNotAllowedMessage } from "./managed-policy.js";
 import { allowedNovaVoiceModes, NOVA_PROFILE_BLOCK_END, NOVA_PROFILE_BYTE_LIMIT, NOVA_PROFILE_SHORTENED_NOTICE, novaReasoningProfileByteLimit, novaCapabilityAllowed, novaCapabilityOffMessage, novaConnectorSendAllowed, novaProfilePromptParts, novaShortcutPromptIssue, type NovaProfilePromptInput } from "./nova-profile.js";
-import { NOVA_NOTES_UNREADABLE_NOTICE, NOVA_SESSION_PROFILE_CHANGED } from "../src/shared/nova-session.js";
+import { NOVA_NOTES_UNREADABLE_NOTICE, NOVA_SESSION_ENDED_BEFORE_CARD, NOVA_SESSION_PROFILE_CHANGED, novaEndedCardOutcome } from "../src/shared/nova-session.js";
 import type {
   AppState,
   ConnectorSummary,
@@ -413,6 +413,12 @@ export class NovaService {
       }
     }
     const session = this.session;
+    // A click on a card whose session already ended: nothing is carried out, and the reply says so.
+    if (input.action === "decide-action" && this.endedCard?.actionId === input.actionId && (!session || input.sessionId !== session.id)) {
+      const ended = this.endedCard;
+      this.endedCard = undefined;
+      throw new Error(`${NOVA_SESSION_ENDED_BEFORE_CARD} ${novaEndedCardOutcome(ended.kind)}`);
+    }
     if (
       !session ||
       input.sessionId !== session.id ||
@@ -433,8 +439,10 @@ export class NovaService {
       // The hosted voice prompt cannot be taken back. When what it was given
       // changed or was removed, the session ends instead of using it further.
       if (session.hostedProfile && hostedProfileChanged(session.hostedProfile, fresh)) {
+        const card = input.action === "decide-action" ? session.pendingAction : undefined;
         this.invalidate();
-        throw new Error(NOVA_SESSION_PROFILE_CHANGED);
+        this.endedCard = undefined;
+        throw new Error(card ? `${NOVA_SESSION_PROFILE_CHANGED} ${novaEndedCardOutcome(card.preview.kind)}` : NOVA_SESSION_PROFILE_CHANGED);
       }
       if (fresh.profile) session.profile = fresh.profile;
       else delete session.profile;
@@ -895,7 +903,12 @@ export class NovaService {
       );
     }
   }
+  /** The card that was waiting when the last session ended, so a late click on it says what happened. */
+  private endedCard?: { actionId: string; kind: import("@openadminos/agent-sdk").NovaActionKind };
+
   private invalidate() {
+    const pending = this.session?.pendingAction;
+    this.endedCard = pending ? { actionId: pending.preview.id, kind: pending.preview.kind } : undefined;
     this.generation++;
     this.answerRevision++;
     this.pendingAnswer?.abort();

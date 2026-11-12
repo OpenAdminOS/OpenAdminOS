@@ -11,6 +11,7 @@ import { NOVA_NOTES_UNREADABLE_NOTICE, NOVA_SESSION_PROFILE_CHANGED, NovaService
 import { defaultNovaSettings } from "./nova-test-settings.js";
 import { NOVA_PROFILE_SHORTENED_NOTICE, effectiveNovaProfile } from "./nova-profile.js";
 import { novaCommand, parseNovaCommand } from "../src/shared/nova-command.js";
+import { NOVA_SESSION_ENDED_BEFORE_CARD } from "../src/shared/nova-session.js";
 
 function fixture(options: { profile?: NovaProfile; memoryOff?: boolean } = {}) {
   const live = { profile: options.profile };
@@ -207,6 +208,32 @@ describe("Nova settings changed during a session", () => {
     await f.nova.handle({ action: "answer", sessionId, text: "How many macOS devices are there?" });
     assert.equal(f.chatOptions.length, calls + 1);
     assert.equal(f.chatOptions.at(-1)!.voiceProfile?.effective.instructions, "Answer in German.");
+  });
+
+  it("says what happened to a pending card when its hosted session ends because the settings changed", async () => {
+    const f = fixture();
+    let sessionId = await start(f, "openai");
+    let prepared = await f.nova.handle({ action: "answer", sessionId, text: "Remember that the Berlin office uses the Kiosk profile." });
+    assert.equal(prepared.pendingAction?.kind, "remember");
+    // Found at the click.
+    f.live.profile = { instructions: "Answer in German." };
+    await assert.rejects(
+      f.nova.handle({ action: "decide-action", sessionId, actionId: prepared.pendingAction!.id, approved: true }),
+      (error: Error) => error.message.startsWith(NOVA_SESSION_PROFILE_CHANGED) && /stays proposed in Settings, Nova/.test(error.message),
+    );
+    assert.equal(f.memory.list("tenant-a")[0]?.reviewState, "proposed", "the click did not confirm the note");
+    // Ended before the click, by the change itself.
+    f.live.profile = undefined;
+    sessionId = await start(f, "openai");
+    prepared = await f.nova.handle({ action: "answer", sessionId, text: "Check compliance again in an hour" });
+    assert.equal(prepared.pendingAction?.kind, "follow-up");
+    f.live.profile = { instructions: "Answer in English." };
+    assert.equal(await f.nova.revalidateHostedSession(), true);
+    await assert.rejects(
+      f.nova.handle({ action: "decide-action", sessionId, actionId: prepared.pendingAction!.id, approved: true }),
+      { message: `${NOVA_SESSION_ENDED_BEFORE_CARD} No follow-up was set.` },
+    );
+    assert.equal(f.followUps.list("tenant-a").length, 0);
   });
 
   it("ends a hosted session whose notes were forgotten or whose instructions changed, and keeps one that only gained a note", async () => {

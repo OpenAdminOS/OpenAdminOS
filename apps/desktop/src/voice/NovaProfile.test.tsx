@@ -151,6 +151,34 @@ it("reviews a note on its own card and shows pending follow-ups", async () => {
   await waitFor(() => expect(bridge.nova).toHaveBeenCalledWith({ action: "decide-action", sessionId: "voice-session", actionId: "n1", approved: true }, expect.any(Function)));
 });
 
+it("says what happened to the card when the click finds the session ended by a settings change", async () => {
+  const dc = stubHostedSession();
+  let finish!: (value: NovaResponse) => void;
+  const bridge = makeMockBridge({
+    nova: vi.fn(async (input) => {
+      if (input.action === "status") return { hasKey: true };
+      if (input.action === "start") return { sessionId: "voice-session", sdp: "v=0" };
+      if (input.action === "answer") return new Promise<NovaResponse>((resolve) => { finish = resolve; });
+      if (input.action === "decide-action")
+        throw new Error("Error invoking remote method 'openadminos:nova': Error: Nova settings or notes changed after this voice session started, so the session ended. OpenAI received the earlier instructions and notes at the start; a new session gets the current ones. Start Nova again. The note on the card was not confirmed. It stays proposed in Settings, Nova, for review.");
+      return {};
+    }),
+  }, createMockAppState({ novaProfile: effective({ shortcuts: [{ id: "s1", name: "Morning check", prompt: "How many devices?", createdAt: "2026-11-12T08:00:00.000Z" }] }) }));
+  renderRoute(<Nova />, { bridge, route: "/cache", path: "/cache" });
+  const user = userEvent.setup();
+  act(() => openNovaShortcut("Morning check"));
+  await user.click(await screen.findByRole("checkbox"));
+  await user.click(screen.getByRole("button", { name: "Start Nova" }));
+  await waitFor(() => expect(dc.onmessage).toBeTypeOf("function"));
+  act(() => dc.onmessage!({ data: JSON.stringify({ type: "session.started" }) }));
+  await waitFor(() => expect(bridge.nova).toHaveBeenCalledWith(expect.objectContaining({ action: "answer" }), expect.any(Function)));
+  await act(async () => finish({ text: "Review the note.", pendingAction: { id: "n1", kind: "remember", title: "Remember for Nova", target: "Northwind", body: "Kiosks are in Berlin", deliveryNote: "You asked for this note in Nova." } }));
+  await user.click(screen.getByRole("button", { name: "Confirm note" }));
+  expect(await screen.findByText(/It stays proposed in Settings, Nova, for review/)).toBeInTheDocument();
+  expect(screen.queryByText(/Error invoking remote method/)).not.toBeInTheDocument();
+  expect(dc.send.mock.calls.some(([event]) => String(event).includes("session.close"))).toBe(true);
+});
+
 it("closes the hosted audio when the main process ends the session after a settings change, without another question", async () => {
   const dc = stubHostedSession();
   const listeners: Array<(info: { reason: string }) => void> = [];

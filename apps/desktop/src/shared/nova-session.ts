@@ -23,3 +23,18 @@ export const NOVA_SESSION_CONTEXT_CHANGED =
 
 /** The app-state change reason sent when the main process ends a voice session because its context changed. */
 export const NOVA_SESSION_CONTEXT_ENDED_REASON = "nova-session-context-ended";
+
+/** Said when a voice session ended before the click on its pending card. */
+export const NOVA_SESSION_ENDED_BEFORE_CARD =
+  "This voice session ended before the click, so the card was not carried out.";
+
+/** What happened to a pending card when its voice session ended before the click. */
+export function novaEndedCardOutcome(kind: "send" | "run" | "profile" | "remember" | "follow-up"): string {
+  return {
+    remember: "The note on the card was not confirmed. It stays proposed in Settings, Nova, for review.",
+    "follow-up": "No follow-up was set.",
+    send: "Nothing was sent.",
+    run: "No agent was started.",
+    profile: "The settings change on the card was not saved.",
+  }[kind];
+}

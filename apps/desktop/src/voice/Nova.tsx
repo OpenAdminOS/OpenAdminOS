@@ -17,7 +17,7 @@ import {
   type NovaAnswerLink,
 } from "@openadminos/agent-sdk";
 import { OPEN_NOVA_EVENT, type OpenNovaDetail } from "../shared/nova-panel";
-import { NOVA_SESSION_CONTEXT_CHANGED, NOVA_SESSION_CONTEXT_ENDED_REASON, NOVA_SESSION_ENDED_REASON, NOVA_SESSION_PROFILE_CHANGED } from "../shared/nova-session";
+import { NOVA_SESSION_CONTEXT_CHANGED, NOVA_SESSION_CONTEXT_ENDED_REASON, NOVA_SESSION_ENDED_BEFORE_CARD, NOVA_SESSION_ENDED_REASON, NOVA_SESSION_PROFILE_CHANGED } from "../shared/nova-session";
 import "./nova.css";
 
 /** What each Nova card names, explains and asks to confirm. Nothing happens before the click. */
@@ -227,10 +227,15 @@ export function Nova({
       if (token === generation.current && revision === actionRevision.current) {
         setPendingAction(undefined);
         // The main process ended a hosted session whose instructions or notes changed: close the audio too.
-        if (String(error).includes(NOVA_SESSION_PROFILE_CHANGED)) {
+        // What happened to the card follows the message.
+        const text = String(error);
+        if (text.includes(NOVA_SESSION_PROFILE_CHANGED)) {
           stop();
-          setError(NOVA_SESSION_PROFILE_CHANGED);
-        } else setError(String(error));
+          setError(text.slice(text.indexOf(NOVA_SESSION_PROFILE_CHANGED)));
+        } else if (text.includes(NOVA_SESSION_ENDED_BEFORE_CARD)) {
+          stop();
+          setError(text.slice(text.indexOf(NOVA_SESSION_ENDED_BEFORE_CARD)));
+        } else setError(text);
       }
     }
     finally { if (revision === actionRevision.current) setActionBusy(false); }
