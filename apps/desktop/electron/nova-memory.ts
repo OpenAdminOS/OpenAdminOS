@@ -24,6 +24,9 @@ export const NOVA_NOTES_PROMPT_MAX_CHARS = 2000;
 const DAY_MS = 86_400_000;
 
 /** A note request Nova or Settings refuses, with the reason in plain words. */
+/** Said when a note card is confirmed after the note changed in Settings. */
+export const NOVA_NOTE_CHANGED = "This note changed in Settings. Review it there.";
+
 export class NovaMemoryError extends Error {
   constructor(message: string) {
     super(message);
@@ -183,14 +186,25 @@ export class NovaMemory {
   }
 
   /** The admin confirmed a proposed note with a click. A confirmed note no longer expires. */
-  confirm(id: string): NovaNote {
+  /**
+   * Confirms a proposed note. With `expectedText` (a Nova card), the note
+   * must still be proposed with exactly that text: a note edited, confirmed
+   * or forgotten in Settings after the card was shown is not confirmed as
+   * the card said.
+   */
+  confirm(id: string, expectedText?: string): NovaNote {
     // A proposal past its review window is gone, also when a stale view still shows it.
     this.expire();
-    const note = this.require(id);
+    const note = expectedText === undefined ? this.require(id) : this.get(id);
+    if (expectedText !== undefined && (!note || note.reviewState !== "proposed" || note.text !== expectedText)) throw new NovaMemoryError(NOVA_NOTE_CHANGED);
+    if (!note) throw new NovaMemoryError(NOVA_NOTE_CHANGED);
     if (note.reviewState !== "proposed") return note;
     this.options.assertWritable?.(note.tenantId, "Nova note");
     const reviewedAt = this.clock().toISOString();
-    this.db.prepare("UPDATE nova_memory_notes SET review_state = 'confirmed', reviewed_at = ?, expires_at = NULL WHERE id = ? AND review_state = 'proposed'").run(reviewedAt, id);
+    const updated = this.db
+      .prepare("UPDATE nova_memory_notes SET review_state = 'confirmed', reviewed_at = ?, expires_at = NULL WHERE id = ? AND review_state = 'proposed' AND text = ?")
+      .run(reviewedAt, id, note.text);
+    if (Number(updated.changes) === 0) throw new NovaMemoryError(NOVA_NOTE_CHANGED);
     const confirmed = this.require(id);
     this.record(confirmed, "confirmed", `nova-memory:${id}:confirmed`);
     return confirmed;

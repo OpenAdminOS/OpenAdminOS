@@ -50,8 +50,12 @@ export interface NovaActionHost {
     promptNotes(tenantId: string): Promise<string[]>;
     /** Stores a note for review; it reaches no prompt until confirmed. */
     propose(input: { tenantId: string; text: string; source: NovaNoteSource; sessionId?: string; conversationId?: string; turnId?: string }): Promise<NovaNote>;
-    /** Confirms a proposed note of `tenantId`, refused unless that organization is still active at the write. */
-    confirm(id: string, tenantId: string): Promise<NovaNote>;
+    /**
+     * Confirms a proposed note of `tenantId`, refused unless that
+     * organization is still active at the write and, with `expectedText`,
+     * the note is still proposed with that text.
+     */
+    confirm(id: string, tenantId: string, expectedText?: string): Promise<NovaNote>;
     forget(id: string): Promise<void>;
     /** Forgets a note only while it is still proposed: a note confirmed or edited in Settings meanwhile stays. */
     discardProposed(id: string): Promise<void>;
@@ -361,7 +365,8 @@ export async function prepareNovaNote(
       await assertStillActive(host, tenantId);
       const settings = await readNovaSettings(host);
       if (!settings.effective.memoryEnabled) throw new Error(novaNotesOffMessage(settings.effective));
-      await notes.confirm(note.id, tenantId);
+      // The text the card showed is the text confirmed, checked inside the write.
+      await notes.confirm(note.id, tenantId, note.text);
       return { text: `Nova will remember this in ${name} from the next conversation. Review notes in Settings, Nova.` };
     },
     cancel: () => notes.discardProposed(note.id),

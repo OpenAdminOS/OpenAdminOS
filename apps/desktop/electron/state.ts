@@ -7266,14 +7266,14 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         const organizationId = organizationForTenant(persisted.organizations ?? [], input.tenantId)?.id;
         return changed(this.novaMemory.propose({ ...input, ...(organizationId ? { organizationId } : {}) }));
       },
-      confirm: async (id, tenantId) => {
+      confirm: async (id, tenantId, expectedText) => {
         const { effective } = await this.novaProfile();
         const persisted = await this.read();
         // Checked with no wait before the write: a switch in between refuses the click.
         if (persisted.activeTenantId !== tenantId) throw new Error(NOVA_ORGANIZATION_CHANGED);
         if (!effective.memoryEnabled) throw new NovaMemoryError(managedNovaMemoryOff(this.managedPolicy) ? NOVA_NOTES_OFF_BY_POLICY : "Nova notes are paused. Resume them in Settings, Nova, then confirm again.");
         if (this.novaMemory.get(id)?.tenantId !== tenantId) throw new NovaMemoryError("That note belongs to another organization or is gone. Reopen Settings, Nova.");
-        return changed(this.novaMemory.confirm(id));
+        return changed(this.novaMemory.confirm(id, expectedText));
       },
       forget: async (id) => changed(this.novaMemory.forget(id)),
       discardProposed: async (id) => changed(this.novaMemory.discardProposed(id)),

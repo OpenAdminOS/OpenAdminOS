@@ -6,7 +6,7 @@ import type { AppState, NovaProfile, SecretAccessor, SendIntuneChatMessageResult
 import type { AuditLogEventSeed } from "./audit-log.js";
 import { NOVA_VOICE_CONSENT_NOT_KEPT, prepareNovaFollowUp, type NovaActionHost } from "./nova-actions.js";
 import { NovaFollowUps } from "./nova-followups.js";
-import { NovaMemory, openNovaDatabase } from "./nova-memory.js";
+import { NOVA_NOTE_CHANGED, NovaMemory, openNovaDatabase } from "./nova-memory.js";
 import { NOVA_NOTES_UNREADABLE_NOTICE, NOVA_SESSION_PROFILE_CHANGED, NovaService, type NovaChatOptions } from "./nova.js";
 import { defaultNovaSettings } from "./nova-test-settings.js";
 import { NOVA_PROFILE_SHORTENED_NOTICE, effectiveNovaProfile } from "./nova-profile.js";
@@ -46,7 +46,7 @@ function fixture(options: { profile?: NovaProfile; memoryOff?: boolean } = {}) {
     notes: {
       promptNotes: async (tenantId) => (settings().effective.memoryEnabled ? memory.promptNotes(tenantId) : []),
       propose: async (input) => memory.propose({ ...input, organizationId: "org-a" }),
-      confirm: async (id) => memory.confirm(id),
+      confirm: async (id, _tenantId, expectedText) => memory.confirm(id, expectedText),
       forget: async (id) => memory.forget(id),
       discardProposed: async (id) => memory.discardProposed(id),
     },
@@ -121,6 +121,22 @@ describe("Nova notes", () => {
     assert.match(cancelled.text!, /did not keep the note/);
     assert.deepEqual(f.memory.list("tenant-a"), []);
     assert.ok(f.events.some((event) => event.type === "nova.memory-note-forgotten"));
+  });
+
+  it("does not confirm a note from its card after the note was edited or confirmed in Settings", async () => {
+    for (const change of ["edit", "confirm", "forget"] as const) {
+      const f = fixture();
+      const sessionId = await start(f);
+      const prepared = await f.nova.handle({ action: "answer", sessionId, text: "Remember that Berlin uses kiosks" });
+      assert.equal(prepared.pendingAction?.kind, "remember", change);
+      const note = f.memory.list("tenant-a")[0]!;
+      if (change === "edit") f.memory.edit(note.id, "Berlin and Munich use kiosks.");
+      else if (change === "confirm") f.memory.confirm(note.id);
+      else f.memory.forget(note.id);
+      const result = await f.nova.handle({ action: "decide-action", sessionId, actionId: prepared.pendingAction!.id, approved: true });
+      assert.equal(result.answerError?.includes(NOVA_NOTE_CHANGED) ?? result.text?.includes(NOVA_NOTE_CHANGED), true, `${change}: ${JSON.stringify(result)}`);
+      if (change === "edit") assert.equal(f.memory.get(note.id)?.text, "Berlin and Munich use kiosks.");
+    }
   });
 
   it("keeps a note confirmed in Settings when its card is cancelled afterwards", async () => {
