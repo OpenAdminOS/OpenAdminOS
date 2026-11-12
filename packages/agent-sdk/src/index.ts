@@ -1323,6 +1323,12 @@ export interface AppState {
   chatToolUse?: ChatToolUseStatus;
   /** The IT policy file in force, when a policy file exists on this device. */
   managedPolicy?: ManagedPolicyStatus;
+  /** Nova's settings with defaults and the IT policy applied. */
+  novaProfile?: EffectiveNovaProfile;
+  /** Nova follow-ups waiting to run, on this device. */
+  novaFollowUpsPending?: number;
+  /** Why Nova's notes and follow-ups are unavailable on this device, when openadminos.db cannot be opened. */
+  novaRecordsUnavailable?: string;
   /** Splashtop connections of the organizations on this device. Never holds a token. */
   splashtopConnections?: SplashtopConnectionSummary[];
 }
@@ -2192,9 +2198,25 @@ export interface NovaConversationTurn {
   text: string;
 }
 
+/**
+ * What a Nova card asks the admin to confirm: a connector send, an agent
+ * run, a change to Nova's own settings, a note to remember, or a one-time
+ * follow-up question. Nothing happens until the click; voice never
+ * confirms.
+ */
+export type NovaActionKind = "send" | "run" | "profile" | "remember" | "follow-up";
+
 export interface NovaActionPreview {
-  id: string; kind: "send" | "run"; title: string; target: string; body: string;
+  id: string; kind: NovaActionKind; title: string; target: string; body: string;
   deliveryNote?: string;
+  /** A settings change: the value it replaces, shown beside the new one. */
+  previousBody?: string;
+}
+
+/** A page Nova points to in its answer, opened only when the admin clicks it. */
+export interface NovaAnswerLink {
+  label: string;
+  route: string;
 }
 
 export type NovaRequest =
@@ -2219,6 +2241,8 @@ export interface NovaResponse {
   /** Full local result for visual review; never sent to the speech model automatically. */
   displayText?: string;
   pendingAction?: NovaActionPreview;
+  /** Pages the answer refers to, offered as links; never opened automatically. */
+  links?: NovaAnswerLink[];
   /** A failed answer, with the session still valid for the next question. */
   answerError?: string;
   route?: string;
@@ -2228,7 +2252,183 @@ export interface NovaResponse {
   text?: string;
   audio?: number[];
   conversationId?: string;
+  /** Something the admin should know about this session, for example that notes could not be read. */
+  notice?: string;
 }
+
+export type NovaVoiceMode = "local" | "openai";
+/** Nova abilities the admin can turn off. Connector sends are set per connector. */
+export type NovaCapabilityName = "webSearch" | "startAgents" | "navigation";
+/** How a profile change was made; "disconnect" when Disconnect removed an organization's instructions. */
+export type NovaProfileChangeVia = "settings" | "nova-proposal" | "revert" | "migration" | "disconnect";
+
+/** A named read-only question Nova runs on request. */
+export interface NovaShortcut {
+  id: string;
+  name: string;
+  prompt: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+/** One saved version of the standing instructions or of an organization's addendum. */
+export interface NovaInstructionRevision {
+  id: string;
+  at: string;
+  scope: "user" | "organization";
+  organizationId?: string;
+  text: string;
+  via: NovaProfileChangeVia;
+}
+
+/** Nova's settings on this device, kept in main-process state. Absent fields use the defaults. */
+export interface NovaProfile {
+  voiceMode?: NovaVoiceMode;
+  greetingName?: string;
+  /** Standing instructions, reference data for Nova that cannot override its fixed rules. */
+  instructions?: string;
+  /** Addendum per organization id. */
+  addenda?: Record<string, string>;
+  capabilities?: Partial<Record<NovaCapabilityName, boolean>>;
+  /** The admin's choice per connector id; a connector not listed may send. */
+  connectorSends?: Record<string, boolean>;
+  shortcuts?: NovaShortcut[];
+  revisions?: NovaInstructionRevision[];
+  memoryPaused?: boolean;
+  /** The voice mode and greeting name were moved from the renderer's local storage. */
+  migratedFromLocalStorage?: boolean;
+  /** How the latest change was made, for the configuration audit. */
+  lastChange?: { id: string; via: NovaProfileChangeVia };
+}
+
+/** The profile with defaults and the IT policy applied, as Nova and Settings use it. */
+export interface EffectiveNovaProfile {
+  /** Undefined when the IT policy allows no voice mode. */
+  voiceMode?: NovaVoiceMode;
+  allowedVoiceModes: NovaVoiceMode[];
+  greetingName: string;
+  instructions: string;
+  instructionsSource: "user" | "policy" | "none";
+  /** The active organization, whose addendum is shown. */
+  organizationId?: string;
+  addendum: string;
+  capabilities: Record<NovaCapabilityName, boolean>;
+  connectorSends: Record<string, boolean>;
+  /**
+   * Whether Nova may send through each messaging connector, as an action is
+   * checked, with the IT policy applied, and whether the policy sets it.
+   */
+  connectorSendStates?: Record<string, { allowed: boolean; locked: boolean }>;
+  /** What the IT policy sets for connector sends, when it sets anything. */
+  connectorSendsPolicy?: boolean | string[];
+  memoryEnabled: boolean;
+  memoryPaused: boolean;
+  shortcuts: NovaShortcut[];
+  locked: {
+    voiceMode: boolean;
+    instructions: boolean;
+    capabilities: Record<NovaCapabilityName, boolean>;
+    connectorSends: boolean;
+    memory: boolean;
+  };
+}
+
+export interface NovaProfileView {
+  effective: EffectiveNovaProfile;
+  /** Newest first: the user's instructions and the active organization's addendum. */
+  revisions: NovaInstructionRevision[];
+  migratedFromLocalStorage: boolean;
+}
+
+export interface NovaProfilePatch {
+  voiceMode?: NovaVoiceMode;
+  greetingName?: string;
+  instructions?: string;
+  addendum?: { organizationId: string; text: string };
+  capabilities?: Partial<Record<NovaCapabilityName, boolean>>;
+  connectorSends?: Record<string, boolean>;
+  saveShortcut?: { id?: string; name: string; prompt: string };
+  deleteShortcut?: string;
+  memoryPaused?: boolean;
+}
+
+/** Who put a note into words: the admin, or Nova from the conversation. */
+export type NovaNoteSource = "user-said" | "nova-proposed";
+/** A proposed note waits for review and never reaches a prompt; confirmed and edited ones do. */
+export type NovaNoteReviewState = "proposed" | "confirmed" | "edited";
+
+/** A fact Nova keeps for one organization, kept in openadminos.db on this device. */
+export interface NovaNote {
+  id: string;
+  tenantId: string;
+  organizationId?: string;
+  text: string;
+  reviewState: NovaNoteReviewState;
+  source: NovaNoteSource;
+  /** Where it came from: the Nova session, its Chat conversation and the turn. */
+  sessionId?: string;
+  conversationId?: string;
+  turnId?: string;
+  createdAt: string;
+  reviewedAt?: string;
+  /** A proposed note expires unless it is confirmed first. */
+  expiresAt?: string;
+}
+
+export type NovaFollowUpStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "cancelled"
+  | "skipped-organization"
+  | "skipped-provider"
+  | "missed"
+  | "failed";
+
+/** A one-time read-only question Nova asks again later, in the organization it was set in. */
+export interface NovaFollowUp {
+  id: string;
+  tenantId: string;
+  organizationId?: string;
+  question: string;
+  providerId: ProviderId;
+  model?: string;
+  dueAt: string;
+  status: NovaFollowUpStatus;
+  createdAt: string;
+  finishedAt?: string;
+  /** The Chat conversation that holds the answer. */
+  conversationId?: string;
+  /** Why it did not run or did not finish. */
+  reason?: string;
+  /** Whether its provider ran on this device when it was set. It runs only where it ran then. */
+  providerLocal?: boolean;
+  /** The Ollama or LM Studio endpoint when it was set. */
+  providerEndpoint?: string;
+  /** When the admin consented, with the click, to a hosted provider for it. */
+  consentAcknowledgedAt?: string;
+}
+
+/** Nova's notes and follow-ups of the active organization, as Settings shows them. */
+export interface NovaRecordsView {
+  tenantId?: string;
+  organizationId?: string;
+  notes: NovaNote[];
+  followUps: NovaFollowUp[];
+}
+
+export type NovaRecordsRequest =
+  | { action: "list" }
+  | { action: "note-confirm"; id: string }
+  | { action: "note-edit"; id: string; text: string }
+  | { action: "note-forget"; id: string }
+  | { action: "follow-up-cancel"; id: string };
+
+export type NovaProfileRequest =
+  | { action: "get" }
+  | { action: "save"; patch: NovaProfilePatch }
+  | { action: "revert"; revisionId: string }
+  | { action: "migrate"; voiceMode?: NovaVoiceMode; greetingName?: string };
 
 export interface GraphCachePreloadJob {
   tenantId: string;
@@ -3192,6 +3392,8 @@ export interface OpenAdminOSApi {
   listMultiTenantAgentBatches(): Promise<MultiTenantAgentBatch[]>;
   getMultiTenantAgentBatch(id: string): Promise<MultiTenantAgentBatch | undefined>;
   nova(input: NovaRequest, onActivity?: (activity: NovaActivity) => void): Promise<NovaResponse>;
+  novaProfile(request: NovaProfileRequest): Promise<NovaProfileView>;
+  novaRecords(request: NovaRecordsRequest): Promise<NovaRecordsView>;
   startGraphCachePreload(options?: RefreshGraphCacheOptions): Promise<void>;
   cancelGraphCachePreload(tenantId: string): Promise<void>;
   refreshGraphCache(options?: RefreshGraphCacheOptions): Promise<GraphCacheRefreshResult>;

@@ -432,6 +432,32 @@ export function makeMockBridge(
     listMultiTenantAgentBatches: vi.fn(async () => []),
     getMultiTenantAgentBatch: vi.fn(async () => undefined),
     nova: vi.fn(async () => ({})),
+    novaProfile: vi.fn(async () => ({
+      effective: {
+        voiceMode: "openai" as const,
+        allowedVoiceModes: ["openai" as const, "local" as const],
+        greetingName: "",
+        instructions: "",
+        instructionsSource: "none" as const,
+        addendum: "",
+        capabilities: { webSearch: true, startAgents: true, navigation: true },
+        connectorSends: {},
+        memoryEnabled: true,
+        memoryPaused: false,
+        shortcuts: [],
+        locked: {
+          voiceMode: false,
+          instructions: false,
+          capabilities: { webSearch: false, startAgents: false, navigation: false },
+          connectorSends: false,
+          memory: false,
+        },
+      },
+      revisions: [],
+      migratedFromLocalStorage: true,
+    })),
+    // Stamped like the main process: for the organization active at the call.
+    novaRecords: vi.fn(async () => ({ ...(appState.activeTenantId ? { tenantId: appState.activeTenantId } : {}), ...(appState.activeOrganizationId ? { organizationId: appState.activeOrganizationId } : {}), notes: [], followUps: [] })),
     startGraphCachePreload: vi.fn(async () => {}),
     cancelGraphCachePreload: vi.fn(async () => {}),
     refreshGraphCache: vi.fn(async () => ({

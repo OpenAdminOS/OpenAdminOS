@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { novaSettingsHost } from "./nova-test-settings.js";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -632,6 +633,7 @@ describe("Disconnect redesign: GPT-6.1-Sol reproductions", () => {
     try {
       const state = await f.store.getAppState();
       const host: NovaActionHost = {
+        ...novaSettingsHost,
         activeTenantId: () => f.store.activeTenantId(),
         connectors: async () => [{ descriptor: { id: "slack", name: "Slack" }, status: "connected", config }] as never,
         send: (input) => f.store.sendNovaConnector(input),

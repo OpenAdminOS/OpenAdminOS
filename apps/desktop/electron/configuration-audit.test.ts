@@ -202,6 +202,10 @@ describe("configuration audit events", () => {
     const fixture = await makeFixture();
     try {
       await fixture.store.connectTenant();
+      // Connect starts a license check nobody waits for; adding access while
+      // it runs is refused as busy, so wait on the check, not on time.
+      for (let index = 0; index < 500 && (await fixture.store.getAppState()).tenantChecks?.length; index += 1)
+        await new Promise((resolve) => setTimeout(resolve, 10));
       await fixture.store.addTenantAccess(contoso.id, ["defender.incidents"]);
       const raw = JSON.stringify(await fixture.recorded());
       assert.ok(raw.length > 2);

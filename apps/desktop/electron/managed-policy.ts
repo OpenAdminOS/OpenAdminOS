@@ -7,12 +7,14 @@ import {
   MANAGED_POLICY_KEYS,
   MANAGED_POLICY_SETTING_KEYS,
   MANAGED_POLICY_VERSION,
+  type ManagedNovaCapabilities,
   type ManagedPolicyAppRegistration,
   type ManagedPolicyIssue,
   type ManagedPolicyScope,
   type ManagedPolicySettingKey,
   type ManagedPolicyStatus,
   type ManagedPolicyValues,
+  type NovaVoiceMode,
   type ProviderId,
 } from "@openadminos/agent-sdk";
 
@@ -31,6 +33,11 @@ const MODEL_MAX_LENGTH = 200;
 const LABEL_MAX_LENGTH = 80;
 const CLIENT_ID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const DIRECTORY_PATTERN = /^[0-9a-zA-Z.-]{1,100}$/;
+/** The longest standing instructions for Nova, the same limit as in the app. */
+export const NOVA_INSTRUCTIONS_MAX_LENGTH = 4000;
+const NOVA_VOICE_MODES: readonly NovaVoiceMode[] = ["local", "openai"];
+const NOVA_CAPABILITY_FIELDS = ["webSearch", "connectorSends", "startAgents", "navigation"] as const;
+const CONNECTOR_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
 export interface ManagedPolicyPath {
   scope: ManagedPolicyScope;
@@ -405,6 +412,53 @@ export function parsePolicyFile(
         result.values.skipFirstRunScan = node.value;
         result.keys.push(key);
         break;
+      case "novaVoiceModes": {
+        if (node.kind !== "array") {
+          issue(`"novaVoiceModes" must be a list in [ ] such as ["local"], not ${kindName(node)}. It is not applied.`, node, key);
+          break;
+        }
+        const modes: NovaVoiceMode[] = [];
+        for (const item of node.items) {
+          if (item.kind !== "string" || !NOVA_VOICE_MODES.includes(item.value as NovaVoiceMode)) {
+            issue(
+              `"novaVoiceModes" lists ${item.kind === "string" ? `"${item.value}"` : kindName(item)}, which is not a voice mode. This entry is ignored. Modes: ${quoteList(NOVA_VOICE_MODES)}.`,
+              item,
+              key,
+            );
+            continue;
+          }
+          if (!modes.includes(item.value as NovaVoiceMode)) modes.push(item.value as NovaVoiceMode);
+        }
+        // Like the other lists, an invalid entry is dropped and the restriction kept.
+        result.values.novaVoiceModes = modes;
+        result.keys.push(key);
+        break;
+      }
+      case "novaInstructions":
+        // The same bounds as schemas/policy.schema.json: some text, at most the limit as written.
+        if (node.kind !== "string" || node.value.trim().length === 0 || node.value.length > NOVA_INSTRUCTIONS_MAX_LENGTH) {
+          issue(`"novaInstructions" must be text in double quotes, at most ${NOVA_INSTRUCTIONS_MAX_LENGTH} characters. It is not applied.`, node, key);
+          break;
+        }
+        result.values.novaInstructions = node.value.trim();
+        result.keys.push(key);
+        break;
+      case "novaCapabilities": {
+        const capabilities = parseNovaCapabilities(node, (message, position) => issue(message, position, key));
+        if (capabilities) {
+          result.values.novaCapabilities = capabilities;
+          result.keys.push(key);
+        }
+        break;
+      }
+      case "novaMemory":
+        if (node.kind !== "string" || node.value !== "off") {
+          issue(`"novaMemory" can only be "off", which turns Nova's notes off. It is not applied.`, node, key);
+          break;
+        }
+        result.values.novaMemory = "off";
+        result.keys.push(key);
+        break;
       case "appRegistration": {
         const registration = parseRegistration(node, (message, position) => issue(message, position, key));
         if (registration) {
@@ -436,6 +490,58 @@ export function parsePolicyFile(
     }
   }
   return result;
+}
+
+function parseNovaCapabilities(
+  node: JsonNode,
+  issue: (message: string, position: JsonPosition) => void,
+): ManagedNovaCapabilities | undefined {
+  if (node.kind !== "object") {
+    issue(`"novaCapabilities" must be an object such as { "webSearch": false }, not ${kindName(node)}. It is not applied.`, node);
+    return undefined;
+  }
+  const capabilities: ManagedNovaCapabilities = {};
+  const seen = new Set<string>();
+  for (const entry of node.entries) {
+    const field = entry.key;
+    const value = entry.value;
+    if (!(NOVA_CAPABILITY_FIELDS as readonly string[]).includes(field)) {
+      issue(`"novaCapabilities" has "${field}", which it does not read. Use ${quoteList(NOVA_CAPABILITY_FIELDS)}.`, entry.keyPosition);
+      continue;
+    }
+    // A repeated switch cannot widen the policy: the most restrictive value is used.
+    const repeated = seen.has(field);
+    seen.add(field);
+    if (repeated) issue(`"novaCapabilities.${field}" appears more than once. The most restrictive value is used; remove the others.`, entry.keyPosition);
+    const earlier = repeated ? capabilities[field as keyof ManagedNovaCapabilities] : undefined;
+    if (field === "connectorSends" && value.kind === "array") {
+      const ids: string[] = [];
+      for (const item of value.items) {
+        if (item.kind !== "string" || !CONNECTOR_ID_PATTERN.test(item.value)) {
+          issue(`"novaCapabilities.connectorSends" lists ${item.kind === "string" ? `"${item.value}"` : kindName(item)}, which is not a connector id. This entry is ignored.`, item);
+          continue;
+        }
+        if (!ids.includes(item.value)) ids.push(item.value);
+      }
+      capabilities.connectorSends = earlier === false ? false : Array.isArray(earlier) ? ids.filter((id) => earlier.includes(id)) : ids;
+      continue;
+    }
+    if (value.kind !== "boolean") {
+      issue(
+        field === "connectorSends"
+          ? `"novaCapabilities.connectorSends" must be true, false or a list of connector ids, not ${kindName(value)}. It is not applied.`
+          : `"novaCapabilities.${field}" must be true or false without quotes, not ${kindName(value)}. It is not applied.`,
+        value,
+      );
+      continue;
+    }
+    if (field === "connectorSends") {
+      capabilities.connectorSends = earlier === false || value.value === false ? false : Array.isArray(earlier) ? earlier : true;
+      continue;
+    }
+    capabilities[field as "webSearch"] = earlier === false ? false : value.value;
+  }
+  return Object.keys(capabilities).length > 0 ? capabilities : undefined;
 }
 
 function parseRegistration(
@@ -642,4 +748,15 @@ export function publicReferenceNotAllowedMessage(name: string): string {
 
 export function registrationLockedMessage(label: string): string {
   return `Your IT department set the app registration ${label} for sign-in on this device. Sign in with it, or ask IT to change the policy.`;
+}
+
+export function novaVoiceModeNotAllowedMessage(mode: NovaVoiceMode, allowed: readonly NovaVoiceMode[]): string {
+  if (allowed.length === 0) return "Your IT department does not allow Nova voice on this device. The policy file sets which voice modes you can use.";
+  const name = mode === "openai" ? "OpenAI voice" : "Local voice";
+  const other = allowed.includes("local") ? " Use Local voice instead." : allowed.includes("openai") ? " Use OpenAI voice instead." : "";
+  return `Your IT department does not allow ${name} for Nova on this device.${other}`;
+}
+
+export function novaSettingLockedMessage(setting: string): string {
+  return `Your IT department set ${setting} for Nova on this device. It cannot be changed in the app.`;
 }

@@ -65,6 +65,10 @@ The JSON Schema is in the repository at [`schemas/policy.schema.json`](https://g
 | `allowedPublicReferences` | List of public reference ids | Only these public references are shown in the Marketplace and used by Chat. An empty list `[]` allows none. Any other one is refused before anything is sent. |
 | `appRegistration` | Object with `clientId`, optional `tenantId` and `label` | Your own Entra app registration, added to the saved registrations. `tenantId` is the Directory (tenant) ID or a verified domain, required for a single-tenant app. See [Own app registration](own-app-registration.md) for how to create it. |
 | `skipFirstRunScan` | `true` or `false` | With `true` and a `defaultProvider`, a fresh install checks only that provider at launch. When it is ready, the first-run model scan is skipped and the first run opens at Connect Microsoft 365, then Chat with the policy's model. When it is not ready, the scan runs as usual. |
+| `novaVoiceModes` | List of `"local"` and `"openai"` | The voice modes Nova may use. With `["local"]`, OpenAI voice is refused in the main process and Nova offers only Local voice. An empty list `[]` turns Nova voice off. Without the key, both modes are allowed. |
+| `novaInstructions` | Text, at most 4000 characters | Standing instructions for Nova. Locked, they replace the admin's own, including instructions for one organization, which are kept and not used; unlocked, they apply until the admin writes their own. Nova's fixed safety rules always apply after them and cannot be changed by them. |
+| `novaCapabilities` | Object with `webSearch`, `connectorSends`, `startAgents`, `navigation` | What Nova may do. `false` turns an ability off whether or not the key is locked. `true` is a default the admin can change, unless the key is locked. `connectorSends` also takes a list of connector ids, the only connectors Nova may prepare messages for. An ability named twice is reported, and the more restrictive value is used. Sends and agent runs always wait for a click. |
+| `novaMemory` | `"off"` | Turns Nova's notes off. Nova adds none, and saved notes stay on the device but never reach a prompt. |
 | `lock` | List of setting keys | The settings the admin cannot change in the app. Without `lock`, every setting the file sets is locked. With `"lock": []`, the file only sets defaults. |
 | `$schema` | Link | Optional. For editors. |
 
@@ -80,7 +84,21 @@ Public reference ids: `microsoft-learn`, `kql-search`, `intuneautomation`, `rele
 - **Unlocked provider or model.** Applies until the admin picks another one, then the admin's choice stays. A new unlocked default in a changed policy replaces only the policy's earlier default, never the admin's own choice.
 - **Unlocked app registration.** Added to the saved registrations once. If the admin removes it, it stays removed until the policy names a different registration.
 
-`allowedProviders` and `allowedPublicReferences` are always enforced, locked or not. The first-run scan checks only allowed providers, and with a `defaultProvider` it never selects another one for you.
+`allowedProviders`, `allowedPublicReferences`, `novaVoiceModes`, `novaMemory` and every `false` in `novaCapabilities` are always enforced, locked or not. The first-run scan checks only allowed providers, and with a `defaultProvider` it never selects another one for you.
+
+### Nova
+
+A Nova setting the policy sets is shown in Settings, **Nova** as **Set by your IT department**. Changes to Nova's settings are recorded in the audit log, with the full text of the standing instructions. Starting an OpenAI voice session records the consent to send audio and shared context to OpenAI in the audit log, before anything is sent.
+
+Example: local voice only, no web search, sends only through Outlook.
+
+```json
+{
+  "novaVoiceModes": ["local"],
+  "novaCapabilities": { "webSearch": false, "connectorSends": ["outlook"] },
+  "lock": ["novaVoiceModes", "novaCapabilities"]
+}
+```
 
 ## When the File Has a Problem
 

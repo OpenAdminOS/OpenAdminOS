@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   DEFAULT_GRAPH_READ_SCOPE_NAMES,
   MANAGED_POLICY_SETTING_KEYS,
@@ -9,21 +11,26 @@ import {
   type ManagedPolicyScope,
   type ManagedPolicySettingKey,
   type ManagedPolicyValues,
+  type NovaInstructionRevision,
+  type NovaProfile,
   type OrganizationRecord,
   type TenantRecord,
 } from "@openadminos/agent-sdk";
 
 /**
  * Configuration changes for the audit log: connections, organizations,
- * provider and model, public references, schedule assignments and the IT
- * policy file.
+ * provider and model, public references, schedule assignments, the IT
+ * policy file and Nova's settings.
  *
  * Events are derived by comparing the state before and after each write,
  * so every flow that changes these settings is recorded, including the
  * organizations that reconciliation creates and removes with a tenant.
  * They are stored apart from run history, so run retention never prunes
- * them. A recorded event holds identifiers, names and scope names only:
- * never tokens, secrets, prompt text or tenant content.
+ * them. A recorded event holds identifiers, names and scope names, never
+ * tokens, secrets or tenant content. The one text an admin writes for a
+ * model is recorded in full: Nova's standing instructions, its addenda and
+ * its shortcuts, and the instructions in the IT policy file, so an export
+ * shows what Nova was told.
  */
 
 /** Newest events kept. Older events are dropped first. */
@@ -55,6 +62,14 @@ export const CONFIGURATION_AUDIT_EVENT_TYPES = [
   "splashtop.connected",
   "splashtop.token-rotated",
   "splashtop.disconnected",
+  "nova.settings-changed",
+  "nova.instructions-changed",
+  "nova.instructions-reverted",
+  "nova.capabilities-changed",
+  "nova.shortcut-saved",
+  "nova.shortcut-deleted",
+  "nova.memory-paused",
+  "nova.memory-resumed",
 ] as const;
 
 export type ConfigurationAuditEventType = (typeof CONFIGURATION_AUDIT_EVENT_TYPES)[number];
@@ -106,6 +121,7 @@ export interface ConfigurationAuditSnapshot {
   /** Azure OpenAI endpoint settings; the API key is never part of state. */
   providerConfigs?: { azureOpenAI?: { endpoint: string; deployment: string; apiVersion: string } };
   managedPolicy?: ManagedPolicyRecord;
+  novaProfile?: NovaProfile;
 }
 
 export interface ConfigurationAuditContext {
@@ -416,10 +432,14 @@ export function diffConfigurationAudit(
     }
   }
 
+  // Names from the state after the change, or before it for an organization
+  // the change removed (Disconnect), so its removed instructions keep a name.
+  seeds.push(...novaSeeds(previous.novaProfile, next.novaProfile, new Map([...previousOrganizationById, ...nextOrganizationById])));
+
   return seeds.map((seed) => ({ id: context.newId(), timestamp: context.timestamp, ...seed }));
 }
 
-/** What the IT policy file sets, as audit details: ids, names and keys, never more. */
+/** What the IT policy file sets, as audit details: ids, names, keys and the Nova instructions it sets. */
 function policyDetails(record: ManagedPolicyRecord): Record<string, ConfigurationAuditDetail> {
   const keys = MANAGED_POLICY_SETTING_KEYS.filter((key) => record.values[key] !== undefined);
   const { values } = record;
@@ -434,7 +454,128 @@ function policyDetails(record: ManagedPolicyRecord): Record<string, Configuratio
     ...(values.allowedPublicReferences ? { allowedPublicReferences: [...values.allowedPublicReferences] } : {}),
     ...(values.appRegistration ? { appRegistrationClientId: values.appRegistration.clientId } : {}),
     ...(values.skipFirstRunScan !== undefined ? { skipFirstRunScan: values.skipFirstRunScan } : {}),
+    ...(values.novaVoiceModes ? { novaVoiceModes: [...values.novaVoiceModes] } : {}),
+    ...(values.novaInstructions !== undefined ? { novaInstructions: values.novaInstructions } : {}),
+    ...(values.novaCapabilities?.webSearch !== undefined ? { novaWebSearch: values.novaCapabilities.webSearch } : {}),
+    ...(values.novaCapabilities?.startAgents !== undefined ? { novaStartAgents: values.novaCapabilities.startAgents } : {}),
+    ...(values.novaCapabilities?.navigation !== undefined ? { novaNavigation: values.novaCapabilities.navigation } : {}),
+    ...(values.novaCapabilities?.connectorSends !== undefined
+      ? { novaConnectorSends: Array.isArray(values.novaCapabilities.connectorSends) ? [...values.novaCapabilities.connectorSends] : values.novaCapabilities.connectorSends }
+      : {}),
+    ...(values.novaMemory ? { novaMemory: values.novaMemory } : {}),
   };
+}
+
+function sha256(text: string): string {
+  return createHash("sha256").update(text).digest("hex");
+}
+
+/** The newest revision of one text, added by this write. */
+function addedRevision(
+  previous: NovaProfile | undefined,
+  next: NovaProfile | undefined,
+  scope: NovaInstructionRevision["scope"],
+  organizationId?: string,
+): NovaInstructionRevision | undefined {
+  const known = new Set((previous?.revisions ?? []).map((entry) => entry.id));
+  const matching = (next?.revisions ?? []).filter(
+    (entry) => entry.scope === scope && (scope === "user" || entry.organizationId === organizationId) && !known.has(entry.id),
+  );
+  return matching.at(-1);
+}
+
+function instructionSeed(
+  before: string,
+  after: string,
+  revision: NovaInstructionRevision | undefined,
+  scope: NovaInstructionRevision["scope"],
+  organization: Pick<EventSeed, "organizationId" | "organizationName">,
+  via: string,
+): EventSeed {
+  const reverted = revision?.via === "revert";
+  return {
+    type: reverted ? "nova.instructions-reverted" : "nova.instructions-changed",
+    ...organization,
+    details: {
+      scope,
+      text: after,
+      length: after.length,
+      sha256: sha256(after),
+      ...(before ? { previousSha256: sha256(before) } : {}),
+      via: revision?.via ?? via,
+      ...(revision ? { revisionId: revision.id } : {}),
+    },
+  };
+}
+
+/** Changes to Nova's settings. The greeting name is recorded as changed, never by value. */
+function novaSeeds(
+  previous: NovaProfile | undefined,
+  next: NovaProfile | undefined,
+  organizations: ReadonlyMap<string, OrganizationRecord>,
+): EventSeed[] {
+  const seeds: EventSeed[] = [];
+  const changed: string[] = [];
+  const migrated = !previous?.migratedFromLocalStorage && next?.migratedFromLocalStorage === true;
+  // How this write was made: on a Nova card, or in Settings.
+  const via = migrated ? "migration" : next?.lastChange && next.lastChange.id !== previous?.lastChange?.id ? next.lastChange.via : "settings";
+  // An unset voice mode is the default; setting the default changes nothing Nova does.
+  if ((previous?.voiceMode ?? "openai") !== (next?.voiceMode ?? "openai")) changed.push("voiceMode");
+  if ((previous?.greetingName ?? "") !== (next?.greetingName ?? "")) changed.push("greetingName");
+  if (changed.length > 0) {
+    seeds.push({
+      type: "nova.settings-changed",
+      details: { changed, ...(next?.voiceMode ? { voiceMode: next.voiceMode } : {}), via },
+    });
+  }
+  // Unset and empty differ: an unset text leaves an IT default in effect, an empty one clears it.
+  if (previous?.instructions !== next?.instructions) {
+    seeds.push(instructionSeed(previous?.instructions ?? "", next?.instructions ?? "", addedRevision(previous, next, "user"), "user", {}, via));
+  }
+  const organizationIds = new Set([...Object.keys(previous?.addenda ?? {}), ...Object.keys(next?.addenda ?? {})]);
+  for (const organizationId of [...organizationIds].sort()) {
+    const before = previous?.addenda?.[organizationId] ?? "";
+    const after = next?.addenda?.[organizationId] ?? "";
+    if (before === after) continue;
+    const organization = organizations.get(organizationId);
+    seeds.push(
+      instructionSeed(before, after, addedRevision(previous, next, "organization", organizationId), "organization", {
+        organizationId,
+        ...(organization ? { organizationName: organization.name } : {}),
+      }, via),
+    );
+  }
+  const enabled: string[] = [];
+  const disabled: string[] = [];
+  for (const name of ["webSearch", "startAgents", "navigation"] as const) {
+    const before = previous?.capabilities?.[name] ?? true;
+    const after = next?.capabilities?.[name] ?? true;
+    if (before !== after) (after ? enabled : disabled).push(name);
+  }
+  const connectorIds = new Set([...Object.keys(previous?.connectorSends ?? {}), ...Object.keys(next?.connectorSends ?? {})]);
+  for (const connectorId of [...connectorIds].sort()) {
+    const before = previous?.connectorSends?.[connectorId] ?? true;
+    const after = next?.connectorSends?.[connectorId] ?? true;
+    if (before !== after) (after ? enabled : disabled).push(`connectorSends:${connectorId}`);
+  }
+  if (enabled.length > 0 || disabled.length > 0) seeds.push({ type: "nova.capabilities-changed", details: { enabled, disabled, via } });
+  const beforeShortcuts = new Map((previous?.shortcuts ?? []).map((entry) => [entry.id, entry]));
+  const afterShortcuts = new Map((next?.shortcuts ?? []).map((entry) => [entry.id, entry]));
+  for (const shortcut of next?.shortcuts ?? []) {
+    const before = beforeShortcuts.get(shortcut.id);
+    if (before && before.name === shortcut.name && before.prompt === shortcut.prompt) continue;
+    seeds.push({
+      type: "nova.shortcut-saved",
+      details: { shortcutId: shortcut.id, name: shortcut.name, prompt: shortcut.prompt, updated: before !== undefined, via },
+    });
+  }
+  for (const shortcut of previous?.shortcuts ?? []) {
+    if (!afterShortcuts.has(shortcut.id)) seeds.push({ type: "nova.shortcut-deleted", details: { shortcutId: shortcut.id, name: shortcut.name, via } });
+  }
+  if ((previous?.memoryPaused ?? false) !== (next?.memoryPaused ?? false)) {
+    seeds.push({ type: next?.memoryPaused ? "nova.memory-paused" : "nova.memory-resumed", details: { via } });
+  }
+  return seeds;
 }
 
 function policySeeds(previous: ManagedPolicyRecord | undefined, next: ManagedPolicyRecord | undefined): EventSeed[] {
@@ -480,7 +621,16 @@ const POLICY_DETAIL_KEYS = [
   "allowedPublicReferences",
   "appRegistrationClientId",
   "skipFirstRunScan",
+  "novaVoiceModes",
+  "novaInstructions",
+  "novaWebSearch",
+  "novaStartAgents",
+  "novaNavigation",
+  "novaConnectorSends",
+  "novaMemory",
 ] as const;
+
+const NOVA_INSTRUCTION_DETAIL_KEYS = ["scope", "text", "length", "sha256", "previousSha256", "via", "revisionId"] as const;
 
 /**
  * The detail fields each event type may carry. A stored field outside its
@@ -514,6 +664,14 @@ const DETAIL_KEYS: Readonly<Record<ConfigurationAuditEventType, readonly string[
   "splashtop.connected": ["region", "host", "teamId", "account", "reconnected"],
   "splashtop.token-rotated": ["region", "host", "teamId"],
   "splashtop.disconnected": ["region", "host", "teamId", "organizationRemoved"],
+  "nova.settings-changed": ["changed", "voiceMode", "via"],
+  "nova.instructions-changed": [...NOVA_INSTRUCTION_DETAIL_KEYS],
+  "nova.instructions-reverted": [...NOVA_INSTRUCTION_DETAIL_KEYS],
+  "nova.capabilities-changed": ["enabled", "disabled", "via"],
+  "nova.shortcut-saved": ["shortcutId", "name", "prompt", "updated", "via"],
+  "nova.shortcut-deleted": ["shortcutId", "name", "via"],
+  "nova.memory-paused": ["via"],
+  "nova.memory-resumed": ["via"],
 };
 
 /** Keeps the allowed detail fields of a recorded shape; a field of another shape is left out, not the event. */

@@ -93,6 +93,10 @@ describe("policy parsing", () => {
         allowedPublicReferences: ["microsoft-learn"],
         appRegistration: { clientId: "AAAAAAAA-1111-2222-3333-444444444444", tenantId: "contoso.onmicrosoft.com", label: "Contoso IT" },
         skipFirstRunScan: true,
+        novaVoiceModes: ["local"],
+        novaInstructions: "Answer in short sentences.",
+        novaCapabilities: { webSearch: false, connectorSends: ["outlook"] },
+        novaMemory: "off",
       }),
     });
     assert.ok(policy);
@@ -104,6 +108,10 @@ describe("policy parsing", () => {
       allowedPublicReferences: ["microsoft-learn"],
       appRegistration: { clientId: "aaaaaaaa-1111-2222-3333-444444444444", tenantId: "contoso.onmicrosoft.com", label: "Contoso IT" },
       skipFirstRunScan: true,
+      novaVoiceModes: ["local"],
+      novaInstructions: "Answer in short sentences.",
+      novaCapabilities: { webSearch: false, connectorSends: ["outlook"] },
+      novaMemory: "off",
     });
     // No lock list: every key the file sets is locked.
     assert.deepEqual(policy.locked, [...MANAGED_POLICY_SETTING_KEYS]);
@@ -111,6 +119,13 @@ describe("policy parsing", () => {
       { scope: "machine", path: MACHINE, found: true },
       { scope: "user", path: USER, found: false },
     ]);
+  });
+
+  it("reports a Nova ability set twice and uses the more restrictive value, so a repeat cannot widen the policy", async () => {
+    const policy = await load({ [MACHINE]: '{ "novaCapabilities": { "webSearch": false, "webSearch": true, "connectorSends": ["outlook", "teams"], "connectorSends": true } }' });
+    assert.ok(policy);
+    assert.deepEqual(policy.values.novaCapabilities, { webSearch: false, connectorSends: ["outlook", "teams"] });
+    assert.equal(policy.issues.filter((entry) => /appears more than once/.test(entry.message)).length, 2, JSON.stringify(policy.issues));
   });
 
   it("returns no policy when neither file exists", async () => {

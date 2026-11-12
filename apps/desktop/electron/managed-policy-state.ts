@@ -199,6 +199,21 @@ export function sanitizeManagedPolicyRecord(value: unknown): ManagedPolicyRecord
     };
   }
   if (typeof rawValues.skipFirstRunScan === "boolean") values.skipFirstRunScan = rawValues.skipFirstRunScan;
+  const voiceModes = stringList(rawValues.novaVoiceModes);
+  if (voiceModes) values.novaVoiceModes = voiceModes.filter((mode): mode is "local" | "openai" => mode === "local" || mode === "openai");
+  if (typeof rawValues.novaInstructions === "string") values.novaInstructions = rawValues.novaInstructions;
+  if (isRecord(rawValues.novaCapabilities)) {
+    const raw = rawValues.novaCapabilities;
+    const capabilities: NonNullable<ManagedPolicyValues["novaCapabilities"]> = {};
+    for (const field of ["webSearch", "startAgents", "navigation"] as const) {
+      if (typeof raw[field] === "boolean") capabilities[field] = raw[field] as boolean;
+    }
+    const sends = raw.connectorSends;
+    if (typeof sends === "boolean") capabilities.connectorSends = sends;
+    else if (stringList(sends)) capabilities.connectorSends = stringList(sends);
+    if (Object.keys(capabilities).length > 0) values.novaCapabilities = capabilities;
+  }
+  if (rawValues.novaMemory === "off") values.novaMemory = "off";
   const sources: ManagedPolicyRecord["sources"] = {};
   if (isRecord(value.sources)) {
     for (const [key, scope] of Object.entries(value.sources)) {
