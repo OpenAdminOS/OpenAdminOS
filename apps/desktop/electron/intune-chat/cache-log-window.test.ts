@@ -1,0 +1,116 @@
+import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { it } from "node:test";
+import { AppStateStore } from "../state.js";
+import {
+  GRAPH_CACHE_LOG_ROW_LIMIT,
+  GRAPH_CACHE_LOG_WINDOW_DAYS,
+  type RunGraphApi,
+} from "@openadminos/agent-sdk";
+
+// A large tenant (the first community report came from a school) retains
+// far more sign-ins and Intune audit events than a refresh can collect.
+// Log resources collect the recent window instead and report a capped
+// window as a successful refresh.
+it("collects log resources as a capped recent window instead of every retained row", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "oaos-log-window-"));
+  const filePath = join(dir, "state.json");
+  await writeFile(
+    filePath,
+    JSON.stringify({
+      activeProviderId: "ollama",
+      tenants: [
+        {
+          id: "tenant-1",
+          displayName: "School",
+          homeAccountId: "test",
+          username: "admin@example.invalid",
+          addedAt: new Date().toISOString(),
+        },
+      ],
+      activeTenantId: "tenant-1",
+      installedAgents: [],
+      runs: [],
+    }),
+  );
+  let endless = false;
+  const firstQueries = new Map<string, Record<string, string>>();
+  const requests = new Map<string, number>();
+  const graph = {
+    request: async (input: { path: string; query?: Record<string, string> }) => {
+      requests.set(input.path, (requests.get(input.path) ?? 0) + 1);
+      const page = Number(input.query?.$skiptoken || 0);
+      if (page === 0) firstQueries.set(input.path, { ...input.query });
+      const size = endless ? 1000 : 50;
+      return {
+        value: Array.from({ length: size }, (_, i) => ({
+          id: `${input.path}-${page}-${i}`,
+          createdDateTime: new Date().toISOString(),
+          activityDateTime: new Date().toISOString(),
+        })),
+        ...(endless
+          ? { "@odata.nextLink": `https://graph.microsoft.com/beta${input.path}?$skiptoken=${page + 1}` }
+          : {}),
+      };
+    },
+  } as unknown as RunGraphApi;
+  const store = new AppStateStore({
+    filePath,
+    userDataPath: dir,
+    statsApiUrl: "",
+    tokenStore: { read: async () => "", write: async () => {} },
+    graphFactory: () => graph,
+  });
+  try {
+    // A quiet week: the whole window fits, so the snapshot is complete.
+    let result = await store.refreshGraphCache({
+      tenantId: "tenant-1",
+      resources: ["signIns", "intuneAuditEvents"],
+    });
+    assert.deepEqual(result.resources.map((r) => [r.resource, r.ok, r.pageLimitReached]), [
+      ["signIns", true, false],
+      ["intuneAuditEvents", true, false],
+    ]);
+    const signInQuery = firstQueries.get("/auditLogs/signIns")!;
+    const intuneQuery = firstQueries.get("/deviceManagement/auditEvents")!;
+    assert.match(signInQuery.$filter!, /^createdDateTime ge \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+    assert.match(intuneQuery.$filter!, /^activityDateTime ge \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+    assert.equal(intuneQuery.$orderby, "activityDateTime desc");
+    const since = Date.parse(signInQuery.$filter!.split(" ge ")[1]!);
+    const expected = Date.now() - GRAPH_CACHE_LOG_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+    assert.ok(Math.abs(since - expected) < 60_000, "the window starts seven days back");
+
+    // A busy tenant: Graph keeps returning pages. The preload stops at the
+    // row limit and the window counts as complete, without the "collection
+    // limit" error a capped refresh after a complete one used to raise.
+    endless = true;
+    requests.clear();
+    await store.startGraphCachePreload({
+      tenantId: "tenant-1",
+      resources: ["signIns", "intuneAuditEvents"],
+    });
+    let status = await store.getGraphCacheStatus("tenant-1");
+    for (let i = 0; i < 500 && status.preload?.status === "running"; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+      status = await store.getGraphCacheStatus("tenant-1");
+    }
+    assert.equal(status.preload?.status, "complete");
+    for (const resource of ["signIns", "intuneAuditEvents"] as const) {
+      const cached = status.resources.find((r) => r.resource === resource)!;
+      assert.equal(cached.rows, GRAPH_CACHE_LOG_ROW_LIMIT);
+      assert.equal(cached.pageLimitReached, true);
+      assert.equal(cached.lastError, undefined);
+    }
+    assert.equal(requests.get("/auditLogs/signIns"), GRAPH_CACHE_LOG_ROW_LIMIT / 1000);
+
+    // A later refresh of the capped window succeeds the same way.
+    result = await store.refreshGraphCache({ tenantId: "tenant-1", resources: ["signIns"] });
+    assert.equal(result.resources[0]!.ok, true);
+    assert.equal(result.resources[0]!.error, undefined);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

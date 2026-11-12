@@ -1,3 +1,8 @@
+import {
+  GRAPH_CACHE_LOG_ROW_LIMIT,
+  GRAPH_CACHE_LOG_WINDOW_DAYS,
+  isGraphCacheLogResource,
+} from "@openadminos/agent-sdk";
 import type {
   AgentSummary,
   GraphCacheResourceKind,
@@ -1013,6 +1018,11 @@ export function pathForResource(resource: GraphCacheResourceKind): {
   select?: string[];
   query?: Record<string, string>;
   headers?: Record<string, string>;
+  /**
+   * Log resources only: the timestamp property the refresh filters on to
+   * collect the recent window (see GRAPH_CACHE_LOG_WINDOW_DAYS).
+   */
+  windowField?: string;
 } {
   switch (resource) {
     case "managedDevices":
@@ -1108,7 +1118,8 @@ export function pathForResource(resource: GraphCacheResourceKind): {
           "location",
           "appliedConditionalAccessPolicies",
         ],
-        query: { "$top": "250" },
+        query: { "$top": "1000" },
+        windowField: "createdDateTime",
       };
     case "directoryAudits":
       return {
@@ -1126,7 +1137,8 @@ export function pathForResource(resource: GraphCacheResourceKind): {
           "targetResources",
           "additionalDetails",
         ],
-        query: { "$top": "250" },
+        query: { "$top": "1000" },
+        windowField: "activityDateTime",
       };
     case "intuneAuditEvents":
       return {
@@ -1144,7 +1156,8 @@ export function pathForResource(resource: GraphCacheResourceKind): {
           "actor",
           "resources",
         ],
-        query: { "$top": "250", "$orderby": "activityDateTime desc" },
+        query: { "$top": "1000", "$orderby": "activityDateTime desc" },
+        windowField: "activityDateTime",
       };
     case "conditionalAccessPolicies":
       return {
@@ -1720,6 +1733,15 @@ export function buildAnswerPack(input: {
           : {}),
         pages: status.pages,
         pageLimitReached: status.pageLimitReached,
+        // Log resources hold a recent window, so a count describes the
+        // window, never all retained logs.
+        ...(isGraphCacheLogResource(status.resource)
+          ? {
+              coverage: status.pageLimitReached
+                ? `Newest ${GRAPH_CACHE_LOG_ROW_LIMIT.toLocaleString("en-US")} entries from the ${GRAPH_CACHE_LOG_WINDOW_DAYS} days before refreshedAt; older entries in that window were not collected.`
+                : `All entries from the ${GRAPH_CACHE_LOG_WINDOW_DAYS} days before refreshedAt; older logs were not collected.`,
+            }
+          : {}),
         selectedRows: selectedRows.length,
         includedSampleRows: sampleRows.length,
         omittedCachedRows: Math.max(0, status.rows - selectedRows.length),

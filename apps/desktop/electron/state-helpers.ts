@@ -1028,6 +1028,9 @@ export const COUNTABLE_GRAPH_RESOURCES: ReadonlySet<string> = new Set([
 
 export const GRAPH_CACHE_ROW_LIMIT = 1000;
 
+/** Memory budget for one resource in a complete or limited refresh. */
+export const GRAPH_CACHE_REFRESH_BYTE_LIMIT = 128 * 1024 * 1024;
+
 
 
 export interface GraphCacheRequestPage {
@@ -1052,6 +1055,12 @@ export async function fetchGraphCachePages(
   request: GraphCacheRequestPage,
   signal?: AbortSignal,
   complete = false,
+  /**
+   * Hard row limit that also applies to a complete collection. Used for
+   * log windows: collection stops at the limit, or at the memory budget,
+   * and the result is reported as capped instead of failing.
+   */
+  rowLimit?: number,
 ): Promise<{
   rows: unknown[];
   pages: number;
@@ -1067,12 +1076,14 @@ export async function fetchGraphCachePages(
   let bytes = 0;
   const seenLinks = new Set<string>();
   const seenIds = new Set<string>();
+  const limited = rowLimit !== undefined;
+  // A complete or limited collection reads past the sample caps, so it
+  // deduplicates IDs and enforces the memory budget.
+  const thorough = complete || limited;
+  const rowCap = limited ? rowLimit : complete ? Infinity : GRAPH_CACHE_ROW_LIMIT;
+  const pageCap = thorough ? Infinity : GRAPH_CACHE_PAGE_LIMIT;
 
-  while (
-    nextRequest &&
-    (complete || pages < GRAPH_CACHE_PAGE_LIMIT) &&
-    (complete || rows.length < GRAPH_CACHE_ROW_LIMIT)
-  ) {
+  while (nextRequest && pages < pageCap && rows.length < rowCap) {
     signal?.throwIfAborted();
     const response = await graph.request({
       method: "GET",
@@ -1089,23 +1100,31 @@ export async function fetchGraphCachePages(
       totalCount = page.totalCount;
     }
     pages += 1;
-    const remainingRows = complete
-      ? page.rows.length
-      : GRAPH_CACHE_ROW_LIMIT - rows.length;
+    const remainingRows = rowCap - rows.length;
     truncated ||= page.rows.length > remainingRows;
+    let overBudget = false;
     for (const row of page.rows.slice(0, remainingRows)) {
       const id =
         row && typeof row === "object" && "id" in row
           ? String(row.id)
           : undefined;
-      if (complete && id && seenIds.has(id)) continue;
+      if (thorough && id && seenIds.has(id)) continue;
       if (id) seenIds.add(id);
-      bytes += Buffer.byteLength(JSON.stringify(row));
-      if (complete && bytes > 128 * 1024 * 1024)
-        throw new Error(
-          "This resource exceeds the 128 MiB refresh memory limit. The previous snapshot was kept. Reduce the selected scope or contact support.",
-        );
+      const rowBytes = Buffer.byteLength(JSON.stringify(row));
+      if (thorough && bytes + rowBytes > GRAPH_CACHE_REFRESH_BYTE_LIMIT) {
+        if (!limited)
+          throw new Error(
+            "This resource exceeds the 128 MiB refresh memory limit. The previous snapshot was kept. Reduce the selected scope or contact support.",
+          );
+        overBudget = true;
+        break;
+      }
+      bytes += rowBytes;
       rows.push(row);
+    }
+    if (overBudget) {
+      truncated = true;
+      break;
     }
     if (page.nextLink && seenLinks.has(page.nextLink))
       throw new Error(

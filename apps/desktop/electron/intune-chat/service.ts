@@ -73,6 +73,9 @@ import {
   type TenantSession,
   type WorkspacePromptContextInput,
   type WorkspacePromptContextSummary,
+  GRAPH_CACHE_LOG_ROW_LIMIT,
+  GRAPH_CACHE_LOG_WINDOW_DAYS,
+  isGraphCacheLogResource,
 } from "@openadminos/agent-sdk";
 
 import { assertAgentCompatible, withAgentCompatibility } from "../agent-draft-helpers.js";
@@ -551,7 +554,7 @@ export class IntuneChatService {
         job.status = controller.signal.aborted
           ? "cancelled"
           : result.resources.length === resources.length &&
-              result.resources.every((r) => r.skipped || (r.ok && !r.pageLimitReached))
+              result.resources.every((r) => r.skipped || (r.ok && (!r.pageLimitReached || isGraphCacheLogResource(r.resource))))
             ? "complete"
             : "incomplete";
       })
@@ -1874,6 +1877,14 @@ export class IntuneChatService {
           query.$count = "true";
           headers.ConsistencyLevel = "eventual";
         }
+        // Log resources collect a recent window, newest first, instead of
+        // every retained row (see GRAPH_CACHE_LOG_WINDOW_DAYS).
+        if (request.windowField) {
+          const since = new Date(Date.now() - GRAPH_CACHE_LOG_WINDOW_DAYS * 24 * 60 * 60 * 1000)
+            .toISOString()
+            .replace(/\.\d{3}Z$/, "Z");
+          query.$filter = `${request.windowField} ge ${since}`;
+        }
         const pageResult = await fetchGraphCachePages(
           graph,
           {
@@ -1883,10 +1894,13 @@ export class IntuneChatService {
           },
           signal,
           complete,
+          request.windowField ? GRAPH_CACHE_LOG_ROW_LIMIT : undefined,
         );
         signal?.throwIfAborted();
         const existing = store.getGraphCacheStatus(tenant.id, [definition])[0];
-        if (pageResult.pageLimitReached && existing?.refreshedAt && !existing.pageLimitReached) {
+        // A log window moves with time, so an older complete window is
+        // never kept in place of a newer capped one.
+        if (pageResult.pageLimitReached && !request.windowField && existing?.refreshedAt && !existing.pageLimitReached) {
           throw new Error("Refresh reached a collection limit. The previous complete snapshot was kept. Use Cache → Preload to collect all pages.");
         }
         store.replaceGraphResources({
@@ -2153,7 +2167,7 @@ export class IntuneChatService {
         const before = store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
         const staleResources = planned.resources.filter((resource) => {
           const status = before.find((entry) => entry.resource === resource);
-          if (!status?.refreshedAt || status.lastError || status.pageLimitReached || (status.tenantTotal !== undefined && status.rows < status.tenantTotal)) return true;
+          if (!status?.refreshedAt || status.lastError || (status.pageLimitReached && !isGraphCacheLogResource(resource)) || (status.tenantTotal !== undefined && status.rows < status.tenantTotal)) return true;
           return (
             Date.now() - new Date(status.refreshedAt).getTime() >
             resourceStalenessMs(resource)
@@ -2726,7 +2740,7 @@ export class IntuneChatService {
         const before = store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
         const staleResources = planned.resources.filter((resource) => {
           const status = before.find((entry) => entry.resource === resource);
-          if (!status?.refreshedAt || status.lastError || status.pageLimitReached || (status.tenantTotal !== undefined && status.rows < status.tenantTotal)) return true;
+          if (!status?.refreshedAt || status.lastError || (status.pageLimitReached && !isGraphCacheLogResource(resource)) || (status.tenantTotal !== undefined && status.rows < status.tenantTotal)) return true;
           return (
             Date.now() - new Date(status.refreshedAt).getTime() >
             resourceStalenessMs(resource)
