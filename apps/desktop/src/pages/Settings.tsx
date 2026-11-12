@@ -735,7 +735,7 @@ function ProviderRow({
         <div className="border-t border-[var(--color-border-soft)] bg-[var(--color-bg-raised)]/30 px-5 py-4">
           <p className="max-w-[720px] text-sm leading-5 text-[var(--color-text-soft)]">{provider.description}</p>
           {/* The check's own recovery: how to start an installed runtime, or why the check failed. */}
-          {implemented && provider.detail && ((provider.status === "not-installed" && provider.installed) || provider.status === "error") ? (
+          {implemented && provider.detail && provider.detail !== testResult?.message && ((provider.status === "not-installed" && provider.installed) || provider.status === "error") ? (
             <p className="mt-2 max-w-[720px] text-sm leading-5 text-[var(--color-text)]">{provider.detail}</p>
           ) : null}
           {provider.cli && implemented ? (

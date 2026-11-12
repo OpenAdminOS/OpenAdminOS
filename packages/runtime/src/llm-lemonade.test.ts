@@ -209,6 +209,7 @@ describe("createLemonadeLlm sends only a listed chat model", () => {
       ["openai.gpt-5", /^Error: Lemonade sends openai\.gpt-5 to a cloud API, so OpenAdminOS does not use it as a local model\./],
       ["nomic-embed-text-v1-GGUF", /^Error: nomic-embed-text-v1-GGUF is not a chat model in Lemonade\./],
       ["Qwen3-8B-GGUF", /^Error: Lemonade has no downloaded chat model named Qwen3-8B-GGUF\. Download it in Lemonade or choose another model, then try again\.$/],
+      ["Qwen3-4B-GGUF", /^Error: Lemonade has no downloaded chat model named Qwen3-4B-GGUF\. Download it in Lemonade or choose another model, then try again\.$/],
     ];
     for (const [model, message] of cases) {
       const urls: string[] = [];
@@ -218,6 +219,7 @@ describe("createLemonadeLlm sends only a listed chat model", () => {
           { id: "Qwen3-0.6B-GGUF", labels: ["chat"], recipe: "llamacpp" },
           { id: "openai.gpt-5", labels: ["chat"], recipe: "cloud" },
           { id: "nomic-embed-text-v1-GGUF", labels: ["embeddings"], recipe: "llamacpp" },
+          { id: "Qwen3-4B-GGUF", labels: ["chat"], recipe: "llamacpp", downloaded: false },
         ]);
       }, async () => {
         const llm = createLemonadeLlm({ defaultModel: model });

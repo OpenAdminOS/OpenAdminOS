@@ -47,7 +47,7 @@ export function lemonadeUnlistedModelMessage(
   if (entry && isLemonadeCloudModel(entry)) {
     return `Lemonade sends ${model} to a cloud API, so OpenAdminOS does not use it as a local model. Choose a chat model that runs on this device.`;
   }
-  if (entry) {
+  if (entry && entry.downloaded !== false) {
     return `${model} is not a chat model in Lemonade. Choose a chat model, then try again.`;
   }
   return `Lemonade has no downloaded chat model named ${model}. Download it in Lemonade or choose another model, then try again.`;
