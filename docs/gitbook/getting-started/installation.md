@@ -61,8 +61,8 @@ plus the UTC build time). Nightlies are signed and notarized like stable
 releases but get less testing, so try them on a test organization first.
 
 - **Turn them on:** Settings > About > **Get nightly builds**. The app then
-  updates to newer nightlies and to newer stable releases. A badge in the status
-  strip marks a nightly build. Write confirmation and every other safeguard work
+  updates to newer nightlies and to newer stable releases. A **Nightly** badge
+  next to the OpenAdminOS name in the sidebar marks a nightly build. Write confirmation and every other safeguard work
   the same as in a stable release.
 - **Go back to stable:** turn **Get nightly builds** off. The app installs the
   current stable release, even if it is older than the nightly.

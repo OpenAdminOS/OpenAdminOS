@@ -305,8 +305,8 @@ Nightly notes describe that build only: the pull requests and commits since
 the previous release of either channel, and the `[Unreleased]` entries of
 `CHANGELOG.md` that were not in the previous release's `CHANGELOG.md`. The
 whole `[Unreleased]` section is never copied, so an entry appears in the notes
-of the nightly that added it, and again only if it is edited later. Stable notes keep the full dated
-section.
+of the nightly that added it, and again only if its words change later
+(rewrapping it does not count). Stable notes keep the full dated section.
 
 Nightly runs share one concurrency group and queue rather than cancel: a
 running nightly always finishes, and GitHub keeps only the newest waiting run.

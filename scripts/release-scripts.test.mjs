@@ -341,3 +341,36 @@ test("nightly notes look past a tag already on the commit and list what it added
     rmSync(repo, { recursive: true, force: true });
   }
 });
+
+test("nightly notes list every entry when the previous release has no CHANGELOG.md", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdtempSync, mkdirSync, rmSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join, resolve } = await import("node:path");
+  const script = resolve("scripts/nightly-release-notes.mjs");
+  const repo = mkdtempSync(join(tmpdir(), "nightly-notes-"));
+  const git = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();
+  try {
+    git("init", "-q", "-b", "main");
+    git("config", "user.email", "test@example.invalid");
+    git("config", "user.name", "Test");
+    writeFileSync(join(repo, "README.md"), "readme\n");
+    git("add", "README.md");
+    git("commit", "-q", "-m", "first");
+    git("tag", "v0.1.0");
+    writeFileSync(join(repo, "CHANGELOG.md"), "# Changelog\n\n## [Unreleased]\n\n### Added\n\n- First entry.\n");
+    git("add", "CHANGELOG.md");
+    git("commit", "-q", "-m", "add a changelog");
+    mkdirSync(join(repo, "assets"));
+    const notes = execFileSync("node", [script, "v0.1.1-nightly.20261112000000", git("rev-parse", "HEAD"), "assets"], {
+      cwd: repo,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, GITHUB_REPOSITORY: "OpenAdminOS/OpenAdminOS" },
+    });
+    assert.match(notes, /## Changes since v0\.1\.0/);
+    assert.match(notes, /## Changelog entries in this build\n\n#### Added\n\n- First entry\./);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
