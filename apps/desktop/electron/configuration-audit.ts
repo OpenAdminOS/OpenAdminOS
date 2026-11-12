@@ -488,6 +488,7 @@ function instructionSeed(
   revision: NovaInstructionRevision | undefined,
   scope: NovaInstructionRevision["scope"],
   organization: Pick<EventSeed, "organizationId" | "organizationName">,
+  via: string,
 ): EventSeed {
   const reverted = revision?.via === "revert";
   return {
@@ -499,7 +500,7 @@ function instructionSeed(
       length: after.length,
       sha256: sha256(after),
       ...(before ? { previousSha256: sha256(before) } : {}),
-      via: revision?.via ?? "settings",
+      via: revision?.via ?? via,
       ...(revision ? { revisionId: revision.id } : {}),
     },
   };
@@ -527,7 +528,7 @@ function novaSeeds(
   }
   // Unset and empty differ: an unset text leaves an IT default in effect, an empty one clears it.
   if (previous?.instructions !== next?.instructions) {
-    seeds.push(instructionSeed(previous?.instructions ?? "", next?.instructions ?? "", addedRevision(previous, next, "user"), "user", {}));
+    seeds.push(instructionSeed(previous?.instructions ?? "", next?.instructions ?? "", addedRevision(previous, next, "user"), "user", {}, via));
   }
   const organizationIds = new Set([...Object.keys(previous?.addenda ?? {}), ...Object.keys(next?.addenda ?? {})]);
   for (const organizationId of [...organizationIds].sort()) {
@@ -539,7 +540,7 @@ function novaSeeds(
       instructionSeed(before, after, addedRevision(previous, next, "organization", organizationId), "organization", {
         organizationId,
         ...(organization ? { organizationName: organization.name } : {}),
-      }),
+      }, via),
     );
   }
   const enabled: string[] = [];
@@ -570,7 +571,7 @@ function novaSeeds(
     if (!afterShortcuts.has(shortcut.id)) seeds.push({ type: "nova.shortcut-deleted", details: { shortcutId: shortcut.id, name: shortcut.name, via } });
   }
   if ((previous?.memoryPaused ?? false) !== (next?.memoryPaused ?? false)) {
-    seeds.push({ type: next?.memoryPaused ? "nova.memory-paused" : "nova.memory-resumed", details: {} });
+    seeds.push({ type: next?.memoryPaused ? "nova.memory-paused" : "nova.memory-resumed", details: { via } });
   }
   return seeds;
 }
@@ -667,8 +668,8 @@ const DETAIL_KEYS: Readonly<Record<ConfigurationAuditEventType, readonly string[
   "nova.capabilities-changed": ["enabled", "disabled", "via"],
   "nova.shortcut-saved": ["shortcutId", "name", "prompt", "updated", "via"],
   "nova.shortcut-deleted": ["shortcutId", "name", "via"],
-  "nova.memory-paused": [],
-  "nova.memory-resumed": [],
+  "nova.memory-paused": ["via"],
+  "nova.memory-resumed": ["via"],
 };
 
 /** Keeps the allowed detail fields of a recorded shape; a field of another shape is left out, not the event. */

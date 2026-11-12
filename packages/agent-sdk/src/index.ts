@@ -2259,7 +2259,8 @@ export interface NovaResponse {
 export type NovaVoiceMode = "local" | "openai";
 /** Nova abilities the admin can turn off. Connector sends are set per connector. */
 export type NovaCapabilityName = "webSearch" | "startAgents" | "navigation";
-export type NovaProfileChangeVia = "settings" | "nova-proposal" | "revert" | "migration";
+/** How a profile change was made; "disconnect" when Disconnect removed an organization's instructions. */
+export type NovaProfileChangeVia = "settings" | "nova-proposal" | "revert" | "migration" | "disconnect";
 
 /** A named read-only question Nova runs on request. */
 export interface NovaShortcut {

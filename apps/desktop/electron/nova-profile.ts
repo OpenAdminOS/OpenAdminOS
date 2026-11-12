@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   isManagedSettingLocked,
   managedNovaMemoryOff,
@@ -190,7 +191,7 @@ export function sanitizeNovaProfile(value: unknown): NovaProfile | undefined {
   }
   if (value.memoryPaused === true) profile.memoryPaused = true;
   if (value.migratedFromLocalStorage === true) profile.migratedFromLocalStorage = true;
-  if (isRecord(value.lastChange) && typeof value.lastChange.id === "string" && value.lastChange.id.length <= 128 && ["settings", "nova-proposal", "revert", "migration"].includes(value.lastChange.via as string))
+  if (isRecord(value.lastChange) && typeof value.lastChange.id === "string" && value.lastChange.id.length <= 128 && ["settings", "nova-proposal", "revert", "migration", "disconnect"].includes(value.lastChange.via as string))
     profile.lastChange = { id: value.lastChange.id, via: value.lastChange.via as NovaProfileChangeVia };
   return Object.keys(profile).length > 0 ? profile : undefined;
 }
@@ -259,7 +260,7 @@ function instructionsState(profile: NovaProfile | undefined, policy: ManagedPoli
  * The profile without the addenda, and their versions, of organizations
  * that are disconnected. Unchanged when it holds none of them.
  */
-export function novaProfileWithoutOrganizations(profile: NovaProfile | undefined, organizationIds: readonly string[]): NovaProfile | undefined {
+export function novaProfileWithoutOrganizations(profile: NovaProfile | undefined, organizationIds: readonly string[], changeId: string = randomUUID()): NovaProfile | undefined {
   if (!profile || organizationIds.length === 0) return profile;
   const removed = new Set(organizationIds);
   const hasAddendum = Object.keys(profile.addenda ?? {}).some((id) => removed.has(id));
@@ -272,6 +273,8 @@ export function novaProfileWithoutOrganizations(profile: NovaProfile | undefined
   const revisions = (profile.revisions ?? []).filter((revision) => !(revision.scope === "organization" && removed.has(revision.organizationId ?? "")));
   if (revisions.length > 0) next.revisions = revisions;
   else delete next.revisions;
+  // The audit records this removal as made by Disconnect, not in Settings.
+  next.lastChange = { id: changeId, via: "disconnect" };
   return next;
 }
 

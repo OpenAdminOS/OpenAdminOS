@@ -436,6 +436,7 @@ describe("Nova settings in the store", () => {
       assert.deepEqual(events[3]!.details, { enabled: [], disabled: ["webSearch", "connectorSends:slack"], via: "settings" });
       assert.equal(events[4]!.details.prompt, "Which devices are noncompliant?");
       assert.equal(events[4]!.details.via, "settings");
+      assert.deepEqual(events[5]!.details, { via: "settings" });
 
       const exported = await fixture.store.exportAuditLog({ format: "json" });
       const document = JSON.parse(exported.content) as { events: Array<{ type: string; details: Record<string, unknown> }> };
@@ -444,6 +445,23 @@ describe("Nova settings in the store", () => {
       const appState = await fixture.store.getAppState();
       assert.equal(appState.novaProfile?.instructions, "Answer in short sentences. Name the organization.");
       assert.equal(appState.novaProfile?.addendum, "Contoso pilots Windows 11.");
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("records the organization instructions removed by Disconnect as made by Disconnect", async () => {
+    const fixture = await makeStore();
+    try {
+      const state = await fixture.store.getAppState();
+      const organizationId = state.activeOrganizationId!;
+      await fixture.store.handleNovaProfile({ action: "save", patch: { addendum: { organizationId, text: "Contoso pilots Windows 11." } } });
+      await fixture.store.disconnectTenant(state.activeTenantId!);
+      const removed = (await fixture.recorded()).filter((event) => event.type === "nova.instructions-changed" && event.organizationId === organizationId);
+      assert.equal(removed.length, 2, JSON.stringify(removed));
+      assert.equal(removed[0]!.details.via, "settings");
+      assert.equal(removed[1]!.details.text, "");
+      assert.equal(removed[1]!.details.via, "disconnect");
     } finally {
       await fixture.close();
     }
