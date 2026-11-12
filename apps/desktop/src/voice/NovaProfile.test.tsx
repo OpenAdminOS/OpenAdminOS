@@ -179,6 +179,34 @@ it("says what happened to the card when the click finds the session ended by a s
   expect(dc.send.mock.calls.some(([event]) => String(event).includes("session.close"))).toBe(true);
 });
 
+it("closes the hosted audio when the click finds the sign-in or endpoint changed", async () => {
+  const dc = stubHostedSession();
+  let finish!: (value: NovaResponse) => void;
+  const bridge = makeMockBridge({
+    nova: vi.fn(async (input) => {
+      if (input.action === "status") return { hasKey: true };
+      if (input.action === "start") return { sessionId: "voice-session", sdp: "v=0" };
+      if (input.action === "answer") return new Promise<NovaResponse>((resolve) => { finish = resolve; });
+      if (input.action === "decide-action")
+        throw new Error("Error invoking remote method 'openadminos:nova': Error: The organization, its connection or the reasoning provider changed after this voice session started, so the session ended. Start Nova again. No follow-up was set.");
+      return {};
+    }),
+  }, createMockAppState({ novaProfile: effective({ shortcuts: [{ id: "s1", name: "Morning check", prompt: "How many devices?", createdAt: "2026-11-12T08:00:00.000Z" }] }) }));
+  renderRoute(<Nova />, { bridge, route: "/cache", path: "/cache" });
+  const user = userEvent.setup();
+  act(() => openNovaShortcut("Morning check"));
+  await user.click(await screen.findByRole("checkbox"));
+  await user.click(screen.getByRole("button", { name: "Start Nova" }));
+  await waitFor(() => expect(dc.onmessage).toBeTypeOf("function"));
+  act(() => dc.onmessage!({ data: JSON.stringify({ type: "session.started" }) }));
+  await waitFor(() => expect(bridge.nova).toHaveBeenCalledWith(expect.objectContaining({ action: "answer" }), expect.any(Function)));
+  await act(async () => finish({ text: "Review the follow-up.", pendingAction: { id: "f1", kind: "follow-up", title: "Follow-up", target: "Northwind", body: "Check compliance in 1 hour", deliveryNote: "Read-only." } }));
+  await user.click(screen.getByRole("button", { name: /Confirm/ }));
+  expect(await screen.findByText(/connection or the reasoning provider changed.*No follow-up was set\./)).toBeInTheDocument();
+  expect(screen.queryByText(/Error invoking remote method/)).not.toBeInTheDocument();
+  expect(dc.send.mock.calls.some(([event]) => String(event).includes("session.close"))).toBe(true);
+});
+
 it("closes the hosted audio when the main process ends the session after a settings change, without another question", async () => {
   const dc = stubHostedSession();
   const listeners: Array<(info: { reason: string }) => void> = [];

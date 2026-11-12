@@ -5481,8 +5481,8 @@ function registerIpcHandlers() {
   ipcMain.handle("openadminos:refresh-providers", handleTrusted(() => store.refreshProviders()));
   ipcMain.handle(
     "openadminos:set-active-provider-and-model",
-    handleTrusted((_event, providerId: unknown, model: unknown) =>
-      store.setActiveProviderAndModel(validateProviderId(providerId, "providerId"), requireBoundedString(model, "model", 256)),
+    handleTrusted(async (_event, providerId: unknown, model: unknown) =>
+      afterNovaContextChange(await store.setActiveProviderAndModel(validateProviderId(providerId, "providerId"), requireBoundedString(model, "model", 256)), { tellPanel: true }),
     ),
   );
   ipcMain.handle(
@@ -5504,8 +5504,9 @@ function registerIpcHandlers() {
   );
   ipcMain.handle(
     "openadminos:set-azure-openai-config",
-    handleTrusted((_event, input: unknown) =>
-      store.setAzureOpenAIConfig(validateAzureOpenAIConfigInput(input)),
+    // A new Azure OpenAI resource or deployment is another endpoint: a voice session on it ends.
+    handleTrusted(async (_event, input: unknown) =>
+      afterNovaContextChange(await store.setAzureOpenAIConfig(validateAzureOpenAIConfigInput(input)), { tellPanel: true }),
     ),
   );
   ipcMain.handle(

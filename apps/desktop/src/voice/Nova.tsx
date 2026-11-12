@@ -235,6 +235,9 @@ export function Nova({
         } else if (text.includes(NOVA_SESSION_ENDED_BEFORE_CARD)) {
           stop();
           setError(text.slice(text.indexOf(NOVA_SESSION_ENDED_BEFORE_CARD)));
+        } else if (text.includes(NOVA_SESSION_CONTEXT_CHANGED)) {
+          stop();
+          setError(text.slice(text.indexOf(NOVA_SESSION_CONTEXT_CHANGED)));
         } else setError(text);
       }
     }

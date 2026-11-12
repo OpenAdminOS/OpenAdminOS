@@ -11,7 +11,7 @@ import { NOVA_NOTES_UNREADABLE_NOTICE, NOVA_SESSION_PROFILE_CHANGED, NovaService
 import { defaultNovaSettings } from "./nova-test-settings.js";
 import { NOVA_PROFILE_SHORTENED_NOTICE, effectiveNovaProfile } from "./nova-profile.js";
 import { novaCommand, parseNovaCommand } from "../src/shared/nova-command.js";
-import { NOVA_SESSION_ENDED_BEFORE_CARD } from "../src/shared/nova-session.js";
+import { NOVA_SESSION_CONTEXT_CHANGED, NOVA_SESSION_ENDED_BEFORE_CARD } from "../src/shared/nova-session.js";
 
 function fixture(options: { profile?: NovaProfile; memoryOff?: boolean } = {}) {
   const live = { profile: options.profile };
@@ -461,6 +461,53 @@ describe("Nova hosted sessions after a settings change, without another question
     await assert.rejects(starting, /tenant or provider changed/);
     assert.equal(f.requests.some((request) => request.url.includes("/live/sessions")), false, "nothing went to OpenAI");
     assert.equal(f.consents.length, 0);
+  });
+
+  it("refuses a question on another sign-in before the reconnect check ran, and asks nothing", async () => {
+    const f = fixture();
+    const tenants = (f.state as unknown as { tenants: Array<Record<string, unknown>> }).tenants;
+    tenants[0] = { ...tenants[0], connectionId: "connection-1", username: "admin@northwind.example", homeAccountId: "home-1" };
+    const sessionId = await start(f);
+    tenants[0] = { ...tenants[0], connectionId: "connection-2", username: "other@northwind.example", homeAccountId: "home-2" };
+    // No sessionContextChanged() call: the request itself finds the change.
+    await assert.rejects(f.nova.handle({ action: "answer", sessionId, text: "How many devices?" }), { message: NOVA_SESSION_CONTEXT_CHANGED });
+    assert.equal(f.chatOptions.length, 0, "nothing was asked");
+    await assert.rejects(f.nova.handle({ action: "answer", sessionId, text: "How many devices?" }), /tenant or provider changed/);
+  });
+
+  it("refuses a card click after the provider endpoint moved, before the endpoint check ran, and says what happened to the card", async () => {
+    const f = fixture();
+    let endpoint = "https://original.openai.azure.com#gpt";
+    f.host.providerEndpoint = async () => endpoint;
+    const sessionId = await start(f);
+    const prepared = await f.nova.handle({ action: "answer", sessionId, text: "Check compliance again in an hour" });
+    assert.equal(prepared.pendingAction?.kind, "follow-up");
+    endpoint = "https://different.openai.azure.com#other";
+    await assert.rejects(
+      f.nova.handle({ action: "decide-action", sessionId, actionId: prepared.pendingAction!.id, approved: true }),
+      { message: `${NOVA_SESSION_CONTEXT_CHANGED} No follow-up was set.` },
+    );
+    assert.equal(f.followUps.list("tenant-a").length, 0);
+  });
+
+  it("does not start a local session when the organization is connected again while the start reads its settings", async () => {
+    const f = fixture();
+    const tenants = (f.state as unknown as { tenants: Array<Record<string, unknown>> }).tenants;
+    tenants[0] = { ...tenants[0], connectionId: "connection-1" };
+    const read = f.host.profile;
+    let release: (() => void) | undefined;
+    let calls = 0;
+    f.host.profile = async (...args) => {
+      calls += 1;
+      if (calls === 1) await new Promise<void>((resolve) => { release = resolve; });
+      return read(...args);
+    };
+    const starting = start(f);
+    for (let index = 0; index < 100 && !release; index += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.ok(release, "the start is reading its settings");
+    tenants[0] = { ...tenants[0], connectionId: "connection-2" };
+    release!();
+    await assert.rejects(starting, /tenant or provider changed/);
   });
 
   it("says the settings could not be read when a shortcut is asked for and they cannot be", async () => {

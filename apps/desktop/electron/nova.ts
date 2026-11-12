@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { managedNovaVoiceModeAllowed, resolveProviderDefaultModel } from "@openadminos/agent-sdk";
 import { ManagedPolicyError, novaVoiceModeNotAllowedMessage } from "./managed-policy.js";
 import { allowedNovaVoiceModes, NOVA_PROFILE_BLOCK_END, NOVA_PROFILE_BYTE_LIMIT, NOVA_PROFILE_SHORTENED_NOTICE, novaReasoningProfileByteLimit, novaCapabilityAllowed, novaCapabilityOffMessage, novaConnectorSendAllowed, novaProfilePromptParts, novaShortcutPromptIssue, type NovaProfilePromptInput } from "./nova-profile.js";
-import { NOVA_NOTES_UNREADABLE_NOTICE, NOVA_SESSION_ENDED_BEFORE_CARD, NOVA_SESSION_PROFILE_CHANGED, novaEndedCardOutcome } from "../src/shared/nova-session.js";
+import { NOVA_NOTES_UNREADABLE_NOTICE, NOVA_SESSION_CONTEXT_CHANGED, NOVA_SESSION_ENDED_BEFORE_CARD, NOVA_SESSION_PROFILE_CHANGED, novaEndedCardOutcome } from "../src/shared/nova-session.js";
 import type {
   AppState,
   ConnectorSummary,
@@ -190,15 +190,15 @@ export class NovaService {
   private profileChanges = 0;
 
   /**
-   * Run by a hosted start before it records the consent and sends the
-   * request. It always reads the state, the settings and the notes again
+   * Run by a start: a hosted one before it records the consent and sends
+   * the request, a local one before it returns its session. It always reads the state, the settings and the notes again
    * and refuses when the organization, its connection, the provider,
    * model, locality or endpoint, or what the session would send changed.
    * A change announced during that read makes it read again. It returns
    * the fresh state and settings with no wait after its last read, so the
    * caller records the consent and sends at once, from that snapshot.
    */
-  private async confirmHostedStartCurrent(session: NonNullable<NovaService["session"]>): Promise<{ state: AppState; settings?: NovaSettings }> {
+  private async confirmStartCurrent(session: NonNullable<NovaService["session"]>): Promise<{ state: AppState; settings?: NovaSettings }> {
     for (let attempt = 0; attempt < 5; attempt += 1) {
       session.controller.signal.throwIfAborted();
       const changes = this.profileChanges;
@@ -335,10 +335,15 @@ export class NovaService {
       };
       this.session = session;
       try {
-        if (input.mode === "local") return { sessionId: session.id, ...notice };
+        // A local session starts only on the context it was asked for, checked
+        // the same way as a hosted start right before it would send.
+        if (input.mode === "local") {
+          await this.confirmStartCurrent(session);
+          return { sessionId: session.id, ...notice };
+        }
         // A change while the profile was read did not reach this session;
         // it is checked again here and once more right before sending.
-        await this.confirmHostedStartCurrent(session);
+        await this.confirmStartCurrent(session);
         if (
           typeof input.sdp !== "string" ||
           input.sdp.length > 65536 ||
@@ -355,7 +360,7 @@ export class NovaService {
         session.controller.signal.throwIfAborted();
         // Nothing awaits between this check and the request below, which is
         // built from the state and settings this check read.
-        const current = await this.confirmHostedStartCurrent(session);
+        const current = await this.confirmStartCurrent(session);
         // The consent is on this device before audio or context is sent; when no store kept it, nothing is sent.
         if (!this.actions?.recordVoiceConsent) throw new Error(NOVA_VOICE_CONSENT_NOT_KEPT);
         {
@@ -434,8 +439,21 @@ export class NovaService {
     if (input.action === "answer" || input.action === "decide-action") {
       // Settings and notes read now, not at session start: a note paused,
       // edited or forgotten in the meantime stays out of the next answer.
-      const fresh = await this.readSessionProfile(session.tenantId);
+      const [fresh, activeTenantId, endpoint] = await Promise.all([
+        this.readSessionProfile(session.tenantId),
+        this.writableActiveTenant(),
+        this.providerEndpoint(session.providerId),
+      ]);
       if (session !== this.session) throw new Error("Nova was stopped or this question was replaced. Start a new conversation.");
+      // The same identity check as after a Connect, Disconnect or provider
+      // save, made per request: a question or click that arrives before that
+      // check finished does not run on another sign-in or endpoint.
+      if (sessionContextDiffers(session, state, activeTenantId, endpoint)) {
+        const card = input.action === "decide-action" ? session.pendingAction : undefined;
+        this.invalidate();
+        this.endedCard = undefined;
+        throw new Error(card ? `${NOVA_SESSION_CONTEXT_CHANGED} ${novaEndedCardOutcome(card.preview.kind)}` : NOVA_SESSION_CONTEXT_CHANGED);
+      }
       // The hosted voice prompt cannot be taken back. When what it was given
       // changed or was removed, the session ends instead of using it further.
       if (session.hostedProfile && hostedProfileChanged(session.hostedProfile, fresh)) {
