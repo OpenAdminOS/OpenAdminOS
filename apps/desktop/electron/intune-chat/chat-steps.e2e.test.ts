@@ -454,6 +454,30 @@ describe("Chat steps, sources and follow-ups end to end", () => {
     });
   });
 
+  it("asks a non-streaming deterministic answer that only promises work again, at most twice, and keeps a real answer", async () => {
+    await withHarness(async ({ store, prompts, script }) => {
+      await store.setChatInvestigationMode("always-deterministic");
+      script(["I'll check that now.", "2 of the 5 Macs are noncompliant."]);
+      let before = prompts.length;
+      const repaired = (await store.sendIntuneChatMessage({ content: "Which of our macOS devices are noncompliant?" })).assistantMessage;
+      assert.equal(repaired.content, "2 of the 5 Macs are noncompliant.");
+      assert.equal(prompts.length - before, 2);
+      assert.match(prompts.at(-1)!.prompt, /Your previous reply:\nI'll check that now\./);
+
+      script(["Let me look into it.", "One moment, I'm checking.", "I'll check that now.", "unused"]);
+      before = prompts.length;
+      const kept = (await store.sendIntuneChatMessage({ content: "Which of our Windows devices are noncompliant?" })).assistantMessage;
+      assert.equal(prompts.length - before, 3);
+      assert.equal(kept.content, "I'll check that now.");
+
+      script(["All 5 Macs are compliant. I'll check the app installs next.", "unused"]);
+      before = prompts.length;
+      const answered = (await store.sendIntuneChatMessage({ content: "Are our Macs compliant?" })).assistantMessage;
+      assert.equal(prompts.length - before, 1);
+      assert.equal(answered.content, "All 5 Macs are compliant. I'll check the app installs next.");
+    });
+  });
+
   it("does not label the answer Microsoft Learn when the Learn call was blocked", async () => {
     await withHarness(async ({ store, script }) => {
       script([

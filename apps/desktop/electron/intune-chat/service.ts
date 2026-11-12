@@ -1,5 +1,5 @@
 import { voiceDeviceEvidenceAnswer, voiceDeviceEvidenceIntent } from "./voice-device-evidence.js";
-import { MAX_PROMISE_NUDGES, PROMISE_REPAIR_PROMPT, looksLikeUnkeptPromise } from "./unkept-promise.js";
+import { MAX_PROMISE_NUDGES, PROMISE_REPAIR_PROMPT, completeWithPromiseNudge, looksLikeUnkeptPromise } from "./unkept-promise.js";
 import type { WebSearch } from "./web-search.js";
 import { voiceConversationContext, voiceInventoryAnswer, voiceAppPlatformCountAnswer, voiceDeviceSummaryAnswer, voiceResourcesForQuestion, compactVoiceAnswerPack, assertVoicePromptBudget, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
 import { randomUUID } from "node:crypto";
@@ -1704,26 +1704,29 @@ export class IntuneChatService {
     const llm = withTenantDataOutputFilter(await this.tenantLlm(input.providerId, input.model, input.tenantIds));
     if (!llm.available) return deterministic;
     try {
-      const completion = await llm.complete({
-        system: buildIntuneChatSystemPrompt(input.provider?.isLocal === true),
-        prompt: [
-          "Summarize this read-only multi-tenant Chat result for an admin.",
-          "The JSON table is the source of truth. Mention partial, failed, skipped, or stale tenants.",
-          `Question: ${input.prompt}`,
-          fenceTenantData(JSON.stringify(
-            {
-              summary: input.summary,
-              tenants: input.comparisons,
-            },
-            null,
-            2,
-          ), "chat:multi-tenant-result"),
-        ].join("\n\n"),
+      const system = buildIntuneChatSystemPrompt(input.provider?.isLocal === true);
+      const prompt = [
+        "Summarize this read-only multi-tenant Chat result for an admin.",
+        "The JSON table is the source of truth. Mention partial, failed, skipped, or stale tenants.",
+        `Question: ${input.prompt}`,
+        fenceTenantData(JSON.stringify(
+          {
+            summary: input.summary,
+            tenants: input.comparisons,
+          },
+          null,
+          2,
+        ), "chat:multi-tenant-result"),
+      ].join("\n\n");
+      // An answer that only promises work is asked again, at most twice; the last answer is kept.
+      const text = await completeWithPromiseNudge(async (attempt) => (await llm.complete({
+        system,
+        prompt: attempt,
         ...(input.model ? { model: input.model } : {}),
         temperature: 0.2,
         maxTokens: 700,
-      });
-      return completion.text.trim() || deterministic;
+      })).text.trim(), prompt);
+      return text || deterministic;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return `${deterministic}\n\nThe selected LLM provider failed while summarizing this multi-tenant result. ${message}`;
@@ -2323,18 +2326,24 @@ export class IntuneChatService {
         citations.addPassages(documentation);
         documentationSources = citations.sources;
         const finishAnswerStep = startAnswerStep(steps, answerModel);
-        const completion = await llm.complete({
-          system: buildIntuneChatSystemPrompt(provider?.isLocal === true),
-          prompt: buildAnswerPrompt(answerPack, documentation),
-          ...(selectedModel ? { model: selectedModel } : {}),
-          temperature: 0.2,
-          maxTokens: chatBudget.maxTokens,
-        });
+        const system = buildIntuneChatSystemPrompt(provider?.isLocal === true);
+        let model: string | undefined;
+        // An answer that only promises work is asked again, at most twice; the last answer is kept.
+        const content = await completeWithPromiseNudge(async (attempt) => {
+          const completion = await llm.complete({
+            system,
+            prompt: attempt,
+            ...(selectedModel ? { model: selectedModel } : {}),
+            temperature: 0.2,
+            maxTokens: chatBudget.maxTokens,
+          });
+          model = completion.model;
+          return completion.text.trim();
+        }, buildAnswerPrompt(answerPack, documentation));
         finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0 });
-        const content = completion.text.trim();
         return {
           content,
-          model: completion.model,
+          model,
         };
       };
 
