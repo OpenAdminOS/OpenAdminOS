@@ -654,6 +654,10 @@ and sends, whatever changed or was announced, refuses when the organization, its
 connection, the provider, model, locality or endpoint (Ollama, LM Studio, Azure
 OpenAI resource and deployment) or what the session would send changed, and
 builds the request from that read with no wait in between (round 5 review,
+2026-11-12). The connection is the tenant's connection id and signed-in
+account, so connecting the same organization again ends a session too. A click
+on a card whose session ended says what happened to it: a note stays proposed in
+Settings, Nova; nothing else was sent, started, set or saved (round 6 review,
 2026-11-12). Only notes that fit the hosted block are recorded as sent and
 watched; a settings read that fails ends the session too.
 
@@ -770,14 +774,20 @@ counted (round 3 review, 2026-11-12). The follow-up and its place in the daily
 count are stored in one transaction, and `nova.followup.created` is recorded
 only once both are; a failed write sets nothing. Azure OpenAI follow-ups are
 bound to their resource and deployment like a local provider's endpoint, and are
-skipped when either changed (round 5 review, 2026-11-12). The decision is
+skipped when either changed (round 5 review, 2026-11-12). The model of a run is
+built only for that endpoint, compared on the values the adapter is built from,
+so a configuration saved after the fire decision ends the run `failed` before
+anything is sent; a new follow-up is checked against the organization, provider
+and model after its last read, with no wait before it is stored (round 6 review,
+2026-11-12). The decision is
 made on the pending row: a skipped or missed follow-up is never marked running
 and has no started event; one that runs takes the tenant lease first, then is
 claimed and records `started` right before Chat is asked, so a Disconnect after
 the decision skips it (`skipped-organization`) without a started event. Inside
 the lease the decision is taken again on the state then, so an organization,
 provider or model switched after the first decision is a skip as well, with no
-started event (round 4 review, 2026-11-12). One more than an hour late is `missed`;
+started event (round 4 review, 2026-11-12). One more than an hour late is `missed`,
+also when earlier follow-ups of the same check ran first, which Settings says;
 one cut off by a quit is `failed`, marked at the next scheduler check when marking
 it at launch failed. A run goes through Chat, which is strictly
 read-only, under the tenant lease, with a hard five-minute bound (a call that
@@ -794,7 +804,8 @@ The Nova panel counts only the active organization's pending follow-ups.
 
 **What needs me.** "What needs me?" and close wordings list the active
 organization's open Agent Team findings and runs waiting for confirmation,
-without a model call, with links to each. Nothing is approved; with nothing open
+without a model call, with a link to each run's confirmation and one to Agent
+Team, where findings are decided (it has no link per finding). Nothing is approved; with nothing open
 Nova says so, and without an active organization it refuses.
 
 **Shortcuts.** Named read-only questions (at most 20, a name of 40 and a question

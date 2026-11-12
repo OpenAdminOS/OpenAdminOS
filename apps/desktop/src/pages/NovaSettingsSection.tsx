@@ -38,7 +38,7 @@ const FOLLOW_UP_STATE_TEXT: Record<NovaFollowUp["status"], string> = {
   cancelled: "Cancelled",
   "skipped-organization": "Not run: the organization it was set in was not active or not connected at that time.",
   "skipped-provider": "Not run: the agent provider or model changed after it was set.",
-  missed: "Not run: OpenAdminOS was not running within an hour of its time.",
+  missed: "Not run within an hour of its time: OpenAdminOS was not running, or earlier follow-ups ran first.",
   failed: "Started, but Chat did not return an answer.",
 };
 
