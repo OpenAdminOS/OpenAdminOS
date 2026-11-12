@@ -142,6 +142,14 @@ test("nightly notes list only the changelog entries added since the previous rel
   assert.match(newUnreleasedEntries(previous, previous.replace("Splashtop Docs MCP.", "Splashtop Docs MCP, renamed.")), /renamed/);
   // No previous release: all entries.
   assert.match(newUnreleasedEntries("", current), /Managed configuration/);
+  // A moved entry is not new, a removed one is not listed, CRLF reads like LF.
+  const moved = previous.replace("### Added\n\n- Splashtop Docs MCP.", "### Added\n").replace("### Fixed\n", "### Fixed\n\n- Splashtop Docs MCP.\n");
+  assert.equal(newUnreleasedEntries(previous, moved), "");
+  assert.equal(newUnreleasedEntries(previous, previous.replace("- Splashtop Docs MCP.\n", "")), "");
+  assert.equal(newUnreleasedEntries(previous.replace(/\n/g, "\r\n"), current.replace(/\n/g, "\r\n")), newUnreleasedEntries(previous, current));
+  // Paragraphs and code blocks inside an entry keep their blank lines.
+  const multi = changelog("- A feature.", "", "  A second paragraph.", "", "  ```json", "  {}", "", "  ```");
+  assert.equal(newUnreleasedEntries(changelog(), multi), "#### Added\n\n- A feature.\n\n  A second paragraph.\n\n  ```json\n  {}\n\n  ```");
 
   const notes = buildNotes({
     tag: "v0.7.3-nightly.20261112175700",

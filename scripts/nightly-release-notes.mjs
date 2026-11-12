@@ -78,24 +78,42 @@ export function unreleasedSection(changelog) {
  * The `## [Unreleased]` section of `current` reduced to the entries that are
  * not in the `## [Unreleased]` section of `previous` (the CHANGELOG.md of the
  * previous release). An entry is a "- " line with its indented continuation
- * lines; an entry whose text was edited counts as new. Headings with no new
+ * lines (blank lines inside it are kept); an entry whose text was edited
+ * counts as new, one moved to another heading does not, and CRLF files read
+ * like LF files. Headings with no new
  * entries are dropped, as in `unreleasedSection`.
  */
 export function newUnreleasedEntries(previous, current) {
   const entries = (section) => {
     const result = [];
     let heading = "";
+    let open = false;
+    const close = () => {
+      const last = result[result.length - 1];
+      while (last && last.lines.length > 1 && last.lines[last.lines.length - 1].trim() === "") last.lines.pop();
+      open = false;
+    };
     for (const line of section.split("\n")) {
-      if (/^#### /.test(line)) heading = line;
-      else if (/^- /.test(line)) result.push({ heading, lines: [line] });
-      else if (/^\s+\S/.test(line) && result.length > 0) result[result.length - 1].lines.push(line);
+      if (/^#### /.test(line)) {
+        close();
+        heading = line;
+      } else if (/^- /.test(line)) {
+        close();
+        result.push({ heading, lines: [line] });
+        open = true;
+      } else if (open && (line.trim() === "" || /^\s+\S/.test(line))) {
+        // Blank lines inside an entry keep its paragraphs and code blocks.
+        result[result.length - 1].lines.push(line);
+      } else if (line.trim() !== "") close();
     }
+    close();
     return result;
   };
+  const lf = (text) => text.replace(/\r\n?/g, "\n");
   const key = (entry) => entry.lines.map((line) => line.trim()).join(" ").replace(/\s+/g, " ");
-  const seen = new Set(entries(unreleasedSection(previous)).map(key));
+  const seen = new Set(entries(unreleasedSection(lf(previous))).map(key));
   const blocks = [];
-  for (const entry of entries(unreleasedSection(current))) {
+  for (const entry of entries(unreleasedSection(lf(current)))) {
     if (seen.has(key(entry))) continue;
     const last = blocks[blocks.length - 1];
     if (last && last.heading === entry.heading) last.entries.push(entry.lines.join("\n"));
