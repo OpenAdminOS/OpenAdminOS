@@ -6,6 +6,7 @@ import {
   buildNotes,
   downloadsTable,
   formatChanges,
+  newUnreleasedEntries,
   unreleasedSection,
 } from "./nightly-release-notes.mjs";
 import { NIGHTLY_VERSION, nextNightly, stable } from "./release-version.mjs";
@@ -114,6 +115,59 @@ test("the unreleased section drops empty headings", () => {
     "#### Added\n\n- Nightly update channel.\n\n#### Fixed\n\n- Something.",
   );
   assert.equal(unreleasedSection("# Changelog\n"), "");
+});
+
+test("nightly notes list only the changelog entries added since the previous release", () => {
+  const changelog = (...entries) =>
+    ["# Changelog", "", "## [Unreleased]", "", "### Added", "", ...entries, "", "### Fixed", "", "## [0.7.2] - 2026-11-01", "", "### Added", "- Old entry."].join("\n");
+  const previous = changelog("- Splashtop Docs MCP.", "- Managed configuration for IT rollouts.");
+  const current = [
+    "# Changelog", "", "## [Unreleased]", "", "### Added", "",
+    "- Nova profile, notes and follow-ups.",
+    "  Continued on a second line.",
+    "- Splashtop Docs MCP.",
+    "- Managed configuration for IT rollouts.",
+    "", "### Fixed", "", "- A fix in this build.", "",
+    "## [0.7.2] - 2026-11-01", "", "### Added", "- Old entry.",
+  ].join("\n");
+  assert.equal(
+    newUnreleasedEntries(previous, current),
+    "#### Added\n\n- Nova profile, notes and follow-ups.\n  Continued on a second line.\n\n#### Fixed\n\n- A fix in this build.",
+  );
+  // Nothing new: no changelog section at all.
+  assert.equal(newUnreleasedEntries(current, current), "");
+  // After a stable release rolled [Unreleased], every current entry is new.
+  assert.match(newUnreleasedEntries(changelog(), current), /Splashtop Docs MCP/);
+  // An edited entry counts as new.
+  assert.match(newUnreleasedEntries(previous, previous.replace("Splashtop Docs MCP.", "Splashtop Docs MCP, renamed.")), /renamed/);
+  // No previous release: all entries.
+  assert.match(newUnreleasedEntries("", current), /Managed configuration/);
+  // A moved entry is not new, a removed one is not listed, CRLF reads like LF.
+  const moved = previous.replace("### Added\n\n- Splashtop Docs MCP.", "### Added\n").replace("### Fixed\n", "### Fixed\n\n- Splashtop Docs MCP.\n");
+  assert.equal(newUnreleasedEntries(previous, moved), "");
+  assert.equal(newUnreleasedEntries(previous, previous.replace("- Splashtop Docs MCP.\n", "")), "");
+  assert.equal(newUnreleasedEntries(previous.replace(/\n/g, "\r\n"), current.replace(/\n/g, "\r\n")), newUnreleasedEntries(previous, current));
+  // An unindented wrapped line stays part of its entry.
+  assert.equal(newUnreleasedEntries(changelog(), changelog("- A long entry", "wrapped at column 0.")), "#### Added\n\n- A long entry\nwrapped at column 0.");
+  // A second copy of an entry the previous release had once is new.
+  assert.equal(newUnreleasedEntries(changelog("- Same."), changelog("- Same.", "- Same.")), "#### Added\n\n- Same.");
+  // Paragraphs and code blocks inside an entry keep their blank lines.
+  const multi = changelog("- A feature.", "", "  A second paragraph.", "", "  ```json", "  {}", "", "  ```");
+  assert.equal(newUnreleasedEntries(changelog(), multi), "#### Added\n\n- A feature.\n\n  A second paragraph.\n\n  ```json\n  {}\n\n  ```");
+
+  const notes = buildNotes({
+    tag: "v0.7.3-nightly.20261112175700",
+    sha: "f".repeat(40),
+    previous: "v0.7.3-nightly.20261111230544",
+    changes: ["- nova: editable profile (#192)"],
+    unreleased: newUnreleasedEntries(previous, current),
+    downloads: "",
+    repo: "OpenAdminOS/OpenAdminOS",
+  });
+  assert.match(notes, /## Changelog entries in this build\n\n#### Added\n\n- Nova profile/);
+  assert.doesNotMatch(notes, /Splashtop Docs MCP|Managed configuration|Unreleased changelog/);
+  const nothingNew = buildNotes({ tag: "v0.7.3-nightly.20261112175700", sha: "f".repeat(40), previous: "v0.7.3-nightly.20261111230544", changes: ["- one"], unreleased: newUnreleasedEntries(current, current), downloads: "", repo: "OpenAdminOS/OpenAdminOS" });
+  assert.doesNotMatch(nothingNew, /Changelog entries/);
 });
 
 test("the downloads table links the installers that were built", () => {
@@ -247,6 +301,75 @@ test("nightly-app-changes ignores contributor tooling, npm scripts, and linguist
     // Nightly builds patch the app with this script, so it still counts.
     const nightlyBuild = commit("scripts/prepare-nightly-build.mjs", "patch");
     assert.equal(changes(nightlyBuild), "scripts/prepare-nightly-build.mjs");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("nightly notes look past a tag already on the commit and list what it added", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdtempSync, mkdirSync, rmSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join, resolve } = await import("node:path");
+  const script = resolve("scripts/nightly-release-notes.mjs");
+  const repo = mkdtempSync(join(tmpdir(), "nightly-notes-"));
+  const git = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();
+  const changelog = (...entries) => ["# Changelog", "", "## [Unreleased]", "", "### Added", "", ...entries, ""].join("\n");
+  try {
+    git("init", "-q", "-b", "main");
+    git("config", "user.email", "test@example.invalid");
+    git("config", "user.name", "Test");
+    writeFileSync(join(repo, "CHANGELOG.md"), changelog("- Old entry."));
+    git("add", "CHANGELOG.md");
+    git("commit", "-q", "-m", "first");
+    git("tag", "v0.1.0-nightly.20261111000000");
+    writeFileSync(join(repo, "CHANGELOG.md"), changelog("- Old entry.", "- New entry."));
+    git("commit", "-q", "-am", "add an entry");
+    const sha = git("rev-parse", "HEAD");
+    // A rerun after this build's own tag was made.
+    git("tag", "v0.1.0-nightly.20261112000000");
+    mkdirSync(join(repo, "assets"));
+    const notes = execFileSync("node", [script, "v0.1.0-nightly.20261112000000", sha, "assets"], {
+      cwd: repo,
+      encoding: "utf8",
+      env: { ...process.env, GITHUB_REPOSITORY: "OpenAdminOS/OpenAdminOS" },
+    });
+    assert.match(notes, /## Changes since v0\.1\.0-nightly\.20261111000000\n\n- add an entry/);
+    assert.match(notes, /## Changelog entries in this build\n\n#### Added\n\n- New entry\./);
+    assert.doesNotMatch(notes, /Old entry/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("nightly notes list every entry when the previous release has no CHANGELOG.md", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdtempSync, mkdirSync, rmSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join, resolve } = await import("node:path");
+  const script = resolve("scripts/nightly-release-notes.mjs");
+  const repo = mkdtempSync(join(tmpdir(), "nightly-notes-"));
+  const git = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();
+  try {
+    git("init", "-q", "-b", "main");
+    git("config", "user.email", "test@example.invalid");
+    git("config", "user.name", "Test");
+    writeFileSync(join(repo, "README.md"), "readme\n");
+    git("add", "README.md");
+    git("commit", "-q", "-m", "first");
+    git("tag", "v0.1.0");
+    writeFileSync(join(repo, "CHANGELOG.md"), "# Changelog\n\n## [Unreleased]\n\n### Added\n\n- First entry.\n");
+    git("add", "CHANGELOG.md");
+    git("commit", "-q", "-m", "add a changelog");
+    mkdirSync(join(repo, "assets"));
+    const notes = execFileSync("node", [script, "v0.1.1-nightly.20261112000000", git("rev-parse", "HEAD"), "assets"], {
+      cwd: repo,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, GITHUB_REPOSITORY: "OpenAdminOS/OpenAdminOS" },
+    });
+    assert.match(notes, /## Changes since v0\.1\.0/);
+    assert.match(notes, /## Changelog entries in this build\n\n#### Added\n\n- First entry\./);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }

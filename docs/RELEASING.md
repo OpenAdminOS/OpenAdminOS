@@ -263,7 +263,7 @@ release-prep PR. They are fully automatic.
 |---|---|---|
 | Trigger | Release-prep merge (untagged package version) | Any other green `main` commit that changes the app |
 | Version | `0.7.1` | `0.7.1-nightly.20261023141500` (next stable patch + UTC build time) |
-| GitHub release | Latest release, CHANGELOG notes | Prerelease, never latest, commit-list notes |
+| GitHub release | Latest release, CHANGELOG notes | Prerelease, never latest, notes for that build only |
 | Update files | `latest.yml`, `latest-mac.yml`, `latest-linux.yml` | `nightly.yml`, `nightly-mac.yml`, `nightly-linux.yml` |
 | macOS | `.dmg`, `.pkg`, `.zip` | `.dmg`, `.zip` |
 | Linux | Release assets + apt repository | Release assets only |
@@ -300,6 +300,13 @@ How it runs:
    `gh release create --prerelease --latest=false`, writes notes with
    `scripts/nightly-release-notes.mjs`, and deletes all but the newest 20
    nightlies with their tags. A cancelled or failed nightly leaves no tag.
+
+Nightly notes describe that build only: the pull requests and commits since
+the previous release of either channel, and the `[Unreleased]` entries of
+`CHANGELOG.md` that were not in the previous release's `CHANGELOG.md`. The
+whole `[Unreleased]` section is never copied, so an entry appears in the notes
+of the nightly that added it, and again only if its words change later
+(rewrapping it does not count). Stable notes keep the full dated section.
 
 Nightly runs share one concurrency group and queue rather than cancel: a
 running nightly always finishes, and GitHub keeps only the newest waiting run.
