@@ -78,7 +78,8 @@ export function unreleasedSection(changelog) {
  * The `## [Unreleased]` section of `current` reduced to the entries that are
  * not in the `## [Unreleased]` section of `previous` (the CHANGELOG.md of the
  * previous release). An entry is a "- " line with its indented continuation
- * lines (blank lines inside it are kept); an entry whose text was edited
+ * lines, up to the next entry or heading (blank lines inside it are kept);
+ * an entry whose text was edited
  * counts as new, one moved to another heading does not, and CRLF files read
  * like LF files. Headings with no new
  * entries are dropped, as in `unreleasedSection`.
@@ -101,20 +102,28 @@ export function newUnreleasedEntries(previous, current) {
         close();
         result.push({ heading, lines: [line] });
         open = true;
-      } else if (open && (line.trim() === "" || /^\s+\S/.test(line))) {
-        // Blank lines inside an entry keep its paragraphs and code blocks.
+      } else if (open) {
+        // Every line up to the next entry or heading belongs to the entry:
+        // indented and unindented continuations, and blank lines that keep
+        // its paragraphs and code blocks.
         result[result.length - 1].lines.push(line);
-      } else if (line.trim() !== "") close();
+      }
     }
     close();
     return result;
   };
   const lf = (text) => text.replace(/\r\n?/g, "\n");
   const key = (entry) => entry.lines.map((line) => line.trim()).join(" ").replace(/\s+/g, " ");
-  const seen = new Set(entries(unreleasedSection(lf(previous))).map(key));
+  // Counted, so a second copy of an entry the previous release had once is new.
+  const seen = new Map();
+  for (const entry of entries(unreleasedSection(lf(previous)))) seen.set(key(entry), (seen.get(key(entry)) ?? 0) + 1);
   const blocks = [];
   for (const entry of entries(unreleasedSection(lf(current)))) {
-    if (seen.has(key(entry))) continue;
+    const count = seen.get(key(entry)) ?? 0;
+    if (count > 0) {
+      seen.set(key(entry), count - 1);
+      continue;
+    }
     const last = blocks[blocks.length - 1];
     if (last && last.heading === entry.heading) last.entries.push(entry.lines.join("\n"));
     else blocks.push({ heading: entry.heading, entries: [entry.lines.join("\n")] });
@@ -169,12 +178,18 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     throw new Error("Usage: GITHUB_REPOSITORY=owner/repo nightly-release-notes.mjs <tag> <sha> <assets dir>");
   }
 
-  let previous = "";
-  try {
-    previous = git("describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", sha);
-  } catch {
-    previous = "";
-  }
+  // The previous release is the newest tag before this commit. A tag already
+  // on the commit itself (a rerun after its tag was made, or a stable tag on
+  // the same commit) would leave the notes empty, so look from its parent.
+  const describe = (ref) => {
+    try {
+      return git("describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", ref);
+    } catch {
+      return "";
+    }
+  };
+  let previous = describe(sha);
+  if (previous && git("rev-list", "-n", "1", previous) === sha) previous = describe(`${sha}^`);
   const range = previous ? [`${previous}..${sha}`] : ["-n", "100", sha];
   const log = git("log", "--first-parent", "--format=%H%x09%s", ...range).split("\n");
   const bodies = new Map();
@@ -190,7 +205,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (previous) {
     try {
       previousChangelog = git("show", `${previous}:CHANGELOG.md`);
-    } catch {
+    } catch (error) {
+      process.stderr.write(`Could not read CHANGELOG.md at ${previous}, so every [Unreleased] entry is listed: ${error instanceof Error ? error.message : String(error)}\n`);
       previousChangelog = "";
     }
   }
