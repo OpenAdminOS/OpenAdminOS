@@ -293,7 +293,7 @@ export async function prepareNovaProfileChange(change: NovaProfileProposal, host
     previousBody = `${CAPABILITY_TITLES[change.capability]}: on`;
   }
   // The same checks Settings makes; a locked or too long value is refused here, before the card.
-  applyNovaProfilePatch(profile, patch, policy, { now: new Date().toISOString(), newId: () => 'proposal', organizationIds: [], via: 'nova-proposal' });
+  applyNovaProfilePatch(profile, patch, policy, { now: new Date().toISOString(), newId: () => 'proposal', organizationIds: [], activeOrganizationId: undefined, via: 'nova-proposal' });
   const before = current(settings);
   return {
     preview: { id: randomUUID(), kind: 'profile', title, target, body, previousBody },

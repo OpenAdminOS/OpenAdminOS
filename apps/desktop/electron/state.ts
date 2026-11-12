@@ -7089,6 +7089,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         now: this.clock().toISOString(),
         newId: () => randomUUID(),
         organizationIds: (persisted.organizations ?? []).map((organization) => organization.id),
+        // Read inside the serialized write: a switch queued before this save is seen here.
+        activeOrganizationId: this.activeOrganizationIdOf(persisted),
         via,
       };
       const next =

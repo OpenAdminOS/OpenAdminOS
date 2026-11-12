@@ -14,6 +14,7 @@ import { MCP_CATALOG } from "./mcp/catalog.js";
 import { ManagedPolicyError, loadManagedPolicy } from "./managed-policy.js";
 import { NovaService } from "./nova.js";
 import {
+  NOVA_ADDENDUM_NOT_ACTIVE,
   NOVA_REVISIONS_PER_TEXT,
   NOVA_SHORTCUT_NOT_READ_ONLY,
   NovaProfileError,
@@ -47,10 +48,11 @@ async function policyOf(machine: unknown): Promise<ManagedPolicyStatus | undefin
 }
 
 let ids = 0;
-const context = (organizationIds: string[] = ["org-a"]) => ({
+const context = (organizationIds: string[] = ["org-a"], activeOrganizationId: string | undefined = organizationIds[0]) => ({
   now: "2026-11-12T10:00:00.000Z",
   newId: () => `id-${++ids}`,
   organizationIds,
+  activeOrganizationId,
 });
 
 describe("Nova policy keys", () => {
@@ -188,6 +190,17 @@ describe("Nova profile", () => {
     assert.throws(
       () => applyNovaProfilePatch(undefined, { addendum: { organizationId: "org-gone", text: "x" } }, undefined, context(["org-a"])),
       /no longer on this device/,
+    );
+  });
+
+  it("changes only the active organization's addendum", () => {
+    assert.throws(
+      () => applyNovaProfilePatch(undefined, { addendum: { organizationId: "org-a", text: "x" } }, undefined, context(["org-a", "org-b"], "org-b")),
+      { message: NOVA_ADDENDUM_NOT_ACTIVE },
+    );
+    assert.throws(
+      () => applyNovaProfilePatch(undefined, { addendum: { organizationId: "org-a", text: "x" } }, undefined, { ...context(["org-a"]), activeOrganizationId: undefined }),
+      { message: NOVA_ADDENDUM_NOT_ACTIVE },
     );
   });
 
@@ -394,6 +407,7 @@ describe("Nova settings in the store", () => {
     });
     return {
       store,
+      statePath,
       async recorded(): Promise<ConfigurationAuditEvent[]> {
         return (JSON.parse(await readFile(statePath, "utf8")) as { configurationAudit?: ConfigurationAuditEvent[] }).configurationAudit ?? [];
       },
@@ -445,6 +459,28 @@ describe("Nova settings in the store", () => {
       const appState = await fixture.store.getAppState();
       assert.equal(appState.novaProfile?.instructions, "Answer in short sentences. Name the organization.");
       assert.equal(appState.novaProfile?.addendum, "Contoso pilots Windows 11.");
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("does not change an organization's addendum when a switch away from it was queued before the save or restore", async () => {
+    const fixture = await makeStore();
+    try {
+      const state = await fixture.store.getAppState();
+      const organizationId = state.activeOrganizationId!;
+      const saved = await fixture.store.handleNovaProfile({ action: "save", patch: { addendum: { organizationId, text: "Contoso pilots Windows 11." } } });
+      await fixture.store.handleNovaProfile({ action: "save", patch: { addendum: { organizationId, text: "Contoso pilots Windows 12." } } });
+      const revision = saved.revisions.find((entry) => entry.scope === "organization" && entry.text === "Contoso pilots Windows 11.")!;
+      // The switch reaches the serialized queue first; the save and the restore were sent for the organization left behind.
+      const switching = fixture.store.setActiveOrganization(null);
+      const saving = assert.rejects(fixture.store.handleNovaProfile({ action: "save", patch: { addendum: { organizationId, text: "Written after the switch." } } }), { message: NOVA_ADDENDUM_NOT_ACTIVE });
+      const restoring = assert.rejects(fixture.store.handleNovaProfile({ action: "revert", revisionId: revision.id }), { message: NOVA_ADDENDUM_NOT_ACTIVE });
+      await switching;
+      await saving;
+      await restoring;
+      const persisted = JSON.parse(await readFile(fixture.statePath, "utf8")) as { novaProfile?: { addenda?: Record<string, string> } };
+      assert.equal(persisted.novaProfile?.addenda?.[organizationId], "Contoso pilots Windows 12.");
     } finally {
       await fixture.close();
     }

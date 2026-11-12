@@ -71,8 +71,18 @@ export interface NovaProfileChangeContext {
   newId: () => string;
   /** Organizations on this device; an addendum belongs to one of them. */
   organizationIds: readonly string[];
+  /**
+   * The organization active when the change is written. Only its addendum
+   * can change: a save or restore that was waiting while the admin switched
+   * organization does not change the one left behind.
+   */
+  activeOrganizationId: string | undefined;
   via?: NovaProfileChangeVia;
 }
+
+/** Said when an addendum change names an organization that is no longer the active one. */
+export const NOVA_ADDENDUM_NOT_ACTIVE =
+  "Another organization is active now, so its instructions for Nova were not changed. Switch back to it to edit them.";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -433,6 +443,7 @@ function setAddendum(profile: NovaProfile, value: unknown, context: NovaProfileC
   rejectUnknownKeys(value, ["organizationId", "text"], "The addendum");
   const { organizationId } = value;
   if (!context.organizationIds.includes(organizationId)) throw new NovaProfileError("This organization is no longer on this device. Nothing was saved.");
+  if (organizationId !== context.activeOrganizationId) throw new NovaProfileError(NOVA_ADDENDUM_NOT_ACTIVE);
   const text = value.text.trim();
   if (text.length > NOVA_ADDENDUM_MAX_LENGTH) {
     throw new NovaProfileError(`An organization addendum can be at most ${NOVA_ADDENDUM_MAX_LENGTH} characters. This one has ${text.length}.`);
