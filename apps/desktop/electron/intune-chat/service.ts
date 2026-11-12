@@ -501,6 +501,19 @@ export interface IntuneChatStreamOptions {
   scope?: { tenantId: string; providerId: ProviderId; model?: string; isLocal?: boolean };
 }
 
+/**
+ * The system prompt of a deterministic Chat answer. Nova's profile block,
+ * in voice, comes first and is closed before the fixed rules, so the
+ * rules follow the admin's text and override it.
+ */
+export function deterministicChatSystemPrompt(isLocalProvider: boolean, voice: boolean, voiceProfile: string): string {
+  return [
+    ...(voice && voiceProfile ? [voiceProfile, NOVA_PROFILE_BLOCK_END] : []),
+    buildIntuneChatSystemPrompt(isLocalProvider, false, voice),
+    voice ? VOICE_ANSWER_INSTRUCTIONS : "",
+  ].filter(Boolean).join("\n");
+}
+
 export class IntuneChatService {
   private readonly preloadJobs = new Map<
     string,
@@ -2952,7 +2965,7 @@ export class IntuneChatService {
           generatedAt: answerGeneratedAt,
           limits: chatBudget.answerPackLimits,
         });
-        const system = [buildIntuneChatSystemPrompt(provider?.isLocal === true, false, Boolean(options.voice)), options.voice ? VOICE_ANSWER_INSTRUCTIONS : "", voiceProfile, voiceProfile ? NOVA_PROFILE_BLOCK_END : ""].filter(Boolean).join("\n");
+        const system = deterministicChatSystemPrompt(provider?.isLocal === true, Boolean(options.voice), voiceProfile);
         const streamDocumentation = options.voice
           ? await this.retrieveDocumentationSafely(content)
           : answerPlan?.sources.kind === "tenant" ? [] : await this.searchDocsIndex(modelQuestion, steps);
