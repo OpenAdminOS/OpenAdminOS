@@ -3615,6 +3615,7 @@ The maintainer approved a Nightly channel next to Stable, modelled on TenuVault:
 - **Publishing:** a GitHub prerelease that is never marked latest, so the website download page, apt, and stable installs are unaffected. Builds are signed and notarized like stable releases. Linux packages are attached to the prerelease and never published to apt. macOS nightlies ship `.dmg` and `.zip` without `.pkg`. The newest 20 nightlies are kept.
 - **In the app:** Settings > About offers "Get nightly builds". The default follows the installed build. A nightly install is also offered newer stable releases, and turning nightlies off installs the current stable release even if it is older. A status-strip badge marks nightly builds, because admins run them against real tenants. Write-confirmation and every other hard constraint apply unchanged to nightly builds.
 - **Agent compatibility:** a nightly satisfies `minAppVersion` values up to its base version, so `0.7.1-nightly.*` runs agents that require 0.7.1.
+- **Release notes (2026-11-12):** a nightly's notes cover only that build: its pull requests and commits since the previous release of either channel, and the `CHANGELOG.md` `[Unreleased]` entries added since that release. The full `[Unreleased]` section is not repeated in every nightly.
 
 Runbook: `docs/RELEASING.md`, "Nightly builds".
 

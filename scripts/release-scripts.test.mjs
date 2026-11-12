@@ -6,6 +6,7 @@ import {
   buildNotes,
   downloadsTable,
   formatChanges,
+  newUnreleasedEntries,
   unreleasedSection,
 } from "./nightly-release-notes.mjs";
 import { NIGHTLY_VERSION, nextNightly, stable } from "./release-version.mjs";
@@ -114,6 +115,45 @@ test("the unreleased section drops empty headings", () => {
     "#### Added\n\n- Nightly update channel.\n\n#### Fixed\n\n- Something.",
   );
   assert.equal(unreleasedSection("# Changelog\n"), "");
+});
+
+test("nightly notes list only the changelog entries added since the previous release", () => {
+  const changelog = (...entries) =>
+    ["# Changelog", "", "## [Unreleased]", "", "### Added", "", ...entries, "", "### Fixed", "", "## [0.7.2] - 2026-11-01", "", "### Added", "- Old entry."].join("\n");
+  const previous = changelog("- Splashtop Docs MCP.", "- Managed configuration for IT rollouts.");
+  const current = [
+    "# Changelog", "", "## [Unreleased]", "", "### Added", "",
+    "- Nova profile, notes and follow-ups.",
+    "  Continued on a second line.",
+    "- Splashtop Docs MCP.",
+    "- Managed configuration for IT rollouts.",
+    "", "### Fixed", "", "- A fix in this build.", "",
+    "## [0.7.2] - 2026-11-01", "", "### Added", "- Old entry.",
+  ].join("\n");
+  assert.equal(
+    newUnreleasedEntries(previous, current),
+    "#### Added\n\n- Nova profile, notes and follow-ups.\n  Continued on a second line.\n\n#### Fixed\n\n- A fix in this build.",
+  );
+  // Nothing new: no changelog section at all.
+  assert.equal(newUnreleasedEntries(current, current), "");
+  // After a stable release rolled [Unreleased], every current entry is new.
+  assert.match(newUnreleasedEntries(changelog(), current), /Splashtop Docs MCP/);
+  // An edited entry counts as new.
+  assert.match(newUnreleasedEntries(previous, previous.replace("Splashtop Docs MCP.", "Splashtop Docs MCP, renamed.")), /renamed/);
+  // No previous release: all entries.
+  assert.match(newUnreleasedEntries("", current), /Managed configuration/);
+
+  const notes = buildNotes({
+    tag: "v0.7.3-nightly.20261112175700",
+    sha: "f".repeat(40),
+    previous: "v0.7.3-nightly.20261111230544",
+    changes: ["- nova: editable profile (#192)"],
+    unreleased: newUnreleasedEntries(previous, current),
+    downloads: "",
+    repo: "OpenAdminOS/OpenAdminOS",
+  });
+  assert.match(notes, /## Changelog entries in this build\n\n#### Added\n\n- Nova profile/);
+  assert.doesNotMatch(notes, /Splashtop Docs MCP|Managed configuration|Unreleased changelog/);
 });
 
 test("the downloads table links the installers that were built", () => {
