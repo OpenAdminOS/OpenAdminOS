@@ -233,7 +233,8 @@ Open **Settings > Nova** to set how Nova works on this device:
   destinations or skip a confirmation. The last 10 versions are kept; choose
   **Restore** to go back to one.
 - **Organization instructions**: up to 1,000 characters that apply only while the
-  active organization is selected.
+  active organization is selected. When your IT department sets Nova's
+  instructions, these are kept and not used.
 - **Abilities**: turn web search, opening pages, starting agents, or sends through a
   connector off or on. A turned-off ability is refused when Nova prepares an action
   and again when you confirm it.
@@ -244,6 +245,12 @@ You can also ask Nova to change a setting, for example "add to my instructions:
 name device counts first" or "turn off web search". Nova shows the change on a
 card and saves it only when you click **Confirm change**. Nova can turn an ability
 off, never on.
+
+Most models get all of your instructions, the organization instructions and
+recent notes. A small on-device model, such as Apple Intelligence, gets a
+shortened version: the oldest notes are left out first, then the organization
+instructions and the standing instructions are cut at the end. Nova says so when
+a conversation starts.
 
 Values set by your IT department show **Set by your IT department** and cannot be
 changed here. In hosted voice, your instructions and the organization's confirmed
