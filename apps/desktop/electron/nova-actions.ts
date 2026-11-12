@@ -26,9 +26,11 @@ export interface NovaActionHost {
   /**
    * Nova's settings now, with the IT policy applied. Read again for every
    * action, at preparation and at the click, so a switch turned off in
-   * between stops it. A failed read refuses the action.
+   * between stops it. A failed read refuses the action. With `tenantId`,
+   * the organization instructions are those of that tenant's organization,
+   * not of whichever organization is active: a voice session reads its own.
    */
-  profile(): Promise<NovaSettings>;
+  profile(tenantId?: string): Promise<NovaSettings>;
   /**
    * Saves a settings change the admin confirmed on a Nova card. The IT
    * policy is applied again. `assertUnchanged` runs inside the same
@@ -74,9 +76,9 @@ export const NOVA_SETTINGS_UNREADABLE =
   'Nova could not read its settings, so nothing was sent, started or opened. Open Settings, Nova, check it loads, then ask again.';
 
 /** Nova's settings for one action. Throws the designed refusal when they cannot be read. */
-export async function readNovaSettings(host: Pick<NovaActionHost, 'profile'>): Promise<NovaSettings> {
+export async function readNovaSettings(host: Pick<NovaActionHost, 'profile'>, tenantId?: string): Promise<NovaSettings> {
   try {
-    const settings = await host.profile();
+    const settings = await (tenantId === undefined ? host.profile() : host.profile(tenantId));
     if (!settings?.effective) throw new Error('No settings returned.');
     return settings;
   } catch {

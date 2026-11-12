@@ -5712,7 +5712,7 @@ function registerIpcHandlers() {
     () => store.getAppState(),
     (input, options) => store.streamIntuneChatMessage(input, event => options.onEvent?.(event), { ...options, voice: true }),
     fetch,
-    { classifyCommand: (text, context, options) => store.classifyNovaCommand(text, context, options), connectors: () => store.listConnectors(), send: input => store.sendNovaConnector(input), startRun: (slug, options) => store.startRun(slug, options, { activeOrganizationOnly: true }), activeTenantId: () => store.activeTenantId(), tenantLease: (tenantId, work) => store.withTenantLease(tenantId, work), profile: () => store.novaProfile(), applyProfileProposal: (patch, assertUnchanged) => store.applyNovaProfileProposal(patch, assertUnchanged), recordVoiceConsent: input => store.recordNovaVoiceConsent(input), notes: store.novaNotesHost(), followUps: store.novaFollowUpsHost() },
+    { classifyCommand: (text, context, options) => store.classifyNovaCommand(text, context, options), connectors: () => store.listConnectors(), send: input => store.sendNovaConnector(input), startRun: (slug, options) => store.startRun(slug, options, { activeOrganizationOnly: true }), activeTenantId: () => store.activeTenantId(), tenantLease: (tenantId, work) => store.withTenantLease(tenantId, work), profile: (tenantId) => store.novaProfile(tenantId), applyProfileProposal: (patch, assertUnchanged) => store.applyNovaProfileProposal(patch, assertUnchanged), recordVoiceConsent: input => store.recordNovaVoiceConsent(input), notes: store.novaNotesHost(), followUps: store.novaFollowUpsHost() },
   );
   ipcMain.handle("openadminos:nova", handleTrusted((event, input: import("@openadminos/agent-sdk").NovaRequest, streamId?: unknown) => {
     const safeStreamId = streamId === undefined ? undefined : requireBoundedString(streamId, "Nova streamId", 128);
@@ -6566,12 +6566,22 @@ function registerIpcHandlers() {
     "openadminos:cancel-connect-tenant",
     handleTrusted(() => store.cancelConnectTenant()),
   );
-  ipcMain.handle("openadminos:set-active-tenant", handleTrusted((_event, id: unknown) =>
-    store.setActiveTenant(requireBoundedString(id, "tenantId", 256)),
+  // A Nova voice session belongs to one organization: switching ends it, and
+  // a hosted start in progress checks again before it sends anything.
+  const afterOrganizationSwitch = async <T,>(state: T): Promise<T> => {
+    try {
+      if (await novaService?.activeOrganizationChanged()) mainWindow?.webContents.send("openadminos:app-state-changed", { reason: NOVA_SESSION_ENDED_REASON });
+    } catch (error) {
+      console.warn("[nova] the voice session could not be checked after an organization switch", error);
+    }
+    return state;
+  };
+  ipcMain.handle("openadminos:set-active-tenant", handleTrusted(async (_event, id: unknown) =>
+    afterOrganizationSwitch(await store.setActiveTenant(requireBoundedString(id, "tenantId", 256))),
   ),
   );
-  ipcMain.handle("openadminos:set-active-organization", handleTrusted((_event, id: unknown) =>
-    store.setActiveOrganization(id === null ? null : requireBoundedString(id, "organizationId", 300)),
+  ipcMain.handle("openadminos:set-active-organization", handleTrusted(async (_event, id: unknown) =>
+    afterOrganizationSwitch(await store.setActiveOrganization(id === null ? null : requireBoundedString(id, "organizationId", 300))),
   ),
   );
   ipcMain.handle("openadminos:rename-organization", handleTrusted((_event, id: unknown, name: unknown) =>

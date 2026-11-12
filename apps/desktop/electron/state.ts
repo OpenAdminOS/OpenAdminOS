@@ -7100,12 +7100,17 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     return view;
   }
 
-  /** Nova's settings now, with the IT policy applied, for the active organization. */
-  async novaProfile(): Promise<{ profile: NovaProfile | undefined; effective: EffectiveNovaProfile; policy: ManagedPolicyStatus | undefined }> {
+  /**
+   * Nova's settings now, with the IT policy applied, for the active
+   * organization, or with `tenantId` for that tenant's organization (a
+   * voice session reads its own organization's instructions).
+   */
+  async novaProfile(tenantId?: string): Promise<{ profile: NovaProfile | undefined; effective: EffectiveNovaProfile; policy: ManagedPolicyStatus | undefined }> {
     const persisted = await this.read();
+    const organizationId = tenantId === undefined ? this.activeOrganizationIdOf(persisted) : organizationForTenant(persisted.organizations ?? [], tenantId)?.id;
     return {
       profile: persisted.novaProfile,
-      effective: effectiveNovaProfile(persisted.novaProfile, this.managedPolicy, this.activeOrganizationIdOf(persisted)),
+      effective: effectiveNovaProfile(persisted.novaProfile, this.managedPolicy, organizationId),
       policy: this.managedPolicy,
     };
   }

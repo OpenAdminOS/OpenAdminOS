@@ -9,6 +9,7 @@ import { NovaFollowUps } from "./nova-followups.js";
 import { NovaMemory, openNovaDatabase } from "./nova-memory.js";
 import { NOVA_NOTES_UNREADABLE_NOTICE, NOVA_SESSION_PROFILE_CHANGED, NovaService, type NovaChatOptions } from "./nova.js";
 import { defaultNovaSettings } from "./nova-test-settings.js";
+import { effectiveNovaProfile } from "./nova-profile.js";
 import { novaCommand, parseNovaCommand } from "../src/shared/nova-command.js";
 
 function fixture(options: { profile?: NovaProfile; memoryOff?: boolean } = {}) {
@@ -253,6 +254,82 @@ describe("Nova hosted sessions after a settings change, without another question
     release!();
     await assert.rejects(starting, { message: NOVA_SESSION_PROFILE_CHANGED });
     assert.equal(f.requests.some((request) => request.url.includes("/live/sessions")), false, "the old instructions did not go to OpenAI");
+    assert.equal(f.consents.length, 0);
+  });
+
+  it("sends the starting organization's own instructions, and nothing, after a switch to another organization", async () => {
+    const f = fixture({ profile: { addenda: { "org-a": "Northwind uses kiosks.", "org-b": "Fabrikam uses shared iPads." } } });
+    const state = f.state as unknown as { activeTenantId: string; activeOrganizationId: string; organizations: unknown[]; tenants: unknown[] };
+    state.organizations.push({ id: "org-b", name: "Fabrikam", createdAt: "", connections: { microsoft365: { tenantId: "tenant-b" } } });
+    state.tenants.push({ id: "tenant-b", displayName: "Fabrikam" });
+    const organizationOf = (tenantId?: string) => (tenantId ?? state.activeTenantId) === "tenant-b" ? "org-b" : "org-a";
+    f.host.profile = async (tenantId?: string) => ({ ...defaultNovaSettings(f.live.profile), effective: effectiveNovaProfile(f.live.profile, undefined, organizationOf(tenantId)) });
+    let release: (() => void) | undefined;
+    const read = f.host.notes!.promptNotes;
+    f.host.notes!.promptNotes = async (tenantId) => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return read(tenantId);
+    };
+    const starting = start(f, "openai");
+    for (let index = 0; index < 100 && !release; index += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.ok(release, "the start is reading the profile");
+    state.activeTenantId = "tenant-b";
+    state.activeOrganizationId = "org-b";
+    assert.equal(await f.nova.activeOrganizationChanged(), false, "no session yet");
+    f.host.notes!.promptNotes = read;
+    release!();
+    await assert.rejects(starting, /tenant or provider changed/);
+    assert.equal(f.requests.some((request) => request.url.includes("/live/sessions")), false, "nothing went to OpenAI");
+    assert.equal(f.requests.some((request) => request.body?.includes("Fabrikam uses shared iPads.")), false, "the other organization's instructions were not sent");
+    assert.equal(f.consents.length, 0);
+  });
+
+  it("reads a session's own organization instructions, not the active organization's", async () => {
+    const f = fixture({ profile: { addenda: { "org-a": "Northwind uses kiosks." } } });
+    const tenants: Array<string | undefined> = [];
+    f.host.profile = async (tenantId?: string) => { tenants.push(tenantId); return defaultNovaSettings(f.live.profile); };
+    const sessionId = await start(f);
+    await f.nova.handle({ action: "answer", sessionId, text: "How many devices are noncompliant?" });
+    // Ability checks read the settings without a tenant; the session's own reads name it.
+    const named = tenants.filter((tenantId) => tenantId !== undefined);
+    assert.ok(named.length >= 2, "the start and the answer read the session's organization");
+    assert.ok(named.every((tenantId) => tenantId === "tenant-a"), named.join(", "));
+  });
+
+  it("ends a live session when another organization becomes active", async () => {
+    const f = fixture();
+    const sessionId = await start(f);
+    assert.equal(await f.nova.activeOrganizationChanged(), false, "the same organization keeps its session");
+    (f.state as unknown as { activeTenantId: string }).activeTenantId = "tenant-b";
+    assert.equal(await f.nova.activeOrganizationChanged(), true);
+    await assert.rejects(f.nova.handle({ action: "answer", sessionId, text: "How many devices?" }), /tenant or provider changed/);
+  });
+
+  it("does not send a note forgotten while a hosted start reads its profile a second time", async () => {
+    const f = fixture();
+    const note = f.memory.confirm(f.memory.propose({ tenantId: "tenant-a", text: "Berlin uses kiosks.", source: "user-said" }).id);
+    let release: (() => void) | undefined;
+    const read = f.host.notes!.promptNotes;
+    f.host.notes!.promptNotes = async (tenantId) => {
+      const notes = await read(tenantId);
+      await new Promise<void>((resolve) => { release = resolve; });
+      return notes;
+    };
+    const wait = async () => { for (let index = 0; index < 100 && !release; index += 1) await new Promise((resolve) => setTimeout(resolve, 5)); assert.ok(release); };
+    const starting = start(f, "openai");
+    await wait();
+    // Something changed during the first read: the start reads again.
+    await f.nova.revalidateHostedSession();
+    let first = release!; release = undefined; first();
+    await wait();
+    // During that second read a change is announced and its check finds
+    // nothing yet; then the note is forgotten before any other check runs.
+    f.host.notes!.promptNotes = read;
+    assert.equal(await f.nova.revalidateHostedSession(), false);
+    f.memory.forget(note.id);
+    first = release!; release = undefined; first();
+    await assert.rejects(starting, { message: NOVA_SESSION_PROFILE_CHANGED });
+    assert.equal(f.requests.some((request) => request.url.includes("/live/sessions")), false, "the forgotten note did not go to OpenAI");
     assert.equal(f.consents.length, 0);
   });
 

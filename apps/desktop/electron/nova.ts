@@ -113,7 +113,8 @@ export class NovaService {
     profile?: Omit<NovaProfilePromptInput, "byteLimit">;
     notesUnreadable?: boolean;
   }> {
-    const settings = this.actions ? await readNovaSettings(this.actions) : undefined;
+    // The instructions of this tenant's organization, not of whichever is active now.
+    const settings = this.actions ? await readNovaSettings(this.actions, tenantId) : undefined;
     // Confirmed notes of this organization join the profile; proposed ones never do.
     let notes: string[] = [];
     let notesUnreadable = false;
@@ -148,8 +149,54 @@ export class NovaService {
     return true;
   }
 
-  /** Counts settings and notes changes, so a hosted start that read the profile before one notices it. */
+  /**
+   * Ends a live session bound to an organization that is no longer active,
+   * and makes a hosted start in progress check again before it sends
+   * anything. Called after the active organization or tenant changed.
+   * Returns true when it ended a session.
+   */
+  async activeOrganizationChanged(): Promise<boolean> {
+    this.profileChanges += 1;
+    const session = this.session;
+    if (!session) return false;
+    const state = await this.state();
+    if (session !== this.session || state.activeTenantId === session.tenantId) return false;
+    this.invalidate();
+    return true;
+  }
+
+  /** Counts settings, notes and organization changes, so a hosted start that read the profile before one notices it. */
   private profileChanges = 0;
+
+  /**
+   * Run by a hosted start before it records the consent and sends the
+   * request: when the settings, notes or active organization changed since
+   * the start last looked, it reads again and refuses when what the session
+   * would send is no longer so. Returns only when nothing changed since its
+   * last check, with no wait after it, so the caller can send at once.
+   */
+  private async confirmHostedStartCurrent(session: NonNullable<NovaService["session"]>, seen: { changes: number; checked?: boolean }): Promise<void> {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      session.controller.signal.throwIfAborted();
+      // The first call always checks; later calls check when something changed.
+      if (seen.checked && this.profileChanges === seen.changes) return;
+      seen.checked = true;
+      seen.changes = this.profileChanges;
+      const [fresh, latest] = await Promise.all([this.readSessionProfile(session.tenantId).catch(() => undefined), this.state()]);
+      session.controller.signal.throwIfAborted();
+      if (session !== this.session) throw new Error("Nova was stopped or this question was replaced. Start a new conversation.");
+      if (
+        latest.activeTenantId !== session.tenantId ||
+        latest.activeProviderId !== session.providerId ||
+        selectedNovaModel(latest) !== session.model ||
+        latest.providers.find((p) => p.id === session.providerId)?.isLocal !== session.reasoningIsLocal
+      )
+        throw new Error("Nova's tenant or provider changed. Start a new conversation.");
+      if (session.hostedProfile && hostedProfileChanged(session.hostedProfile, fresh)) throw new Error(NOVA_SESSION_PROFILE_CHANGED);
+    }
+    // Settings that keep changing while Nova starts: nothing is sent.
+    throw new Error(NOVA_SESSION_PROFILE_CHANGED);
+  }
 
   constructor(
     private readonly secrets: SecretAccessor,
@@ -238,7 +285,9 @@ export class NovaService {
         );
       // The profile shapes the prompts of this session; without it, Nova does not start.
       const changesBeforeRead = this.profileChanges;
-      const { settings, profile, notesUnreadable } = await this.readSessionProfile(state.activeTenantId);
+      // The session belongs to the organization and provider active when it was asked for.
+      const identity = { tenantId: state.activeTenantId, providerId: state.activeProviderId, model: selectedNovaModel(state), reasoningIsLocal: provider?.isLocal === true };
+      const { settings, profile, notesUnreadable } = await this.readSessionProfile(identity.tenantId);
       if (generation !== this.generation) throw new Error("Nova was stopped or this question was replaced. Start a new conversation.");
       // Only the notes that fit the block are sent, recorded in the consent and watched for changes.
       const { block: profileBlock, notes, adminText } = profile ? novaProfilePromptParts({ ...profile, byteLimit: NOVA_VOICE_PROFILE_BYTE_LIMIT }) : { block: "", notes: [] as string[], adminText: false };
@@ -247,10 +296,7 @@ export class NovaService {
       this.session?.controller.abort();
       const session = {
         id: randomUUID(),
-        tenantId: state.activeTenantId,
-        providerId: state.activeProviderId,
-        model: selectedNovaModel(state),
-        reasoningIsLocal: provider?.isLocal === true,
+        ...identity,
         mode: input.mode,
         consent: input.consent === true,
         name: greetingName,
@@ -261,14 +307,10 @@ export class NovaService {
       this.session = session;
       try {
         if (input.mode === "local") return { sessionId: session.id, ...notice };
-        // A change while the profile was read did not reach this session; read
-        // it again now. Changes from here on end the session through
-        // revalidateHostedSession.
-        if (this.profileChanges !== changesBeforeRead && session.hostedProfile) {
-          const fresh = await this.readSessionProfile(session.tenantId).catch(() => undefined);
-          if (hostedProfileChanged(session.hostedProfile, fresh)) throw new Error(NOVA_SESSION_PROFILE_CHANGED);
-          session.controller.signal.throwIfAborted();
-        }
+        // A change while the profile was read did not reach this session;
+        // it is checked again here and once more right before sending.
+        const seen: { changes: number; checked?: boolean } = { changes: changesBeforeRead };
+        await this.confirmHostedStartCurrent(session, seen);
         if (
           typeof input.sdp !== "string" ||
           input.sdp.length > 65536 ||
@@ -283,6 +325,9 @@ export class NovaService {
         const name = session.name;
         const connectors = await this.actions?.connectors().catch(() => undefined);
         session.controller.signal.throwIfAborted();
+        // Nothing awaits between this check and the request below.
+        await this.confirmHostedStartCurrent(session, seen);
+        if (this.profileChanges !== seen.changes) throw new Error(NOVA_SESSION_PROFILE_CHANGED);
         // The consent is on this device before audio or context is sent; when no store kept it, nothing is sent.
         if (this.actions && !this.actions.recordVoiceConsent) throw new Error(NOVA_VOICE_CONSENT_NOT_KEPT);
         {
