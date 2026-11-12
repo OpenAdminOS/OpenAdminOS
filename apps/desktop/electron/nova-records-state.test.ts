@@ -311,10 +311,16 @@ describe("a Nova follow-up run", () => {
       const followUp = await store.novaFollowUpsHost().create({ tenantId: contoso.id, question: "Check device compliance", providerId: "ollama", model: "test", delayMinutes: 1 });
       now = new Date(now.getTime() + 61_000);
       const firing = store.fireDueNovaFollowUps();
-      for (let index = 0; index < 100 && !release; index += 1) await new Promise((resolve) => setImmediate(resolve));
-      assert.ok(release, "the follow-up reached Graph before the Disconnect");
+      // Wait on conditions, not on a number of event loop turns: on a slow
+      // runner the follow-up needs file reads before it reaches Graph.
+      const until = async (condition: () => boolean, message: string) => {
+        for (let index = 0; index < 500 && !condition(); index += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+        assert.ok(condition(), message);
+      };
+      await until(() => release !== undefined, "the follow-up reached Graph before the Disconnect");
       const disconnecting = store.disconnectTenant(contoso.id);
-      for (let index = 0; index < 20; index += 1) await new Promise((resolve) => setImmediate(resolve));
+      const lifecycle = (store as unknown as { tenantLifecycle: { isWritable(id: string): boolean } }).tenantLifecycle;
+      await until(() => !lifecycle.isWritable(contoso.id), "the Disconnect closed the organization while the follow-up waited on Graph");
       release?.();
       await firing;
       await disconnecting;
