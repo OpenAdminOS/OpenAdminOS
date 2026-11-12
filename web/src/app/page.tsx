@@ -142,7 +142,7 @@ const TOUR: readonly TourItem[] = [
   {
     id: "models",
     title: "Models",
-    text: "Run Ollama, LM Studio, or Apple Foundation locally, or use a hosted provider through its own CLI or Azure OpenAI. Each is marked Local or Hosted.",
+    text: "Run Ollama, LM Studio, Lemonade, or Apple Foundation locally, or use a hosted provider through its own CLI or Azure OpenAI. Each is marked Local or Hosted.",
     screen: "settings",
     alt: "Provider settings with local and hosted model providers",
     tone: "sage",
