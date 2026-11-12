@@ -2252,6 +2252,8 @@ export interface NovaResponse {
   text?: string;
   audio?: number[];
   conversationId?: string;
+  /** Something the admin should know about this session, for example that notes could not be read. */
+  notice?: string;
 }
 
 export type NovaVoiceMode = "local" | "openai";
@@ -2294,6 +2296,8 @@ export interface NovaProfile {
   memoryPaused?: boolean;
   /** The voice mode and greeting name were moved from the renderer's local storage. */
   migratedFromLocalStorage?: boolean;
+  /** How the latest change was made, for the configuration audit. */
+  lastChange?: { id: string; via: NovaProfileChangeVia };
 }
 
 /** The profile with defaults and the IT policy applied, as Nova and Settings use it. */
@@ -2309,6 +2313,11 @@ export interface EffectiveNovaProfile {
   addendum: string;
   capabilities: Record<NovaCapabilityName, boolean>;
   connectorSends: Record<string, boolean>;
+  /**
+   * Whether Nova may send through each messaging connector, as an action is
+   * checked, with the IT policy applied, and whether the policy sets it.
+   */
+  connectorSendStates?: Record<string, { allowed: boolean; locked: boolean }>;
   /** What the IT policy sets for connector sends, when it sets anything. */
   connectorSendsPolicy?: boolean | string[];
   memoryEnabled: boolean;
@@ -2391,6 +2400,12 @@ export interface NovaFollowUp {
   conversationId?: string;
   /** Why it did not run or did not finish. */
   reason?: string;
+  /** Whether its provider ran on this device when it was set. It runs only where it ran then. */
+  providerLocal?: boolean;
+  /** The Ollama or LM Studio endpoint when it was set. */
+  providerEndpoint?: string;
+  /** When the admin consented, with the click, to a hosted provider for it. */
+  consentAcknowledgedAt?: string;
 }
 
 /** Nova's notes and follow-ups of the active organization, as Settings shows them. */

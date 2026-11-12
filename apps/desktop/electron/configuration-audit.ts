@@ -513,19 +513,21 @@ function novaSeeds(
 ): EventSeed[] {
   const seeds: EventSeed[] = [];
   const changed: string[] = [];
-  if (previous?.voiceMode !== next?.voiceMode) changed.push("voiceMode");
+  const migrated = !previous?.migratedFromLocalStorage && next?.migratedFromLocalStorage === true;
+  // How this write was made: on a Nova card, or in Settings.
+  const via = migrated ? "migration" : next?.lastChange && next.lastChange.id !== previous?.lastChange?.id ? next.lastChange.via : "settings";
+  // An unset voice mode is the default; setting the default changes nothing Nova does.
+  if ((previous?.voiceMode ?? "openai") !== (next?.voiceMode ?? "openai")) changed.push("voiceMode");
   if ((previous?.greetingName ?? "") !== (next?.greetingName ?? "")) changed.push("greetingName");
   if (changed.length > 0) {
-    const migrated = !previous?.migratedFromLocalStorage && next?.migratedFromLocalStorage === true;
     seeds.push({
       type: "nova.settings-changed",
-      details: { changed, ...(next?.voiceMode ? { voiceMode: next.voiceMode } : {}), via: migrated ? "migration" : "settings" },
+      details: { changed, ...(next?.voiceMode ? { voiceMode: next.voiceMode } : {}), via },
     });
   }
-  const beforeInstructions = previous?.instructions ?? "";
-  const afterInstructions = next?.instructions ?? "";
-  if (beforeInstructions !== afterInstructions) {
-    seeds.push(instructionSeed(beforeInstructions, afterInstructions, addedRevision(previous, next, "user"), "user", {}));
+  // Unset and empty differ: an unset text leaves an IT default in effect, an empty one clears it.
+  if (previous?.instructions !== next?.instructions) {
+    seeds.push(instructionSeed(previous?.instructions ?? "", next?.instructions ?? "", addedRevision(previous, next, "user"), "user", {}));
   }
   const organizationIds = new Set([...Object.keys(previous?.addenda ?? {}), ...Object.keys(next?.addenda ?? {})]);
   for (const organizationId of [...organizationIds].sort()) {
@@ -553,7 +555,7 @@ function novaSeeds(
     const after = next?.connectorSends?.[connectorId] ?? true;
     if (before !== after) (after ? enabled : disabled).push(`connectorSends:${connectorId}`);
   }
-  if (enabled.length > 0 || disabled.length > 0) seeds.push({ type: "nova.capabilities-changed", details: { enabled, disabled } });
+  if (enabled.length > 0 || disabled.length > 0) seeds.push({ type: "nova.capabilities-changed", details: { enabled, disabled, via } });
   const beforeShortcuts = new Map((previous?.shortcuts ?? []).map((entry) => [entry.id, entry]));
   const afterShortcuts = new Map((next?.shortcuts ?? []).map((entry) => [entry.id, entry]));
   for (const shortcut of next?.shortcuts ?? []) {
@@ -662,7 +664,7 @@ const DETAIL_KEYS: Readonly<Record<ConfigurationAuditEventType, readonly string[
   "nova.settings-changed": ["changed", "voiceMode", "via"],
   "nova.instructions-changed": [...NOVA_INSTRUCTION_DETAIL_KEYS],
   "nova.instructions-reverted": [...NOVA_INSTRUCTION_DETAIL_KEYS],
-  "nova.capabilities-changed": ["enabled", "disabled"],
+  "nova.capabilities-changed": ["enabled", "disabled", "via"],
   "nova.shortcut-saved": ["shortcutId", "name", "prompt", "updated"],
   "nova.shortcut-deleted": ["shortcutId", "name"],
   "nova.memory-paused": [],

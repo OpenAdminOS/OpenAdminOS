@@ -13,6 +13,7 @@ import {
   type NovaShortcut,
   type NovaVoiceMode,
 } from "@openadminos/agent-sdk";
+import { NOVA_SEND_CONNECTOR_IDS } from "../src/shared/nova-session.js";
 
 import { novaCommand } from "../src/shared/nova-command.js";
 import {
@@ -189,6 +190,8 @@ export function sanitizeNovaProfile(value: unknown): NovaProfile | undefined {
   }
   if (value.memoryPaused === true) profile.memoryPaused = true;
   if (value.migratedFromLocalStorage === true) profile.migratedFromLocalStorage = true;
+  if (isRecord(value.lastChange) && typeof value.lastChange.id === "string" && value.lastChange.id.length <= 128 && ["settings", "nova-proposal", "revert", "migration"].includes(value.lastChange.via as string))
+    profile.lastChange = { id: value.lastChange.id, via: value.lastChange.via as NovaProfileChangeVia };
   return Object.keys(profile).length > 0 ? profile : undefined;
 }
 
@@ -301,6 +304,11 @@ export function effectiveNovaProfile(
     addendum: organizationId ? (profile?.addenda?.[organizationId] ?? "") : "",
     capabilities,
     connectorSends: { ...(profile?.connectorSends ?? {}) },
+    // The same resolver as the check at preparation and at the click.
+    connectorSendStates: Object.fromEntries(
+      [...new Set<string>([...NOVA_SEND_CONNECTOR_IDS, ...Object.keys(profile?.connectorSends ?? {}), ...(Array.isArray(sendsPolicy) ? sendsPolicy : [])])]
+        .map((id) => { const state = connectorSendState(profile, policy, id); return [id, { allowed: state.value, locked: state.locked }]; }),
+    ),
     ...(sendsPolicy !== undefined ? { connectorSendsPolicy: Array.isArray(sendsPolicy) ? [...sendsPolicy] : sendsPolicy } : {}),
     memoryEnabled: !memoryOff && profile?.memoryPaused !== true,
     memoryPaused: profile?.memoryPaused === true,
@@ -335,14 +343,26 @@ export function novaProfileView(profile: NovaProfile | undefined, policy: Manage
 export function novaShortcutPromptIssue(prompt: string): string | undefined {
   const command = novaCommand(prompt);
   if (command && command.kind !== "research" && command.kind !== "capabilities" && command.kind !== "attention") return NOVA_SHORTCUT_NOT_READ_ONLY;
-  if (/\b(?:remember|remind|forget|schedule|again in|every (?:day|hour|week|morning|evening|night|monday|tuesday|wednesday|thursday|friday)|tomorrow|tonight|later today)\b/i.test(prompt)) {
+  // Remembering and scheduling. A day named as the subject of a question
+  // ("which devices expire tomorrow") stays readable; asking to do something
+  // then ("check it tomorrow", "check compliance daily") does not.
+  if (/\b(?:remember|remind|forget|schedule|again in|every (?:day|hour|week|morning|evening|night|monday|tuesday|wednesday|thursday|friday|saturday|sunday|other|few|\d+)|each (?:day|hour|week|morning|evening|night))\b/i.test(prompt)) {
     return NOVA_SHORTCUT_NOT_READ_ONLY;
   }
-  if (/\b(?:send|email|e-mail|forward|deliver|publish|dispatch|notify)\b/i.test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
+  const politely = "^\\s*(?:(?:can|could|would|will) you\\s+|please\\s+)*";
+  if (new RegExp(`${politely}(?:check|ask|run|do|look|try|repeat)\\b[^.?!]{0,60}\\b(?:tomorrow|tonight|later today|next week)\\b`, "i").test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
+  if (/\b(?:daily|hourly|nightly|weekly|monthly)(?:\s+at\b|\s*[.?!]*\s*$)/i.test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
+  if (/\b(?:make|take|save|store|keep|jot down|write down|note down)\s+(?:a\s+|this\s+|the\s+)?(?:note|fact|reminder)\b|\bnote that\b/i.test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
+  // Delivery, as a verb with whom or what it delivers ("send the report",
+  // "WhatsApp me", "message us"). As a noun ("the last send", "the error
+  // message the device showed", "email address") it stays readable.
+  if (/\b(?:send|forward|whatsapp|slack|dm|ping|tweet)\s+(?:me|us|it|this|that|these|those|them|the|a|an|my|our|to|him|her|everyone|everybody|out)\b/i.test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
+  if (/\b(?:email|e-mail|mail|message|text|post|share)\s+(?:me|us|him|her|everyone|everybody)\b/i.test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
+  if (/\b(?:deliver|publish|dispatch|notify)\b/i.test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
   // Write verbs as the request itself, or chained onto a question. As nouns
   // ("update rings", "the lock screen") they stay readable.
-  const writeVerb = "(?:run|start|launch|execute|trigger|delete|remove|retire|wipe|disable|enable|reset|reboot|restart|sync|lock|unlock|unassign|assign|create|update|change|set|rename|block|unblock|revoke|approve|install|uninstall|deploy|move|add)";
-  if (new RegExp(`^\\s*(?:(?:can|could|would|will) you\\s+|please\\s+)*${writeVerb}\\b`, "i").test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
+  const writeVerb = "(?:run|start|launch|execute|trigger|kick\\s+off|fire\\s+off|spin\\s+up|turn\\s+(?:on|off)|switch\\s+(?:on|off)|delete|remove|retire|wipe|disable|enable|reset|reboot|restart|sync|lock|unlock|unassign|assign|create|update|change|set|rename|block|unblock|revoke|approve|install|uninstall|deploy|move|add|save|store|record|send|email(?!\\s+address)|e-mail|message|post|share|text)";
+  if (new RegExp(`${politely}${writeVerb}\\b`, "i").test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
   if (new RegExp(`\\b(?:and|then|also)\\s+(?:please\\s+)?${writeVerb}\\b`, "i").test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
   if (/\b(?:delete|retire|wipe|revoke)\b/i.test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
   return undefined;
@@ -517,9 +537,15 @@ export function applyNovaProfilePatch(
   if (change.deleteShortcut !== undefined) deleteShortcut(profile, change.deleteShortcut);
   if (change.memoryPaused !== undefined) {
     if (typeof change.memoryPaused !== "boolean") throw new NovaProfileError("Pausing notes must be on or off.");
+    // While the IT policy turns notes off, the pause switch is theirs too; resuming would take effect only once the policy goes.
+    if (managedNovaMemoryOff(policy)) throw new ManagedPolicyError(novaSettingLockedMessage("Nova notes"));
     if (change.memoryPaused) profile.memoryPaused = true;
     else delete profile.memoryPaused;
   }
+  // The audit names how a change was made: in Settings or on a Nova card. A patch that changes nothing leaves it.
+  const { lastChange: _before, ...unchangedBefore } = current ?? {};
+  const { lastChange: _after, ...after } = profile;
+  if (JSON.stringify(after) !== JSON.stringify(unchangedBefore)) profile.lastChange = { id: context.newId(), via: context.via ?? "settings" };
   return profile;
 }
 
@@ -601,10 +627,18 @@ function clipToBytes(text: string, bytes: number): string {
  * addendum and the instructions are clipped.
  */
 export function novaProfilePromptBlock(input: NovaProfilePromptInput): string {
+  return novaProfilePromptParts(input).block;
+}
+
+/**
+ * The block of `novaProfilePromptBlock` with the notes that survived the
+ * byte limit, so a consent or a hosted session records only what it sent.
+ */
+export function novaProfilePromptParts(input: NovaProfilePromptInput): { block: string; notes: string[] } {
   const instructions = input.effective.instructions.trim();
   let addendum = input.effective.addendum.trim();
   const notes = (input.notes ?? []).map((note) => note.trim()).filter(Boolean);
-  if (!instructions && !addendum && notes.length === 0) return "";
+  if (!instructions && !addendum && notes.length === 0) return { block: "", notes: [] };
   let standing = instructions;
   const render = () => {
     const data: Record<string, unknown> = {};
@@ -615,7 +649,7 @@ export function novaProfilePromptBlock(input: NovaProfilePromptInput): string {
   };
   const limit = input.byteLimit;
   let block = render();
-  if (limit === undefined || Buffer.byteLength(block) <= limit) return block;
+  if (limit === undefined || Buffer.byteLength(block) <= limit) return { block, notes };
   while (notes.length > 0 && Buffer.byteLength(block) > limit) {
     notes.pop();
     block = render();
@@ -630,5 +664,5 @@ export function novaProfilePromptBlock(input: NovaProfilePromptInput): string {
     clip(over * 2);
     block = render();
   }
-  return Buffer.byteLength(block) <= limit ? block : clipToBytes(NOVA_PROFILE_BLOCK_INTRO, limit);
+  return Buffer.byteLength(block) <= limit ? { block, notes } : { block: clipToBytes(NOVA_PROFILE_BLOCK_INTRO, limit), notes: [] };
 }

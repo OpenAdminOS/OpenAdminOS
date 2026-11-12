@@ -74,6 +74,7 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 4000,
+      "pattern": "\\S",
       "description": "Standing instructions for Nova. Locked, they replace the admin's own instructions; otherwise they are the default until the admin writes their own. Nova's fixed safety rules always apply after them."
     },
     "novaCapabilities": {

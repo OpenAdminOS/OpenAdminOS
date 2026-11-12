@@ -435,7 +435,8 @@ export function parsePolicyFile(
         break;
       }
       case "novaInstructions":
-        if (node.kind !== "string" || node.value.trim().length === 0 || node.value.trim().length > NOVA_INSTRUCTIONS_MAX_LENGTH) {
+        // The same bounds as schemas/policy.schema.json: some text, at most the limit as written.
+        if (node.kind !== "string" || node.value.trim().length === 0 || node.value.length > NOVA_INSTRUCTIONS_MAX_LENGTH) {
           issue(`"novaInstructions" must be text in double quotes, at most ${NOVA_INSTRUCTIONS_MAX_LENGTH} characters. It is not applied.`, node, key);
           break;
         }

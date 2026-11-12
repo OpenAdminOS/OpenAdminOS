@@ -223,6 +223,14 @@ describe("Nova profile", () => {
       "list stale devices and retire them",
       "please delete the old policy",
       "email the report to my manager",
+      // Synonyms of sending, starting, scheduling and remembering.
+      "Message the team on Slack",
+      "WhatsApp me the compliance summary",
+      "Kick off the dormant apps agent",
+      "Check compliance daily",
+      "Save a note that Berlin uses kiosks",
+      "Check the stale devices tomorrow",
+      "Which devices are noncompliant? Then post it to the Teams channel",
     ]) {
       assert.equal(novaShortcutPromptIssue(prompt), NOVA_SHORTCUT_NOT_READ_ONLY, prompt);
     }
@@ -231,6 +239,13 @@ describe("Nova profile", () => {
       "How many devices have not synced in 30 days?",
       "Show me the Windows update rings and their deferral settings",
       "List devices running Windows 10",
+      // The same words as nouns or as the subject of a question.
+      "Which devices failed the last send of the policy?",
+      "Which devices are due for a feature update tomorrow?",
+      "Show the daily sign-in count",
+      "Which users have no email address?",
+      "Show the error message the device reported",
+      "List the teams the user belongs to",
     ]) {
       assert.equal(novaShortcutPromptIssue(prompt), undefined, prompt);
     }
@@ -395,7 +410,7 @@ describe("Nova settings in the store", () => {
       assert.equal(events[1]!.details.scope, "user");
       assert.equal(events[2]!.organizationId, organizationId);
       assert.equal(events[2]!.details.scope, "organization");
-      assert.deepEqual(events[3]!.details, { enabled: [], disabled: ["webSearch", "connectorSends:slack"] });
+      assert.deepEqual(events[3]!.details, { enabled: [], disabled: ["webSearch", "connectorSends:slack"], via: "settings" });
       assert.equal(events[4]!.details.prompt, "Which devices are noncompliant?");
 
       const exported = await fixture.store.exportAuditLog({ format: "json" });
@@ -405,6 +420,27 @@ describe("Nova settings in the store", () => {
       const appState = await fixture.store.getAppState();
       assert.equal(appState.novaProfile?.instructions, "Answer in short sentences. Name the organization.");
       assert.equal(appState.novaProfile?.addendum, "Contoso pilots Windows 11.");
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("names a change confirmed on a Nova card, skips the default voice mode, and records clearing an IT default", async () => {
+    const fixture = await makeStore(await policyOf({ novaInstructions: "IT suggestion.", lock: [] }));
+    try {
+      await fixture.store.handleNovaProfile({ action: "save", patch: { voiceMode: "openai" } });
+      await fixture.store.applyNovaProfileProposal({ capabilities: { navigation: false } }, () => undefined);
+      await fixture.store.handleNovaProfile({ action: "save", patch: { instructions: "" } });
+      const events = (await fixture.recorded()).filter((event) => event.type.startsWith("nova."));
+      // Unset already meant OpenAI voice: choosing it changes nothing Nova does.
+      assert.equal(events.some((event) => event.type === "nova.settings-changed"), false, JSON.stringify(events));
+      const capabilities = events.find((event) => event.type === "nova.capabilities-changed");
+      assert.deepEqual(capabilities?.details, { enabled: [], disabled: ["navigation"], via: "nova-proposal" });
+      // The IT suggestion was in effect; an empty text clears it.
+      const cleared = events.find((event) => event.type === "nova.instructions-changed");
+      assert.equal(cleared?.details.text, "");
+      assert.equal(cleared?.details.via, "settings");
+      assert.equal((await fixture.store.handleNovaProfile({ action: "get" })).effective.instructions, "");
     } finally {
       await fixture.close();
     }
