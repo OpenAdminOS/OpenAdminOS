@@ -17,6 +17,7 @@ import {
   type NovaAnswerLink,
 } from "@openadminos/agent-sdk";
 import { OPEN_NOVA_EVENT, type OpenNovaDetail } from "../shared/nova-panel";
+import { NOVA_SESSION_ENDED_REASON, NOVA_SESSION_PROFILE_CHANGED } from "../shared/nova-session";
 import "./nova.css";
 
 /** What each Nova card names, explains and asks to confirm. Nothing happens before the click. */
@@ -61,6 +62,7 @@ export function Nova({
   const [nameDraft, setNameDraft] = useState<string>();
   const [links, setLinks] = useState<NovaAnswerLink[]>([]);
   const [shortcutNotice, setShortcutNotice] = useState("");
+  const [sessionNotice, setSessionNotice] = useState("");
   const queuedShortcut = useRef<string | undefined>(undefined);
   /** Asks the live session a typed request, such as a shortcut picked in the palette. */
   const askTyped = useRef<(text: string) => void>(() => {});
@@ -164,6 +166,8 @@ export function Nova({
     if (modeOverride && profile?.voiceMode === modeOverride) setModeOverride(undefined);
   }, [modeOverride, profile?.voiceMode]);
   // Move the values this device kept in local storage into Nova's settings, once.
+  const [migrationError, setMigrationError] = useState("");
+  const [migrationAttempt, setMigrationAttempt] = useState(0);
   useEffect(() => {
     if (!api?.novaProfile) return;
     let storedMode: string | null, storedName: string | null;
@@ -177,13 +181,17 @@ export function Nova({
       ...(storedMode === "local" || storedMode === "openai" ? { voiceMode: storedMode } : {}),
       ...(storedName?.trim() ? { greetingName: storedName.trim().slice(0, 40) } : {}),
     }).then(() => {
+      setMigrationError("");
       try {
         localStorage.removeItem("nova.voice-mode");
         localStorage.removeItem("nova.greeting-name");
       } catch { /* The next start tries again; the move is idempotent. */ }
       void refresh();
-    }).catch((caught) => console.warn("[nova] the voice settings on this device were not moved yet", caught));
-  }, [api, refresh]);
+    }).catch((caught) => {
+      // The values stay in local storage until the move succeeds.
+      setMigrationError(`Nova could not move the voice mode and greeting name saved on this device into its settings, so they are not applied yet. ${voiceErrorMessage(caught)}`);
+    });
+  }, [api, refresh, migrationAttempt]);
   const saveProfile = async (patch: Parameters<NonNullable<typeof api>["novaProfile"]>[0] & { action: "save" }) => {
     if (!api?.novaProfile) return false;
     try {
@@ -215,7 +223,16 @@ export function Nova({
           dc.send(JSON.stringify({ type: "session.commentary.append", delegation_id: null, content }));
       }
       if (answer.route) { setExpanded(false); navigate(answer.route); }
-    } catch (error) { if (token === generation.current && revision === actionRevision.current) { setPendingAction(undefined); setError(String(error)); } }
+    } catch (error) {
+      if (token === generation.current && revision === actionRevision.current) {
+        setPendingAction(undefined);
+        // The main process ended a hosted session whose instructions or notes changed: close the audio too.
+        if (String(error).includes(NOVA_SESSION_PROFILE_CHANGED)) {
+          stop();
+          setError(NOVA_SESSION_PROFILE_CHANGED);
+        } else setError(String(error));
+      }
+    }
     finally { if (revision === actionRevision.current) setActionBusy(false); }
   };
   const stop = useCallback(() => {
@@ -279,10 +296,21 @@ export function Nova({
     URL.revokeObjectURL(blobUrl.current);
     blobUrl.current = "";
     sessionId.current = "";
+    setSessionNotice("");
     orb.current?.style.setProperty("--voice-level", "0");
     void api?.nova({ action: "stop" }).catch(() => {});
     setPhase("idle");
   }, [api, endActivities]);
+  // The main process ends a hosted voice session when its instructions or
+  // notes change; the audio and the connection to OpenAI close here at once.
+  useEffect(() => {
+    if (!api?.onAppStateChanged) return;
+    return api.onAppStateChanged((info) => {
+      if (info.reason !== NOVA_SESSION_ENDED_REASON || !sessionId.current) return;
+      stop();
+      setError(NOVA_SESSION_PROFILE_CHANGED);
+    });
+  }, [api, stop]);
   useEffect(() => {
     stop();
     setConsent(false);
@@ -498,6 +526,7 @@ export function Nova({
         });
         if (token !== generation.current) return;
         sessionId.current = result.sessionId!;
+        setSessionNotice(result.notice ?? "");
         const recorded: Blob[] = [];
         const rec = new MediaRecorder(stream);
         recorder.current = rec;
@@ -901,6 +930,7 @@ export function Nova({
       });
       if (token !== generation.current) return;
       sessionId.current = result.sessionId!;
+      setSessionNotice(result.notice ?? "");
       timeout.current = setTimeout(
         () => fail(new Error("Nova did not become ready. Stop and retry.")),
         20000,
@@ -1285,6 +1315,13 @@ export function Nova({
             </div>
           )}
           {shortcutNotice && <p role="status" className="text-xs text-center">{shortcutNotice}</p>}
+          {sessionNotice && <p role="status" className="text-xs text-center">{sessionNotice}</p>}
+          {migrationError && (
+            <div role="alert" className="text-xs text-center">
+              <p>{migrationError}</p>
+              <Button size="sm" variant="secondary" onClick={() => { setMigrationError(""); setMigrationAttempt((value) => value + 1); }}>Try again</Button>
+            </div>
+          )}
           {!active && (
             <div className="nova-readiness">
               <p>

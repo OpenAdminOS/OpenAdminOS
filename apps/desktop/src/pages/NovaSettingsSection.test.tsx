@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -7,9 +7,13 @@ import { createMockAppState, makeMockBridge, renderWithAppState } from "../test/
 import { useAppState } from "../state";
 import type { AppState, ConnectorSummary, EffectiveNovaProfile, NovaProfileView, NovaRecordsRequest, NovaRecordsView } from "../shared/openAdminOS";
 
+/** A view as the main process returns it: stamped for the active organization, with send states resolved. */
 function view(effective: Partial<EffectiveNovaProfile> = {}, rest: Partial<NovaProfileView> = {}): NovaProfileView {
+  const sends = effective.connectorSends ?? {};
   return {
     effective: {
+      organizationId: "org-a",
+      connectorSendStates: Object.fromEntries(["outlook", "teams", "slack", "whatsapp-web", "discord", "signal"].map((id) => [id, { allowed: sends[id] ?? true, locked: false }])),
       voiceMode: "openai",
       allowedVoiceModes: ["openai", "local"],
       greetingName: "",
@@ -246,7 +250,8 @@ describe("Settings, Nova, across an organization switch", () => {
     const answer = async (organizationId: string, profile: NovaProfileView | Error, records: NovaRecordsView | Error) => {
       await waitFor(() => expect(profileReads.some((read) => read.organizationId === organizationId)).toBe(true));
       await waitFor(() => expect(recordReads.some((read) => read.organizationId === organizationId)).toBe(true));
-      for (const read of profileReads.splice(0).filter((entry) => entry.organizationId === organizationId)) profile instanceof Error ? read.reply.reject(profile) : read.reply.resolve(profile);
+      const stamped = profile instanceof Error ? profile : { ...profile, effective: { ...profile.effective, organizationId } };
+      for (const read of profileReads.splice(0).filter((entry) => entry.organizationId === organizationId)) stamped instanceof Error ? read.reply.reject(stamped) : read.reply.resolve(stamped);
       for (const read of recordReads.splice(0).filter((entry) => entry.organizationId === organizationId)) records instanceof Error ? read.reply.reject(records) : read.reply.resolve(records);
     };
     return { novaProfile, profileReads, recordReads, answer };
@@ -321,5 +326,115 @@ describe("Settings, Nova, across an organization switch", () => {
     await answer("org-b", view({ addendum: "Contoso rules." }), recordsFor("org-b", "Contoso laptops are in Munich"));
     expect(await screen.findByLabelText("Nova instructions for Contoso")).toHaveValue("Contoso rules.");
     expect(await screen.findByText("Contoso laptops are in Munich")).toBeInTheDocument();
+  });
+});
+
+describe("Settings, Nova, kept current", () => {
+  function organizations() {
+    return createMockAppState({
+      organizations: [{ id: "org-a", name: "Northwind", createdAt: "", connections: { microsoft365: { tenantId: "tenant-a" } } }],
+      activeOrganizationId: "org-a",
+    });
+  }
+
+  it("keeps unsaved instructions when another switch is saved", async () => {
+    const novaProfile = vi.fn(async (request: Parameters<NonNullable<typeof window.openAdminOS>["novaProfile"]>[0]) =>
+      request.action === "save" ? view({ capabilities: { webSearch: true, startAgents: false, navigation: true } }) : view());
+    const bridge = makeMockBridge({ novaProfile, listConnectors: vi.fn(async () => []) }, organizations());
+    renderWithAppState(<NovaSettingsSection />, { bridge });
+    const user = userEvent.setup();
+    const box = await screen.findByLabelText("Nova standing instructions");
+    await user.type(box, "Unsaved draft.");
+    await user.click(screen.getByRole("switch", { name: /Start agents/ }));
+    await waitFor(() => expect(novaProfile).toHaveBeenCalledWith({ action: "save", patch: { capabilities: { startAgents: false } } }));
+    expect(await screen.findByText("Saved.")).toBeInTheDocument();
+    expect(box).toHaveValue("Unsaved draft.");
+  });
+
+  it("shows a follow-up answered while the page stays open", async () => {
+    const listeners: Array<(info: { reason: string }) => void> = [];
+    const pending = { tenantId: "tenant-a", organizationId: "org-a", notes: [], followUps: [{ id: "f1", tenantId: "tenant-a", question: "Check compliance", providerId: "ollama" as const, dueAt: "2026-11-12T11:00:00.000Z", status: "pending" as const, createdAt: "2026-11-12T10:00:00.000Z" }] };
+    const answered = { ...pending, followUps: [{ ...pending.followUps[0]!, status: "completed" as const, conversationId: "conv-1", finishedAt: "2026-11-12T11:00:20.000Z" }] };
+    const novaRecords = vi.fn(async () => pending as NovaRecordsView);
+    const bridge = makeMockBridge({
+      novaProfile: vi.fn(async () => view()),
+      novaRecords,
+      listConnectors: vi.fn(async () => []),
+      onAppStateChanged: vi.fn((next: (info: { reason: string }) => void) => { listeners.push(next); return () => undefined; }),
+    }, organizations());
+    renderWithAppState(<NovaSettingsSection />, { bridge });
+    const list = await screen.findByRole("list", { name: "Nova follow-ups" });
+    expect(within(list).getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    novaRecords.mockResolvedValue(answered as NovaRecordsView);
+    for (const listener of listeners) listener({ reason: "nova-records-changed" });
+    expect(await within(list).findByRole("link", { name: "Open in Chat" })).toHaveAttribute("href", "/chat/conv-1");
+    expect(within(list).queryByRole("button", { name: "Cancel" })).toBeNull();
+  });
+
+  it("says when the messaging connectors cannot be read instead of saying none are set up", async () => {
+    let readable = false;
+    const listConnectors = vi.fn(async () => {
+      if (!readable) throw new Error("Error invoking remote method 'openadminos:list-connectors': Error: connectors.json is locked.");
+      return [slack];
+    });
+    const bridge = makeMockBridge({ novaProfile: vi.fn(async () => view()), listConnectors }, organizations());
+    renderWithAppState(<NovaSettingsSection />, { bridge });
+    expect(await screen.findByText(/messaging connectors could not be read.*connectors\.json is locked/)).toBeInTheDocument();
+    expect(screen.queryByText(/No messaging connectors are set up/)).toBeNull();
+    readable = true;
+    await userEvent.setup().click(screen.getAllByRole("button", { name: "Try again" })[0]!);
+    expect(await screen.findByRole("switch", { name: /Send through Slack/ })).toBeInTheDocument();
+  });
+
+  it("shows Slack sending as the IT policy sets it, not as the saved switch", async () => {
+    const bridge = makeMockBridge({
+      novaProfile: vi.fn(async () => view({ connectorSends: { slack: false }, connectorSendStates: { slack: { allowed: true, locked: true } } })),
+      listConnectors: vi.fn(async () => [slack]),
+    }, organizations());
+    renderWithAppState(<NovaSettingsSection />, { bridge });
+    const toggle = await screen.findByRole("switch", { name: /Send through Slack/ });
+    expect(toggle).toBeChecked();
+    expect(toggle).toBeDisabled();
+  });
+});
+
+describe("Settings, Nova, a save in flight across an organization switch", () => {
+  it("does not show the previous organization's save result under the new one", async () => {
+    let appState: AppState = createMockAppState({
+      organizations: [
+        { id: "org-a", name: "Northwind", createdAt: "", connections: { microsoft365: { tenantId: "tenant-a" } } },
+        { id: "org-b", name: "Contoso", createdAt: "", connections: { microsoft365: { tenantId: "tenant-b" } } },
+      ],
+      activeOrganizationId: "org-a",
+      activeTenantId: "tenant-a",
+    });
+    let finishSave!: (value: NovaProfileView) => void;
+    const novaProfile = vi.fn((request: Parameters<NonNullable<typeof window.openAdminOS>["novaProfile"]>[0]) => {
+      if (request.action === "save") return new Promise<NovaProfileView>((resolve) => { finishSave = resolve; });
+      return Promise.resolve({ ...view({ addendum: "" }), effective: { ...view().effective, organizationId: appState.activeOrganizationId } });
+    });
+    const bridge = makeMockBridge({
+      novaProfile,
+      listConnectors: vi.fn(async () => []),
+      getAppState: vi.fn(async () => appState),
+      setActiveOrganization: vi.fn(async (id: string | null) => {
+        appState = { ...appState, activeOrganizationId: id ?? undefined, activeTenantId: id === "org-b" ? "tenant-b" : "tenant-a" };
+        return appState;
+      }),
+    }, appState);
+    function Switcher() {
+      const { setActiveOrganization } = useAppState();
+      return <button type="button" onClick={() => void setActiveOrganization("org-b")}>Switch to Contoso</button>;
+    }
+    renderWithAppState(<><Switcher /><NovaSettingsSection /></>, { bridge });
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText("Nova instructions for Northwind"), "Northwind rules.");
+    await user.click(screen.getByRole("button", { name: "Save for Northwind" }));
+    await waitFor(() => expect(finishSave).toBeTypeOf("function"));
+    await user.click(screen.getByRole("button", { name: "Switch to Contoso" }));
+    expect(await screen.findByLabelText("Nova instructions for Contoso")).toHaveValue("");
+    await act(async () => finishSave(view({ addendum: "Northwind rules." })));
+    expect(screen.queryByText("Saved for Northwind.")).toBeNull();
+    expect(screen.getByLabelText("Nova instructions for Contoso")).toHaveValue("");
   });
 });

@@ -17,10 +17,8 @@ import type {
   NovaVoiceMode,
 } from "../shared/openAdminOS";
 import { useAppState } from "../state";
+import { NOVA_SEND_CONNECTOR_IDS } from "../shared/nova-session";
 import { SettingRow } from "./SettingRow";
-
-/** The connectors Nova can prepare sends through. */
-const NOVA_SEND_CONNECTOR_IDS = ["outlook", "teams", "slack", "whatsapp-web", "discord", "signal"] as const;
 const INSTRUCTIONS_MAX = 4000;
 const ADDENDUM_MAX = 1000;
 const NAME_MAX = 40;
@@ -87,7 +85,8 @@ export function NovaSettingsSection() {
   const { state, refresh } = useAppState();
   const api = window.openAdminOS;
   const [view, setView] = useState<NovaProfileView>();
-  const [connectors, setConnectors] = useState<ConnectorSummary[]>([]);
+  const [connectors, setConnectors] = useState<ConnectorSummary[]>();
+  const [connectorsError, setConnectorsError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -110,12 +109,23 @@ export function NovaSettingsSection() {
   const organization = state.organizations?.find((entry) => entry.id === activeOrganizationId);
   const organizationReady = loadedFor !== undefined && loadedFor.organizationId === activeOrganizationId;
 
-  const adopt = useCallback((next: NovaProfileView, organizationId: string | undefined) => {
+  // The values last taken from the main process. A text field whose draft
+  // still equals it has no unsaved change and follows the new value; an
+  // edited one keeps the draft, unless the save was for that field.
+  const adopted = useRef({ name: "", instructions: "", addendum: "" });
+  const adopt = useCallback((next: NovaProfileView, organizationId: string | undefined, saved: readonly ("name" | "instructions" | "addendum")[] = []) => {
+    // A reply stamped for another organization than the one it was asked for is not shown.
+    if ((next.effective.organizationId ?? undefined) !== organizationId) return false;
+    const previous = adopted.current;
+    const follow = (field: "name" | "instructions" | "addendum", value: string) => (current: string) =>
+      saved.includes(field) || current === previous[field] ? value : current;
+    setName(follow("name", next.effective.greetingName));
+    setInstructions(follow("instructions", next.effective.instructions));
+    setAddendum(follow("addendum", next.effective.addendum));
+    adopted.current = { name: next.effective.greetingName, instructions: next.effective.instructions, addendum: next.effective.addendum };
     setView(next);
     setLoadedFor({ organizationId });
-    setName(next.effective.greetingName);
-    setInstructions(next.effective.instructions);
-    setAddendum(next.effective.addendum);
+    return true;
   }, []);
 
   useEffect(() => {
@@ -126,12 +136,18 @@ export function NovaSettingsSection() {
     setRecords(undefined);
     setNoteDraft(undefined);
     setAddendum("");
+    adopted.current = { ...adopted.current, addendum: "" };
     setProfileLoadError(null);
     setRecordsLoadError(null);
+    setConnectorsError(null);
+    setError(null);
+    setNotice(null);
     if (!api?.novaProfile) return;
     void api
       .novaProfile({ action: "get" })
-      .then((next) => { if (current()) adopt(next, organizationId); })
+      .then((next) => {
+        if (current() && !adopt(next, organizationId)) setProfileLoadError("The settings returned were for another organization.");
+      })
       .catch((caught) => { if (current()) setProfileLoadError(hostError(caught)); });
     void api
       .novaRecords?.({ action: "list" })
@@ -140,45 +156,77 @@ export function NovaSettingsSection() {
     void api
       .listConnectors?.()
       .then((list) => { if (!cancelled) setConnectors(list); })
-      .catch(() => { if (!cancelled) setConnectors([]); });
+      .catch((caught) => { if (!cancelled) { setConnectors(undefined); setConnectorsError(hostError(caught)); } });
     return () => { cancelled = true; };
   }, [api, adopt, activeOrganizationId, reload]);
 
-  const run = async (request: Parameters<NonNullable<typeof api>["novaProfile"]>[0], done: string) => {
+  // Notes and follow-ups change outside this page too: a follow-up answers,
+  // a note is proposed or confirmed in Nova. Unsaved drafts stay.
+  useEffect(() => {
+    if (!api?.onAppStateChanged) return;
+    return api.onAppStateChanged((info) => {
+      const organizationId = activeOrganization.current;
+      if (info.reason === "nova-records-changed") {
+        void api.novaRecords?.({ action: "list" })
+          .then((next) => { if (activeOrganization.current === organizationId && (next.organizationId ?? undefined) === organizationId) { setRecords(next); setRecordsLoadError(null); } })
+          .catch((caught) => { if (activeOrganization.current === organizationId) setRecordsLoadError(hostError(caught)); });
+      } else if (info.reason === "nova-profile-changed") {
+        void api.novaProfile?.({ action: "get" })
+          .then((next) => { if (activeOrganization.current === organizationId) adopt(next, organizationId); })
+          .catch(() => { /* The page keeps what it shows; the next save reports a failure. */ });
+      }
+    });
+  }, [api, adopt]);
+
+  const run = async (request: Parameters<NonNullable<typeof api>["novaProfile"]>[0], done: string, saved: readonly ("name" | "instructions" | "addendum")[] = []) => {
     if (!api?.novaProfile) return;
     const organizationId = activeOrganization.current;
+    // Nothing is saved over settings that did not load for the active organization.
+    if (loadedFor?.organizationId !== organizationId) {
+      setError(`Nova settings for ${organization?.name ?? "this organization"} are not loaded. Try again before saving.`);
+      return false;
+    }
+    const stillHere = () => activeOrganization.current === organizationId;
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
       const next = await api.novaProfile(request);
       // A reply for an organization that is no longer active is not shown; the new one loads itself.
-      if (activeOrganization.current === organizationId) adopt(next, organizationId);
-      setNotice(done);
+      if (stillHere()) {
+        adopt(next, organizationId, saved);
+        setNotice(done);
+      }
       await refresh();
       return true;
     } catch (caught) {
-      setError(hostError(caught));
+      if (stillHere()) setError(hostError(caught));
       return false;
     } finally {
       setBusy(false);
     }
   };
-  const save = (patch: NovaProfilePatch, done = "Saved.") => run({ action: "save", patch }, done);
+  const savedFields = (patch: NovaProfilePatch): ("name" | "instructions" | "addendum")[] => [
+    ...(patch.greetingName !== undefined ? ["name" as const] : []),
+    ...(patch.instructions !== undefined ? ["instructions" as const] : []),
+    ...(patch.addendum !== undefined ? ["addendum" as const] : []),
+  ];
+  const save = (patch: NovaProfilePatch, done = "Saved.") => run({ action: "save", patch }, done, savedFields(patch));
   const record = async (request: NovaRecordsRequest, done: string) => {
     if (!api?.novaRecords) return false;
     const organizationId = activeOrganization.current;
+    const stillHere = () => activeOrganization.current === organizationId;
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
       const next = await api.novaRecords(request);
-      if (activeOrganization.current === organizationId && (next.organizationId ?? undefined) === organizationId) setRecords(next);
-      setNotice(done);
+      if (stillHere() && (next.organizationId ?? undefined) === organizationId) setRecords(next);
+      if (stillHere()) setNotice(done);
       await refresh();
       return true;
     } catch (caught) {
-      setError(hostError(caught));
+      if (stillHere()) setError(hostError(caught));
       return false;
     } finally {
       setBusy(false);
@@ -211,14 +259,12 @@ export function NovaSettingsSection() {
   const locked = effective.locked;
   const userRevisions = view.revisions.filter((revision) => revision.scope === "user");
   const addendumRevisions = organizationReady ? view.revisions.filter((revision) => revision.scope === "organization") : [];
-  const sendConnectors = NOVA_SEND_CONNECTOR_IDS.map((id) => connectors.find((connector) => connector.descriptor.id === id)).filter((connector): connector is ConnectorSummary => Boolean(connector));
-  const sendsPolicy = effective.connectorSendsPolicy;
-  const connectorAllowed = (id: string) => {
-    if (sendsPolicy === false) return false;
-    if (Array.isArray(sendsPolicy) && !sendsPolicy.includes(id)) return false;
-    return effective.connectorSends[id] ?? true;
-  };
-  const connectorLocked = (id: string) => locked.connectorSends || sendsPolicy === false || (Array.isArray(sendsPolicy) && !sendsPolicy.includes(id));
+  const sendConnectors = NOVA_SEND_CONNECTOR_IDS.map((id) => connectors?.find((connector) => connector.descriptor.id === id)).filter((connector): connector is ConnectorSummary => Boolean(connector));
+  // As the main process checks a send: a connector it has no state for is refused there too.
+  const connectorAllowed = (id: string) => effective.connectorSendStates?.[id]?.allowed ?? false;
+  const connectorLocked = (id: string) => effective.connectorSendStates?.[id]?.locked ?? true;
+  // While the settings of the active organization are not loaded, nothing can be changed.
+  const blocked = busy || !organizationReady;
 
   return (
     <div className="max-w-[1040px]">
@@ -242,7 +288,7 @@ export function NovaSettingsSection() {
                     aria-label="Nova voice provider"
                     className={inputClass}
                     value={effective.voiceMode}
-                    disabled={busy || locked.voiceMode}
+                    disabled={blocked || locked.voiceMode}
                     onChange={(event) => void save({ voiceMode: event.target.value as NovaVoiceMode })}
                   >
                     {effective.allowedVoiceModes.map((mode) => (
@@ -258,7 +304,7 @@ export function NovaSettingsSection() {
                   className={inputClass}
                   value={name}
                   maxLength={NAME_MAX}
-                  disabled={busy}
+                  disabled={blocked}
                   onChange={(event) => setName(event.target.value)}
                   onBlur={() => { if (name.trim() !== effective.greetingName) void save({ greetingName: name }); }}
                 />
@@ -284,7 +330,7 @@ export function NovaSettingsSection() {
                 className={`${inputClass} min-h-[120px] resize-y leading-5`}
                 value={instructions}
                 readOnly={locked.instructions}
-                disabled={busy && !locked.instructions}
+                disabled={blocked && !locked.instructions}
                 onChange={(event) => setInstructions(event.target.value)}
               />
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -294,14 +340,14 @@ export function NovaSettingsSection() {
                     <UiButton
                       size="sm"
                       variant="ghost"
-                      disabled={busy || instructions === effective.instructions}
+                      disabled={blocked || instructions === effective.instructions}
                       onClick={() => setInstructions(effective.instructions)}
                     >
                       Discard changes
                     </UiButton>
                     <UiButton
                       size="sm"
-                      disabled={busy || instructions === effective.instructions || instructions.length > INSTRUCTIONS_MAX}
+                      disabled={blocked || instructions === effective.instructions || instructions.length > INSTRUCTIONS_MAX}
                       onClick={() => void save({ instructions }, "Instructions saved. Nova uses them from the next conversation.")}
                     >
                       Save instructions
@@ -329,14 +375,14 @@ export function NovaSettingsSection() {
                   aria-label={`Nova instructions for ${organization.name}`}
                   className={`${inputClass} min-h-[72px] resize-y leading-5`}
                   value={addendum}
-                  disabled={busy}
+                  disabled={blocked}
                   onChange={(event) => setAddendum(event.target.value)}
                 />
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <Counter value={addendum} max={ADDENDUM_MAX} />
                   <UiButton
                     size="sm"
-                    disabled={busy || addendum === effective.addendum || addendum.length > ADDENDUM_MAX}
+                    disabled={blocked || addendum === effective.addendum || addendum.length > ADDENDUM_MAX}
                     onClick={() => void save({ addendum: { organizationId: organization.id, text: addendum } }, `Saved for ${organization.name}.`)}
                   >
                     Save for {organization.name}
@@ -359,7 +405,7 @@ export function NovaSettingsSection() {
                   <Switch
                     className="flex-1"
                     checked={effective.capabilities[capability.id]}
-                    disabled={busy || locked.capabilities[capability.id]}
+                    disabled={blocked || locked.capabilities[capability.id]}
                     onCheckedChange={(checked) => void save({ capabilities: { [capability.id]: checked } })}
                     label={capability.label}
                     description={capability.description}
@@ -367,7 +413,14 @@ export function NovaSettingsSection() {
                   {locked.capabilities[capability.id] ? <SetByItBadge /> : null}
                 </div>
               ))}
-              {sendConnectors.length === 0 ? (
+              {connectorsError ? (
+                <div role="alert" className="flex flex-wrap items-center gap-2 py-2 text-sm text-[var(--color-danger)]">
+                  <span>The messaging connectors could not be read, so sends per connector are not shown: {connectorsError}</span>
+                  {retry}
+                </div>
+              ) : connectors === undefined ? (
+                <p role="status" className="py-2 text-sm text-[var(--color-text-muted)]">Loading messaging connectors.</p>
+              ) : sendConnectors.length === 0 ? (
                 <p className="py-2 text-sm text-[var(--color-text-muted)]">No messaging connectors are set up. Sends per connector appear here once one is.</p>
               ) : (
                 sendConnectors.map((connector) => (
@@ -375,7 +428,7 @@ export function NovaSettingsSection() {
                     <Switch
                       className="flex-1"
                       checked={connectorAllowed(connector.descriptor.id)}
-                      disabled={busy || connectorLocked(connector.descriptor.id)}
+                      disabled={blocked || connectorLocked(connector.descriptor.id)}
                       onCheckedChange={(checked) => void save({ connectorSends: { [connector.descriptor.id]: checked } })}
                       label={`Send through ${connector.descriptor.name}`}
                       description={connector.status === "connected" ? "Each message still needs your click on its preview." : "Not set up yet. Open Connections to finish setup."}
@@ -406,8 +459,8 @@ export function NovaSettingsSection() {
                         <UiButton
                           size="sm"
                           variant="ghost"
-                          disabled={busy || revision.text === current || (revision.scope === "user" && locked.instructions)}
-                          onClick={() => void run({ action: "revert", revisionId: revision.id }, "Version restored.")}
+                          disabled={blocked || revision.text === current || (revision.scope === "user" && locked.instructions)}
+                          onClick={() => void run({ action: "revert", revisionId: revision.id }, "Version restored.", [revision.scope === "user" ? "instructions" : "addendum"])}
                         >
                           {revision.text === current ? "Current" : "Restore"}
                         </UiButton>
@@ -428,7 +481,7 @@ export function NovaSettingsSection() {
             <ShortcutList
               shortcuts={effective.shortcuts}
               draft={shortcutDraft}
-              busy={busy}
+              busy={blocked}
               onDraft={setShortcutDraft}
               onSave={async (draft) => {
                 if (await save({ saveShortcut: draft }, draft.id ? "Shortcut saved." : "Shortcut added.")) setShortcutDraft(undefined);
@@ -451,7 +504,7 @@ export function NovaSettingsSection() {
                 <Switch
                   className="flex-1"
                   checked={effective.memoryEnabled}
-                  disabled={busy || locked.memory}
+                  disabled={blocked || locked.memory}
                   onCheckedChange={(checked) => void save({ memoryPaused: !checked }, checked ? "Notes resumed." : "Notes paused. Nova reads and keeps none until you resume them.")}
                   label="Use notes"
                   description={locked.memory ? "Your IT department turned Nova notes off. Existing notes are kept and not used." : "While paused, Nova reads no notes and keeps no new ones."}
@@ -466,7 +519,7 @@ export function NovaSettingsSection() {
                 <NoteList
                   notes={records?.notes ?? []}
                   draft={noteDraft}
-                  busy={busy}
+                  busy={blocked}
                   onDraft={setNoteDraft}
                   onConfirm={(note) => void record({ action: "note-confirm", id: note.id }, "Note confirmed.")}
                   onSave={async (draft) => {
@@ -494,7 +547,7 @@ export function NovaSettingsSection() {
             ) : organization ? (
               <FollowUpList
                 followUps={records?.followUps ?? []}
-                busy={busy}
+                busy={blocked}
                 onCancel={(followUp) => void record({ action: "follow-up-cancel", id: followUp.id }, "Follow-up cancelled.")}
               />
             ) : (

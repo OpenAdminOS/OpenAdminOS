@@ -150,3 +150,44 @@ it("reviews a note on its own card and shows pending follow-ups", async () => {
   await user.click(screen.getByRole("button", { name: "Confirm note" }));
   await waitFor(() => expect(bridge.nova).toHaveBeenCalledWith({ action: "decide-action", sessionId: "voice-session", actionId: "n1", approved: true }, expect.any(Function)));
 });
+
+it("closes the hosted audio when the main process ends the session after a settings change, without another question", async () => {
+  const dc = stubHostedSession();
+  const listeners: Array<(info: { reason: string }) => void> = [];
+  const bridge = makeMockBridge({
+    nova: vi.fn(async (input) => {
+      if (input.action === "status") return { hasKey: true };
+      if (input.action === "start") return { sessionId: "voice-session", sdp: "v=0" };
+      return {};
+    }),
+    onAppStateChanged: vi.fn((next: (info: { reason: string }) => void) => { listeners.push(next); return () => undefined; }),
+  });
+  renderRoute(<Nova />, { bridge, route: "/cache", path: "/cache" });
+  const user = userEvent.setup();
+  act(openNovaPanel);
+  await user.click(await screen.findByRole("checkbox"));
+  await user.click(screen.getByRole("button", { name: "Start Nova" }));
+  await waitFor(() => expect(dc.onmessage).toBeTypeOf("function"));
+  act(() => dc.onmessage!({ data: JSON.stringify({ type: "session.started" }) }));
+  // A note OpenAI received is forgotten in Settings; the main process ends the session.
+  act(() => { for (const listener of listeners) listener({ reason: "nova-session-ended" }); });
+  expect(await screen.findByText(/Nova settings or notes changed after this voice session started/)).toBeInTheDocument();
+  expect(dc.send.mock.calls.some(([event]) => String(event).includes("session.close"))).toBe(true);
+  expect(bridge.nova).toHaveBeenCalledWith({ action: "stop" });
+});
+
+it("says when the voice settings on this device could not be moved, keeps them, and tries again", async () => {
+  localStorage.setItem("nova.voice-mode", "local");
+  const migrate = vi.fn()
+    .mockRejectedValueOnce(new Error("Error invoking remote method 'openadminos:nova-profile': Error: state.json is locked."))
+    .mockResolvedValue({});
+  const bridge = makeMockBridge({ novaProfile: migrate });
+  renderRoute(<Nova />, { bridge, route: "/cache", path: "/cache" });
+  act(openNovaPanel);
+  expect(await screen.findByText(/could not move the voice mode and greeting name/)).toBeInTheDocument();
+  expect(localStorage.getItem("nova.voice-mode")).toBe("local");
+  await userEvent.setup().click(screen.getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(localStorage.getItem("nova.voice-mode")).toBeNull());
+  expect(migrate).toHaveBeenCalledTimes(2);
+  expect(screen.queryByText(/could not move the voice mode/)).toBeNull();
+});
