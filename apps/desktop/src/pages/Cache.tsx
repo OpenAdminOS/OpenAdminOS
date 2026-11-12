@@ -15,6 +15,8 @@ import { ServiceAccessDialog } from "../components/ServiceAccess";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 import {
+  GRAPH_CACHE_LOG_WINDOW_DAYS,
+  isGraphCacheLogResource,
   serviceById,
   type GraphCacheResourceKind,
   type GraphCacheStatus,
@@ -111,7 +113,11 @@ export function DataSettingsSection() {
       status?.resources.filter(
         (resource) =>
           !resource.notGrantedService &&
-          (!resource.refreshedAt || Boolean(resource.lastError) || resource.pageLimitReached),
+          (!resource.refreshedAt ||
+            Boolean(resource.lastError) ||
+            // A capped log window is the expected result in a large
+            // tenant, and another refresh would not collect more.
+            (resource.pageLimitReached && !isGraphCacheLogResource(resource.resource))),
       ) ?? [],
     [status],
   );
@@ -256,7 +262,19 @@ export function DataSettingsSection() {
         sortable: true,
         align: "right",
         sortValue: (resource) => resource.rows,
-        render: (resource) => resource.rows.toLocaleString(),
+        render: (resource) =>
+          isGraphCacheLogResource(resource.resource) ? (
+            <span className="inline-flex flex-col items-end">
+              {resource.rows.toLocaleString()}
+              <span className="text-xs text-[var(--color-text-muted)]">
+                {resource.pageLimitReached
+                  ? `Newest, last ${GRAPH_CACHE_LOG_WINDOW_DAYS} days`
+                  : `Last ${GRAPH_CACHE_LOG_WINDOW_DAYS} days`}
+              </span>
+            </span>
+          ) : (
+            resource.rows.toLocaleString()
+          ),
       },
       {
         id: "pages",

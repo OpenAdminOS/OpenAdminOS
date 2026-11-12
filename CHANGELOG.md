@@ -74,6 +74,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Sign-in logs, directory audit logs and Intune audit events sync in large tenants: every refresh collects the last 7 days, newest first, up to 10,000 entries, instead of every retained entry, which failed on throttling or the memory limit. A window at the limit shows as capped, not as an error, and Settings, Data and Chat say which window the data covers.
+
 - Chat and the data boundary text show the organization's name instead of the tenant domain (Chat heading, composer, scope, answer headers, status strip tooltip), and follow a rename at once.
 - Chat keeps the local Microsoft docs index out of an answer when a docs server chosen for the question answers, as it already did for Microsoft Learn: a Splashtop question answered by the Splashtop servers no longer gets Microsoft passages about other topics. The index is searched only when no chosen server answers, and the step says which one did not ("Searched the local docs index, because KQL Search returned nothing").
 - Chat no longer treats a how-to as a tenant question because it says "my", "our" or "we": "how do I upload my first app?" stays a docs question when the model calls it one, so no Graph refresh runs, the docs answer is not sent back for tenant evidence, and no cached tenant rows go to the provider for an answer that does not use them. State words, tenant values and earlier tenant answers in the chat still make it a docs and tenant question.

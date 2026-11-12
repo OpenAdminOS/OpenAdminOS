@@ -53,6 +53,36 @@ describe("Intune Chat read-only tools", () => {
     }
   });
 
+  it("log resources carry their 7-day window at the front of cache tool results", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-log-"));
+    const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+    try {
+      store.replaceGraphResources({
+        tenantId: "tenant-1",
+        resource: "signIns",
+        label: "Sign-in logs",
+        scopeSet: ["AuditLog.Read.All"],
+        refreshedAt: new Date().toISOString(),
+        pageLimitReached: true,
+        rows: [{ id: "sign-in-1", userPrincipalName: "a@example.invalid", createdDateTime: new Date().toISOString() }],
+      });
+      const ctx = toolContext(store);
+      const query = await executeIntuneChatTool(ctx, "query_cache", { resource: "signIns", limit: 5 });
+      const result = query.result as Record<string, unknown>;
+      // Observation compaction keeps leading keys, so the window comes first.
+      assert.deepEqual(Object.keys(result).slice(0, 2), ["resource", "coverage"]);
+      assert.match(String(result.coverage), /^Newest 1 entries from the 7 days/);
+      const inventory = await executeIntuneChatTool(ctx, "list_cached_resources", {});
+      const entry = (inventory.result as { resources: Array<Record<string, unknown>> }).resources.find((r) => r.resource === "signIns")!;
+      assert.match(String(entry.coverage), /7 days/);
+      const managed = (inventory.result as { resources: Array<Record<string, unknown>> }).resources.find((r) => r.resource === "managedDevices")!;
+      assert.equal(managed.coverage, undefined);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("query_cache can count Intune apps by @odata.type for platform questions", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
     const store = seededStore(dir, 0);

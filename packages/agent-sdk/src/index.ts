@@ -1698,6 +1698,27 @@ export const GRAPH_CACHE_RESOURCE_KINDS = [
 
 export type GraphCacheResourceKind = (typeof GRAPH_CACHE_RESOURCE_KINDS)[number];
 
+/**
+ * Log resources are collected as a recent window instead of every retained
+ * row: the last GRAPH_CACHE_LOG_WINDOW_DAYS days, newest first, at most
+ * GRAPH_CACHE_LOG_ROW_LIMIT rows. A large tenant (a school, for example)
+ * retains millions of sign-ins, which no refresh can collect within the
+ * reporting API throttle (five requests per ten seconds per app and tenant)
+ * or the refresh memory budget. A window that reaches the row limit is
+ * reported as capped, never as a failure.
+ */
+export const GRAPH_CACHE_LOG_WINDOW_DAYS = 7;
+export const GRAPH_CACHE_LOG_ROW_LIMIT = 10_000;
+export const GRAPH_CACHE_LOG_RESOURCES: ReadonlySet<GraphCacheResourceKind> = new Set<GraphCacheResourceKind>([
+  "signIns",
+  "directoryAudits",
+  "intuneAuditEvents",
+]);
+
+export function isGraphCacheLogResource(resource: string): boolean {
+  return GRAPH_CACHE_LOG_RESOURCES.has(resource as GraphCacheResourceKind);
+}
+
 export interface GraphCacheResourceStatus {
   resource: GraphCacheResourceKind;
   label: string;

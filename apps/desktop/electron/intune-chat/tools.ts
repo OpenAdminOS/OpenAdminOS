@@ -14,7 +14,7 @@ import type {
   SplashtopReadToolName,
 } from "@openadminos/agent-sdk";
 
-import { graphAccessDenialFromError, graphAccessDenialText, missingServiceCopy, omittedSnapshotsCopy } from "@openadminos/agent-sdk";
+import { GRAPH_CACHE_LOG_WINDOW_DAYS, graphAccessDenialFromError, graphAccessDenialText, isGraphCacheLogResource, missingServiceCopy, omittedSnapshotsCopy } from "@openadminos/agent-sdk";
 import { fenceTenantData } from "@openadminos/runtime";
 
 import { lookupEndpoint, searchEndpoints } from "../graph-catalog.js";
@@ -28,6 +28,7 @@ import { graphCacheRequestFromNextLink, resourceStalenessMs, unwrapGraphCollecti
 import {
   GRAPH_CACHE_RESOURCES,
   definitionForResource,
+  logWindowCoverage,
   pathForResource,
 } from "./planner.js";
 import { DRIFT_TRACKED_RESOURCES } from "./drift/tracked-resources.js";
@@ -1280,11 +1281,14 @@ function listCachedResources(ctx: IntuneChatToolContext, params: unknown): unkno
         : Number.NaN;
       const stale =
         !resource.refreshedAt ||
-        resource.rows === 0 ||
+        // A log window with no activity is a valid result, not missing data.
+        (resource.rows === 0 && !isGraphCacheLogResource(resource.resource)) ||
         !Number.isFinite(refreshedMs) ||
         nowMs - refreshedMs > (staleAfterMs ?? resourceStalenessMs(resource.resource));
       return {
         resource: resource.resource,
+        // Kept near the front: compaction drops trailing fields first.
+        ...logWindowCoverage(resource),
         label: resource.label,
         rows: resource.rows,
         refreshedAt: resource.refreshedAt,
@@ -1363,7 +1367,7 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
       emptyHint = {
         cachedRowsForResource,
         ...(availableFields ? { availableFields } : {}),
-        note: `No row matched this filter, but this ${resource} snapshot holds ${cachedRowsForResource} cached rows. Report no matches in this snapshot, not an empty tenant. The validated filter matched no cached rows. This is not proof of the current tenant-wide count; check snapshot coverage and freshness.`,
+        note: `No row matched this filter, but this ${resource} snapshot holds ${cachedRowsForResource} cached rows. Report no matches in this snapshot, not an empty tenant. The validated filter matched no cached rows. This is not proof of the current tenant-wide count; check snapshot coverage and freshness.${isGraphCacheLogResource(resource) ? ` The snapshot covers only the last ${GRAPH_CACHE_LOG_WINDOW_DAYS} days of ${resource}, so older entries are not in it.` : ""}`,
       };
     } else {
       emptyHint = {
@@ -1375,6 +1379,9 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
 
   return {
     resource,
+    // Kept at the front, outside the snapshot: compaction drops trailing
+    // and nested fields first.
+    ...(snapshot ? logWindowCoverage(snapshot) : {}),
     snapshot,
     totalCount: result.totalCount,
     returnedRows: result.returnedRows,
@@ -1577,6 +1584,7 @@ async function refreshResource(
   const result = await ctx.refreshResource(resource);
   return {
     resource: result.resource,
+    ...(result.ok ? logWindowCoverage({ ...result, pageLimitReached: result.pageLimitReached === true }) : {}),
     label: result.label,
     ok: result.ok,
     rows: result.rows,

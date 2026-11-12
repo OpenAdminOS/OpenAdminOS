@@ -512,10 +512,22 @@ refresh scope. Manual preloads expose progress, cancellation and incomplete-resu
 retry. Scheduled refresh uses the same complete collection path. It follows all
 Graph `/beta` continuation links, deduplicates IDs and preserves previous complete
 snapshots when requests fail, are cancelled or hit the explicit 128 MiB per-resource
-refresh budget. Concurrent resource requests remain bounded; overlapping refreshes
+refresh budget. Log resources (sign-in logs, directory audit logs, Intune audit
+events) are the exception (decided 2026-11-12, after the first community report from
+a school tenant): every refresh collects the last 7 days with a `$filter` on the
+event time, newest first, at most 10,000 rows and within the memory budget. A window
+that reaches the limit is stored as capped and counts as a successful refresh, not
+as needing attention; Settings, Data shows the window under the row count, and Chat
+context (the answer pack, the cache tools and the system prompt) states it so counts
+are never read as all retained logs. Log snapshots cached before this decision carry
+no window marker and are removed once by a store migration, so the next refresh
+collects real windows. Collecting every
+retained log is not possible in large tenants: the Entra reporting API allows five
+requests per ten seconds per app and tenant, and a month of sign-ins exceeds the
+memory budget. Concurrent resource requests remain bounded; overlapping refreshes
 are serialized to prevent older partial refreshes overwriting newer complete data.
-“All” describes the supported collection catalogue, including available retained
-logs, not every Graph property, relationship or action. Device records include
+“All” describes the supported collection catalogue, with logs limited to the recent
+window above, not every Graph property, relationship or action. Device records include
 reported encryption; deterministic aggregates include OS versions and encryption
 with unknown values retained.
 

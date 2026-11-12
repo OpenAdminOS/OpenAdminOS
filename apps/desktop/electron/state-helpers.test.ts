@@ -586,3 +586,27 @@ describe("client ID canonical form and token cache partitions", () => {
     assert.equal(merged.RefreshToken?.["other.tid-login.microsoftonline.com-refreshtoken-x----"]?.client_id, CLIENT_ID);
   });
 });
+
+it("a row limit stops a complete collection at the limit and reports it as capped", async () => {
+  let requests = 0;
+  const graph = { request: async () => {
+    const page = requests++;
+    return { value: Array.from({length:1000}, (_, i) => ({id:String(page * 1000 + i)})), "@odata.nextLink": `https://graph.microsoft.com/beta/auditLogs/signIns?$skiptoken=${page+1}` };
+  }} as unknown as RunGraphApi;
+  const result = await fetchGraphCachePages(graph, {path:"/auditLogs/signIns"}, undefined, true, 2500);
+  assert.equal(requests, 3); assert.equal(result.rows.length, 2500); assert.equal(result.pageLimitReached, true);
+});
+
+it("a row-limited collection keeps the rows within the memory budget instead of failing", async () => {
+  const blob = "x".repeat(2 * 1024 * 1024);
+  let requests = 0;
+  const graph = { request: async () => {
+    const page = requests++;
+    return { value: Array.from({length:10}, (_, i) => ({id:String(page * 10 + i), blob})), "@odata.nextLink": `https://graph.microsoft.com/beta/auditLogs/signIns?$skiptoken=${page+1}` };
+  }} as unknown as RunGraphApi;
+  const result = await fetchGraphCachePages(graph, {path:"/auditLogs/signIns"}, undefined, true, 10_000);
+  assert.equal(result.pageLimitReached, true);
+  assert.ok(result.rows.length > 0 && result.rows.length < 64, `kept ${result.rows.length} rows`);
+  requests = 0;
+  await assert.rejects(fetchGraphCachePages(graph, {path:"/auditLogs/signIns"}, undefined, true), /128 MiB/);
+});
