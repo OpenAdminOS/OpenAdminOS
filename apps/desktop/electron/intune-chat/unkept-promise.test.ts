@@ -26,6 +26,8 @@ describe("unkept promise", () => {
       "Checking now.",
       "I'll take a look.",
       "Let me see.",
+      // "since" before a time is part of the announced work.
+      "I'll check the devices that have not synced since Monday.",
     ]) {
       assert.equal(looksLikeUnkeptPromise(answer), true, answer);
     }
@@ -58,6 +60,10 @@ describe("unkept promise", () => {
       "I'll check the apps next and the compliance review is complete.",
       "I'll verify the apps next and the devices are already compliant.",
       "I'll check the sign-in logs now, so the devices are done.",
+      // A result joined by "because", "since", "as" or "now that".
+      "I'll check the app failures next since the compliance review is complete.",
+      "I'll look at the apps next because all devices are compliant.",
+      "Let me check the profiles now that the devices are enrolled.",
       // The present progressive reports what was found; alone it is not a promise.
       "I am getting a 403 Forbidden response from Microsoft Graph",
       "I am finding no devices matching that filter.",

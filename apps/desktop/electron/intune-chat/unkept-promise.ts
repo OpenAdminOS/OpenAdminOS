@@ -66,12 +66,14 @@ function isFiller(text: string): boolean {
 /**
  * The clauses of an answer: split at sentence ends, at , ; : and dashes,
  * and at the conjunctions that join a second statement ("and", "but",
- * "so"), so a result next to a promise stands on its own. "go and check"
+ * "so"), so a result next to a promise stands on its own. "because",
+ * "since", "as" and "now that" split only before a statement ("since the
+ * review is complete"), not before a time ("since Monday"). "go and check"
  * stays one clause.
  */
 function clauses(text: string): string[] {
   return text
-    .split(/(?<=[.!?…])\s+|\n+|\s*[,;:—–]\s*|(?<!\bgo)\s+(?:and|but|so|while|although|though|yet|however|whereas)\s+/i)
+    .split(/(?<=[.!?…])\s+|\n+|\s*[,;:—–]\s*|(?<!\bgo)\s+(?:and|but|so|while|although|though|yet|however|whereas)\s+|\s+(?:because|since|as|now that)\s+(?=(?:the|all|every|each|no|none|it|its|this|that|these|those|they|there|we|our|your|i|you|[0-9])\b)/i)
     .map((clause) => clause.replace(/[.!?…]+$/, "").trim())
     .filter(Boolean);
 }
