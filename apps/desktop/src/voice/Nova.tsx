@@ -637,7 +637,12 @@ export function Nova({
               ),
             );
           output.current!.onended = () => {
-            if (token === generation.current) { if (answer.pendingAction) setPhase("listening"); else stop(); }
+            if (token !== generation.current) return;
+            if (answer.pendingAction) { setPhase("listening"); return; }
+            // The session ends with the speech; the answer's links stay until the next answer or organization.
+            const kept = answer.links ?? [];
+            stop();
+            if (kept.length > 0) setLinks(kept);
           };
           await output.current!.play();
         };

@@ -6567,10 +6567,11 @@ function registerIpcHandlers() {
     handleTrusted(() => store.cancelConnectTenant()),
   );
   // A Nova voice session belongs to one organization: switching ends it, and
-  // a hosted start in progress checks again before it sends anything.
+  // a hosted start in progress checks again before it sends anything. The
+  // panel closes its audio itself when the active organization changes.
   const afterOrganizationSwitch = async <T,>(state: T): Promise<T> => {
     try {
-      if (await novaService?.activeOrganizationChanged()) mainWindow?.webContents.send("openadminos:app-state-changed", { reason: NOVA_SESSION_ENDED_REASON });
+      await novaService?.activeOrganizationChanged();
     } catch (error) {
       console.warn("[nova] the voice session could not be checked after an organization switch", error);
     }

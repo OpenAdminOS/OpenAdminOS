@@ -191,3 +191,42 @@ it("says when the voice settings on this device could not be moved, keeps them, 
   expect(migrate).toHaveBeenCalledTimes(2);
   expect(screen.queryByText(/could not move the voice mode/)).toBeNull();
 });
+
+it("keeps the links of a local answer after its speech ends, until the next answer", async () => {
+  stubHostedSession();
+  vi.stubGlobal("MediaRecorder", class {
+    state = "inactive";
+    ondataavailable?: (event: { data: Blob }) => void;
+    onstop?: () => void;
+    start() { this.state = "recording"; }
+    stop() { this.state = "inactive"; this.onstop?.(); }
+  });
+  const createObjectURL = vi.fn(() => "blob:speech");
+  Object.defineProperty(URL, "createObjectURL", { value: createObjectURL, configurable: true });
+  Object.defineProperty(URL, "revokeObjectURL", { value: vi.fn(), configurable: true });
+  vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(async () => {});
+  const bridge = makeMockBridge({
+    nova: vi.fn(async (input) => {
+      if (input.action === "status") return { hasKey: true };
+      if (input.action === "start") return { sessionId: "local-session" };
+      if (input.action === "answer") return { text: "In Contoso, 1 run waits.", links: [{ label: "Review Retire devices", route: "/runs/run-1" }] };
+      if (input.action === "speak") return { audio: [0, 1, 2] };
+      return {};
+    }),
+  }, createMockAppState({ novaProfile: effective({ voiceMode: "local", shortcuts: [{ id: "s1", name: "Morning check", prompt: "What needs me?", createdAt: "2026-11-12T08:00:00.000Z" }] }) }));
+  renderRoute(<Nova />, { bridge, route: "/cache", path: "/cache" });
+  const user = userEvent.setup();
+  act(() => openNovaShortcut("Morning check"));
+  await user.click(await screen.findByRole("button", { name: "Start Nova" }));
+  await waitFor(() => expect(bridge.nova).toHaveBeenCalledWith(expect.objectContaining({ action: "speak", sessionId: "local-session" })));
+  expect(await screen.findByRole("button", { name: "Review Retire devices" })).toBeInTheDocument();
+  const audio = document.querySelector("audio")!;
+  await waitFor(() => expect(audio.onended).toBeTypeOf("function"));
+  await act(async () => { audio.onended!(new Event("ended")); });
+  // The session ended with the speech; the review link is still there.
+  expect(bridge.nova).toHaveBeenCalledWith({ action: "stop" });
+  expect(screen.getByRole("button", { name: "Review Retire devices" })).toBeInTheDocument();
+  // A new session clears it.
+  await user.click(screen.getByRole("button", { name: "Start Nova" }));
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Review Retire devices" })).not.toBeInTheDocument());
+});
