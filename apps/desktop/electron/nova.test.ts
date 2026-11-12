@@ -842,8 +842,11 @@ it("keeps the fixed rules after the admin's instructions, whatever they say", ()
   const shaped = buildNovaInstructions(state, "", true, [], settings, block);
   const fixedRules = plain.slice(plain.indexOf("Delegation policy:"));
   assert.ok(shaped.endsWith(fixedRules), "the fixed rules are unchanged and last");
-  assert.ok(shaped.indexOf(block) < shaped.indexOf("Delegation policy:"));
-  assert.match(shaped, /End of admin preferences/);
+  // The block opens the prompt and is closed before every fixed line, also the identity and conversation lines.
+  assert.equal(shaped.indexOf(block), 0);
+  const end = shaped.indexOf("End of admin preferences");
+  assert.ok(end > 0 && end < shaped.indexOf("You are Nova, the voice of OpenAdminOS."));
+  assert.ok(shaped.endsWith(plain), "every fixed line follows the block unchanged");
   assert.match(shaped, /You cannot approve actions by voice/);
 });
 

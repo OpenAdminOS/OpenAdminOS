@@ -878,9 +878,10 @@ function buildAgenticSystemPrompt(input: RunAgenticChatInput, questionKind: Intu
   const servers = input.tools.mcp?.servers ?? [];
   const missing = servers.filter((server) => missingSourceIds.includes(server.id)).map((server) => server.name);
   return [
+    // Nova's profile comes first and is closed before every fixed rule, so the fixed rules follow and override it.
+    ...(input.voice && input.voiceProfile ? [input.voiceProfile, NOVA_PROFILE_BLOCK_END] : []),
     buildIntuneChatSystemPrompt(input.providerIsLocal, Boolean(input.tools.webSearch), Boolean(input.voice)),
     input.voice ? VOICE_ANSWER_INSTRUCTIONS : "",
-    ...(input.voice && input.voiceProfile ? [input.voiceProfile, NOVA_PROFILE_BLOCK_END] : []),
     "",
     input.noTenant
       ? "No organization is active, so there is no tenant data to read. A request to explain a product, or to write a query or script the admin runs themselves, is docs. Choose tenant or mixed only when the answer needs facts about the admin's own tenant."

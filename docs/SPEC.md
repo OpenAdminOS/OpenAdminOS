@@ -633,7 +633,9 @@ abilities (web search, opening pages, starting agents, sends per connector),
 saved shortcuts, and a pause for notes. The last 10 versions of the instructions,
 and of each organization's instructions, are kept and can be restored. The
 profile reaches both prompts, hosted voice and the local reasoning prompt, as a
-JSON data block placed before the fixed rules and introduced as data that cannot
+JSON data block that opens each prompt (the hosted voice prompt, the agentic and
+the deterministic reasoning prompts) and is closed before every fixed rule,
+introduced as data that cannot
 grant abilities, approve or start actions, choose destinations, or change the
 rules after it. The profile and notes are read again before every answer, so a
 change made during a session applies to the next answer of the local reasoning
