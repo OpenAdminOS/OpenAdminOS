@@ -9,7 +9,6 @@ describe("unkept promise", () => {
       "I'll check that now.",
       "Let me look into the device inventory.",
       "I will now query the sign-in logs.",
-      "One moment, I'm pulling the data.",
       "Give me a moment. I'm going to verify the assignments.",
       "Sure. Let me go and check the Autopilot profiles for you.",
       "I’ll look into it.",
@@ -20,6 +19,9 @@ describe("unkept promise", () => {
       "Let me check the Microsoft 365 sign-in logs.",
       "I will check the Windows 11 devices that have not synced in 30 days.",
       "One moment, I'm checking.",
+      "Working on it, one moment.",
+      "Sure, I'm on it. Let me check.",
+      "I'm looking into that now. I'll get back with the list.",
       "Checking the devices now.",
       "Checking now.",
       "I'll take a look.",
@@ -61,6 +63,10 @@ describe("unkept promise", () => {
       "I am finding no devices matching that filter.",
       "I am checking the compliance policies.",
       "Checking now: 12 devices are non-compliant.",
+      // A progressive with an object reports what is happening; next to a later step it is still substance.
+      "I'm getting a 403 response. I'll check the permissions next.",
+      "One moment, I'm pulling the data.",
+      "I'm seeing two devices without BitLocker. Let me check the third.",
       // A code block or a list is substance, also next to a promise.
       "```kql\nSigninLogs | take 10\n```\nI'll run this next.",
       "1. WIN-01\n2. WIN-02\nLet me check the rest.",

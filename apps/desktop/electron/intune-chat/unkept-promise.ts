@@ -32,12 +32,13 @@ const PROMISE = new RegExp(
 const CHECKING_NOW = /^(?:i(?:'m|’m| am)\s+)?(?:just\s+|still\s+)?(?:checking|looking)\b[^.!?]*?\bnow$/i;
 
 /**
- * Work under way, in the present progressive: "I'm pulling the data",
- * "I am getting a 403 response". Neither a promise nor a result on its
- * own: next to a promise ("One moment, I'm pulling the data.") the answer
- * is still a progress message, alone it is not one.
+ * Work under way said with nothing after it: "I'm checking", "I'm on it",
+ * "working on it", "I'm looking into that now". Next to a promise ("One
+ * moment, I'm checking.") the answer is still a progress message. A
+ * progressive with an object or a result ("I'm getting a 403 response",
+ * "I'm pulling the device list") reports something and is substance.
  */
-const PROGRESS = /^(?:i(?:'m|’m| am)\s+)?(?:now\s+|currently\s+|just\s+|still\s+)?(?:checking|looking|querying|searching|investigating|finding|retrieving|pulling|running|getting|verifying|fetching|reviewing|digging|gathering|analy[sz]ing|examining|confirming|inspecting|scanning|researching|working)\b/i;
+const BARE_PROGRESS = /^(?:i(?:'m|’m| am)\s+)?(?:now\s+|currently\s+|just\s+|still\s+)?(?:on it|(?:checking|looking|querying|searching|investigating|retrieving|verifying|fetching|reviewing|digging|researching|working)(?:\s+(?:on|into|at)?\s*(?:it|that|this))?)(?:\s+(?:now|for you|right now))?$/i;
 
 /** A promise that depends on the admin, or an offer, is not unkept work. */
 const CONDITIONAL =
@@ -78,8 +79,8 @@ function clauses(text: string): string[] {
 /**
  * True only for a short progress message: at least one clause announces
  * work in forward-looking words ("I'll check that now.", "Let me see."),
- * and every other clause acknowledges the question ("Sure.") or describes
- * work under way ("I'm pulling the data").
+ * and every other clause acknowledges the question ("Sure.") or says work
+ * is under way with nothing after it ("I'm checking").
  * Any other clause is substance: a result, an offer, a list or a code
  * block finishes the answer, also when it mentions a later step. Numbers
  * inside the announced work ("I'll check the Windows 11 devices.") do not
@@ -105,8 +106,8 @@ export function looksLikeUnkeptPromise(answer: string): boolean {
       promised = true;
       continue;
     }
-    // Work under way is neutral; any other clause is substance.
-    if (PROGRESS.test(clause)) continue;
+    // Work under way with nothing after it is neutral; any other clause is substance.
+    if (BARE_PROGRESS.test(clause)) continue;
     return false;
   }
   return promised;
