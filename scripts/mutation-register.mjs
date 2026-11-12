@@ -299,8 +299,8 @@ export const REGISTER = [
   {
     id: "nova-hosted-session-keeps-removed-notes",
     path: "apps/desktop/electron/nova.ts",
-    find: "        session.hostedProfile.notes.some((note) => !fresh.notes.includes(note))",
-    replace: "        false",
+    find: "  return hostedProfileKey(fresh.profile) !== hosted.instructions || hosted.notes.some((note) => !current.has(note));",
+    replace: "  return hostedProfileKey(fresh.profile) !== hosted.instructions;",
     tests: ["apps/desktop/electron/nova-notes-followups.test.ts"],
     why: "A hosted voice session ends when a note it was given is forgotten, edited or paused.",
   },
@@ -311,6 +311,30 @@ export const REGISTER = [
     replace: "",
     tests: ["apps/desktop/electron/nova-followups.test.ts"],
     why: "A follow-up does not run with a provider or model the IT policy no longer allows.",
+  },
+  {
+    id: "nova-follow-up-ignores-provider-locality",
+    path: "apps/desktop/electron/nova-followups.ts",
+    find: "  if (followUp.providerLocal === undefined || context.activeProviderLocal !== followUp.providerLocal) return \"skipped-provider\";",
+    replace: "",
+    tests: ["apps/desktop/electron/nova-followups.test.ts"],
+    why: "A follow-up set against a provider on this device is not asked once that provider runs off this device.",
+  },
+  {
+    id: "nova-voice-consent-not-required",
+    path: "apps/desktop/electron/nova.ts",
+    find: "        if (this.actions && !this.actions.recordVoiceConsent) throw new Error(NOVA_VOICE_CONSENT_NOT_KEPT);",
+    replace: "",
+    tests: ["apps/desktop/electron/nova-notes-followups.test.ts"],
+    why: "Hosted voice sends nothing to OpenAI unless the consent was kept on this device.",
+  },
+  {
+    id: "nova-purge-deletes-unaudited",
+    path: "apps/desktop/electron/nova-memory.ts",
+    find: "    (this.options.auditDurably ?? this.options.audit)(rows.map(",
+    replace: "    this.options.audit(rows.map(",
+    tests: ["apps/desktop/electron/nova-memory.test.ts"],
+    why: "Disconnect deletes no Nova note before its purge event is on disk.",
   },
 ];
 
