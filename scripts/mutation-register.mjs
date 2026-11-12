@@ -288,6 +288,30 @@ export const REGISTER = [
     tests: ["apps/desktop/electron/nova-followups.test.ts"],
     why: "A follow-up runs only in the organization it was set in, never in the one active at its time.",
   },
+  {
+    id: "nova-proposal-skips-write-check",
+    path: "apps/desktop/electron/state.ts",
+    find: "      assertUnchanged?.(effectiveNovaProfile(persisted.novaProfile, this.managedPolicy, this.activeOrganizationIdOf(persisted)));",
+    replace: "",
+    tests: ["apps/desktop/electron/nova-records-state.test.ts"],
+    why: "A settings change confirmed on a Nova card never overwrites a Settings save made after the card was prepared.",
+  },
+  {
+    id: "nova-hosted-session-keeps-removed-notes",
+    path: "apps/desktop/electron/nova.ts",
+    find: "        session.hostedProfile.notes.some((note) => !fresh.notes.includes(note))",
+    replace: "        false",
+    tests: ["apps/desktop/electron/nova-notes-followups.test.ts"],
+    why: "A hosted voice session ends when a note it was given is forgotten, edited or paused.",
+  },
+  {
+    id: "nova-follow-up-ignores-policy",
+    path: "apps/desktop/electron/nova-followups.ts",
+    find: "  if (context.providerAllowed === false) return \"skipped-provider\";",
+    replace: "",
+    tests: ["apps/desktop/electron/nova-followups.test.ts"],
+    why: "A follow-up does not run with a provider or model the IT policy no longer allows.",
+  },
 ];
 
 /**
