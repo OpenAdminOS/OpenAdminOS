@@ -67,12 +67,14 @@ it("collects log resources as a capped recent window instead of every retained r
     // A quiet week: the whole window fits, so the snapshot is complete.
     let result = await store.refreshGraphCache({
       tenantId: "tenant-1",
-      resources: ["signIns", "intuneAuditEvents"],
+      resources: ["signIns", "directoryAudits", "intuneAuditEvents"],
     });
     assert.deepEqual(result.resources.map((r) => [r.resource, r.ok, r.pageLimitReached]), [
       ["signIns", true, false],
+      ["directoryAudits", true, false],
       ["intuneAuditEvents", true, false],
     ]);
+    assert.match(firstQueries.get("/auditLogs/directoryAudits")!.$filter!, /^activityDateTime ge /);
     const signInQuery = firstQueries.get("/auditLogs/signIns")!;
     const intuneQuery = firstQueries.get("/deviceManagement/auditEvents")!;
     assert.match(signInQuery.$filter!, /^createdDateTime ge \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
@@ -89,7 +91,7 @@ it("collects log resources as a capped recent window instead of every retained r
     requests.clear();
     await store.startGraphCachePreload({
       tenantId: "tenant-1",
-      resources: ["signIns", "intuneAuditEvents"],
+      resources: ["signIns", "directoryAudits", "intuneAuditEvents"],
     });
     let status = await store.getGraphCacheStatus("tenant-1");
     for (let i = 0; i < 500 && status.preload?.status === "running"; i++) {
@@ -97,7 +99,7 @@ it("collects log resources as a capped recent window instead of every retained r
       status = await store.getGraphCacheStatus("tenant-1");
     }
     assert.equal(status.preload?.status, "complete");
-    for (const resource of ["signIns", "intuneAuditEvents"] as const) {
+    for (const resource of ["signIns", "directoryAudits", "intuneAuditEvents"] as const) {
       const cached = status.resources.find((r) => r.resource === resource)!;
       assert.equal(cached.rows, GRAPH_CACHE_LOG_ROW_LIMIT);
       assert.equal(cached.pageLimitReached, true);
@@ -120,4 +122,50 @@ it("tells the model which window a log snapshot covers, and nothing for other re
   assert.match(logWindowCoverage({ resource: "signIns", rows: 10_000, pageLimitReached: true }).coverage!, /^Newest 10,000 entries from the 7 days/);
   assert.match(logWindowCoverage({ resource: "intuneAuditEvents", rows: 40, pageLimitReached: false }).coverage!, /^All entries from the 7 days/);
   assert.deepEqual(logWindowCoverage({ resource: "managedDevices", rows: 1000, pageLimitReached: true }), {});
+});
+
+it("drops log snapshots cached before the window policy once, and keeps other resources", async () => {
+  const { IntelligenceSqliteStore } = await import("./sqlite-store.js");
+  const { DatabaseSync } = await import("node:sqlite");
+  const dir = await mkdtemp(join(tmpdir(), "oaos-log-migration-"));
+  const dbPath = join(dir, "openadminos.db");
+  try {
+    const seed = (store: InstanceType<typeof IntelligenceSqliteStore>) => {
+      store.replaceGraphResources({
+        tenantId: "tenant-1", resource: "signIns", label: "Sign-in logs",
+        scopeSet: ["AuditLog.Read.All"], refreshedAt: new Date().toISOString(),
+        rows: [{ id: "sign-in-1", createdDateTime: "2026-10-01T00:00:00Z" }],
+      });
+      store.replaceGraphResources({
+        tenantId: "tenant-1", resource: "managedDevices", label: "Intune managed devices",
+        scopeSet: ["DeviceManagementManagedDevices.Read.All"], refreshedAt: new Date().toISOString(),
+        rows: [{ id: "device-1", deviceName: "PC-1" }],
+      });
+    };
+    let store = new IntelligenceSqliteStore(dbPath);
+    seed(store);
+    store.close();
+    // Simulate a database from before the migration existed.
+    const raw = new DatabaseSync(dbPath);
+    raw.prepare("DELETE FROM schema_migrations WHERE id = 3").run();
+    raw.close();
+
+    store = new IntelligenceSqliteStore(dbPath);
+    const resources = () => store.getGraphCacheStatus("tenant-1", [
+      { resource: "signIns", label: "Sign-in logs", scopes: ["AuditLog.Read.All"] },
+      { resource: "managedDevices", label: "Intune managed devices", scopes: ["DeviceManagementManagedDevices.Read.All"] },
+    ]);
+    assert.deepEqual(resources().map((r) => [r.resource, r.rows, Boolean(r.refreshedAt)]), [
+      ["signIns", 0, false],
+      ["managedDevices", 1, true],
+    ]);
+    // Runs once: a log snapshot taken after the migration survives a reopen.
+    seed(store);
+    store.close();
+    store = new IntelligenceSqliteStore(dbPath);
+    assert.equal(resources()[0]!.rows, 1);
+    store.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

@@ -1281,7 +1281,8 @@ function listCachedResources(ctx: IntuneChatToolContext, params: unknown): unkno
         : Number.NaN;
       const stale =
         !resource.refreshedAt ||
-        resource.rows === 0 ||
+        // A log window with no activity is a valid result, not missing data.
+        (resource.rows === 0 && !isGraphCacheLogResource(resource.resource)) ||
         !Number.isFinite(refreshedMs) ||
         nowMs - refreshedMs > (staleAfterMs ?? resourceStalenessMs(resource.resource));
       return {
@@ -1584,6 +1585,7 @@ async function refreshResource(
     rows: result.rows,
     pages: result.pages,
     pageLimitReached: result.pageLimitReached,
+    ...(result.ok ? logWindowCoverage({ ...result, pageLimitReached: result.pageLimitReached === true }) : {}),
     refreshedAt: result.refreshedAt,
     error: result.error,
   };
