@@ -231,6 +231,12 @@ describe("Nova profile", () => {
       "Save a note that Berlin uses kiosks",
       "Check the stale devices tomorrow",
       "Which devices are noncompliant? Then post it to the Teams channel",
+      // Gerunds, and handing or putting a result somewhere.
+      "Which devices are noncompliant, sharing the list in Slack",
+      "Give the compliance summary to the team in Slack",
+      "Check compliance and put the result in Teams",
+      "Summarize the stale devices, posting it in the channel",
+      "Hand the list of expiring secrets to my manager",
     ]) {
       assert.equal(novaShortcutPromptIssue(prompt), NOVA_SHORTCUT_NOT_READ_ONLY, prompt);
     }
@@ -246,6 +252,9 @@ describe("Nova profile", () => {
       "Which users have no email address?",
       "Show the error message the device reported",
       "List the teams the user belongs to",
+      "Which apps put the most load on the devices?",
+      "Which policies give users local admin rights?",
+      "Show the sharing settings of the SharePoint sites",
     ]) {
       assert.equal(novaShortcutPromptIssue(prompt), undefined, prompt);
     }

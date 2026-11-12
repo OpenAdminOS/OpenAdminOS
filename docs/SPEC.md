@@ -730,12 +730,20 @@ and the IT policy still allows that provider and model; otherwise it is
 refuses it or the provider moved) and does not start. A loopback Ollama later
 pointed at a remote host under the same id therefore gets no question (round 2
 review, 2026-11-12). A hosted follow-up runs with the consent given by the click,
-its time stored with it; no new consent is minted when it fires. The decision is
+its time stored with it; no new consent is minted when it fires. Chat checks that
+consent against the stored follow-up (running, same organization, provider,
+model, consent time and endpoint) instead of the five-minute window of a typed
+send; only the main process passes that check, the renderer's Chat call cannot.
+When no store keeps the consent at the click, nothing is set and no creation is
+counted (round 3 review, 2026-11-12). The decision is
 made on the pending row: a skipped or missed follow-up is never marked running
-and has no started event; one that runs is claimed and records `started` right
-before Chat is asked. One more than an hour late is `missed`;
+and has no started event; one that runs takes the tenant lease first, then is
+claimed and records `started` right before Chat is asked, so a Disconnect after
+the decision skips it (`skipped-organization`) without a started event. One more than an hour late is `missed`;
 one cut off by a quit is `failed`. A run goes through Chat, which is strictly
-read-only, under the tenant lease, with a five-minute bound, into a new Chat
+read-only, under the tenant lease, with a hard five-minute bound (a call that
+ignores its cancel signal is left behind, the follow-up ends `failed` with the
+reason, and later follow-ups still run), into a new Chat
 conversation titled "Follow-up: ...". It never sends to a connector. Settings >
 Nova lists follow-ups with their state, a link to the answer, and Cancel; the
 Nova panel shows how many are pending. Audit events, source `nova`:
@@ -753,7 +761,11 @@ Nova says so, and without an active organization it refuses.
 of 600 characters), saved only when the question reads as read-only. "Run
 morning check" by voice, or the command palette entry "Nova: run ...", runs the
 saved question on the research path only, after checking it again; with no session the palette entry waits
-until the admin starts one, so consent stays a click.
+until the admin starts one, so consent stays a click. The save check is a wording
+check (verbs, gerunds and "give, put or hand it to" a destination), so a
+wording it misses can be saved; the guarantee is structural: a shortcut only
+ever reaches the read-only research path, which cannot send, run or write
+(round 3 review, 2026-11-12).
 
 **IT policy.** Four keys in `policy.json`: `novaVoiceModes` (the voice modes
 allowed; an empty list turns Nova voice off; a policy without Nova keys allows
@@ -778,13 +790,15 @@ run opens its page only while Nova may open pages.
 **Unkept promises.** A final answer that is only a progress message ("I'll check
 that now.", "Okay, let me look.", "One moment") gets a repair turn, at most twice
 per answer, in Chat (the tool loop and deterministic retrieval), Agent Team
-answers and voice. Every clause (sentences split at commas, semicolons, colons,
-dashes and "but", "while" and the like) must be a first-person promise or an
-acknowledgement; a result clause before or after the promise, an offer or a
-list make it a finished answer ("All devices are compliant. I'll check the app
-installs next.", "I'll check the apps next, but the devices are compliant.",
+answers and voice. The check is conservative: only an answer of at most 160
+characters qualifies, and every clause (split at sentence ends, commas,
+semicolons, colons, dashes and "and", "but", "so", "while" and the like, but not
+"go and check") must be a first-person promise or an acknowledgement. Any other
+clause is a result, so a result before or after the promise, an offer, a list or
+a code block make it a finished answer ("All devices are compliant. I'll check
+the app installs next.", "I'm looking at 47 devices and all are compliant.",
 "Let me verify: all Macs are compliant." are not nudged, and neither is "let's"
-guidance). Numbers inside the announced work do not count as a result ("I'll
+guidance; round 3 review, 2026-11-12). Numbers inside the announced work do not count as a result ("I'll
 check the Windows 11 devices now." is nudged). After two, Chat and Agent Team keep the last answer, and voice
 on the tool loop keeps its fallback to retrieved evidence. A voice repair that
 would exceed the voice prompt budget is not sent. Each Agent Team model call has

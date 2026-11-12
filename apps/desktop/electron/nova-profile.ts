@@ -359,6 +359,15 @@ export function novaShortcutPromptIssue(prompt: string): string | undefined {
   if (/\b(?:send|forward|whatsapp|slack|dm|ping|tweet)\s+(?:me|us|it|this|that|these|those|them|the|a|an|my|our|to|him|her|everyone|everybody|out)\b/i.test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
   if (/\b(?:email|e-mail|mail|message|text|post|share)\s+(?:me|us|him|her|everyone|everybody)\b/i.test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
   if (/\b(?:deliver|publish|dispatch|notify)\b/i.test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
+  // Delivery as a gerund with where it goes ("sharing the list in Slack"),
+  // and handing a result to someone or putting it somewhere ("give the
+  // summary to the team", "put the result in Teams"). "The sharing
+  // settings" names no destination and stays readable.
+  const destination =
+    "(?:(?:a|an|the|my|our)\\s+)?(?:slack|teams|outlook|email|e-mail|mail|whatsapp|sms|channel|chat|ticket|servicenow|jira|team|manager|helpdesk)|me|us|him|her|everyone|everybody";
+  const delivered = `[^.?!]{0,60}\\b(?:to|in|into|on|via|with)\\s+(?:${destination})\\b`;
+  if (new RegExp(`\\b(?:sending|forwarding|sharing|posting|emailing|e-mailing|mailing|messaging|texting|slacking|pinging|delivering|publishing|notifying)\\b${delivered}`, "i").test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
+  if (new RegExp(`\\b(?:give|hand|pass|put|drop|paste|copy|place)\\b${delivered}`, "i").test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
   // Write verbs as the request itself, or chained onto a question. As nouns
   // ("update rings", "the lock screen") they stay readable.
   const writeVerb = "(?:run|start|launch|execute|trigger|kick\\s+off|fire\\s+off|spin\\s+up|turn\\s+(?:on|off)|switch\\s+(?:on|off)|delete|remove|retire|wipe|disable|enable|reset|reboot|restart|sync|lock|unlock|unassign|assign|create|update|change|set|rename|block|unblock|revoke|approve|install|uninstall|deploy|move|add|save|store|record|send|email(?!\\s+address)|e-mail|message|post|share|text)";
