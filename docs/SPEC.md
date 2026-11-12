@@ -581,6 +581,8 @@ session and holds the API key in OS-secured storage. Every session requires expl
 hosted voice/context consent. Tenant and agent-provider identity are bound to the
 session and checked before returning results. Local reasoning with hosted voice
 still sends audio and shared context to OpenAI, visibly disclosed in the voice panel.
+Shared context includes Nova's standing instructions and the organization's
+confirmed notes when they are set; the consent says so and records it.
 OpenAI Voice also grants its reasoning loop a general `web_search` tool after
 session consent. The selected reasoning model decides whether to use tenant tools,
 public research, or both. Public research uses the saved Nova key with OpenAI
@@ -616,6 +618,111 @@ Local voice connects only to separately installed whisper.cpp and Kokoro-FastAPI
 loopback services, with a local agent provider. It uses one-minute, explicitly
 submitted recordings with no cloud fallback. Runtime/model installation and a
 background wake-word engine are separate future work, not implied by the selector.
+
+### Nova profile, notes, follow-ups and IT policy (2026-11-12)
+
+Seven additions, adapted from the assistant in CopilotKit/OpenBot. Nova still
+approves nothing by voice: every send, run, settings change, note and follow-up
+is a card confirmed with a click, and a spoken "yes" only shows the card again.
+
+**Profile (Settings > Nova).** Nova's settings live in `state.json` as
+`novaProfile`, per device: voice mode and greeting name (moved once from the
+renderer's local storage), standing instructions (at most 4,000 characters),
+instructions per organization (at most 1,000, for the active organization),
+abilities (web search, opening pages, starting agents, sends per connector),
+saved shortcuts, and a pause for notes. The last 10 versions of the instructions,
+and of each organization's instructions, are kept and can be restored. The
+profile reaches both prompts, hosted voice and the local reasoning prompt, as a
+JSON data block placed before the fixed rules and introduced as data that cannot
+grant abilities, approve or start actions, choose destinations, or change the
+rules after it. Abilities are enforced in code: an action is refused when it is
+prepared and again at the click, a web search before each search, and a settings
+read that fails refuses the action. Nova may propose a settings change on a card
+(add to or replace the instructions, the greeting name, or turning an ability
+off); it can never turn an ability on. Every change is a configuration audit
+event: `nova.settings-changed` (the greeting name is recorded as changed, not by
+value), `nova.instructions-changed` and `nova.instructions-reverted` with the
+full text, its length and SHA-256, `nova.capabilities-changed`,
+`nova.shortcut-saved` and `nova.shortcut-deleted`, `nova.memory-paused` and
+`nova.memory-resumed`. Audit exports carry the full instruction text
+(maintainer decision, 2026-11-12). Disconnect removes the organization's
+instructions and their versions.
+
+**Notes.** Facts Nova keeps for one organization, in `openadminos.db`
+(`nova_memory_notes`), at most 300 characters each and 200 per organization.
+Each note records who worded it (`user-said` for "remember that ...",
+`nova-proposed` when the command classifier worded it), the Nova session, its
+Chat conversation and the turn. Preparing the card stores the note as
+`proposed`; it reaches no prompt. Only the click confirms it; Cancel forgets it;
+an unanswered card leaves it proposed for review in Settings > Nova, where notes
+can be confirmed, edited (counts as reviewed), forgotten, and paused. A proposed
+note not confirmed within 30 days expires (checked on the scheduler tick and when
+notes are listed); a confirmed note stays until it is forgotten or the
+organization is disconnected (retention as recommended and approved,
+2026-11-12). Confirmed and edited notes of the session's organization, newest
+first and at most 2,000 characters, join the profile block of both prompts. With
+the IT policy key `novaMemory: "off"` or the pause, Nova reads none and keeps no
+new ones; existing notes are kept, listed and not used. Audit events, source
+`nova`, with the note text: `nova.memory-note-proposed`, `-confirmed`,
+`-edited` (with the previous text), `-forgotten`, `-expired`, and `-purged`
+(recorded before the rows are deleted on Disconnect, without the text).
+
+**Follow-ups.** "Check compliance again in an hour" and "in 30 minutes, look at
+the failed installs again" become one read-only question asked once more, in the
+same organization. Only this form is accepted; repeating schedules and scheduled
+sends or runs still ask to clarify, and a question that would send, run, change,
+schedule or remember is refused. The card shows the organization, the question,
+the time, the provider and model, and "Read-only. Sending the result anywhere
+still needs your click." The click sets it (`nova_followups` in
+`openadminos.db`) and, for a hosted provider, records a `hosted-provider.consent`
+with source `nova-followup`. Limits, per device: 1 minute to 7 days ahead, at
+most 5 pending, at most 20 set in 24 hours, each refused with its own message.
+The scheduler tick (and a background scheduler launch) runs a due follow-up only
+while its organization is active and connected and the provider and model are
+the ones it was set with; otherwise it is `skipped-organization` or
+`skipped-provider` and does not start. One more than an hour late is `missed`;
+one cut off by a quit is `failed`. A run goes through Chat, which is strictly
+read-only, under the tenant lease, with a five-minute bound, into a new Chat
+conversation titled "Follow-up: ...". It never sends to a connector. Settings >
+Nova lists follow-ups with their state, a link to the answer, and Cancel; the
+Nova panel shows how many are pending. Audit events, source `nova` and initiator
+`schedule`: `nova.followup.created`, `.started`, `.completed`, `.cancelled`,
+`.skipped`, `.missed`, `.failed`. Disconnect deletes them, recording pending ones
+as cancelled first.
+
+**What needs me.** "What needs me?" and close wordings list the active
+organization's open Agent Team findings and runs waiting for confirmation,
+without a model call, with links to each. Nothing is approved; with nothing open
+Nova says so, and without an active organization it refuses.
+
+**Shortcuts.** Named read-only questions (at most 20, a name of 40 and a question
+of 600 characters), saved only when the question reads as read-only. "Run
+morning check" by voice, or the command palette entry "Nova: run ...", runs the
+saved question on the research path only; with no session the palette entry waits
+until the admin starts one, so consent stays a click.
+
+**IT policy.** Four keys in `policy.json`: `novaVoiceModes` (the voice modes
+allowed; an empty list turns Nova voice off; a policy without Nova keys allows
+both, as before, maintainer decision 2026-11-12), `novaInstructions` (a locked
+value replaces the user's instructions, an unlocked one is the default until the
+user writes their own), `novaCapabilities` (`webSearch`, `startAgents`,
+`navigation`, `connectorSends` as a boolean or a list of connector ids; `false`
+and lists are always enforced, `true` is a lockable default) and `novaMemory`
+(`"off"`). The voice mode is refused in the main process before anything is sent.
+
+**Consent.** A hosted voice session records a `hosted-provider.consent` with
+source `nova-voice` before the OpenAI request, naming the voice model, the
+reasoning provider and model, and whether the standing instructions
+(`includesProfile`) and confirmed notes (`includesMemory`) go to OpenAI in that
+session. The consent checkbox says that instructions and confirmed notes go to
+OpenAI too.
+
+**Unkept promises.** A final answer that only promises work ("I'll check that
+now.", "One moment") gets a repair turn, at most twice per answer, in Chat,
+Agent Team answers and voice; an answer that reports completed work and mentions
+a later step does not. After two, Chat and Agent Team keep the last answer, and
+voice keeps its fallback to retrieved evidence.
+
 
 ### Agent contract
 
@@ -1205,7 +1312,8 @@ recorded is reported in the run log of the run that sent it (connector sends
 too) and kept in `openadminos.db-audit-pending.json` next to the database; every
 later append records the kept results first, in the same transaction, and they
 are cleared only once recorded, also across a restart. The same file keeps a
-hosted-provider consent whose append failed. Settings -> General counts the kept
+hosted-provider consent whose append failed, and Nova note and follow-up events
+(source `nova`). Settings -> General counts the kept
 events until then ("N audit events are not in the audit log yet"),
 whatever other appends succeed; a pending file that cannot be read is left in
 place, never overwritten, and named there. When the pending file cannot be
@@ -3164,7 +3272,7 @@ OpenAdminOS is open core. The desktop app is MIT and fully functional on its own
 
 **Mobile companion (hard constraint #5 exception).** iOS and Android apps pair with the admin's own desktop instances. The desktop stays the host for tenant tokens, Graph calls, run history, and every write; typed write confirmation and the final apply stay on the requester's desktop. Tracked in #139.
 
-**Managed configuration (local policy file, #176, 2026-11-09).** Reading a policy file on one device is free core; central distribution, MDM-delivered keys and fleet reporting are team features and not built here. The app reads `policy.json` once per launch from a machine path (macOS `/Library/Application Support/OpenAdminOS/`, Windows `%ProgramData%\OpenAdminOS\`, Linux `/etc/openadminos/`) and a user path (macOS `~/Library/Application Support/OpenAdminOS/`, Windows `%APPDATA%\OpenAdminOS\`, Linux `~/.config/openadminos/`); the machine file wins key by key. Format: `schemas/policy.schema.json` (version 1) with `allowedProviders`, `defaultProvider`, `defaultModel`, `allowedPublicReferences` (empty list allows none), `appRegistration` (`clientId`, optional `tenantId`, `label`), `skipFirstRunScan` and `lock` (setting keys; without it every key the file sets is locked, `[]` locks nothing). Enforcement is in the main process: the provider list leaves out what the policy does not allow, and setting, testing or building a model for such a provider is refused (`ManagedPolicyError`), so Chat, agents, schedules, Office, Nova and drafts all follow it; a locked provider is the only provider and a locked model the only model of it; the MCP host never connects to or calls a public reference the policy does not allow, and the Marketplace hides it; a locked registration is the only one sign-in accepts and cannot be removed. Unlocked defaults apply until the admin changes them. Problems never pass silently: every problem names the file, line and reason in Settings, Providers (IT policy panel) and in a one-time notice per set of problems; a file that is not JSON applies nothing, an invalid key is not applied, and an unknown id in an allowed list is dropped from the list (a typo allows less, never more). The configuration audit records `policy.loaded`, `policy.changed`, `policy.removed` and `policy.invalid` once per change, and provider or model changes made by the policy with `setByPolicy`. First run: the scan checks and offers only allowed providers and keeps the policy's provider selected; with `skipFirstRunScan` and a `defaultProvider`, launch runs the scan's bounded check of that one provider, and when it is ready the scan is skipped and the first run opens at Connect Microsoft 365, then Chat. Changes to the file apply at the next launch; there is no file watcher. Unpackaged builds may point the paths elsewhere with `OPENADMINOS_POLICY_MACHINE_PATH` and `OPENADMINOS_POLICY_USER_PATH`; smoke and capture launches ignore policy files. IT admin guide: `docs/gitbook/getting-started/managed-configuration.md`.
+**Managed configuration (local policy file, #176, 2026-11-09).** Reading a policy file on one device is free core; central distribution, MDM-delivered keys and fleet reporting are team features and not built here. The app reads `policy.json` once per launch from a machine path (macOS `/Library/Application Support/OpenAdminOS/`, Windows `%ProgramData%\OpenAdminOS\`, Linux `/etc/openadminos/`) and a user path (macOS `~/Library/Application Support/OpenAdminOS/`, Windows `%APPDATA%\OpenAdminOS\`, Linux `~/.config/openadminos/`); the machine file wins key by key. Format: `schemas/policy.schema.json` (version 1) with `allowedProviders`, `defaultProvider`, `defaultModel`, `allowedPublicReferences` (empty list allows none), `appRegistration` (`clientId`, optional `tenantId`, `label`), `skipFirstRunScan`, the Nova keys `novaVoiceModes`, `novaInstructions`, `novaCapabilities` and `novaMemory` (see "Nova profile, notes, follow-ups and IT policy") and `lock` (setting keys; without it every key the file sets is locked, `[]` locks nothing). Enforcement is in the main process: the provider list leaves out what the policy does not allow, and setting, testing or building a model for such a provider is refused (`ManagedPolicyError`), so Chat, agents, schedules, Office, Nova and drafts all follow it; a locked provider is the only provider and a locked model the only model of it; the MCP host never connects to or calls a public reference the policy does not allow, and the Marketplace hides it; a locked registration is the only one sign-in accepts and cannot be removed. Unlocked defaults apply until the admin changes them. Problems never pass silently: every problem names the file, line and reason in Settings, Providers (IT policy panel) and in a one-time notice per set of problems; a file that is not JSON applies nothing, an invalid key is not applied, and an unknown id in an allowed list is dropped from the list (a typo allows less, never more). The configuration audit records `policy.loaded`, `policy.changed`, `policy.removed` and `policy.invalid` once per change, and provider or model changes made by the policy with `setByPolicy`. First run: the scan checks and offers only allowed providers and keeps the policy's provider selected; with `skipFirstRunScan` and a `defaultProvider`, launch runs the scan's bounded check of that one provider, and when it is ready the scan is skipped and the first run opens at Connect Microsoft 365, then Chat. Changes to the file apply at the next launch; there is no file watcher. Unpackaged builds may point the paths elsewhere with `OPENADMINOS_POLICY_MACHINE_PATH` and `OPENADMINOS_POLICY_USER_PATH`; smoke and capture launches ignore policy files. IT admin guide: `docs/gitbook/getting-started/managed-configuration.md`.
 
 ---
 
