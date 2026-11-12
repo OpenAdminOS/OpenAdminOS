@@ -93,6 +93,10 @@ describe("policy parsing", () => {
         allowedPublicReferences: ["microsoft-learn"],
         appRegistration: { clientId: "AAAAAAAA-1111-2222-3333-444444444444", tenantId: "contoso.onmicrosoft.com", label: "Contoso IT" },
         skipFirstRunScan: true,
+        novaVoiceModes: ["local"],
+        novaInstructions: "Answer in short sentences.",
+        novaCapabilities: { webSearch: false, connectorSends: ["outlook"] },
+        novaMemory: "off",
       }),
     });
     assert.ok(policy);
@@ -104,6 +108,10 @@ describe("policy parsing", () => {
       allowedPublicReferences: ["microsoft-learn"],
       appRegistration: { clientId: "aaaaaaaa-1111-2222-3333-444444444444", tenantId: "contoso.onmicrosoft.com", label: "Contoso IT" },
       skipFirstRunScan: true,
+      novaVoiceModes: ["local"],
+      novaInstructions: "Answer in short sentences.",
+      novaCapabilities: { webSearch: false, connectorSends: ["outlook"] },
+      novaMemory: "off",
     });
     // No lock list: every key the file sets is locked.
     assert.deepEqual(policy.locked, [...MANAGED_POLICY_SETTING_KEYS]);

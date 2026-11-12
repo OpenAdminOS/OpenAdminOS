@@ -246,6 +246,7 @@ const api: OpenAdminOSApi = {
     return ipcRenderer.invoke("openadminos:nova", input, streamId)
       .finally(() => ipcRenderer.removeListener("openadminos:nova-activity", handler));
   },
+  novaProfile: (request) => ipcRenderer.invoke("openadminos:nova-profile", request),
   startGraphCachePreload: (options) => ipcRenderer.invoke("openadminos:start-graph-cache-preload", options),
   cancelGraphCachePreload: (tenantId) => ipcRenderer.invoke("openadminos:cancel-graph-cache-preload", tenantId),
   refreshGraphCache: (options) =>

@@ -1,6 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
-import type { AppState, ConnectorSummary, NovaActionPreview, RunRecord, StartRunOptions } from '@openadminos/agent-sdk';
+import type { AppState, ConnectorSummary, EffectiveNovaProfile, ManagedPolicyStatus, NovaActionPreview, NovaProfile, ProviderId, RunRecord, StartRunOptions } from '@openadminos/agent-sdk';
 
 export interface NovaActionHost {
   classifyCommand?(text: string, context: import("../src/shared/nova-command.js").NovaCommandContext, options: Pick<import("./nova.js").NovaChatOptions, "scope" | "signal">): Promise<string>;
@@ -15,6 +15,10 @@ export interface NovaActionHost {
    * signal fires when it starts closing, so a multi-part send stops.
    */
   tenantLease?<T>(tenantId: string, work: (signal: AbortSignal) => Promise<T>): Promise<T>;
+  /** Nova's settings now, with the IT policy applied, read when Nova acts. */
+  profile?(): Promise<{ profile: NovaProfile | undefined; effective: EffectiveNovaProfile; policy: ManagedPolicyStatus | undefined }>;
+  /** Records the consent to send audio and shared context to OpenAI for one voice session. Never throws. */
+  recordVoiceConsent?(input: { tenantId: string; sessionId: string; acknowledgedAt: string; voiceModel: string; reasoningProviderId: ProviderId; reasoningModel?: string }): void;
 }
 
 /** Run an approved action under its tenant's lease, with both signals. */

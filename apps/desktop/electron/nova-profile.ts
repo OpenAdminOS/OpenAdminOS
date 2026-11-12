@@ -1,0 +1,542 @@
+import {
+  isManagedSettingLocked,
+  managedNovaMemoryOff,
+  managedNovaVoiceModeAllowed,
+  type EffectiveNovaProfile,
+  type ManagedPolicyStatus,
+  type NovaCapabilityName,
+  type NovaInstructionRevision,
+  type NovaProfile,
+  type NovaProfileChangeVia,
+  type NovaProfilePatch,
+  type NovaProfileView,
+  type NovaShortcut,
+  type NovaVoiceMode,
+} from "@openadminos/agent-sdk";
+
+import { novaCommand } from "../src/shared/nova-command.js";
+import {
+  ManagedPolicyError,
+  NOVA_INSTRUCTIONS_MAX_LENGTH,
+  novaSettingLockedMessage,
+  novaVoiceModeNotAllowedMessage,
+} from "./managed-policy.js";
+
+/**
+ * Nova's settings on this device: voice mode, greeting name, standing
+ * instructions, an addendum per organization, the abilities the admin
+ * turned off, saved shortcuts and the notes pause. Kept in state.json, so
+ * every change is a configuration audit event. The IT policy is applied
+ * here, in the main process: a locked or forced value is refused whatever
+ * the renderer shows.
+ */
+
+export { NOVA_INSTRUCTIONS_MAX_LENGTH };
+export const NOVA_ADDENDUM_MAX_LENGTH = 1000;
+export const NOVA_GREETING_NAME_MAX_LENGTH = 40;
+/** Versions kept of each text: the instructions, and each organization's addendum. */
+export const NOVA_REVISIONS_PER_TEXT = 10;
+export const NOVA_SHORTCUTS_MAX = 20;
+export const NOVA_SHORTCUT_NAME_MAX_LENGTH = 40;
+export const NOVA_SHORTCUT_PROMPT_MAX_LENGTH = 600;
+
+export const NOVA_VOICE_MODES: readonly NovaVoiceMode[] = ["openai", "local"];
+export const NOVA_CAPABILITY_NAMES: readonly NovaCapabilityName[] = ["webSearch", "startAgents", "navigation"];
+const CONNECTOR_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+const ID_PATTERN = /^[A-Za-z0-9_-]{1,80}$/;
+
+const CAPABILITY_LABELS: Record<NovaCapabilityName | "connectorSends", string> = {
+  webSearch: "web search",
+  startAgents: "starting agents",
+  navigation: "opening pages",
+  connectorSends: "sending through connectors",
+};
+
+export const NOVA_SHORTCUT_NOT_READ_ONLY =
+  "A shortcut can only ask a read-only question. Remove the request to send, run, schedule, change or remember something.";
+
+/** A request Nova's settings refuse, with the reason in plain words. */
+export class NovaProfileError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NovaProfileError";
+  }
+}
+
+export interface NovaProfileChangeContext {
+  /** ISO timestamp of the change. */
+  now: string;
+  newId: () => string;
+  /** Organizations on this device; an addendum belongs to one of them. */
+  organizationIds: readonly string[];
+  via?: NovaProfileChangeVia;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isVoiceMode(value: unknown): value is NovaVoiceMode {
+  return value === "local" || value === "openai";
+}
+
+function boundedText(value: unknown, max: number): string | undefined {
+  return typeof value === "string" && value.length <= max ? value : undefined;
+}
+
+function validTimestamp(value: unknown): value is string {
+  return typeof value === "string" && Number.isFinite(Date.parse(value));
+}
+
+function sanitizeShortcut(value: unknown): NovaShortcut | undefined {
+  if (!isRecord(value)) return undefined;
+  if (typeof value.id !== "string" || !ID_PATTERN.test(value.id)) return undefined;
+  const name = boundedText(value.name, NOVA_SHORTCUT_NAME_MAX_LENGTH)?.trim();
+  const prompt = boundedText(value.prompt, NOVA_SHORTCUT_PROMPT_MAX_LENGTH)?.trim();
+  if (!name || !prompt || !validTimestamp(value.createdAt)) return undefined;
+  return {
+    id: value.id,
+    name,
+    prompt,
+    createdAt: value.createdAt,
+    ...(validTimestamp(value.updatedAt) ? { updatedAt: value.updatedAt } : {}),
+  };
+}
+
+function sanitizeRevision(value: unknown): NovaInstructionRevision | undefined {
+  if (!isRecord(value)) return undefined;
+  if (typeof value.id !== "string" || !ID_PATTERN.test(value.id) || !validTimestamp(value.at)) return undefined;
+  if (value.scope !== "user" && value.scope !== "organization") return undefined;
+  if (value.scope === "organization" && (typeof value.organizationId !== "string" || !value.organizationId)) return undefined;
+  const max = value.scope === "user" ? NOVA_INSTRUCTIONS_MAX_LENGTH : NOVA_ADDENDUM_MAX_LENGTH;
+  const text = boundedText(value.text, max);
+  if (text === undefined) return undefined;
+  const via = ["settings", "nova-proposal", "revert", "migration"].includes(String(value.via)) ? (value.via as NovaProfileChangeVia) : "settings";
+  return {
+    id: value.id,
+    at: value.at,
+    scope: value.scope,
+    ...(value.scope === "organization" ? { organizationId: value.organizationId as string } : {}),
+    text,
+    via,
+  };
+}
+
+function revisionKey(revision: Pick<NovaInstructionRevision, "scope" | "organizationId">): string {
+  return revision.scope === "user" ? "user" : `organization:${revision.organizationId}`;
+}
+
+/** Keeps the newest `NOVA_REVISIONS_PER_TEXT` of each text, oldest first. */
+function pruneRevisions(revisions: readonly NovaInstructionRevision[]): NovaInstructionRevision[] {
+  const counts = new Map<string, number>();
+  const kept: NovaInstructionRevision[] = [];
+  for (let index = revisions.length - 1; index >= 0; index -= 1) {
+    const revision = revisions[index]!;
+    const key = revisionKey(revision);
+    const count = counts.get(key) ?? 0;
+    if (count >= NOVA_REVISIONS_PER_TEXT) continue;
+    counts.set(key, count + 1);
+    kept.unshift(revision);
+  }
+  return kept;
+}
+
+/** The stored profile, or undefined when nothing valid is stored. Texts over their limit are dropped. */
+export function sanitizeNovaProfile(value: unknown): NovaProfile | undefined {
+  if (!isRecord(value)) return undefined;
+  const profile: NovaProfile = {};
+  if (isVoiceMode(value.voiceMode)) profile.voiceMode = value.voiceMode;
+  const greetingName = boundedText(value.greetingName, NOVA_GREETING_NAME_MAX_LENGTH)?.trim();
+  if (greetingName) profile.greetingName = greetingName;
+  const instructions = boundedText(value.instructions, NOVA_INSTRUCTIONS_MAX_LENGTH);
+  if (instructions !== undefined) profile.instructions = instructions;
+  if (isRecord(value.addenda)) {
+    const addenda: Record<string, string> = {};
+    for (const [organizationId, text] of Object.entries(value.addenda)) {
+      const bounded = boundedText(text, NOVA_ADDENDUM_MAX_LENGTH);
+      if (organizationId && bounded) addenda[organizationId] = bounded;
+    }
+    if (Object.keys(addenda).length > 0) profile.addenda = addenda;
+  }
+  if (isRecord(value.capabilities)) {
+    const capabilities: Partial<Record<NovaCapabilityName, boolean>> = {};
+    for (const name of NOVA_CAPABILITY_NAMES) {
+      if (typeof value.capabilities[name] === "boolean") capabilities[name] = value.capabilities[name] as boolean;
+    }
+    if (Object.keys(capabilities).length > 0) profile.capabilities = capabilities;
+  }
+  if (isRecord(value.connectorSends)) {
+    const sends: Record<string, boolean> = {};
+    for (const [connectorId, allowed] of Object.entries(value.connectorSends)) {
+      if (CONNECTOR_ID_PATTERN.test(connectorId) && typeof allowed === "boolean") sends[connectorId] = allowed;
+    }
+    if (Object.keys(sends).length > 0) profile.connectorSends = sends;
+  }
+  if (Array.isArray(value.shortcuts)) {
+    const shortcuts: NovaShortcut[] = [];
+    const names = new Set<string>();
+    for (const raw of value.shortcuts) {
+      const shortcut = sanitizeShortcut(raw);
+      if (!shortcut || names.has(shortcut.name.toLowerCase()) || shortcuts.some((entry) => entry.id === shortcut.id)) continue;
+      names.add(shortcut.name.toLowerCase());
+      shortcuts.push(shortcut);
+    }
+    if (shortcuts.length > 0) profile.shortcuts = shortcuts.slice(0, NOVA_SHORTCUTS_MAX);
+  }
+  if (Array.isArray(value.revisions)) {
+    const revisions = pruneRevisions(value.revisions.map(sanitizeRevision).filter((entry): entry is NovaInstructionRevision => entry !== undefined));
+    if (revisions.length > 0) profile.revisions = revisions;
+  }
+  if (value.memoryPaused === true) profile.memoryPaused = true;
+  if (value.migratedFromLocalStorage === true) profile.migratedFromLocalStorage = true;
+  return Object.keys(profile).length > 0 ? profile : undefined;
+}
+
+/** The voice modes the IT policy allows, in the order the app offers them. */
+export function allowedNovaVoiceModes(policy: ManagedPolicyStatus | undefined): NovaVoiceMode[] {
+  return NOVA_VOICE_MODES.filter((mode) => managedNovaVoiceModeAllowed(policy, mode));
+}
+
+interface CapabilityState {
+  value: boolean;
+  locked: boolean;
+}
+
+function capabilityState(profile: NovaProfile | undefined, policy: ManagedPolicyStatus | undefined, name: NovaCapabilityName): CapabilityState {
+  const forced = policy?.values.novaCapabilities?.[name];
+  const locked = isManagedSettingLocked(policy, "novaCapabilities");
+  if (forced === false) return { value: false, locked: true };
+  if (forced === true && locked) return { value: true, locked: true };
+  return { value: profile?.capabilities?.[name] ?? forced ?? true, locked: false };
+}
+
+/** Whether Nova may use this ability now, with the IT policy applied. */
+export function novaCapabilityAllowed(profile: NovaProfile | undefined, policy: ManagedPolicyStatus | undefined, name: NovaCapabilityName): boolean {
+  return capabilityState(profile, policy, name).value;
+}
+
+function connectorSendState(profile: NovaProfile | undefined, policy: ManagedPolicyStatus | undefined, connectorId: string): CapabilityState {
+  const forced = policy?.values.novaCapabilities?.connectorSends;
+  const locked = isManagedSettingLocked(policy, "novaCapabilities");
+  if (forced === false) return { value: false, locked: true };
+  if (Array.isArray(forced) && !forced.includes(connectorId)) return { value: false, locked: true };
+  if (forced === true && locked) return { value: true, locked: true };
+  return { value: profile?.connectorSends?.[connectorId] ?? true, locked: false };
+}
+
+/** Whether Nova may prepare a message through this connector, with the IT policy applied. */
+export function novaConnectorSendAllowed(profile: NovaProfile | undefined, policy: ManagedPolicyStatus | undefined, connectorId: string): boolean {
+  return connectorSendState(profile, policy, connectorId).value;
+}
+
+/** Said when a turned-off ability is asked for. */
+export function novaCapabilityOffMessage(policy: ManagedPolicyStatus | undefined, name: NovaCapabilityName | "connectorSends", connectorName?: string): string {
+  const byPolicy =
+    name === "connectorSends"
+      ? policy?.values.novaCapabilities?.connectorSends !== undefined && policy.values.novaCapabilities.connectorSends !== true
+      : policy?.values.novaCapabilities?.[name] === false;
+  const what = name === "connectorSends" && connectorName ? `Sending through ${connectorName}` : CAPABILITY_LABELS[name].replace(/^./, (first) => first.toUpperCase());
+  return byPolicy
+    ? `${what} is turned off for Nova by your IT department. Nothing was sent or started.`
+    : `${what} is turned off in Settings, Nova. Nothing was sent or started.`;
+}
+
+function instructionsState(profile: NovaProfile | undefined, policy: ManagedPolicyStatus | undefined): Pick<EffectiveNovaProfile, "instructions" | "instructionsSource"> & { locked: boolean } {
+  const policyText = policy?.values.novaInstructions;
+  const locked = isManagedSettingLocked(policy, "novaInstructions");
+  if (policyText !== undefined && locked) return { instructions: policyText, instructionsSource: "policy", locked };
+  if (profile?.instructions !== undefined) {
+    return { instructions: profile.instructions, instructionsSource: profile.instructions ? "user" : "none", locked };
+  }
+  if (policyText !== undefined) return { instructions: policyText, instructionsSource: "policy", locked };
+  return { instructions: "", instructionsSource: "none", locked };
+}
+
+/** The profile with defaults and the IT policy applied, for the active organization. */
+export function effectiveNovaProfile(
+  profile: NovaProfile | undefined,
+  policy: ManagedPolicyStatus | undefined,
+  organizationId?: string,
+): EffectiveNovaProfile {
+  const allowedVoiceModes = allowedNovaVoiceModes(policy);
+  const chosen = profile?.voiceMode ?? "openai";
+  const voiceMode = allowedVoiceModes.includes(chosen) ? chosen : allowedVoiceModes[0];
+  const instructions = instructionsState(profile, policy);
+  const capabilities = {} as Record<NovaCapabilityName, boolean>;
+  const lockedCapabilities = {} as Record<NovaCapabilityName, boolean>;
+  for (const name of NOVA_CAPABILITY_NAMES) {
+    const state = capabilityState(profile, policy, name);
+    capabilities[name] = state.value;
+    lockedCapabilities[name] = state.locked;
+  }
+  const sendsPolicy = policy?.values.novaCapabilities?.connectorSends;
+  const memoryOff = managedNovaMemoryOff(policy);
+  return {
+    ...(voiceMode ? { voiceMode } : {}),
+    allowedVoiceModes,
+    greetingName: profile?.greetingName ?? "",
+    instructions: instructions.instructions,
+    instructionsSource: instructions.instructionsSource,
+    ...(organizationId ? { organizationId } : {}),
+    addendum: organizationId ? (profile?.addenda?.[organizationId] ?? "") : "",
+    capabilities,
+    connectorSends: { ...(profile?.connectorSends ?? {}) },
+    ...(sendsPolicy !== undefined ? { connectorSendsPolicy: Array.isArray(sendsPolicy) ? [...sendsPolicy] : sendsPolicy } : {}),
+    memoryEnabled: !memoryOff && profile?.memoryPaused !== true,
+    memoryPaused: profile?.memoryPaused === true,
+    shortcuts: [...(profile?.shortcuts ?? [])],
+    locked: {
+      voiceMode: policy?.values.novaVoiceModes !== undefined && allowedVoiceModes.length <= 1,
+      instructions: instructions.locked && policy?.values.novaInstructions !== undefined,
+      capabilities: lockedCapabilities,
+      connectorSends: sendsPolicy === false || (sendsPolicy === true && isManagedSettingLocked(policy, "novaCapabilities")),
+      memory: memoryOff,
+    },
+  };
+}
+
+/** What Settings shows: the effective profile and the revisions of the texts it shows, newest first. */
+export function novaProfileView(profile: NovaProfile | undefined, policy: ManagedPolicyStatus | undefined, organizationId?: string): NovaProfileView {
+  return {
+    effective: effectiveNovaProfile(profile, policy, organizationId),
+    revisions: (profile?.revisions ?? [])
+      .filter((entry) => entry.scope === "user" || (organizationId !== undefined && entry.organizationId === organizationId))
+      .slice()
+      .reverse(),
+    migratedFromLocalStorage: profile?.migratedFromLocalStorage === true,
+  };
+}
+
+/**
+ * Undefined when a shortcut prompt only asks for information; otherwise
+ * why it cannot be saved. Shortcuts run on Nova's read-only research path,
+ * and this check keeps a saved prompt from reading as a command.
+ */
+export function novaShortcutPromptIssue(prompt: string): string | undefined {
+  const command = novaCommand(prompt);
+  if (command && command.kind !== "research" && command.kind !== "capabilities") return NOVA_SHORTCUT_NOT_READ_ONLY;
+  if (/\b(?:remember|remind|forget|schedule|again in|every (?:day|hour|week|morning|evening|night|monday|tuesday|wednesday|thursday|friday)|tomorrow|tonight|later today)\b/i.test(prompt)) {
+    return NOVA_SHORTCUT_NOT_READ_ONLY;
+  }
+  if (/\b(?:send|email|e-mail|forward|deliver|publish|dispatch|notify)\b/i.test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
+  // Write verbs as the request itself, or chained onto a question. As nouns
+  // ("update rings", "the lock screen") they stay readable.
+  const writeVerb = "(?:run|start|launch|execute|trigger|delete|remove|retire|wipe|disable|enable|reset|reboot|restart|sync|lock|unlock|unassign|assign|create|update|change|set|rename|block|unblock|revoke|approve|install|uninstall|deploy|move|add)";
+  if (new RegExp(`^\\s*(?:(?:can|could|would|will) you\\s+|please\\s+)*${writeVerb}\\b`, "i").test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
+  if (new RegExp(`\\b(?:and|then|also)\\s+(?:please\\s+)?${writeVerb}\\b`, "i").test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
+  if (/\b(?:delete|retire|wipe|revoke)\b/i.test(prompt)) return NOVA_SHORTCUT_NOT_READ_ONLY;
+  return undefined;
+}
+
+function addRevision(
+  profile: NovaProfile,
+  revision: Omit<NovaInstructionRevision, "id" | "at">,
+  context: NovaProfileChangeContext,
+): void {
+  profile.revisions = pruneRevisions([...(profile.revisions ?? []), { id: context.newId(), at: context.now, ...revision }]);
+}
+
+function rejectUnknownKeys(value: Record<string, unknown>, allowed: readonly string[], what: string): void {
+  const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
+  if (unknown.length > 0) throw new NovaProfileError(`${what} has ${unknown.map((key) => `"${key}"`).join(", ")}, which Nova settings do not read.`);
+}
+
+const PATCH_KEYS = [
+  "voiceMode",
+  "greetingName",
+  "instructions",
+  "addendum",
+  "capabilities",
+  "connectorSends",
+  "saveShortcut",
+  "deleteShortcut",
+  "memoryPaused",
+] as const;
+
+function setInstructions(profile: NovaProfile, value: unknown, policy: ManagedPolicyStatus | undefined, context: NovaProfileChangeContext): void {
+  if (typeof value !== "string") throw new NovaProfileError("Standing instructions must be text.");
+  if (isManagedSettingLocked(policy, "novaInstructions") && policy?.values.novaInstructions !== undefined) {
+    throw new ManagedPolicyError(novaSettingLockedMessage("the standing instructions"));
+  }
+  const text = value.trim();
+  if (text.length > NOVA_INSTRUCTIONS_MAX_LENGTH) {
+    throw new NovaProfileError(`Standing instructions can be at most ${NOVA_INSTRUCTIONS_MAX_LENGTH} characters. These have ${text.length}.`);
+  }
+  if (profile.instructions === text) return;
+  profile.instructions = text;
+  addRevision(profile, { scope: "user", text, via: context.via ?? "settings" }, context);
+}
+
+function setAddendum(profile: NovaProfile, value: unknown, context: NovaProfileChangeContext): void {
+  if (!isRecord(value) || typeof value.organizationId !== "string" || typeof value.text !== "string") {
+    throw new NovaProfileError("An organization addendum needs the organization and its text.");
+  }
+  rejectUnknownKeys(value, ["organizationId", "text"], "The addendum");
+  const { organizationId } = value;
+  if (!context.organizationIds.includes(organizationId)) throw new NovaProfileError("This organization is no longer on this device. Nothing was saved.");
+  const text = value.text.trim();
+  if (text.length > NOVA_ADDENDUM_MAX_LENGTH) {
+    throw new NovaProfileError(`An organization addendum can be at most ${NOVA_ADDENDUM_MAX_LENGTH} characters. This one has ${text.length}.`);
+  }
+  if ((profile.addenda?.[organizationId] ?? "") === text) return;
+  const addenda = { ...(profile.addenda ?? {}) };
+  if (text) addenda[organizationId] = text;
+  else delete addenda[organizationId];
+  if (Object.keys(addenda).length > 0) profile.addenda = addenda;
+  else delete profile.addenda;
+  addRevision(profile, { scope: "organization", organizationId, text, via: context.via ?? "settings" }, context);
+}
+
+function setCapabilities(profile: NovaProfile, value: unknown, policy: ManagedPolicyStatus | undefined): void {
+  if (!isRecord(value)) throw new NovaProfileError("Nova abilities must be a list of on and off switches.");
+  rejectUnknownKeys(value, NOVA_CAPABILITY_NAMES, "The abilities");
+  const capabilities = { ...(profile.capabilities ?? {}) };
+  for (const name of NOVA_CAPABILITY_NAMES) {
+    const wanted = value[name];
+    if (wanted === undefined) continue;
+    if (typeof wanted !== "boolean") throw new NovaProfileError(`The switch for ${CAPABILITY_LABELS[name]} must be on or off.`);
+    const state = capabilityState(profile, policy, name);
+    if (state.locked && state.value !== wanted) throw new ManagedPolicyError(novaSettingLockedMessage(CAPABILITY_LABELS[name]));
+    if (!state.locked) capabilities[name] = wanted;
+  }
+  if (Object.keys(capabilities).length > 0) profile.capabilities = capabilities;
+  else delete profile.capabilities;
+}
+
+function setConnectorSends(profile: NovaProfile, value: unknown, policy: ManagedPolicyStatus | undefined): void {
+  if (!isRecord(value)) throw new NovaProfileError("Connector sends must be on or off per connector.");
+  const sends = { ...(profile.connectorSends ?? {}) };
+  for (const [connectorId, wanted] of Object.entries(value)) {
+    if (!CONNECTOR_ID_PATTERN.test(connectorId)) throw new NovaProfileError(`"${connectorId.slice(0, 64)}" is not a connector.`);
+    if (typeof wanted !== "boolean") throw new NovaProfileError("Connector sends must be on or off per connector.");
+    const state = connectorSendState(profile, policy, connectorId);
+    if (state.locked && state.value !== wanted) throw new ManagedPolicyError(novaSettingLockedMessage(CAPABILITY_LABELS.connectorSends));
+    if (!state.locked) sends[connectorId] = wanted;
+  }
+  if (Object.keys(sends).length > 0) profile.connectorSends = sends;
+  else delete profile.connectorSends;
+}
+
+function saveShortcut(profile: NovaProfile, value: unknown, context: NovaProfileChangeContext): void {
+  if (!isRecord(value) || typeof value.name !== "string" || typeof value.prompt !== "string") {
+    throw new NovaProfileError("A shortcut needs a name and a question.");
+  }
+  rejectUnknownKeys(value, ["id", "name", "prompt"], "The shortcut");
+  const name = value.name.trim().replace(/\s+/g, " ");
+  const prompt = value.prompt.trim();
+  if (!name) throw new NovaProfileError("Give the shortcut a name.");
+  if (name.length > NOVA_SHORTCUT_NAME_MAX_LENGTH) throw new NovaProfileError(`A shortcut name can be at most ${NOVA_SHORTCUT_NAME_MAX_LENGTH} characters.`);
+  if (!prompt) throw new NovaProfileError("Write the question the shortcut asks.");
+  if (prompt.length > NOVA_SHORTCUT_PROMPT_MAX_LENGTH) throw new NovaProfileError(`A shortcut question can be at most ${NOVA_SHORTCUT_PROMPT_MAX_LENGTH} characters.`);
+  const issue = novaShortcutPromptIssue(prompt);
+  if (issue) throw new NovaProfileError(issue);
+  const shortcuts = [...(profile.shortcuts ?? [])];
+  const id = value.id;
+  if (id !== undefined && (typeof id !== "string" || !shortcuts.some((entry) => entry.id === id))) {
+    throw new NovaProfileError("This shortcut no longer exists. Nothing was saved.");
+  }
+  if (shortcuts.some((entry) => entry.id !== id && entry.name.toLowerCase() === name.toLowerCase())) {
+    throw new NovaProfileError(`A shortcut named ${name} already exists. Choose another name.`);
+  }
+  if (id === undefined) {
+    if (shortcuts.length >= NOVA_SHORTCUTS_MAX) throw new NovaProfileError(`Nova keeps ${NOVA_SHORTCUTS_MAX} shortcuts. Delete one before adding another.`);
+    shortcuts.push({ id: context.newId(), name, prompt, createdAt: context.now });
+  } else {
+    const index = shortcuts.findIndex((entry) => entry.id === id);
+    const current = shortcuts[index]!;
+    if (current.name === name && current.prompt === prompt) return;
+    shortcuts[index] = { ...current, name, prompt, updatedAt: context.now };
+  }
+  profile.shortcuts = shortcuts;
+}
+
+function deleteShortcut(profile: NovaProfile, value: unknown): void {
+  if (typeof value !== "string" || !(profile.shortcuts ?? []).some((entry) => entry.id === value)) {
+    throw new NovaProfileError("This shortcut no longer exists.");
+  }
+  const shortcuts = (profile.shortcuts ?? []).filter((entry) => entry.id !== value);
+  if (shortcuts.length > 0) profile.shortcuts = shortcuts;
+  else delete profile.shortcuts;
+}
+
+/**
+ * Applies one change from Settings or from a confirmed Nova proposal.
+ * Throws `ManagedPolicyError` for a value the IT policy sets, and
+ * `NovaProfileError` for anything else that cannot be saved. Nothing is
+ * changed when either is thrown.
+ */
+export function applyNovaProfilePatch(
+  current: NovaProfile | undefined,
+  patch: unknown,
+  policy: ManagedPolicyStatus | undefined,
+  context: NovaProfileChangeContext,
+): NovaProfile {
+  if (!isRecord(patch)) throw new NovaProfileError("Nova settings received no change.");
+  rejectUnknownKeys(patch, PATCH_KEYS, "The change");
+  const profile: NovaProfile = structuredClone(current ?? {});
+  const change = patch as NovaProfilePatch;
+  if (change.voiceMode !== undefined) {
+    if (!isVoiceMode(change.voiceMode)) throw new NovaProfileError("Choose Local voice or OpenAI voice.");
+    if (!managedNovaVoiceModeAllowed(policy, change.voiceMode)) {
+      throw new ManagedPolicyError(novaVoiceModeNotAllowedMessage(change.voiceMode, allowedNovaVoiceModes(policy)));
+    }
+    profile.voiceMode = change.voiceMode;
+  }
+  if (change.greetingName !== undefined) {
+    if (typeof change.greetingName !== "string") throw new NovaProfileError("The greeting name must be text.");
+    const name = change.greetingName.trim();
+    if (name.length > NOVA_GREETING_NAME_MAX_LENGTH) throw new NovaProfileError(`The greeting name can be at most ${NOVA_GREETING_NAME_MAX_LENGTH} characters.`);
+    if (name) profile.greetingName = name;
+    else delete profile.greetingName;
+  }
+  if (change.instructions !== undefined) setInstructions(profile, change.instructions, policy, context);
+  if (change.addendum !== undefined) setAddendum(profile, change.addendum, context);
+  if (change.capabilities !== undefined) setCapabilities(profile, change.capabilities, policy);
+  if (change.connectorSends !== undefined) setConnectorSends(profile, change.connectorSends, policy);
+  if (change.saveShortcut !== undefined) saveShortcut(profile, change.saveShortcut, context);
+  if (change.deleteShortcut !== undefined) deleteShortcut(profile, change.deleteShortcut);
+  if (change.memoryPaused !== undefined) {
+    if (typeof change.memoryPaused !== "boolean") throw new NovaProfileError("Pausing notes must be on or off.");
+    if (change.memoryPaused) profile.memoryPaused = true;
+    else delete profile.memoryPaused;
+  }
+  return profile;
+}
+
+/** Restores a saved version of the instructions or of an addendum; the restore is a new version. */
+export function revertNovaInstructions(
+  current: NovaProfile | undefined,
+  revisionId: unknown,
+  policy: ManagedPolicyStatus | undefined,
+  context: NovaProfileChangeContext,
+): NovaProfile {
+  const revision = typeof revisionId === "string" ? current?.revisions?.find((entry) => entry.id === revisionId) : undefined;
+  if (!revision) throw new NovaProfileError("This version is no longer kept. Nothing was changed.");
+  const now = revision.scope === "user" ? (current?.instructions ?? "") : (current?.addenda?.[revision.organizationId!] ?? "");
+  if (now === revision.text) throw new NovaProfileError("This version is the current one. Nothing was changed.");
+  const revert = { ...context, via: "revert" as const };
+  return revision.scope === "user"
+    ? applyNovaProfilePatch(current, { instructions: revision.text }, policy, revert)
+    : applyNovaProfilePatch(current, { addendum: { organizationId: revision.organizationId!, text: revision.text } }, policy, revert);
+}
+
+/**
+ * Moves the voice mode and greeting name the renderer kept in local
+ * storage, once. A value already set here, or one the IT policy does not
+ * allow, is not taken over.
+ */
+export function migrateNovaProfile(
+  current: NovaProfile | undefined,
+  input: { voiceMode?: unknown; greetingName?: unknown },
+  policy: ManagedPolicyStatus | undefined,
+): NovaProfile {
+  if (current?.migratedFromLocalStorage) return current;
+  const profile: NovaProfile = structuredClone(current ?? {});
+  if (profile.voiceMode === undefined && isVoiceMode(input.voiceMode) && managedNovaVoiceModeAllowed(policy, input.voiceMode)) {
+    profile.voiceMode = input.voiceMode;
+  }
+  const name = typeof input.greetingName === "string" ? input.greetingName.trim() : "";
+  if (profile.greetingName === undefined && name && name.length <= NOVA_GREETING_NAME_MAX_LENGTH) profile.greetingName = name;
+  profile.migratedFromLocalStorage = true;
+  return profile;
+}

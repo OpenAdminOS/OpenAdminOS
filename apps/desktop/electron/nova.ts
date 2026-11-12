@@ -5,7 +5,9 @@ import { novaConnectorSetupIssue, prepareNovaAction, type NovaActionHost, type P
 import { clipVoiceText } from "./intune-chat/voice-context.js";
 import { searchPublicWeb, type WebSearch } from "./intune-chat/web-search.js";
 import { randomUUID } from "node:crypto";
-import { resolveProviderDefaultModel } from "@openadminos/agent-sdk";
+import { managedNovaVoiceModeAllowed, resolveProviderDefaultModel } from "@openadminos/agent-sdk";
+import { ManagedPolicyError, novaVoiceModeNotAllowedMessage } from "./managed-policy.js";
+import { allowedNovaVoiceModes } from "./nova-profile.js";
 import type {
   AppState,
   ConnectorSummary,
@@ -30,6 +32,16 @@ export interface NovaChatOptions {
     model?: string;
     isLocal?: boolean;
   };
+}
+
+/** The OpenAI model of hosted voice sessions. */
+export const NOVA_VOICE_MODEL = "gpt-live-1";
+
+/** The IT policy sets which voice modes Nova may use; refused here, whatever the renderer offers. */
+function requireVoiceModeAllowed(state: AppState, mode: unknown): void {
+  if ((mode === "openai" || mode === "local") && !managedNovaVoiceModeAllowed(state.managedPolicy, mode)) {
+    throw new ManagedPolicyError(novaVoiceModeNotAllowedMessage(mode, allowedNovaVoiceModes(state.managedPolicy)));
+  }
 }
 
 export class NovaService {
@@ -100,6 +112,7 @@ export class NovaService {
       throw new Error(
         "Nova was stopped or this question was replaced. Start a new conversation.",
       );
+    if (input.action === "check" || input.action === "start") requireVoiceModeAllowed(state, input.mode);
     if (input.action === "check") {
       this.requireReasoningProvider(state, input.mode);
       if (input.connectivity !== false || input.mode === "local")
@@ -167,6 +180,19 @@ export class NovaService {
           typeof input.name === "string" ? input.name.trim().slice(0, 40) : "";
         const connectors = await this.actions?.connectors().catch(() => undefined);
         session.controller.signal.throwIfAborted();
+        // The consent is in the audit log before audio or context is sent.
+        try {
+          this.actions?.recordVoiceConsent?.({
+            tenantId: session.tenantId,
+            sessionId: session.id,
+            acknowledgedAt: new Date().toISOString(),
+            voiceModel: NOVA_VOICE_MODEL,
+            reasoningProviderId: session.providerId,
+            ...(session.model ? { reasoningModel: session.model } : {}),
+          });
+        } catch (error) {
+          console.warn("[audit] the Nova voice consent could not be recorded", error);
+        }
         const response = await this.request(
           "https://api.openai.com/v1/live/sessions",
           {
@@ -182,7 +208,7 @@ export class NovaService {
             ]),
             body: JSON.stringify({
               session: {
-                model: "gpt-live-1",
+                model: NOVA_VOICE_MODEL,
                 delegation: { type: "client" },
                 instructions: buildNovaInstructions(state, name, true, connectors),
               },

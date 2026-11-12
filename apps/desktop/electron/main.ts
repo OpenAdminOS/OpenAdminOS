@@ -5709,7 +5709,7 @@ function registerIpcHandlers() {
     () => store.getAppState(),
     (input, options) => store.streamIntuneChatMessage(input, event => options.onEvent?.(event), { ...options, voice: true }),
     fetch,
-    { classifyCommand: (text, context, options) => store.classifyNovaCommand(text, context, options), connectors: () => store.listConnectors(), send: input => store.sendNovaConnector(input), startRun: (slug, options) => store.startRun(slug, options, { activeOrganizationOnly: true }), activeTenantId: () => store.activeTenantId(), tenantLease: (tenantId, work) => store.withTenantLease(tenantId, work) },
+    { classifyCommand: (text, context, options) => store.classifyNovaCommand(text, context, options), connectors: () => store.listConnectors(), send: input => store.sendNovaConnector(input), startRun: (slug, options) => store.startRun(slug, options, { activeOrganizationOnly: true }), activeTenantId: () => store.activeTenantId(), tenantLease: (tenantId, work) => store.withTenantLease(tenantId, work), profile: () => store.novaProfile(), recordVoiceConsent: input => store.recordNovaVoiceConsent(input) },
   );
   ipcMain.handle("openadminos:nova", handleTrusted((event, input: import("@openadminos/agent-sdk").NovaRequest, streamId?: unknown) => {
     const safeStreamId = streamId === undefined ? undefined : requireBoundedString(streamId, "Nova streamId", 128);
@@ -5717,6 +5717,7 @@ function registerIpcHandlers() {
       if (safeStreamId && !event.sender.isDestroyed()) event.sender.send("openadminos:nova-activity", { streamId: safeStreamId, activity });
     });
   }));
+  ipcMain.handle("openadminos:nova-profile", handleTrusted((_event, request: unknown) => store.handleNovaProfile(request)));
   ipcMain.handle("openadminos:start-graph-cache-preload", handleTrusted((_event, options?: unknown) => store.startGraphCachePreload(validateRefreshGraphCacheOptions(options))));
   ipcMain.handle("openadminos:cancel-graph-cache-preload", handleTrusted((_event, tenantId: unknown) => store.cancelGraphCachePreload(requireBoundedString(tenantId, "tenantId", 256))));
   ipcMain.handle(

@@ -1323,6 +1323,8 @@ export interface AppState {
   chatToolUse?: ChatToolUseStatus;
   /** The IT policy file in force, when a policy file exists on this device. */
   managedPolicy?: ManagedPolicyStatus;
+  /** Nova's settings with defaults and the IT policy applied. */
+  novaProfile?: EffectiveNovaProfile;
   /** Splashtop connections of the organizations on this device. Never holds a token. */
   splashtopConnections?: SplashtopConnectionSummary[];
 }
@@ -2229,6 +2231,100 @@ export interface NovaResponse {
   audio?: number[];
   conversationId?: string;
 }
+
+export type NovaVoiceMode = "local" | "openai";
+/** Nova abilities the admin can turn off. Connector sends are set per connector. */
+export type NovaCapabilityName = "webSearch" | "startAgents" | "navigation";
+export type NovaProfileChangeVia = "settings" | "nova-proposal" | "revert" | "migration";
+
+/** A named read-only question Nova runs on request. */
+export interface NovaShortcut {
+  id: string;
+  name: string;
+  prompt: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+/** One saved version of the standing instructions or of an organization's addendum. */
+export interface NovaInstructionRevision {
+  id: string;
+  at: string;
+  scope: "user" | "organization";
+  organizationId?: string;
+  text: string;
+  via: NovaProfileChangeVia;
+}
+
+/** Nova's settings on this device, kept in main-process state. Absent fields use the defaults. */
+export interface NovaProfile {
+  voiceMode?: NovaVoiceMode;
+  greetingName?: string;
+  /** Standing instructions, reference data for Nova that cannot override its fixed rules. */
+  instructions?: string;
+  /** Addendum per organization id. */
+  addenda?: Record<string, string>;
+  capabilities?: Partial<Record<NovaCapabilityName, boolean>>;
+  /** The admin's choice per connector id; a connector not listed may send. */
+  connectorSends?: Record<string, boolean>;
+  shortcuts?: NovaShortcut[];
+  revisions?: NovaInstructionRevision[];
+  memoryPaused?: boolean;
+  /** The voice mode and greeting name were moved from the renderer's local storage. */
+  migratedFromLocalStorage?: boolean;
+}
+
+/** The profile with defaults and the IT policy applied, as Nova and Settings use it. */
+export interface EffectiveNovaProfile {
+  /** Undefined when the IT policy allows no voice mode. */
+  voiceMode?: NovaVoiceMode;
+  allowedVoiceModes: NovaVoiceMode[];
+  greetingName: string;
+  instructions: string;
+  instructionsSource: "user" | "policy" | "none";
+  /** The active organization, whose addendum is shown. */
+  organizationId?: string;
+  addendum: string;
+  capabilities: Record<NovaCapabilityName, boolean>;
+  connectorSends: Record<string, boolean>;
+  /** What the IT policy sets for connector sends, when it sets anything. */
+  connectorSendsPolicy?: boolean | string[];
+  memoryEnabled: boolean;
+  memoryPaused: boolean;
+  shortcuts: NovaShortcut[];
+  locked: {
+    voiceMode: boolean;
+    instructions: boolean;
+    capabilities: Record<NovaCapabilityName, boolean>;
+    connectorSends: boolean;
+    memory: boolean;
+  };
+}
+
+export interface NovaProfileView {
+  effective: EffectiveNovaProfile;
+  /** Newest first: the user's instructions and the active organization's addendum. */
+  revisions: NovaInstructionRevision[];
+  migratedFromLocalStorage: boolean;
+}
+
+export interface NovaProfilePatch {
+  voiceMode?: NovaVoiceMode;
+  greetingName?: string;
+  instructions?: string;
+  addendum?: { organizationId: string; text: string };
+  capabilities?: Partial<Record<NovaCapabilityName, boolean>>;
+  connectorSends?: Record<string, boolean>;
+  saveShortcut?: { id?: string; name: string; prompt: string };
+  deleteShortcut?: string;
+  memoryPaused?: boolean;
+}
+
+export type NovaProfileRequest =
+  | { action: "get" }
+  | { action: "save"; patch: NovaProfilePatch }
+  | { action: "revert"; revisionId: string }
+  | { action: "migrate"; voiceMode?: NovaVoiceMode; greetingName?: string };
 
 export interface GraphCachePreloadJob {
   tenantId: string;
@@ -3192,6 +3288,7 @@ export interface OpenAdminOSApi {
   listMultiTenantAgentBatches(): Promise<MultiTenantAgentBatch[]>;
   getMultiTenantAgentBatch(id: string): Promise<MultiTenantAgentBatch | undefined>;
   nova(input: NovaRequest, onActivity?: (activity: NovaActivity) => void): Promise<NovaResponse>;
+  novaProfile(request: NovaProfileRequest): Promise<NovaProfileView>;
   startGraphCachePreload(options?: RefreshGraphCacheOptions): Promise<void>;
   cancelGraphCachePreload(tenantId: string): Promise<void>;
   refreshGraphCache(options?: RefreshGraphCacheOptions): Promise<GraphCacheRefreshResult>;

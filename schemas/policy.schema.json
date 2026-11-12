@@ -64,6 +64,39 @@
       "type": "boolean",
       "description": "Skip the first-run model scan when the policy's provider is ready, and open Chat with it."
     },
+    "novaVoiceModes": {
+      "type": "array",
+      "description": "The voice modes Nova may use. Without this key both are allowed. An empty list turns Nova voice off.",
+      "items": { "enum": ["local", "openai"] },
+      "uniqueItems": true
+    },
+    "novaInstructions": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000,
+      "description": "Standing instructions for Nova. Locked, they replace the admin's own instructions; otherwise they are the default until the admin writes their own. Nova's fixed safety rules always apply after them."
+    },
+    "novaCapabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What Nova may do. false is enforced whether or not the key is locked; true is a default the admin can change unless the key is locked.",
+      "properties": {
+        "webSearch": { "type": "boolean", "description": "Public web search in OpenAI voice sessions." },
+        "connectorSends": {
+          "description": "Preparing messages through connectors, always confirmed with a click. A list names the only connectors Nova may send through.",
+          "oneOf": [
+            { "type": "boolean" },
+            { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" }, "uniqueItems": true }
+          ]
+        },
+        "startAgents": { "type": "boolean", "description": "Preparing agent runs, always confirmed with a click." },
+        "navigation": { "type": "boolean", "description": "Opening app pages on request." }
+      }
+    },
+    "novaMemory": {
+      "enum": ["off"],
+      "description": "\"off\" turns Nova's notes off: none are added, and saved notes are kept but never reach a prompt."
+    },
     "lock": {
       "type": "array",
       "description": "Setting keys the admin cannot change in the app. Without this key, every setting the file sets is locked. An empty list locks nothing.",
@@ -82,7 +115,7 @@
       "enum": ["microsoft-learn", "kql-search", "intuneautomation", "release-communications", "windowsforum", "splashtop-kb", "splashtop-packr-kb", "endoflife-ai"]
     },
     "settingKey": {
-      "enum": ["allowedProviders", "defaultProvider", "defaultModel", "allowedPublicReferences", "appRegistration", "skipFirstRunScan"]
+      "enum": ["allowedProviders", "defaultProvider", "defaultModel", "allowedPublicReferences", "appRegistration", "skipFirstRunScan", "novaVoiceModes", "novaInstructions", "novaCapabilities", "novaMemory"]
     }
   }
 }

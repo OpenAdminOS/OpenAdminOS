@@ -14,6 +14,14 @@ import {
   type ManagedPolicyRecord,
 } from "./configuration-audit.js";
 import {
+  applyNovaProfilePatch,
+  effectiveNovaProfile,
+  migrateNovaProfile,
+  novaProfileView,
+  revertNovaInstructions,
+  sanitizeNovaProfile,
+} from "./nova-profile.js";
+import {
   ManagedPolicyError,
   modelLockedMessage,
   providerLockedMessage,
@@ -234,6 +242,9 @@ import {
   managedProviderAllowed,
   managedPublicReferenceAllowed,
   type ManagedPolicyStatus,
+  type EffectiveNovaProfile,
+  type NovaProfile,
+  type NovaProfileView,
   type McpServerSummary,
   type ProviderId,
   type ModelScanOutcome,
@@ -523,6 +534,8 @@ interface PersistedState {
   configurationAudit?: ConfigurationAuditEvent[];
   /** The IT policy file as last applied, so its changes are recorded once (see managed-policy.ts). */
   managedPolicy?: ManagedPolicyRecord;
+  /** Nova's settings (see nova-profile.ts). Changes are configuration audit events. */
+  novaProfile?: NovaProfile;
   /**
    * Disconnects whose cleanup has not finished (see tenant-removal.ts). The
    * tenant is gone from `tenants` and refused everywhere; cleanup resumes
@@ -3622,6 +3635,7 @@ export class AppStateStore {
       const activeOrganization = organizationForTenant(persisted.organizations ?? [], persisted.activeTenantId);
       if (activeOrganization) state.activeOrganizationId = activeOrganization.id;
     }
+    state.novaProfile = effectiveNovaProfile(persisted.novaProfile, this.managedPolicy, state.activeOrganizationId);
     if (persisted.organizationMigration) {
       state.organizationMigration = persisted.organizationMigration;
     }
@@ -6938,6 +6952,91 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     return true;
   }
 
+  /**
+   * Nova's settings: read, change, restore a version, or move the values
+   * the renderer kept in local storage. The IT policy is applied here; a
+   * refused change leaves the profile as it was.
+   */
+  async handleNovaProfile(request: unknown): Promise<NovaProfileView> {
+    if (!isStateRecord(request) || typeof request.action !== "string") throw new Error("Nova settings received no request.");
+    const action = request.action;
+    if (action === "get") {
+      const persisted = await this.read();
+      return novaProfileView(persisted.novaProfile, this.managedPolicy, this.activeOrganizationIdOf(persisted));
+    }
+    if (action !== "save" && action !== "revert" && action !== "migrate") throw new Error("Nova settings do not know this request.");
+    const view = await this.serialize(async () => {
+      const persisted = await this.read();
+      const context = {
+        now: this.clock().toISOString(),
+        newId: () => randomUUID(),
+        organizationIds: (persisted.organizations ?? []).map((organization) => organization.id),
+      };
+      const next =
+        action === "save"
+          ? applyNovaProfilePatch(persisted.novaProfile, request.patch, this.managedPolicy, context)
+          : action === "revert"
+            ? revertNovaInstructions(persisted.novaProfile, request.revisionId, this.managedPolicy, context)
+            : migrateNovaProfile(persisted.novaProfile, { voiceMode: request.voiceMode, greetingName: request.greetingName }, this.managedPolicy);
+      const novaProfile = sanitizeNovaProfile(next);
+      if (JSON.stringify(novaProfile) !== JSON.stringify(persisted.novaProfile)) {
+        const updated: PersistedState = { ...persisted };
+        if (novaProfile) updated.novaProfile = novaProfile;
+        else delete updated.novaProfile;
+        await this.write(updated);
+      }
+      return novaProfileView(novaProfile, this.managedPolicy, this.activeOrganizationIdOf(persisted));
+    });
+    this.emitStateChanged("nova-profile-changed");
+    return view;
+  }
+
+  /** Nova's settings now, with the IT policy applied, for the active organization. */
+  async novaProfile(): Promise<{ profile: NovaProfile | undefined; effective: EffectiveNovaProfile; policy: ManagedPolicyStatus | undefined }> {
+    const persisted = await this.read();
+    return {
+      profile: persisted.novaProfile,
+      effective: effectiveNovaProfile(persisted.novaProfile, this.managedPolicy, this.activeOrganizationIdOf(persisted)),
+      policy: this.managedPolicy,
+    };
+  }
+
+  /**
+   * The consent to send audio and shared context to OpenAI for one Nova
+   * voice session, recorded before the session is requested. Kept like
+   * every hosted-provider consent: in the Chat database and the audit log,
+   * and with the pending audit events when the audit log cannot take it.
+   */
+  recordNovaVoiceConsent(input: { tenantId: string; sessionId: string; acknowledgedAt: string; voiceModel: string; reasoningProviderId: ProviderId; reasoningModel?: string }): void {
+    const consent: HostedProviderConsentAuditRecord = {
+      id: `event_${randomUUID()}`,
+      tenantId: input.tenantId,
+      source: "nova-voice",
+      payload: {
+        tenantIds: [input.tenantId],
+        providerId: "openai-voice",
+        providerName: "OpenAI",
+        model: input.voiceModel,
+        sessionId: input.sessionId,
+        reasoningProviderId: input.reasoningProviderId,
+        ...(input.reasoningModel ? { reasoningModel: input.reasoningModel } : {}),
+        acknowledgedAt: input.acknowledgedAt,
+        remember: false,
+      },
+      createdAt: input.acknowledgedAt,
+    };
+    try {
+      this.intelligenceStore?.recordHostedProviderConsentAuditEvent(consent);
+    } catch (error) {
+      console.warn("[audit] the Chat database could not keep a Nova voice consent", error);
+    }
+    this.recordHostedProviderConsent(consent);
+  }
+
+  private activeOrganizationIdOf(persisted: PersistedState): string | undefined {
+    return organizationForTenant(persisted.organizations ?? [], persisted.activeTenantId)?.id;
+  }
+
   async dismissManagedPolicyNotice(): Promise<AppState> {
     await this.serialize(async () => {
       const persisted = await this.read();
@@ -8713,6 +8812,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       if (configurationAudit) state.configurationAudit = configurationAudit;
       const managedPolicy = sanitizeManagedPolicyRecord((parsed as { managedPolicy?: unknown }).managedPolicy);
       if (managedPolicy) state.managedPolicy = managedPolicy;
+      const novaProfile = sanitizeNovaProfile((parsed as { novaProfile?: unknown }).novaProfile);
+      if (novaProfile) state.novaProfile = novaProfile;
       const tenantRemovals = sanitizeTenantRemovals((parsed as { tenantRemovals?: unknown }).tenantRemovals);
       if (tenantRemovals) {
         state.tenantRemovals = tenantRemovals;
