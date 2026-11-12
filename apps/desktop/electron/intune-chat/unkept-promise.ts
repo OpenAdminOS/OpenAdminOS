@@ -52,10 +52,23 @@ function isFiller(text: string): boolean {
 }
 
 /**
- * True only for a progress message: every sentence either announces work
+ * Clauses of a sentence: a result can share a sentence with a promise,
+ * before or after it ("I'll check the apps next, but the devices are
+ * compliant.", "Let me verify: all Macs are compliant.").
+ */
+function clauses(sentence: string): string[] {
+  return sentence
+    .split(/\s*[,;:—–]\s*|\s+(?:but|while|although|though|yet|however|whereas)\s+/i)
+    .map((clause) => clause.trim())
+    .filter(Boolean);
+}
+
+/**
+ * True only for a progress message: every clause either announces work
  * ("I'll check that now.") or acknowledges the question ("Sure."). Any
- * sentence or clause with a result, an offer, a number or a list makes it
- * a finished answer, also when it mentions a later step.
+ * clause with a result, an offer or a list makes it a finished answer,
+ * also when it mentions a later step. Numbers inside the announced work
+ * ("I'll check the Windows 11 devices.") do not make it a result.
  */
 export function looksLikeUnkeptPromise(answer: string): boolean {
   const text = withoutQuotedText(answer).trim();
@@ -64,14 +77,15 @@ export function looksLikeUnkeptPromise(answer: string): boolean {
   let promised = false;
   for (const sentence of sentences(text)) {
     if (isFiller(sentence)) continue;
-    const match = PROMISE.exec(sentence);
-    // A sentence without a promise, with a number, or long enough to report
-    // something is substance, so the answer is finished.
-    if (!match || CONDITIONAL.test(sentence) || /\d/.test(sentence) || sentence.length > 200) return false;
-    // A result clause before the promise in the same sentence ("All devices
-    // are compliant, and I'll check the apps next.") is substance too.
-    if (!isFiller(sentence.slice(0, match.index))) return false;
-    promised = true;
+    // An offer, or a sentence long enough to report something, finishes the answer.
+    if (CONDITIONAL.test(sentence) || sentence.length > 200) return false;
+    for (const clause of clauses(sentence)) {
+      if (isFiller(clause)) continue;
+      const match = PROMISE.exec(clause);
+      // A clause without a promise is substance; so is one with a result before its promise.
+      if (!match || !isFiller(clause.slice(0, match.index))) return false;
+      promised = true;
+    }
   }
   return promised;
 }

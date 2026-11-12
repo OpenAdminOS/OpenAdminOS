@@ -16,6 +16,10 @@ describe("unkept promise", () => {
       "I’ll look into it.",
       "Okay, let me check the compliance policies.",
       "Got it. I'm checking the sign-in logs now.",
+      // Numbers inside the announced work do not make it a result.
+      "I'll check the Windows 11 devices now.",
+      "Let me check the Microsoft 365 sign-in logs.",
+      "I will check the Windows 11 devices that have not synced in 30 days.",
     ]) {
       assert.equal(looksLikeUnkeptPromise(answer), true, answer);
     }
@@ -38,6 +42,11 @@ describe("unkept promise", () => {
       "Yes. Let's verify it in Devices.",
       "Open Devices, then let's check the compliance column.",
       "BitLocker is off on the pilot laptops. Let me check the policy assignment next.",
+      // A result after the promise, in the same sentence.
+      "I'll check the apps next, but the devices are already compliant.",
+      "I'm checking the app installs next; the compliance review is complete.",
+      "Let me verify: all Macs are compliant.",
+      "All devices are compliant. I will check again tomorrow.",
       "",
       "The tenant has no Windows Update rings assigned to the pilot group, so the devices in it receive updates on the default schedule. That matches what the compliance report shows. Let me know which ring you plan to use.",
     ]) {
