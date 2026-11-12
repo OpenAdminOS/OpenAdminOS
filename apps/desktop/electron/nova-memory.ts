@@ -24,6 +24,11 @@ export const NOVA_NOTES_PROMPT_MAX_CHARS = 2000;
 const DAY_MS = 86_400_000;
 
 /** A note request Nova or Settings refuses, with the reason in plain words. */
+/** Proposed notes one voice conversation can leave waiting for review. */
+export const NOVA_PROPOSED_NOTES_PER_SESSION = 5;
+export const NOVA_SESSION_PROPOSALS_FULL =
+  "This conversation has 5 notes waiting for review. Confirm or forget them in Settings, Nova, before Nova suggests another.";
+
 /** Said when a note card is confirmed after the note changed in Settings. */
 export const NOVA_NOTE_CHANGED = "This note changed in Settings. Review it there.";
 
@@ -163,6 +168,12 @@ export class NovaMemory {
     this.expire();
     const count = (this.db.prepare("SELECT COUNT(*) AS count FROM nova_memory_notes WHERE tenant_id = ?").get(input.tenantId) as { count: number }).count;
     if (count >= NOVA_NOTES_PER_ORGANIZATION) throw new NovaMemoryError(NOVA_NOTES_FULL);
+    // Cards replaced without a click leave their proposals for review; one
+    // conversation cannot fill the organization's notes with them.
+    if (input.sessionId) {
+      const waiting = (this.db.prepare("SELECT COUNT(*) AS count FROM nova_memory_notes WHERE session_id = ? AND review_state = 'proposed'").get(input.sessionId) as { count: number }).count;
+      if (waiting >= NOVA_PROPOSED_NOTES_PER_SESSION) throw new NovaMemoryError(NOVA_SESSION_PROPOSALS_FULL);
+    }
     const now = this.clock();
     const note: NovaNote = {
       id: `note_${randomUUID()}`,
@@ -240,6 +251,8 @@ export class NovaMemory {
   discardProposed(id: string): void {
     const note = this.get(id);
     if (!note || note.reviewState !== "proposed") return;
+    // During a Disconnect the purge removes it, with its own event.
+    this.options.assertWritable?.(note.tenantId, "Nova note");
     const changed = this.db.prepare("DELETE FROM nova_memory_notes WHERE id = ? AND review_state = 'proposed'").run(id).changes;
     if (Number(changed) === 1) this.record(note, "forgotten", `nova-memory:${id}:forgotten`);
   }
@@ -250,11 +263,20 @@ export class NovaMemory {
     const rows = this.db
       .prepare("SELECT * FROM nova_memory_notes WHERE review_state = 'proposed' AND expires_at IS NOT NULL AND expires_at <= ?")
       .all(now) as unknown as NoteRow[];
-    if (rows.length === 0) return 0;
+    // Notes of an organization being disconnected are left to its purge, which records them without their text.
+    const expiring = rows.filter((row) => {
+      try {
+        this.options.assertWritable?.(row.tenant_id, "Nova note");
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    if (expiring.length === 0) return 0;
     const remove = this.db.prepare("DELETE FROM nova_memory_notes WHERE id = ?");
-    for (const row of rows) remove.run(row.id);
-    for (const row of rows) this.record(noteOf(row), "expired", `nova-memory:${row.id}:expired`);
-    return rows.length;
+    for (const row of expiring) remove.run(row.id);
+    for (const row of expiring) this.record(noteOf(row), "expired", `nova-memory:${row.id}:expired`);
+    return expiring.length;
   }
 
   /**

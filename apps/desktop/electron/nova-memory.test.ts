@@ -3,6 +3,8 @@ import { describe, it } from "node:test";
 
 import type { AuditLogEventSeed } from "./audit-log.js";
 import {
+  NOVA_PROPOSED_NOTES_PER_SESSION,
+  NOVA_SESSION_PROPOSALS_FULL,
   NOVA_NOTES_FULL,
   NOVA_NOTES_PER_ORGANIZATION,
   NOVA_NOTES_PROMPT_MAX_CHARS,
@@ -13,14 +15,39 @@ import {
 function memory(start = "2026-11-12T10:00:00.000Z") {
   let now = new Date(start);
   const events: AuditLogEventSeed[] = [];
+  const closed = new Set<string>();
   const store = new NovaMemory(openNovaDatabase(":memory:"), {
     audit: (batch) => events.push(...batch),
     clock: () => now,
+    assertWritable: (tenantId) => { if (closed.has(tenantId)) throw new Error(`${tenantId} is being disconnected`); },
   });
-  return { store, events, advance: (ms: number) => { now = new Date(now.getTime() + ms); } };
+  return { store, events, closed, advance: (ms: number) => { now = new Date(now.getTime() + ms); } };
 }
 
 describe("Nova notes", () => {
+  it("leaves a proposal of an organization being disconnected to its purge, not to expiry or a discarded card", () => {
+    const { store, events, closed, advance } = memory();
+    const kept = store.propose({ tenantId: "t1", text: "Berlin uses kiosks.", source: "user-said" });
+    const other = store.propose({ tenantId: "t2", text: "Munich uses kiosks.", source: "user-said" });
+    closed.add("t1");
+    assert.throws(() => store.discardProposed(kept.id), /being disconnected/);
+    advance(31 * 24 * 60 * 60 * 1000);
+    assert.equal(store.expire(), 1);
+    assert.ok(store.get(kept.id), "the purge removes it");
+    assert.equal(store.get(other.id), undefined);
+    assert.equal(events.some((event) => event.type === "nova.memory-note-expired" && JSON.stringify(event).includes(kept.id)), false);
+  });
+
+  it("lets one conversation leave at most 5 proposals waiting, and frees a place when one is reviewed", () => {
+    const { store } = memory();
+    const proposed = Array.from({ length: NOVA_PROPOSED_NOTES_PER_SESSION }, (_, index) => store.propose({ tenantId: "t1", text: `Note ${index}`, source: "nova-proposed", sessionId: "s1" }));
+    assert.throws(() => store.propose({ tenantId: "t1", text: "One more", source: "nova-proposed", sessionId: "s1" }), { message: NOVA_SESSION_PROPOSALS_FULL });
+    // Another conversation, and Settings without a session, are not held back.
+    store.propose({ tenantId: "t1", text: "From another conversation", source: "user-said", sessionId: "s2" });
+    store.confirm(proposed[0]!.id);
+    store.propose({ tenantId: "t1", text: "One more", source: "nova-proposed", sessionId: "s1" });
+  });
+
   it("keeps provenance and review state, and audits the full text", () => {
     const { store, events } = memory();
     const note = store.propose({ tenantId: "t1", organizationId: "o1", text: "  The Berlin office uses   the Kiosk profile. ", source: "user-said", sessionId: "s1", conversationId: "c1", turnId: "u1" });

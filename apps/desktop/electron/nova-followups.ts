@@ -326,9 +326,12 @@ export class NovaFollowUps {
   /**
    * Deletes every follow-up of a disconnected tenant; pending ones are
    * cancelled in the audit log first, with initiator person (the admin's
-   * Disconnect). A running row is deleted too: that is safe only because a
-   * run holds the tenant lease, which Disconnect drains before its cleanup
-   * calls this, so no run is still writing its result here.
+   * Disconnect). A running row is deleted too. Disconnect drains the tenant
+   * lease a run holds, but only up to a bound, so a run can outlive the
+   * drain. What keeps that safe is that the tenant is closed before this
+   * runs, which refuses the run's Graph calls and writes, and that a run's
+   * own result is written with finish(), which updates only a row that is
+   * still there and still running: a row deleted here stays deleted.
    */
   purgeTenant(tenantId: string): number {
     const rows = this.db.prepare("SELECT * FROM nova_followups WHERE tenant_id = ?").all(tenantId) as unknown as FollowUpRow[];

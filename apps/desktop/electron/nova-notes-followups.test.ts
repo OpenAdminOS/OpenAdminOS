@@ -409,6 +409,14 @@ describe("Nova hosted sessions after a settings change, without another question
     await assert.rejects(f.nova.handle({ action: "answer", sessionId, text: "How many devices?" }));
   });
 
+  it("says the settings could not be read when a shortcut is asked for and they cannot be", async () => {
+    const f = fixture({ profile: { shortcuts: [{ id: "s1", name: "Morning check", prompt: "How many devices are noncompliant?", createdAt: "2026-11-12T08:00:00.000Z" }] } });
+    const sessionId = await start(f);
+    f.host.profile = async () => { throw new Error("state.json is locked"); };
+    const answer = await f.nova.handle({ action: "answer", sessionId, text: "Run morning check" }).catch((error: Error) => ({ text: error.message, answerError: error.message }));
+    assert.match(answer.answerError ?? "", /could not read its settings/);
+  });
+
   it("ends the session when the settings cannot be read", async () => {
     const f = fixture();
     await start(f, "openai");
@@ -458,12 +466,12 @@ describe("Nova hosted voice consent", () => {
 
   it("says once, at the start, when the reasoning model gets a shortened profile", async () => {
     const f = fixture({ profile: { instructions: "Answer in short sentences and name the source of each fact. ".repeat(60).slice(0, 3000) } });
-    const full = await f.nova.handle({ action: "start", mode: "local", tenantId: "tenant-a" });
+    const full = await f.nova.handle({ action: "start", mode: "local", tenantId: "tenant-a", consent: false });
     assert.equal(full.notice, undefined, "a full-size model gets all of it");
     const state = f.state as unknown as { activeProviderId: string; providers: unknown[] };
     state.providers.push({ id: "apple-foundation", name: "Apple Intelligence", isLocal: true, status: "connected", models: ["apple"] });
     state.activeProviderId = "apple-foundation";
-    const small = await f.nova.handle({ action: "start", mode: "local", tenantId: "tenant-a" });
+    const small = await f.nova.handle({ action: "start", mode: "local", tenantId: "tenant-a", consent: false });
     assert.equal(small.notice, NOVA_PROFILE_SHORTENED_NOTICE);
   });
 

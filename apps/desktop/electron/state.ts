@@ -2254,6 +2254,9 @@ export class AppStateStore {
   tickOffice() { return this.officeService.tick(); }
   reportOfficeError(error: unknown) { this.officeService.reportError(error); }
 
+  /** Follow-ups left running by a quit that could not be marked yet; see fireDueNovaFollowUps. */
+  private novaRecoveryPending = false;
+
   /** Nova's note and follow-up stores. Throws the designed message when openadminos.db cannot be opened. */
   private novaStores(): NonNullable<AppStateStore["novaStoresInstance"]> {
     if (this.novaStoresInstance) return this.novaStoresInstance;
@@ -2268,11 +2271,14 @@ export class AppStateStore {
       const assertWritable = (tenantId: string, what: string) => this.tenantLifecycle.assertWritable(tenantId, what);
       const memory = new NovaMemory(db, { audit, auditDurably, assertWritable, clock: () => this.clock() });
       const followUps = new NovaFollowUps(db, { audit, auditDurably, assertWritable, clock: () => this.clock() });
-      // A follow-up still marked running was cut off by a quit; it did not finish.
+      // A follow-up still marked running was cut off by a quit; it did not
+      // finish. A failure to mark them is retried at the next scheduler tick.
       try {
         followUps.recoverInterrupted();
+        this.novaRecoveryPending = false;
       } catch (error) {
-        console.warn("[nova] interrupted follow-ups could not be marked", errorText(error));
+        this.novaRecoveryPending = true;
+        console.warn("[nova] interrupted follow-ups could not be marked; trying again at the next check", errorText(error));
       }
       this.novaStoresInstance = { db, memory, followUps };
       this.novaStoresFailedAt = undefined;
@@ -7364,6 +7370,17 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     if (this.novaFollowUpsFiring) return;
     this.novaFollowUpsFiring = true;
     try {
+      // Follow-ups run only inside these passes, one after another, so at
+      // the start of one no follow-up of this session is running: a row
+      // still marked running was cut off by a quit.
+      if (this.novaRecoveryPending) {
+        try {
+          if (this.novaFollowUps.recoverInterrupted() > 0) this.emitStateChanged("nova-records-changed");
+          this.novaRecoveryPending = false;
+        } catch (error) {
+          console.warn("[nova] interrupted follow-ups could not be marked; trying again at the next check", errorText(error));
+        }
+      }
       try {
         if (this.novaMemory.expire() > 0) this.emitStateChanged("nova-records-changed");
       } catch (error) {

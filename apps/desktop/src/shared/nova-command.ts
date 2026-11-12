@@ -258,7 +258,8 @@ export function novaContextualCommand(text: string, context: NovaCommandContext)
   return agent ? { kind: 'run', name: agent.slug } : novaCommand(text);
 }
 
-const shortcutKey = (name: string) => name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+/** How a shortcut name is matched, when it is spoken and when it is saved: case and punctuation do not count. */
+export const shortcutKey = (name: string) => name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
 /**
  * "Run morning check" for a saved shortcut named Morning check. Only an

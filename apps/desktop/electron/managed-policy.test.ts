@@ -121,6 +121,13 @@ describe("policy parsing", () => {
     ]);
   });
 
+  it("reports a Nova ability set twice and uses the more restrictive value, so a repeat cannot widen the policy", async () => {
+    const policy = await load({ [MACHINE]: '{ "novaCapabilities": { "webSearch": false, "webSearch": true, "connectorSends": ["outlook", "teams"], "connectorSends": true } }' });
+    assert.ok(policy);
+    assert.deepEqual(policy.values.novaCapabilities, { webSearch: false, connectorSends: ["outlook", "teams"] });
+    assert.equal(policy.issues.filter((entry) => /appears more than once/.test(entry.message)).length, 2, JSON.stringify(policy.issues));
+  });
+
   it("returns no policy when neither file exists", async () => {
     assert.equal(await load({}), undefined);
   });

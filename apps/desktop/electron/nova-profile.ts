@@ -16,7 +16,7 @@ import {
 } from "@openadminos/agent-sdk";
 import { NOVA_SEND_CONNECTOR_IDS } from "../src/shared/nova-session.js";
 
-import { novaCommand } from "../src/shared/nova-command.js";
+import { novaCommand, shortcutKey } from "../src/shared/nova-command.js";
 import {
   ManagedPolicyError,
   NOVA_INSTRUCTIONS_MAX_LENGTH,
@@ -189,8 +189,8 @@ export function sanitizeNovaProfile(value: unknown): NovaProfile | undefined {
     const names = new Set<string>();
     for (const raw of value.shortcuts) {
       const shortcut = sanitizeShortcut(raw);
-      if (!shortcut || names.has(shortcut.name.toLowerCase()) || shortcuts.some((entry) => entry.id === shortcut.id)) continue;
-      names.add(shortcut.name.toLowerCase());
+      if (!shortcut || names.has(shortcutKey(shortcut.name)) || shortcuts.some((entry) => entry.id === shortcut.id)) continue;
+      names.add(shortcutKey(shortcut.name));
       shortcuts.push(shortcut);
     }
     if (shortcuts.length > 0) profile.shortcuts = shortcuts.slice(0, NOVA_SHORTCUTS_MAX);
@@ -511,7 +511,7 @@ function saveShortcut(profile: NovaProfile, value: unknown, context: NovaProfile
   if (id !== undefined && (typeof id !== "string" || !shortcuts.some((entry) => entry.id === id))) {
     throw new NovaProfileError("This shortcut no longer exists. Nothing was saved.");
   }
-  if (shortcuts.some((entry) => entry.id !== id && entry.name.toLowerCase() === name.toLowerCase())) {
+  if (shortcuts.some((entry) => entry.id !== id && shortcutKey(entry.name) === shortcutKey(name))) {
     throw new NovaProfileError(`A shortcut named ${name} already exists. Choose another name.`);
   }
   if (id === undefined) {

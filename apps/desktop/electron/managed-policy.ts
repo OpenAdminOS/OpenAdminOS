@@ -501,6 +501,7 @@ function parseNovaCapabilities(
     return undefined;
   }
   const capabilities: ManagedNovaCapabilities = {};
+  const seen = new Set<string>();
   for (const entry of node.entries) {
     const field = entry.key;
     const value = entry.value;
@@ -508,6 +509,11 @@ function parseNovaCapabilities(
       issue(`"novaCapabilities" has "${field}", which it does not read. Use ${quoteList(NOVA_CAPABILITY_FIELDS)}.`, entry.keyPosition);
       continue;
     }
+    // A repeated switch cannot widen the policy: the most restrictive value is used.
+    const repeated = seen.has(field);
+    seen.add(field);
+    if (repeated) issue(`"novaCapabilities.${field}" appears more than once. The most restrictive value is used; remove the others.`, entry.keyPosition);
+    const earlier = repeated ? capabilities[field as keyof ManagedNovaCapabilities] : undefined;
     if (field === "connectorSends" && value.kind === "array") {
       const ids: string[] = [];
       for (const item of value.items) {
@@ -517,7 +523,7 @@ function parseNovaCapabilities(
         }
         if (!ids.includes(item.value)) ids.push(item.value);
       }
-      capabilities.connectorSends = ids;
+      capabilities.connectorSends = earlier === false ? false : Array.isArray(earlier) ? ids.filter((id) => earlier.includes(id)) : ids;
       continue;
     }
     if (value.kind !== "boolean") {
@@ -529,7 +535,11 @@ function parseNovaCapabilities(
       );
       continue;
     }
-    capabilities[field as "webSearch"] = value.value;
+    if (field === "connectorSends") {
+      capabilities.connectorSends = earlier === false || value.value === false ? false : Array.isArray(earlier) ? earlier : true;
+      continue;
+    }
+    capabilities[field as "webSearch"] = earlier === false ? false : value.value;
   }
   return Object.keys(capabilities).length > 0 ? capabilities : undefined;
 }

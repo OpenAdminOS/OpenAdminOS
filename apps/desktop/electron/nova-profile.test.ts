@@ -219,6 +219,14 @@ describe("Nova profile", () => {
     );
   });
 
+  it("refuses a second shortcut whose name differs only in case or punctuation, as it is matched when spoken", () => {
+    const saved = applyNovaProfilePatch(undefined, { saveShortcut: { name: "Morning-check", prompt: "How many devices are noncompliant?" } }, undefined, context());
+    assert.throws(
+      () => applyNovaProfilePatch(saved, { saveShortcut: { name: "morning check", prompt: "Which apps failed to install?" } }, undefined, context()),
+      /already exists/,
+    );
+  });
+
   it("moves local storage values exactly once and never over a set value or the policy", async () => {
     const policy = await policyOf({ novaVoiceModes: ["local"] });
     const first = migrateNovaProfile(undefined, { voiceMode: "openai", greetingName: " Ugur " }, policy);
@@ -513,6 +521,7 @@ describe("Nova settings in the store", () => {
       assert.equal(removed[0]!.details.via, "settings");
       assert.equal(removed[1]!.details.text, "");
       assert.equal(removed[1]!.details.via, "disconnect");
+      assert.equal(removed[1]!.organizationName, state.organizations?.find((entry) => entry.id === organizationId)?.name, "the removed organization keeps its name in the event");
     } finally {
       await fixture.close();
     }

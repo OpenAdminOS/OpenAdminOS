@@ -12,7 +12,7 @@ import { loadManagedPolicy } from "./managed-policy.js";
 import { MCP_CATALOG } from "./mcp/catalog.js";
 import { NOVA_FOLLOW_UP_CONSENT_NOT_KEPT, NOVA_PROFILE_CHANGED, prepareNovaProfileChange, type NovaActionHost } from "./nova-actions.js";
 import { NOVA_NOTES_OFF_BY_POLICY } from "./nova-memory.js";
-import { NOVA_FOLLOW_UP_TIMED_OUT } from "./nova-followups.js";
+import { NOVA_FOLLOW_UP_TIMED_OUT, NovaFollowUps } from "./nova-followups.js";
 import { AppStateStore } from "./state.js";
 import { TenantClosedError } from "./tenant-lifecycle.js";
 
@@ -563,6 +563,33 @@ describe("a Nova follow-up run", () => {
       if (before === undefined) delete process.env.OPENAGENTS_OLLAMA_URL;
       else process.env.OPENAGENTS_OLLAMA_URL = before;
       close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("marks a follow-up a quit cut off at the next check when marking it at the start failed", async () => {
+    const now = new Date();
+    const { store, dir } = await makeStore({ clock: () => now, extra: { providerListFactory: providers, graphFactory: graph([]) } });
+    const recover = NovaFollowUps.prototype.recoverInterrupted;
+    try {
+      // A follow-up left running by an earlier session.
+      const followUp = await store.novaFollowUpsHost().create({ tenantId: contoso.id, question: "Check device compliance", providerId: "ollama", model: "test", delayMinutes: 60 });
+      (store as unknown as { novaStoresInstance?: { db: DatabaseSync } }).novaStoresInstance!.db.prepare("UPDATE nova_followups SET status = 'running' WHERE id = ?").run(followUp.id);
+      // The next launch cannot mark it at first.
+      (store as unknown as { novaStoresInstance?: unknown }).novaStoresInstance = undefined;
+      let calls = 0;
+      NovaFollowUps.prototype.recoverInterrupted = function (this: NovaFollowUps) {
+        calls += 1;
+        if (calls === 1) throw new Error("database is locked");
+        return recover.call(this);
+      };
+      assert.equal((await store.handleNovaRecords({ action: "list" })).followUps.find((entry) => entry.id === followUp.id)?.status, "running");
+      await store.fireDueNovaFollowUps();
+      assert.equal((await store.handleNovaRecords({ action: "list" })).followUps.find((entry) => entry.id === followUp.id)?.status, "failed");
+      assert.equal(calls, 2);
+    } finally {
+      NovaFollowUps.prototype.recoverInterrupted = recover;
+      store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });

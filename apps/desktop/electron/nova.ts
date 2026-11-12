@@ -500,8 +500,10 @@ export class NovaService {
       session.commandContext = undefined;
       const followUp = previous && Date.now() - previous.at < 300000 &&
         (/^(?:actually|instead|no[, ]|use |make (?:it|that)|via |on |through |to my )/i.test(input.text.trim()) || input.text.trim().split(/\s+/).length <= 4);
-      // Shortcut names come from the settings now; a failed read only means none match.
-      const shortcuts = this.actions ? (await readNovaSettings(this.actions).catch(() => undefined))?.effective.shortcuts ?? [] : [];
+      // Shortcut names come from the settings now. When they cannot be read,
+      // "run <name>" says so instead of looking like a missing shortcut.
+      let shortcutsUnreadable = false;
+      const shortcuts = this.actions ? (await readNovaSettings(this.actions).catch(() => { shortcutsUnreadable = true; return undefined; }))?.effective.shortcuts ?? [] : [];
       const context = { agents: (state.installedAgents ?? []).slice(0, 40).map(a => ({ name: a.name.slice(0, 100), slug: a.slug })), shortcuts: shortcuts.map(entry => ({ name: entry.name })), ...(followUp ? { previousRequest: previous.request } : {}) };
       const connectorReply = novaConnectorReply(input.text);
       let command: NovaCommand | undefined = novaContextualCommand(input.text, context);
@@ -509,6 +511,8 @@ export class NovaService {
         const name = command.name.toLowerCase().replace(/[^a-z0-9]/g, "");
         if (!(state.installedAgents ?? []).some(a => [a.name, a.slug].some(n => n.toLowerCase().replace(/[^a-z0-9]/g, "") === name))) command = undefined;
       }
+      if (shortcutsUnreadable && command?.kind !== "run" && /^(?:run|start|do)\s+(?:my\s+|the\s+)?\S/i.test(input.text.trim()))
+        return { text: NOVA_SETTINGS_UNREADABLE, answerError: NOVA_SETTINGS_UNREADABLE };
       if (!command) {
         // Keep the unfinished request available if a late speech fragment replaces classification.
         session.commandContext = { request: (followUp ? previous.request : input.text).slice(0, 1200), at: Date.now() };

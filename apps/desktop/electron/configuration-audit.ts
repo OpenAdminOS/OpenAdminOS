@@ -432,7 +432,9 @@ export function diffConfigurationAudit(
     }
   }
 
-  seeds.push(...novaSeeds(previous.novaProfile, next.novaProfile, nextOrganizationById));
+  // Names from the state after the change, or before it for an organization
+  // the change removed (Disconnect), so its removed instructions keep a name.
+  seeds.push(...novaSeeds(previous.novaProfile, next.novaProfile, new Map([...previousOrganizationById, ...nextOrganizationById])));
 
   return seeds.map((seed) => ({ id: context.newId(), timestamp: context.timestamp, ...seed }));
 }
