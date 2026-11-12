@@ -28,16 +28,26 @@ function openNow(finding: OfficeFinding, now: number): boolean {
 
 const SEVERITY_ORDER: Record<OfficeFinding["severity"], number> = { warning: 0, info: 1 };
 
+// Finding titles, persona and agent names come from model output and tenant
+// data. They are spoken and shown as labels only: one line, no markdown
+// structure, bounded length. The hosted voice prompt already treats tool
+// results as reference data, never as instructions.
+const LABEL_MAX_LENGTH = 120;
+export function attentionLabel(value: string): string {
+  const flat = value.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/[*_`#>\[\]|<]/g, "").replace(/\s+/g, " ").trim();
+  return flat.length > LABEL_MAX_LENGTH ? `${flat.slice(0, LABEL_MAX_LENGTH - 3).trimEnd()}...` : flat || "Untitled";
+}
+
 function plural(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`;
 }
 
 export function novaAttention(state: AppState, now: Date): NovaAttention {
   const tenantId = state.activeTenantId;
-  const organization =
+  const organization = attentionLabel(
     state.organizations?.find((entry) => entry.id === state.activeOrganizationId)?.name ||
     state.tenants.find((tenant) => tenant.id === tenantId)?.displayName ||
-    "the active organization";
+    "the active organization");
   const time = now.getTime();
   const findings = tenantId
     ? (state.office?.findings ?? [])
@@ -54,15 +64,17 @@ export function novaAttention(state: AppState, now: Date): NovaAttention {
     return { text, displayText: text, links: [], findings, approvals };
   }
   const agentName = (run: RunRecord) =>
-    state.installedAgents.find((agent) => agent.slug === run.agentSlug)?.name ?? run.agentSlug;
-  const persona = (finding: OfficeFinding) =>
-    state.office?.personas.find((entry) => entry.id === finding.personaId)?.name;
+    attentionLabel(state.installedAgents.find((agent) => agent.slug === run.agentSlug)?.name ?? run.agentSlug);
+  const persona = (finding: OfficeFinding) => {
+    const name = state.office?.personas.find((entry) => entry.id === finding.personaId)?.name;
+    return name ? attentionLabel(name) : undefined;
+  };
   const summary = [
     approvals.length ? plural(approvals.length, "run waits for your confirmation", "runs wait for your confirmation") : "",
     findings.length ? plural(findings.length, "Agent Team finding is open", "Agent Team findings are open") : "",
   ].filter(Boolean);
   const spokenApprovals = approvals.slice(0, NOVA_ATTENTION_LIMIT).map((run) => agentName(run));
-  const spokenFindings = findings.slice(0, NOVA_ATTENTION_LIMIT).map((finding) => finding.title);
+  const spokenFindings = findings.slice(0, NOVA_ATTENTION_LIMIT).map((finding) => attentionLabel(finding.title));
   const text = [
     `In ${organization}, ${summary.join(" and ")}.`,
     spokenApprovals.length ? `Waiting for confirmation: ${spokenApprovals.join("; ")}${approvals.length > NOVA_ATTENTION_LIMIT ? `, and ${approvals.length - NOVA_ATTENTION_LIMIT} more` : ""}.` : "",
@@ -80,7 +92,7 @@ export function novaAttention(state: AppState, now: Date): NovaAttention {
     lines.push("Open Agent Team findings:");
     for (const finding of findings.slice(0, NOVA_ATTENTION_LIMIT)) {
       const who = persona(finding);
-      lines.push(`- ${finding.severity === "warning" ? "Warning" : "Info"}: ${finding.title}${who ? ` (${who})` : ""}`);
+      lines.push(`- ${finding.severity === "warning" ? "Warning" : "Info"}: ${attentionLabel(finding.title)}${who ? ` (${who})` : ""}`);
     }
     if (findings.length > NOVA_ATTENTION_LIMIT) lines.push(`- ${findings.length - NOVA_ATTENTION_LIMIT} more in Agent Team`);
   }
