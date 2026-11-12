@@ -741,7 +741,10 @@ counted (round 3 review, 2026-11-12). The decision is
 made on the pending row: a skipped or missed follow-up is never marked running
 and has no started event; one that runs takes the tenant lease first, then is
 claimed and records `started` right before Chat is asked, so a Disconnect after
-the decision skips it (`skipped-organization`) without a started event. One more than an hour late is `missed`;
+the decision skips it (`skipped-organization`) without a started event. Inside
+the lease the decision is taken again on the state then, so an organization,
+provider or model switched after the first decision is a skip as well, with no
+started event (round 4 review, 2026-11-12). One more than an hour late is `missed`;
 one cut off by a quit is `failed`. A run goes through Chat, which is strictly
 read-only, under the tenant lease, with a hard five-minute bound (a call that
 ignores its cancel signal is left behind, the follow-up ends `failed` with the
@@ -752,7 +755,8 @@ Nova panel shows how many are pending. Audit events, source `nova`:
 `nova.followup.created` and `.cancelled` with initiator `person` (a click set or
 cancelled it, also through Disconnect), and `.started`, `.completed`, `.skipped`,
 `.missed`, `.failed` with initiator `schedule` (round 1 review, 2026-11-12). Disconnect deletes them, recording pending ones
-as cancelled first.
+as cancelled first, with initiator `person`: the admin's Disconnect click cancels them.
+The Nova panel counts only the active organization's pending follow-ups.
 
 **What needs me.** "What needs me?" and close wordings list the active
 organization's open Agent Team findings and runs waiting for confirmation,

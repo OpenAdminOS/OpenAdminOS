@@ -445,8 +445,50 @@ describe("a Nova follow-up run", () => {
       assert.equal(one?.status, "failed");
       assert.equal(one?.reason, NOVA_FOLLOW_UP_TIMED_OUT);
       assert.equal(list.find((entry) => entry.id === second.id)?.status, "completed");
+      // The hung call did not hold the next one: both were asked in the same pass.
+      assert.equal(calls, 2);
     } finally {
       store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips a follow-up whose provider was switched between the first decision and the lease, with no started event", async () => {
+    let now = new Date();
+    let streams = 0;
+    const { store, dir, dbPath } = await makeStore({
+      clock: () => now,
+      extra: {
+        providerListFactory: providers,
+        graphFactory: graph([]),
+        llmFactory: () => ({ available: true, complete: async () => ({ text: "Nothing.", model: "test" }), async *stream() { streams += 1; yield { delta: "Nothing.", accumulated: "Nothing.", done: true, model: "test" }; } }) as never,
+      },
+    });
+    let closed = false;
+    const close = () => { if (!closed) { closed = true; store.close(); } };
+    try {
+      const followUp = await store.novaFollowUpsHost().create({ tenantId: contoso.id, question: "Check device compliance", providerId: "ollama", model: "test", delayMinutes: 1 });
+      now = new Date(now.getTime() + 61_000);
+      // The admin switches the provider right after the first decision.
+      const original = store.getAppState.bind(store);
+      let reads = 0;
+      (store as unknown as { getAppState: () => Promise<unknown> }).getAppState = async () => {
+        const state = await original();
+        reads += 1;
+        return reads >= 2 ? { ...state, activeProviderId: "anthropic" } : state;
+      };
+      await store.fireDueNovaFollowUps();
+      (store as unknown as { getAppState: unknown }).getAppState = original;
+      const done = (await store.handleNovaRecords({ action: "list" })).followUps.find((entry) => entry.id === followUp.id);
+      assert.equal(done?.status, "skipped-provider");
+      assert.equal(streams, 0, "Chat was not asked");
+      close();
+      const db = new DatabaseSync(dbPath, { readOnly: true });
+      const types = (db.prepare("SELECT type FROM audit_log WHERE type LIKE 'nova.followup.%' ORDER BY seq").all() as { type: string }[]).map((row) => row.type);
+      db.close();
+      assert.deepEqual(types, ["nova.followup.created", "nova.followup.skipped"]);
+    } finally {
+      close();
       await rm(dir, { recursive: true, force: true });
     }
   });

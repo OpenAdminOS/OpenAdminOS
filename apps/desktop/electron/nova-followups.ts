@@ -310,7 +310,13 @@ export class NovaFollowUps {
     return rows.length;
   }
 
-  /** Deletes every follow-up of a disconnected tenant; pending ones are cancelled in the audit log first. */
+  /**
+   * Deletes every follow-up of a disconnected tenant; pending ones are
+   * cancelled in the audit log first, with initiator person (the admin's
+   * Disconnect). A running row is deleted too: that is safe only because a
+   * run holds the tenant lease, which Disconnect drains before its cleanup
+   * calls this, so no run is still writing its result here.
+   */
   purgeTenant(tenantId: string): number {
     const rows = this.db.prepare("SELECT * FROM nova_followups WHERE tenant_id = ?").all(tenantId) as unknown as FollowUpRow[];
     if (rows.length === 0) return 0;

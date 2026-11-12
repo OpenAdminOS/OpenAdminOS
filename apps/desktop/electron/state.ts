@@ -7371,7 +7371,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       this.novaFollowUps.finish(followUp.id, status, { ...detail, from });
       this.emitStateChanged("nova-records-changed");
     };
-    try {
+    // The fire decision on the state now, with the reason a skip is shown with.
+    const decide = async () => {
       const state = await this.getAppState();
       const provider = state.providers.find((entry) => entry.id === state.activeProviderId);
       const activeModel = resolveProviderDefaultModel(provider, state.activeModelByProviderId).model;
@@ -7388,18 +7389,32 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         ...(novaProviderEndpoint(state.activeProviderId) ? { activeProviderEndpoint: novaProviderEndpoint(state.activeProviderId) } : {}),
         providerAllowed,
       });
-      if (decision === "skipped-provider" && !providerAllowed) return finish(decision, { reason: NOVA_FOLLOW_UP_PROVIDER_NOT_ALLOWED });
-      if (decision === "skipped-provider" && state.activeProviderId === followUp.providerId &&
+      let reason: string | undefined;
+      if (decision === "skipped-provider" && !providerAllowed) reason = NOVA_FOLLOW_UP_PROVIDER_NOT_ALLOWED;
+      else if (decision === "skipped-provider" && state.activeProviderId === followUp.providerId &&
           ((provider?.isLocal === true) !== followUp.providerLocal || (followUp.providerEndpoint ?? undefined) !== novaProviderEndpoint(followUp.providerId)))
-        return finish(decision, { reason: NOVA_FOLLOW_UP_PROVIDER_MOVED });
-      if (decision !== "run") return finish(decision);
+        reason = NOVA_FOLLOW_UP_PROVIDER_MOVED;
+      return { decision, provider, ...(reason ? { reason } : {}) };
+    };
+    try {
+      const first = await decide();
+      if (first.decision !== "run") return finish(first.decision, first.reason ? { reason: first.reason } : {});
       // The lease is taken before the claim: a Disconnect that began after
       // the decision refuses it and the follow-up is skipped, never started.
-      // The started event is recorded right before Chat is asked.
+      // Inside the lease the decision is taken again on the state now, so a
+      // provider or organization switched in between is a skip too; the
+      // claim and the started event follow it with no wait.
       const runMs = this.novaFollowUpRunMs;
+      let skipped: Awaited<ReturnType<typeof decide>> | undefined;
       let result: SendIntuneChatMessageResult | undefined;
       try {
         result = await this.withTenantLease(followUp.tenantId, async (signal) => {
+          const fresh = await decide();
+          if (fresh.decision !== "run") {
+            skipped = fresh;
+            return undefined;
+          }
+          const provider = fresh.provider;
           if (!this.novaFollowUps.claim(followUp.id)) return undefined;
           from = "running";
           const controller = new AbortController();
@@ -7440,6 +7455,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         if (from === "pending" && error instanceof TenantClosedError) return finish("skipped-organization");
         throw error;
       }
+      if (skipped && skipped.decision !== "run") return finish(skipped.decision, skipped.reason ? { reason: skipped.reason } : {});
       if (!result) return;
       const conversationId = result.conversation.id;
       try {
