@@ -235,6 +235,27 @@ describe("Nova hosted sessions after a settings change, without another question
     void sessionId;
   });
 
+  it("does not send instructions that changed while a hosted session was starting", async () => {
+    const f = fixture({ profile: { instructions: "Answer in English." } });
+    let release: (() => void) | undefined;
+    const read = f.host.notes!.promptNotes;
+    f.host.notes!.promptNotes = async (tenantId) => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return read(tenantId);
+    };
+    const starting = start(f, "openai");
+    for (let index = 0; index < 100 && !release; index += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.ok(release, "the start is reading the profile");
+    f.live.profile = { instructions: "Answer in German." };
+    // No session yet, so nothing to end; the start must notice by itself.
+    assert.equal(await f.nova.revalidateHostedSession(), false);
+    f.host.notes!.promptNotes = read;
+    release!();
+    await assert.rejects(starting, { message: NOVA_SESSION_PROFILE_CHANGED });
+    assert.equal(f.requests.some((request) => request.url.includes("/live/sessions")), false, "the old instructions did not go to OpenAI");
+    assert.equal(f.consents.length, 0);
+  });
+
   it("ends the session when the settings cannot be read", async () => {
     const f = fixture();
     await start(f, "openai");

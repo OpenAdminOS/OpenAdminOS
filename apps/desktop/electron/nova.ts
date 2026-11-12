@@ -137,6 +137,8 @@ export class NovaService {
    * Returns true when it ended a session.
    */
   async revalidateHostedSession(): Promise<boolean> {
+    // A start still reading the profile has no session yet; it compares this count after its read.
+    this.profileChanges += 1;
     const session = this.session;
     if (!session?.hostedProfile) return false;
     const fresh = await this.readSessionProfile(session.tenantId).catch(() => undefined);
@@ -145,6 +147,9 @@ export class NovaService {
     this.invalidate();
     return true;
   }
+
+  /** Counts settings and notes changes, so a hosted start that read the profile before one notices it. */
+  private profileChanges = 0;
 
   constructor(
     private readonly secrets: SecretAccessor,
@@ -232,6 +237,7 @@ export class NovaService {
           "Confirm hosted agent context sharing before starting Nova.",
         );
       // The profile shapes the prompts of this session; without it, Nova does not start.
+      const changesBeforeRead = this.profileChanges;
       const { settings, profile, notesUnreadable } = await this.readSessionProfile(state.activeTenantId);
       if (generation !== this.generation) throw new Error("Nova was stopped or this question was replaced. Start a new conversation.");
       // Only the notes that fit the block are sent, recorded in the consent and watched for changes.
@@ -255,6 +261,14 @@ export class NovaService {
       this.session = session;
       try {
         if (input.mode === "local") return { sessionId: session.id, ...notice };
+        // A change while the profile was read did not reach this session; read
+        // it again now. Changes from here on end the session through
+        // revalidateHostedSession.
+        if (this.profileChanges !== changesBeforeRead && session.hostedProfile) {
+          const fresh = await this.readSessionProfile(session.tenantId).catch(() => undefined);
+          if (hostedProfileChanged(session.hostedProfile, fresh)) throw new Error(NOVA_SESSION_PROFILE_CHANGED);
+          session.controller.signal.throwIfAborted();
+        }
         if (
           typeof input.sdp !== "string" ||
           input.sdp.length > 65536 ||
