@@ -28,19 +28,15 @@ const PROMISE = new RegExp(
 const CONDITIONAL =
   /\b(?:if (?:you|needed|that helps|it helps|useful|wanted|required)|should i|do you want|would you like|let me know|i can\b|i could\b|when you|whenever you|once you|if you ask|on request|just ask|tell me)\b/i;
 
-function withoutQuotedText(answer: string): string {
+/** Longest answer that can still be a progress message; anything longer reports something. */
+export const PROMISE_ANSWER_MAX_LENGTH = 160;
+
+/** Inline quotes are text the answer talks about, not work it announces. */
+function withoutInlineQuotes(answer: string): string {
   return answer
-    .replace(/```[\s\S]*?```/g, " ")
     .replace(/`[^`\n]*`/g, " ")
     .replace(/^\s*>.*$/gm, " ")
     .replace(/"[^"\n]*"|“[^”\n]*”/g, " ");
-}
-
-function sentences(text: string): string[] {
-  return text
-    .split(/(?<=[.!?…])\s+|\n+/)
-    .map((sentence) => sentence.trim())
-    .filter(Boolean);
 }
 
 /** Acknowledgements that carry no result: "Sure.", "Okay, ", "Got it." */
@@ -52,40 +48,40 @@ function isFiller(text: string): boolean {
 }
 
 /**
- * Clauses of a sentence: a result can share a sentence with a promise,
- * before or after it ("I'll check the apps next, but the devices are
- * compliant.", "Let me verify: all Macs are compliant.").
+ * The clauses of an answer: split at sentence ends, at , ; : and dashes,
+ * and at the conjunctions that join a second statement ("and", "but",
+ * "so"), so a result next to a promise stands on its own. "go and check"
+ * stays one clause.
  */
-function clauses(sentence: string): string[] {
-  return sentence
-    .split(/\s*[,;:—–]\s*|\s+(?:but|while|although|though|yet|however|whereas)\s+/i)
-    .map((clause) => clause.trim())
+function clauses(text: string): string[] {
+  return text
+    .split(/(?<=[.!?…])\s+|\n+|\s*[,;:—–]\s*|(?<!\bgo)\s+(?:and|but|so|while|although|though|yet|however|whereas)\s+/i)
+    .map((clause) => clause.replace(/[.!?…]+$/, "").trim())
     .filter(Boolean);
 }
 
 /**
- * True only for a progress message: every clause either announces work
- * ("I'll check that now.") or acknowledges the question ("Sure."). Any
- * clause with a result, an offer or a list makes it a finished answer,
- * also when it mentions a later step. Numbers inside the announced work
- * ("I'll check the Windows 11 devices.") do not make it a result.
+ * True only for a short progress message: every clause either announces
+ * work ("I'll check that now.") or acknowledges the question ("Sure.").
+ * Any other clause is substance: a result, an offer, a list or a code
+ * block finishes the answer, also when it mentions a later step. Numbers
+ * inside the announced work ("I'll check the Windows 11 devices.") do not
+ * make it a result. Conservative on purpose: a missed promise costs an
+ * unhelpful answer the admin can ask again; a false one withdraws a
+ * correct answer.
  */
 export function looksLikeUnkeptPromise(answer: string): boolean {
-  const text = withoutQuotedText(answer).trim();
-  if (!text) return false;
-  if (/^\s*(?:[-*•]|\d+[.)])\s+/m.test(answer)) return false;
+  const raw = answer.trim();
+  if (!raw || raw.length > PROMISE_ANSWER_MAX_LENGTH) return false;
+  if (raw.includes("```") || /^\s*(?:[-*•]|\d+[.)])\s+/m.test(raw)) return false;
+  if (CONDITIONAL.test(raw)) return false;
   let promised = false;
-  for (const sentence of sentences(text)) {
-    if (isFiller(sentence)) continue;
-    // An offer, or a sentence long enough to report something, finishes the answer.
-    if (CONDITIONAL.test(sentence) || sentence.length > 200) return false;
-    for (const clause of clauses(sentence)) {
-      if (isFiller(clause)) continue;
-      const match = PROMISE.exec(clause);
-      // A clause without a promise is substance; so is one with a result before its promise.
-      if (!match || !isFiller(clause.slice(0, match.index))) return false;
-      promised = true;
-    }
+  for (const clause of clauses(withoutInlineQuotes(raw))) {
+    if (isFiller(clause)) continue;
+    const match = PROMISE.exec(clause);
+    // A clause without a promise is substance; so is one with anything but an acknowledgement before its promise.
+    if (!match || !isFiller(clause.slice(0, match.index))) return false;
+    promised = true;
   }
   return promised;
 }

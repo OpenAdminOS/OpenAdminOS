@@ -20,6 +20,7 @@ describe("unkept promise", () => {
       "I'll check the Windows 11 devices now.",
       "Let me check the Microsoft 365 sign-in logs.",
       "I will check the Windows 11 devices that have not synced in 30 days.",
+      "One moment, I'm checking.",
     ]) {
       assert.equal(looksLikeUnkeptPromise(answer), true, answer);
     }
@@ -47,6 +48,16 @@ describe("unkept promise", () => {
       "I'm checking the app installs next; the compliance review is complete.",
       "Let me verify: all Macs are compliant.",
       "All devices are compliant. I will check again tomorrow.",
+      // A result joined to the promise by a conjunction.
+      "I'm looking at 47 devices and all are compliant.",
+      "I'll check the apps next and the compliance review is complete.",
+      "I'll verify the apps next and the devices are already compliant.",
+      "I'll check the sign-in logs now, so the devices are done.",
+      // A code block or a list is substance, also next to a promise.
+      "```kql\nSigninLogs | take 10\n```\nI'll run this next.",
+      "1. WIN-01\n2. WIN-02\nLet me check the rest.",
+      // Too long to be only a progress message.
+      `I'll check ${"the device compliance, the app installs and the configuration profiles of the pilot group ".repeat(2)}now.`,
       "",
       "The tenant has no Windows Update rings assigned to the pilot group, so the devices in it receive updates on the default schedule. That matches what the compliance report shows. Let me know which ring you plan to use.",
     ]) {
