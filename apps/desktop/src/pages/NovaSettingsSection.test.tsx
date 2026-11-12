@@ -4,7 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { NovaSettingsSection } from "./NovaSettingsSection";
 import { createMockAppState, makeMockBridge, renderWithAppState } from "../test/test-utils";
-import type { ConnectorSummary, EffectiveNovaProfile, NovaProfileView, NovaRecordsRequest, NovaRecordsView } from "../shared/openAdminOS";
+import { useAppState } from "../state";
+import type { AppState, ConnectorSummary, EffectiveNovaProfile, NovaProfileView, NovaRecordsRequest, NovaRecordsView } from "../shared/openAdminOS";
 
 function view(effective: Partial<EffectiveNovaProfile> = {}, rest: Partial<NovaProfileView> = {}): NovaProfileView {
   return {
@@ -192,5 +193,133 @@ describe("Settings, Nova, notes and follow-ups", () => {
     expect(within(list).getByRole("link", { name: "Open in Chat" })).toHaveAttribute("href", "/chat/conv-9");
     await user.click(within(list).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(novaRecords).toHaveBeenCalledWith({ action: "follow-up-cancel", id: "f1" }));
+  });
+});
+
+describe("Settings, Nova, across an organization switch", () => {
+  type Deferred<T> = { promise: Promise<T>; resolve: (value: T) => void; reject: (error: Error) => void };
+  function deferred<T>(): Deferred<T> {
+    let resolve!: (value: T) => void, reject!: (error: Error) => void;
+    const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+    return { promise, resolve, reject };
+  }
+
+  function Switcher() {
+    const { setActiveOrganization } = useAppState();
+    return <button type="button" onClick={() => void setActiveOrganization("org-b")}>Switch to Contoso</button>;
+  }
+
+  function setupSwitch() {
+    let appState: AppState = createMockAppState({
+      organizations: [
+        { id: "org-a", name: "Northwind", createdAt: "", connections: { microsoft365: { tenantId: "tenant-a" } } },
+        { id: "org-b", name: "Contoso", createdAt: "", connections: { microsoft365: { tenantId: "tenant-b" } } },
+      ],
+      activeOrganizationId: "org-a",
+      activeTenantId: "tenant-a",
+    });
+    const profileReads: Array<{ organizationId?: string; reply: Deferred<NovaProfileView> }> = [];
+    const recordReads: Array<{ organizationId?: string; reply: Deferred<NovaRecordsView> }> = [];
+    const novaProfile = vi.fn((request: Parameters<NonNullable<typeof window.openAdminOS>["novaProfile"]>[0]) => {
+      const reply = deferred<NovaProfileView>();
+      profileReads.push({ organizationId: appState.activeOrganizationId, reply });
+      void request;
+      return reply.promise;
+    });
+    const novaRecords = vi.fn(() => {
+      const reply = deferred<NovaRecordsView>();
+      recordReads.push({ organizationId: appState.activeOrganizationId, reply });
+      return reply.promise;
+    });
+    const bridge = makeMockBridge({
+      novaProfile,
+      novaRecords,
+      listConnectors: vi.fn(async () => []),
+      getAppState: vi.fn(async () => appState),
+      setActiveOrganization: vi.fn(async (id: string | null) => {
+        appState = { ...appState, activeOrganizationId: id ?? undefined, activeTenantId: id === "org-b" ? "tenant-b" : "tenant-a" };
+        return appState;
+      }),
+    }, appState);
+    renderWithAppState(<><Switcher /><NovaSettingsSection /></>, { bridge });
+    /** Answers every open read, as the main process would for the organization active at the call. */
+    const answer = async (organizationId: string, profile: NovaProfileView | Error, records: NovaRecordsView | Error) => {
+      await waitFor(() => expect(profileReads.some((read) => read.organizationId === organizationId)).toBe(true));
+      await waitFor(() => expect(recordReads.some((read) => read.organizationId === organizationId)).toBe(true));
+      for (const read of profileReads.splice(0).filter((entry) => entry.organizationId === organizationId)) profile instanceof Error ? read.reply.reject(profile) : read.reply.resolve(profile);
+      for (const read of recordReads.splice(0).filter((entry) => entry.organizationId === organizationId)) records instanceof Error ? read.reply.reject(records) : read.reply.resolve(records);
+    };
+    return { novaProfile, profileReads, recordReads, answer };
+  }
+
+  const recordsFor = (organizationId: string, text: string): NovaRecordsView => ({
+    tenantId: organizationId === "org-a" ? "tenant-a" : "tenant-b",
+    organizationId,
+    notes: [{ id: `n-${organizationId}`, tenantId: "t", organizationId, text, reviewState: "confirmed", source: "user-said", createdAt: "2026-11-12T10:00:00.000Z", reviewedAt: "2026-11-12T10:01:00.000Z" }],
+    followUps: [],
+  });
+
+  it("shows and saves nothing of the previous organization while the new one loads, and ignores its late replies", async () => {
+    const { novaProfile, recordReads, answer } = setupSwitch();
+    const user = userEvent.setup();
+    await answer("org-a", view({ addendum: "Northwind rules." }), recordsFor("org-a", "Northwind kiosks are in Berlin"));
+    const box = await screen.findByLabelText("Nova instructions for Northwind");
+    await user.type(box, " Draft for Northwind.");
+    expect(await screen.findByText("Northwind kiosks are in Berlin")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Switch to Contoso" }));
+    expect(await screen.findByText("Loading nova instructions for Contoso.")).toBeInTheDocument();
+    expect(screen.getByText("Loading notes for Contoso.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Nova instructions for Contoso")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save for Contoso" })).toBeNull();
+    expect(screen.queryByText("Northwind kiosks are in Berlin")).toBeNull();
+    expect(screen.queryByDisplayValue(/Draft for Northwind/)).toBeNull();
+
+    await answer("org-b", view({ addendum: "" }), recordsFor("org-b", "Contoso laptops are in Munich"));
+    const contoso = await screen.findByLabelText("Nova instructions for Contoso");
+    expect(contoso).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Save for Contoso" })).toBeDisabled();
+    expect(await screen.findByText("Contoso laptops are in Munich")).toBeInTheDocument();
+    expect(recordReads.length).toBe(0);
+    expect(novaProfile.mock.calls.every(([request]) => request.action === "get")).toBe(true);
+  });
+
+  it("ignores a reply that arrives for the previous organization after the switch", async () => {
+    const { profileReads, recordReads, answer } = setupSwitch();
+    const user = userEvent.setup();
+    await waitFor(() => expect(recordReads.some((read) => read.organizationId === "org-a")).toBe(true));
+    const late = recordReads.filter((read) => read.organizationId === "org-a");
+    const lateProfile = profileReads.filter((read) => read.organizationId === "org-a");
+    await user.click(screen.getByRole("button", { name: "Switch to Contoso" }));
+    await answer("org-b", view({ addendum: "Contoso rules." }), recordsFor("org-b", "Contoso laptops are in Munich"));
+    expect(await screen.findByText("Contoso laptops are in Munich")).toBeInTheDocument();
+    for (const read of lateProfile) read.reply.resolve(view({ addendum: "Northwind rules." }));
+    for (const read of late) read.reply.resolve(recordsFor("org-a", "Late Northwind note"));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByText("Late Northwind note")).toBeNull();
+    expect(screen.getByLabelText("Nova instructions for Contoso")).toHaveValue("Contoso rules.");
+  });
+
+  it("shows a failed read for the new organization with a retry, not the previous organization's data", async () => {
+    const { answer } = setupSwitch();
+    const user = userEvent.setup();
+    await answer("org-a", view({ addendum: "Northwind rules." }), recordsFor("org-a", "Northwind kiosks are in Berlin"));
+    expect(await screen.findByLabelText("Nova instructions for Northwind")).toHaveValue("Northwind rules.");
+
+    await user.click(screen.getByRole("button", { name: "Switch to Contoso" }));
+    await answer(
+      "org-b",
+      new Error("Error invoking remote method 'openadminos:nova-profile': Error: state.json is locked."),
+      new Error("Error invoking remote method 'openadminos:nova-records': NovaMemoryError: Nova notes and follow-ups are unavailable."),
+    );
+    expect(await screen.findByText(/Nova instructions for Contoso could not be loaded: state\.json is locked\./)).toBeInTheDocument();
+    expect(screen.getByText(/Notes for Contoso could not be loaded: Nova notes and follow-ups are unavailable\./)).toBeInTheDocument();
+    expect(screen.queryByText("Northwind kiosks are in Berlin")).toBeNull();
+    expect(screen.queryByDisplayValue("Northwind rules.")).toBeNull();
+
+    await user.click(screen.getAllByRole("button", { name: "Try again" })[0]!);
+    await answer("org-b", view({ addendum: "Contoso rules." }), recordsFor("org-b", "Contoso laptops are in Munich"));
+    expect(await screen.findByLabelText("Nova instructions for Contoso")).toHaveValue("Contoso rules.");
+    expect(await screen.findByText("Contoso laptops are in Munich")).toBeInTheDocument();
   });
 });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 
 import { SetByItBadge } from "../components/ManagedPolicy";
@@ -97,10 +97,22 @@ export function NovaSettingsSection() {
   const [shortcutDraft, setShortcutDraft] = useState<{ id?: string; name: string; prompt: string }>();
   const [records, setRecords] = useState<NovaRecordsView>();
   const [noteDraft, setNoteDraft] = useState<{ id: string; text: string }>();
-  const organization = state.organizations?.find((entry) => entry.id === state.activeOrganizationId);
+  // What was loaded is bound to the organization it was loaded for: after a
+  // switch, the previous organization's instructions, notes and drafts are
+  // neither shown nor saved under the new one.
+  const [loadedFor, setLoadedFor] = useState<{ organizationId: string | undefined }>();
+  const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
+  const [recordsLoadError, setRecordsLoadError] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
+  const activeOrganizationId = state.activeOrganizationId;
+  const activeOrganization = useRef(activeOrganizationId);
+  activeOrganization.current = activeOrganizationId;
+  const organization = state.organizations?.find((entry) => entry.id === activeOrganizationId);
+  const organizationReady = loadedFor !== undefined && loadedFor.organizationId === activeOrganizationId;
 
-  const adopt = useCallback((next: NovaProfileView) => {
+  const adopt = useCallback((next: NovaProfileView, organizationId: string | undefined) => {
     setView(next);
+    setLoadedFor({ organizationId });
     setName(next.effective.greetingName);
     setInstructions(next.effective.instructions);
     setAddendum(next.effective.addendum);
@@ -108,29 +120,40 @@ export function NovaSettingsSection() {
 
   useEffect(() => {
     let cancelled = false;
+    const organizationId = activeOrganizationId;
+    const current = () => !cancelled && activeOrganization.current === organizationId;
+    setLoadedFor(undefined);
+    setRecords(undefined);
+    setNoteDraft(undefined);
+    setAddendum("");
+    setProfileLoadError(null);
+    setRecordsLoadError(null);
     if (!api?.novaProfile) return;
     void api
       .novaProfile({ action: "get" })
-      .then((next) => { if (!cancelled) adopt(next); })
-      .catch((caught) => { if (!cancelled) setError(hostError(caught)); });
+      .then((next) => { if (current()) adopt(next, organizationId); })
+      .catch((caught) => { if (current()) setProfileLoadError(hostError(caught)); });
     void api
       .novaRecords?.({ action: "list" })
-      .then((next) => { if (!cancelled) setRecords(next); })
-      .catch((caught) => { if (!cancelled) setError(hostError(caught)); });
+      .then((next) => { if (current() && (next.organizationId ?? undefined) === organizationId) setRecords(next); })
+      .catch((caught) => { if (current()) setRecordsLoadError(hostError(caught)); });
     void api
       .listConnectors?.()
       .then((list) => { if (!cancelled) setConnectors(list); })
       .catch(() => { if (!cancelled) setConnectors([]); });
     return () => { cancelled = true; };
-  }, [api, adopt, state.activeOrganizationId]);
+  }, [api, adopt, activeOrganizationId, reload]);
 
   const run = async (request: Parameters<NonNullable<typeof api>["novaProfile"]>[0], done: string) => {
     if (!api?.novaProfile) return;
+    const organizationId = activeOrganization.current;
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
-      adopt(await api.novaProfile(request));
+      const next = await api.novaProfile(request);
+      // A reply for an organization that is no longer active is not shown; the new one loads itself.
+      if (activeOrganization.current === organizationId) adopt(next, organizationId);
       setNotice(done);
       await refresh();
       return true;
@@ -144,11 +167,13 @@ export function NovaSettingsSection() {
   const save = (patch: NovaProfilePatch, done = "Saved.") => run({ action: "save", patch }, done);
   const record = async (request: NovaRecordsRequest, done: string) => {
     if (!api?.novaRecords) return false;
+    const organizationId = activeOrganization.current;
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
-      setRecords(await api.novaRecords(request));
+      const next = await api.novaRecords(request);
+      if (activeOrganization.current === organizationId && (next.organizationId ?? undefined) === organizationId) setRecords(next);
       setNotice(done);
       await refresh();
       return true;
@@ -162,15 +187,30 @@ export function NovaSettingsSection() {
 
   if (!view) {
     return (
-      <div className="max-w-[1040px] text-sm text-[var(--color-text-muted)]" role={error ? "alert" : "status"}>
-        {error ?? "Loading Nova settings."}
+      <div className="max-w-[1040px] text-sm text-[var(--color-text-muted)]" role={profileLoadError ? "alert" : "status"}>
+        {profileLoadError ? `Nova settings could not be loaded: ${profileLoadError}` : "Loading Nova settings."}
+        {profileLoadError ? (
+          <UiButton className="ml-2" size="sm" variant="ghost" onClick={() => setReload((count) => count + 1)}>Try again</UiButton>
+        ) : null}
       </div>
     );
   }
+  const retry = <UiButton size="sm" variant="ghost" onClick={() => setReload((count) => count + 1)}>Try again</UiButton>;
+  /** The state of a panel for the active organization while its data is not loaded. */
+  const notLoaded = (what: string, failure: string | null) =>
+    failure ? (
+      <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-[var(--color-danger)]">
+        <span>{what} for {organization?.name ?? "this organization"} could not be loaded: {failure}</span>
+        {retry}
+      </div>
+    ) : (
+      <span role="status" className="text-sm text-[var(--color-text-muted)]">Loading {what.toLowerCase()} for {organization?.name ?? "this organization"}.</span>
+    );
+  const recordsUnavailable = state.novaRecordsUnavailable;
   const { effective } = view;
   const locked = effective.locked;
   const userRevisions = view.revisions.filter((revision) => revision.scope === "user");
-  const addendumRevisions = view.revisions.filter((revision) => revision.scope === "organization");
+  const addendumRevisions = organizationReady ? view.revisions.filter((revision) => revision.scope === "organization") : [];
   const sendConnectors = NOVA_SEND_CONNECTOR_IDS.map((id) => connectors.find((connector) => connector.descriptor.id === id)).filter((connector): connector is ConnectorSummary => Boolean(connector));
   const sendsPolicy = effective.connectorSendsPolicy;
   const connectorAllowed = (id: string) => {
@@ -281,7 +321,9 @@ export function NovaSettingsSection() {
               : "Select an organization to add instructions that apply to it only."
           }
           control={
-            organization ? (
+            organization && !organizationReady ? (
+              notLoaded("Nova instructions", profileLoadError)
+            ) : organization ? (
               <div className="grid gap-2">
                 <textarea
                   aria-label={`Nova instructions for ${organization.name}`}
@@ -416,7 +458,11 @@ export function NovaSettingsSection() {
                 />
                 {locked.memory ? <SetByItBadge /> : null}
               </div>
-              {organization ? (
+              {organization && recordsUnavailable ? (
+                <span role="alert" className="text-sm text-[var(--color-danger)]">{recordsUnavailable}</span>
+              ) : organization && !records ? (
+                notLoaded("Notes", recordsLoadError)
+              ) : organization ? (
                 <NoteList
                   notes={records?.notes ?? []}
                   draft={noteDraft}
@@ -441,7 +487,11 @@ export function NovaSettingsSection() {
               : "Select an organization to see its follow-ups."
           }
           control={
-            organization ? (
+            organization && recordsUnavailable ? (
+              <span role="alert" className="text-sm text-[var(--color-danger)]">{recordsUnavailable}</span>
+            ) : organization && !records ? (
+              notLoaded("Follow-ups", recordsLoadError)
+            ) : organization ? (
               <FollowUpList
                 followUps={records?.followUps ?? []}
                 busy={busy}
