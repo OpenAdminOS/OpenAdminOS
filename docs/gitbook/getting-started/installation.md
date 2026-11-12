@@ -55,21 +55,31 @@ Service. KDE users can use KWallet. OpenAdminOS refuses Electron's unprotected
 
 ## Nightly builds
 
-Every change to `main` that touches the app is published as a signed nightly
+Every change to `main` that touches the app is published as a nightly
 prerelease, named like `v0.7.3-nightly.20261112175700` (the next stable version
-plus the UTC build time). Nightlies are signed and notarized like stable
-releases but get less testing, so try them on a test organization first.
+plus the UTC build time). The Windows installer is code signed and the macOS
+builds are signed and notarized, like stable releases. The Linux packages are
+unsigned, as in stable releases: verify them against `SHA256SUMS.txt` in the
+release notes. Nightlies get less testing, so try them on a test organization
+first.
 
-- **Turn them on:** Settings > About > **Get nightly builds**. The app then
-  updates to newer nightlies and to newer stable releases. A **Nightly** badge
-  next to the OpenAdminOS name in the sidebar marks a nightly build. Write confirmation and every other safeguard work
-  the same as in a stable release.
-- **Go back to stable:** turn **Get nightly builds** off. The app installs the
-  current stable release, even if it is older than the nightly.
-- **Download one directly:** the [nightly releases on
+- **Turn them on (macOS and Windows):** Settings > About > **Get nightly
+  builds**. The app then updates to newer nightlies and to newer stable
+  releases. A **Nightly** badge next to the OpenAdminOS name in the sidebar
+  marks a nightly build. Write confirmation and every other safeguard work the
+  same as in a stable release.
+- **Go back to stable (macOS and Windows):** turn **Get nightly builds** off.
+  The app installs the current stable release, even if it is older than the
+  nightly.
+- **Linux and the Microsoft Store:** the switch shows **Not available**,
+  because these builds do not update themselves. On Linux, install a nightly
+  package from the [nightly releases on
+  GitHub](https://github.com/OpenAdminOS/OpenAdminOS/releases?q=nightly&expanded=true)
+  by hand, and go back by installing the stable package or the apt version.
+  Nightly Linux packages are attached there only; the apt repository carries
+  stable releases. Store builds stay on the Store's version.
+- **Download one directly:** the same [nightly releases on
   GitHub](https://github.com/OpenAdminOS/OpenAdminOS/releases?q=nightly&expanded=true).
-  Linux packages are attached there only; the apt repository carries stable
-  releases.
 
 Each nightly's release notes describe that build only: the pull requests and
 commits since the previous release, and the changelog entries they added. To
