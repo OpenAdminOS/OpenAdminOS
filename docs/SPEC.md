@@ -640,7 +640,13 @@ change made during a session applies to the next answer of the local reasoning
 prompt. The hosted voice prompt is sent once, at session start; when its
 instructions change, or one of the notes it was given is edited, forgotten or
 paused, the hosted session ends with a message and the next session gets the
-current values (a note added during the session does not end it). Abilities are enforced in code: an action is refused when it is
+current values (a note added during the session does not end it). The main
+process checks this as soon as Nova's settings or notes change, not only at the
+next question, and tells the panel, which closes the audio and the connection
+to OpenAI at once (round 2 review, 2026-11-12). Only notes that fit the hosted
+block are recorded as sent and watched; a settings read that fails ends the
+session too. Deterministic Chat places the block first, closed before all fixed
+rules, so the prompt never ends with the admin's text. Abilities are enforced in code: an action is refused when it is
 prepared and again at the click, a web search before each search, and a settings
 read that fails refuses the action. Nova may propose a settings change on a card
 (add to or replace the instructions, the greeting name, or turning an ability
@@ -650,12 +656,24 @@ click is never overwritten; the card then reports that the settings changed.
 Settings > Nova binds what it loaded, and any unsaved draft, to the organization
 it was loaded for: after a switch, the previous organization's instructions,
 notes and follow-ups are neither shown nor saved, its late replies are ignored,
-and a failed read shows its reason with Try again. Every change is a configuration audit
+and a failed read shows its reason with Try again. A reply stamped for another
+organization is not shown, nothing is saved while the active organization's
+settings did not load, and a save still in flight after a switch shows no result
+under the new organization. A save keeps unsaved drafts of the other text fields.
+Notes and follow-ups refresh while the page is open when they change elsewhere.
+Sends per connector show the value the click check uses, with the IT policy
+applied (`connectorSendStates`); a connector list that cannot be read shows its
+reason with Try again. A failed move of the voice settings from local storage
+says so in Nova with Try again and keeps the stored values. Every change is a configuration audit
 event: `nova.settings-changed` (the greeting name is recorded as changed, not by
-value), `nova.instructions-changed` and `nova.instructions-reverted` with the
-full text, its length and SHA-256, `nova.capabilities-changed`,
+value; setting the default voice mode on an unset one records nothing),
+`nova.instructions-changed` and `nova.instructions-reverted` with the
+full text, its length and SHA-256 (clearing an unset text, which ends an
+unlocked IT default, is recorded), `nova.capabilities-changed`,
 `nova.shortcut-saved` and `nova.shortcut-deleted`, `nova.memory-paused` and
-`nova.memory-resumed`. Audit exports carry the full instruction text
+`nova.memory-resumed`. Settings and capability events carry `via`
+(`settings`, `nova-proposal` for a change confirmed on a Nova card, `migration`),
+from `novaProfile.lastChange`. Audit exports carry the full instruction text
 (maintainer decision, 2026-11-12). Disconnect removes the organization's
 instructions and their versions.
 
@@ -675,13 +693,20 @@ organization is disconnected (retention as recommended and approved,
 first and at most 2,000 characters, join the profile block of both prompts. With
 the IT policy key `novaMemory: "off"` or the pause, Nova reads none and keeps no
 new ones; existing notes are kept, listed and not used. While the policy turns
-notes off, the main process refuses to confirm or edit a note; forgetting stays
-allowed. When `openadminos.db` cannot be opened, notes and follow-ups are off
+notes off, the main process refuses to confirm or edit a note and to change the
+pause; forgetting stays allowed. A proposal past its 30 days cannot be confirmed
+or edited, also from a view opened earlier. A card's click confirms the note only
+while its organization is still active, checked with no wait before the write.
+When the notes cannot be read at the start of a session, Nova says so in the
+panel and answers without them. When `openadminos.db` cannot be opened, notes and follow-ups are off
 with a designed message in Settings > Nova and in Nova's answers, opening is
 tried again at most once a minute, and the rest of the app starts. Audit events, source
 `nova`, with the note text: `nova.memory-note-proposed`, `-confirmed`,
 `-edited` (with the previous text), `-forgotten`, `-expired`, and `-purged`
-(recorded before the rows are deleted on Disconnect, without the text).
+(recorded before the rows are deleted on Disconnect, without the text). The
+purge events must be in the audit log or the pending file on disk before the
+rows go; otherwise the Disconnect cleanup step fails and is retried, and nothing
+is deleted unaudited. The same holds for pending follow-ups cancelled by Disconnect.
 
 **Follow-ups.** "Check compliance again in an hour" and "in 30 minutes, look at
 the failed installs again" become one read-only question asked once more, in the
@@ -698,9 +723,17 @@ The 24-hour count reads a table of creation times only (`nova_followup_creations
 no tenant data), so pruning finished follow-ups and Disconnect do not reset it.
 The scheduler tick (and a background scheduler launch) runs a due follow-up only
 while its organization is active and connected and the provider and model are
-the ones it was set with, and the IT policy still allows that provider and model;
-otherwise it is `skipped-organization` or `skipped-provider` (with the reason
-when the policy refuses it) and does not start. One more than an hour late is `missed`;
+the ones it was set with, running where they ran then (on this device or not,
+and for Ollama and LM Studio at the same endpoint, stored with the follow-up),
+and the IT policy still allows that provider and model; otherwise it is
+`skipped-organization` or `skipped-provider` (with the reason when the policy
+refuses it or the provider moved) and does not start. A loopback Ollama later
+pointed at a remote host under the same id therefore gets no question (round 2
+review, 2026-11-12). A hosted follow-up runs with the consent given by the click,
+its time stored with it; no new consent is minted when it fires. The decision is
+made on the pending row: a skipped or missed follow-up is never marked running
+and has no started event; one that runs is claimed and records `started` right
+before Chat is asked. One more than an hour late is `missed`;
 one cut off by a quit is `failed`. A run goes through Chat, which is strictly
 read-only, under the tenant lease, with a five-minute bound, into a new Chat
 conversation titled "Follow-up: ...". It never sends to a connector. Settings >
@@ -719,7 +752,7 @@ Nova says so, and without an active organization it refuses.
 **Shortcuts.** Named read-only questions (at most 20, a name of 40 and a question
 of 600 characters), saved only when the question reads as read-only. "Run
 morning check" by voice, or the command palette entry "Nova: run ...", runs the
-saved question on the research path only; with no session the palette entry waits
+saved question on the research path only, after checking it again; with no session the palette entry waits
 until the admin starts one, so consent stays a click.
 
 **IT policy.** Four keys in `policy.json`: `novaVoiceModes` (the voice modes
@@ -734,18 +767,25 @@ and lists are always enforced, `true` is a lockable default) and `novaMemory`
 **Consent.** A hosted voice session records a `hosted-provider.consent` with
 source `nova-voice` before the OpenAI request, naming the voice model, the
 reasoning provider and model, and whether the standing instructions
-(`includesProfile`) and confirmed notes (`includesMemory`) go to OpenAI in that
-session. The consent checkbox says that instructions and confirmed notes go to
-OpenAI too.
+(`includesProfile`) and confirmed notes (`includesMemory`, only notes that fit
+the block) go to OpenAI in that session. The consent checkbox says that
+instructions and confirmed notes go to OpenAI too. When neither the Chat
+database nor the audit log, or its pending file on disk, kept the consent, the
+session does not start and nothing is sent. A send through a connector Nova may
+not use is refused before any tenant research for the message, and a confirmed
+run opens its page only while Nova may open pages.
 
 **Unkept promises.** A final answer that is only a progress message ("I'll check
 that now.", "Okay, let me look.", "One moment") gets a repair turn, at most twice
 per answer, in Chat (the tool loop and deterministic retrieval), Agent Team
-answers and voice. Every sentence must be a first-person promise or an
-acknowledgement; any result, offer, number or list, and a result clause before
-the promise in the same sentence, make it a finished answer ("All devices are
-compliant. I'll check the app installs next." is not nudged, and neither is
-"let's" guidance). After two, Chat and Agent Team keep the last answer, and voice
+answers and voice. Every clause (sentences split at commas, semicolons, colons,
+dashes and "but", "while" and the like) must be a first-person promise or an
+acknowledgement; a result clause before or after the promise, an offer or a
+list make it a finished answer ("All devices are compliant. I'll check the app
+installs next.", "I'll check the apps next, but the devices are compliant.",
+"Let me verify: all Macs are compliant." are not nudged, and neither is "let's"
+guidance). Numbers inside the announced work do not count as a result ("I'll
+check the Windows 11 devices now." is nudged). After two, Chat and Agent Team keep the last answer, and voice
 on the tool loop keeps its fallback to retrieved evidence. A voice repair that
 would exceed the voice prompt budget is not sent. Each Agent Team model call has
 its own one-minute bound, so an answer takes at most three minutes with two
