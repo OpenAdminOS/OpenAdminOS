@@ -138,7 +138,7 @@ describe("Nova notes and follow-ups in the store", () => {
 
   it("marks a late follow-up missed, cancels a pending one, and refuses one for another provider", async () => {
     let now = new Date("2026-11-12T10:00:00.000Z");
-    const { store, dir } = await makeStore({ clock: () => now });
+    const { store, dir, dbPath } = await makeStore({ clock: () => now });
     try {
       const host = store.novaFollowUpsHost();
       const state = await store.getAppState();
@@ -148,8 +148,10 @@ describe("Nova notes and follow-ups in the store", () => {
       assert.equal(cancelled.organizationId, "org-contoso");
       assert.equal((await store.getAppState()).novaFollowUpsPending, 1);
       // Another organization's follow-up is not counted under this one.
-      const other = (store as unknown as { novaFollowUps: { create(input: Record<string, unknown>): unknown } }).novaFollowUps;
-      other.create({ tenantId: "tenant-other", organizationId: "org-other", question: "Check apps", providerId, ...(model ? { model } : {}), delayMinutes: 5, providerLocal: true });
+      const db = new DatabaseSync(dbPath);
+      db.prepare("INSERT INTO nova_followups (id, tenant_id, organization_id, question, provider_id, model, due_at, status, created_at, provider_local) VALUES ('followup_other', 'tenant-other', 'org-other', 'Check apps', ?, ?, ?, 'pending', ?, 1)")
+        .run(providerId, model ?? null, new Date(now.getTime() + 5 * 60_000).toISOString(), now.toISOString());
+      db.close();
       assert.equal((await store.getAppState()).novaFollowUpsPending, 1);
       const late = await host.create({ tenantId: contoso.id, question: "Check apps", providerId, ...(model ? { model } : {}), delayMinutes: 1 });
       // Only the late one is due at first; it is more than an hour past its time.
