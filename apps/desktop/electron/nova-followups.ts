@@ -257,8 +257,10 @@ export class NovaFollowUps {
       .all(tenantId) as unknown as FollowUpRow[]).map(followUpOf);
   }
 
-  pendingCount(): number {
-    return (this.db.prepare("SELECT COUNT(*) AS count FROM nova_followups WHERE status IN ('pending', 'running')").get() as { count: number }).count;
+  /** Follow-ups still to come; with `tenantId`, only that organization's, for the panel of the active one. */
+  pendingCount(tenantId?: string): number {
+    if (tenantId === undefined) return (this.db.prepare("SELECT COUNT(*) AS count FROM nova_followups WHERE status IN ('pending', 'running')").get() as { count: number }).count;
+    return (this.db.prepare("SELECT COUNT(*) AS count FROM nova_followups WHERE status IN ('pending', 'running') AND tenant_id = ?").get(tenantId) as { count: number }).count;
   }
 
   cancel(id: string): NovaFollowUp {

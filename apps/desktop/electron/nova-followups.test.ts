@@ -84,6 +84,17 @@ describe("Nova follow-ups", () => {
     assert.equal(store.pendingCount(), 0);
   });
 
+  it("counts pending follow-ups per organization for the panel", () => {
+    const { store } = followUps();
+    store.create(input);
+    store.create(input);
+    store.create({ ...input, tenantId: "t2", organizationId: "o2" });
+    assert.equal(store.pendingCount("t1"), 2);
+    assert.equal(store.pendingCount("t2"), 1);
+    assert.equal(store.pendingCount("t3"), 0);
+    assert.equal(store.pendingCount(), 3);
+  });
+
   it("marks a follow-up cut off by a quit as failed", () => {
     const { store, advance } = followUps();
     const followUp = store.create({ ...input, delayMinutes: 1 });

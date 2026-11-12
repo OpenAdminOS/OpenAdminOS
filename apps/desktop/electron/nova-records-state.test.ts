@@ -147,6 +147,10 @@ describe("Nova notes and follow-ups in the store", () => {
       const cancelled = await host.create({ tenantId: contoso.id, question: "Check compliance", providerId, ...(model ? { model } : {}), delayMinutes: 5 });
       assert.equal(cancelled.organizationId, "org-contoso");
       assert.equal((await store.getAppState()).novaFollowUpsPending, 1);
+      // Another organization's follow-up is not counted under this one.
+      const other = (store as unknown as { novaFollowUps: { create(input: Record<string, unknown>): unknown } }).novaFollowUps;
+      other.create({ tenantId: "tenant-other", organizationId: "org-other", question: "Check apps", providerId, ...(model ? { model } : {}), delayMinutes: 5, providerLocal: true });
+      assert.equal((await store.getAppState()).novaFollowUpsPending, 1);
       const late = await host.create({ tenantId: contoso.id, question: "Check apps", providerId, ...(model ? { model } : {}), delayMinutes: 1 });
       // Only the late one is due at first; it is more than an hour past its time.
       now = new Date("2026-11-12T11:02:00.000Z");

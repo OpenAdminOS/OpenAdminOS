@@ -3728,7 +3728,8 @@ export class AppStateStore {
     }
     state.novaProfile = effectiveNovaProfile(persisted.novaProfile, this.managedPolicy, state.activeOrganizationId);
     try {
-      const pending = this.novaFollowUps.pendingCount();
+      // The badge belongs to the organization it is shown under.
+      const pending = persisted.activeTenantId ? this.novaFollowUps.pendingCount(persisted.activeTenantId) : 0;
       if (pending > 0) state.novaFollowUpsPending = pending;
     } catch (error) {
       if (error instanceof NovaMemoryError) state.novaRecordsUnavailable = error.message;
