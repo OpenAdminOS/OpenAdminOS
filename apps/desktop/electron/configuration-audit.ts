@@ -563,11 +563,11 @@ function novaSeeds(
     if (before && before.name === shortcut.name && before.prompt === shortcut.prompt) continue;
     seeds.push({
       type: "nova.shortcut-saved",
-      details: { shortcutId: shortcut.id, name: shortcut.name, prompt: shortcut.prompt, updated: before !== undefined },
+      details: { shortcutId: shortcut.id, name: shortcut.name, prompt: shortcut.prompt, updated: before !== undefined, via },
     });
   }
   for (const shortcut of previous?.shortcuts ?? []) {
-    if (!afterShortcuts.has(shortcut.id)) seeds.push({ type: "nova.shortcut-deleted", details: { shortcutId: shortcut.id, name: shortcut.name } });
+    if (!afterShortcuts.has(shortcut.id)) seeds.push({ type: "nova.shortcut-deleted", details: { shortcutId: shortcut.id, name: shortcut.name, via } });
   }
   if ((previous?.memoryPaused ?? false) !== (next?.memoryPaused ?? false)) {
     seeds.push({ type: next?.memoryPaused ? "nova.memory-paused" : "nova.memory-resumed", details: {} });
@@ -665,8 +665,8 @@ const DETAIL_KEYS: Readonly<Record<ConfigurationAuditEventType, readonly string[
   "nova.instructions-changed": [...NOVA_INSTRUCTION_DETAIL_KEYS],
   "nova.instructions-reverted": [...NOVA_INSTRUCTION_DETAIL_KEYS],
   "nova.capabilities-changed": ["enabled", "disabled", "via"],
-  "nova.shortcut-saved": ["shortcutId", "name", "prompt", "updated"],
-  "nova.shortcut-deleted": ["shortcutId", "name"],
+  "nova.shortcut-saved": ["shortcutId", "name", "prompt", "updated", "via"],
+  "nova.shortcut-deleted": ["shortcutId", "name", "via"],
   "nova.memory-paused": [],
   "nova.memory-resumed": [],
 };

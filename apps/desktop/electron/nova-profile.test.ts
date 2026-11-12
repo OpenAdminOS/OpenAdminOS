@@ -27,6 +27,7 @@ import {
   sanitizeNovaProfile,
   NOVA_PROFILE_BLOCK_INTRO,
   novaProfilePromptBlock,
+  novaProfilePromptParts,
 } from "./nova-profile.js";
 import { AppStateStore } from "./state.js";
 
@@ -421,6 +422,7 @@ describe("Nova settings in the store", () => {
       assert.equal(events[2]!.details.scope, "organization");
       assert.deepEqual(events[3]!.details, { enabled: [], disabled: ["webSearch", "connectorSends:slack"], via: "settings" });
       assert.equal(events[4]!.details.prompt, "Which devices are noncompliant?");
+      assert.equal(events[4]!.details.via, "settings");
 
       const exported = await fixture.store.exportAuditLog({ format: "json" });
       const document = JSON.parse(exported.content) as { events: Array<{ type: string; details: Record<string, unknown> }> };
@@ -536,3 +538,16 @@ describe("Nova profile prompt block", () => {
     assert.equal(novaShortcutPromptIssue("Add to my instructions: answer in German"), NOVA_SHORTCUT_NOT_READ_ONLY);
   });
 });
+
+describe("the profile block for the consent record", () => {
+  it("says admin text was sent only when instructions survived clipping", () => {
+    const effective = effectiveNovaProfile({ instructions: "Answer in German. ".repeat(40).trim() }, undefined);
+    assert.equal(novaProfilePromptParts({ effective }).adminText, true);
+    // A limit that leaves only the fixed introduction sends no admin text.
+    const clipped = novaProfilePromptParts({ effective, byteLimit: Buffer.byteLength(NOVA_PROFILE_BLOCK_INTRO) + 4 });
+    assert.ok(clipped.block.length > 0);
+    assert.equal(clipped.adminText, false);
+    assert.equal(novaProfilePromptParts({ effective: effectiveNovaProfile(undefined, undefined), notes: ["Kiosks are in Berlin"] }).adminText, false);
+  });
+});
+

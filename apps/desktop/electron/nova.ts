@@ -241,7 +241,7 @@ export class NovaService {
       const { settings, profile, notesUnreadable } = await this.readSessionProfile(state.activeTenantId);
       if (generation !== this.generation) throw new Error("Nova was stopped or this question was replaced. Start a new conversation.");
       // Only the notes that fit the block are sent, recorded in the consent and watched for changes.
-      const { block: profileBlock, notes } = profile ? novaProfilePromptParts({ ...profile, byteLimit: NOVA_VOICE_PROFILE_BYTE_LIMIT }) : { block: "", notes: [] as string[] };
+      const { block: profileBlock, notes, adminText } = profile ? novaProfilePromptParts({ ...profile, byteLimit: NOVA_VOICE_PROFILE_BYTE_LIMIT }) : { block: "", notes: [] as string[], adminText: false };
       const notice = notesUnreadable ? { notice: NOVA_NOTES_UNREADABLE_NOTICE } : {};
       const greetingName = settings?.effective.greetingName || (typeof input.name === "string" ? input.name.trim().slice(0, 40) : "");
       this.session?.controller.abort();
@@ -293,7 +293,7 @@ export class NovaService {
             voiceModel: NOVA_VOICE_MODEL,
             reasoningProviderId: session.providerId,
             ...(session.model ? { reasoningModel: session.model } : {}),
-            includesProfile: profileBlock.length > 0,
+            includesProfile: adminText,
             includesMemory: notes.length > 0,
           });
         }

@@ -643,11 +643,11 @@ export function novaProfilePromptBlock(input: NovaProfilePromptInput): string {
  * The block of `novaProfilePromptBlock` with the notes that survived the
  * byte limit, so a consent or a hosted session records only what it sent.
  */
-export function novaProfilePromptParts(input: NovaProfilePromptInput): { block: string; notes: string[] } {
+export function novaProfilePromptParts(input: NovaProfilePromptInput): { block: string; notes: string[]; adminText: boolean } {
   const instructions = input.effective.instructions.trim();
   let addendum = input.effective.addendum.trim();
   const notes = (input.notes ?? []).map((note) => note.trim()).filter(Boolean);
-  if (!instructions && !addendum && notes.length === 0) return { block: "", notes: [] };
+  if (!instructions && !addendum && notes.length === 0) return { block: "", notes: [], adminText: false };
   let standing = instructions;
   const render = () => {
     const data: Record<string, unknown> = {};
@@ -658,7 +658,9 @@ export function novaProfilePromptParts(input: NovaProfilePromptInput): { block: 
   };
   const limit = input.byteLimit;
   let block = render();
-  if (limit === undefined || Buffer.byteLength(block) <= limit) return { block, notes };
+  // Whether instructions or the organization's instructions survived clipping, for the consent record.
+  const adminText = () => Boolean(standing || addendum);
+  if (limit === undefined || Buffer.byteLength(block) <= limit) return { block, notes, adminText: adminText() };
   while (notes.length > 0 && Buffer.byteLength(block) > limit) {
     notes.pop();
     block = render();
@@ -673,5 +675,5 @@ export function novaProfilePromptParts(input: NovaProfilePromptInput): { block: 
     clip(over * 2);
     block = render();
   }
-  return Buffer.byteLength(block) <= limit ? { block, notes } : { block: clipToBytes(NOVA_PROFILE_BLOCK_INTRO, limit), notes: [] };
+  return Buffer.byteLength(block) <= limit ? { block, notes, adminText: adminText() } : { block: clipToBytes(NOVA_PROFILE_BLOCK_INTRO, limit), notes: [], adminText: false };
 }
