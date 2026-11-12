@@ -214,7 +214,7 @@ describe("Settings, Nova, notes and follow-ups", () => {
       organizationId: "org-a",
       notes: [],
       followUps: [
-        { id: "p1", tenantId: "tenant-a", question: "Check policy", providerId: "codex", dueAt: "2026-11-12T09:00:00.000Z", status: "skipped-provider", createdAt: "2026-11-12T08:00:00.000Z", finishedAt: "2026-11-12T09:00:30.000Z", reason: "Your IT department no longer allows this provider or model. Nothing was asked." },
+        { id: "p1", tenantId: "tenant-a", question: "Check policy", providerId: "openai", dueAt: "2026-11-12T09:00:00.000Z", status: "skipped-provider", createdAt: "2026-11-12T08:00:00.000Z", finishedAt: "2026-11-12T09:00:30.000Z", reason: "Your IT department no longer allows this provider or model. Nothing was asked." },
         { id: "p2", tenantId: "tenant-a", question: "Check endpoint", providerId: "ollama", dueAt: "2026-11-12T09:00:00.000Z", status: "skipped-provider", createdAt: "2026-11-12T08:00:00.000Z", finishedAt: "2026-11-12T09:00:30.000Z", reason: "The provider now runs somewhere else than when this follow-up was set, for example off this device. Nothing was asked." },
         { id: "p3", tenantId: "tenant-a", question: "Check model", providerId: "ollama", dueAt: "2026-11-12T09:00:00.000Z", status: "skipped-provider", createdAt: "2026-11-12T08:00:00.000Z", finishedAt: "2026-11-12T09:00:30.000Z" },
       ],
