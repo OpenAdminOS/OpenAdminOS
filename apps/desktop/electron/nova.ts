@@ -90,6 +90,8 @@ export class NovaService {
     reasoningIsLocal: boolean;
     /** Where the reasoning provider was reached at start, for providers that can be pointed elsewhere. */
     endpoint?: string;
+    /** The sign-in the organization was connected with at start; a reconnect replaces it. */
+    connection?: string;
     mode: "openai" | "local";
     conversationId?: string;
     lastEvidence?: string;
@@ -305,7 +307,8 @@ export class NovaService {
       // The profile shapes the prompts of this session; without it, Nova does not start.
       // The session belongs to the organization and provider active when it was asked for.
       const endpoint = await this.providerEndpoint(state.activeProviderId);
-      const identity = { tenantId: state.activeTenantId, providerId: state.activeProviderId, model: selectedNovaModel(state), reasoningIsLocal: provider?.isLocal === true, ...(endpoint ? { endpoint } : {}) };
+      const connection = tenantConnection(state, state.activeTenantId);
+      const identity = { tenantId: state.activeTenantId, providerId: state.activeProviderId, model: selectedNovaModel(state), reasoningIsLocal: provider?.isLocal === true, ...(endpoint ? { endpoint } : {}), ...(connection ? { connection } : {}) };
       const { settings, profile, notesUnreadable } = await this.readSessionProfile(identity.tenantId);
       if (generation !== this.generation) throw new Error("Nova was stopped or this question was replaced. Start a new conversation.");
       // Only the notes that fit the block are sent, recorded in the consent and watched for changes.
@@ -1015,9 +1018,21 @@ function listInWords(items: readonly string[]): string {
  * never move or replace a fixed line; the ability lines follow the
  * settings, and the code checks the same settings again on every action.
  */
+/**
+ * The sign-in an organization is connected with: its connection id, which
+ * every connect and reconnect replaces, and the account. A tenant
+ * connected before connection ids were recorded has only the account.
+ */
+function tenantConnection(state: AppState, tenantId: string): string | undefined {
+  const tenant = state.tenants.find((entry) => entry.id === tenantId);
+  if (!tenant) return undefined;
+  const parts = [tenant.connectionId ?? "", tenant.homeAccountId ?? "", tenant.username ?? ""];
+  return parts.some(Boolean) ? JSON.stringify(parts) : undefined;
+}
+
 /** Whether a session's organization, connection or reasoning provider is no longer what it started with. */
 function sessionContextDiffers(
-  session: { tenantId: string; providerId: AppState["activeProviderId"]; model?: string; reasoningIsLocal: boolean; endpoint?: string },
+  session: { tenantId: string; providerId: AppState["activeProviderId"]; model?: string; reasoningIsLocal: boolean; endpoint?: string; connection?: string },
   state: AppState,
   writableActiveTenantId: string | undefined,
   endpoint: string | undefined,
@@ -1026,6 +1041,7 @@ function sessionContextDiffers(
     state.activeTenantId !== session.tenantId ||
     writableActiveTenantId !== session.tenantId ||
     !state.tenants.some((tenant) => tenant.id === session.tenantId) ||
+    tenantConnection(state, session.tenantId) !== session.connection ||
     state.activeProviderId !== session.providerId ||
     selectedNovaModel(state) !== session.model ||
     state.providers.find((p) => p.id === session.providerId)?.isLocal !== session.reasoningIsLocal ||

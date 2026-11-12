@@ -409,6 +409,33 @@ describe("Nova hosted sessions after a settings change, without another question
     await assert.rejects(f.nova.handle({ action: "answer", sessionId, text: "How many devices?" }));
   });
 
+  it("ends a live session when its organization is connected again with another sign-in", async () => {
+    const f = fixture();
+    const tenants = (f.state as unknown as { tenants: Array<Record<string, unknown>> }).tenants;
+    tenants[0] = { ...tenants[0], connectionId: "connection-1", username: "admin@northwind.example", homeAccountId: "home-1" };
+    const sessionId = await start(f, "openai");
+    assert.equal(await f.nova.sessionContextChanged(), false, "nothing changed");
+    tenants[0] = { ...tenants[0], connectionId: "connection-2", username: "other@northwind.example", homeAccountId: "home-2" };
+    assert.equal(await f.nova.sessionContextChanged(), true);
+    await assert.rejects(f.nova.handle({ action: "answer", sessionId, text: "How many devices?" }));
+  });
+
+  it("sends nothing when the organization is connected again while a hosted start reads its connectors", async () => {
+    const f = fixture();
+    const tenants = (f.state as unknown as { tenants: Array<Record<string, unknown>> }).tenants;
+    tenants[0] = { ...tenants[0], connectionId: "connection-1", username: "admin@northwind.example", homeAccountId: "home-1" };
+    let release: (() => void) | undefined;
+    f.host.connectors = async () => { await new Promise<void>((resolve) => { release = resolve; }); return []; };
+    const starting = start(f, "openai");
+    for (let index = 0; index < 100 && !release; index += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.ok(release, "the start is reading its connectors");
+    tenants[0] = { ...tenants[0], connectionId: "connection-2" };
+    release!();
+    await assert.rejects(starting, /tenant or provider changed/);
+    assert.equal(f.requests.some((request) => request.url.includes("/live/sessions")), false, "nothing went to OpenAI");
+    assert.equal(f.consents.length, 0);
+  });
+
   it("says the settings could not be read when a shortcut is asked for and they cannot be", async () => {
     const f = fixture({ profile: { shortcuts: [{ id: "s1", name: "Morning check", prompt: "How many devices are noncompliant?", createdAt: "2026-11-12T08:00:00.000Z" }] } });
     const sessionId = await start(f);
