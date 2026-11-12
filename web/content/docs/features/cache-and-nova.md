@@ -247,7 +247,11 @@ off, never on.
 
 Values set by your IT department show **Set by your IT department** and cannot be
 changed here. In hosted voice, your instructions and the organization's confirmed
-notes go to OpenAI with the conversation; the consent checkbox says so.
+notes go to OpenAI with the conversation; the consent checkbox says so. OpenAI
+receives them when the session starts. If you then change the instructions, or
+edit, forget or pause a note it received, Nova ends the hosted session and asks
+you to start it again, so the next session uses the current values. Local voice
+reads the current values before every answer.
 
 ### Notes
 
@@ -255,7 +259,8 @@ Say "remember that the Berlin office uses the Kiosk profile". Nova shows the not
 a card. Until you click **Confirm note** it waits for review in **Settings > Nova**
 and Nova does not use it. Nova reads confirmed notes only in the organization they
 belong to. In Settings you can confirm, edit or forget a note, or pause notes.
-A note that is not confirmed within 30 days is removed. Disconnecting the
+A note that is not confirmed within 30 days is removed. While your IT department
+turns notes off, you can forget notes but not confirm or edit them. Disconnecting the
 organization deletes its notes. Each organization can have 200 notes of up to 300
 characters.
 
@@ -267,7 +272,8 @@ the time and the provider on a card, and sets the follow-up when you click
 "Follow-up: ...". Sending the result anywhere still needs your click.
 
 A follow-up does not run when another organization is active, the organization is
-disconnected, or the provider or model changed; Settings > Nova shows why. One that
+disconnected, the provider or model changed, or your IT department no longer
+allows that provider or model; Settings > Nova shows why. One that
 could not run within an hour of its time, for example because the app was closed,
 is shown as missed. You can have 5 pending follow-ups and set 20 in a day, from 1
 minute to 7 days ahead. Cancel one in **Settings > Nova**.

@@ -635,11 +635,22 @@ and of each organization's instructions, are kept and can be restored. The
 profile reaches both prompts, hosted voice and the local reasoning prompt, as a
 JSON data block placed before the fixed rules and introduced as data that cannot
 grant abilities, approve or start actions, choose destinations, or change the
-rules after it. Abilities are enforced in code: an action is refused when it is
+rules after it. The profile and notes are read again before every answer, so a
+change made during a session applies to the next answer of the local reasoning
+prompt. The hosted voice prompt is sent once, at session start; when its
+instructions change, or one of the notes it was given is edited, forgotten or
+paused, the hosted session ends with a message and the next session gets the
+current values (a note added during the session does not end it). Abilities are enforced in code: an action is refused when it is
 prepared and again at the click, a web search before each search, and a settings
 read that fails refuses the action. Nova may propose a settings change on a card
 (add to or replace the instructions, the greeting name, or turning an ability
-off); it can never turn an ability on. Every change is a configuration audit
+off); it can never turn an ability on. The card's value is compared with the
+stored one again inside the write, so a Settings save between the card and the
+click is never overwritten; the card then reports that the settings changed.
+Settings > Nova binds what it loaded, and any unsaved draft, to the organization
+it was loaded for: after a switch, the previous organization's instructions,
+notes and follow-ups are neither shown nor saved, its late replies are ignored,
+and a failed read shows its reason with Try again. Every change is a configuration audit
 event: `nova.settings-changed` (the greeting name is recorded as changed, not by
 value), `nova.instructions-changed` and `nova.instructions-reverted` with the
 full text, its length and SHA-256, `nova.capabilities-changed`,
@@ -653,7 +664,8 @@ instructions and their versions.
 Each note records who worded it (`user-said` for "remember that ...",
 `nova-proposed` when the command classifier worded it), the Nova session, its
 Chat conversation and the turn. Preparing the card stores the note as
-`proposed`; it reaches no prompt. Only the click confirms it; Cancel forgets it;
+`proposed`; it reaches no prompt. Only the click confirms it; Cancel forgets it while it is still proposed (a
+note confirmed or edited in Settings meanwhile stays);
 an unanswered card leaves it proposed for review in Settings > Nova, where notes
 can be confirmed, edited (counts as reviewed), forgotten, and paused. A proposed
 note not confirmed within 30 days expires (checked on the scheduler tick and when
@@ -662,7 +674,11 @@ organization is disconnected (retention as recommended and approved,
 2026-11-12). Confirmed and edited notes of the session's organization, newest
 first and at most 2,000 characters, join the profile block of both prompts. With
 the IT policy key `novaMemory: "off"` or the pause, Nova reads none and keeps no
-new ones; existing notes are kept, listed and not used. Audit events, source
+new ones; existing notes are kept, listed and not used. While the policy turns
+notes off, the main process refuses to confirm or edit a note; forgetting stays
+allowed. When `openadminos.db` cannot be opened, notes and follow-ups are off
+with a designed message in Settings > Nova and in Nova's answers, opening is
+tried again at most once a minute, and the rest of the app starts. Audit events, source
 `nova`, with the note text: `nova.memory-note-proposed`, `-confirmed`,
 `-edited` (with the previous text), `-forgotten`, `-expired`, and `-purged`
 (recorded before the rows are deleted on Disconnect, without the text).
@@ -673,21 +689,26 @@ same organization. Only this form is accepted; repeating schedules and scheduled
 sends or runs still ask to clarify, and a question that would send, run, change,
 schedule or remember is refused. The card shows the organization, the question,
 the time, the provider and model, and "Read-only. Sending the result anywhere
-still needs your click." The click sets it (`nova_followups` in
+still needs your click." The question's length and the limits are checked before
+the card is shown, and again at the click. The click sets it (`nova_followups` in
 `openadminos.db`) and, for a hosted provider, records a `hosted-provider.consent`
 with source `nova-followup`. Limits, per device: 1 minute to 7 days ahead, at
 most 5 pending, at most 20 set in 24 hours, each refused with its own message.
+The 24-hour count reads a table of creation times only (`nova_followup_creations`,
+no tenant data), so pruning finished follow-ups and Disconnect do not reset it.
 The scheduler tick (and a background scheduler launch) runs a due follow-up only
 while its organization is active and connected and the provider and model are
-the ones it was set with; otherwise it is `skipped-organization` or
-`skipped-provider` and does not start. One more than an hour late is `missed`;
+the ones it was set with, and the IT policy still allows that provider and model;
+otherwise it is `skipped-organization` or `skipped-provider` (with the reason
+when the policy refuses it) and does not start. One more than an hour late is `missed`;
 one cut off by a quit is `failed`. A run goes through Chat, which is strictly
 read-only, under the tenant lease, with a five-minute bound, into a new Chat
 conversation titled "Follow-up: ...". It never sends to a connector. Settings >
 Nova lists follow-ups with their state, a link to the answer, and Cancel; the
-Nova panel shows how many are pending. Audit events, source `nova` and initiator
-`schedule`: `nova.followup.created`, `.started`, `.completed`, `.cancelled`,
-`.skipped`, `.missed`, `.failed`. Disconnect deletes them, recording pending ones
+Nova panel shows how many are pending. Audit events, source `nova`:
+`nova.followup.created` and `.cancelled` with initiator `person` (a click set or
+cancelled it, also through Disconnect), and `.started`, `.completed`, `.skipped`,
+`.missed`, `.failed` with initiator `schedule` (round 1 review, 2026-11-12). Disconnect deletes them, recording pending ones
 as cancelled first.
 
 **What needs me.** "What needs me?" and close wordings list the active
@@ -717,11 +738,18 @@ reasoning provider and model, and whether the standing instructions
 session. The consent checkbox says that instructions and confirmed notes go to
 OpenAI too.
 
-**Unkept promises.** A final answer that only promises work ("I'll check that
-now.", "One moment") gets a repair turn, at most twice per answer, in Chat,
-Agent Team answers and voice; an answer that reports completed work and mentions
-a later step does not. After two, Chat and Agent Team keep the last answer, and
-voice keeps its fallback to retrieved evidence.
+**Unkept promises.** A final answer that is only a progress message ("I'll check
+that now.", "Okay, let me look.", "One moment") gets a repair turn, at most twice
+per answer, in Chat (the tool loop and deterministic retrieval), Agent Team
+answers and voice. Every sentence must be a first-person promise or an
+acknowledgement; any result, offer, number or list, and a result clause before
+the promise in the same sentence, make it a finished answer ("All devices are
+compliant. I'll check the app installs next." is not nudged, and neither is
+"let's" guidance). After two, Chat and Agent Team keep the last answer, and voice
+on the tool loop keeps its fallback to retrieved evidence. A voice repair that
+would exceed the voice prompt budget is not sent. Each Agent Team model call has
+its own one-minute bound, so an answer takes at most three minutes with two
+repairs.
 
 
 ### Agent contract
