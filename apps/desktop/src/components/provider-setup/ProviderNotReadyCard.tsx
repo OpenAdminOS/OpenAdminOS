@@ -299,6 +299,8 @@ function providerGuideUrl(id: ProviderSummary["id"]): string | undefined {
       return "https://support.apple.com/121115";
     case "lm-studio":
       return "https://lmstudio.ai";
+    case "lemonade":
+      return "https://lemonade-server.ai";
     case "anthropic":
       return "https://docs.anthropic.com/en/docs/claude-code/overview";
     case "openai":

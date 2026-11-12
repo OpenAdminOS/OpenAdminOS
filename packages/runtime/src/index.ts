@@ -95,6 +95,16 @@ export {
   type LmStudioProviderOptions,
 } from "./llm-lm-studio.js";
 export {
+  classifyLemonadeEndpoint,
+  createLemonadeLlm,
+  lemonadeChatModelIds,
+  probeLemonadeLlm,
+  resolveLemonadeEndpoint,
+  type LemonadeEndpointTrust,
+  type LemonadeProbeResult,
+  type LemonadeProviderOptions,
+} from "./llm-lemonade.js";
+export {
   createAzureOpenAiLlm,
   probeAzureOpenAi,
   type AzureOpenAiProbeResult,

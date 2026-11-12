@@ -19,7 +19,7 @@ export type ChoiceAction =
   | "use"
   /** Ollama without a model: set up OpenAdmin 8B. */
   | "get-model"
-  /** LM Studio without a loaded model: scan again after loading one. */
+  /** LM Studio without a loaded model, or Lemonade not running or without a chat model: scan again after fixing it. */
   | "rescan";
 
 export interface ChoiceOption {
@@ -37,7 +37,7 @@ export interface ChoiceOption {
   unavailable?: boolean;
 }
 
-const LOCAL_ORDER: readonly ProviderId[] = ["ollama", "lm-studio", "apple-foundation"];
+const LOCAL_ORDER: readonly ProviderId[] = ["ollama", "lm-studio", "lemonade", "apple-foundation"];
 const HOSTED_ORDER: readonly ProviderId[] = ["anthropic", "openai", "copilot", "gemini", "azure-openai"];
 const order = (id: ProviderId) => {
   const local = LOCAL_ORDER.indexOf(id);
@@ -86,6 +86,9 @@ export function optionsFromProbes(
       const model = outcome && "providerId" in outcome && outcome.providerId === probe.providerId && chosenModel ? chosenModel : probe.models.find(isOpenAdmin8B) ?? probe.models[0];
       if (probe.ready) {
         options.push({ providerId: probe.providerId, name, where: "local", whereLine: MODEL_CHOICE_COPY.localReady(modelDisplayName(model)), state: MODEL_CHOICE_COPY.ready, action: "open", ...(model ? { model } : {}) });
+      } else if (probe.summary === "Installed, not running" && probe.providerId === "lemonade") {
+        // The scan names the command for this OS.
+        options.push({ providerId: "lemonade", name, where: "local", whereLine: MODEL_CHOICE_COPY.localStartLemonade(probe.facts[0]), state: MODEL_CHOICE_COPY.notRunning, action: "rescan" });
       } else if (probe.summary === "Installed, not running") {
         options.push({ providerId: probe.providerId, name, where: "local", whereLine: MODEL_CHOICE_COPY.localStart(probe.providerId), state: MODEL_CHOICE_COPY.notRunning, action: "start" });
       } else {
@@ -94,7 +97,12 @@ export function optionsFromProbes(
           providerId: probe.providerId,
           name,
           where: "local",
-          whereLine: probe.providerId === "ollama" ? MODEL_CHOICE_COPY.localGetModel : MODEL_CHOICE_COPY.localLoadModel,
+          whereLine:
+            probe.providerId === "ollama"
+              ? MODEL_CHOICE_COPY.localGetModel
+              : probe.providerId === "lemonade"
+                ? MODEL_CHOICE_COPY.localDownloadLemonadeModel
+                : MODEL_CHOICE_COPY.localLoadModel,
           state: MODEL_CHOICE_COPY.noModel,
           action: probe.providerId === "ollama" ? "get-model" : "rescan",
         });
@@ -130,6 +138,11 @@ export function optionsFromProviders(providers: readonly ProviderSummary[]): Cho
       } else if (provider.status === "connected" && provider.id === "lm-studio") {
         // Running without a loaded model: the scan's recovery.
         options.push({ providerId: "lm-studio", name, where: "local", whereLine: MODEL_CHOICE_COPY.localLoadModel, state: MODEL_CHOICE_COPY.noModel, action: "rescan" });
+      } else if (provider.status === "connected" && provider.id === "lemonade") {
+        options.push({ providerId: "lemonade", name, where: "local", whereLine: MODEL_CHOICE_COPY.localDownloadLemonadeModel, state: MODEL_CHOICE_COPY.noModel, action: "rescan" });
+      } else if (provider.installed && provider.id === "lemonade") {
+        // The provider check names the command for this OS.
+        options.push({ providerId: "lemonade", name, where: "local", whereLine: MODEL_CHOICE_COPY.localStartLemonade(provider.detail), state: MODEL_CHOICE_COPY.notRunning, action: "rescan" });
       } else if (provider.status === "connected" && provider.id === "ollama") {
         options.push({ providerId: "ollama", name, where: "local", whereLine: MODEL_CHOICE_COPY.localGetModel, state: MODEL_CHOICE_COPY.noModel, action: "get-model" });
       } else if (provider.installed && (provider.id === "ollama" || provider.id === "lm-studio")) {

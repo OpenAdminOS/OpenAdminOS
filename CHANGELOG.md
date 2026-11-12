@@ -6,6 +6,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Lemonade Server as a local provider: the model scan, Settings and the model choice find it on its loopback port (13305), offer its downloaded chat models (never embedding, speech, image or cloud-routed ones) and keep prompts on this device; LM Studio and Lemonade share one OpenAI-compatible adapter.
 - Splashtop Agentic Packr Docs MCP: a built-in Marketplace reference that answers Agentic Packr questions from support-splashtopagenticpackr.splashtop.com with links to the articles; both Splashtop references show the Splashtop logo in the Marketplace and on Connections.
 - Splashtop Docs MCP: the Splashtop documentation listing is named Splashtop Docs MCP and answers Splashtop questions from support-splashtopbusiness.splashtop.com with links to the articles.
 - Managed configuration for IT rollouts: a local `policy.json` (machine and user path per OS, schema in `schemas/policy.schema.json`) sets allowed providers, the provider and model, allowed public references, a pre-seeded own app registration, skipping the first-run scan (straight to Connect Microsoft 365 when the policy provider is ready) and locked settings, enforced in the main process, with the scan offering only allowed providers; Settings shows "Set by your IT department" and an IT policy panel, problems name the file and line, and the configuration audit records policy load, change, removal and problems.

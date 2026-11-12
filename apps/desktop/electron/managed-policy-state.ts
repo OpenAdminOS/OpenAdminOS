@@ -135,7 +135,9 @@ export function applyManagedPolicyToProviders(
       // Not checked yet (the first-run scan is pending): nothing is known about its models.
       if (!model || provider.status === "not-checked") return provider;
       // An empty list means the CLI picks the model, so the policy model is passed to it.
-      if (provider.models.length === 0 || provider.models.includes(model)) {
+      // Not for Lemonade: its list holds only the local chat models it may use, so an
+      // unlisted model would be downloaded or sent to a cloud API.
+      if ((provider.models.length === 0 && provider.id !== "lemonade") || provider.models.includes(model)) {
         return { ...provider, models: [model], defaultModel: model };
       }
       const { defaultModel: _unlisted, ...rest } = provider;

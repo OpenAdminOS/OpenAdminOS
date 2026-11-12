@@ -300,6 +300,7 @@ Concrete providers, required for v1 unless marked optional:
 - `OllamaProvider` (local, default)
 - `AppleFoundationProvider` (local, macOS-only optional provider)
 - `LMStudioProvider` (local)
+- `LemonadeProvider` (local)
 - `AnthropicProvider` (hosted)
 - `OpenAIProvider` (hosted)
 - `AzureOpenAIProvider` (hosted)
@@ -373,6 +374,41 @@ development override. Like Ollama, LM Studio is local only when the configured
 HTTP endpoint resolves to loopback. A LAN, internet, wildcard, or invalid
 endpoint flips the provider to external trust messaging before tenant prompts
 are sent.
+
+Lemonade support (added 2026-11-12, maintainer decision: an external provider,
+not an embedded runtime) uses Lemonade Server's OpenAI-compatible API at
+`http://127.0.0.1:13305/v1` by default, with `OPENADMINOS_LEMONADE_URL` as the
+override and the same loopback rule as LM Studio. LM Studio and Lemonade share
+one adapter (`packages/runtime/src/llm-openai-compatible.ts`); each supplies its
+name, endpoint, overrides and copy. Lemonade's model list holds only downloaded
+models, so a chat request never starts a download. Only models labelled `chat`
+are offered (embeddings, transcription, image and speech models carry other
+labels), and models with `recipe: "cloud"` are left out, because Lemonade sends
+their prompts to a cloud API even though its endpoint is on loopback. Lemonade
+is ready with at least one such model. Because Lemonade downloads an unlisted
+registry model on request and routes cloud models off the device, every chat
+request first reads the model list again and sends only a listed local chat
+model; a saved, policy-set or deleted model that is not listed is refused with
+the reason (cloud, not a chat model, or not downloaded). A managed policy model
+is never passed to a Lemonade that does not list it (PR #191 review round 1). Installed means its server or CLI is in
+the installers' locations: `/usr/local/bin/lemond` or the
+`ai.lemonadeserver.server` launch daemon on macOS,
+`%LOCALAPPDATA%\lemonade_server\bin\LemonadeServer.exe` or the Program Files
+equivalent on Windows, `/usr/bin/lemond`, `/opt/bin/lemond` or the snap on
+Linux, or `lemond` or `lemonade` on PATH. OpenAdminOS does not start Lemonade:
+on macOS and Linux it runs as a system service that needs admin rights to
+start, so an installed Lemonade that is not running names the command in
+the scan, Settings and the model choice (`sudo launchctl kickstart -k
+system/ai.lemonadeserver.server`, `sudo systemctl start lemond`, or Lemonade
+Server from the Start menu on Windows) and offers Scan again (Settings,
+Providers shows a provider's check detail in its details whenever the runtime
+is installed but stopped or its check failed, for every provider); a running server without a chat model says to
+download one and offers Scan again. A server that runs with `LEMONADE_API_KEY`
+answers 401, and the check says so: OpenAdminOS sends no Lemonade API key yet
+(open question). Lemonade's embeddable build (`lemond` bundled into an app and
+run as a private subprocess) was considered and not adopted: it would add
+per-platform binaries to the installer and to signing, and there is no macOS
+x64 or Windows arm64 build.
 
 Apple Foundation support uses Apple's on-device Foundation Models framework
 through a small signed macOS helper binary bundled with the Electron app. The
@@ -2635,7 +2671,7 @@ North-star metric: time from install to first successful result, target under 5 
 | No organization | Organization switcher state | No organization is active; only agents that call no service API can run |
 | Public reference | Marketplace item | A public MCP server that Chat can consult, installed, enabled, disabled and removed in the Marketplace |
 | Result connector | Connections, Results go to | Where run results are sent, such as Teams, Outlook or Slack |
-| Provider | Unchanged | The model runtime or tool, named as admins know it: Claude Code, Codex, Apple Intelligence, Ollama, LM Studio, GitHub Copilot CLI, Gemini CLI, Azure OpenAI |
+| Provider | Unchanged | The model runtime or tool, named as admins know it: Claude Code, Codex, Apple Intelligence, Ollama, LM Studio, Lemonade, GitHub Copilot CLI, Gemini CLI, Azure OpenAI |
 | Data location | Status strip and provider rows | Where a hosted provider sends prompts, from `providerDataLocation`, for example "Claude Code · location set by your account", with the documented default from `providerDataLocationDetail` |
 | Theme | Appearance setting | Device-local System, Light, Dark, or Midnight preference shared by renderer windows and native chrome |
 

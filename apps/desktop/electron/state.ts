@@ -44,6 +44,7 @@ import {
   createGeminiLlm,
   createAppleFoundationLlm,
   createLmStudioLlm,
+  createLemonadeLlm,
   DEFAULT_AUTHORITY,
   GRAPH_CLI_CLIENT_ID,
   GRAPH_DEFAULT_SCOPE,
@@ -376,6 +377,7 @@ import {
   checkClaudeCode,
   checkCodex,
   checkAdditionalCli,
+  checkLemonade,
   checkLmStudio,
   checkOllama,
   isProviderId,
@@ -2152,7 +2154,7 @@ export class AppStateStore {
         return { tenants: persisted.tenants, agents: persisted.installedAgents, runs: persisted.runs, providers,
           providerConfigKeys: Object.fromEntries(providers.map(provider => [provider.id,
             createHash("sha256").update(JSON.stringify({ config: provider.id === "azure-openai" ? persisted.providerConfigs?.azureOpenAI : undefined,
-              endpoint: provider.id === "ollama" ? ollamaEndpointOverride() : provider.id === "lm-studio" ? process.env.OPENADMINOS_LM_STUDIO_URL : undefined })).digest("hex")])) };
+              endpoint: provider.id === "ollama" ? ollamaEndpointOverride() : provider.id === "lm-studio" ? process.env.OPENADMINOS_LM_STUDIO_URL : provider.id === "lemonade" ? process.env.OPENADMINOS_LEMONADE_URL : undefined })).digest("hex")])) };
 
       },
       startRun: (slug, options) => this.startRun(slug, options),
@@ -3891,6 +3893,7 @@ export class AppStateStore {
       if (provider.id === "ollama") return await checkOllama(provider);
       if (provider.id === "apple-foundation") return await checkAppleFoundation(provider);
       if (provider.id === "lm-studio") return await checkLmStudio(provider);
+      if (provider.id === "lemonade") return await checkLemonade(provider);
       if (provider.id === "anthropic") return await checkClaudeCode(provider);
       if (provider.id === "openai") return await checkCodex(provider);
       if (provider.id === "copilot" || provider.id === "gemini") return await checkAdditionalCli(provider);
@@ -8181,6 +8184,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         options.defaultModel = defaultModel;
       }
       return createLmStudioLlm(options);
+    }
+    if (providerId === "lemonade") {
+      return createLemonadeLlm(defaultModel ? { defaultModel } : {});
     }
     if (providerId === "anthropic") {
       return createClaudeCodeLlm({ defaultModel });

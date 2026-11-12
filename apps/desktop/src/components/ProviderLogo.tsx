@@ -6,6 +6,7 @@ import copilotBlack from "../assets/provider-logos/github-copilot-icon-black.svg
 import copilotWhite from "../assets/provider-logos/github-copilot-icon-white.svg";
 import lmStudioColor from "../assets/provider-logos/lm-studio-icon-color.svg";
 import lmStudioOutlineWhite from "../assets/provider-logos/lm-studio-icon-outline-white.svg";
+import lemonade from "../assets/provider-logos/lemonade-logo.svg";
 import ollamaBlack from "../assets/provider-logos/ollama-black.svg";
 import ollamaWhite from "../assets/provider-logos/ollama-white.svg";
 import openAIBlack from "../assets/provider-logos/openai-blossom-black.svg";
@@ -27,6 +28,7 @@ interface Logo {
 const LOGOS: Readonly<Partial<Record<string, Logo>>> = {
   ollama: { light: ollamaBlack, dark: ollamaWhite },
   "lm-studio": { light: lmStudioColor, dark: lmStudioOutlineWhite },
+  lemonade: { light: lemonade, dark: lemonade },
   "apple-foundation": { light: appleIntelligence, dark: appleIntelligence, scale: 1.12 },
   anthropic: { light: claudeSpark, dark: claudeSpark, scale: 0.92 },
   // The Blossom fills about half of its canvas.
