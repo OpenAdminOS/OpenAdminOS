@@ -537,11 +537,18 @@ describe("a Nova follow-up run", () => {
     const close = () => { if (!closed) { closed = true; store.close(); } };
     try {
       const before = (await store.listIntuneChatConversations()).length;
+      const runsBefore = (await store.getAppState()).runs.length;
       const followUp = await store.novaFollowUpsHost().create({ tenantId: contoso.id, question: "Check device compliance", providerId: "ollama", model: "test", delayMinutes: 1 });
       now = new Date(now.getTime() + 61_000);
       await store.fireDueNovaFollowUps();
       const done = (await store.handleNovaRecords({ action: "list" })).followUps.find((entry) => entry.id === followUp.id);
       assert.equal(done?.status, "completed", done?.reason);
+      // Criterion 7: a follow-up reaches only the read-only Chat path. No run
+      // was started, no note was stored and no other follow-up was set.
+      assert.equal((await store.getAppState()).runs.length, runsBefore, "no agent run was started");
+      const records = await store.handleNovaRecords({ action: "list" });
+      assert.equal(records.notes.length, 0, "no note was stored");
+      assert.deepEqual(records.followUps.map((entry) => entry.id), [followUp.id], "no other follow-up was set");
       const conversations = await store.listIntuneChatConversations();
       assert.equal(conversations.length, before + 1);
       const conversation = conversations.find((entry) => entry.id === done?.conversationId);

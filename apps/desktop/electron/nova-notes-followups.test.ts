@@ -510,6 +510,25 @@ describe("Nova hosted sessions after a settings change, without another question
     await assert.rejects(starting, /tenant or provider changed/);
   });
 
+  it("runs a shortcut only on the read-only research path: no card, no send, no run, no note, no follow-up", async () => {
+    const f = fixture({ profile: { shortcuts: [
+      { id: "s1", name: "Morning check", prompt: "How many devices are noncompliant?", createdAt: "2026-11-12T08:00:00.000Z" },
+      // Stored past the save check, for example by an older version: refused when it runs.
+      { id: "s2", name: "Evening send", prompt: "Send the compliance summary to Slack", createdAt: "2026-11-12T08:00:00.000Z" },
+    ] } });
+    const sessionId = await start(f);
+    const answer = await f.nova.handle({ action: "answer", sessionId, text: "Run morning check" });
+    assert.equal(answer.pendingAction, undefined);
+    assert.equal(f.chatOptions.length, 1, "the saved question went to Chat");
+    assert.equal(f.memory.list("tenant-a").length, 0);
+    assert.equal(f.followUps.list("tenant-a").length, 0);
+    const refused = await f.nova.handle({ action: "answer", sessionId, text: "Run evening send" }).catch((error: Error) => ({ answerError: error.message, pendingAction: undefined }));
+    assert.equal(refused.pendingAction, undefined);
+    assert.ok(refused.answerError, "a stored shortcut that would send is refused when it runs");
+    assert.equal(f.chatOptions.length, 1, "nothing more was asked");
+    // host.send and host.startRun throw in this fixture: reaching either would have failed the turn.
+  });
+
   it("says the settings could not be read when a shortcut is asked for and they cannot be", async () => {
     const f = fixture({ profile: { shortcuts: [{ id: "s1", name: "Morning check", prompt: "How many devices are noncompliant?", createdAt: "2026-11-12T08:00:00.000Z" }] } });
     const sessionId = await start(f);
