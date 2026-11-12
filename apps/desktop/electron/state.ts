@@ -8784,6 +8784,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     };
     if (binding) requireBound(novaProviderEndpoint(providerId, providerId === "azure-openai" ? await this.read() : undefined));
     if (this.llmFactory) {
+      // Test seam only: it returns before the in-branch endpoint comparison
+      // below, so only the check above applies to it. Production adapters
+      // must be built in the branches below, not through a factory like this.
       return await this.llmFactory(providerId, model);
     }
     const providers = await this.listProviders();

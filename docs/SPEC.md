@@ -655,7 +655,16 @@ connection, the provider, model, locality or endpoint (Ollama, LM Studio, Azure
 OpenAI resource and deployment) or what the session would send changed, and
 builds the request from that read with no wait in between (round 5 review,
 2026-11-12). The connection is the tenant's connection id and signed-in
-account, so connecting the same organization again ends a session too. A click
+account, so connecting the same organization again ends a session too. Every
+question and card click checks the same identity again, including the
+connection and the endpoint, so one that arrives before the check after a
+Connect or a provider save finished is refused and ends the session; a local
+start makes the same check before it returns its session, and saving the active
+provider and model together or a new Azure OpenAI resource or deployment ends a
+live session as well (round 7 review, 2026-11-12). A tenant connected before
+connection ids were recorded and with no account fields has no connection
+identity, so a reconnect of that tenant cannot be told apart and does not end
+its session; such tenants get an id on their next Connect. A click
 on a card whose session ended says what happened to it: a note stays proposed in
 Settings, Nova; nothing else was sent, started, set or saved (round 6 review,
 2026-11-12). Only notes that fit the hosted block are recorded as sent and
@@ -762,7 +771,8 @@ the ones it was set with, running where they ran then (on this device or not,
 and for Ollama and LM Studio at the same endpoint, stored with the follow-up),
 and the IT policy still allows that provider and model; otherwise it is
 `skipped-organization` or `skipped-provider` (with the reason when the policy
-refuses it or the provider moved) and does not start. A loopback Ollama later
+refuses it or the provider moved, shown as is in Settings, Nova; round 7
+review, 2026-11-12) and does not start. A loopback Ollama later
 pointed at a remote host under the same id therefore gets no question (round 2
 review, 2026-11-12). A hosted follow-up runs with the consent given by the click,
 its time stored with it; no new consent is minted when it fires. Chat checks that
@@ -850,8 +860,9 @@ run opens its page only while Nova may open pages.
 
 **Unkept promises.** A final answer that is only a progress message ("I'll check
 that now.", "Okay, let me look.", "One moment") gets a repair turn, at most twice
-per answer, in Chat (the tool loop and deterministic retrieval), Agent Team
-answers and voice. The check is conservative: only an answer of at most 160
+per answer, in Chat (the tool loop, deterministic retrieval streamed or not,
+and the multi-tenant summary; round 7 review, 2026-11-12), Agent Team answers
+and voice. The check is conservative: only an answer of at most 160
 characters qualifies, and every clause (split at sentence ends, commas,
 semicolons, colons, dashes and "and", "but", "so", "while" and the like, but not
 "go and check") must be a first-person promise or an acknowledgement. Any other
