@@ -434,7 +434,8 @@ export interface ChatServiceHost {
   requireIntelligenceStore(): IntelligenceSqliteStore;
   resolveTenant(persisted: ChatPersistedState, tenantId?: string): TenantRecord;
   listProviders(): Promise<ProviderSummary[]>;
-  buildLlm(providerId: ProviderId, model: string | undefined): Promise<RunLlmApi>;
+  /** With a binding, the model is built only for that endpoint (see ProviderEndpointBinding in state.ts). */
+  buildLlm(providerId: ProviderId, model: string | undefined, binding?: { endpoint: string | undefined }): Promise<RunLlmApi>;
   buildGraph(
     pinnedTenantId?: string,
     agentScopes?: string[],
@@ -506,6 +507,13 @@ export interface IntuneChatStreamOptions {
    * renderer's Chat IPC never passes options.
    */
   scheduledConsent?: (check: { tenantId?: string; providerId: ProviderId; model?: string; acknowledgedAt: string }) => boolean;
+  /**
+   * Main process only, for a Nova follow-up: the model is built only for
+   * the endpoint the follow-up was set for (Ollama, LM Studio, Azure
+   * OpenAI resource and deployment). A configuration saved after the fire
+   * decision makes the build fail before anything is sent.
+   */
+  providerBinding?: { endpoint: string | undefined };
 }
 
 /**
@@ -609,8 +617,8 @@ export class IntuneChatService {
    * starts closing, and stops with its signal. Agent Team does the same in
    * its host; runs stop through their lease-cancelled controller.
    */
-  private async tenantLlm(providerId: ProviderId, model: string | undefined, tenantIds: readonly string[]): Promise<RunLlmApi> {
-    const llm = await this.host.buildLlm(providerId, model);
+  private async tenantLlm(providerId: ProviderId, model: string | undefined, tenantIds: readonly string[], binding?: { endpoint: string | undefined }): Promise<RunLlmApi> {
+    const llm = await this.host.buildLlm(providerId, model, binding);
     const writable = this.host.tenantWritable;
     if (!writable) return llm;
     const signalOf = this.host.tenantSignal;
@@ -2950,7 +2958,7 @@ export class IntuneChatService {
       emitDelta(assistantContent);
     } else {
       // Tenant work goes through the model egress choke point; a send with no tenant has none to close.
-      const llm = withTenantDataOutputFilter(gateHostedLlm(noTenant ? await this.host.buildLlm(providerId, selectedModel) : await this.tenantLlm(providerId, selectedModel, [tenant.id]), verifyConsent));
+      const llm = withTenantDataOutputFilter(gateHostedLlm(noTenant ? await this.host.buildLlm(providerId, selectedModel, options.providerBinding) : await this.tenantLlm(providerId, selectedModel, [tenant.id], options.providerBinding), verifyConsent));
       const contextualQuestion =
         voiceContext?.history ??
         (conversationMemory

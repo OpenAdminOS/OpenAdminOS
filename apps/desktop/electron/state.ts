@@ -1769,6 +1769,19 @@ function errorText(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
 
+/** What a model build is bound to: where a provider is reached, as novaProviderEndpoint reads it. */
+export interface ProviderEndpointBinding {
+  endpoint: string | undefined;
+}
+
+/** A bound model build found its provider configured for another endpoint; nothing was sent. */
+export class ProviderEndpointChangedError extends Error {
+  constructor() {
+    super(NOVA_FOLLOW_UP_PROVIDER_MOVED);
+    this.name = "ProviderEndpointChangedError";
+  }
+}
+
 /** The state change reason sent when Disconnect closes a tenant, before its data is removed. */
 export const TENANT_CLOSING_REASON = "tenant-closing";
 
@@ -2043,7 +2056,7 @@ export class AppStateStore {
         host.resolveTenant(persisted as PersistedState, tenantId),
       listProviders: () => host.listProviders(),
       now: () => host.clock(),
-      buildLlm: (providerId, model) => host.buildLlm(providerId, model),
+      buildLlm: (providerId, model, binding) => host.buildLlm(providerId, model, binding),
       buildGraph: (pinnedTenantId, agentScopes) =>
         host.buildGraph(pinnedTenantId, agentScopes),
       startRun: (agentSlug, options) => host.startRun(agentSlug, options),
@@ -7477,6 +7490,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
                   scope: { tenantId: followUp.tenantId, providerId: followUp.providerId, ...(followUp.model ? { model: followUp.model } : {}), isLocal: provider?.isLocal === true },
                   // Checked against the stored follow-up instead of the five-minute window of a typed send.
                   scheduledConsent: (check) => this.novaFollowUpConsentMatches(followUp.id, check, fresh.endpoint),
+                  // The model is built for the endpoint the follow-up was set for, not one saved since.
+                  providerBinding: { endpoint: followUp.providerEndpoint },
                 },
               ),
               timedOut,
@@ -8750,6 +8765,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   private async buildLlm(
     providerId: ProviderId,
     model: string | undefined,
+    binding?: ProviderEndpointBinding,
   ): Promise<RunLlmApi> {
     // Chat, agents, Office, voice and drafts all build their model here, so the IT policy file is enforced here.
     this.requireProviderAllowed(providerId);
@@ -8757,6 +8773,14 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     if (lockedModel && model !== undefined && model !== lockedModel) {
       throw new ManagedPolicyError(modelLockedMessage(lockedModel, this.providerName(providerId)));
     }
+    // A model bound to an endpoint (a Nova follow-up, bound to where its
+    // consent was given) is built only for that endpoint. The endpoint is
+    // compared again on the exact values the adapter is built from below,
+    // so a configuration saved in between cannot redirect it.
+    const requireBound = (endpoint: string | undefined) => {
+      if (binding && (endpoint ?? undefined) !== (binding.endpoint ?? undefined)) throw new ProviderEndpointChangedError();
+    };
+    if (binding) requireBound(novaProviderEndpoint(providerId, providerId === "azure-openai" ? await this.read() : undefined));
     if (this.llmFactory) {
       return await this.llmFactory(providerId, model);
     }
@@ -8771,7 +8795,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
     const defaultModel = model ?? provider.defaultModel ?? provider.models[0];
     if (providerId === "ollama") {
-      const options: { defaultModel?: string } = {};
+      // The endpoint is resolved once and given to the adapter, so the one compared is the one used.
+      const endpoint = resolveOllamaEndpoint();
+      requireBound(endpoint.replace(/\/$/, ""));
+      const options: { defaultModel?: string; endpoint?: string } = binding ? { endpoint } : {};
       if (defaultModel) {
         options.defaultModel = defaultModel;
       }
@@ -8781,7 +8808,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       return createAppleFoundationLlm({ defaultModel });
     }
     if (providerId === "lm-studio") {
-      const options: { defaultModel?: string } = {};
+      const endpoint = resolveLmStudioEndpoint();
+      requireBound(endpoint.replace(/\/$/, ""));
+      const options: { defaultModel?: string; endpoint?: string } = binding ? { endpoint } : {};
       if (defaultModel) {
         options.defaultModel = defaultModel;
       }
@@ -8796,13 +8825,15 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     if (providerId === "copilot") return createCopilotLlm({ defaultModel });
     if (providerId === "gemini") return createGeminiLlm({ defaultModel });
     if (providerId === "azure-openai") {
+      let options: Awaited<ReturnType<AppStateStore["azureOpenAIRuntimeOptions"]>>;
       try {
-        return createAzureOpenAiLlm(
-          await this.azureOpenAIRuntimeOptions(defaultModel),
-        );
+        options = await this.azureOpenAIRuntimeOptions(defaultModel);
       } catch {
+        requireBound("azure-openai:unset");
         return noopLlm;
       }
+      requireBound(`${options.endpoint.trim().replace(/\/$/, "")}#${options.deployment.trim()}`);
+      return createAzureOpenAiLlm(options);
     }
     return noopLlm;
   }

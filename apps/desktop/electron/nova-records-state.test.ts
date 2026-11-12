@@ -618,6 +618,92 @@ describe("a Nova follow-up run", () => {
     }
   });
 
+  for (const changed of [false, true]) {
+    it(changed
+      ? "builds the Azure OpenAI model only for the resource and deployment the click consented to, also when they are saved again after the fire decision"
+      : "asks Azure OpenAI at the resource and deployment the click consented to", async () => {
+      let now = new Date();
+      const azure = () => [{ id: "azure-openai", name: "Azure OpenAI", isLocal: false, status: "connected", models: ["test"], defaultModel: "test" } as never];
+      const secrets = new Map<string, string>();
+      const sent: string[] = [];
+      const realFetch = globalThis.fetch;
+      let store: AppStateStore | undefined;
+      let saved = false;
+      globalThis.fetch = (async (input: string | URL | Request) => {
+        const url = String(input instanceof Request ? input.url : input);
+        if (url.includes("openai.azure.com")) sent.push(url);
+        return new Response(JSON.stringify({ error: { message: "test endpoint" } }), { status: 500, headers: { "content-type": "application/json" } });
+      }) as typeof fetch;
+      const made = await makeStore({
+        clock: () => now,
+        activeProviderId: "azure-openai",
+        extra: {
+          providerListFactory: azure,
+          providerSecretsFor: () => ({ get: async (key: string) => secrets.get(key), set: async (key: string, value: string) => { secrets.set(key, value); }, remove: async (key: string) => { secrets.delete(key); } }),
+          graphFactory: graph([]),
+        },
+      });
+      store = made.store;
+      // The configuration is saved again after the fire decision, right before the model is built.
+      const internals = store as unknown as { buildLlm(...args: unknown[]): Promise<unknown> };
+      const build = internals.buildLlm.bind(store);
+      internals.buildLlm = async (...args: unknown[]) => {
+        if (changed && !saved) {
+          saved = true;
+          await store!.setAzureOpenAIConfig({ endpoint: "https://different.openai.azure.com/", deployment: "other", apiVersion: "" });
+        }
+        return build(...args);
+      };
+      try {
+        await store.setAzureOpenAIConfig({ endpoint: "https://original.openai.azure.com/", deployment: "test", apiVersion: "", apiKey: "test-key" });
+        const followUp = await store.novaFollowUpsHost().create({ tenantId: contoso.id, question: "Check device compliance", providerId: "azure-openai", model: "test", delayMinutes: 1 });
+        now = new Date(now.getTime() + 61_000);
+        await store.fireDueNovaFollowUps();
+        const done = (await store.handleNovaRecords({ action: "list" })).followUps.find((entry) => entry.id === followUp.id);
+        if (changed) {
+          assert.equal(saved, true, "the configuration was saved during the run");
+          assert.deepEqual(sent, [], "nothing went to any Azure OpenAI resource");
+          assert.notEqual(done?.status, "completed");
+          assert.match(done?.reason ?? "", /runs somewhere else/);
+        } else {
+          assert.ok(sent.length > 0 && sent.every((url) => url.startsWith("https://original.openai.azure.com/openai/deployments/test/")), sent.join(", "));
+        }
+      } finally {
+        globalThis.fetch = realFetch;
+        store.close();
+        await rm(made.dir, { recursive: true, force: true });
+      }
+    });
+  }
+
+  it("builds a bound Ollama or LM Studio model only at the endpoint it is bound to", async () => {
+    const local = () => [
+      { id: "ollama", name: "Ollama", isLocal: true, status: "connected", models: ["test"], defaultModel: "test" },
+      { id: "lm-studio", name: "LM Studio", isLocal: true, status: "connected", models: ["test"], defaultModel: "test" },
+    ] as never;
+    const { store, dir } = await makeStore({ extra: { providerListFactory: local } });
+    const saved = { ollama: process.env.OPENAGENTS_OLLAMA_URL, lmStudio: process.env.OPENADMINOS_LM_STUDIO_URL };
+    try {
+      const build = (store as unknown as { buildLlm(providerId: string, model: string, binding?: { endpoint: string | undefined }): Promise<unknown> }).buildLlm.bind(store);
+      process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:11434";
+      process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:1234/v1";
+      await build("ollama", "test", { endpoint: "http://127.0.0.1:11434" });
+      await build("lm-studio", "test", { endpoint: "http://127.0.0.1:1234/v1" });
+      // Pointed off this device after the follow-up was set.
+      process.env.OPENAGENTS_OLLAMA_URL = "http://10.0.0.5:11434";
+      process.env.OPENADMINOS_LM_STUDIO_URL = "http://10.0.0.5:1234/v1";
+      await assert.rejects(build("ollama", "test", { endpoint: "http://127.0.0.1:11434" }), /runs somewhere else/);
+      await assert.rejects(build("lm-studio", "test", { endpoint: "http://127.0.0.1:1234/v1" }), /runs somewhere else/);
+      // Without a binding nothing changes for other callers.
+      await build("ollama", "test");
+    } finally {
+      if (saved.ollama === undefined) delete process.env.OPENAGENTS_OLLAMA_URL; else process.env.OPENAGENTS_OLLAMA_URL = saved.ollama;
+      if (saved.lmStudio === undefined) delete process.env.OPENADMINOS_LM_STUDIO_URL; else process.env.OPENADMINOS_LM_STUDIO_URL = saved.lmStudio;
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("leaves no conversation and no completed event when the organization is disconnected while it runs", async () => {
     let now = new Date();
     let release: (() => void) | undefined;
