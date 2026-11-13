@@ -6,6 +6,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- The homepage shows a Member of row under the quote, with the NVIDIA Inception Program badge and the KI Bundesverband logo, each linking to its owner's home page.
 - Nova profile, notes and follow-ups: Settings > Nova edits the voice, greeting, standing instructions with 10 versions, instructions per organization, abilities and read-only shortcuts; Nova keeps reviewed notes per organization (a click confirms each, unconfirmed ones expire after 30 days, Disconnect deletes them), sets one-time read-only follow-ups that answer in Chat, lists what needs the admin, and nudges answers that only promise work in Chat, Agent Team and voice; IT can restrict voice modes, instructions, abilities and notes in `policy.json`, and every change, note, follow-up and hosted voice consent is in the audit log.
 - Splashtop Agentic Packr Docs MCP: a built-in Marketplace reference that answers Agentic Packr questions from support-splashtopagenticpackr.splashtop.com with links to the articles; both Splashtop references show the Splashtop logo in the Marketplace and on Connections.
 - Splashtop Docs MCP: the Splashtop documentation listing is named Splashtop Docs MCP and answers Splashtop questions from support-splashtopbusiness.splashtop.com with links to the articles.

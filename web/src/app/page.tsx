@@ -227,6 +227,51 @@ const TESTIMONIAL = {
     "I'm a huge fan of OpenAdminOS. It's the first tool that let me use local AI with 100% privacy to manage my tenants.",
 } as const;
 
+// Programs OpenAdminOS is a member of. A membership is not an endorsement, so
+// the row says "Member of" and nothing more. Each logo is its owner's artwork,
+// shown without redrawing, recoloring, or resampling:
+// - KI Bundesverband supplied KIBV_Logo_Black.png and KIBV_Logo_White.png. Both
+//   are copied byte for byte and swapped with the site theme. The files carry
+//   their own clear space (the artwork starts 83 px into the 2000 px canvas).
+// - NVIDIA gives the Inception Program badge to members only and publishes no
+//   download. This file is the badge as NVIDIA placed it in its member social
+//   template (nv-inception-social-fb-instagram-template.pptx,
+//   ppt/media/image4.png, 2048 px), cut out at its border.
+//   TODO(ugur): replace it with the badge file from the Inception portal.
+const MEMBERSHIPS: readonly {
+  name: string;
+  href: string;
+  /** One file for both themes, or a pair swapped with the site theme. */
+  src: string | { light: string; dark: string };
+  width: number;
+  height: number;
+  /** Display height. A boxed badge needs more of it than a bare wordmark. */
+  size: string;
+  /** Optical alignment for a file that carries its own clear space. */
+  className?: string;
+}[] = [
+  {
+    name: "NVIDIA Inception Program",
+    href: "https://www.nvidia.com/",
+    src: "/members/nvidia-inception-program-badge.png",
+    width: 722,
+    height: 266,
+    size: "h-14",
+  },
+  {
+    name: "KI Bundesverband",
+    href: "https://ki-verband.de/",
+    src: {
+      light: "/members/ki-bundesverband-black.png",
+      dark: "/members/ki-bundesverband-white.png",
+    },
+    width: 2000,
+    height: 384,
+    size: "h-12",
+    className: "-ml-2.5",
+  },
+];
+
 const dateFormat = new Intl.DateTimeFormat("en-US", {
   month: "short",
   day: "numeric",
@@ -785,6 +830,44 @@ export default async function HomePage() {
               &ldquo;{TESTIMONIAL.quote}&rdquo;
             </blockquote>
           </figure>
+
+          <div
+            data-reveal
+            className="mt-10 grid gap-6 border-t border-brand-line pt-10 md:grid-cols-[minmax(0,14rem)_minmax(0,1fr)] md:items-center"
+          >
+            <h3 className="text-sm text-brand-faint">Member of</h3>
+            <ul className="flex flex-wrap items-center gap-x-10 gap-y-6">
+              {MEMBERSHIPS.map((member) => (
+                <li key={member.name} className={member.className}>
+                  <Link
+                    href={member.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block rounded-md transition-opacity hover:opacity-75"
+                  >
+                    {(typeof member.src === "string"
+                      ? [{ src: member.src, theme: "" }]
+                      : [
+                          { src: member.src.light, theme: "theme-img-light" },
+                          { src: member.src.dark, theme: "theme-img-dark" },
+                        ]
+                    ).map(({ src, theme }) => (
+                      <img
+                        key={src}
+                        src={src}
+                        alt={member.name}
+                        width={member.width}
+                        height={member.height}
+                        loading="lazy"
+                        decoding="async"
+                        className={`${member.size} w-auto ${theme}`}
+                      />
+                    ))}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
       </section>
 
