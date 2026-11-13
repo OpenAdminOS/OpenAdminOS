@@ -1,9 +1,9 @@
 {
-  "updatedAt": "2026-11-13T06:00:47.424Z",
+  "updatedAt": "2026-11-13T17:00:47.442Z",
   "agents": {
     "find-inactive-devices": {
       "installs": 36,
-      "installs7d": 3
+      "installs7d": 2
     },
     "intune-device-posture-auditor": {
       "installs": 12,
@@ -15,19 +15,19 @@
     },
     "compliance-overview": {
       "installs": 54,
-      "installs7d": 6
+      "installs7d": 5
     },
     "os-update-posture": {
       "installs": 26,
-      "installs7d": 3
+      "installs7d": 2
     },
     "tenant-health-report": {
       "installs": 37,
       "installs7d": 3
     },
     "user-license-overview": {
-      "installs": 36,
-      "installs7d": 5
+      "installs": 37,
+      "installs7d": 6
     },
     "conditional-access-explainer": {
       "installs": 60,
@@ -47,7 +47,7 @@
     },
     "sign-in-failure-explainer": {
       "installs": 29,
-      "installs7d": 5
+      "installs7d": 4
     },
     "stale-guest-cleanup": {
       "installs": 25,
