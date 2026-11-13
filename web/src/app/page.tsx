@@ -860,7 +860,7 @@ export default async function HomePage() {
                         height={member.height}
                         loading="lazy"
                         decoding="async"
-                        className={`${member.size} w-auto ${theme}`}
+                        className={`${member.size} w-auto object-contain object-left ${theme}`}
                       />
                     ))}
                   </Link>
