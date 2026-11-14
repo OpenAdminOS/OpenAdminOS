@@ -94,6 +94,25 @@ describe("createTlsCertificate", () => {
     }
   });
 
+  it("keeps the SPKI pin when reissued with the same private key", () => {
+    const first = createTlsCertificate({ commonName: "openadminos-sandbox", now: NOW });
+    const reissued = createTlsCertificate({ commonName: "openadminos-sandbox", privateKey: first.privateKeyPem, now: new Date("2027-11-01T00:00:00Z") });
+    assert.equal(reissued.spkiSha256, first.spkiSha256);
+    assert.notEqual(reissued.certificatePem, first.certificatePem);
+    const certificate = new X509Certificate(reissued.certificatePem);
+    assert.ok(certificate.verify(certificate.publicKey));
+    assert.ok(certificate.checkPrivateKey(createPrivateKey(first.privateKeyPem)));
+    const fromKeyObject = createTlsCertificate({ commonName: "a", privateKey: createPrivateKey(first.privateKeyPem), now: NOW });
+    assert.equal(fromKeyObject.spkiSha256, first.spkiSha256);
+  });
+
+  it("refuses an existing key that is not a P-256 private key", () => {
+    assert.equal(reasonOf(() => createTlsCertificate({ commonName: "a", privateKey: "not a key" })), "key-invalid");
+    assert.equal(reasonOf(() => createTlsCertificate({ commonName: "a", privateKey: generateKeyPairSync("ed25519").privateKey })), "key-invalid");
+    assert.equal(reasonOf(() => createTlsCertificate({ commonName: "a", privateKey: generateKeyPairSync("ec", { namedCurve: "secp384r1" }).privateKey })), "key-invalid");
+    assert.equal(reasonOf(() => createTlsCertificate({ commonName: "a", privateKey: generateKeyPairSync("ec", { namedCurve: "prime256v1" }).publicKey })), "key-invalid");
+  });
+
   it("refuses options out of range", () => {
     assert.equal(reasonOf(() => createTlsCertificate({ commonName: "" })), "certificate-options-invalid");
     assert.equal(reasonOf(() => createTlsCertificate({ commonName: "x".repeat(65) })), "certificate-options-invalid");

@@ -1,4 +1,4 @@
-import { createHash, generateKeyPairSync, randomBytes, sign, timingSafeEqual, X509Certificate, type KeyObject } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign, timingSafeEqual, X509Certificate, type KeyObject } from "node:crypto";
 import { isIPv4, isIPv6 } from "node:net";
 
 import {
@@ -43,6 +43,12 @@ export interface TlsCertificateOptions {
   /** Whole days from `now`, 1 to 3650; 365 when left out. */
   validityDays?: number;
   now?: Date;
+  /**
+   * An existing P-256 private key (KeyObject or PKCS #8 or SEC 1 PEM), to
+   * reissue the certificate with the same key so the SPKI pin stays the
+   * same. A new key is generated when left out.
+   */
+  privateKey?: KeyObject | string;
 }
 
 export interface TlsCertificate {
@@ -74,7 +80,7 @@ export function createTlsCertificate(options: TlsCertificateOptions): TlsCertifi
   }
   const altNames = subjectAltNames(options.dnsNames ?? [], options.ipAddresses ?? []);
 
-  const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  const { privateKey, publicKey } = options.privateKey === undefined ? generateKeyPairSync("ec", { namedCurve: "prime256v1" }) : existingKeyPair(options.privateKey);
   const spki = publicKey.export({ type: "spki", format: "der" });
   const name = sequence(set(sequence(objectIdentifier(OID.commonName), utf8String(commonName))));
   const signatureAlgorithm = sequence(objectIdentifier(OID.ecdsaWithSha256));
@@ -143,6 +149,19 @@ export function matchesTlsSpkiPin(source: X509Certificate | KeyObject | string, 
 
 export function isTlsSpkiPin(value: unknown): value is string {
   return typeof value === "string" && HEX_PIN.test(value);
+}
+
+function existingKeyPair(source: KeyObject | string): { privateKey: KeyObject; publicKey: KeyObject } {
+  let privateKey: KeyObject;
+  try {
+    privateKey = typeof source === "string" ? createPrivateKey({ key: source, format: "pem" }) : source;
+  } catch (error) {
+    throw new PairingError("key-invalid", "The TLS private key is not a readable PEM key.", { cause: error });
+  }
+  if (privateKey.type !== "private" || privateKey.asymmetricKeyType !== "ec" || privateKey.asymmetricKeyDetails?.namedCurve !== "prime256v1") {
+    throw new PairingError("key-invalid", "The TLS private key is not an ECDSA P-256 private key.");
+  }
+  return { privateKey, publicKey: createPublicKey(privateKey) };
 }
 
 function spkiDigest(spki: Buffer): string {
