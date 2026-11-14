@@ -227,6 +227,9 @@ function createStorage(backend: EnterpriseStorageBackend, assertLive: () => void
     loaded ??= backend.read().then((text) => {
       const entries = new Map<string, EnterpriseJson>();
       if (text === undefined || text.trim() === "") return entries;
+      if (Buffer.byteLength(text, "utf8") > ENTERPRISE_LIMITS.maxStorageBytes) {
+        throw new EnterpriseHostError("limit", `The team features storage file is larger than ${ENTERPRISE_LIMITS.maxStorageBytes} bytes.`);
+      }
       let parsed: unknown;
       try {
         parsed = JSON.parse(text);
@@ -236,7 +239,11 @@ function createStorage(backend: EnterpriseStorageBackend, assertLive: () => void
       if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
         throw new EnterpriseHostError("invalid-value", "The team features storage file is not a JSON object.");
       }
-      for (const [key, value] of Object.entries(parsed)) {
+      const stored = Object.entries(parsed);
+      if (stored.length > ENTERPRISE_LIMITS.maxStorageKeys) {
+        throw new EnterpriseHostError("limit", `The team features storage file holds more than ${ENTERPRISE_LIMITS.maxStorageKeys} keys.`);
+      }
+      for (const [key, value] of stored) {
         if (STORAGE_KEY.test(key)) entries.set(key, checkJson(value, ENTERPRISE_LIMITS.maxStorageValueBytes, `stored value ${key}`));
       }
       return entries;
@@ -304,37 +311,77 @@ function createStorage(backend: EnterpriseStorageBackend, assertLive: () => void
 /**
  * Checks that `value` is plain JSON within the size and depth limits and
  * returns a deep frozen copy, so the caller keeps no reference into it.
+ * Bytes are counted during the walk, as the UTF-8 length of the value's
+ * JSON text, so an oversized value is refused as soon as the limit is
+ * passed instead of after copying all of it.
  */
 export function checkJson(value: unknown, maxBytes: number, what: string): EnterpriseJson {
-  const copy = copyJson(value, 0, what);
-  const text = JSON.stringify(copy);
-  if (Buffer.byteLength(text, "utf8") > maxBytes) {
-    throw new EnterpriseHostError("limit", `${capitalise(what)} is larger than ${maxBytes} bytes.`);
-  }
-  return copy;
+  return copyJson(value, 0, { remaining: maxBytes, maxBytes, what });
 }
 
-function copyJson(value: unknown, depth: number, what: string): EnterpriseJson {
+interface JsonBudget {
+  remaining: number;
+  readonly maxBytes: number;
+  readonly what: string;
+}
+
+function spend(budget: JsonBudget, bytes: number): void {
+  budget.remaining -= bytes;
+  if (budget.remaining < 0) {
+    throw new EnterpriseHostError("limit", `${capitalise(budget.what)} is larger than ${budget.maxBytes} bytes.`);
+  }
+}
+
+function spendString(budget: JsonBudget, text: string): void {
+  // The JSON text is at least the string's length plus two quotes; check
+  // that first so a huge string is never serialised.
+  if (text.length + 2 > budget.remaining) spend(budget, text.length + 2);
+  spend(budget, Buffer.byteLength(JSON.stringify(text), "utf8"));
+}
+
+function copyJson(value: unknown, depth: number, budget: JsonBudget): EnterpriseJson {
+  const { what } = budget;
   if (depth > ENTERPRISE_LIMITS.maxJsonDepth) {
     throw new EnterpriseHostError("limit", `${capitalise(what)} is nested deeper than ${ENTERPRISE_LIMITS.maxJsonDepth} levels.`);
   }
-  if (value === null || typeof value === "boolean" || typeof value === "string") return value;
+  if (value === null) {
+    spend(budget, 4);
+    return value;
+  }
+  if (typeof value === "boolean") {
+    spend(budget, value ? 4 : 5);
+    return value;
+  }
+  if (typeof value === "string") {
+    spendString(budget, value);
+    return value;
+  }
   if (typeof value === "number") {
     if (!Number.isFinite(value)) throw new EnterpriseHostError("invalid-value", `${capitalise(what)} contains a number JSON cannot hold.`);
+    spend(budget, JSON.stringify(value).length);
     return value;
   }
   if (Array.isArray(value)) {
-    return Object.freeze(value.map((item) => copyJson(item, depth + 1, what)));
+    spend(budget, 2 + Math.max(0, value.length - 1));
+    const out: EnterpriseJson[] = [];
+    for (let index = 0; index < value.length; index += 1) {
+      out.push(copyJson(value[index], depth + 1, budget));
+    }
+    return Object.freeze(out);
   }
   if (typeof value === "object") {
     const prototype = Object.getPrototypeOf(value) as unknown;
     if (prototype !== Object.prototype && prototype !== null) {
       throw new EnterpriseHostError("invalid-value", `${capitalise(what)} contains a value that is not plain JSON.`);
     }
+    const entries = Object.entries(value);
+    spend(budget, 2 + Math.max(0, entries.length - 1));
     const out: Record<string, EnterpriseJson> = {};
-    for (const [key, item] of Object.entries(value)) {
+    for (const [key, item] of entries) {
+      spendString(budget, key);
+      spend(budget, 1);
       // Defined, not assigned, so a "__proto__" key stays a plain own property.
-      Object.defineProperty(out, key, { value: copyJson(item, depth + 1, what), enumerable: true, writable: true, configurable: true });
+      Object.defineProperty(out, key, { value: copyJson(item, depth + 1, budget), enumerable: true, writable: true, configurable: true });
     }
     return Object.freeze(out);
   }

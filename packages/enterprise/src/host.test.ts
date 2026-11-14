@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   ENTERPRISE_LIMITS,
   EnterpriseHostError,
+  checkJson,
   createEnterpriseHost,
   type EnterpriseIpcRegistrar,
   type EnterpriseLogLevel,
@@ -97,6 +98,49 @@ async function reachable(root: unknown): Promise<unknown[]> {
   }
   return [...seen];
 }
+
+describe("checkJson", () => {
+  it("counts exactly the bytes of the JSON text", () => {
+    const values: unknown[] = [
+      null,
+      true,
+      false,
+      0,
+      -12.5,
+      1e21,
+      "",
+      "plain",
+      "quote \" and \\ and \n and \u0001",
+      "Zürich 東京 \u{1F600}",
+      [],
+      [1, [2, [3]], { a: null }],
+      {},
+      { "key with \"quote\"": ["x", { nested: false }], ü: 1 },
+    ];
+    for (const value of values) {
+      const bytes = Buffer.byteLength(JSON.stringify(value), "utf8");
+      assert.deepEqual(checkJson(value, bytes, "the value"), value);
+      assert.throws(
+        () => checkJson(value, bytes - 1, "the value"),
+        (error: unknown) => error instanceof EnterpriseHostError && error.code === "limit",
+        JSON.stringify(value),
+      );
+    }
+  });
+
+  it("stops walking once the limit is passed", () => {
+    let reads = 0;
+    const items = Array.from({ length: 1000 }, () => "x".repeat(100));
+    const watched = new Proxy(items, {
+      get(target, key, receiver) {
+        if (typeof key === "string" && /^\d+$/.test(key)) reads += 1;
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    assert.throws(() => checkJson(watched, 1024, "the value"), (error: unknown) => error instanceof EnterpriseHostError && error.code === "limit");
+    assert.ok(reads < 20, `read ${reads} items`);
+  });
+});
 
 describe("createEnterpriseHost", () => {
   it("exposes only the documented host APIs", () => {
@@ -319,6 +363,16 @@ describe("createEnterpriseHost", () => {
   it("reports a storage file that is not JSON", async () => {
     const { host } = setup(new MemoryStorage("{not json"));
     await assertRejects(host.storage.keys(), "invalid-value");
+  });
+
+  it("refuses a storage file over the size or key limit", async () => {
+    const big = setup(new MemoryStorage(JSON.stringify({ blob: "x".repeat(ENTERPRISE_LIMITS.maxStorageBytes) })));
+    await assertRejects(big.host.storage.keys(), "limit");
+    const many = Object.fromEntries(Array.from({ length: ENTERPRISE_LIMITS.maxStorageKeys + 1 }, (_, i) => [`k${i}`, i]));
+    const crowded = setup(new MemoryStorage(JSON.stringify(many)));
+    await assertRejects(crowded.host.storage.keys(), "limit");
+    const full = Object.fromEntries(Array.from({ length: ENTERPRISE_LIMITS.maxStorageKeys }, (_, i) => [`k${i}`, i]));
+    assert.equal((await setup(new MemoryStorage(JSON.stringify(full))).host.storage.keys()).length, ENTERPRISE_LIMITS.maxStorageKeys);
   });
 
   it("reads storage again after a failed read", async () => {
