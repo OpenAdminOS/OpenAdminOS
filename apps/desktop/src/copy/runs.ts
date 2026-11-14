@@ -10,6 +10,8 @@ export const RUN_LOCATION_COPY = {
   ranOn: (name: string, model: string) => `Ran on ${name} · local model ${model}`,
   /** Runs list boundary segment for a sandbox run. */
   sandboxBoundary: (name: string) => `local model on ${name}`,
+  /** Provider fact of a sandbox run: the model server on the sandbox, not a desktop provider. */
+  sandboxProvider: (name: string) => `Local model on ${name}`,
 } as const;
 
 /** The Where label: absent or desktop is this computer, a sandbox shows its name. */

@@ -117,15 +117,22 @@ function RunResultPage({ run }: { run: RunRecord }) {
   const runTrust = derivedTrust;
   // A sandbox run names the sandbox and its model; it never claims the
   // data stayed on this device.
+  // Its locality, model and model server come from the run record, not
+  // from this desktop's providers: the host refuses a model that is not
+  // served on the sandbox itself.
   const sandbox = run.executedOn?.kind === "sandbox" ? run.executedOn : undefined;
   const trustDetail = sandbox ? RUN_LOCATION_COPY.ranOn(sandbox.name, sandbox.model) : runTrust.detail;
+  const runIsLocal = sandbox ? true : runTrust.isLocal;
+  const providerIsLocal = sandbox ? true : runProvider?.isLocal;
+  const providerName = sandbox ? RUN_LOCATION_COPY.sandboxProvider(sandbox.name) : providerNameForRun(run, state.providers);
+  const modelName = sandbox ? sandbox.model : run.model;
   const displayName = agent
     ? formatAgentDisplayName(agent)
     : agentNameForRun(run, state.installedAgents);
   const tenantName = tenantNameForRun(run, state.tenants);
   const isSystemRun = run.origin !== undefined;
   const requiresTeamReview = Boolean(
-    run.officeContext && (agent?.mode === "write" || !runTrust.isLocal),
+    run.officeContext && (agent?.mode === "write" || !runIsLocal),
   );
 
   const openRerunPreflight = (slug: string, runChoice: RerunChoice) => {
@@ -294,7 +301,7 @@ function RunResultPage({ run }: { run: RunRecord }) {
         tenant={runTenant}
         tenantName={tenantName}
         trustDetail={trustDetail}
-        providerIsLocal={runProvider?.isLocal === true}
+        providerIsLocal={providerIsLocal === true}
         onBack={closeToRuns}
         onConfirm={confirmRun}
         onReject={rejectRun}
@@ -326,8 +333,9 @@ function RunResultPage({ run }: { run: RunRecord }) {
       run={run}
       displayName={displayName}
       tenantName={tenantName}
-      providerName={providerNameForRun(run, state.providers)}
-      providerIsLocal={runProvider?.isLocal}
+      providerName={providerName}
+      providerIsLocal={providerIsLocal}
+      modelName={modelName}
       trustDetail={trustDetail}
       activeTenantId={state.activeTenantId}
       tenants={state.tenants}
@@ -388,6 +396,7 @@ function RunPage({
   tenantName,
   providerName,
   providerIsLocal,
+  modelName,
   trustDetail,
   activeTenantId,
   tenants,
@@ -404,6 +413,7 @@ function RunPage({
   providerName: string;
   /** Undefined when the run recorded no provider. */
   providerIsLocal: boolean | undefined;
+  modelName: string | undefined;
   trustDetail: string;
   activeTenantId?: string;
   tenants: TenantRecord[];
@@ -482,6 +492,7 @@ function RunPage({
             tenantName={tenantName}
             providerName={providerName}
             providerIsLocal={providerIsLocal}
+            modelName={modelName}
             trustDetail={trustDetail}
           />
 
@@ -693,12 +704,14 @@ function RunStatusCard({
   tenantName,
   providerName,
   providerIsLocal,
+  modelName,
   trustDetail,
 }: {
   run: RunRecord;
   tenantName: string;
   providerName: string;
   providerIsLocal: boolean | undefined;
+  modelName: string | undefined;
   trustDetail: string;
 }) {
   const live = run.status === "queued" || run.status === "running";
@@ -773,7 +786,7 @@ function RunStatusCard({
             }
             tone={providerIsLocal === undefined ? undefined : providerIsLocal ? "success" : "warning"}
           />
-          <RunFact label="Model" value={run.model ?? "Not recorded"} mono={Boolean(run.model)} />
+          <RunFact label="Model" value={modelName ?? "Not recorded"} mono={Boolean(modelName)} />
           <RunFact
             label="Tokens"
             value={tokens > 0 ? tokens.toLocaleString() : live ? "Counting" : "Not recorded"}

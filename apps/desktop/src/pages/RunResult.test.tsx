@@ -843,6 +843,28 @@ describe("RunResult: where the run executed", () => {
     expect(document.body).not.toHaveTextContent(/this device|No data leaves/i);
   });
 
+  const factValue = (card: HTMLElement, label: string) => within(card).getByText(label).nextElementSibling;
+  const warningDots = (card: HTMLElement) => card.querySelectorAll(".bg-\\[var\\(--color-warning\\)\\]");
+
+  it("takes a sandbox run's locality, model server and model from the run, with no desktop provider for it", async () => {
+    renderRun(completedRun({ executedOn: sandboxExecutedOn, providerId: "ollama-on-sandbox", model: "llama3.1" }));
+    const card = await screen.findByRole("region", { name: "Run status" });
+    expect(factValue(card, "Provider")).toHaveTextContent("Local model on Mini PC");
+    expect(factValue(card, "Model")).toHaveTextContent("qwen3:8b");
+    expect(factValue(card, "Cost")).toHaveTextContent("Local, not billed");
+    expect(warningDots(card)).toHaveLength(0);
+    expect(card).not.toHaveTextContent(/ollama-on-sandbox|llama3\.1|leaves this device/);
+  });
+
+  it("ignores a desktop provider with the same id as a sandbox run's", async () => {
+    renderRun(completedRun({ executedOn: sandboxExecutedOn, providerId: "anthropic", model: "claude-sonnet" }));
+    const card = await screen.findByRole("region", { name: "Run status" });
+    expect(factValue(card, "Provider")).toHaveTextContent("Local model on Mini PC");
+    expect(factValue(card, "Model")).toHaveTextContent("qwen3:8b");
+    expect(warningDots(card)).toHaveLength(0);
+    expect(card).not.toHaveTextContent(/Claude Code|Hosted/);
+  });
+
   it("names the sandbox on the review page of a sandbox run", async () => {
     renderRun(createAwaitingConfirmationRun({ executedOn: sandboxExecutedOn }));
     expect(await screen.findByText("Ran on Mini PC · local model qwen3:8b")).toBeInTheDocument();
