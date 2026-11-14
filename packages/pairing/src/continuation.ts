@@ -8,8 +8,11 @@ import {
 } from "@openadminos/runtime";
 
 import { verifyAuditCheckpoint } from "./records.js";
+import { isIdentifier, isPlainObject } from "./validate.js";
 
 export type SignedContinuationFailure =
+  /** `expected` is not a pairing id and a sandbox id; nothing was checked. */
+  | "expectation-invalid"
   /** The checkpoint is malformed or its signature does not verify with the sandbox key. */
   | "checkpoint-signature-invalid"
   /** The checkpoint is signed, but for another pairing or sandbox than expected. */
@@ -49,6 +52,9 @@ export function verifySignedContinuation(
   sandboxPublicKey: KeyObject | string,
   expected: SignedContinuationExpectation,
 ): SignedContinuationResult {
+  if (!isPlainObject(expected) || !isIdentifier(expected.pairingId) || !isIdentifier(expected.sandboxId)) {
+    return { ok: false, failure: "expectation-invalid", seq: -1, detail: "The expected pairing id and sandbox id are missing or malformed; take them from the stored pairing record." };
+  }
   const checkpoint = verifyAuditCheckpoint(signedTip, sandboxPublicKey);
   if (!checkpoint.ok) {
     return { ok: false, failure: "checkpoint-signature-invalid", seq: -1, detail: checkpoint.detail };

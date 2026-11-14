@@ -90,6 +90,14 @@ describe("verifySignedContinuation", () => {
     assert.equal(failureOf(signAuditCheckpoint(tip.checkpoint, desktop.privateKey)), "checkpoint-signature-invalid");
   });
 
+  it("names a malformed expectation instead of throwing", () => {
+    const rows = chain(2);
+    for (const bad of [undefined, null, "pairing-1", [], { pairingId: "pairing-1" }, { pairingId: "", sandboxId: "office-mini-pc" }, { pairingId: "pairing-1", sandboxId: 7 }]) {
+      const result = verifySignedContinuation(AUDIT_CONTINUATION_START, rows, signedTip(tipOf(rows)), sandbox.publicKey, bad as unknown as typeof expected);
+      assert.equal(result.ok ? "accepted" : result.failure, "expectation-invalid", JSON.stringify(bad));
+    }
+  });
+
   it("names a checkpoint signed for another pairing or sandbox", () => {
     const rows = chain(2);
     for (const other of [{ pairingId: "pairing-0" }, { sandboxId: "another-pc" }]) {
