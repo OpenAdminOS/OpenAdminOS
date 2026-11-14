@@ -117,7 +117,7 @@ Without a `pairing` section nothing listens, and the host runs the config schedu
 
 - The address is an IP address and port (`[fd7a:115c:a1e0::10]:7443` for IPv6). The host refuses to start unless it is loopback, a private network (10/8, 172.16/12, 192.168/16), link-local, a tailnet (100.64/10) or fd00::/8 (`listen-address-not-private`). Host names are refused, so what is checked is what is bound.
 - TLS 1.3 only, with the sandbox's own self-signed P-256 certificate in the data folder (`tls-key.pem`, `tls-certificate.pem`, mode 0600). It is created on first start, valid for a year, and reissued with the same key 30 days before it expires, so the desktop's pin stays valid. The sandbox's Ed25519 device key is `device-identity.pem`.
-- While unpaired the host logs a pairing code at start and a new one every 10 minutes. Type it on the desktop. A code allows 5 tries and pairs once; a dropped connection after a valid proof needs the next code. The desktop must be in the organization and tenant of the sandbox config (`binding-mismatch`). The code is in the service log; it expires in 10 minutes and pairs only once.
+- While unpaired the host logs a pairing code at start and a new one every 10 minutes. Type it on the desktop. A code allows 5 tries and pairs once; a dropped connection after a valid proof needs the next code. The desktop must be in the organization and tenant of the sandbox config (`binding-mismatch`). The code is printed in the service log, which journald (or the launchd log file) keeps; it expires after 10 minutes and works for one pairing only.
 - After pairing, every route but `POST /v1/pair` needs the client certificate the desktop paired with. Trust is that pin alone, never a certificate authority. One desktop per sandbox; a second one is refused (`already-paired`).
 - When `organizationId` or `tenantId` in the config changes after pairing, assigned schedules stop and the desktop is refused with `pairing-binding-changed` until the sandbox is unpaired and paired again.
 
@@ -127,7 +127,7 @@ The protocol is in `packages/pairing`. Routes, all JSON:
 | --- | --- |
 | `GET /v1/pair` | Before pairing: the pairing id, sandbox id and name, the sandbox's public key and TLS pin. |
 | `POST /v1/pair` | The desktop's offer and proof; returns the sandbox's proof, the signed pairing record and the first signed audit checkpoint. |
-| `GET /v1/status` | Sandbox, organization, tenant, host version, model and digest, and the schedules with their source (`config` or `assigned`), next run times and `assignment-shadowed`. No secrets, keys or tokens. |
+| `GET /v1/status` | Sandbox, organization, tenant, host version, model and digest ("not checked yet" until the first run's preflight), and the schedules with their source (`config` or `assigned`), next run times and `assignment-shadowed`. No secrets, keys or tokens. |
 | `GET /v1/health` | `health.json`. |
 | `GET /v1/runs?after=&limit=` | Run records written after a cursor, at most 100. |
 | `GET /v1/audit?after=&limit=` | Audit rows after a seq, at most 500, with a checkpoint signed at the batch's last row. |

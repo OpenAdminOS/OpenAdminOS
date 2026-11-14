@@ -82,7 +82,8 @@ export interface SandboxStatus {
   pairingId?: string;
   /** The config's organization or tenant changed since pairing. */
   bindingChanged: boolean;
-  model: { provider: string; model: string; digest?: string };
+  /** `digest` is "not checked yet" until the first preflight after start. */
+  model: { provider: string; model: string; digest: string };
   assignmentVersion?: number;
   schedules: Array<{
     agentId: string;
@@ -284,7 +285,7 @@ export class SandboxHost {
   status(): SandboxStatus {
     const { schedules, shadowed } = this.schedules();
     const next = new Map((this.scheduler?.nextRuns() ?? []).map((entry) => [entry.id, entry.dueAt]));
-    const digest = this.lastModel?.digest;
+    const digest = this.lastModel ? this.lastModel.digest : "not checked yet";
     return {
       sandbox: { ...this.config.sandbox },
       organizationId: this.config.organizationId,
@@ -293,7 +294,7 @@ export class SandboxHost {
       paired: this.pairing !== undefined,
       ...(this.pairing ? { pairingId: this.pairing.record.pairingId } : {}),
       bindingChanged: this.bindingChanged,
-      model: { provider: this.config.model.provider, model: this.config.model.model, ...(digest ? { digest } : {}) },
+      model: { provider: this.config.model.provider, model: this.config.model.model, digest },
       ...(this.assignment ? { assignmentVersion: this.assignment.version } : {}),
       schedules: [
         ...schedules.map(({ agent, source }) => {
