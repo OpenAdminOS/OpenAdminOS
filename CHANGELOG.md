@@ -50,7 +50,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
-- Spec: scheduled agents may run in a sandbox on the customer's own infrastructure with a local model there, so schedules keep running while the admin's computer is off; nothing goes to OpenAdminOS. A paid feature, read-only in its first version (SPEC.md §8b). Nothing is built yet.
+- Spec: scheduled agents may run in a sandbox on the customer's own infrastructure with a local model there, so schedules keep running while the admin's computer is off; nothing goes to OpenAdminOS. A paid feature, read-only in its first version (SPEC.md §8b).
 - Nightly release notes list only what that nightly adds: its pull requests and commits, and the changelog entries added since the previous release, not the whole unreleased changelog.
 - Claude Code and Codex requests no longer stop at 180 seconds in total: they end after a silence limit (90 seconds for Claude Code, 180 for Codex, also before the first output) or a 15 minute cap, each with its own error. `OPENADMINOS_CLAUDE_CODE_IDLE_TIMEOUT_MS` and `OPENADMINOS_CODEX_IDLE_TIMEOUT_MS` raise the silence limit; the existing `_TIMEOUT_MS` variables set the cap. A value above 2147483647 ms, the longest a Node timer waits, is ignored. Time a slow consumer of the stream spends on a chunk does not count as silence.
 - Intune shows the icon Microsoft introduced in 2025 in place of the earlier design, and each connector row under Results go to shows the connector's logo, as its card and its reach map row already do.

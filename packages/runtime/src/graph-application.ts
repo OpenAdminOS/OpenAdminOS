@@ -317,17 +317,22 @@ export interface ApplicationRoleClassification {
   changing: string[];
 }
 
-/** Words that mark a permission segment as able to change, send or take out data. */
-const CHANGING_WORDS = ["write", "send", "privilegedoperations", "manage", "create", "delete", "invite", "remove", "export", "migrate"];
-const READ_SEGMENTS = new Set(["Read", "ReadBasic"]);
+/** The verbs a read-only permission may carry after its resource name. */
+const READ_VERBS = new Set(["Read", "ReadBasic"]);
+/** The qualifiers real read-only Graph application permissions use after the verb. */
+const READ_QUALIFIERS = new Set(["All", "Directory", "Hidden", "Shared"]);
+const RESOURCE_NAME = /^[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*$/;
 
 /**
  * Sorts application permissions into read-only and changing, deny by
- * default. A role is read-only only when one of its segments after the
- * first is exactly `Read` or `ReadBasic` and none of those segments
- * contains a changing word. The first segment names the resource
- * (`DeviceManagementManagedDevices`, `RoleManagement`), so it is checked
- * only for `Write` and `Send`; anything else is changing.
+ * default. Only these shapes are read-only: `<Resource>.Read`,
+ * `<Resource>.ReadBasic`, and either of them followed by `All`,
+ * `Directory`, `Hidden` or `Shared`, where the resource name is letters
+ * and digits (hyphenated parts allowed, as in `AuditLogsQuery-Entra`)
+ * without `Write` or `Send`. Everything else is changing,
+ * including real read permissions with a narrower qualifier such as
+ * `Policy.Read.ConditionalAccess`; a sandbox agent that needs one is a
+ * deliberate change to this list.
  */
 export function classifyApplicationRoles(roles: readonly string[]): ApplicationRoleClassification {
   const readOnly: string[] = [];
@@ -340,15 +345,11 @@ export function classifyApplicationRoles(roles: readonly string[]): ApplicationR
 
 function isReadOnlyRole(role: string): boolean {
   const segments = role.split(".");
-  if (segments.length < 2 || segments.some((segment) => segment.length === 0)) return false;
-  const [resource, ...rest] = segments as [string, ...string[]];
-  const resourceLower = resource.toLowerCase();
-  if (resourceLower.includes("write") || resourceLower.includes("send")) return false;
-  if (!rest.some((segment) => READ_SEGMENTS.has(segment))) return false;
-  return !rest.some((segment) => {
-    const lower = segment.toLowerCase();
-    return CHANGING_WORDS.some((word) => lower.includes(word));
-  });
+  if (segments.length < 2 || segments.length > 3) return false;
+  const [resource, verb, qualifier] = segments as [string, string, string | undefined];
+  if (!RESOURCE_NAME.test(resource) || /write|send/i.test(resource)) return false;
+  if (!READ_VERBS.has(verb)) return false;
+  return qualifier === undefined || READ_QUALIFIERS.has(qualifier);
 }
 
 /**
@@ -369,6 +370,16 @@ export const APPLICATION_SECRET_BEARING_ROLE_PATTERNS: readonly string[] = [
   "Notes.*",
   "Calendars.*",
   "Contacts.*",
+  "eDiscovery.*",
+  "OnlineMeetingTranscript.*",
+  "OnlineMeetingRecording.*",
+  "OnlineMeetingArtifact.*",
+  "CallRecords.*",
+  "CallRecord-*",
+  "UserAuthMethod-*",
+  "Group-Conversation.*",
+  "Tasks.*",
+  "UserAuthenticationMethod.*",
 ];
 
 /**
@@ -377,7 +388,9 @@ export const APPLICATION_SECRET_BEARING_ROLE_PATTERNS: readonly string[] = [
  * that one has its own entry.
  */
 export function isSecretBearingRole(role: string): boolean {
-  return APPLICATION_SECRET_BEARING_ROLE_PATTERNS.some((pattern) =>
-    pattern.endsWith(".*") ? role.startsWith(pattern.slice(0, -1)) : role === pattern,
-  );
+  const name = role.toLowerCase();
+  return APPLICATION_SECRET_BEARING_ROLE_PATTERNS.some((pattern) => {
+    const lower = pattern.toLowerCase();
+    return lower.endsWith("*") ? name.startsWith(lower.slice(0, -1)) : name === lower;
+  });
 }

@@ -47,15 +47,16 @@ export class RunStore {
     return path;
   }
 
-  /** Runs of one agent, oldest first. */
+  /**
+   * Runs of one agent, oldest first. A file that is not a run record is
+   * left out here and named by `unreadableFiles`, which the host logs as
+   * storage-corrupt at open.
+   */
   list(agentSlug: string): RunRecord[] {
     const folder = this.folderFor(agentSlug);
     return this.files(folder).flatMap((name) => {
-      try {
-        return [JSON.parse(readFileSync(join(folder, name), "utf8")) as RunRecord];
-      } catch {
-        return [];
-      }
+      const run = readRunFile(join(folder, name));
+      return run ? [run] : [];
     });
   }
 
@@ -67,11 +68,7 @@ export class RunStore {
       if (!SAFE_SEGMENT.test(agent)) continue;
       const folder = join(this.root, agent);
       for (const name of this.files(folder)) {
-        try {
-          JSON.parse(readFileSync(join(folder, name), "utf8"));
-        } catch {
-          names.push(`${agent}/${name}`);
-        }
+        if (!readRunFile(join(folder, name))) names.push(`${agent}/${name}`);
       }
     }
     return names;
@@ -128,6 +125,47 @@ export class RunStore {
   }
 }
 
+/** A run record file, or undefined when it is not JSON or not shaped like a run record. */
+function readRunFile(path: string): RunRecord | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return undefined;
+  }
+  return isRunRecord(parsed) ? parsed : undefined;
+}
+
+function isRunRecord(value: unknown): value is RunRecord {
+  if (!isPlainObject(value)) return false;
+  return (
+    typeof value.id === "string" &&
+    typeof value.agentSlug === "string" &&
+    typeof value.status === "string" &&
+    typeof value.queuedAt === "string" &&
+    Array.isArray(value.steps) &&
+    Array.isArray(value.logs)
+  );
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isHealthFile(value: unknown): value is HealthFile {
+  if (!isPlainObject(value) || value.version !== 1 || !isPlainObject(value.agents)) return false;
+  return Object.values(value.agents).every((entry) => {
+    if (!isPlainObject(entry)) return false;
+    const { lastRun, lastRefusal, lastDelivery, lastNoticeReason } = entry;
+    return (
+      (lastRun === undefined || (isPlainObject(lastRun) && typeof lastRun.runId === "string" && typeof lastRun.status === "string")) &&
+      (lastRefusal === undefined || (isPlainObject(lastRefusal) && typeof lastRefusal.reason === "string" && typeof lastRefusal.at === "string")) &&
+      (lastDelivery === undefined || (isPlainObject(lastDelivery) && typeof lastDelivery.outcome === "string")) &&
+      (lastNoticeReason === undefined || typeof lastNoticeReason === "string")
+    );
+  });
+}
+
 function fileStamp(iso: string): string {
   return iso.replace(/[:.]/g, "-");
 }
@@ -160,8 +198,8 @@ export class HealthStore {
     let loaded: HealthFile | undefined;
     if (existsSync(path)) {
       try {
-        const parsed = JSON.parse(readFileSync(path, "utf8")) as HealthFile;
-        if (parsed && parsed.version === 1 && parsed.agents !== null && typeof parsed.agents === "object") loaded = parsed;
+        const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+        if (isHealthFile(parsed)) loaded = parsed;
       } catch {
         loaded = undefined;
       }

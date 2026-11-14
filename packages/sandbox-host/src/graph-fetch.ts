@@ -108,10 +108,19 @@ function refusalFor(url: URL | undefined, method: string, versioned: boolean, pa
   if (method !== "GET") {
     return new SandboxRefusal("graph-request-refused", `${method} ${path} was refused before it was sent. A sandbox only reads; every change is confirmed and applied on the desktop.`);
   }
-  if (/\$batch/i.test(path) || /\$batch/i.test(query)) {
+  // Checked on the decoded path too, so %24batch or /%6De is no way around it.
+  let decodedPath: string;
+  let decodedQuery: string;
+  try {
+    decodedPath = decodeURIComponent(path);
+    decodedQuery = decodeURIComponent(query);
+  } catch {
+    return new SandboxRefusal("graph-request-refused", `${path} was refused before it was sent: its encoding cannot be read.`);
+  }
+  if ([path, decodedPath, query, decodedQuery].some((part) => /\$batch/i.test(part))) {
     return new SandboxRefusal("graph-request-refused", `${path} was refused before it was sent: a sandbox does not send $batch requests.`);
   }
-  if (/^\/me(?:[/(]|$)/i.test(path)) {
+  if ([path, decodedPath].some((part) => /^\/me(?:[/(?]|$)/i.test(part))) {
     return new SandboxRefusal("graph-request-refused", `${path} was refused before it was sent: an app-only identity has no signed-in user.`);
   }
   return undefined;

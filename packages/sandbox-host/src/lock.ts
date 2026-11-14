@@ -7,6 +7,9 @@ import { SandboxRefusal } from "./refusal.js";
 /** When this process started, to tell it apart from an earlier process with the same pid. */
 const PROCESS_STARTED_AT = Math.round(Date.now() - process.uptime() * 1000);
 
+/** A takeover guard older than this is left by a host that died while taking over. */
+const GUARD_STALE_MS = 60_000;
+
 interface LockContent {
   pid?: unknown;
   processStartedAt?: unknown;
@@ -14,55 +17,50 @@ interface LockContent {
 
 /**
  * One host per data folder: the service and a `--once` setup check never
- * run at the same time. The lock file is written in full and then linked
- * into place, so it is never seen empty. A lock is stale, and taken over,
- * when its process no longer exists, when it was written before the
- * machine booted, or when it carries this process's pid from an earlier
- * process (a container restart reuses pid 1). A stale lock is claimed by
- * renaming it to a name of its own: only one rename of the file can win,
- * so two hosts taking over at once cannot both succeed.
+ * run at the same time.
+ *
+ * The lock file is written in full and then linked into place, so it is
+ * never seen empty, and a link only succeeds while no lock exists. A lock
+ * is stale when its process no longer exists, when it was written before
+ * the machine booted, or when it carries this process's pid from an
+ * earlier process (a container restart reuses pid 1).
+ *
+ * Replacing a stale lock is serialized by a takeover guard, a second file
+ * created with O_EXCL: only the host holding the guard may remove the
+ * lock, and it checks the lock again under the guard first. While the
+ * stale lock is in place nobody else can link one, so no live lock is
+ * ever removed. A guard left by a host that died is itself stale and is
+ * cleared the same way.
  */
 export class InstanceLock {
   private held = false;
+  private readonly guardPath: string;
 
-  constructor(private readonly path: string) {}
+  constructor(private readonly path: string) {
+    this.guardPath = `${path}.takeover`;
+  }
 
   acquire(): void {
     const content = JSON.stringify({ pid: process.pid, processStartedAt: PROCESS_STARTED_AT, startedAt: new Date().toISOString() });
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      const temporary = `${this.path}.${randomUUID()}.tmp`;
-      writeFileSync(temporary, content, { mode: 0o600 });
-      try {
-        linkSync(temporary, this.path);
-        this.held = true;
-        return;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      } finally {
-        rmSync(temporary, { force: true });
-      }
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (this.link(content)) return;
       const owner = this.read(this.path);
       if (owner && this.isHeld(owner, this.path)) throw this.heldBy(owner);
-      const claim = `${this.path}.stale-${randomUUID()}`;
+      if (!this.takeGuard(content)) {
+        throw new SandboxRefusal("already-running", "Another sandbox host is taking over this data folder right now. Wait for it to start, or stop it first.");
+      }
       try {
-        renameSync(this.path, claim);
-      } catch (error) {
-        // Another host claimed or replaced it first; look again.
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
-        throw error;
+        // Under the guard: look again, then remove only a lock that is still stale.
+        const current = this.read(this.path);
+        if (current && this.isHeld(current, this.path)) throw this.heldBy(current);
+        rmSync(this.path, { force: true });
+        if (this.link(content)) return;
+        // A host that found no lock at all linked its own in between; it holds the folder.
+        const winner = this.read(this.path);
+        if (winner && this.isHeld(winner, this.path)) throw this.heldBy(winner);
+      } finally {
+        this.releaseGuard();
       }
-      const claimed = this.read(claim);
-      if (claimed && this.isHeld(claimed, claim)) {
-        // Between the check and the rename a live host wrote its lock: put it back.
-        try {
-          linkSync(claim, this.path);
-        } catch {
-          // A third host holds the path now; either way the lock is not ours.
-        }
-        rmSync(claim, { force: true });
-        throw this.heldBy(claimed);
-      }
-      rmSync(claim, { force: true });
     }
     throw new SandboxRefusal("already-running", `The lock file ${this.path} could not be taken. Remove it if no sandbox host is running.`);
   }
@@ -70,8 +68,69 @@ export class InstanceLock {
   release(): void {
     if (!this.held) return;
     this.held = false;
-    const owner = this.read(this.path);
-    if (owner?.pid === process.pid && owner.processStartedAt === PROCESS_STARTED_AT) rmSync(this.path, { force: true });
+    if (this.isOurs(this.read(this.path))) rmSync(this.path, { force: true });
+  }
+
+  /** Links a fully written lock into place; false when one exists. */
+  private link(content: string): boolean {
+    const temporary = `${this.path}.${randomUUID()}.tmp`;
+    writeFileSync(temporary, content, { mode: 0o600 });
+    try {
+      linkSync(temporary, this.path);
+      this.held = true;
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      return false;
+    } finally {
+      rmSync(temporary, { force: true });
+    }
+  }
+
+  /** Creates the takeover guard, clearing one left by a dead host. False when a live host holds it. */
+  private takeGuard(content: string): boolean {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const temporary = `${this.guardPath}.${randomUUID()}.tmp`;
+      writeFileSync(temporary, content, { mode: 0o600 });
+      try {
+        linkSync(temporary, this.guardPath);
+        return true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      } finally {
+        rmSync(temporary, { force: true });
+      }
+      const guard = this.read(this.guardPath);
+      if (guard && this.isHeld(guard, this.guardPath, GUARD_STALE_MS)) return false;
+      // A dead host's guard: move it aside under a name of our own, so only one host clears it.
+      const aside = `${this.guardPath}.stale-${randomUUID()}`;
+      try {
+        renameSync(this.guardPath, aside);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw error;
+      }
+      const moved = this.read(aside);
+      if (moved && this.isHeld(moved, aside, GUARD_STALE_MS)) {
+        // A live host's guard landed in between: give it back and step aside.
+        try {
+          linkSync(aside, this.guardPath);
+        } finally {
+          rmSync(aside, { force: true });
+        }
+        return false;
+      }
+      rmSync(aside, { force: true });
+    }
+    return false;
+  }
+
+  private releaseGuard(): void {
+    if (this.isOurs(this.read(this.guardPath))) rmSync(this.guardPath, { force: true });
+  }
+
+  private isOurs(content: LockContent | undefined): boolean {
+    return content?.pid === process.pid && content.processStartedAt === PROCESS_STARTED_AT;
   }
 
   private heldBy(owner: LockContent): SandboxRefusal {
@@ -89,7 +148,7 @@ export class InstanceLock {
     }
   }
 
-  private isHeld(owner: LockContent, path: string): boolean {
+  private isHeld(owner: LockContent, path: string, maxAgeMs?: number): boolean {
     if (typeof owner.pid !== "number") return false;
     let writtenAt: number;
     try {
@@ -99,6 +158,7 @@ export class InstanceLock {
     }
     const bootedAt = Date.now() - uptime() * 1000;
     if (writtenAt < bootedAt) return false;
+    if (maxAgeMs !== undefined && Date.now() - writtenAt > maxAgeMs) return false;
     if (owner.pid === process.pid) return owner.processStartedAt === PROCESS_STARTED_AT;
     try {
       process.kill(owner.pid, 0);

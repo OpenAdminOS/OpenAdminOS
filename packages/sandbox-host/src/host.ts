@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-import type { RunInitiator, RunLlmApi, RunRecord } from "@openadminos/agent-sdk";
+import type { LlmOptions, RunInitiator, RunLlmApi, RunRecord } from "@openadminos/agent-sdk";
 import {
   appendSandboxEvent,
   ApplicationTokenError,
@@ -11,6 +11,7 @@ import {
   createOllamaLlm,
   createQueuedRun,
   executeRun,
+  llmErrorCode,
   graphRequestAuditSink,
   type ApplicationToken,
   type ApplicationTokenProvider,
@@ -18,10 +19,10 @@ import {
   type SandboxAuditContext,
 } from "@openadminos/runtime";
 
-import { resolveSandboxAgent, type SandboxAgent } from "./agents.js";
+import { resolveSandboxAgent, useReleaseAgents, type SandboxAgent } from "./agents.js";
 import { chooseCertificate } from "./certificates.js";
 import type { SandboxAgentConfig, SandboxConfig } from "./config.js";
-import { payloadDigest, renderFailureNotice, renderRecoveryNotice, renderSandboxReport, sendDelivery } from "./delivery.js";
+import { capForConnector, payloadDigest, renderFailureNotice, renderRecoveryNotice, renderSandboxReport, sendDelivery } from "./delivery.js";
 import { assertSupportedPlatform, describe, ensurePrivateDirectory } from "./files.js";
 import { sandboxGraphFetch } from "./graph-fetch.js";
 import { assertAgentPermissions, assertSandboxIdentity } from "./identity.js";
@@ -70,9 +71,10 @@ export class SandboxHost {
   private readonly log: SandboxLogger;
   private readonly lock: InstanceLock;
   private readonly runs: RunStore;
-  private readonly health: HealthStore;
+  private healthStore: HealthStore | undefined;
   private audit: AuditLogStore | undefined;
   private readonly inFlight = new Set<string>();
+  private readonly running = new Set<Promise<unknown>>();
   private scheduler: Scheduler | undefined;
   private readonly stopController = new AbortController();
 
@@ -83,13 +85,20 @@ export class SandboxHost {
     ensurePrivateDirectory(config.dataDir);
     this.lock = new InstanceLock(join(config.dataDir, "sandbox.lock"));
     this.runs = new RunStore(join(config.dataDir, "runs"));
-    this.health = new HealthStore(join(config.dataDir, "health.json"), config.sandbox.id);
+    useReleaseAgents();
+  }
+
+  /** health.json, read only once the lock is held, so a second host never moves it aside. */
+  private get health(): HealthStore {
+    if (!this.healthStore) throw new SandboxRefusal("storage-failed", "health.json is not open. Start the sandbox host again.");
+    return this.healthStore;
   }
 
   /** Takes the instance lock, opens the audit log and marks interrupted runs. */
   open(): void {
     this.lock.acquire();
     try {
+      this.healthStore = new HealthStore(join(this.config.dataDir, "health.json"), this.config.sandbox.id);
       this.audit = new AuditLogStore(join(this.config.dataDir, "openadminos.db"), this.now);
       if (this.health.problem) {
         this.log("error", this.health.problem, { reason: "storage-corrupt", file: "health.json" });
@@ -110,6 +119,8 @@ export class SandboxHost {
   async close(): Promise<void> {
     this.stopController.abort();
     await this.scheduler?.stop();
+    // Runs stop on the abort and record themselves before the audit log closes.
+    await Promise.allSettled([...this.running]);
     this.audit?.close();
     this.audit = undefined;
     this.lock.release();
@@ -142,8 +153,10 @@ export class SandboxHost {
       return { kind: "refused", reason: "already-running", message };
     }
     this.inFlight.add(agentConfig.id);
+    const runNow = this.runAgentNow(agentConfig, initiator);
+    this.running.add(runNow);
     try {
-      return await this.runAgentNow(agentConfig, initiator);
+      return await runNow;
     } catch (error) {
       // Never dropped: a filesystem error in the data folder is
       // storage-failed, anything else is run-failed with its cause.
@@ -154,8 +167,14 @@ export class SandboxHost {
           : new SandboxRefusal("run-failed", `${agentConfig.id} stopped: ${describe(error)}`, { cause: error });
       this.log("error", refusal.message, { agent: agentConfig.id, reason: refusal.reason });
       this.safeHealth(agentConfig.id, { lastRefusal: { reason: refusal.reason, message: refusal.message, at: this.now().toISOString() } });
+      try {
+        await this.sendNotice(agentConfig, this.auditContext(agentConfig.id, initiator), refusal.reason, {});
+      } catch (noticeError) {
+        this.log("error", `Failure notice not sent: ${describe(noticeError)}`, { agent: agentConfig.id, reason: "delivery-failed" });
+      }
       return { kind: "refused", reason: refusal.reason, message: refusal.message };
     } finally {
+      this.running.delete(runNow);
       this.inFlight.delete(agentConfig.id);
     }
   }
@@ -226,7 +245,8 @@ export class SandboxHost {
       certificateSha256: certificate.signer.thumbprintSha256,
     });
 
-    const expectation = { tenantId: this.config.tenantId, clientId: this.config.clientId, allowedRoles: this.allowedRoles(agentConfig, resolved) };
+    const allowlist = this.allowedRoles(agentConfig, resolved);
+    const expectation = { tenantId: this.config.tenantId, clientId: this.config.clientId, allowedRoles: allowlist.roles, refusedAgents: allowlist.refused };
     const factory = this.deps.createTokenProvider ?? createApplicationTokenProvider;
     const tokenProvider = factory({
       tenantId: this.config.tenantId,
@@ -295,6 +315,7 @@ export class SandboxHost {
     const onShutdown = () => stop(new SandboxRefusal("run-stopped", "The sandbox host stopped during the run. The next scheduled run starts fresh."));
     let deadline: ReturnType<typeof setTimeout> | undefined;
     const statuses: number[] = [];
+    let modelFailure: string | undefined;
     try {
       // Set up inside the try, so a throw while building the run cannot
       // leave the deadline timer or the shutdown listener behind.
@@ -327,10 +348,13 @@ export class SandboxHost {
       const timeoutMs = (this.config.model.timeoutSeconds ?? 300) * 1000;
       // The model client sends only to the endpoint that was checked, and never follows a redirect.
       const modelTransport = pinnedModelFetch(this.config.model.endpoint);
-      const llm = this.deps.createLlm?.(this.config.model, model) ??
+      const baseLlm = this.deps.createLlm?.(this.config.model, model) ??
         (this.config.model.provider === "ollama"
           ? createOllamaLlm({ endpoint: this.config.model.endpoint, defaultModel: model.model, timeoutMs, fetchImpl: modelTransport })
           : createLmStudioLlm({ endpoint: this.config.model.endpoint, defaultModel: model.model, timeoutMs, fetchImpl: modelTransport }));
+      const llm = recordModelFailures(baseLlm, (code) => {
+        modelFailure ??= code;
+      });
       run = await executeRun({
         signal: controller.signal,
         run,
@@ -365,7 +389,7 @@ export class SandboxHost {
     if (run.status === "completed" && !stopReason) {
       outcome = { kind: "completed", run };
     } else {
-      const refusal = stopReason ?? failureReason(run, statuses);
+      const refusal = stopReason ?? failureReason(run, statuses, modelFailure);
       run = {
         ...run,
         status: "failed",
@@ -392,7 +416,8 @@ export class SandboxHost {
       steps: run.steps.length,
     });
 
-    if (outcome.kind === "failed" && outcome.reason === "audit-failed") return outcome;
+    // Nothing is sent for a run the audit log could not close, or one stopped by a shutdown.
+    if (outcome.kind === "failed" && (outcome.reason === "audit-failed" || outcome.reason === "run-stopped")) return outcome;
     const delivered = await this.deliverRun(agentConfig, context, run, resolved, outcome, secrets);
     if (delivered) {
       run = delivered.run;
@@ -429,17 +454,19 @@ export class SandboxHost {
    * declare in their hashed manifests, read again on every run. An agent
    * whose own checks fail adds none.
    */
-  private allowedRoles(current: SandboxAgentConfig, resolved: SandboxAgent): Set<string> {
+  private allowedRoles(current: SandboxAgentConfig, resolved: SandboxAgent): { roles: Set<string>; refused: Array<{ id: string; reason: string }> } {
     const roles = new Set(resolved.agent.scopes);
+    const refused: Array<{ id: string; reason: string }> = [];
     for (const agent of this.config.agents) {
       if (agent.id === current.id) continue;
       try {
         for (const scope of resolveSandboxAgent(agent).agent.scopes) roles.add(scope);
-      } catch {
-        // That agent is refused on its own run, with its own reason.
+      } catch (error) {
+        // That agent is refused on its own run; here its scopes are missing from the allowlist.
+        refused.push({ id: agent.id, reason: isSandboxRefusal(error) ? error.reason : "run-failed" });
       }
     }
-    return roles;
+    return { roles, refused };
   }
 
   /** Sends the report when the config asks for it, once. Records the result on the run. */
@@ -489,14 +516,15 @@ export class SandboxHost {
     secrets: SandboxSecrets,
     text: string,
   ): Promise<{ outcome: "sent" | "failed"; detail: string; auditFailure?: SandboxRefusal }> {
+    text = capForConnector(text, delivery.connector);
     const digest = payloadDigest(text);
     try {
       this.auditEvent(context, "delivery.attempted", { connector: delivery.connector, payloadDigest: digest, idempotencyKey });
     } catch (error) {
-      const detail = describe(error);
-      this.safeHealth(agentConfig.id, { lastDelivery: { runId: idempotencyKey, outcome: "failed", detail, at: this.now().toISOString() } });
+      const auditFailure = isSandboxRefusal(error) ? error : new SandboxRefusal("audit-failed", describe(error), { cause: error });
+      this.safeHealth(agentConfig.id, { lastDelivery: { runId: idempotencyKey, outcome: "failed", detail: auditFailure.message, at: this.now().toISOString() } });
       this.log("error", "Report not delivered: the audit log could not record it.", { agent: agentConfig.id, reason: "audit-failed" });
-      return { outcome: "failed", detail };
+      return { outcome: "failed", detail: auditFailure.message, auditFailure };
     }
     const result = await sendDelivery({ delivery, secrets, text, ...(this.deps.deliveryFetch ? { fetch: this.deps.deliveryFetch } : {}) });
     let auditFailure: SandboxRefusal | undefined;
@@ -576,12 +604,13 @@ export class SandboxHost {
 }
 
 /** The named reason of a run that failed without the sandbox stopping it. */
-function failureReason(run: RunRecord, statuses: readonly number[]): SandboxRefusal {
+function failureReason(run: RunRecord, statuses: readonly number[], modelFailure: string | undefined): SandboxRefusal {
   const error = run.error ?? "";
-  if (/(?:Ollama|LM Studio) timed out/.test(error)) {
+  if (modelFailure === "model-timeout") {
     return new SandboxRefusal("model-timeout", "The local model did not answer in time. Check the load on this machine, use a smaller model, or raise model.timeoutSeconds.");
   }
-  const last = [...statuses].reverse().find((status) => status >= 400);
+  // The first fatal status names the failure; a later one is usually its consequence.
+  const last = statuses.find((status) => status === 401 || status === 403) ?? (statuses.includes(429) ? 429 : undefined);
   if (last === 401) {
     return new SandboxRefusal("graph-unauthorized", "Microsoft Graph refused the sandbox token (HTTP 401). For Intune this also means the app lacks the permission the request needs. Check the granted permissions and admin consent.");
   }
@@ -599,4 +628,33 @@ const FILESYSTEM_CODES = new Set(["ENOSPC", "EACCES", "EPERM", "EROFS", "EDQUOT"
 function isFilesystemError(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException | undefined)?.code;
   return typeof code === "string" && FILESYSTEM_CODES.has(code);
+}
+
+/** Passes every model call through and reports the typed code of a model failure. */
+function recordModelFailures(llm: RunLlmApi, report: (code: string) => void): RunLlmApi {
+  const note = (error: unknown) => {
+    const code = llmErrorCode(error);
+    if (code) report(code);
+  };
+  return {
+    available: llm.available,
+    ...(llm.defaultModel !== undefined ? { defaultModel: llm.defaultModel } : {}),
+    ...(llm.streamsIncrementally !== undefined ? { streamsIncrementally: llm.streamsIncrementally } : {}),
+    async complete(options: LlmOptions) {
+      try {
+        return await llm.complete(options);
+      } catch (error) {
+        note(error);
+        throw error;
+      }
+    },
+    async *stream(options: LlmOptions) {
+      try {
+        yield* llm.stream(options);
+      } catch (error) {
+        note(error);
+        throw error;
+      }
+    },
+  };
 }

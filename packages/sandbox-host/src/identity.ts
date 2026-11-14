@@ -17,6 +17,12 @@ export interface IdentityExpectation {
   clientId: string;
   /** The union of the scopes the configured agents declare; no other role is accepted. */
   allowedRoles: ReadonlySet<string>;
+  /**
+   * Configured agents that were refused this run, so their scopes are not
+   * in `allowedRoles`. A role outside the allowlist is then named as that
+   * gap, not as a permission to remove.
+   */
+  refusedAgents?: ReadonlyArray<{ id: string; reason: string }>;
 }
 
 /**
@@ -70,6 +76,13 @@ export function assertSandboxIdentity(token: ApplicationToken, expected: Identit
     );
   }
   const extra = roles.filter((role) => !expected.allowedRoles.has(role));
+  if (extra.length > 0 && (expected.refusedAgents?.length ?? 0) > 0) {
+    const refused = (expected.refusedAgents ?? []).map((agent) => `${agent.id} (${agent.reason})`).join(", ");
+    throw new SandboxRefusal(
+      "identity-allowlist-incomplete",
+      `The sandbox app holds ${extra.join(", ")}, which no agent that passed its checks declares. These configured agents were refused, so their permissions could not be counted: ${refused}. Fix or re-pin them, then run again.`,
+    );
+  }
   if (extra.length > 0) {
     throw new SandboxRefusal(
       "identity-holds-unneeded-permission",

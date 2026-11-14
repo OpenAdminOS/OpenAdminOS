@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -6,14 +6,12 @@ import { createSelfSignedCertificate } from "@openadminos/runtime/testing";
 import type { AgentTemplate } from "@openadminos/agent-sdk";
 import {
   parseAgentTemplate,
-  loadAgentManifestPreview,
-  findRegistryAgentById,
   type ApplicationToken,
   type ApplicationTokenProvider,
   type ApplicationTokenProviderOptions,
 } from "@openadminos/runtime";
 
-import { manifestSha256 } from "./agents.js";
+import { manifestSha256, releaseAgentsRoot } from "./agents.js";
 
 export const TENANT = "11111111-1111-1111-1111-111111111111";
 export const CLIENT = "22222222-2222-2222-2222-222222222222";
@@ -31,11 +29,7 @@ export function writePrivate(path: string, content: string, mode = 0o600): strin
 }
 
 export function bundledHash(id: string): string {
-  const agent = findRegistryAgentById(id);
-  if (!agent) throw new Error(`no bundled agent ${id}`);
-  const preview = loadAgentManifestPreview(agent);
-  if (!preview) throw new Error(`no manifest for ${id}`);
-  return manifestSha256(preview.sourceText);
+  return manifestSha256(readFileSync(join(releaseAgentsRoot(), id, "manifest.yaml")));
 }
 
 export function writeCertificate(dir: string, name: string, notBefore: Date, notAfter: Date): { certificatePath: string; privateKeyPath: string } {
@@ -112,8 +106,5 @@ export function ollamaFetch(options: { models?: Array<Record<string, unknown>>; 
 }
 
 export function bundledManifest(id: string): AgentTemplate {
-  const agent = findRegistryAgentById(id);
-  const preview = agent ? loadAgentManifestPreview(agent) : undefined;
-  if (!preview) throw new Error(`no manifest for ${id}`);
-  return parseAgentTemplate(preview.sourceText);
+  return parseAgentTemplate(readFileSync(join(releaseAgentsRoot(), id, "manifest.yaml"), "utf8"));
 }

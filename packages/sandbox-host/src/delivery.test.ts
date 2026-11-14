@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 
 import type { RunRecord, TemplateStep } from "@openadminos/agent-sdk";
 
-import { modelDerivedStepIds, neutralize, renderFailureNotice, renderSandboxReport, sendDelivery } from "./delivery.js";
+import { capForConnector, modelDerivedStepIds, neutralize, renderFailureNotice, renderSandboxReport, sendDelivery } from "./delivery.js";
 import { SandboxRefusal } from "./refusal.js";
 import { loadSandboxSecrets } from "./secrets.js";
 import { bundledManifest, tempDir, writePrivate } from "./test-support.js";
@@ -69,7 +69,32 @@ describe("renderSandboxReport", () => {
     assert.deepEqual([...modelDerivedStepIds(steps)].sort(), ["ask", "each", "shape"]);
   });
 
+  it("drops bare and filtered references to model steps", () => {
+    const manifest = {
+      ...bundledManifest("team-evidence-review"),
+      skills: [
+        { id: "load", format: "graph", label: "", settings: { method: "GET", path: "/users", scopes: [] } },
+        { id: "review", format: "llm", label: "", settings: {} },
+      ],
+      definition: { result: { summary: "", data: { bare: "{{ review }}", sized: "{{ review | size }}", fallback: "{{ load.output | default(review) }}", kept: "{{ load.output | size }}" } } },
+    } as unknown as Parameters<typeof renderSandboxReport>[0]["manifest"];
+    const text = renderSandboxReport({ run: { ...run, result: { bare: 4, sized: 5, fallback: 6, kept: 7 } }, agentName: "A", sandboxName: "S", manifest });
+    assert.match(text, /- kept: 7/);
+    for (const dropped of ["bare", "sized", "fallback"]) assert.equal(text.includes(`- ${dropped}`), false, dropped);
+  });
+
+  it("caps a report at what each destination takes", () => {
+    const long = Array.from({ length: 400 }, (_, index) => `- line${index}: ${index}`).join("\n");
+    const discord = capForConnector(long, "discord");
+    const slack = capForConnector(long, "slack");
+    assert.ok(discord.length <= 2_000);
+    assert.ok(slack.length <= 3_000 && slack.length > 2_000);
+    assert.match(discord, /The rest is on the sandbox\.$/);
+    assert.equal(capForConnector("short", "discord"), "short");
+  });
+
   it("neutralizes mentions and links in names", () => {
+    assert.equal(neutralize("see www.evil.com and evil.example.org"), "see www evil com and evil example org");
     assert.equal(neutralize("<@here> see https://evil.example now"), "here see https: evil example now");
     const notice = renderFailureNotice({ agentId: "find-inactive-devices", sandboxName: "@everyone", reason: "identity-can-change-tenant", at: "2026-11-14T00:00:00.000Z" });
     assert.equal(notice.includes("@"), false);

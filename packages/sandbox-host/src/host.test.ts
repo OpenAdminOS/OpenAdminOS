@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import type { RunLlmApi } from "@openadminos/agent-sdk";
-import { AuditLogStore } from "@openadminos/runtime";
+import { AuditLogStore, LlmTimeoutError } from "@openadminos/runtime";
 
 import { loadSandboxConfig } from "./config.js";
 import { SandboxHost, type SandboxHostDeps } from "./host.js";
@@ -312,6 +312,172 @@ describe("SandboxHost failures before the secrets and after the run", () => {
       assert.ok(lines.some((line) => line.startsWith("storage-corrupt") && line.includes("find-inactive-devices/broken.json")));
     } finally {
       void host.close();
+      cleanup();
+    }
+  });
+});
+
+describe("SandboxHost round two", () => {
+  const discordConfig = (dir: string, delivery: Record<string, unknown>, agents: unknown[] = []) => {
+    writePrivate(join(dir, "secrets.json"), JSON.stringify({ discord: { webhookUrl: "https://discord.com/api/webhooks/1234567/token_x" } }));
+    return loadSandboxConfig(writeConfig(dir, {
+      agents: [{ id: "find-inactive-devices", templateSha256: bundledHash("find-inactive-devices"), intervalSeconds: 3600, delivery: { connector: "discord", ...delivery } }, ...agents],
+    }));
+  };
+  const counting = () => {
+    const sent: string[] = [];
+    const deliveryFetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      sent.push(String((JSON.parse(String(init?.body)) as { content: string }).content));
+      return Response.json({ id: "m" });
+    }) as typeof fetch;
+    return { sent, deliveryFetch };
+  };
+  const statusGraph = (status: number) => (async () => new Response(JSON.stringify({ error: { code: "x" } }), { status, headers: { "retry-after": "0" } })) as typeof fetch;
+
+  for (const [status, reason] of [[401, "graph-unauthorized"], [403, "graph-forbidden"], [429, "graph-throttled"]] as const) {
+    it(`names HTTP ${status} from Graph as ${reason}`, async () => {
+      const { dir, cleanup } = tempDir();
+      const config = loadSandboxConfig(writeConfig(dir));
+      const host = new SandboxHost(config, deps({ graphFetch: statusGraph(status) }));
+      try {
+        host.open();
+        const outcome = await host.runAgent(config.agents[0]!, "schedule");
+        assert.equal(outcome.kind === "failed" && outcome.reason, reason);
+      } finally {
+        await host.close();
+        cleanup();
+      }
+    });
+  }
+
+  it("names a model timeout by its code", async () => {
+    const { dir, cleanup } = tempDir();
+    const config = loadSandboxConfig(writeConfig(dir));
+    const timingOut: RunLlmApi = {
+      ...llm,
+      async complete() {
+        throw new LlmTimeoutError("anything at all");
+      },
+      async *stream() {
+        throw new LlmTimeoutError("anything at all");
+      },
+    };
+    const host = new SandboxHost(config, { ...deps({ graphFetch: graph().fetchImpl }), createLlm: () => timingOut });
+    try {
+      host.open();
+      const outcome = await host.runAgent(config.agents[0]!, "schedule");
+      assert.equal(outcome.kind === "failed" && outcome.reason, "model-timeout");
+    } finally {
+      await host.close();
+      cleanup();
+    }
+  });
+
+  it("marks the run audit-failed when the delivery attempt cannot be recorded, and sends nothing", async () => {
+    const { dir, cleanup } = tempDir();
+    const config = discordConfig(dir, {});
+    const { sent, deliveryFetch } = counting();
+    const host = new SandboxHost(config, deps({ graphFetch: graph().fetchImpl, deliveryFetch }));
+    try {
+      host.open();
+      const store = (host as unknown as { audit: AuditLogStore }).audit;
+      const append = store.append.bind(store);
+      store.append = (events) => {
+        if (events.some((event) => event.type === "delivery.attempted")) throw new Error("disk full");
+        return append(events);
+      };
+      const outcome = await host.runAgent(config.agents[0]!, "schedule");
+      assert.equal(outcome.kind === "failed" && outcome.reason, "audit-failed");
+      assert.equal(sent.length, 0);
+    } finally {
+      await host.close();
+      cleanup();
+    }
+  });
+
+  it("names an allowlist with a refused agent in it instead of asking to remove that agent's permission", async () => {
+    const { dir, cleanup } = tempDir();
+    const config = loadSandboxConfig(writeConfig(dir, {
+      agents: [
+        { id: "find-inactive-devices", templateSha256: bundledHash("find-inactive-devices"), intervalSeconds: 3600 },
+        { id: "user-license-overview", templateSha256: "0".repeat(64), intervalSeconds: 3600 },
+      ],
+    }));
+    const host = new SandboxHost(config, deps({ graphFetch: graph().fetchImpl, roles: [READ, "User.Read.All"] }));
+    try {
+      host.open();
+      const outcome = await host.runAgent(config.agents[0]!, "schedule");
+      assert.equal(outcome.kind === "refused" && outcome.reason, "identity-allowlist-incomplete");
+      assert.match(outcome.kind === "refused" ? outcome.message : "", /user-license-overview \(agent-hash-mismatch\)/);
+    } finally {
+      await host.close();
+      cleanup();
+    }
+  });
+
+  it("sends nothing for a run stopped by a shutdown", async () => {
+    const { dir, cleanup } = tempDir();
+    const config = discordConfig(dir, { failureNotice: true });
+    const { sent, deliveryFetch } = counting();
+    let closing: Promise<void> | undefined;
+    let host: SandboxHost | undefined;
+    const waiting: RunLlmApi = {
+      ...llm,
+      async *stream(options) {
+        closing = host?.close();
+        await new Promise<void>((resolve) => {
+          if (options.signal?.aborted) resolve();
+          options.signal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+        throw new Error("stopped");
+      },
+    };
+    host = new SandboxHost(config, { ...deps({ graphFetch: graph().fetchImpl, deliveryFetch }), createLlm: () => waiting });
+    try {
+      host.open();
+      const outcome = await host.runAgent(config.agents[0]!, "schedule");
+      assert.equal(outcome.kind === "failed" && outcome.reason, "run-stopped");
+      await closing;
+      assert.equal(sent.length, 0);
+    } finally {
+      await host.close();
+      cleanup();
+    }
+  });
+
+  it("reads health.json only after taking the lock, so a refused second host leaves it alone", async () => {
+    const { dir, cleanup } = tempDir();
+    const config = loadSandboxConfig(writeConfig(dir));
+    const holder = new SandboxHost(config, deps());
+    try {
+      holder.open();
+      writePrivate(join(config.dataDir, "health.json"), "{not json");
+      const second = new SandboxHost(config, deps());
+      assert.throws(() => second.open(), (error: unknown) => (error as { reason?: string }).reason === "already-running");
+      assert.equal(readdirSync(config.dataDir).includes("health.json"), true);
+      assert.equal(readdirSync(config.dataDir).some((name) => name.startsWith("health.json.unreadable")), false);
+    } finally {
+      await holder.close();
+      cleanup();
+    }
+  });
+
+  it("sends a failure notice for a storage failure caught outside the preflight", async () => {
+    const { dir, cleanup } = tempDir();
+    const config = discordConfig(dir, { notifyOnSuccess: false, notifyOnFailure: false, failureNotice: true });
+    const { sent, deliveryFetch } = counting();
+    const host = new SandboxHost(config, deps({ graphFetch: graph().fetchImpl, deliveryFetch }));
+    const runsDir = join(config.dataDir, "runs");
+    try {
+      host.open();
+      mkdirSync(runsDir, { recursive: true });
+      chmodSync(runsDir, 0o500);
+      const outcome = await host.runAgent(config.agents[0]!, "schedule");
+      assert.equal(outcome.kind === "refused" && outcome.reason, "storage-failed");
+      assert.match(sent[0] ?? "", /Reason: storage-failed/);
+    } finally {
+      chmodSync(runsDir, 0o700);
+      await host.close();
       cleanup();
     }
   });

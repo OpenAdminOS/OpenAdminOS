@@ -99,6 +99,25 @@ describe("classifyApplicationRoles", () => {
     assert.ok(result.changing.includes("Read"));
   });
 
+  it("accepts only the read shapes and denies everything else", () => {
+    const { readOnly, changing } = classifyApplicationRoles([
+      "Mail.ReadBasic",
+      "Member.Read.Hidden",
+      "Sites.Read.All",
+      "Foo.Read.Update",
+      "Foo.Read.All.Extra",
+      "Policy.Read.ConditionalAccess",
+      "Foo.read.All",
+      "Write.Read.All",
+      "AuditLogsQuery-Entra.Read.All",
+      "Foo-.Read.All",
+      "Foo--Bar.Read.All",
+      "Foo-Write.Read.All",
+    ]);
+    assert.deepEqual(readOnly, ["Mail.ReadBasic", "Member.Read.Hidden", "Sites.Read.All", "AuditLogsQuery-Entra.Read.All"]);
+    assert.deepEqual(changing, ["Foo.Read.Update", "Foo.Read.All.Extra", "Policy.Read.ConditionalAccess", "Foo.read.All", "Write.Read.All", "Foo-.Read.All", "Foo--Bar.Read.All", "Foo-Write.Read.All"]);
+  });
+
   it("names secret-bearing permissions", () => {
     assert.equal(isSecretBearingRole("DeviceLocalCredential.Read.All"), true);
     assert.equal(isSecretBearingRole("BitlockerKey.Read.All"), true);
@@ -110,6 +129,17 @@ describe("classifyApplicationRoles", () => {
     assert.equal(isSecretBearingRole("ChannelMessage.Read.All"), true);
     assert.equal(isSecretBearingRole("Channel.ReadBasic.All"), false);
     assert.equal(isSecretBearingRole("Mail"), false);
+    for (const role of ["eDiscovery.Read.All", "OnlineMeetingTranscript.Read.All", "OnlineMeetingRecording.Read.All", "OnlineMeetingArtifact.Read.All", "CallRecords.Read.All", "Tasks.Read.All"]) {
+      assert.equal(isSecretBearingRole(role), true, role);
+    }
+    assert.equal(isSecretBearingRole("OnlineMeetings.Read.All"), false);
+    assert.equal(isSecretBearingRole("deviceLocalCredential.read.all"), true, "matching ignores case");
+    assert.equal(isSecretBearingRole("MAIL.READ"), true);
+    assert.equal(isSecretBearingRole("UserAuthenticationMethod.Read.All"), true);
+    assert.equal(isSecretBearingRole("UserAuthMethod-Password.Read.All"), true);
+    assert.equal(isSecretBearingRole("CallRecord-PstnCalls.Read.All"), true);
+    assert.equal(isSecretBearingRole("Group-Conversation.Read.All"), true);
+    assert.equal(isSecretBearingRole("Group.Read.All"), false);
     assert.equal(isSecretBearingRole("DeviceManagementManagedDevices.Read.All"), false);
   });
 });

@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { describe, it } from "node:test";
+
+import { createOllamaLlm } from "@openadminos/runtime";
 
 import { checkLocalModel, isCloudModelName, pinnedModelFetch } from "./model.js";
 import { SandboxRefusal } from "./refusal.js";
@@ -39,6 +43,36 @@ describe("checkLocalModel", () => {
     await assert.rejects(pinned("http://127.0.0.1:11435/api/chat"), (error: unknown) => error instanceof SandboxRefusal && error.reason === "model-endpoint-not-local");
     await assert.rejects(pinned("https://ollama.com/api/chat"), SandboxRefusal);
     assert.equal(inits.length, 1);
+  });
+
+  it("the sandbox model client does not follow a 307 from /api/chat, so the prompt goes nowhere else", async () => {
+    let replayed = 0;
+    const listen = async (server: Server) => {
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    };
+    const elsewhere = createServer((request, response) => {
+      replayed += 1;
+      request.resume();
+      response.end("{}");
+    });
+    const elsewhereUrl = await listen(elsewhere);
+    const local = createServer((request, response) => {
+      request.resume();
+      response.writeHead(307, { location: `${elsewhereUrl}${request.url ?? "/"}` });
+      response.end();
+    });
+    const localUrl = await listen(local);
+    try {
+      const llm = createOllamaLlm({ endpoint: localUrl, defaultModel: "llama3.1:8b", timeoutMs: 5_000, fetchImpl: pinnedModelFetch(localUrl) });
+      await assert.rejects(llm.complete({ prompt: "tenant data" }));
+      assert.equal(replayed, 0);
+    } finally {
+      for (const server of [local, elsewhere]) {
+        server.closeAllConnections();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    }
   });
 
   it("refuses an endpoint that is not on this machine before any request", async () => {

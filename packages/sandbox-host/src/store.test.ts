@@ -77,7 +77,15 @@ describe("unreadable files", () => {
       const store = new RunStore(join(dir, "runs"));
       store.write(run(1));
       writeFileSync(join(dir, "runs", "find-inactive-devices", "2026-broken.json"), "{not json");
-      assert.deepEqual(store.unreadableFiles(), ["find-inactive-devices/2026-broken.json"]);
+      writeFileSync(join(dir, "runs", "find-inactive-devices", "2026-null.json"), "null");
+      writeFileSync(join(dir, "runs", "find-inactive-devices", "2026-shape.json"), JSON.stringify({ id: 1, steps: "x" }));
+      assert.deepEqual(store.unreadableFiles(), ["find-inactive-devices/2026-broken.json", "find-inactive-devices/2026-null.json", "find-inactive-devices/2026-shape.json"]);
+      assert.equal(store.list("find-inactive-devices").length, 1);
+      for (const shape of ['{"version":1,"agents":[]}', "null", '{"version":1,"agents":{"a":{"lastRun":5}}}']) {
+        const path = join(dir, `health-${shape.length}.json`);
+        writeFileSync(path, shape);
+        assert.ok(new HealthStore(path, "mini-pc").problem, shape);
+      }
       writeFileSync(join(dir, "health.json"), "{not json");
       const health = new HealthStore(join(dir, "health.json"), "mini-pc");
       assert.match(health.problem ?? "", /health\.json-?.*could not be read|could not be read/);

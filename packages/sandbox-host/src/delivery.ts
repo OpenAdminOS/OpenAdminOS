@@ -22,7 +22,7 @@ export function neutralize(text: string): string {
   return text
     .replace(/[<>@`*_~|[\]]/g, "")
     .replace(/:\/\//g, ": ")
-    .replace(/\b([A-Za-z0-9-]+)\.([A-Za-z]{2,})\b/g, "$1 $2")
+    .replace(/(?<=\w)\.(?=\w)/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 120);
@@ -51,12 +51,21 @@ export function modelDerivedStepIds(steps: readonly TemplateStep[]): Set<string>
   return derived;
 }
 
-/** Roots of `{{ root.output... }}` and similar references, with string literals removed. */
+/**
+ * Every name an expression reads: `{{ step.output }}`, a bare `{{ step }}`,
+ * `{{ step | size }}` and names in filter arguments, with string literals
+ * and filter names removed. Over-counting only drops a field.
+ */
 function stepReferences(text: string): Set<string> {
   const roots = new Set<string>();
+  const add = (part: string) => {
+    for (const reference of part.matchAll(/(?<![\w.])([A-Za-z_][A-Za-z0-9_]*)/g)) roots.add(reference[1] as string);
+  };
   for (const match of text.matchAll(/\{\{([\s\S]*?)\}\}/g)) {
     const expression = (match[1] ?? "").replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, "");
-    for (const reference of expression.matchAll(/(?<![\w.])([A-Za-z_][A-Za-z0-9_]*)\s*\./g)) roots.add(reference[1] as string);
+    const [value = "", ...filters] = expression.split("|");
+    add(value);
+    for (const filter of filters) add(filter.replace(/^\s*[A-Za-z_][A-Za-z0-9_]*/, ""));
   }
   return roots;
 }
@@ -159,6 +168,19 @@ function collect(
   if (!prefix || !deterministic(definition)) return;
   if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) out.push(`- ${prefix}: ${value}`);
   else if (Array.isArray(value)) out.push(`- ${prefix}: ${value.length} ${value.length === 1 ? "item" : "items"}`);
+}
+
+/** The longest message each destination takes. */
+export const DELIVERY_MAX_CHARS = { slack: 3_000, discord: 2_000 } as const;
+
+/** Shortens a message to what its destination takes, saying that the rest stays here. */
+export function capForConnector(text: string, connector: keyof typeof DELIVERY_MAX_CHARS): string {
+  const max = DELIVERY_MAX_CHARS[connector];
+  if (text.length <= max) return text;
+  const note = "\nThe rest is on the sandbox.";
+  const cut = text.slice(0, max - note.length);
+  const lastLine = cut.lastIndexOf("\n");
+  return `${lastLine > 0 ? cut.slice(0, lastLine) : cut}${note}`;
 }
 
 export function payloadDigest(text: string): string {

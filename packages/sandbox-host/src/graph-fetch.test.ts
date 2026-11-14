@@ -72,6 +72,11 @@ describe("sandboxGraphFetch", () => {
       "https://graph.microsoft.com/beta/$batch",
       "https://graph.microsoft.com/v1.0/me/messages",
       "https://graph.microsoft.com/users",
+      "https://graph.microsoft.com/beta/%24batch",
+      "https://graph.microsoft.com/v1.0/%6De/messages",
+      "https://graph.microsoft.com/v1.0/%6D%65",
+      "https://graph.microsoft.com/beta/users?x=%24batch",
+      "https://graph.microsoft.com/beta/users/%E0%A4%A",
     ]) {
       const h = harness();
       await assert.rejects(h.wrapped(url, { method: "GET" }), SandboxRefusal, url);

@@ -26,7 +26,7 @@ The run is refused, with a named reason in the log and in `health.json`, when an
 
   The directory role check sees only what the token carries: tenant-wide directory roles, in the `wids` claim (the value every app-only token carries is ignored). A role scoped to an administrative unit or to an application, and permissions the service principal holds on other resources, are not visible in a Graph token. What contains those is the egress limit: the host sends only GET requests, and only to Microsoft Graph. Check the service principal's role assignments in Entra as part of the setup.
 
-During the run, every Graph request is written to the audit log before it is sent (method, path and a digest of the query, never a body). Requests to any other host, any method but GET, `$batch` and `/me` are refused before they are sent, and redirects fail. A run that does not finish within `runDeadlineSeconds` is stopped.
+During the run, every Graph request is written to the audit log before it is sent (method, path and a digest of the query, never a body). Requests to any other host, any method but GET, `$batch` and `/me` are refused before they are sent, and redirects fail. A run that does not finish within `runDeadlineSeconds` is stopped. The deadline covers the execution of the agent; the checks before it and the report delivery after it are bounded by their own transport timeouts of about 30 seconds per request (10 seconds for the model checks).
 
 ## Minimum setup
 
@@ -48,7 +48,7 @@ During the run, every Graph request is written to the audit log before it is sen
    ollama pull llama3.1:8b
    ```
 
-6. Build the host from a release checkout: `npm ci && npm run build -w @openadminos/sandbox-host`. The bundled agents are read from the `agents` folder of that checkout: run the host from a release checkout, not a copy of `dist` alone. The run uses the exact manifest text whose hash you pinned.
+6. Build the host from a release checkout: `npm ci && npm run build -w @openadminos/sandbox-host`. The bundled agents are read from the `agents` folder of that checkout: run the host from a release checkout, not a copy of `dist` alone. The folder is found from the host's own location, never from the current directory. The run uses the exact manifest text whose hash you pinned.
 7. Create a service user (for example `openadminos`) that owns the config folder and the data folder, and nothing else.
 8. Use full disk encryption on the machine. The private key and the run results are protected by file permissions only; disk encryption is a precondition.
 

@@ -48,6 +48,19 @@ describe("assertSandboxIdentity", () => {
   });
 });
 
+describe("an incomplete allowlist", () => {
+  it("names the refused agents instead of asking to remove their permissions", () => {
+    assert.throws(
+      () => assertSandboxIdentity(tokenFor(appClaims(["DeviceManagementManagedDevices.Read.All", "Policy.Read.All"])), { ...expected, refusedAgents: [{ id: "conditional-access-explainer", reason: "agent-hash-mismatch" }] }),
+      (error: unknown) =>
+        error instanceof SandboxRefusal &&
+        error.reason === "identity-allowlist-incomplete" &&
+        error.message.includes("conditional-access-explainer (agent-hash-mismatch)") &&
+        error.message.includes("Policy.Read.All"),
+    );
+  });
+});
+
 describe("assertAgentPermissions", () => {
   it("names the scope the identity does not hold", () => {
     assert.throws(
