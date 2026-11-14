@@ -9,6 +9,7 @@ const VERSIONED_PACKAGES = [
   "packages/agent-sdk/package.json",
   "packages/runtime/package.json",
   "packages/sandbox-host/package.json",
+  "packages/pairing/package.json",
   "packages/qa-graph/package.json",
   "packages/connector-discord/package.json",
   "packages/connector-outlook/package.json",

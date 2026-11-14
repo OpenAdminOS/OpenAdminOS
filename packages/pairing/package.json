@@ -1,0 +1,36 @@
+{
+  "name": "@openadminos/pairing",
+  "version": "0.7.2",
+  "private": true,
+  "description": "Public pairing protocol for OpenAdminOS sandboxes: device identities, pinned TLS certificates, pairing codes, domain-separated signatures and signed audit checkpoints.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "npm run build -w @openadminos/runtime && tsc -p tsconfig.json",
+    "typecheck": "npm run build -w @openadminos/runtime && tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@openadminos/runtime": "0.7.2"
+  },
+  "devDependencies": {
+    "@types/node": "^25.8.0",
+    "tsx": "^4.22.3",
+    "typescript": "~6.0.3"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}
