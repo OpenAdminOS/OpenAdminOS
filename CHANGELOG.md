@@ -6,6 +6,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Pairing protocol (`packages/pairing`, public): Ed25519 device identities, self-signed P-256 TLS certificates with an SPKI pin, 28 character pairing codes (16 from the TLS pin, 12 secret, 10 minutes, 5 attempts) with ordered scrypt-keyed HMAC proofs, domain-separated signatures over canonical JSON, signed pairing records and audit checkpoints, and `verifySignedContinuation`, which checks a sandbox's signed audit tip before its hash chain.
 - Runs show where each run executed: the list and run detail say This computer or the sandbox name, Filter has a Where option, and a sandbox run's detail says "Ran on <name> · local model <model>" instead of the on-device line.
 - Audit log range reads in the runtime: `AuditLogStore.readRange` and `tip`, and `verifyAuditContinuation`, which checks that rows read from another log continue the chain from the last accepted row and names a gap, fork, rollback or invalid row.
 - Sandbox host (`packages/sandbox-host`): a headless service that runs bundled read-only agents on a schedule on a machine the customer runs, with its own app-only certificate identity and a local Ollama or LM Studio model; it checks the identity, agent, model and files before every run, refuses with a named reason, audits every Graph request before it is sent, keeps run records in its data folder and can send a counts-only report to Slack or Discord.
