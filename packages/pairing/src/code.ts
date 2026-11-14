@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 
 import { canonicalJson } from "@openadminos/runtime";
 
@@ -9,43 +9,59 @@ import { isDevicePublicKey } from "./identity.js";
 import { isIdentifier, isTenantId } from "./validate.js";
 
 /**
- * A pairing code is 20 Crockford base32 characters that the sandbox
+ * A pairing code is 28 Crockford base32 characters that the sandbox
  * shows and the admin types into the desktop:
  *
- * - characters 1 to 12: the first 60 bits of the sandbox's TLS SPKI
+ * - characters 1 to 16: the first 80 bits of the sandbox's TLS SPKI
  *   SHA-256, so the desktop pins the right TLS key before it sends anything;
- * - characters 13 to 20: 40 random bits, the secret that keys the
- *   transcript proof. The secret is only ever sent as an HMAC, inside the
- *   pinned TLS connection.
+ * - characters 17 to 28: 60 random bits, the secret that keys the
+ *   transcript proofs. The secret is never sent; only HMACs keyed by a
+ *   key derived from it are, inside the pinned TLS connection.
+ *
+ * Why not a PAKE in v1: the fingerprint part pins the TLS key, so a
+ * man in the middle would need an 80 bit second preimage of the SPKI
+ * hash within the code's lifetime. Inside that channel only the real
+ * sandbox sees a proof; it allows 5 proof checks per code and a code
+ * lives 10 minutes. The scrypt key derivation makes each offline guess
+ * at a leaked proof memory-hard on top of the 60 bit secret.
+ * TODO(ugur): consider CPace (a balanced PAKE) in a later protocol version,
+ * so a proof gives an attacker nothing to guess against offline.
  */
-export const PAIRING_CODE_LENGTH = 20;
-export const PAIRING_CODE_FINGERPRINT_LENGTH = 12;
-export const PAIRING_CODE_SECRET_LENGTH = 8;
+export const PAIRING_CODE_LENGTH = 28;
+export const PAIRING_CODE_FINGERPRINT_LENGTH = 16;
+export const PAIRING_CODE_SECRET_LENGTH = 12;
+/** Shown as groups of this many characters, separated by hyphens. */
+export const PAIRING_CODE_GROUP_LENGTH = 4;
 /** A code is valid this long after it is shown; the sandbox then shows a new one. */
 export const PAIRING_CODE_LIFETIME_MS = 10 * 60_000;
-/** Proof checks allowed per code, right or wrong. */
+/** Desktop proofs checked per code, right or wrong. */
 export const PAIRING_CODE_MAX_ATTEMPTS = 5;
 
 const TRANSCRIPT_DOMAIN = "openadminos.pairing.transcript.v1";
+const KEY_DOMAIN = "openadminos.pairing.key.v1";
+/** scrypt cost: N = 2^15, r = 8, p = 1 needs 32 MiB, so the limit is set above it. */
+const SCRYPT = { N: 2 ** 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 } as const;
+const PROOF = /^[A-Za-z0-9_-]{43}$/;
 /** Typed codes may be grouped with spaces or hyphens; longer input is refused before it is read. */
 const MAX_TYPED_LENGTH = 64;
 
 export interface PairingCode {
-  /** The 20 canonical characters. */
+  /** The 28 canonical characters. */
   code: string;
-  /** The first 12 characters. */
+  /** The first 16 characters. */
   fingerprint: string;
-  /** The last 8 characters. */
+  /** The last 12 characters. */
   secret: string;
 }
 
 export function createPairingCode(tlsSpkiSha256: string): PairingCode {
   const fingerprint = pairingCodeFingerprint(tlsSpkiSha256);
-  const secret = encodeBase32(randomBytes(5));
+  // 8 random bytes encode to 13 characters; the first 12 carry 60 uniform bits.
+  const secret = encodeBase32(randomBytes(8)).slice(0, PAIRING_CODE_SECRET_LENGTH);
   return { code: `${fingerprint}${secret}`, fingerprint, secret };
 }
 
-/** The first 12 characters for a TLS SPKI pin (64 lowercase hex). */
+/** The first 16 characters for a TLS SPKI pin (64 lowercase hex). */
 export function pairingCodeFingerprint(tlsSpkiSha256: string): string {
   if (!isTlsSpkiPin(tlsSpkiSha256)) {
     throw new PairingError("key-invalid", "The TLS SPKI pin is not 64 lowercase hex characters.");
@@ -53,9 +69,9 @@ export function pairingCodeFingerprint(tlsSpkiSha256: string): string {
   return encodeBase32(Buffer.from(tlsSpkiSha256, "hex")).slice(0, PAIRING_CODE_FINGERPRINT_LENGTH);
 }
 
-/** Four groups of five, for showing: `ABCDE-FGHJK-MNPQR-STVWX`. */
+/** Seven groups of four, for showing: `ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345`. */
 export function formatPairingCode(code: PairingCode): string {
-  return code.code.match(/.{5}/g)?.join("-") ?? code.code;
+  return code.code.match(new RegExp(`.{1,${PAIRING_CODE_GROUP_LENGTH}}`, "g"))?.join("-") ?? code.code;
 }
 
 export type PairingCodeParseResult =
@@ -127,34 +143,156 @@ export function pairingTranscript(role: PairingProofRole, fields: PairingTranscr
   return Buffer.from(`${TRANSCRIPT_DOMAIN}\n${canonicalJson(body)}`, "utf8");
 }
 
-/** HMAC-SHA256 of the transcript, keyed by the code's secret, as base64url (43 characters). */
-export function createPairingProof(code: PairingCode, role: PairingProofRole, fields: PairingTranscriptFields): string {
-  return createHmac("sha256", secretKey(code)).update(pairingTranscript(role, fields)).digest("base64url");
-}
+/**
+ * The desktop's side. It reached the sandbox over TLS, checked the
+ * peer's SPKI against the code, and got the sandbox's pairing id and
+ * public key. It sends `desktopProof()` first and checks the sandbox's
+ * proof only after that.
+ */
+export class DesktopPairingSession {
+  readonly fields: PairingTranscriptFields;
+  private readonly key: Buffer;
+  private sent = false;
 
-/** Constant-time check of a proof; false for any malformed input. */
-export function verifyPairingProof(code: PairingCode, role: PairingProofRole, fields: PairingTranscriptFields, proof: unknown): boolean {
-  if (typeof proof !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(proof)) return false;
-  let expected: Buffer;
-  try {
-    expected = Buffer.from(createPairingProof(code, role, fields), "base64url");
-  } catch {
-    return false;
+  /** Throws `fingerprint-mismatch` when the TLS key is not the one the code names, `payload-invalid` for fields out of shape. */
+  constructor(code: PairingCode, fields: PairingTranscriptFields) {
+    pairingTranscript("desktop", fields);
+    if (!pairingCodeMatchesSpki(code, fields.tlsSpkiSha256)) {
+      throw new PairingError("fingerprint-mismatch", "The sandbox's TLS key is not the one the pairing code names. Check the code on the sandbox, and that the address is the sandbox's.");
+    }
+    this.fields = { ...fields };
+    this.key = derivePairingKey(code, fields);
   }
-  const given = Buffer.from(proof, "base64url");
-  return given.length === expected.length && timingSafeEqual(given, expected);
+
+  desktopProof(): string {
+    this.sent = true;
+    return proofFor(this.key, "desktop", this.fields);
+  }
+
+  /** Constant-time; throws `proof-order` before `desktopProof()` was produced. */
+  verifySandboxProof(proof: unknown): boolean {
+    if (!this.sent) {
+      throw new PairingError("proof-order", "The desktop sends its proof before it checks the sandbox's.");
+    }
+    return proofMatches(this.key, "sandbox", this.fields, proof);
+  }
 }
 
-function secretKey(code: PairingCode): Buffer {
-  const secret = typeof code.secret === "string" ? normalizeBase32(code.secret) : undefined;
+export interface SandboxPairingSessionOptions extends Omit<PairingAttemptLimiterOptions, "issuedAt"> {
+  code: PairingCode;
+  pairingId: string;
+  sandboxPublicKey: string;
+  tlsSpkiSha256: string;
+  /** When the code was shown, in the clock's milliseconds. */
+  issuedAt: number;
+}
+
+/** What the desktop offers with its proof; the rest of the transcript is the sandbox's own. */
+export interface DesktopPairingOffer {
+  organizationId: string;
+  tenantId: string;
+  desktopPublicKey: string;
+}
+
+export type DesktopProofFailure =
+  | PairingAttemptFailure
+  /** The offer is out of shape; it still counts as an attempt. */
+  | "transcript-invalid"
+  /** The proof does not match: a wrong code or a changed transcript. */
+  | "proof-invalid";
+
+export type DesktopProofResult =
+  | { ok: true; fields: PairingTranscriptFields }
+  | { ok: false; failure: DesktopProofFailure; detail: string; remaining: number };
+
+/**
+ * The sandbox's side for one shown code. Every desktop proof counts
+ * against the code's attempts, right or wrong. Only after a desktop
+ * proof verifies does `sandboxProof()` produce the sandbox's proof, and
+ * the code cannot pair again.
+ */
+export class SandboxPairingSession {
+  private readonly limiter: PairingAttemptLimiter;
+  private readonly key: Buffer;
+  private readonly own: Pick<PairingTranscriptFields, "pairingId" | "sandboxPublicKey" | "tlsSpkiSha256">;
+  private verified: PairingTranscriptFields | undefined;
+
+  constructor(options: SandboxPairingSessionOptions) {
+    const { code, pairingId, sandboxPublicKey, tlsSpkiSha256, ...limiter } = options;
+    if (!isIdentifier(pairingId) || !isDevicePublicKey(sandboxPublicKey) || !isTlsSpkiPin(tlsSpkiSha256)) {
+      throw new PairingError("payload-invalid", "The sandbox session needs a pairing id, the sandbox public key and its TLS SPKI pin.");
+    }
+    if (!pairingCodeMatchesSpki(code, tlsSpkiSha256)) {
+      throw new PairingError("fingerprint-mismatch", "The pairing code was not made for this sandbox's TLS key.");
+    }
+    this.limiter = new PairingAttemptLimiter(limiter);
+    this.own = { pairingId, sandboxPublicKey, tlsSpkiSha256 };
+    this.key = derivePairingKey(code, this.own);
+  }
+
+  get remaining(): number {
+    return this.limiter.remaining;
+  }
+
+  verifyDesktopProof(offer: DesktopPairingOffer, proof: unknown): DesktopProofResult {
+    const attempt = this.limiter.attempt();
+    if (!attempt.ok) return { ...attempt, remaining: 0 };
+    const fields: PairingTranscriptFields = {
+      ...this.own,
+      organizationId: offer?.organizationId,
+      tenantId: offer?.tenantId,
+      desktopPublicKey: offer?.desktopPublicKey,
+    };
+    if (transcriptProblem("desktop", fields)) {
+      return { ok: false, failure: "transcript-invalid", detail: "The desktop's pairing request is out of shape.", remaining: attempt.remaining };
+    }
+    if (!proofMatches(this.key, "desktop", fields, proof)) {
+      return { ok: false, failure: "proof-invalid", detail: "The desktop's proof does not match this pairing code. Check the code typed on the desktop.", remaining: attempt.remaining };
+    }
+    this.limiter.succeed();
+    this.verified = fields;
+    return { ok: true, fields: { ...fields } };
+  }
+
+  /** Throws `proof-order` until a desktop proof verified. */
+  sandboxProof(): string {
+    if (!this.verified) {
+      throw new PairingError("proof-order", "The sandbox sends its proof only after the desktop's proof verified.");
+    }
+    return proofFor(this.key, "sandbox", this.verified);
+  }
+}
+
+/**
+ * scrypt of the code's secret, salted with the key domain, the TLS SPKI
+ * pin and the pairing id, so a derived key is bound to one sandbox key
+ * and one pairing.
+ */
+function derivePairingKey(code: PairingCode, fields: Pick<PairingTranscriptFields, "pairingId" | "tlsSpkiSha256">): Buffer {
+  const secret = typeof code?.secret === "string" ? normalizeBase32(code.secret) : undefined;
   if (secret === undefined || secret.length !== PAIRING_CODE_SECRET_LENGTH) {
-    throw new PairingError("payload-invalid", "The pairing code secret is not 8 base32 characters.");
+    throw new PairingError("payload-invalid", `The pairing code secret is not ${PAIRING_CODE_SECRET_LENGTH} base32 characters.`);
   }
-  return Buffer.from(secret, "ascii");
+  const salt = Buffer.from(`${KEY_DOMAIN}\n${fields.tlsSpkiSha256}\n${fields.pairingId}`, "utf8");
+  return scryptSync(Buffer.from(secret, "ascii"), salt, 32, SCRYPT);
+}
+
+/** HMAC-SHA256 of the transcript as base64url (43 characters). */
+function proofFor(key: Buffer, role: PairingProofRole, fields: PairingTranscriptFields): string {
+  return createHmac("sha256", key).update(pairingTranscript(role, fields)).digest("base64url");
+}
+
+function proofMatches(key: Buffer, role: PairingProofRole, fields: PairingTranscriptFields, proof: unknown): boolean {
+  if (typeof proof !== "string" || !PROOF.test(proof)) return false;
+  const given = Buffer.from(proof, "base64url");
+  const expected = Buffer.from(proofFor(key, role, fields), "base64url");
+  // A non-canonical last character decodes to the same bytes; refuse it.
+  return given.length === expected.length && given.toString("base64url") === proof && timingSafeEqual(given, expected);
 }
 
 function transcriptProblem(role: PairingProofRole, fields: PairingTranscriptFields): string | undefined {
   if (role !== "desktop" && role !== "sandbox") return "role is not desktop or sandbox";
+  if (fields === null || typeof fields !== "object") return "fields";
   if (!isIdentifier(fields.pairingId)) return "pairingId";
   if (!isIdentifier(fields.organizationId)) return "organizationId";
   if (!isTenantId(fields.tenantId)) return "tenantId is not a lowercase tenant id";

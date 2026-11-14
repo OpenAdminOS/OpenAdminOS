@@ -4,7 +4,11 @@ export type PairingErrorReason =
   /** Certificate options are out of range. */
   | "certificate-options-invalid"
   /** A payload to sign is not plain JSON, or the domain is unknown. */
-  | "payload-invalid";
+  | "payload-invalid"
+  /** The TLS key reached is not the one the pairing code names. */
+  | "fingerprint-mismatch"
+  /** A pairing proof was asked for or checked out of order. */
+  | "proof-order";
 
 /** Thrown for input a caller should never pass; results use named failures instead. */
 export class PairingError extends Error {

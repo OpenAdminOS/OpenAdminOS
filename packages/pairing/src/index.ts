@@ -10,8 +10,9 @@ export {
 export { CROCKFORD_ALPHABET, decodeBase32, encodeBase32, normalizeBase32 } from "./base32.js";
 export {
   createPairingCode,
-  createPairingProof,
+  DesktopPairingSession,
   formatPairingCode,
+  PAIRING_CODE_GROUP_LENGTH,
   PAIRING_CODE_FINGERPRINT_LENGTH,
   PAIRING_CODE_LENGTH,
   PAIRING_CODE_LIFETIME_MS,
@@ -22,7 +23,10 @@ export {
   pairingCodeMatchesSpki,
   pairingTranscript,
   parsePairingCode,
-  verifyPairingProof,
+  SandboxPairingSession,
+  type DesktopPairingOffer,
+  type DesktopProofFailure,
+  type DesktopProofResult,
   type PairingAttemptFailure,
   type PairingAttemptLimiterOptions,
   type PairingAttemptResult,
@@ -30,6 +34,7 @@ export {
   type PairingCodeParseResult,
   type PairingProofRole,
   type PairingTranscriptFields,
+  type SandboxPairingSessionOptions,
 } from "./code.js";
 export { PairingError, type PairingErrorReason } from "./errors.js";
 export {
