@@ -27,17 +27,22 @@ export interface PairingRecord {
   createdAt: string;
 }
 
-/** The sandbox's signed statement of its audit log tip. */
+/**
+ * The sandbox's signed statement of a position in its audit log: the
+ * last row of the batch it sends with it (the reader's pin when the
+ * batch is empty), not the log's newest row. Each batch gets its own
+ * checkpoint, so every row a reader accepts is covered by a signature.
+ */
 export interface AuditCheckpoint {
   pairingId: string;
   sandboxId: string;
-  /** The tip's seq; 0 for an empty log. */
+  /** The seq of the batch's last row; for an empty batch, the pin's seq (0 before the first row). */
   seq: number;
-  /** The tip's hash; the chain start hash for an empty log. */
+  /** The hash of that row; for an empty batch, the pin's hash (the chain start hash before the first row). */
   sha256: string;
-  /** Rows the log holds up to the tip, after retention; never more than `seq`. Attested by the sandbox, checked for shape only. */
+  /** Rows the log holds up to this position, after retention; never more than `seq`. Attested by the sandbox, checked for shape only. */
   rowCount: number;
-  /** When the sandbox read the tip, ISO 8601 in UTC. Attested by the sandbox, checked for shape only. */
+  /** When the sandbox signed, ISO 8601 in UTC. Attested by the sandbox, checked for shape only. */
   at: string;
 }
 
