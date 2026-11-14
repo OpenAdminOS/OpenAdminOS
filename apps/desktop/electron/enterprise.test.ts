@@ -27,6 +27,7 @@ import {
   ENTERPRISE_STORAGE_FILE_MAX_BYTES,
   EnterpriseLicenceFileError,
   EnterpriseStorageFileError,
+  ENTERPRISE_STOP_TIMEOUT_MS,
   MAX_TIMER_DELAY_MS,
   EnterpriseModuleLoadError,
   enterpriseFiles,
@@ -356,7 +357,64 @@ describe("loadEnterprise with a valid licence", () => {
     assert.ok(!status.active && status.problem?.reason === "licence-expired");
     assert.match(status.problem.message, /grace period ended .*Install a renewed licence, then restart OpenAdminOS\.$/);
     assert.ok(changes.length >= 1);
-    assert.equal(timers.length, 2);
+    // The third timer only bounds deactivate.
+    assert.equal(timers.length, 3);
+    assert.equal(timers[2]?.delay, ENTERPRISE_STOP_TIMEOUT_MS);
+  });
+
+  it("revokes the module at the grace end even when its deactivate never resolves", async () => {
+    let now = NOW;
+    const timers: Array<{ callback: () => void; delay: number }> = [];
+    let host: EnterpriseHost | undefined;
+    let deactivateCalls = 0;
+    const module = {
+      default: {
+        interfaceVersion: 1,
+        activate(given: EnterpriseHost) {
+          host = given;
+          given.registerIpc("team.status", () => null);
+          return {
+            deactivate: () => {
+              deactivateCalls += 1;
+              return new Promise<void>(() => undefined);
+            },
+          };
+        },
+      },
+    };
+    const changes: string[] = [];
+    const { options, ipc, logs } = harness({
+      token: licence({ expiresAt: NOW_SECONDS + DAY, graceSeconds: DAY }),
+      module,
+      now: () => now,
+      onChange: () => changes.push("changed"),
+      setTimer: (callback, delay) => {
+        timers.push({ callback, delay });
+        return () => undefined;
+      },
+    });
+    const runtime = await loadEnterprise(options);
+    assert.equal(runtime.status().active, true);
+
+    now = (NOW_SECONDS + 2 * DAY) * 1000;
+    timers[0]?.callback();
+    // Synchronously, before deactivate settles: revoked and announced.
+    assert.equal(ipc.handlers.size, 0);
+    assert.deepEqual(changes, ["changed"]);
+    const status = runtime.status();
+    assert.ok(!status.active && status.problem?.reason === "licence-expired");
+    assert.throws(() => host?.registerIpc("again", () => null), /turned off/);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(deactivateCalls, 1);
+
+    // The bound lets go of the hung deactivate and says so.
+    const bound = timers.find((timer) => timer.delay === ENTERPRISE_STOP_TIMEOUT_MS);
+    assert.ok(bound);
+    bound.callback();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.ok(logs.some((entry) => /did not stop in time/.test(entry.message)));
+    await runtime.deactivate();
+    assert.equal(deactivateCalls, 1);
   });
 
   it("turns the module off from status() when the clock passed the grace end before the timer fired", async () => {
@@ -376,7 +434,8 @@ describe("loadEnterprise with a valid licence", () => {
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(seen.deactivated, 1);
     assert.equal(ipc.handlers.size, 0);
-    assert.deepEqual(cancelled, [true]);
+    // The expiry timer, then the bound on deactivate once it settled.
+    assert.deepEqual(cancelled, [true, true]);
   });
 
   it("uses an unref'd timer that is cleared on deactivate", async () => {
@@ -408,6 +467,10 @@ describe("loadEnterprise with a valid licence", () => {
       assert.equal(created[0]?.unref, true);
       await runtime.deactivate();
       assert.equal(created[0]?.cleared, true);
+      // deactivate is bounded by a second timer, cleared once it settles.
+      assert.equal(created[1]?.delay, ENTERPRISE_STOP_TIMEOUT_MS);
+      assert.equal(created[1]?.unref, true);
+      assert.equal(created[1]?.cleared, true);
     } finally {
       globalThis.setTimeout = realSetTimeout;
       globalThis.clearTimeout = realClearTimeout;

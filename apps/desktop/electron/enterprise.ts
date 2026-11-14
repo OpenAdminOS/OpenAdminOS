@@ -301,15 +301,38 @@ export async function loadEnterprise(options: LoadEnterpriseOptions): Promise<En
   let cancelTimer: (() => void) | undefined;
   let stoppedProblem: EnterpriseProblem | undefined;
 
+  const setTimer = options.setTimer ?? defaultSetTimer;
+
+  // Runs the module's deactivate, waiting at most ENTERPRISE_STOP_TIMEOUT_MS.
+  const runDeactivate = async () => {
+    let cancelBound: (() => void) | undefined;
+    const bound = new Promise<"timeout">((resolve) => {
+      cancelBound = setTimer(() => resolve("timeout"), ENTERPRISE_STOP_TIMEOUT_MS);
+    });
+    try {
+      const result = await Promise.race([
+        Promise.resolve().then(() => active.deactivate()).then(() => "stopped" as const),
+        bound,
+      ]);
+      if (result === "timeout") {
+        options.log("warn", "enterprise: the team features module did not stop in time", { timeoutMs: ENTERPRISE_STOP_TIMEOUT_MS });
+      }
+    } catch (error) {
+      options.log("error", "enterprise: the team features module failed to stop", { error: errorMessage(error) });
+    } finally {
+      cancelBound?.();
+    }
+  };
+
+  // Quit: the module stops first, while it can still use the host, then
+  // its capabilities are removed.
   const stop = async () => {
     if (stopped) return;
     stopped = true;
     cancelTimer?.();
     cancelTimer = undefined;
     try {
-      await active.deactivate();
-    } catch (error) {
-      options.log("error", "enterprise: the team features module failed to stop", { error: errorMessage(error) });
+      await runDeactivate();
     } finally {
       // Removes the module's IPC handlers and calls onChange.
       controller.dispose();
@@ -322,13 +345,19 @@ export async function loadEnterprise(options: LoadEnterpriseOptions): Promise<En
     const graceEndsAt = new Date(verified.graceEndsAt).toISOString();
     options.log("warn", "enterprise: the licence grace period ended, team features are off", { graceEndsAt });
     stoppedProblem = licenceProblem("expired", `The licence expired and its grace period ended ${graceEndsAt}.`);
-    void stop();
+    // The licence no longer covers the module: its capabilities go first,
+    // and the renderer hears at once (dispose calls onChange). deactivate
+    // runs afterwards and cannot hold any of that up.
+    stopped = true;
+    cancelTimer?.();
+    cancelTimer = undefined;
+    controller.dispose();
+    void runDeactivate();
   };
 
   // The grace period can end while the app runs. One timer, unref'd so it
   // never keeps the app alive, waits in steps no longer than setTimeout
   // allows and checks the clock again at each step.
-  const setTimer = options.setTimer ?? defaultSetTimer;
   const scheduleExpiry = () => {
     if (stopped) return;
     const remaining = verified.graceEndsAt - options.now();
@@ -356,6 +385,9 @@ export async function loadEnterprise(options: LoadEnterpriseOptions): Promise<En
     deactivate: stop,
   });
 }
+
+/** How long a module's deactivate may take before the host moves on. */
+export const ENTERPRISE_STOP_TIMEOUT_MS = 2000;
 
 /** The longest delay setTimeout accepts (2^31 - 1 ms). */
 export const MAX_TIMER_DELAY_MS = 2_147_483_647;
