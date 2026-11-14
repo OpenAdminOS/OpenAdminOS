@@ -13,8 +13,16 @@ import {
  * `readRange(pin.seq, limit)` and then the `tip()`, and moves the pin
  * only when this returns ok.
  *
- * Only the hash chain is checked. Signatures over checkpoints are out of
- * scope here: they need the pairing keys, which come later.
+ * Only the hash chain is checked. A paired desktop reading a sandbox
+ * uses `verifySignedContinuation` from `@openadminos/pairing` instead:
+ * there the tip is not the log's tip but the position of the batch's
+ * last row (the pin when the batch is empty), as signed by the sandbox
+ * at the end of the batch, so every accepted row is covered by a
+ * signature.
+ *
+ * After a prune removed every row, `tip()` reports the newest removed
+ * row; a first read with that position as the pin accepts the next row,
+ * which is chained to it.
  */
 
 /** The pin before any row is accepted. */

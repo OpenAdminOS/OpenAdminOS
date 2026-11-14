@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import { AUDIT_CONTINUATION_START, verifyAuditContinuation, type AuditContinuationFailure } from "./audit-continuation.js";
-import { AUDIT_CHAIN_START_HASH, appendSandboxEvent, AuditLogStore, chainHash, type AuditLogPosition, type AuditLogRangeRow } from "./audit-log.js";
+import { AUDIT_CHAIN_START_HASH, AUDIT_LOG_RETENTION_DAYS, appendSandboxEvent, AuditLogStore, chainHash, type AuditLogPosition, type AuditLogRangeRow } from "./audit-log.js";
 
 const context = { tenantId: "tenant-1", organizationId: "org-1", sandboxId: "mini-pc", runId: "run_1", agentSlug: "find-inactive-devices", initiator: "schedule" as const };
 
@@ -138,6 +138,39 @@ describe("verifyAuditContinuation", () => {
     for (const respelled of ['{"value":1e400}', '{"value":2,"value":null}', '{ "value": null }']) {
       const result = verifyAuditContinuation(AUDIT_CONTINUATION_START, [row(respelled)], tip);
       assert.equal(result.ok ? "accepted" : result.failure, "chain-row-invalid", respelled);
+    }
+  });
+
+  it("continues from the newest pruned row after a prune emptied the log", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "oaos-audit-pruned-"));
+    const path = join(dir, "openadminos.db");
+    try {
+      const old = new Date(Date.now() - (AUDIT_LOG_RETENTION_DAYS + 1) * 86_400_000);
+      const oldStore = new AuditLogStore(path, () => old);
+      for (let index = 0; index < 3; index += 1) appendSandboxEvent(oldStore, context, "sandbox.token.acquired", { index });
+      const newest = oldStore.tip();
+      assert.equal(newest.seq, 3);
+      assert.equal(oldStore.pruneExpired(), 3);
+      // Not the chain start: the position of the newest removed row.
+      assert.deepEqual(oldStore.tip(), newest);
+      oldStore.close();
+
+      const store = new AuditLogStore(path);
+      try {
+        assert.deepEqual(store.tip(), newest);
+        appendSandboxEvent(store, context, "sandbox.token.acquired", { index: 3 });
+        const rows = store.readRange(newest.seq, 10);
+        assert.deepEqual(rows.map((row) => row.seq), [4]);
+        assert.equal(rows[0]!.previous_sha256, newest.sha256);
+        assert.deepEqual(verifyAuditContinuation(newest, rows, store.tip()), { ok: true, pin: store.tip() });
+        // From genesis the kept rows do not continue: the pruned ones are missing.
+        const fromStart = verifyAuditContinuation(AUDIT_CONTINUATION_START, rows, store.tip());
+        assert.equal(fromStart.ok ? "accepted" : fromStart.failure, "chain-gap");
+      } finally {
+        store.close();
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
     }
   });
 });
