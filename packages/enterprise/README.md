@@ -59,7 +59,7 @@ The desktop main process (`apps/desktop/electron/enterprise.ts`) reads `<user da
 - No licence, or a malformed, tampered, not yet valid or expired one: nothing else happens. No module is resolved or imported, and no IPC handler, listener, timer or socket is created. A refused licence is logged.
 - A valid licence: the loader resolves `@openadminos/enterprise-module` from the app's node_modules. When it is not installed, which is every build from this repository, the no-op default module is used. When it is installed, its default export is checked and activated.
 
-While the module is active, one unref'd timer waits for the end of the grace period, in steps no longer than setTimeout allows. When it ends the module is deactivated, its handlers are removed and the status strip changes; IPC calls are refused as soon as the licence state is `expired`.
+While the module is active, one unref'd timer waits for the end of the grace period, in steps no longer than setTimeout allows. When it ends, the module's handlers are removed and the status strip changes at once, and then its `deactivate` runs, bounded to two seconds; IPC calls are refused as soon as the licence state is `expired`. The licence is also checked again just before `activate`, so a licence that lapsed while the module was imported does not activate it.
 
 The status the renderer reads says why team features are off when that needs attention (a refused or unreadable licence, a licensed build without the module, another interface version, a load error or a failed start) with the step that fixes it. With no licence it says nothing.
 
