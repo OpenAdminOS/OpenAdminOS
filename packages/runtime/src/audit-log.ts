@@ -121,6 +121,20 @@ export interface AuditLogChainSummary {
   finalHash: string;
 }
 
+/** One stored row as `readRange` returns it, for checking a continuation elsewhere. */
+export interface AuditLogRangeRow {
+  seq: number;
+  previous_sha256: string;
+  sha256: string;
+  event_json: string;
+}
+
+/** A position in the chain: a row's seq and hash. */
+export interface AuditLogPosition {
+  seq: number;
+  sha256: string;
+}
+
 /** The anchor file is the database path with this suffix. */
 const AUDIT_ANCHOR_SUFFIX = "-audit-anchor.json";
 
@@ -273,6 +287,28 @@ export class AuditLogStore {
       this.db.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  /**
+   * Up to `limit` rows with a seq above `afterSeq`, oldest first, as
+   * stored. Read-only and unverified: the reader checks them, for
+   * example with verifyAuditContinuation.
+   */
+  readRange(afterSeq: number, limit: number): AuditLogRangeRow[] {
+    if (!Number.isSafeInteger(afterSeq) || afterSeq < 0) throw new RangeError("afterSeq must be a non-negative integer.");
+    if (!Number.isSafeInteger(limit) || limit < 1) throw new RangeError("limit must be a positive integer.");
+    return this.db
+      .prepare("SELECT seq, previous_sha256, sha256, event_json FROM audit_log WHERE seq > ? ORDER BY seq ASC LIMIT ?")
+      .all(afterSeq, limit) as unknown as AuditLogRangeRow[];
+  }
+
+  /**
+   * The newest row's seq and hash. An empty table reports seq 0 and
+   * AUDIT_CHAIN_START_HASH, the position before the first row.
+   */
+  tip(): AuditLogPosition {
+    const last = this.db.prepare("SELECT seq, sha256 FROM audit_log ORDER BY seq DESC LIMIT 1").get() as AuditLogPosition | undefined;
+    return last ? { seq: last.seq, sha256: last.sha256 } : { seq: 0, sha256: AUDIT_CHAIN_START_HASH };
   }
 
   has(eventId: string): boolean {
