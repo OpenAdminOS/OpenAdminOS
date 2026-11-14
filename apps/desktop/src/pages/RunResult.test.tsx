@@ -847,7 +847,12 @@ describe("RunResult: where the run executed", () => {
   const warningDots = (card: HTMLElement) => card.querySelectorAll(".bg-\\[var\\(--color-warning\\)\\]");
 
   it("takes a sandbox run's locality, model server and model from the run, with no desktop provider for it", async () => {
-    renderRun(completedRun({ executedOn: sandboxExecutedOn, providerId: "ollama-on-sandbox", model: "llama3.1" }));
+    renderRun(completedRun({
+      executedOn: sandboxExecutedOn,
+      // An id this desktop has no provider for.
+      providerId: "ollama-on-sandbox" as unknown as NonNullable<Parameters<typeof createAwaitingConfirmationRun>[0]>["providerId"],
+      model: "llama3.1",
+    }));
     const card = await screen.findByRole("region", { name: "Run status" });
     expect(factValue(card, "Provider")).toHaveTextContent("Local model on Mini PC");
     expect(factValue(card, "Model")).toHaveTextContent("qwen3:8b");
