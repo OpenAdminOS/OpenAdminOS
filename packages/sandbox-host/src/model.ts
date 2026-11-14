@@ -33,7 +33,7 @@ export function pinnedModelFetch(endpoint: string, base: typeof fetch = fetch): 
  * server answers, the model is pulled, and it is not a cloud model that
  * Ollama would forward to a remote host.
  */
-export async function checkLocalModel(model: SandboxConfig["model"], fetchImpl: typeof fetch = fetch): Promise<ModelCheck> {
+export async function checkLocalModel(model: SandboxConfig["model"], fetchImpl: typeof fetch = fetch, timeoutMs: number = PROBE_TIMEOUT_MS): Promise<ModelCheck> {
   const trust = model.provider === "ollama" ? classifyOllamaEndpoint(model.endpoint) : classifyLmStudioEndpoint(model.endpoint);
   if (!trust.isLocal) {
     throw new SandboxRefusal(
@@ -44,30 +44,30 @@ export async function checkLocalModel(model: SandboxConfig["model"], fetchImpl: 
   if (isCloudModelName(model.model)) {
     throw cloudModel(model.model);
   }
-  return model.provider === "ollama" ? checkOllama(model, fetchImpl) : checkLmStudio(model, fetchImpl);
+  return model.provider === "ollama" ? checkOllama(model, fetchImpl, timeoutMs) : checkLmStudio(model, fetchImpl, timeoutMs);
 }
 
 export function isCloudModelName(name: string): boolean {
   return /[-:]cloud$/i.test(name.trim());
 }
 
-async function checkOllama(model: SandboxConfig["model"], fetchImpl: typeof fetch): Promise<ModelCheck> {
+async function checkOllama(model: SandboxConfig["model"], fetchImpl: typeof fetch, timeoutMs: number): Promise<ModelCheck> {
   const base = model.endpoint.replace(/\/+$/, "");
-  const tags = await probe<{ models?: Array<{ name?: string; model?: string; digest?: string; remote_host?: string; remote_model?: string }> }>(fetchImpl, `${base}/api/tags`, "Ollama", model.endpoint);
+  const tags = await probe<{ models?: Array<{ name?: string; model?: string; digest?: string; remote_host?: string; remote_model?: string }> }>(fetchImpl, `${base}/api/tags`, "Ollama", model.endpoint, timeoutMs);
   const wanted = model.model.includes(":") ? model.model : `${model.model}:latest`;
   const entry = tags.models?.find((candidate) => candidate.name === wanted || candidate.model === wanted || candidate.name === model.model);
   if (!entry) {
     throw new SandboxRefusal("model-not-pulled", `Ollama on this machine has no model ${model.model}. Pull it with \`ollama pull ${model.model}\`, then run again.`);
   }
   if (entry.remote_host || entry.remote_model) throw cloudModel(model.model);
-  const shown = await probe<{ remote_host?: string; remote_model?: string }>(fetchImpl, `${base}/api/show`, "Ollama", model.endpoint, { model: model.model });
+  const shown = await probe<{ remote_host?: string; remote_model?: string }>(fetchImpl, `${base}/api/show`, "Ollama", model.endpoint, timeoutMs, { model: model.model });
   if (shown.remote_host || shown.remote_model) throw cloudModel(model.model);
   return { model: entry.name ?? model.model, digest: typeof entry.digest === "string" && entry.digest.length > 0 ? entry.digest : "unknown" };
 }
 
-async function checkLmStudio(model: SandboxConfig["model"], fetchImpl: typeof fetch): Promise<ModelCheck> {
+async function checkLmStudio(model: SandboxConfig["model"], fetchImpl: typeof fetch, timeoutMs: number): Promise<ModelCheck> {
   const base = model.endpoint.replace(/\/+$/, "");
-  const listing = await probe<{ data?: Array<{ id?: string; digest?: unknown; sha256?: unknown }> }>(fetchImpl, `${base}/models`, "LM Studio", model.endpoint);
+  const listing = await probe<{ data?: Array<{ id?: string; digest?: unknown; sha256?: unknown }> }>(fetchImpl, `${base}/models`, "LM Studio", model.endpoint, timeoutMs);
   const entry = listing.data?.find((candidate) => candidate.id === model.model);
   if (!entry) {
     throw new SandboxRefusal("model-not-pulled", `LM Studio on this machine has no model ${model.model} loaded. Load it in LM Studio or with \`lms load ${model.model}\`, then run again.`);
@@ -77,32 +77,50 @@ async function checkLmStudio(model: SandboxConfig["model"], fetchImpl: typeof fe
   return { model: model.model, digest };
 }
 
-async function probe<T>(fetchImpl: typeof fetch, url: string, server: string, endpoint: string, body?: unknown): Promise<T> {
+async function probe<T>(fetchImpl: typeof fetch, url: string, server: string, endpoint: string, timeoutMs: number, body?: unknown): Promise<T> {
+  // One signal covers the request and the body, so a server that sends
+  // headers and then stalls ends as a timeout, not as an unreadable answer.
+  const signal = AbortSignal.timeout(timeoutMs);
+  const timeout = (cause: unknown) =>
+    new SandboxRefusal(
+      "model-timeout",
+      `${server} at ${endpoint} did not answer within ${timeoutMs / 1000} seconds. Check that it is not overloaded, then run again.`,
+      { cause },
+    );
   let response: Response;
   try {
     response = await fetchImpl(url, {
       method: body === undefined ? "GET" : "POST",
       ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
       redirect: "error",
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      signal,
     });
   } catch (error) {
-    const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+    const timedOut = signal.aborted || (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError"));
+    if (timedOut) throw timeout(error);
     throw new SandboxRefusal(
-      timedOut ? "model-timeout" : "model-unreachable",
-      timedOut
-        ? `${server} at ${endpoint} did not answer within ${PROBE_TIMEOUT_MS / 1000} seconds. Check that it is not overloaded, then run again.`
-        : `${server} isn't reachable at ${endpoint}: ${describe(error)} Start it${server === "Ollama" ? " with `ollama serve`" : ""}, then run again.`,
+      "model-unreachable",
+      `${server} isn't reachable at ${endpoint}: ${describe(error)} Start it${server === "Ollama" ? " with `ollama serve`" : ""}, then run again.`,
       { cause: error },
     );
   }
   if (!response.ok) {
     throw new SandboxRefusal("model-unreachable", `${server} at ${endpoint} answered HTTP ${response.status}. Check the server log, then run again.`);
   }
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(signal.reason);
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+  });
+  aborted.catch(() => undefined);
   try {
-    return (await response.json()) as T;
-  } catch {
+    return (await Promise.race([response.json(), aborted])) as T;
+  } catch (error) {
+    if (signal.aborted) throw timeout(error);
     throw new SandboxRefusal("model-unreachable", `${server} at ${endpoint} answered with a response the sandbox could not read.`);
+  } finally {
+    if (onAbort) signal.removeEventListener("abort", onAbort);
   }
 }
 

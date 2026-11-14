@@ -94,6 +94,14 @@ describe("checkLocalModel", () => {
     assert.equal(await reasonOf(checkLocalModel(local, refused)), "model-unreachable");
   });
 
+  it("names a model check that stalls after the headers as a timeout", async () => {
+    // Headers arrive, then the body never ends and ignores the abort.
+    const stalled = (async () =>
+      new Response(new ReadableStream({ start() {} }), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
+    assert.equal(await reasonOf(checkLocalModel(local, stalled, 50)), "model-timeout");
+    assert.equal(await reasonOf(checkLocalModel({ provider: "lm-studio", endpoint: "http://127.0.0.1:1234/v1", model: "qwen3-8b" }, stalled, 50)), "model-timeout");
+  });
+
   it("refuses Ollama cloud models by name and by what Ollama reports", async () => {
     assert.equal(isCloudModelName("gpt-oss:120b-cloud"), true);
     assert.equal(isCloudModelName("deepseek:cloud"), true);
