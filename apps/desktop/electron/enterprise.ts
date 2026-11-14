@@ -417,6 +417,52 @@ export async function loadEnterprise(options: LoadEnterpriseOptions): Promise<En
 /** How long a module's deactivate may take before the host moves on. */
 export const ENTERPRISE_STOP_TIMEOUT_MS = 2000;
 
+export interface EnterpriseService {
+  /** Inactive until `start` settles, then the runtime's status. */
+  status(): EnterpriseStatusView;
+  /** Loads once. Always resolves, and always notifies the renderer once it settles. */
+  start(): Promise<EnterpriseRuntime>;
+}
+
+/**
+ * Holds the runtime for the main process. The renderer may read the status
+ * before loading finishes, so whatever the outcome (on, off with a problem,
+ * off with nothing to say, or a failure loading at all) the final runtime
+ * is stored first and the renderer is then told to read again.
+ */
+export function createEnterpriseService(input: {
+  readonly load: () => Promise<EnterpriseRuntime>;
+  readonly notify: () => void;
+  readonly log: EnterpriseLogSink;
+}): EnterpriseService {
+  let runtime: EnterpriseRuntime | undefined;
+  let starting: Promise<EnterpriseRuntime> | undefined;
+  const start = async (): Promise<EnterpriseRuntime> => {
+    let loaded: EnterpriseRuntime;
+    try {
+      loaded = await input.load();
+    } catch (error) {
+      const message = `Team features could not be checked: ${errorMessage(error)}.`;
+      input.log("error", `enterprise: ${message}`);
+      loaded = inactive(
+        { kind: "failed", error: error instanceof Error ? error : new Error(String(error)) },
+        problem("module-load", `${message} Restart OpenAdminOS. If it fails again, report it with Report an issue.`),
+      );
+    }
+    runtime = loaded;
+    try {
+      input.notify();
+    } catch (error) {
+      input.log("warn", "enterprise: the window could not be told about team features", { error: errorMessage(error) });
+    }
+    return loaded;
+  };
+  return Object.freeze({
+    status: () => runtime?.status() ?? INACTIVE,
+    start: () => (starting ??= start()),
+  });
+}
+
 /** The longest delay setTimeout accepts (2^31 - 1 ms). */
 export const MAX_TIMER_DELAY_MS = 2_147_483_647;
 

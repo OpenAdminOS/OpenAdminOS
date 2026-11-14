@@ -43,11 +43,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, win32 } from "node:path";
 import { AppStateStore, TENANT_CLOSING_REASON } from "./state.js";
 import {
+  createEnterpriseService,
   enterpriseFiles,
   ipcMainRegistrar,
   loadEnterprise,
   resolveInstalledModule,
-  type EnterpriseRuntime,
+  type EnterpriseService,
 } from "./enterprise.js";
 import { loadManagedPolicy, resolveManagedPolicyPaths } from "./managed-policy.js";
 import { MCP_CATALOG } from "./mcp/catalog.js";
@@ -318,7 +319,7 @@ let companionWindow: BrowserWindow | null = null;
 let menuBarTray: Tray | null = null;
 let store: AppStateStore;
 // Team features stay off until a valid licence is found; see enterprise.ts.
-let enterprise: EnterpriseRuntime | undefined;
+let enterprise: EnterpriseService | undefined;
 /** The Nova service, once IPC is registered: settings changes check its live voice session. */
 let novaService: NovaService | undefined;
 const activeNotifications = new Set<Notification>();
@@ -3253,26 +3254,33 @@ function isAllowedAppNavigation(url: string): boolean {
 async function startEnterprise(userDataDir: string): Promise<void> {
   const files = enterpriseFiles(userDataDir);
   const notify = () => mainWindow?.webContents.send("openadminos:enterprise-status-changed");
-  enterprise = await loadEnterprise({
-    readLicenceToken: files.readLicenceToken,
-    now: () => Date.now(),
-    resolveModule: (specifier) => resolveInstalledModule(specifier, (name) => import.meta.resolve(name)),
-    importModule: (url) => import(url),
-    ipc: ipcMainRegistrar(ipcMain, requireTrustedIpcSender),
-    storage: files.storage,
-    log: (level, message, fields) => console[level](`[enterprise] ${message}`, fields ?? {}),
-    onChange: notify,
+  const log = (level: "info" | "warn" | "error", message: string, fields?: Readonly<Record<string, string | number | boolean>>) =>
+    console[level](`[enterprise] ${message}`, fields ?? {});
+  enterprise = createEnterpriseService({
+    load: () =>
+      loadEnterprise({
+        readLicenceToken: files.readLicenceToken,
+        now: () => Date.now(),
+        resolveModule: (specifier) => resolveInstalledModule(specifier, (name) => import.meta.resolve(name)),
+        importModule: (url) => import(url),
+        ipc: ipcMainRegistrar(ipcMain, requireTrustedIpcSender),
+        storage: files.storage,
+        log,
+        onChange: notify,
+      }),
+    notify,
+    log,
   });
-  if (enterprise.outcome.kind !== "active") return;
-  notify();
-  // Quit waits up to two seconds for the module to stop, then quits anyway.
-  const active = enterprise;
+  // The service stores the final runtime and notifies the window for every outcome.
+  const runtime = await enterprise.start();
+  if (runtime.outcome.kind !== "active") return;
+  // Quit waits for the module to stop; deactivate is bounded to two seconds.
   let stopping = false;
   app.on("will-quit", (event) => {
     if (stopping) return;
     stopping = true;
     event.preventDefault();
-    void Promise.race([active.deactivate(), new Promise((resolve) => setTimeout(resolve, 2000).unref())]).finally(() => app.quit());
+    void runtime.deactivate().finally(() => app.quit());
   });
 }
 

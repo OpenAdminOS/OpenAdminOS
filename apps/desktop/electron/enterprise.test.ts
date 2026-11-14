@@ -28,6 +28,7 @@ import {
   EnterpriseLicenceFileError,
   EnterpriseStorageFileError,
   ENTERPRISE_STOP_TIMEOUT_MS,
+  createEnterpriseService,
   MAX_TIMER_DELAY_MS,
   EnterpriseModuleLoadError,
   enterpriseFiles,
@@ -631,6 +632,68 @@ describe("loadEnterprise with a valid licence", () => {
     assert.deepEqual(runtime.outcome, { kind: "module-off", source: "module" });
     assert.deepEqual(runtime.status(), { active: false });
     assert.equal(ipc.handlers.size, 0);
+  });
+});
+
+describe("createEnterpriseService", () => {
+  it("stores a delayed startup failure and notifies after the first status read", async () => {
+    let fail: (error: Error) => void = () => undefined;
+    const notified: string[] = [];
+    const logs: string[] = [];
+    const service = createEnterpriseService({
+      load: () =>
+        new Promise<never>((_resolve, reject) => {
+          fail = reject;
+        }),
+      notify: () => notified.push(JSON.stringify(service.status())),
+      log: (_level, message) => logs.push(message),
+    });
+    const started = service.start();
+    // The renderer reads first, while loading is still under way.
+    assert.deepEqual(service.status(), { active: false });
+    assert.deepEqual(notified, []);
+    fail(new Error("ENOMEM: out of memory"));
+    const runtime = await started;
+    assert.equal(runtime.outcome.kind, "failed");
+    const status = service.status();
+    assert.ok(!status.active && status.problem?.reason === "module-load");
+    assert.equal(
+      status.problem.message,
+      "Team features could not be checked: ENOMEM: out of memory. Restart OpenAdminOS. If it fails again, report it with Report an issue.",
+    );
+    // The notification came after the runtime was stored, so a read then sees the failure.
+    assert.equal(notified.length, 1);
+    assert.match(notified[0] ?? "", /module-load/);
+    assert.equal(logs.length, 1);
+    assert.equal(await service.start(), runtime);
+    assert.equal(notified.length, 1);
+  });
+
+  it("notifies for every outcome", async () => {
+    const outcomes = [
+      harness({ token: undefined }),
+      harness({ token: "not-a-licence" }),
+      harness({ token: licence(), module: trackingModule().module }),
+    ];
+    const expected: Array<Record<string, unknown>> = [];
+    for (const { options } of outcomes) {
+      let notified = 0;
+      let seen: unknown;
+      const service = createEnterpriseService({
+        load: () => loadEnterprise(options),
+        notify: () => {
+          notified += 1;
+          seen = service.status();
+        },
+        log: () => undefined,
+      });
+      await service.start();
+      assert.equal(notified, 1);
+      expected.push(seen as Record<string, unknown>);
+    }
+    assert.deepEqual(expected[0], { active: false });
+    assert.equal((expected[1]?.problem as { reason?: string } | undefined)?.reason, "licence-malformed");
+    assert.equal(expected[2]?.active, true);
   });
 });
 
