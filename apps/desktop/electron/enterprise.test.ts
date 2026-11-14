@@ -29,7 +29,7 @@ import {
   EnterpriseStorageFileError,
   ENTERPRISE_STOP_TIMEOUT_MS,
   createEnterpriseService,
-  MAX_TIMER_DELAY_MS,
+  ENTERPRISE_CHECK_INTERVAL_MS,
   EnterpriseModuleLoadError,
   enterpriseFiles,
   ipcMainRegistrar,
@@ -315,18 +315,17 @@ describe("loadEnterprise with a valid licence", () => {
     assert.equal(seen.host?.entitlement().state, "grace");
   });
 
-  it("turns the module off when the grace period ends during the session", async () => {
-    const graceEndsAt = (NOW_SECONDS + 3 * DAY) * 1000 + 30 * 24 * 60 * 60 * 1000;
-    let now = NOW;
+  /** An active runtime on a fake clock with a recorded timer list. */
+  async function clockHarness(token: string) {
+    const clock = { now: NOW };
     const timers: Array<{ callback: () => void; delay: number; cancelled: boolean }> = [];
     const { module, seen } = trackingModule();
-    const changes: number[] = [];
+    const changes: string[] = [];
     const { options, ipc } = harness({
-      // Expires in three days, with a 30 day grace period: past 2^31-1 ms.
-      token: licence({ expiresAt: NOW_SECONDS + 3 * DAY, graceSeconds: 30 * DAY }),
+      token,
       module,
-      now: () => now,
-      onChange: () => changes.push(1),
+      now: () => clock.now,
+      onChange: () => changes.push("changed"),
       setTimer: (callback, delay) => {
         const timer = { callback, delay, cancelled: false };
         timers.push(timer);
@@ -337,30 +336,84 @@ describe("loadEnterprise with a valid licence", () => {
     });
     const runtime = await loadEnterprise(options);
     assert.equal(runtime.outcome.kind, "active");
-    assert.equal(timers.length, 1);
-    assert.equal(timers[0]?.delay, MAX_TIMER_DELAY_MS);
+    const checks = () => timers.filter((timer) => timer.delay !== ENTERPRISE_STOP_TIMEOUT_MS);
+    const fireLatestCheck = () => {
+      const latest = checks().at(-1);
+      assert.ok(latest && !latest.cancelled, "no pending check timer");
+      latest.callback();
+    };
+    return { clock, timers, checks, fireLatestCheck, seen, changes, ipc, runtime };
+  }
 
-    // The first step ends before the grace period does: wait again.
-    now += MAX_TIMER_DELAY_MS;
-    timers[0]?.callback();
-    assert.equal(timers.length, 2);
-    assert.equal(timers[1]?.delay, graceEndsAt - now);
-    assert.equal(seen.deactivated, 0);
-    assert.equal(runtime.status().active, true);
+  it("checks the licence window every 15 minutes and turns the module off at the grace end", async () => {
+    const graceEndsAt = (NOW_SECONDS + DAY + DAY) * 1000;
+    const t = await clockHarness(licence({ expiresAt: NOW_SECONDS + DAY, graceSeconds: DAY }));
+    assert.deepEqual(t.checks().map((timer) => timer.delay), [ENTERPRISE_CHECK_INTERVAL_MS]);
 
-    // Cross graceEndsAt.
-    now = graceEndsAt;
-    timers[1]?.callback();
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(seen.deactivated, 1);
-    assert.equal(ipc.handlers.size, 0);
-    const status = runtime.status();
+    // A step inside the window schedules the next one, no longer than 15 minutes.
+    t.clock.now += ENTERPRISE_CHECK_INTERVAL_MS;
+    t.fireLatestCheck();
+    assert.equal(t.checks().length, 2);
+    assert.equal(t.checks()[1]?.delay, ENTERPRISE_CHECK_INTERVAL_MS);
+    assert.equal(t.ipc.handlers.size, 1);
+
+    // Close to the end the step shortens to land on graceEndsAt.
+    t.clock.now = graceEndsAt - 60_000;
+    t.fireLatestCheck();
+    assert.equal(t.checks().at(-1)?.delay, 60_000);
+
+    t.clock.now = graceEndsAt;
+    t.fireLatestCheck();
+    // Synchronously, without a status() call: handlers gone, renderer told.
+    assert.equal(t.ipc.handlers.size, 0);
+    assert.deepEqual(t.changes, ["changed"]);
+    const status = t.runtime.status();
     assert.ok(!status.active && status.problem?.reason === "licence-expired");
     assert.match(status.problem.message, /grace period ended .*Install a renewed licence, then restart OpenAdminOS\.$/);
-    assert.ok(changes.length >= 1);
-    // The third timer only bounds deactivate.
-    assert.equal(timers.length, 3);
-    assert.equal(timers[2]?.delay, ENTERPRISE_STOP_TIMEOUT_MS);
+    // No further check is scheduled; the remaining timer only bounds deactivate.
+    assert.equal(t.checks().length, 3);
+    assert.ok(t.timers.some((timer) => timer.delay === ENTERPRISE_STOP_TIMEOUT_MS));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(t.seen.deactivated, 1);
+  });
+
+  it("follows the system clock moved past the grace end at the next timer step", async () => {
+    // A licence valid for a year: the pending step is 15 minutes, not months.
+    const t = await clockHarness(licence({ expiresAt: NOW_SECONDS + 365 * DAY, graceSeconds: 14 * DAY }));
+    assert.equal(t.checks()[0]?.delay, ENTERPRISE_CHECK_INTERVAL_MS);
+    t.clock.now = (NOW_SECONDS + 400 * DAY) * 1000;
+    t.fireLatestCheck();
+    assert.equal(t.ipc.handlers.size, 0);
+    assert.deepEqual(t.changes, ["changed"]);
+    const status = t.runtime.status();
+    assert.ok(!status.active && status.problem?.reason === "licence-expired");
+  });
+
+  it("follows the system clock moved back before notBefore at the next timer step", async () => {
+    const t = await clockHarness(licence({ notBefore: NOW_SECONDS - DAY }));
+    t.clock.now = NOW - 3 * DAY * 1000;
+    t.fireLatestCheck();
+    assert.equal(t.ipc.handlers.size, 0);
+    assert.deepEqual(t.changes, ["changed"]);
+    const status = t.runtime.status();
+    assert.ok(!status.active && status.problem?.reason === "licence-not-yet-valid");
+  });
+
+  it("checks again at once on recheck, as on resume from sleep", async () => {
+    const t = await clockHarness(licence({ expiresAt: NOW_SECONDS + DAY, graceSeconds: 0 }));
+    t.runtime.recheck();
+    assert.equal(t.ipc.handlers.size, 1);
+    assert.deepEqual(t.changes, []);
+    t.clock.now = (NOW_SECONDS + 2 * DAY) * 1000;
+    t.runtime.recheck();
+    assert.equal(t.ipc.handlers.size, 0);
+    assert.deepEqual(t.changes, ["changed"]);
+    const status = t.runtime.status();
+    assert.ok(!status.active && status.problem?.reason === "licence-expired");
+    // The pending check timer was cancelled.
+    assert.equal(t.checks()[0]?.cancelled, true);
+    t.runtime.recheck();
+    assert.deepEqual(t.changes, ["changed"]);
   });
 
   it("does not activate when the licence lapses while the module is imported", async () => {
@@ -516,7 +569,7 @@ describe("loadEnterprise with a valid licence", () => {
       const { options } = harness({ token: licence(), module });
       const runtime = await loadEnterprise(options);
       assert.equal(created.length, 1);
-      assert.equal(created[0]?.delay, MAX_TIMER_DELAY_MS);
+      assert.equal(created[0]?.delay, ENTERPRISE_CHECK_INTERVAL_MS);
       assert.equal(created[0]?.unref, true);
       await runtime.deactivate();
       assert.equal(created[0]?.cleared, true);
@@ -667,6 +720,29 @@ describe("createEnterpriseService", () => {
     assert.equal(logs.length, 1);
     assert.equal(await service.start(), runtime);
     assert.equal(notified.length, 1);
+  });
+
+  it("passes recheck to the runtime once loaded and ignores it before", async () => {
+    const rechecks: string[] = [];
+    let resolve: (runtime: Parameters<typeof Promise.resolve>[0]) => void = () => undefined;
+    const service = createEnterpriseService({
+      load: () => new Promise((done) => {
+        resolve = done as typeof resolve;
+      }),
+      notify: () => undefined,
+      log: () => undefined,
+    });
+    const started = service.start();
+    service.recheck();
+    resolve({
+      outcome: { kind: "active" },
+      status: () => ({ active: false }),
+      recheck: () => rechecks.push("recheck"),
+      deactivate: async () => undefined,
+    });
+    await started;
+    service.recheck();
+    assert.deepEqual(rechecks, ["recheck"]);
   });
 
   it("notifies for every outcome", async () => {

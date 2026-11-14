@@ -100,6 +100,8 @@ export interface EnterpriseRuntime {
   /** What happened at launch. `status()` reflects later changes, such as the end of the grace period. */
   readonly outcome: EnterpriseOutcome;
   status(): EnterpriseStatusView;
+  /** Checks the licence window against the clock now, for example after the device wakes. */
+  recheck(): void;
   deactivate(): Promise<void>;
 }
 
@@ -143,7 +145,7 @@ function inactiveStatus(issue: EnterpriseProblem | undefined): EnterpriseStatusV
 
 function inactive(outcome: EnterpriseOutcome, issue?: EnterpriseProblem): EnterpriseRuntime {
   const status = inactiveStatus(issue);
-  return Object.freeze({ outcome, status: () => status, deactivate: async () => undefined });
+  return Object.freeze({ outcome, status: () => status, recheck: () => undefined, deactivate: async () => undefined });
 }
 
 /** The problem shown for a licence that was refused, with the step that fixes it. */
@@ -383,24 +385,26 @@ export async function loadEnterprise(options: LoadEnterpriseOptions): Promise<En
     void runDeactivate();
   };
 
-  // The grace period can end while the app runs. One timer, unref'd so it
-  // never keeps the app alive, waits in steps no longer than setTimeout
-  // allows and checks the clock again at each step.
-  const scheduleExpiry = () => {
-    if (stopped) return;
-    const remaining = verified.graceEndsAt - options.now();
-    if (remaining <= 0) {
-      expire();
-      return;
-    }
-    cancelTimer = setTimer(scheduleExpiry, Math.min(remaining, MAX_TIMER_DELAY_MS));
+  // The licence window can close while the app runs: the grace period
+  // ends, or the system clock is moved past it or back before notBefore.
+  // A relative delay does not follow a clock change, so one unref'd timer
+  // checks the whole window at least every ENTERPRISE_CHECK_INTERVAL_MS,
+  // and resume from sleep checks at once (see `recheck`).
+  const recheck = () => {
+    if (!stopped && expired()) expire();
   };
-  scheduleExpiry();
+  const scheduleCheck = () => {
+    recheck();
+    if (stopped) return;
+    const untilGraceEnd = verified.graceEndsAt - options.now();
+    cancelTimer = setTimer(scheduleCheck, Math.max(1, Math.min(untilGraceEnd, ENTERPRISE_CHECK_INTERVAL_MS)));
+  };
+  scheduleCheck();
 
   return Object.freeze({
     outcome: Object.freeze({ kind: "active" }),
     status: (): EnterpriseStatusView => {
-      if (!stopped && expired()) expire();
+      recheck();
       if (stopped) return inactiveStatus(stoppedProblem);
       const snapshot = controller.snapshot();
       return Object.freeze({
@@ -410,6 +414,7 @@ export async function loadEnterprise(options: LoadEnterpriseOptions): Promise<En
         settingsSections: snapshot.settingsSections,
       });
     },
+    recheck,
     deactivate: stop,
   });
 }
@@ -422,6 +427,8 @@ export interface EnterpriseService {
   status(): EnterpriseStatusView;
   /** Loads once. Always resolves, and always notifies the renderer once it settles. */
   start(): Promise<EnterpriseRuntime>;
+  /** Checks the licence window again; a no-op until loaded and when inactive. */
+  recheck(): void;
 }
 
 /**
@@ -460,11 +467,12 @@ export function createEnterpriseService(input: {
   return Object.freeze({
     status: () => runtime?.status() ?? INACTIVE,
     start: () => (starting ??= start()),
+    recheck: () => runtime?.recheck(),
   });
 }
 
-/** The longest delay setTimeout accepts (2^31 - 1 ms). */
-export const MAX_TIMER_DELAY_MS = 2_147_483_647;
+/** How often an active module's licence window is checked against the clock. */
+export const ENTERPRISE_CHECK_INTERVAL_MS = 15 * 60 * 1000;
 
 function defaultSetTimer(callback: () => void, delayMs: number): () => void {
   const timer = setTimeout(callback, delayMs);

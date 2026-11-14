@@ -26,6 +26,7 @@ import {
   nativeImage,
   nativeTheme,
   Notification,
+  powerMonitor,
   session,
   shell,
   screen,
@@ -3256,7 +3257,7 @@ async function startEnterprise(userDataDir: string): Promise<void> {
   const notify = () => mainWindow?.webContents.send("openadminos:enterprise-status-changed");
   const log = (level: "info" | "warn" | "error", message: string, fields?: Readonly<Record<string, string | number | boolean>>) =>
     console[level](`[enterprise] ${message}`, fields ?? {});
-  enterprise = createEnterpriseService({
+  const service = createEnterpriseService({
     load: () =>
       loadEnterprise({
         readLicenceToken: files.readLicenceToken,
@@ -3271,9 +3272,13 @@ async function startEnterprise(userDataDir: string): Promise<void> {
     notify,
     log,
   });
+  enterprise = service;
   // The service stores the final runtime and notifies the window for every outcome.
-  const runtime = await enterprise.start();
+  const runtime = await service.start();
   if (runtime.outcome.kind !== "active") return;
+  // A clock that moved while the device slept is checked on wake, not at
+  // the next timer step.
+  powerMonitor.on("resume", () => service.recheck());
   // Quit waits for the module to stop; deactivate is bounded to two seconds.
   let stopping = false;
   app.on("will-quit", (event) => {
