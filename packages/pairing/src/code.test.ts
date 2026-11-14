@@ -16,6 +16,7 @@ import {
   type DesktopPairingOffer,
   type PairingCode,
   type PairingTranscriptFields,
+  type SandboxPairingSessionOptions,
 } from "./code.js";
 import { PairingError } from "./errors.js";
 import { exportDevicePublicKey, generateDeviceIdentity } from "./identity.js";
@@ -42,8 +43,17 @@ function offer(overrides: Partial<DesktopPairingOffer> = {}): DesktopPairingOffe
   return { organizationId, tenantId, desktopPublicKey, ...overrides };
 }
 
-function sandboxSession(code: PairingCode, clock: { now: number } = { now: 0 }): SandboxPairingSession {
-  return new SandboxPairingSession({ code, pairingId: "pairing-1", sandboxPublicKey: SANDBOX_KEY, tlsSpkiSha256: PIN, issuedAt: 0, now: () => clock.now });
+function sandboxOptions(code: PairingCode, clock: { now: number }, overrides: Partial<SandboxPairingSessionOptions> = {}): SandboxPairingSessionOptions {
+  const { organizationId, tenantId } = fields();
+  return { code, pairingId: "pairing-1", sandboxPublicKey: SANDBOX_KEY, tlsSpkiSha256: PIN, organizationId, tenantId, issuedAt: 0, now: () => clock.now, ...overrides };
+}
+
+function sandboxSession(code: PairingCode, clock: { now: number } = { now: 0 }, overrides: Partial<SandboxPairingSessionOptions> = {}): Promise<SandboxPairingSession> {
+  return SandboxPairingSession.create(sandboxOptions(code, clock, overrides));
+}
+
+async function assertRejects(promise: Promise<unknown>, reason: string): Promise<void> {
+  await assert.rejects(promise, (error) => error instanceof PairingError && error.reason === reason);
 }
 
 function parsed(input: string): PairingCode {
@@ -124,11 +134,11 @@ describe("pairing transcript", () => {
 });
 
 describe("pairing proofs", () => {
-  it("run desktop first, then sandbox, and both verify", () => {
+  it("run desktop first, then sandbox, and both verify", async () => {
     const code = createPairingCode(PIN);
     // The admin types the code on the desktop.
-    const desktop = new DesktopPairingSession(parsed(formatPairingCode(code).toLowerCase()), fields());
-    const sandbox = sandboxSession(code);
+    const desktop = await DesktopPairingSession.create(parsed(formatPairingCode(code).toLowerCase()), fields());
+    const sandbox = await sandboxSession(code);
     const desktopProof = desktop.desktopProof();
     assert.equal(desktopProof.length, 43);
     const result = sandbox.verifyDesktopProof(offer(), desktopProof);
@@ -140,61 +150,73 @@ describe("pairing proofs", () => {
     assert.equal(desktop.verifySandboxProof(desktopProof), false);
   });
 
-  it("keys the HMAC with scrypt of the secret, salted with the domain, the pin and the pairing id", () => {
+  it("keys the HMAC with scrypt of the secret, salted with the domain, the pin and the pairing id", async () => {
     const code = createPairingCode(PIN);
     const salt = `openadminos.pairing.key.v1\n${PIN}\npairing-1`;
     const key = scryptSync(code.secret, salt, 32, { N: 2 ** 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
     const expected = createHmac("sha256", key).update(pairingTranscript("desktop", fields())).digest("base64url");
-    assert.equal(new DesktopPairingSession(code, fields()).desktopProof(), expected);
+    assert.equal((await DesktopPairingSession.create(code, fields())).desktopProof(), expected);
   });
 
-  it("gives no sandbox proof before a desktop proof verified", () => {
+  it("gives no sandbox proof before a desktop proof verified", async () => {
     const code = createPairingCode(PIN);
-    const sandbox = sandboxSession(code);
+    const sandbox = await sandboxSession(code);
     assert.equal(reasonOf(() => sandbox.sandboxProof()), "proof-order");
-    const failed = sandbox.verifyDesktopProof(offer(), new DesktopPairingSession(createPairingCode(PIN), fields()).desktopProof());
+    const failed = sandbox.verifyDesktopProof(offer(), (await DesktopPairingSession.create(createPairingCode(PIN), fields())).desktopProof());
     assert.equal(failed.ok ? "accepted" : failed.failure, "proof-invalid");
     assert.equal(reasonOf(() => sandbox.sandboxProof()), "proof-order");
   });
 
-  it("lets the desktop check the sandbox only after it sent its own proof", () => {
-    const code = createPairingCode(PIN);
-    const desktop = new DesktopPairingSession(code, fields());
+  it("lets the desktop check the sandbox only after it sent its own proof", async () => {
+    const desktop = await DesktopPairingSession.create(createPairingCode(PIN), fields());
     assert.equal(reasonOf(() => desktop.verifySandboxProof("x".repeat(43))), "proof-order");
     desktop.desktopProof();
     assert.equal(desktop.verifySandboxProof("x".repeat(43)), false);
   });
 
-  it("refuses a desktop session for a TLS key the code does not name", () => {
-    assert.equal(reasonOf(() => new DesktopPairingSession(createPairingCode(PIN), fields({ tlsSpkiSha256: OTHER_PIN }))), "fingerprint-mismatch");
-    assert.equal(reasonOf(() => new DesktopPairingSession(createPairingCode(PIN), fields({ tenantId: "x" }))), "payload-invalid");
-    assert.equal(reasonOf(() => new DesktopPairingSession({ ...createPairingCode(PIN), secret: "short" }, fields())), "payload-invalid");
-    assert.equal(reasonOf(() => sandboxSession(createPairingCode(OTHER_PIN))), "fingerprint-mismatch");
+  it("refuses sessions for a TLS key the code does not name or options out of shape", async () => {
+    await assertRejects(DesktopPairingSession.create(createPairingCode(PIN), fields({ tlsSpkiSha256: OTHER_PIN })), "fingerprint-mismatch");
+    await assertRejects(DesktopPairingSession.create(createPairingCode(PIN), fields({ tenantId: "x" })), "payload-invalid");
+    await assertRejects(DesktopPairingSession.create({ ...createPairingCode(PIN), secret: "short" }, fields()), "payload-invalid");
+    await assertRejects(sandboxSession(createPairingCode(OTHER_PIN)), "fingerprint-mismatch");
+    await assertRejects(sandboxSession(createPairingCode(PIN), { now: 0 }, { tenantId: "TENANT" }), "payload-invalid");
+    await assertRejects(sandboxSession(createPairingCode(PIN), { now: 0 }, { organizationId: "" }), "payload-invalid");
   });
 
-  it("fails the desktop proof for another secret or any changed field", () => {
+  it("refuses a desktop for another organization or tenant before any sandbox proof, as an attempt", async () => {
     const code = createPairingCode(PIN);
-    const desktopProof = new DesktopPairingSession(code, fields()).desktopProof();
-    const changes: Partial<DesktopPairingOffer>[] = [
-      { organizationId: "org-2" },
-      { tenantId: "11111111-2222-3333-4444-555555555556" },
-      { desktopPublicKey: exportDevicePublicKey(generateDeviceIdentity().publicKey) },
-    ];
+    const sandbox = await sandboxSession(code);
+    const changes: Partial<DesktopPairingOffer>[] = [{ organizationId: "org-2" }, { tenantId: "11111111-2222-3333-4444-555555555556" }];
     for (const change of changes) {
-      const result = sandboxSession(code).verifyDesktopProof(offer(change), desktopProof);
-      assert.equal(result.ok ? "accepted" : result.failure, "proof-invalid", JSON.stringify(change));
+      // The desktop computed a correct proof for its own organization and tenant.
+      const desktopProof = (await DesktopPairingSession.create(code, fields(change))).desktopProof();
+      const result = sandbox.verifyDesktopProof(offer(change), desktopProof);
+      assert.equal(result.ok ? "accepted" : result.failure, "binding-mismatch", JSON.stringify(change));
     }
-    // The sandbox's own fields are part of the transcript and the key: another pairing id fails.
-    const otherPairing = new DesktopPairingSession(code, fields({ pairingId: "pairing-2" })).desktopProof();
-    const result = sandboxSession(code).verifyDesktopProof(offer(), otherPairing);
-    assert.equal(result.ok ? "accepted" : result.failure, "proof-invalid");
+    assert.equal(sandbox.remaining, 3);
+    assert.equal(reasonOf(() => sandbox.sandboxProof()), "proof-order");
   });
 
-  it("fails closed on a tampered or malformed proof and counts each try", () => {
+  it("fails the desktop proof for another secret or a changed transcript", async () => {
     const code = createPairingCode(PIN);
-    const desktopProof = new DesktopPairingSession(code, fields()).desktopProof();
+    const desktopProof = (await DesktopPairingSession.create(code, fields())).desktopProof();
+    const otherKey = await sandboxSession(code);
+    const swapped = otherKey.verifyDesktopProof(offer({ desktopPublicKey: exportDevicePublicKey(generateDeviceIdentity().publicKey) }), desktopProof);
+    assert.equal(swapped.ok ? "accepted" : swapped.failure, "proof-invalid");
+    // The sandbox's own fields are part of the transcript and the key: another pairing id fails.
+    const otherPairing = (await DesktopPairingSession.create(code, fields({ pairingId: "pairing-2" }))).desktopProof();
+    const result = (await sandboxSession(code)).verifyDesktopProof(offer(), otherPairing);
+    assert.equal(result.ok ? "accepted" : result.failure, "proof-invalid");
+    const wrongCode = (await DesktopPairingSession.create(createPairingCode(PIN), fields())).desktopProof();
+    const wrong = (await sandboxSession(code)).verifyDesktopProof(offer(), wrongCode);
+    assert.equal(wrong.ok ? "accepted" : wrong.failure, "proof-invalid");
+  });
+
+  it("fails closed on a tampered or malformed proof and counts each try", async () => {
+    const code = createPairingCode(PIN);
+    const desktopProof = (await DesktopPairingSession.create(code, fields())).desktopProof();
     const flipped = `${desktopProof[0] === "A" ? "B" : "A"}${desktopProof.slice(1)}`;
-    const sandbox = sandboxSession(code);
+    const sandbox = await sandboxSession(code);
     const remaining: number[] = [];
     for (const bad of [flipped, desktopProof.slice(1), 7, undefined]) {
       const result = sandbox.verifyDesktopProof(offer(), bad);
@@ -210,18 +232,28 @@ describe("pairing proofs", () => {
     assert.equal(reasonOf(() => sandbox.sandboxProof()), "proof-order");
   });
 
-  it("refuses an expired code and a code that already paired", () => {
+  it("refuses an expired code and a code that already paired", async () => {
     const code = createPairingCode(PIN);
-    const desktopProof = new DesktopPairingSession(code, fields()).desktopProof();
+    const desktopProof = (await DesktopPairingSession.create(code, fields())).desktopProof();
     const clock = { now: 10 * 60_000 };
-    const expired = sandboxSession(code, clock).verifyDesktopProof(offer(), desktopProof);
+    const expired = (await sandboxSession(code, clock)).verifyDesktopProof(offer(), desktopProof);
     assert.equal(expired.ok ? "accepted" : expired.failure, "code-expired");
     clock.now = 1;
-    const sandbox = sandboxSession(code, clock);
+    const sandbox = await sandboxSession(code, clock);
     assert.ok(sandbox.verifyDesktopProof(offer(), desktopProof).ok);
     const again = sandbox.verifyDesktopProof(offer(), desktopProof);
     assert.equal(again.ok ? "accepted" : again.failure, "code-used");
     assert.equal(sandbox.remaining, 0);
+  });
+
+  it("cannot loosen the protocol limits", async () => {
+    const code = createPairingCode(PIN);
+    const clock = { now: 0 };
+    const sandbox = await SandboxPairingSession.create({ ...sandboxOptions(code, clock), maxAttempts: 50, lifetimeMs: 24 * 60 * 60_000 });
+    assert.equal(sandbox.remaining, 5);
+    clock.now = 10 * 60_000;
+    const late = sandbox.verifyDesktopProof(offer(), "x".repeat(43));
+    assert.equal(late.ok ? "accepted" : late.failure, "code-expired");
   });
 });
 
@@ -266,6 +298,18 @@ describe("PairingAttemptLimiter", () => {
     assert.equal(again.ok, false);
     if (!again.ok) assert.equal(again.failure, "code-used");
     assert.equal(limiter.remaining, 0);
+  });
+
+  it("clamps overrides to the protocol limits but allows tighter ones", () => {
+    let now = 0;
+    const loose = new PairingAttemptLimiter({ issuedAt: 0, now: () => now, maxAttempts: 99, lifetimeMs: 60 * 60_000 });
+    assert.equal(loose.remaining, 5);
+    assert.equal(loose.expiresAt, 10 * 60_000);
+    const tight = new PairingAttemptLimiter({ issuedAt: 0, now: () => now, maxAttempts: 2, lifetimeMs: 1_000 });
+    assert.equal(tight.remaining, 2);
+    now = 1_000;
+    const result = tight.attempt();
+    assert.equal(result.ok ? "accepted" : result.failure, "code-expired");
   });
 
   it("refuses options out of range", () => {

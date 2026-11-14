@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 
 import { canonicalJson } from "@openadminos/runtime";
 
@@ -154,14 +154,19 @@ export class DesktopPairingSession {
   private readonly key: Buffer;
   private sent = false;
 
-  /** Throws `fingerprint-mismatch` when the TLS key is not the one the code names, `payload-invalid` for fields out of shape. */
-  constructor(code: PairingCode, fields: PairingTranscriptFields) {
+  private constructor(fields: PairingTranscriptFields, key: Buffer) {
+    this.fields = fields;
+    this.key = key;
+  }
+
+  /** Rejects with `fingerprint-mismatch` when the TLS key is not the one the code names, `payload-invalid` for fields out of shape. */
+  static async create(code: PairingCode, fields: PairingTranscriptFields): Promise<DesktopPairingSession> {
     pairingTranscript("desktop", fields);
     if (!pairingCodeMatchesSpki(code, fields.tlsSpkiSha256)) {
       throw new PairingError("fingerprint-mismatch", "The sandbox's TLS key is not the one the pairing code names. Check the code on the sandbox, and that the address is the sandbox's.");
     }
-    this.fields = { ...fields };
-    this.key = derivePairingKey(code, fields);
+    const copy = { ...fields };
+    return new DesktopPairingSession(copy, await derivePairingKey(code, copy));
   }
 
   desktopProof(): string {
@@ -183,6 +188,9 @@ export interface SandboxPairingSessionOptions extends Omit<PairingAttemptLimiter
   pairingId: string;
   sandboxPublicKey: string;
   tlsSpkiSha256: string;
+  /** The sandbox's own organization and tenant, from its config: a desktop for another one cannot pair. */
+  organizationId: string;
+  tenantId: string;
   /** When the code was shown, in the clock's milliseconds. */
   issuedAt: number;
 }
@@ -198,6 +206,8 @@ export type DesktopProofFailure =
   | PairingAttemptFailure
   /** The offer is out of shape; it still counts as an attempt. */
   | "transcript-invalid"
+  /** The desktop offers another organization or tenant than the sandbox's config; it still counts as an attempt. */
+  | "binding-mismatch"
   /** The proof does not match: a wrong code or a changed transcript. */
   | "proof-invalid";
 
@@ -206,28 +216,40 @@ export type DesktopProofResult =
   | { ok: false; failure: DesktopProofFailure; detail: string; remaining: number };
 
 /**
- * The sandbox's side for one shown code. Every desktop proof counts
- * against the code's attempts, right or wrong. Only after a desktop
- * proof verifies does `sandboxProof()` produce the sandbox's proof, and
- * the code cannot pair again.
+ * The sandbox's side for one shown code. Create one session when a code
+ * is shown and share it across every connection that tries that code,
+ * so the attempt limit and the lifetime hold for the code, not per
+ * connection; a new code gets a new session.
+ *
+ * Every desktop proof counts against the code's attempts, right or
+ * wrong. Only after a desktop proof verifies does `sandboxProof()`
+ * produce the sandbox's proof, and the code cannot pair again: when the
+ * connection drops after that, pairing needs a new code.
  */
 export class SandboxPairingSession {
   private readonly limiter: PairingAttemptLimiter;
   private readonly key: Buffer;
-  private readonly own: Pick<PairingTranscriptFields, "pairingId" | "sandboxPublicKey" | "tlsSpkiSha256">;
+  private readonly own: Omit<PairingTranscriptFields, "desktopPublicKey">;
   private verified: PairingTranscriptFields | undefined;
 
-  constructor(options: SandboxPairingSessionOptions) {
-    const { code, pairingId, sandboxPublicKey, tlsSpkiSha256, ...limiter } = options;
-    if (!isIdentifier(pairingId) || !isDevicePublicKey(sandboxPublicKey) || !isTlsSpkiPin(tlsSpkiSha256)) {
-      throw new PairingError("payload-invalid", "The sandbox session needs a pairing id, the sandbox public key and its TLS SPKI pin.");
+  private constructor(limiter: PairingAttemptLimiter, own: Omit<PairingTranscriptFields, "desktopPublicKey">, key: Buffer) {
+    this.limiter = limiter;
+    this.own = own;
+    this.key = key;
+  }
+
+  /** Rejects with `payload-invalid` for options out of shape, `fingerprint-mismatch` for a code made for another TLS key. */
+  static async create(options: SandboxPairingSessionOptions): Promise<SandboxPairingSession> {
+    const { code, pairingId, sandboxPublicKey, tlsSpkiSha256, organizationId, tenantId, ...limiterOptions } = options;
+    if (!isIdentifier(pairingId) || !isDevicePublicKey(sandboxPublicKey) || !isTlsSpkiPin(tlsSpkiSha256) || !isIdentifier(organizationId) || !isTenantId(tenantId)) {
+      throw new PairingError("payload-invalid", "The sandbox session needs a pairing id, the sandbox public key, its TLS SPKI pin, and the organization and lowercase tenant id from its config.");
     }
     if (!pairingCodeMatchesSpki(code, tlsSpkiSha256)) {
       throw new PairingError("fingerprint-mismatch", "The pairing code was not made for this sandbox's TLS key.");
     }
-    this.limiter = new PairingAttemptLimiter(limiter);
-    this.own = { pairingId, sandboxPublicKey, tlsSpkiSha256 };
-    this.key = derivePairingKey(code, this.own);
+    const limiter = new PairingAttemptLimiter(limiterOptions);
+    const own = { pairingId, sandboxPublicKey, tlsSpkiSha256, organizationId, tenantId };
+    return new SandboxPairingSession(limiter, own, await derivePairingKey(code, own));
   }
 
   get remaining(): number {
@@ -245,6 +267,14 @@ export class SandboxPairingSession {
     };
     if (transcriptProblem("desktop", fields)) {
       return { ok: false, failure: "transcript-invalid", detail: "The desktop's pairing request is out of shape.", remaining: attempt.remaining };
+    }
+    if (fields.organizationId !== this.own.organizationId || fields.tenantId !== this.own.tenantId) {
+      return {
+        ok: false,
+        failure: "binding-mismatch",
+        detail: "The desktop's active organization or tenant is not the one this sandbox is configured for. Switch the desktop to the sandbox's organization, then pair again.",
+        remaining: attempt.remaining,
+      };
     }
     if (!proofMatches(this.key, "desktop", fields, proof)) {
       return { ok: false, failure: "proof-invalid", detail: "The desktop's proof does not match this pairing code. Check the code typed on the desktop.", remaining: attempt.remaining };
@@ -266,15 +296,18 @@ export class SandboxPairingSession {
 /**
  * scrypt of the code's secret, salted with the key domain, the TLS SPKI
  * pin and the pairing id, so a derived key is bound to one sandbox key
- * and one pairing.
+ * and one pairing. Asynchronous, so the 32 MiB derivation does not hold
+ * the event loop.
  */
-function derivePairingKey(code: PairingCode, fields: Pick<PairingTranscriptFields, "pairingId" | "tlsSpkiSha256">): Buffer {
+async function derivePairingKey(code: PairingCode, fields: Pick<PairingTranscriptFields, "pairingId" | "tlsSpkiSha256">): Promise<Buffer> {
   const secret = typeof code?.secret === "string" ? normalizeBase32(code.secret) : undefined;
   if (secret === undefined || secret.length !== PAIRING_CODE_SECRET_LENGTH) {
     throw new PairingError("payload-invalid", `The pairing code secret is not ${PAIRING_CODE_SECRET_LENGTH} base32 characters.`);
   }
   const salt = Buffer.from(`${KEY_DOMAIN}\n${fields.tlsSpkiSha256}\n${fields.pairingId}`, "utf8");
-  return scryptSync(Buffer.from(secret, "ascii"), salt, 32, SCRYPT);
+  return new Promise((resolve, reject) => {
+    scrypt(Buffer.from(secret, "ascii"), salt, 32, SCRYPT, (error, key) => (error ? reject(error) : resolve(key)));
+  });
 }
 
 /** HMAC-SHA256 of the transcript as base64url (43 characters). */
@@ -320,7 +353,9 @@ export interface PairingAttemptLimiterOptions {
   issuedAt: number;
   /** Milliseconds; a monotonic clock is best. `Date.now` when left out. */
   now?: () => number;
+  /** Fewer attempts than the protocol's 5; a larger value is clamped to 5. */
   maxAttempts?: number;
+  /** A shorter lifetime than the protocol's 10 minutes; a longer one is clamped. */
   lifetimeMs?: number;
 }
 
@@ -338,8 +373,9 @@ export class PairingAttemptLimiter {
   private used = false;
 
   constructor(options: PairingAttemptLimiterOptions) {
-    const maxAttempts = options.maxAttempts ?? PAIRING_CODE_MAX_ATTEMPTS;
-    const lifetimeMs = options.lifetimeMs ?? PAIRING_CODE_LIFETIME_MS;
+    // Overrides can only tighten the protocol limits, never loosen them.
+    const maxAttempts = Math.min(options.maxAttempts ?? PAIRING_CODE_MAX_ATTEMPTS, PAIRING_CODE_MAX_ATTEMPTS);
+    const lifetimeMs = Math.min(options.lifetimeMs ?? PAIRING_CODE_LIFETIME_MS, PAIRING_CODE_LIFETIME_MS);
     if (!Number.isFinite(options.issuedAt) || !Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || !Number.isFinite(lifetimeMs) || lifetimeMs <= 0) {
       throw new PairingError("payload-invalid", "The attempt limiter needs a finite issuedAt, at least one attempt and a positive lifetime.");
     }
