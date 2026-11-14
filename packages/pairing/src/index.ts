@@ -45,3 +45,22 @@ export {
   type FingerprintFormat,
 } from "./identity.js";
 export { isSignatureDomain, sign, SIGNATURE_DOMAINS, signedMessage, verify, type SignatureDomain } from "./signatures.js";
+export {
+  verifySignedContinuation,
+  type SignedContinuationExpectation,
+  type SignedContinuationFailure,
+  type SignedContinuationResult,
+} from "./continuation.js";
+export {
+  parseAuditCheckpoint,
+  parsePairingRecord,
+  signAuditCheckpoint,
+  signPairingRecord,
+  verifyAuditCheckpoint,
+  verifyPairingRecord,
+  type AuditCheckpoint,
+  type PairingRecord,
+  type ParseResult,
+  type SignedAuditCheckpoint,
+  type SignedPairingRecord,
+} from "./records.js";
