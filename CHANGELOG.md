@@ -6,6 +6,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Sandbox host (`packages/sandbox-host`): a headless service that runs bundled read-only agents on a schedule on a machine the customer runs, with its own app-only certificate identity and a local Ollama or LM Studio model; it checks the identity, agent, model and files before every run, refuses with a named reason, audits every Graph request before it is sent, keeps run records in its data folder and can send a counts-only report to Slack or Discord.
+- `graph-application` auth source in the runtime: a certificate-based client credentials token provider whose scopes are the token's `roles`, with a deny-by-default classifier that separates read-only application permissions from ones that can change the tenant.
 - Nova profile, notes and follow-ups: Settings > Nova edits the voice, greeting, standing instructions with 10 versions, instructions per organization, abilities and read-only shortcuts; Nova keeps reviewed notes per organization (a click confirms each, unconfirmed ones expire after 30 days, Disconnect deletes them), sets one-time read-only follow-ups that answer in Chat, lists what needs the admin, and nudges answers that only promise work in Chat, Agent Team and voice; IT can restrict voice modes, instructions, abilities and notes in `policy.json`, and every change, note, follow-up and hosted voice consent is in the audit log.
 - Splashtop Agentic Packr Docs MCP: a built-in Marketplace reference that answers Agentic Packr questions from support-splashtopagenticpackr.splashtop.com with links to the articles; both Splashtop references show the Splashtop logo in the Marketplace and on Connections.
 - Splashtop Docs MCP: the Splashtop documentation listing is named Splashtop Docs MCP and answers Splashtop questions from support-splashtopbusiness.splashtop.com with links to the articles.
@@ -48,6 +50,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Spec: scheduled agents may run in a sandbox on the customer's own infrastructure with a local model there, so schedules keep running while the admin's computer is off; nothing goes to OpenAdminOS. A paid feature, read-only in its first version (SPEC.md §8b). Nothing is built yet.
 - Nightly release notes list only what that nightly adds: its pull requests and commits, and the changelog entries added since the previous release, not the whole unreleased changelog.
 - Claude Code and Codex requests no longer stop at 180 seconds in total: they end after a silence limit (90 seconds for Claude Code, 180 for Codex, also before the first output) or a 15 minute cap, each with its own error. `OPENADMINOS_CLAUDE_CODE_IDLE_TIMEOUT_MS` and `OPENADMINOS_CODEX_IDLE_TIMEOUT_MS` raise the silence limit; the existing `_TIMEOUT_MS` variables set the cap. A value above 2147483647 ms, the longest a Node timer waits, is ignored. Time a slow consumer of the stream spends on a chunk does not count as silence.
 - Intune shows the icon Microsoft introduced in 2025 in place of the earlier design, and each connector row under Results go to shows the connector's logo, as its card and its reach map row already do.

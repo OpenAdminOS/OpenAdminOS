@@ -1,0 +1,164 @@
+import { randomUUID } from "node:crypto";
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeSync } from "node:fs";
+import { dirname, join } from "node:path";
+
+import type { RunRecord } from "@openadminos/agent-sdk";
+
+/** Runs kept per agent; the oldest beyond this are removed after each write. */
+export const RUN_RETENTION_PER_AGENT = 200;
+
+const SAFE_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+
+/** Writes to a temporary file in the same folder, flushes it, then renames it over `path`. */
+export function writeFileAtomic(path: string, content: string): void {
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  try {
+    const file = openSync(temporary, "w", 0o600);
+    try {
+      writeSync(file, content);
+      fsyncSync(file);
+    } finally {
+      closeSync(file);
+    }
+    renameSync(temporary, path);
+  } finally {
+    rmSync(temporary, { force: true });
+  }
+  if (process.platform === "win32") return;
+  const folder = openSync(dirname(path), "r");
+  try {
+    fsyncSync(folder);
+  } finally {
+    closeSync(folder);
+  }
+}
+
+/** Run records as JSON files under `<dataDir>/runs/<agent>/`, newest last by name. */
+export class RunStore {
+  constructor(private readonly root: string, private readonly retention = RUN_RETENTION_PER_AGENT) {}
+
+  write(run: RunRecord): string {
+    const folder = this.folderFor(run.agentSlug);
+    mkdirSync(folder, { recursive: true, mode: 0o700 });
+    if (!SAFE_SEGMENT.test(run.id)) throw new Error(`Run id ${JSON.stringify(run.id)} cannot be used as a file name.`);
+    const path = join(folder, `${fileStamp(run.queuedAt)}_${run.id}.json`);
+    writeFileAtomic(path, `${JSON.stringify(run, null, 2)}\n`);
+    this.prune(folder);
+    return path;
+  }
+
+  /** Runs of one agent, oldest first. */
+  list(agentSlug: string): RunRecord[] {
+    const folder = this.folderFor(agentSlug);
+    return this.files(folder).flatMap((name) => {
+      try {
+        return [JSON.parse(readFileSync(join(folder, name), "utf8")) as RunRecord];
+      } catch {
+        return [];
+      }
+    });
+  }
+
+  latest(agentSlug: string): RunRecord | undefined {
+    const runs = this.list(agentSlug);
+    return runs[runs.length - 1];
+  }
+
+  /**
+   * Marks runs left queued or running by a host that stopped as failed,
+   * with the interruption as the reason. Returns how many were marked.
+   */
+  markInterrupted(now: Date): number {
+    const runsRoot = this.root;
+    if (!existsSync(runsRoot)) return 0;
+    let marked = 0;
+    for (const agent of readdirSync(runsRoot)) {
+      if (!SAFE_SEGMENT.test(agent)) continue;
+      for (const run of this.list(agent)) {
+        if (run.status !== "running" && run.status !== "queued") continue;
+        const finishedAt = now.toISOString();
+        this.write({
+          ...run,
+          status: "failed",
+          finishedAt,
+          liveSummary: undefined,
+          error: "Interrupted: the sandbox host stopped before this run finished.",
+          summary: "Interrupted: the sandbox host stopped before this run finished.",
+          logs: [...run.logs, { id: `${run.id}_interrupted`, runId: run.id, timestamp: finishedAt, level: "error", message: "Interrupted: the sandbox host stopped before this run finished." }],
+        });
+        marked += 1;
+      }
+    }
+    return marked;
+  }
+
+  private folderFor(agentSlug: string): string {
+    if (!SAFE_SEGMENT.test(agentSlug)) throw new Error(`Agent ${JSON.stringify(agentSlug)} cannot be used as a folder name.`);
+    return join(this.root, agentSlug);
+  }
+
+  private files(folder: string): string[] {
+    if (!existsSync(folder)) return [];
+    return readdirSync(folder).filter((name) => name.endsWith(".json")).sort();
+  }
+
+  private prune(folder: string): void {
+    const files = this.files(folder);
+    for (const name of files.slice(0, Math.max(0, files.length - this.retention))) {
+      rmSync(join(folder, name), { force: true });
+    }
+  }
+}
+
+function fileStamp(iso: string): string {
+  return iso.replace(/[:.]/g, "-");
+}
+
+export interface AgentHealth {
+  lastRun?: { runId: string; status: string; reason?: string; finishedAt?: string };
+  lastRefusal?: { reason: string; message: string; at: string };
+  lastDelivery?: { runId: string; outcome: "sent" | "failed" | "skipped"; detail: string; at: string };
+  /**
+   * The reason of the last failure notice sent, cleared by the recovery
+   * notice. A notice goes out only when the reason changes.
+   */
+  lastNoticeReason?: string;
+}
+
+export interface HealthFile {
+  version: 1;
+  sandboxId: string;
+  updatedAt: string;
+  agents: Record<string, AgentHealth>;
+}
+
+/** `<dataDir>/health.json`: the last run and the last refusal per agent. */
+export class HealthStore {
+  private state: HealthFile;
+
+  constructor(private readonly path: string, sandboxId: string) {
+    let loaded: HealthFile | undefined;
+    try {
+      const parsed = JSON.parse(readFileSync(path, "utf8")) as HealthFile;
+      if (parsed && parsed.version === 1 && typeof parsed.agents === "object") loaded = parsed;
+    } catch {
+      loaded = undefined;
+    }
+    this.state = loaded ?? { version: 1, sandboxId, updatedAt: new Date(0).toISOString(), agents: {} };
+    this.state.sandboxId = sandboxId;
+  }
+
+  get(agentId: string): AgentHealth {
+    return this.state.agents[agentId] ?? {};
+  }
+
+  update(agentId: string, change: Partial<AgentHealth>, now: Date): void {
+    const next: AgentHealth = { ...this.get(agentId), ...change };
+    for (const key of Object.keys(change) as Array<keyof AgentHealth>) {
+      if (change[key] === undefined) delete next[key];
+    }
+    this.state.agents[agentId] = next;
+    this.state.updatedAt = now.toISOString();
+    writeFileAtomic(this.path, `${JSON.stringify(this.state, null, 2)}\n`);
+  }
+}
