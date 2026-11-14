@@ -80,7 +80,27 @@ async function checkLmStudio(model: SandboxConfig["model"], fetchImpl: typeof fe
 async function probe<T>(fetchImpl: typeof fetch, url: string, server: string, endpoint: string, timeoutMs: number, body?: unknown): Promise<T> {
   // One signal covers the request and the body, so a server that sends
   // headers and then stalls ends as a timeout, not as an unreadable answer.
-  const signal = AbortSignal.timeout(timeoutMs);
+  // A referenced timer (not AbortSignal.timeout, whose timer is unref'd)
+  // keeps the process alive until the check settles; cleared in finally.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new DOMException("The model check timed out.", "TimeoutError")), timeoutMs);
+  const signal = controller.signal;
+  try {
+    return await probeWithSignal<T>(fetchImpl, url, server, endpoint, timeoutMs, signal, body);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function probeWithSignal<T>(
+  fetchImpl: typeof fetch,
+  url: string,
+  server: string,
+  endpoint: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+  body: unknown,
+): Promise<T> {
   const timeout = (cause: unknown) =>
     new SandboxRefusal(
       "model-timeout",
