@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import { AUDIT_CONTINUATION_START, verifyAuditContinuation, type AuditContinuationFailure } from "./audit-continuation.js";
-import { appendSandboxEvent, AuditLogStore, type AuditLogPosition, type AuditLogRangeRow } from "./audit-log.js";
+import { AUDIT_CHAIN_START_HASH, appendSandboxEvent, AuditLogStore, chainHash, type AuditLogPosition, type AuditLogRangeRow } from "./audit-log.js";
 
 const context = { tenantId: "tenant-1", organizationId: "org-1", sandboxId: "mini-pc", runId: "run_1", agentSlug: "find-inactive-devices", initiator: "schedule" as const };
 
@@ -102,6 +102,20 @@ describe("verifyAuditContinuation", () => {
         { name: "a hash that is not hex", pin: pinAt2, rows: [{ ...rows[2]!, previous_sha256: "Z".repeat(64) }], tip, failure: "chain-position-invalid", seq: 3 },
         { name: "a tip with a negative seq", pin: pinAt2, rows: [], tip: { ...tip, seq: -1 }, failure: "chain-position-invalid", seq: -1 },
         { name: "a pin seq that is not a number", pin: { ...pinAt2, seq: Number.NaN }, rows: [rows[2]!], tip, failure: "chain-position-invalid", seq: -1 },
+        { name: "a pin that is null", pin: null as unknown as AuditLogPosition, rows: [rows[2]!], tip, failure: "chain-position-invalid", seq: -1 },
+        { name: "a tip that is not an object", pin: pinAt2, rows: [], tip: "tip" as unknown as AuditLogPosition, failure: "chain-position-invalid", seq: -1 },
+        { name: "rows that are not a list", pin: pinAt2, rows: { length: 1 } as unknown as AuditLogRangeRow[], tip, failure: "chain-position-invalid", seq: -1 },
+        { name: "a row that is null", pin: pinAt2, rows: [null as unknown as AuditLogRangeRow], tip, failure: "chain-position-invalid", seq: -1 },
+        { name: "a row that is a string", pin: pinAt2, rows: ["row" as unknown as AuditLogRangeRow], tip, failure: "chain-position-invalid", seq: -1 },
+        { name: "a row without a previous hash", pin: pinAt2, rows: [{ ...rows[2]!, previous_sha256: undefined as unknown as string }], tip, failure: "chain-position-invalid", seq: 3 },
+        {
+          name: "content stored with other spacing than canonical JSON",
+          pin: pinAt2,
+          rows: [{ ...rows[2]!, event_json: JSON.stringify(JSON.parse(rows[2]!.event_json), null, 1) }],
+          tip,
+          failure: "chain-row-invalid",
+          seq: 3,
+        },
       ];
       for (const testCase of cases) {
         const result = verifyAuditContinuation(testCase.pin, testCase.rows, testCase.tip);
@@ -112,5 +126,18 @@ describe("verifyAuditContinuation", () => {
         assert.ok(result.detail.length > 0, testCase.name);
       }
     });
+  });
+
+  it("hashes the stored text, so a different spelling of the same value is refused", () => {
+    const hashedAs = '{"value":null}';
+    const sha256 = chainHash(AUDIT_CHAIN_START_HASH, hashedAs);
+    const tip = { seq: 1, sha256 };
+    const row = (event_json: string): AuditLogRangeRow => ({ seq: 1, previous_sha256: AUDIT_CHAIN_START_HASH, sha256, event_json });
+    assert.deepEqual(verifyAuditContinuation(AUDIT_CONTINUATION_START, [row(hashedAs)], tip), { ok: true, pin: tip });
+    // 1e400 parses to Infinity, which canonical JSON writes as null.
+    for (const respelled of ['{"value":1e400}', '{"value":2,"value":null}', '{ "value": null }']) {
+      const result = verifyAuditContinuation(AUDIT_CONTINUATION_START, [row(respelled)], tip);
+      assert.equal(result.ok ? "accepted" : result.failure, "chain-row-invalid", respelled);
+    }
   });
 });

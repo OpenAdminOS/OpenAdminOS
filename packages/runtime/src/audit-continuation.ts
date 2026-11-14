@@ -27,9 +27,9 @@ export type AuditContinuationFailure =
   | "chain-fork"
   /** The log is now shorter than what was accepted, or holds a different row at the pinned seq. */
   | "chain-rollback"
-  /** A row's stored hash is not the hash of its content. */
+  /** A row's stored hash is not the hash of its content, or the content is not stored as canonical JSON. */
   | "chain-row-invalid"
-  /** A seq is not a non-negative whole number, or a hash is not 64 lowercase hex characters. */
+  /** A seq is not a non-negative whole number, a hash is not 64 lowercase hex characters, or the pin, tip, rows or a row is not the right shape. */
   | "chain-position-invalid";
 
 export type AuditContinuationResult =
@@ -46,16 +46,20 @@ export function verifyAuditContinuation(
   rows: readonly AuditLogRangeRow[],
   tip: AuditLogPosition,
 ): AuditContinuationResult {
-  // Reject malformed positions first: NaN or a fraction passes every
-  // comparison below and would let a broken chain through.
+  // Reject malformed input first: NaN or a fraction passes every
+  // comparison below and would let a broken chain through, and a missing
+  // object would throw instead of naming the problem.
   for (const [name, position] of [["pin", pin], ["tip", tip]] as const) {
-    if (!isPosition(position.seq, position.sha256)) {
-      return fail("chain-position-invalid", Number.isSafeInteger(position.seq) ? position.seq : -1, `the ${name} is not a valid audit position.`);
+    if (!isObject(position) || !isPosition(position.seq, position.sha256)) {
+      return fail("chain-position-invalid", seqOf(position), `the ${name} is not a valid audit position.`);
     }
   }
+  if (!Array.isArray(rows)) {
+    return fail("chain-position-invalid", -1, "the delivered entries are not a list.");
+  }
   for (const row of rows) {
-    if (!isPosition(row.seq, row.sha256) || !HASH.test(row.previous_sha256) || typeof row.event_json !== "string") {
-      return fail("chain-position-invalid", Number.isSafeInteger(row.seq) ? row.seq : -1, "a delivered entry has an invalid seq or hash.");
+    if (!isObject(row) || !isPosition(row.seq, row.sha256) || typeof row.previous_sha256 !== "string" || !HASH.test(row.previous_sha256) || typeof row.event_json !== "string") {
+      return fail("chain-position-invalid", seqOf(row), "a delivered entry has an invalid seq or hash.");
     }
   }
   if (tip.seq < pin.seq) {
@@ -76,13 +80,19 @@ export function verifyAuditContinuation(
     if (row.previous_sha256 !== previous.sha256) {
       return fail("chain-fork", row.seq, `entry ${row.seq} is not chained to entry ${previous.seq}.`);
     }
-    let recomputed: string;
+    let canonical: string;
     try {
-      recomputed = chainHash(row.previous_sha256, canonicalJson(JSON.parse(row.event_json)));
+      canonical = canonicalJson(JSON.parse(row.event_json));
     } catch {
       return fail("chain-row-invalid", row.seq, `entry ${row.seq} does not hold valid JSON.`);
     }
-    if (recomputed !== row.sha256) {
+    // The writer stores canonical JSON and hashes that string. Text that
+    // parses to the same value but is spelled differently (1e400 for
+    // null, a duplicate key) is not what was hashed.
+    if (canonical !== row.event_json) {
+      return fail("chain-row-invalid", row.seq, `entry ${row.seq} is not stored as canonical JSON.`);
+    }
+    if (chainHash(row.previous_sha256, row.event_json) !== row.sha256) {
       return fail("chain-row-invalid", row.seq, `the stored hash of entry ${row.seq} does not match its content.`);
     }
     previous = { seq: row.seq, sha256: row.sha256 };
@@ -101,6 +111,16 @@ const HASH = /^[0-9a-f]{64}$/;
 
 function isPosition(seq: unknown, sha256: unknown): boolean {
   return typeof seq === "number" && Number.isSafeInteger(seq) && seq >= 0 && typeof sha256 === "string" && HASH.test(sha256);
+}
+
+/** The seq of a malformed input when it has a usable one, for the failure; -1 otherwise. */
+function seqOf(value: unknown): number {
+  const seq = isObject(value) ? value.seq : undefined;
+  return typeof seq === "number" && Number.isSafeInteger(seq) ? seq : -1;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
 }
 
 function fail(failure: AuditContinuationFailure, seq: number, detail: string): AuditContinuationResult {
