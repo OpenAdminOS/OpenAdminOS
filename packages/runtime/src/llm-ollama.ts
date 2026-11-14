@@ -10,6 +10,8 @@ export interface OllamaProviderOptions {
   endpoint?: string;
   defaultModel?: string;
   timeoutMs?: number;
+  /** Transport for the chat requests; defaults to the global fetch. Redirects always fail. */
+  fetchImpl?: typeof fetch;
 }
 
 interface OllamaChatChunk {
@@ -117,11 +119,13 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
 
       let response: Response;
       try {
-        response = await fetch(url, {
+        // A redirect would replay the prompt to wherever the server points.
+        response = await (options.fetchImpl ?? fetch)(url, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(body),
           signal: controller.signal,
+          redirect: "error",
         });
       } catch (error) {
         clearTimeout(timer);

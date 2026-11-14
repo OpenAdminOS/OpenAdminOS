@@ -12,6 +12,8 @@ export interface LmStudioProviderOptions {
   signal?: AbortSignal;
   defaultModel?: string;
   timeoutMs?: number;
+  /** Transport for the chat requests; defaults to the global fetch. Redirects always fail. */
+  fetchImpl?: typeof fetch;
 }
 
 export interface LmStudioEndpointTrust {
@@ -96,11 +98,13 @@ export function createLmStudioLlm(
       const url = `${endpoint.replace(/\/$/, "")}/chat/completions`;
       let response: Response;
       try {
-        response = await fetch(url, {
+        // A redirect would replay the prompt to wherever the server points.
+        response = await (options.fetchImpl ?? fetch)(url, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(createChatRequestBody({ ...opts, model, stream: false })),
           signal: controller.signal,
+          redirect: "error",
         });
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
@@ -156,11 +160,12 @@ export function createLmStudioLlm(
       const url = `${endpoint.replace(/\/$/, "")}/chat/completions`;
       let response: Response;
       try {
-        response = await fetch(url, {
+        response = await (options.fetchImpl ?? fetch)(url, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(createChatRequestBody({ ...opts, model, stream: true })),
           signal: controller.signal,
+          redirect: "error",
         });
       } catch (error) {
         clearTimeout(timer);
@@ -483,11 +488,11 @@ function truncate(value: string, max: number): string {
  */
 export async function fetchLocal(url: string, init: { signal?: AbortSignal } = {}): Promise<Response> {
   try {
-    return await fetch(url, init);
+    return await fetch(url, { ...init, redirect: "error" });
   } catch (error) {
     const code = (error as { cause?: { code?: unknown } } | undefined)?.cause?.code;
     if (code !== "UND_ERR_SOCKET" || init.signal?.aborted) throw error;
-    return fetch(url, init);
+    return fetch(url, { ...init, redirect: "error" });
   }
 }
 
