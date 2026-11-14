@@ -33,18 +33,109 @@ export function writeFileAtomic(path: string, content: string): void {
   }
 }
 
+/** The sync index: every write of a run gets the next number, so a reader can ask for what changed after a number. */
+interface RunCursorFile {
+  version: 1;
+  counter: number;
+  runs: Record<string, { agentSlug: string; file: string; cursor: number }>;
+}
+
+/** A run and the cursor of its latest write. */
+export interface RunAfterCursor {
+  cursor: number;
+  run: RunRecord;
+}
+
 /** Run records as JSON files under `<dataDir>/runs/<agent>/`, newest last by name. */
 export class RunStore {
+  private index: RunCursorFile | undefined;
+
   constructor(private readonly root: string, private readonly retention = RUN_RETENTION_PER_AGENT) {}
 
   write(run: RunRecord): string {
     const folder = this.folderFor(run.agentSlug);
     mkdirSync(folder, { recursive: true, mode: 0o700 });
     if (!SAFE_SEGMENT.test(run.id)) throw new Error(`Run id ${JSON.stringify(run.id)} cannot be used as a file name.`);
-    const path = join(folder, `${fileStamp(run.queuedAt)}_${run.id}.json`);
+    const file = `${fileStamp(run.queuedAt)}_${run.id}.json`;
+    const path = join(folder, file);
     writeFileAtomic(path, `${JSON.stringify(run, null, 2)}\n`);
-    this.prune(folder);
+    const index = this.cursorIndex();
+    index.counter += 1;
+    index.runs[run.id] = { agentSlug: run.agentSlug, file, cursor: index.counter };
+    this.prune(folder, index);
+    this.writeIndex(index);
     return path;
+  }
+
+  /**
+   * Runs written after `cursor`, oldest write first, at most `limit`. A
+   * run written again (queued, then finished) moves to its newest
+   * cursor, so a reader that keeps the last cursor it saw gets every
+   * change once. Cursors only grow.
+   */
+  listAfter(cursor: number, limit: number): RunAfterCursor[] {
+    if (!Number.isSafeInteger(cursor) || cursor < 0) throw new RangeError("cursor must be a non-negative integer.");
+    if (!Number.isSafeInteger(limit) || limit < 1) throw new RangeError("limit must be a positive integer.");
+    const entries = Object.values(this.cursorIndex().runs)
+      .filter((entry) => entry.cursor > cursor)
+      .sort((left, right) => left.cursor - right.cursor);
+    const result: RunAfterCursor[] = [];
+    for (const entry of entries) {
+      if (result.length >= limit) break;
+      if (!SAFE_SEGMENT.test(entry.agentSlug)) continue;
+      const run = readRunFile(join(this.root, entry.agentSlug, entry.file));
+      if (run) result.push({ cursor: entry.cursor, run });
+    }
+    return result;
+  }
+
+  /** The newest cursor given out; 0 before any write. */
+  latestCursor(): number {
+    return this.cursorIndex().counter;
+  }
+
+  private get indexPath(): string {
+    return join(this.root, "cursor.json");
+  }
+
+  /**
+   * The index, read once. When it is missing or unreadable it is built
+   * again from the run files, numbered from the current time in
+   * milliseconds: above any number an earlier index gave out, so a
+   * reader's cursor never skips the rebuilt runs.
+   */
+  private cursorIndex(): RunCursorFile {
+    if (this.index) return this.index;
+    let loaded: RunCursorFile | undefined;
+    if (existsSync(this.indexPath)) {
+      try {
+        const parsed: unknown = JSON.parse(readFileSync(this.indexPath, "utf8"));
+        if (isCursorFile(parsed)) loaded = parsed;
+      } catch {
+        loaded = undefined;
+      }
+    }
+    if (!loaded) {
+      loaded = { version: 1, counter: existsSync(this.indexPath) || existsSync(this.root) ? Date.now() : 0, runs: {} };
+      if (existsSync(this.root)) {
+        for (const agent of readdirSync(this.root).sort()) {
+          if (!SAFE_SEGMENT.test(agent)) continue;
+          for (const file of this.files(join(this.root, agent))) {
+            const run = readRunFile(join(this.root, agent, file));
+            if (!run) continue;
+            loaded.counter += 1;
+            loaded.runs[run.id] = { agentSlug: agent, file, cursor: loaded.counter };
+          }
+        }
+      }
+    }
+    this.index = loaded;
+    return loaded;
+  }
+
+  private writeIndex(index: RunCursorFile): void {
+    mkdirSync(this.root, { recursive: true, mode: 0o700 });
+    writeFileAtomic(this.indexPath, `${JSON.stringify(index)}\n`);
   }
 
   /**
@@ -117,10 +208,13 @@ export class RunStore {
     return readdirSync(folder).filter((name) => name.endsWith(".json")).sort();
   }
 
-  private prune(folder: string): void {
+  private prune(folder: string, index: RunCursorFile): void {
     const files = this.files(folder);
-    for (const name of files.slice(0, Math.max(0, files.length - this.retention))) {
-      rmSync(join(folder, name), { force: true });
+    const removed = new Set(files.slice(0, Math.max(0, files.length - this.retention)));
+    for (const name of removed) rmSync(join(folder, name), { force: true });
+    if (removed.size === 0) return;
+    for (const [id, entry] of Object.entries(index.runs)) {
+      if (join(this.root, entry.agentSlug) === folder && removed.has(entry.file)) delete index.runs[id];
     }
   }
 }
@@ -145,6 +239,13 @@ function isRunRecord(value: unknown): value is RunRecord {
     typeof value.queuedAt === "string" &&
     Array.isArray(value.steps) &&
     Array.isArray(value.logs)
+  );
+}
+
+function isCursorFile(value: unknown): value is RunCursorFile {
+  if (!isPlainObject(value) || value.version !== 1 || !Number.isSafeInteger(value.counter) || !isPlainObject(value.runs)) return false;
+  return Object.values(value.runs).every(
+    (entry) => isPlainObject(entry) && typeof entry.agentSlug === "string" && typeof entry.file === "string" && Number.isSafeInteger(entry.cursor),
   );
 }
 

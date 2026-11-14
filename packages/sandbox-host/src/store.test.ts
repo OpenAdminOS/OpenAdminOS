@@ -14,6 +14,49 @@ function run(index: number, status: RunRecord["status"] = "completed"): RunRecor
 }
 
 describe("RunStore", () => {
+  it("pages runs by a cursor that grows with every write", () => {
+    const { dir, cleanup } = tempDir();
+    try {
+      const store = new RunStore(join(dir, "runs"), 3);
+      assert.equal(store.latestCursor(), 0);
+      for (let index = 0; index < 4; index += 1) store.write(run(index));
+      // run_0000 was pruned; the rest come in write order.
+      const first = store.listAfter(0, 2);
+      assert.deepEqual(first.map((entry) => entry.run.id), ["run_0001", "run_0002"]);
+      const second = store.listAfter(first[1]!.cursor, 10);
+      assert.deepEqual(second.map((entry) => entry.run.id), ["run_0003"]);
+      assert.deepEqual(store.listAfter(second[0]!.cursor, 10), []);
+      // A run written again moves to a new cursor, once.
+      store.write({ ...run(2), summary: "again" });
+      const changed = store.listAfter(second[0]!.cursor, 10);
+      assert.deepEqual(changed.map((entry) => [entry.run.id, entry.run.summary]), [["run_0002", "again"]]);
+      assert.equal(changed[0]!.cursor, store.latestCursor());
+      // A new store reads the same index.
+      assert.deepEqual(new RunStore(join(dir, "runs"), 3).listAfter(0, 10).map((entry) => entry.run.id), ["run_0001", "run_0003", "run_0002"]);
+      assert.throws(() => store.listAfter(-1, 1), RangeError);
+      assert.throws(() => store.listAfter(0, 0), RangeError);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("rebuilds a lost index above any earlier cursor", () => {
+    const { dir, cleanup } = tempDir();
+    try {
+      const store = new RunStore(join(dir, "runs"));
+      store.write(run(1));
+      const before = store.latestCursor();
+      writeFileSync(join(dir, "runs", "cursor.json"), "not json");
+      const rebuilt = new RunStore(join(dir, "runs"));
+      const entries = rebuilt.listAfter(before, 10);
+      assert.deepEqual(entries.map((entry) => entry.run.id), ["run_0001"]);
+      assert.ok(entries[0]!.cursor > before);
+    } finally {
+      cleanup();
+    }
+  });
+
+
   it("keeps the newest runs per agent and removes the rest", () => {
     const { dir, cleanup } = tempDir();
     try {
