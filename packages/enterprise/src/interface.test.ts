@@ -1,0 +1,163 @@
+// Guards the versioned interface. Two checks:
+//
+// 1. A compile-time check (run by `npm run typecheck`): a module and a host
+//    written against interface version 1 must still type check. Removing or
+//    renaming a member, or narrowing what a module may pass, breaks it.
+// 2. A runtime check: the declarations emitted for `interface.ts` must match
+//    `api/interface-v<version>.d.ts` exactly. Any change to the contract
+//    fails here. A compatible change updates the snapshot in the same
+//    commit; an incompatible one raises ENTERPRISE_INTERFACE_VERSION and adds
+//    a new snapshot, and the loader then refuses modules built for the old one.
+
+import { strict as assert } from "node:assert";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
+
+import ts from "typescript";
+
+import * as enterprise from "./index.js";
+import {
+  ENTERPRISE_INTERFACE_VERSION,
+  ENTERPRISE_IPC_PREFIX,
+  type EnterpriseEntitlement,
+  type EnterpriseHandle,
+  type EnterpriseHost,
+  type EnterpriseModule,
+} from "./interface.js";
+
+const packageDir = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+// ---- 1. Compile-time: interface version 1 as a module author wrote it. ----
+
+const v1Module: EnterpriseModule = {
+  interfaceVersion: 1,
+  activate(host: EnterpriseHost): EnterpriseHandle | undefined {
+    const version: 1 = host.interfaceVersion;
+    const entitlement: EnterpriseEntitlement = host.entitlement();
+    const state: "active" | "grace" | "expired" = entitlement.state;
+    const fields: [string, readonly string[], number, number, number] = [
+      entitlement.licenseeId,
+      entitlement.features,
+      entitlement.notBefore,
+      entitlement.expiresAt,
+      entitlement.graceEndsAt,
+    ];
+    host.registerIpc("team.status", (input) => ({ input, version, state, count: fields.length }));
+    host.registerIpc("team.ping", async () => undefined);
+    host.registerSettingsSection({ id: "team", title: "Team", description: "Approvals and audit." });
+    host.setStatusContribution({ label: "Team service", detail: "End-to-end encrypted." });
+    host.setStatusContribution({ label: "Team service" });
+    host.setStatusContribution(undefined);
+    const pending: [Promise<unknown>, Promise<void>, Promise<void>, Promise<readonly string[]>] = [
+      host.storage.get("team.id"),
+      host.storage.set("team.id", { nested: [1, "two", null, true] }),
+      host.storage.delete("team.id"),
+      host.storage.keys(),
+    ];
+    void pending;
+    host.log.info("activated", { features: 1, grace: false, licensee: "x" });
+    host.log.warn("warn");
+    host.log.error("error");
+    return { deactivate: async () => undefined };
+  },
+};
+
+// A host written against version 1 must still satisfy the interface.
+const v1Host: EnterpriseHost = {
+  interfaceVersion: 1,
+  entitlement: () => ({ state: "active", licenseeId: "x", features: [], notBefore: 0, expiresAt: 1, graceEndsAt: 2 }),
+  registerIpc: () => undefined,
+  registerSettingsSection: () => undefined,
+  setStatusContribution: () => undefined,
+  storage: {
+    get: async () => undefined,
+    set: async () => undefined,
+    delete: async () => undefined,
+    keys: async () => [],
+  },
+  log: { info: () => undefined, warn: () => undefined, error: () => undefined },
+};
+
+// ---- 2. Runtime: the emitted declarations match the snapshot. ----
+
+function emittedDeclarations(): string {
+  const file = join(packageDir, "src", "interface.ts");
+  const options: ts.CompilerOptions = {
+    declaration: true,
+    emitDeclarationOnly: true,
+    removeComments: true,
+    strict: true,
+    target: ts.ScriptTarget.ES2022,
+    module: ts.ModuleKind.NodeNext,
+    moduleResolution: ts.ModuleResolutionKind.NodeNext,
+    skipLibCheck: true,
+    types: [],
+  };
+  const host = ts.createCompilerHost(options);
+  let output = "";
+  host.writeFile = (name, text) => {
+    if (name.endsWith("interface.d.ts")) output = text;
+  };
+  const program = ts.createProgram([file], options, host);
+  const result = program.emit(undefined, undefined, undefined, true);
+  assert.deepEqual(result.diagnostics.map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")), []);
+  return output.replace(/\r\n/g, "\n").trim();
+}
+
+describe("enterprise interface", () => {
+  it("is version 1 with the fixed IPC prefix", () => {
+    assert.equal(ENTERPRISE_INTERFACE_VERSION, 1);
+    assert.equal(ENTERPRISE_IPC_PREFIX, "openadminos-enterprise:");
+    assert.equal(v1Module.interfaceVersion, ENTERPRISE_INTERFACE_VERSION);
+    assert.equal(v1Host.interfaceVersion, ENTERPRISE_INTERFACE_VERSION);
+  });
+
+  it("matches the declaration snapshot for its version", () => {
+    const snapshotPath = join(packageDir, "api", `interface-v${ENTERPRISE_INTERFACE_VERSION}.d.ts`);
+    const snapshot = readFileSync(snapshotPath, "utf8").replace(/\r\n/g, "\n").trim();
+    const actual = emittedDeclarations();
+    assert.equal(
+      actual,
+      snapshot,
+      `The enterprise interface changed. Keep it compatible and update ${snapshotPath}, ` +
+        "or raise ENTERPRISE_INTERFACE_VERSION and add a new snapshot.",
+    );
+  });
+
+  it("keeps the package exports", () => {
+    assert.deepEqual(Object.keys(enterprise).sort(), [
+      "ENTERPRISE_INTERFACE_VERSION",
+      "ENTERPRISE_IPC_PREFIX",
+      "ENTERPRISE_LIMITS",
+      "EnterpriseHostError",
+      "EnterpriseInterfaceVersionError",
+      "LICENCE_LIMITS",
+      "LICENCE_PUBLIC_KEY_PEM",
+      "LICENCE_SIGNING_CONTEXT",
+      "checkJson",
+      "createEnterpriseHost",
+      "defaultEnterpriseModule",
+      "enterpriseIpcChannel",
+      "entitlementAt",
+      "isEnterpriseModule",
+      "verifyLicence",
+    ]);
+  });
+
+  it("ships a no-op default module that implements the current version", () => {
+    assert.ok(enterprise.isEnterpriseModule(enterprise.defaultEnterpriseModule));
+    assert.equal(enterprise.defaultEnterpriseModule.interfaceVersion, ENTERPRISE_INTERFACE_VERSION);
+    assert.equal(enterprise.defaultEnterpriseModule.activate(v1Host), undefined);
+    assert.ok(Object.isFrozen(enterprise.defaultEnterpriseModule));
+  });
+
+  it("names a version mismatch", () => {
+    const error = new enterprise.EnterpriseInterfaceVersionError(2);
+    assert.equal(error.name, "EnterpriseInterfaceVersionError");
+    assert.equal(error.expected, 1);
+    assert.equal(error.received, 2);
+    assert.match(error.message, /interface version 2.*implements version 1/);
+  });
+});
