@@ -22,7 +22,9 @@ import {
 
 import {
   DEFAULT_TEAM_STATUS_LABEL,
+  ENTERPRISE_LICENCE_FILE_MAX_BYTES,
   ENTERPRISE_MODULE_SPECIFIER,
+  EnterpriseLicenceFileError,
   EnterpriseModuleLoadError,
   enterpriseFiles,
   ipcMainRegistrar,
@@ -402,6 +404,23 @@ describe("enterprise wiring", () => {
       await mkdir(join(dir, "enterprise"), { recursive: true });
       await writeFile(join(dir, "enterprise", "licence.token"), "token-text\n");
       assert.equal(await files.readLicenceToken(), "token-text\n");
+      await writeFile(join(dir, "enterprise", "licence.token"), "x".repeat(ENTERPRISE_LICENCE_FILE_MAX_BYTES));
+      assert.equal((await files.readLicenceToken())?.length, ENTERPRISE_LICENCE_FILE_MAX_BYTES);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a licence file over the size limit, or a path that is not a file, without reading it", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-enterprise-"));
+    try {
+      const files = enterpriseFiles(dir);
+      await mkdir(join(dir, "enterprise"), { recursive: true });
+      await writeFile(join(dir, "enterprise", "licence.token"), "x".repeat(ENTERPRISE_LICENCE_FILE_MAX_BYTES + 1));
+      await assert.rejects(files.readLicenceToken(), (error: unknown) => error instanceof EnterpriseLicenceFileError && error.code === "too-large");
+      await rm(join(dir, "enterprise", "licence.token"));
+      await mkdir(join(dir, "enterprise", "licence.token"));
+      await assert.rejects(files.readLicenceToken(), (error: unknown) => error instanceof EnterpriseLicenceFileError && error.code === "not-a-file");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
