@@ -316,5 +316,12 @@ describe("PairingAttemptLimiter", () => {
     assert.throws(() => new PairingAttemptLimiter({ issuedAt: Number.NaN }), PairingError);
     assert.throws(() => new PairingAttemptLimiter({ issuedAt: 0, maxAttempts: 0 }), PairingError);
     assert.throws(() => new PairingAttemptLimiter({ issuedAt: 0, lifetimeMs: 0 }), PairingError);
+    for (const now of [0, "now", null, {}]) {
+      assert.throws(
+        () => new PairingAttemptLimiter({ issuedAt: 0, now: now as unknown as () => number }),
+        (error) => error instanceof PairingError && error.reason === "payload-invalid",
+        String(now),
+      );
+    }
   });
 });

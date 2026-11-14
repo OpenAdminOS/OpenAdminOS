@@ -381,6 +381,9 @@ export class PairingAttemptLimiter {
     if (!Number.isFinite(options.issuedAt) || !Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || !Number.isFinite(lifetimeMs) || lifetimeMs <= 0) {
       throw new PairingError("payload-invalid", "The attempt limiter needs a finite issuedAt, at least one attempt and a positive lifetime.");
     }
+    if (options.now !== undefined && typeof options.now !== "function") {
+      throw new PairingError("payload-invalid", "The attempt limiter's clock must be a function that returns milliseconds.");
+    }
     this.now = options.now ?? Date.now;
     this.issuedAt = options.issuedAt;
     this.maxAttempts = maxAttempts;
