@@ -234,3 +234,59 @@ it("lists dry runs in terminal history and filters them separately from pending 
   expect(screen.getByText("Dry run: not applied")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Review" })).not.toBeInTheDocument();
 });
+
+describe("Runs: where each run executed", () => {
+  const sandboxExecutedOn = {
+    kind: "sandbox" as const,
+    sandboxId: "mini-pc",
+    name: "Mini PC",
+    organizationId: "org-1",
+    model: "qwen3:8b",
+  };
+
+  const runsWithLocations = () => [
+    createAwaitingConfirmationRun({ id: "run-absent", agentSlug: "agent-a", status: "completed", plan: undefined, finishedAt: "2026-10-10T10:01:00.000Z" }),
+    createAwaitingConfirmationRun({ id: "run-desktop", agentSlug: "agent-b", status: "completed", plan: undefined, finishedAt: "2026-10-10T10:02:00.000Z", executedOn: { kind: "desktop" } }),
+    createAwaitingConfirmationRun({ id: "run-sandbox", agentSlug: "agent-c", status: "completed", plan: undefined, finishedAt: "2026-10-10T10:03:00.000Z", executedOn: sandboxExecutedOn }),
+  ];
+
+  const agents = [
+    createMockAgent({ id: "agent-a", slug: "agent-a", name: "Agent A" }),
+    createMockAgent({ id: "agent-b", slug: "agent-b", name: "Agent B" }),
+    createMockAgent({ id: "agent-c", slug: "agent-c", name: "Agent C" }),
+  ];
+
+  const rowFor = (history: HTMLElement, name: string) =>
+    within(history).getByText(name).closest("button") as HTMLElement;
+
+  it("labels absent and desktop runs as this computer, and sandbox runs by name", async () => {
+    const bridge = makeMockBridge({}, createMockAppState({ installedAgents: agents, runs: runsWithLocations() }));
+    renderRoute(<Runs />, { path: "/runs", route: "/runs", bridge });
+
+    const history = await screen.findByRole("list", { name: "Run history" });
+    expect(rowFor(history, "Agent A")).toHaveTextContent(/This computer · .*local, stays on this device/);
+    expect(rowFor(history, "Agent B")).toHaveTextContent(/This computer · /);
+    const sandboxRow = rowFor(history, "Agent C");
+    expect(sandboxRow).toHaveTextContent(/Mini PC · .*local, stays on Mini PC/);
+    expect(sandboxRow).not.toHaveTextContent(/This computer|stays on this device/);
+  });
+
+  it("filters by this computer or by a sandbox", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge({}, createMockAppState({ installedAgents: agents, runs: runsWithLocations() }));
+    renderRoute(<Runs />, { path: "/runs", route: "/runs?where=sandbox:mini-pc", bridge });
+
+    const history = await screen.findByRole("list", { name: "Run history" });
+    expect(within(history).getByText("Agent C")).toBeInTheDocument();
+    expect(within(history).queryByText("Agent A")).not.toBeInTheDocument();
+    expect(within(history).queryByText("Agent B")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Filter (1)" }));
+    expect(screen.getByRole("menuitem", { name: "Where: Mini PC (selected)" })).toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "Where: This computer" }));
+
+    expect(within(history).getByText("Agent A")).toBeInTheDocument();
+    expect(within(history).getByText("Agent B")).toBeInTheDocument();
+    expect(within(history).queryByText("Agent C")).not.toBeInTheDocument();
+  });
+});

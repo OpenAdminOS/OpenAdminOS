@@ -808,3 +808,44 @@ it("says Run again did not continue when the run page closes before the switch l
   expect(await screen.findByText(RERUN_COPY.rerunNotContinued)).toBeInTheDocument();
   expect(bridge.startRun).not.toHaveBeenCalled();
 });
+
+describe("RunResult: where the run executed", () => {
+  const sandboxExecutedOn = { kind: "sandbox" as const, sandboxId: "mini-pc", name: "Mini PC", organizationId: "org-1", model: "qwen3:8b" };
+
+  const completedRun = (overrides: Parameters<typeof createAwaitingConfirmationRun>[0] = {}) =>
+    createAwaitingConfirmationRun({ id: "run-where", status: "completed", plan: undefined, finishedAt: "2026-10-10T10:01:00.000Z", ...overrides });
+
+  const renderRun = (run: ReturnType<typeof createAwaitingConfirmationRun>) => {
+    const bridge = makeMockBridge({}, createMockAppState({ runs: [run] }));
+    renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+  };
+
+  const whereValue = (card: HTMLElement) => within(card).getByText("Where").nextElementSibling;
+
+  it("shows this computer when the run recorded no location", async () => {
+    renderRun(completedRun());
+    const card = await screen.findByRole("region", { name: "Run status" });
+    expect(whereValue(card)).toHaveTextContent("This computer");
+    expect(card).toHaveTextContent("Tenant data stays on this device.");
+  });
+
+  it("shows this computer for a desktop run", async () => {
+    renderRun(completedRun({ executedOn: { kind: "desktop" } }));
+    const card = await screen.findByRole("region", { name: "Run status" });
+    expect(whereValue(card)).toHaveTextContent("This computer");
+  });
+
+  it("names the sandbox and its model and makes no on-device claim for a sandbox run", async () => {
+    renderRun(completedRun({ executedOn: sandboxExecutedOn }));
+    const card = await screen.findByRole("region", { name: "Run status" });
+    expect(whereValue(card)).toHaveTextContent("Mini PC");
+    expect(within(card).getByText("Ran on Mini PC · local model qwen3:8b")).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/this device|No data leaves/i);
+  });
+
+  it("names the sandbox on the review page of a sandbox run", async () => {
+    renderRun(createAwaitingConfirmationRun({ executedOn: sandboxExecutedOn }));
+    expect(await screen.findByText("Ran on Mini PC · local model qwen3:8b")).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/stays on this device|No data leaves/i);
+  });
+});

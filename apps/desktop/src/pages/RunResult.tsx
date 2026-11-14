@@ -34,7 +34,7 @@ import {
   StatusDot,
   type MenuEntry,
 } from "../components/ui";
-import { ORGANIZATION_COPY, RERUN_COPY, userFacingErrorReason } from "../copy";
+import { ORGANIZATION_COPY, RERUN_COPY, RUN_LOCATION_COPY, runLocationLabel, userFacingErrorReason } from "../copy";
 import { Modal, ModalHeader } from "../components/Modal";
 import { createPendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
@@ -115,6 +115,10 @@ function RunResultPage({ run }: { run: RunRecord }) {
     model: run.model,
   });
   const runTrust = derivedTrust;
+  // A sandbox run names the sandbox and its model; it never claims the
+  // data stayed on this device.
+  const sandbox = run.executedOn?.kind === "sandbox" ? run.executedOn : undefined;
+  const trustDetail = sandbox ? RUN_LOCATION_COPY.ranOn(sandbox.name, sandbox.model) : runTrust.detail;
   const displayName = agent
     ? formatAgentDisplayName(agent)
     : agentNameForRun(run, state.installedAgents);
@@ -289,7 +293,7 @@ function RunResultPage({ run }: { run: RunRecord }) {
         displayName={displayName}
         tenant={runTenant}
         tenantName={tenantName}
-        trustDetail={runTrust.detail}
+        trustDetail={trustDetail}
         providerIsLocal={runProvider?.isLocal === true}
         onBack={closeToRuns}
         onConfirm={confirmRun}
@@ -324,7 +328,7 @@ function RunResultPage({ run }: { run: RunRecord }) {
       tenantName={tenantName}
       providerName={providerNameForRun(run, state.providers)}
       providerIsLocal={runProvider?.isLocal}
-      trustDetail={runTrust.detail}
+      trustDetail={trustDetail}
       activeTenantId={state.activeTenantId}
       tenants={state.tenants}
       isSystemRun={isSystemRun}
@@ -758,7 +762,8 @@ function RunStatusCard({
           </p>
         ) : null}
 
-        <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-[var(--color-border-soft)] pt-4 sm:grid-cols-3 lg:grid-cols-5">
+        <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-[var(--color-border-soft)] pt-4 sm:grid-cols-3 lg:grid-cols-6">
+          <RunFact label={RUN_LOCATION_COPY.label} value={runLocationLabel(run.executedOn)} />
           <RunFact label="Tenant" value={tenantName} />
           <RunFact
             label="Provider"
