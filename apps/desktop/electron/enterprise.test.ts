@@ -362,6 +362,38 @@ describe("loadEnterprise with a valid licence", () => {
     assert.equal(timers[2]?.delay, ENTERPRISE_STOP_TIMEOUT_MS);
   });
 
+  it("does not activate when the licence lapses while the module is imported", async () => {
+    const graceEndsAt = (NOW_SECONDS + 2 * DAY) * 1000;
+    let now = NOW;
+    const { module, seen } = trackingModule();
+    const timers: number[] = [];
+    const { options, ipc, calls } = harness({
+      token: licence({ expiresAt: NOW_SECONDS + DAY, graceSeconds: DAY }),
+      module,
+      now: () => now,
+      setTimer: (_callback, delay) => {
+        timers.push(delay);
+        return () => undefined;
+      },
+    });
+    const importModule = options.importModule;
+    const runtime = await loadEnterprise({
+      ...options,
+      importModule: async (url) => {
+        const imported = await importModule(url);
+        now = graceEndsAt;
+        return imported;
+      },
+    });
+    assert.equal(calls.import, 1);
+    assert.equal(seen.activated, 0);
+    assert.equal(ipc.handleCalls, 0);
+    assert.deepEqual(timers, []);
+    assert.ok(runtime.outcome.kind === "licence-refused" && runtime.outcome.reason === "expired");
+    const status = runtime.status();
+    assert.ok(!status.active && status.problem?.reason === "licence-expired");
+  });
+
   it("says not yet valid, not expired, when the clock moves back before notBefore", async () => {
     let now = NOW;
     const { module, seen } = trackingModule();

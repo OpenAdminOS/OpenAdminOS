@@ -254,6 +254,22 @@ export async function loadEnterprise(options: LoadEnterpriseOptions): Promise<En
   }
 
   const verified = licence.entitlement;
+  // Importing the module takes time; the licence may have lapsed meanwhile.
+  const atActivation = options.now();
+  if (entitlementAt(verified, atActivation).state === "expired") {
+    const issue = lapsedLicenceProblem(verified, atActivation);
+    options.log("warn", "enterprise: the licence lapsed while the module loaded, team features stay off", {
+      reason: issue.reason,
+    });
+    return inactive(
+      {
+        kind: "licence-refused",
+        reason: issue.reason === "licence-not-yet-valid" ? "not-yet-valid" : "expired",
+        message: issue.message,
+      },
+      issue,
+    );
+  }
   const controller: EnterpriseHostController = createEnterpriseHost({
     entitlement: () => entitlementAt(verified, options.now()),
     ipc: options.ipc,
