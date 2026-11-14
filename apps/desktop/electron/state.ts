@@ -1169,6 +1169,8 @@ function compareAuditEvents(left: AuditLogEventSeed, right: AuditLogEventSeed): 
     "graph-write": 4,
     gateway: 5,
     nova: 6,
+    // Written only by a sandbox host; the desktop records none yet.
+    sandbox: 7,
   };
   const sourceDiff = sourceOrder[left.source] - sourceOrder[right.source];
   if (sourceDiff !== 0) return sourceDiff;
