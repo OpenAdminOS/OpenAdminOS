@@ -120,4 +120,69 @@ describe("Scheduler", () => {
     }
     assert.equal(runs, 0);
   });
+
+  it("replaces its jobs without a restart: kept jobs keep their time, new ones start, removed ones stop", async () => {
+    const fake = fakeClock(0);
+    const runs: string[] = [];
+    const job = (id: string, intervalMs: number, lastStartedAt?: number) => ({
+      id,
+      intervalMs,
+      ...(lastStartedAt !== undefined ? { lastStartedAt } : {}),
+      run: async () => {
+        runs.push(id);
+      },
+    });
+    const scheduler = new Scheduler([job("a", HOUR), job("b", HOUR)], fake.clock);
+    try {
+      scheduler.start();
+      await fake.advance(0);
+      assert.deepEqual(runs.sort(), ["a", "b"]);
+      runs.length = 0;
+      await fake.advance(HOUR / 2);
+      // b is removed, c is new and never ran, a stays with the same interval.
+      scheduler.replace([job("a", HOUR), job("c", HOUR, -100 * HOUR)]);
+      await fake.advance(0);
+      assert.deepEqual(runs, ["c"], "an overdue new job runs once, not once per missed interval");
+      await fake.advance(HOUR / 2);
+      assert.deepEqual(runs, ["c", "a"], "a kept its due time");
+      await fake.advance(3 * HOUR);
+      assert.ok(!runs.includes("b"), "a removed job is not armed again");
+      assert.deepEqual(scheduler.nextRuns().map((next) => next.id).sort(), ["a", "c"]);
+    } finally {
+      await scheduler.stop();
+    }
+  });
+
+  it("applies a changed interval from the last start, and never starts a running job twice", async () => {
+    const fake = fakeClock(0);
+    let starts = 0;
+    let finish: (() => void) | undefined;
+    const slow = { id: "a", intervalMs: HOUR, run: () => new Promise<void>((resolve) => { starts += 1; finish = resolve; }) };
+    const scheduler = new Scheduler([slow], fake.clock);
+    try {
+      scheduler.start();
+      await fake.advance(0);
+      assert.equal(starts, 1);
+      scheduler.replace([{ ...slow, intervalMs: 2 * HOUR }]);
+      await fake.advance(0);
+      assert.equal(starts, 1, "still running: not started again");
+      finish?.();
+      await fake.advance(0);
+      await fake.advance(2 * HOUR - 1);
+      assert.equal(starts, 1);
+      await fake.advance(1);
+      assert.equal(starts, 2, "the new interval counts from the last start");
+      finish?.();
+      await fake.advance(0);
+      // Not running now: the shorter interval counts from the start at 2 hours.
+      scheduler.replace([{ ...slow, intervalMs: HOUR }]);
+      await fake.advance(HOUR - 1);
+      assert.equal(starts, 2);
+      await fake.advance(1);
+      assert.equal(starts, 3);
+      finish?.();
+    } finally {
+      await scheduler.stop();
+    }
+  });
 });
