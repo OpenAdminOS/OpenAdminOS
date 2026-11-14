@@ -42,6 +42,13 @@ import { arch as osArch, release as osRelease } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, win32 } from "node:path";
 import { AppStateStore, TENANT_CLOSING_REASON } from "./state.js";
+import {
+  enterpriseFiles,
+  ipcMainRegistrar,
+  loadEnterprise,
+  resolveInstalledModule,
+  type EnterpriseRuntime,
+} from "./enterprise.js";
 import { loadManagedPolicy, resolveManagedPolicyPaths } from "./managed-policy.js";
 import { MCP_CATALOG } from "./mcp/catalog.js";
 import { SafeStorageTokenCacheStore } from "./secret-store.js";
@@ -310,6 +317,8 @@ let mainWindow: BrowserWindow | null = null;
 let companionWindow: BrowserWindow | null = null;
 let menuBarTray: Tray | null = null;
 let store: AppStateStore;
+// Team features stay off until a valid licence is found; see enterprise.ts.
+let enterprise: EnterpriseRuntime | undefined;
 /** The Nova service, once IPC is registered: settings changes check its live voice session. */
 let novaService: NovaService | undefined;
 const activeNotifications = new Set<Notification>();
@@ -3237,6 +3246,36 @@ function isAllowedAppNavigation(url: string): boolean {
   }
 }
 
+/**
+ * Checks the licence and, only when it is valid, loads the team features
+ * module. Without a valid licence this reads one file and does nothing else.
+ */
+async function startEnterprise(userDataDir: string): Promise<void> {
+  const files = enterpriseFiles(userDataDir);
+  const notify = () => mainWindow?.webContents.send("openadminos:enterprise-status-changed");
+  enterprise = await loadEnterprise({
+    readLicenceToken: files.readLicenceToken,
+    now: () => Date.now(),
+    resolveModule: (specifier) => resolveInstalledModule(specifier, (name) => import.meta.resolve(name)),
+    importModule: (url) => import(url),
+    ipc: ipcMainRegistrar(ipcMain, requireTrustedIpcSender),
+    storage: files.storage,
+    log: (level, message, fields) => console[level](`[enterprise] ${message}`, fields ?? {}),
+    onChange: notify,
+  });
+  if (enterprise.outcome.kind !== "active") return;
+  notify();
+  // Quit waits up to two seconds for the module to stop, then quits anyway.
+  const active = enterprise;
+  let stopping = false;
+  app.on("will-quit", (event) => {
+    if (stopping) return;
+    stopping = true;
+    event.preventDefault();
+    void Promise.race([active.deactivate(), new Promise((resolve) => setTimeout(resolve, 2000).unref())]).finally(() => app.quit());
+  });
+}
+
 function requireTrustedIpcSender(event: IpcMainInvokeEvent): void {
   const senderUrl = event.senderFrame?.url || event.sender.getURL();
   if (!isAllowedAppNavigation(senderUrl)) {
@@ -5366,6 +5405,10 @@ function registerIpcHandlers() {
     handleTrusted(() => getSandboxSettings()),
   );
   ipcMain.handle(
+    "openadminos:get-enterprise-status",
+    handleTrusted(() => enterprise?.status() ?? { active: false }),
+  );
+  ipcMain.handle(
     "openadminos:get-release-diagnostics",
     handleTrusted(() => getReleaseDiagnostics()),
   );
@@ -7056,6 +7099,9 @@ if (!gotLock) {
     await store.recoverInterruptedRuns();
     applySandboxedCodeEnabled(await store.getSandboxedCodeEnabled());
     registerIpcHandlers();
+    void startEnterprise(userDataDir).catch((error: unknown) => {
+      console.error("[enterprise] team features could not be checked, they stay off", error);
+    });
     void store.processPendingRunDeliveries();
     debugStartupLog("registered ipc handlers");
     void store.processPendingRunDeliveries();
