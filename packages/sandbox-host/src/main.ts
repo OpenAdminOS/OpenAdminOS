@@ -94,6 +94,13 @@ export async function main(
     }
   }
 
+  try {
+    await host.startApi();
+  } catch (error) {
+    log("error", describe(error), { reason: isSandboxRefusal(error) ? error.reason : "startup-failed" });
+    await host.close();
+    return EXIT_CONFIG;
+  }
   host.startSchedule();
   await (options.waitForSignal ?? waitForStopSignal)();
   log("info", "Stopping: runs in progress are stopped and recorded.", { sandbox: config.sandbox.id });

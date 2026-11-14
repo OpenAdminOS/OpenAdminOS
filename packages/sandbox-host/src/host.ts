@@ -28,6 +28,7 @@ import {
 } from "@openadminos/pairing";
 
 import { resolveSandboxAgent, useReleaseAgents, type SandboxAgent } from "./agents.js";
+import { SandboxApi } from "./api.js";
 import { AssignmentError, checkAssignment, effectiveSchedules, type EffectiveSchedule } from "./assignments.js";
 import { chooseCertificate } from "./certificates.js";
 import type { SandboxAgentConfig, SandboxConfig } from "./config.js";
@@ -35,6 +36,7 @@ import { capForConnector, payloadDigest, renderFailureNotice, renderRecoveryNoti
 import { assertSupportedPlatform, describe, ensurePrivateDirectory } from "./files.js";
 import { sandboxGraphFetch } from "./graph-fetch.js";
 import { assertAgentPermissions, assertSandboxIdentity } from "./identity.js";
+import type { ListenAddress } from "./listen.js";
 import { InstanceLock } from "./lock.js";
 import { createLineLogger, type SandboxLogger } from "./log.js";
 import { checkLocalModel, pinnedModelFetch, type ModelCheck } from "./model.js";
@@ -188,6 +190,22 @@ export class SandboxHost {
       this.log("info", "Scheduled.", { agent: next.id, next: new Date(next.dueAt).toISOString() });
     }
     return scheduler;
+  }
+
+  /**
+   * Starts the pairing API when the config has a pairing section; without
+   * one nothing listens. Stopped by close.
+   */
+  async startApi(): Promise<ListenAddress | undefined> {
+    if (!this.config.pairing) return undefined;
+    const api = new SandboxApi(this, this.config.pairing.listen, this.log, this.now, this.deps.pairingClock);
+    this.addCloseHook(() => api.close());
+    try {
+      return await api.start();
+    } catch (error) {
+      await api.close();
+      throw error;
+    }
   }
 
   /** Applies a changed set of schedules without a restart. */
