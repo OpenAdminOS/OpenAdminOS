@@ -44,3 +44,4 @@ export {
   type DeviceIdentity,
   type FingerprintFormat,
 } from "./identity.js";
+export { isSignatureDomain, sign, SIGNATURE_DOMAINS, signedMessage, verify, type SignatureDomain } from "./signatures.js";
