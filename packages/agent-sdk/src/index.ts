@@ -3256,13 +3256,39 @@ export interface SandboxSettings {
  * `{ active: false }`. While active, the status strip shows `label`.
  */
 export type EnterpriseStatus =
-  | { readonly active: false }
+  | {
+      readonly active: false;
+      /**
+       * Why team features are off when that needs the admin's attention:
+       * a licence that was refused or could not be read, or a module that
+       * is missing, incompatible or failed. Absent when no licence is
+       * installed, which is the normal free app.
+       */
+      readonly problem?: EnterpriseProblem;
+    }
   | {
       readonly active: true;
       readonly label: string;
       readonly detail?: string;
       readonly settingsSections: readonly EnterpriseSettingsSectionView[];
     };
+
+export type EnterpriseProblemReason =
+  | "licence-expired"
+  | "licence-not-yet-valid"
+  | "licence-signature"
+  | "licence-malformed"
+  | "licence-unreadable"
+  | "module-missing"
+  | "module-version"
+  | "module-load"
+  | "module-activate";
+
+export interface EnterpriseProblem {
+  readonly reason: EnterpriseProblemReason;
+  /** One or two plain sentences: what is wrong and the step that fixes it. */
+  readonly message: string;
+}
 
 export interface EnterpriseSettingsSectionView {
   readonly id: string;

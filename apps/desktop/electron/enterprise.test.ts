@@ -168,17 +168,18 @@ describe("loadEnterprise without a valid licence", () => {
     for (const undo of restore.splice(0).reverse()) undo();
   });
 
-  const cases: Array<[string, string | undefined, string]> = [
-    ["no licence", undefined, "no-licence"],
-    ["an empty licence file", "\n", "no-licence"],
-    ["a malformed licence", "not-a-licence", "malformed"],
-    ["a tampered licence", `${licence().split(".")[0]}x.${licence().split(".")[1]}`, "signature"],
-    ["a licence for another key", signLicence({ v: 1 }, generateKeyPairSync("ed25519").privateKey), "signature"],
-    ["a licence that is not valid yet", licence({ notBefore: NOW_SECONDS + DAY }), "not-yet-valid"],
-    ["a licence past its grace period", licence({ expiresAt: NOW_SECONDS - 20 * DAY, graceSeconds: 14 * DAY }), "expired"],
+  // [name, token, outcome or licence reason, problem shown to the admin]
+  const cases: Array<[string, string | undefined, string, string | undefined]> = [
+    ["no licence", undefined, "no-licence", undefined],
+    ["an empty licence file", "\n", "no-licence", undefined],
+    ["a malformed licence", "not-a-licence", "malformed", "licence-malformed"],
+    ["a tampered licence", `${licence().split(".")[0]}x.${licence().split(".")[1]}`, "signature", "licence-signature"],
+    ["a licence for another key", signLicence({ v: 1 }, generateKeyPairSync("ed25519").privateKey), "signature", "licence-signature"],
+    ["a licence that is not valid yet", licence({ notBefore: NOW_SECONDS + DAY }), "not-yet-valid", "licence-not-yet-valid"],
+    ["a licence past its grace period", licence({ expiresAt: NOW_SECONDS - 20 * DAY, graceSeconds: 14 * DAY }), "expired", "licence-expired"],
   ];
 
-  for (const [name, token, expected] of cases) {
+  for (const [name, token, expected, problemReason] of cases) {
     it(`runs no module code and makes no network call with ${name}`, async () => {
       const before = process.getActiveResourcesInfo().sort();
       const { module, seen } = trackingModule();
@@ -188,7 +189,16 @@ describe("loadEnterprise without a valid licence", () => {
 
       const outcome = runtime.outcome;
       assert.equal(outcome.kind === "licence-refused" ? outcome.reason : outcome.kind, expected);
-      assert.deepEqual(runtime.status(), { active: false });
+      const status = runtime.status();
+      assert.equal(status.active, false);
+      if (problemReason === undefined) {
+        // No licence is the free app: nothing to say.
+        assert.deepEqual(status, { active: false });
+      } else {
+        assert.ok(!status.active && status.problem);
+        assert.equal(status.problem.reason, problemReason);
+        assert.match(status.problem.message, /\. (Install|Check) .*, then restart OpenAdminOS\.$/);
+      }
       assert.equal(calls.resolve, 0, "the module was resolved");
       assert.equal(calls.import, 0, "the module was imported");
       assert.equal(seen.activated, 0);
@@ -218,9 +228,32 @@ describe("loadEnterprise without a valid licence", () => {
       },
     });
     const runtime = await loadEnterprise(options);
-    assert.equal(runtime.outcome.kind, "licence-refused");
+    assert.deepEqual(runtime.outcome, {
+      kind: "licence-refused",
+      reason: "unreadable",
+      message: "The licence file could not be read (EACCES: permission denied).",
+    });
+    assert.deepEqual(runtime.status(), {
+      active: false,
+      problem: {
+        reason: "licence-unreadable",
+        message: "The licence file could not be read (EACCES: permission denied). Check that the file is readable by your account, then restart OpenAdminOS.",
+      },
+    });
     assert.equal(calls.resolve, 0);
     assert.match(logs[0]?.message ?? "", /could not be read/);
+  });
+
+  it("reports a licence file over the size limit as malformed, not missing", async () => {
+    const { options } = harness({
+      readLicenceToken: async () => {
+        throw new EnterpriseLicenceFileError("too-large", "The licence file is 99999 bytes; a licence is at most 8192 bytes.");
+      },
+    });
+    const runtime = await loadEnterprise(options);
+    assert.ok(runtime.outcome.kind === "licence-refused" && runtime.outcome.reason === "malformed");
+    const status = runtime.status();
+    assert.ok(!status.active && status.problem?.reason === "licence-malformed");
   });
 });
 
@@ -229,7 +262,14 @@ describe("loadEnterprise with a valid licence", () => {
     const { options, ipc, calls } = harness({ token: licence() });
     const runtime = await loadEnterprise(options);
     assert.deepEqual(runtime.outcome, { kind: "module-off", source: "stub" });
-    assert.deepEqual(runtime.status(), { active: false });
+    assert.deepEqual(runtime.status(), {
+      active: false,
+      problem: {
+        reason: "module-missing",
+        message:
+          "A team features licence is installed, but this build of OpenAdminOS does not include team features. Install the official build from openadminos.com, then restart OpenAdminOS.",
+      },
+    });
     assert.equal(calls.resolve, 1);
     assert.equal(calls.import, 0);
     assert.equal(ipc.handleCalls, 0);
@@ -310,7 +350,9 @@ describe("loadEnterprise with a valid licence", () => {
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(seen.deactivated, 1);
     assert.equal(ipc.handlers.size, 0);
-    assert.equal(runtime.status().active, false);
+    const status = runtime.status();
+    assert.ok(!status.active && status.problem?.reason === "licence-expired");
+    assert.match(status.problem.message, /grace period ended .*Install a renewed licence, then restart OpenAdminOS\.$/);
     assert.ok(changes.length >= 1);
     assert.equal(timers.length, 2);
   });
@@ -378,7 +420,14 @@ describe("loadEnterprise with a valid licence", () => {
     assert.ok(runtime.outcome.kind === "failed" && runtime.outcome.error instanceof EnterpriseInterfaceVersionError);
     assert.equal(seen.activated, 0);
     assert.equal(ipc.handleCalls, 0);
-    assert.deepEqual(runtime.status(), { active: false });
+    assert.deepEqual(runtime.status(), {
+      active: false,
+      problem: {
+        reason: "module-version",
+        message:
+          "The team features in this build do not match this version of OpenAdminOS. Install the official build from openadminos.com, then restart OpenAdminOS.",
+      },
+    });
     assert.equal(logs.at(-1)?.level, "error");
     assert.match(logs.at(-1)?.message ?? "", /EnterpriseInterfaceVersionError: .*interface version 2/);
   });
@@ -394,6 +443,12 @@ describe("loadEnterprise with a valid licence", () => {
     const runtime = await loadEnterprise(options);
     assert.ok(runtime.outcome.kind === "failed" && runtime.outcome.error instanceof EnterpriseModuleLoadError);
     assert.match(logs.at(-1)?.message ?? "", /EnterpriseModuleLoadError: .*left-pad/);
+    const status = runtime.status();
+    assert.ok(!status.active && status.problem?.reason === "module-load");
+    assert.equal(
+      status.problem.message,
+      "The team features module could not be loaded: Cannot find package 'left-pad'. Install the official build from openadminos.com again, then restart OpenAdminOS.",
+    );
   });
 
   it("refuses an export that is not a module", async () => {
@@ -418,6 +473,12 @@ describe("loadEnterprise with a valid licence", () => {
     const runtime = await loadEnterprise(options);
     assert.ok(runtime.outcome.kind === "failed" && runtime.outcome.error instanceof EnterpriseModuleLoadError);
     assert.equal(ipc.handlers.size, 0);
+    const status = runtime.status();
+    assert.ok(!status.active && status.problem?.reason === "module-activate");
+    assert.equal(
+      status.problem.message,
+      "The team features module failed to start: boom. Restart OpenAdminOS. If it fails again, report it with Report an issue.",
+    );
   });
 
   it("refuses an async activate and logs its later failure", async () => {
@@ -451,6 +512,7 @@ describe("loadEnterprise with a valid licence", () => {
     const { options, ipc } = harness({ token: licence(), module });
     const runtime = await loadEnterprise(options);
     assert.deepEqual(runtime.outcome, { kind: "module-off", source: "module" });
+    assert.deepEqual(runtime.status(), { active: false });
     assert.equal(ipc.handlers.size, 0);
   });
 });

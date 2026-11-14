@@ -34,7 +34,7 @@ import {
   type LicenceFailureReason,
 } from "@openadminos/enterprise";
 
-import type { EnterpriseStatus } from "@openadminos/agent-sdk";
+import type { EnterpriseProblem, EnterpriseProblemReason, EnterpriseStatus } from "@openadminos/agent-sdk";
 
 import { atomicRename } from "./atomic-rename.js";
 import { writeFileDurably } from "./durable-file.js";
@@ -74,7 +74,11 @@ export type EnterpriseStatusView = EnterpriseStatus;
 
 export type EnterpriseOutcome =
   | { readonly kind: "no-licence" }
-  | { readonly kind: "licence-refused"; readonly reason: LicenceFailureReason; readonly message: string }
+  | {
+      readonly kind: "licence-refused";
+      readonly reason: Exclude<LicenceFailureReason, "missing"> | "unreadable";
+      readonly message: string;
+    }
   | { readonly kind: "module-off"; readonly source: "stub" | "module" }
   | { readonly kind: "active" }
   | { readonly kind: "failed"; readonly error: Error };
@@ -112,8 +116,52 @@ export interface LoadEnterpriseOptions {
 
 const INACTIVE: EnterpriseStatusView = Object.freeze({ active: false });
 
-function inactive(outcome: EnterpriseOutcome): EnterpriseRuntime {
-  return Object.freeze({ outcome, status: () => INACTIVE, deactivate: async () => undefined });
+const RESTART = "then restart OpenAdminOS.";
+const REINSTALL_LICENCE = `Install the licence file you received again, ${RESTART}`;
+const OFFICIAL_BUILD = "Install the official build from openadminos.com";
+
+function problem(reason: EnterpriseProblemReason, message: string): EnterpriseProblem {
+  return Object.freeze({ reason, message });
+}
+
+function inactiveStatus(issue: EnterpriseProblem | undefined): EnterpriseStatusView {
+  return issue ? Object.freeze({ active: false, problem: issue }) : INACTIVE;
+}
+
+function inactive(outcome: EnterpriseOutcome, issue?: EnterpriseProblem): EnterpriseRuntime {
+  const status = inactiveStatus(issue);
+  return Object.freeze({ outcome, status: () => status, deactivate: async () => undefined });
+}
+
+/** The problem shown for a licence that was refused, with the step that fixes it. */
+function licenceProblem(reason: Exclude<LicenceFailureReason, "missing">, message: string): EnterpriseProblem {
+  switch (reason) {
+    case "expired":
+      return problem("licence-expired", `${message} Install a renewed licence, ${RESTART}`);
+    case "not-yet-valid":
+      return problem("licence-not-yet-valid", `${message} Check the date and time on this device, ${RESTART}`);
+    case "signature":
+      return problem("licence-signature", `${message} ${REINSTALL_LICENCE}`);
+    case "malformed":
+      return problem("licence-malformed", `${message} ${REINSTALL_LICENCE}`);
+  }
+}
+
+/** The problem shown for a module that could not be used. */
+function moduleProblem(error: Error, stage: "load" | "activate"): EnterpriseProblem {
+  if (error instanceof EnterpriseInterfaceVersionError) {
+    return problem(
+      "module-version",
+      `The team features in this build do not match this version of OpenAdminOS. ${OFFICIAL_BUILD}, ${RESTART}`,
+    );
+  }
+  if (stage === "activate") {
+    return problem(
+      "module-activate",
+      `${error.message} Restart OpenAdminOS. If it fails again, report it with Report an issue.`,
+    );
+  }
+  return problem("module-load", `${error.message} ${OFFICIAL_BUILD} again, ${RESTART}`);
 }
 
 export async function loadEnterprise(options: LoadEnterpriseOptions): Promise<EnterpriseRuntime> {
@@ -124,7 +172,17 @@ export async function loadEnterprise(options: LoadEnterpriseOptions): Promise<En
     options.log("warn", "enterprise: the licence file could not be read, team features stay off", {
       error: errorMessage(error),
     });
-    return inactive({ kind: "licence-refused", reason: "missing", message: errorMessage(error) });
+    if (error instanceof EnterpriseLicenceFileError && error.code === "too-large") {
+      return inactive(
+        { kind: "licence-refused", reason: "malformed", message: error.message },
+        licenceProblem("malformed", error.message),
+      );
+    }
+    const message = `The licence file could not be read (${errorMessage(error)}).`;
+    return inactive(
+      { kind: "licence-refused", reason: "unreadable", message },
+      problem("licence-unreadable", `${message} Check that the file is readable by your account, ${RESTART}`),
+    );
   }
 
   const licence = verifyLicence(token, {
@@ -137,7 +195,10 @@ export async function loadEnterprise(options: LoadEnterpriseOptions): Promise<En
       reason: licence.reason,
       message: licence.message,
     });
-    return inactive({ kind: "licence-refused", reason: licence.reason, message: licence.message });
+    return inactive(
+      { kind: "licence-refused", reason: licence.reason, message: licence.message },
+      licenceProblem(licence.reason, licence.message),
+    );
   }
 
   let module: EnterpriseModule;
@@ -150,7 +211,7 @@ export async function loadEnterprise(options: LoadEnterpriseOptions): Promise<En
     } else {
       const imported = await options.importModule(url).catch((error: unknown) => {
         throw new EnterpriseModuleLoadError(
-          `The team features module could not be loaded: ${errorMessage(error)}`,
+          `The team features module could not be loaded: ${errorMessage(error)}.`,
           { cause: error },
         );
       });
@@ -165,7 +226,7 @@ export async function loadEnterprise(options: LoadEnterpriseOptions): Promise<En
       source = "module";
     }
   } catch (error) {
-    return failed(options, error);
+    return failed(options, error, "load");
   }
 
   const verified = licence.entitlement;
@@ -184,7 +245,8 @@ export async function loadEnterprise(options: LoadEnterpriseOptions): Promise<En
     controller.dispose();
     return failed(
       options,
-      new EnterpriseModuleLoadError(`The team features module failed to start: ${errorMessage(error)}`, { cause: error }),
+      new EnterpriseModuleLoadError(`The team features module failed to start: ${errorMessage(error)}.`, { cause: error }),
+      "activate",
     );
   }
   if (isThenable(handle)) {
@@ -195,15 +257,25 @@ export async function loadEnterprise(options: LoadEnterpriseOptions): Promise<En
     handle.then(undefined, (error: unknown) => {
       options.log("error", "enterprise: the team features module failed after an async activate", { error: errorMessage(error) });
     });
-    return failed(options, new EnterpriseModuleLoadError("The team features module returned a promise from activate; interface version 1 needs a handle or undefined."));
+    return failed(options, new EnterpriseModuleLoadError("The team features module returned a promise from activate; interface version 1 needs a handle or undefined."), "activate");
   }
   if (handle === undefined || handle === null) {
     controller.dispose();
-    return inactive({ kind: "module-off", source });
+    // A licence with no team features in the build is worth saying; a module
+    // that chose to stay off is not.
+    return inactive(
+      { kind: "module-off", source },
+      source === "stub"
+        ? problem(
+            "module-missing",
+            `A team features licence is installed, but this build of OpenAdminOS does not include team features. ${OFFICIAL_BUILD}, ${RESTART}`,
+          )
+        : undefined,
+    );
   }
   if (typeof handle.deactivate !== "function") {
     controller.dispose();
-    return failed(options, new EnterpriseModuleLoadError("The team features module returned a handle without deactivate."));
+    return failed(options, new EnterpriseModuleLoadError("The team features module returned a handle without deactivate."), "activate");
   }
 
   options.log("info", "enterprise: team features are on", {
@@ -214,6 +286,7 @@ export async function loadEnterprise(options: LoadEnterpriseOptions): Promise<En
   const active = handle;
   let stopped = false;
   let cancelTimer: (() => void) | undefined;
+  let stoppedProblem: EnterpriseProblem | undefined;
 
   const stop = async () => {
     if (stopped) return;
@@ -233,9 +306,9 @@ export async function loadEnterprise(options: LoadEnterpriseOptions): Promise<En
   const expired = () => entitlementAt(verified, options.now()).state === "expired";
   const expire = () => {
     if (stopped) return;
-    options.log("warn", "enterprise: the licence grace period ended, team features are off", {
-      graceEndsAt: new Date(verified.graceEndsAt).toISOString(),
-    });
+    const graceEndsAt = new Date(verified.graceEndsAt).toISOString();
+    options.log("warn", "enterprise: the licence grace period ended, team features are off", { graceEndsAt });
+    stoppedProblem = licenceProblem("expired", `The licence expired and its grace period ended ${graceEndsAt}.`);
     void stop();
   };
 
@@ -258,7 +331,7 @@ export async function loadEnterprise(options: LoadEnterpriseOptions): Promise<En
     outcome: Object.freeze({ kind: "active" }),
     status: (): EnterpriseStatusView => {
       if (!stopped && expired()) expire();
-      if (stopped) return INACTIVE;
+      if (stopped) return inactiveStatus(stoppedProblem);
       const snapshot = controller.snapshot();
       return Object.freeze({
         active: true,
@@ -280,10 +353,10 @@ function defaultSetTimer(callback: () => void, delayMs: number): () => void {
   return () => clearTimeout(timer);
 }
 
-function failed(options: LoadEnterpriseOptions, error: unknown): EnterpriseRuntime {
+function failed(options: LoadEnterpriseOptions, error: unknown, stage: "load" | "activate"): EnterpriseRuntime {
   const named = error instanceof Error ? error : new EnterpriseModuleLoadError(String(error));
   options.log("error", `enterprise: ${named.name}: ${named.message}`);
-  return inactive({ kind: "failed", error: named });
+  return inactive({ kind: "failed", error: named }, moduleProblem(named, stage));
 }
 
 /** Reads the licence and keeps module storage in the app's user data folder. */
