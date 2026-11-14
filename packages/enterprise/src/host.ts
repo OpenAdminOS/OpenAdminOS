@@ -33,8 +33,12 @@ export const ENTERPRISE_LIMITS = Object.freeze({
   maxLogMessageLength: 500,
 });
 
-const NAME = /^[a-z][a-z0-9-]{0,47}(?:\.[a-z][a-z0-9-]{0,47}){0,3}$/;
-const STORAGE_KEY = /^[a-z][a-z0-9._-]{0,63}$/;
+/** IPC handler names and settings section ids. Part of interface version 1. */
+export const ENTERPRISE_NAME_PATTERN = Object.freeze(/^[a-z][a-z0-9-]{0,47}(?:\.[a-z][a-z0-9-]{0,47}){0,3}$/);
+/** Storage keys. Part of interface version 1. */
+export const ENTERPRISE_STORAGE_KEY_PATTERN = Object.freeze(/^[a-z][a-z0-9._-]{0,63}$/);
+const NAME = ENTERPRISE_NAME_PATTERN;
+const STORAGE_KEY = ENTERPRISE_STORAGE_KEY_PATTERN;
 // C0 and C1 control characters, which have no place in a single line label.
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;

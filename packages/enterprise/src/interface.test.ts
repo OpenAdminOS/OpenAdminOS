@@ -126,11 +126,46 @@ describe("enterprise interface", () => {
     );
   });
 
+  it("keeps the version 1 limits", () => {
+    // Modules are written against these bounds. Tightening one breaks
+    // modules that rely on it, so it needs a new interface version.
+    assert.deepEqual(
+      { ...enterprise.ENTERPRISE_LIMITS },
+      {
+        maxIpcHandlers: 32,
+        maxIpcInputBytes: 65536,
+        maxIpcOutputBytes: 262144,
+        maxJsonDepth: 16,
+        maxSettingsSections: 8,
+        maxStorageKeys: 256,
+        maxStorageValueBytes: 65536,
+        maxStorageBytes: 1048576,
+        maxLabelLength: 80,
+        maxTitleLength: 60,
+        maxDetailLength: 300,
+        maxLogMessageLength: 500,
+      },
+    );
+    assert.ok(Object.isFrozen(enterprise.ENTERPRISE_LIMITS));
+  });
+
+  it("keeps the version 1 name and storage key patterns", () => {
+    assert.equal(enterprise.ENTERPRISE_NAME_PATTERN.source, "^[a-z][a-z0-9-]{0,47}(?:\\.[a-z][a-z0-9-]{0,47}){0,3}$");
+    assert.equal(enterprise.ENTERPRISE_NAME_PATTERN.flags, "");
+    assert.equal(enterprise.ENTERPRISE_STORAGE_KEY_PATTERN.source, "^[a-z][a-z0-9._-]{0,63}$");
+    assert.equal(enterprise.ENTERPRISE_STORAGE_KEY_PATTERN.flags, "");
+    // Frozen, so module code cannot recompile the host's checks.
+    assert.throws(() => (enterprise.ENTERPRISE_NAME_PATTERN as RegExp & { compile(p: string): RegExp }).compile(".*"), TypeError);
+    assert.ok(enterprise.ENTERPRISE_NAME_PATTERN.test("team.status"));
+  });
+
   it("keeps the package exports", () => {
     assert.deepEqual(Object.keys(enterprise).sort(), [
       "ENTERPRISE_INTERFACE_VERSION",
       "ENTERPRISE_IPC_PREFIX",
       "ENTERPRISE_LIMITS",
+      "ENTERPRISE_NAME_PATTERN",
+      "ENTERPRISE_STORAGE_KEY_PATTERN",
       "EnterpriseHostError",
       "EnterpriseInterfaceVersionError",
       "LICENCE_LIMITS",

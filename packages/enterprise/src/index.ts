@@ -16,6 +16,8 @@ export {
 } from "./interface.js";
 export {
   ENTERPRISE_LIMITS,
+  ENTERPRISE_NAME_PATTERN,
+  ENTERPRISE_STORAGE_KEY_PATTERN,
   EnterpriseHostError,
   checkJson,
   createEnterpriseHost,
