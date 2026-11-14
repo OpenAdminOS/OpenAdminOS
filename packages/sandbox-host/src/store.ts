@@ -318,6 +318,11 @@ export class HealthStore {
     return this.state.agents[agentId] ?? {};
   }
 
+  /** A copy of health.json as it is now. */
+  snapshot(): HealthFile {
+    return structuredClone(this.state);
+  }
+
   update(agentId: string, change: Partial<AgentHealth>, now: Date): void {
     const next: AgentHealth = { ...this.get(agentId), ...change };
     for (const key of Object.keys(change) as Array<keyof AgentHealth>) {

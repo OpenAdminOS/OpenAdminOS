@@ -19,7 +19,16 @@ import {
   type SandboxAuditContext,
 } from "@openadminos/runtime";
 
+import {
+  deviceFingerprint,
+  importDevicePublicKey,
+  verifyScheduleAssignment,
+  type DeviceIdentity,
+  type ScheduleAssignment,
+} from "@openadminos/pairing";
+
 import { resolveSandboxAgent, useReleaseAgents, type SandboxAgent } from "./agents.js";
+import { AssignmentError, checkAssignment, effectiveSchedules, type EffectiveSchedule } from "./assignments.js";
 import { chooseCertificate } from "./certificates.js";
 import type { SandboxAgentConfig, SandboxConfig } from "./config.js";
 import { capForConnector, payloadDigest, renderFailureNotice, renderRecoveryNotice, renderSandboxReport, sendDelivery } from "./delivery.js";
@@ -30,9 +39,11 @@ import { InstanceLock } from "./lock.js";
 import { createLineLogger, type SandboxLogger } from "./log.js";
 import { checkLocalModel, pinnedModelFetch, type ModelCheck } from "./model.js";
 import { isSandboxRefusal, SandboxRefusal, signInRefusal, type RefusalReason } from "./refusal.js";
-import { Scheduler, type SchedulerClock } from "./scheduler.js";
+import { loadOrCreateDeviceIdentity, readAssignments, readPairing, removePairingFiles, writeAssignments, writePairing, type StoredPairing } from "./pairing-files.js";
+import { Scheduler, type ScheduledJob, type SchedulerClock } from "./scheduler.js";
 import { loadSandboxSecrets, type SandboxSecrets } from "./secrets.js";
-import { HealthStore, RunStore } from "./store.js";
+import { HealthStore, RunStore, type HealthFile, type RunAfterCursor } from "./store.js";
+import { hostVersion } from "./version.js";
 
 /** Seams for tests and for a future key store; production uses the defaults. */
 export interface SandboxHostDeps {
@@ -55,6 +66,31 @@ export interface SandboxHostDeps {
   deliveryTimeoutMs?: number;
   /** The platform the host refuses or accepts; tests pass one. */
   platform?: NodeJS.Platform;
+  /** Milliseconds for pairing code lifetimes; tests move it. */
+  pairingClock?: () => number;
+}
+
+/** What GET /v1/status reports. Never config secrets, keys or tokens. */
+export interface SandboxStatus {
+  sandbox: { id: string; name: string };
+  organizationId: string;
+  tenantId: string;
+  hostVersion: string;
+  paired: boolean;
+  pairingId?: string;
+  /** The config's organization or tenant changed since pairing. */
+  bindingChanged: boolean;
+  model: { provider: string; model: string; digest?: string };
+  assignmentVersion?: number;
+  schedules: Array<{
+    agentId: string;
+    source: "config" | "assigned";
+    intervalSeconds: number;
+    templateSha256: string;
+    nextRunAt?: string;
+    /** An assigned schedule for an agent the config also lists; the config one runs. */
+    status?: "assignment-shadowed";
+  }>;
 }
 
 export type RunOutcome =
@@ -79,6 +115,11 @@ export class SandboxHost {
   private readonly running = new Set<Promise<unknown>>();
   private scheduler: Scheduler | undefined;
   private readonly stopController = new AbortController();
+  private identityKey: DeviceIdentity | undefined;
+  private pairing: StoredPairing | undefined;
+  private assignment: ScheduleAssignment | undefined;
+  private lastModel: ModelCheck | undefined;
+  private readonly onClose: Array<() => Promise<void>> = [];
 
   constructor(private readonly config: SandboxConfig, private readonly deps: SandboxHostDeps = {}) {
     this.now = deps.now ?? (() => new Date());
@@ -111,6 +152,16 @@ export class SandboxHost {
       }
       const interrupted = this.runs.markInterrupted(this.now());
       if (interrupted > 0) this.log("warn", "Runs left running by a stopped host were marked interrupted.", { count: interrupted });
+      // Pairing exists only with a pairing section: without it the host
+      // reads no pairing file and runs the config schedules alone.
+      if (this.config.pairing) {
+        this.identityKey = loadOrCreateDeviceIdentity(this.config.dataDir);
+        this.pairing = readPairing(this.config.dataDir, this.identityKey);
+        this.assignment = this.pairing ? readAssignments(this.config.dataDir, this.pairing.record.desktopPublicKey)?.assignment : undefined;
+        if (this.pairing && this.bindingChanged) {
+          this.log("error", "The config's organization or tenant changed since this sandbox was paired. Assigned schedules are not run and the desktop is refused until the sandbox is unpaired and paired again.", { reason: "pairing-binding-changed" });
+        }
+      }
     } catch (error) {
       this.lock.release();
       throw error;
@@ -119,6 +170,7 @@ export class SandboxHost {
 
   /** Stops the schedule, stops runs in progress, closes the audit log and releases the lock. */
   async close(): Promise<void> {
+    for (const stop of this.onClose.splice(0)) await stop();
     this.stopController.abort();
     await this.scheduler?.stop();
     // Runs stop on the abort and record themselves before the audit log closes.
@@ -129,23 +181,169 @@ export class SandboxHost {
   }
 
   startSchedule(): Scheduler {
-    const scheduler = new Scheduler(
-      this.config.agents.map((agent) => ({
-        id: agent.id,
-        intervalMs: agent.intervalSeconds * 1000,
-        ...(this.lastStartedAt(agent.id) !== undefined ? { lastStartedAt: this.lastStartedAt(agent.id) as number } : {}),
-        run: async () => {
-          await this.runAgent(agent, "schedule");
-        },
-      })),
-      this.deps.schedulerClock,
-    );
+    const scheduler = new Scheduler(this.scheduledJobs(), this.deps.schedulerClock);
     this.scheduler = scheduler;
     scheduler.start();
     for (const next of scheduler.nextRuns()) {
       this.log("info", "Scheduled.", { agent: next.id, next: new Date(next.dueAt).toISOString() });
     }
     return scheduler;
+  }
+
+  /** Applies a changed set of schedules without a restart. */
+  private refreshSchedule(): void {
+    this.scheduler?.replace(this.scheduledJobs());
+  }
+
+  private scheduledJobs(): ScheduledJob[] {
+    return this.schedules().schedules.map(({ agent }) => {
+      const lastStartedAt = this.lastStartedAt(agent.id);
+      return {
+        id: agent.id,
+        intervalMs: agent.intervalSeconds * 1000,
+        ...(lastStartedAt !== undefined ? { lastStartedAt } : {}),
+        run: async () => {
+          await this.runAgent(agent, "schedule");
+        },
+      };
+    });
+  }
+
+  /** Config schedules, and assigned ones while the pairing still matches the config. */
+  private schedules(): { schedules: EffectiveSchedule[]; shadowed: string[] } {
+    return effectiveSchedules(this.config, this.pairing && !this.bindingChanged ? this.assignment : undefined);
+  }
+
+  /** The config's organization or tenant is not the one the desktop paired with. */
+  get bindingChanged(): boolean {
+    const record = this.pairing?.record;
+    return record !== undefined && (record.organizationId !== this.config.organizationId || record.tenantId !== this.config.tenantId);
+  }
+
+  get sandboxConfig(): SandboxConfig {
+    return this.config;
+  }
+
+  /** The device key; only with a pairing section, after open. */
+  get identity(): DeviceIdentity {
+    if (!this.identityKey) throw new SandboxRefusal("pairing-files-invalid", "The sandbox device key is not loaded. The config has no pairing section, or the host is not open.");
+    return this.identityKey;
+  }
+
+  get currentPairing(): StoredPairing | undefined {
+    return this.pairing;
+  }
+
+  /** Runs a cleanup when the host closes, before the schedule stops; the pairing API registers its own. */
+  addCloseHook(stop: () => Promise<void>): void {
+    this.onClose.push(stop);
+  }
+
+  status(): SandboxStatus {
+    const { schedules, shadowed } = this.schedules();
+    const next = new Map((this.scheduler?.nextRuns() ?? []).map((entry) => [entry.id, entry.dueAt]));
+    const digest = this.lastModel?.digest;
+    return {
+      sandbox: { ...this.config.sandbox },
+      organizationId: this.config.organizationId,
+      tenantId: this.config.tenantId,
+      hostVersion: hostVersion(),
+      paired: this.pairing !== undefined,
+      ...(this.pairing ? { pairingId: this.pairing.record.pairingId } : {}),
+      bindingChanged: this.bindingChanged,
+      model: { provider: this.config.model.provider, model: this.config.model.model, ...(digest ? { digest } : {}) },
+      ...(this.assignment ? { assignmentVersion: this.assignment.version } : {}),
+      schedules: [
+        ...schedules.map(({ agent, source }) => {
+          const dueAt = next.get(agent.id);
+          return {
+            agentId: agent.id,
+            source,
+            intervalSeconds: agent.intervalSeconds,
+            templateSha256: agent.templateSha256,
+            ...(dueAt !== undefined ? { nextRunAt: new Date(dueAt).toISOString() } : {}),
+          };
+        }),
+        ...shadowed.map((agentId) => {
+          const entry = this.assignment?.entries.find((candidate) => candidate.agentId === agentId);
+          return {
+            agentId,
+            source: "assigned" as const,
+            intervalSeconds: entry?.intervalSeconds ?? 0,
+            templateSha256: entry?.templateSha256 ?? "",
+            status: "assignment-shadowed" as const,
+          };
+        }),
+      ],
+    };
+  }
+
+  healthSnapshot(): HealthFile {
+    return this.health.snapshot();
+  }
+
+  runsAfter(cursor: number, limit: number): RunAfterCursor[] {
+    return this.runs.listAfter(cursor, limit);
+  }
+
+  auditLog(): AuditLogStore {
+    return this.requireAudit();
+  }
+
+  /** Records a successful pairing: audited first, then pairing.json. */
+  completePairing(pairing: StoredPairing): void {
+    this.auditEvent(this.hostContext(), "sandbox.pairing.created", {
+      pairingId: pairing.record.pairingId,
+      desktopFingerprint: deviceFingerprint(importDevicePublicKey(pairing.record.desktopPublicKey)),
+      desktopTlsSpkiSha256: pairing.desktopTlsSpkiSha256,
+    });
+    writePairing(this.config.dataDir, pairing);
+    this.pairing = pairing;
+    this.assignment = undefined;
+    this.log("info", "Paired with a desktop.", { pairing: pairing.record.pairingId });
+  }
+
+  /**
+   * Checks and applies a signed assignment from the paired desktop, then
+   * swaps the schedule without a restart. Throws an AssignmentError.
+   */
+  applyAssignment(signed: unknown): { version: number; assigned: string[]; shadowed: string[] } {
+    const pairing = this.pairing;
+    if (!pairing) throw new AssignmentError("assignment-binding-mismatch", "This sandbox is not paired.");
+    const verified = verifyScheduleAssignment(signed, pairing.record.desktopPublicKey);
+    if (!verified.ok) throw new AssignmentError("assignment-invalid", verified.detail);
+    const assignment = verified.value;
+    checkAssignment(assignment, { config: this.config, pairingId: pairing.record.pairingId, heldVersion: this.assignment?.version });
+    this.auditEvent(this.hostContext(), "sandbox.assignment.applied", {
+      pairingId: assignment.pairingId,
+      version: assignment.version,
+      agents: assignment.entries.map((entry) => entry.agentId),
+    });
+    writeAssignments(this.config.dataDir, { assignment, signature: (signed as { signature: string }).signature });
+    this.assignment = assignment;
+    this.refreshSchedule();
+    const { schedules, shadowed } = this.schedules();
+    this.log("info", "Schedule assignment applied.", { version: assignment.version, assigned: schedules.filter((entry) => entry.source === "assigned").length, shadowed: shadowed.length });
+    return { version: assignment.version, assigned: schedules.filter((entry) => entry.source === "assigned").map((entry) => entry.agent.id), shadowed };
+  }
+
+  /**
+   * Removes the pairing and the assigned schedules; config schedules keep
+   * running. Returns the files removed.
+   */
+  unpair(): string[] {
+    const pairingId = this.pairing?.record.pairingId;
+    this.auditEvent(this.hostContext(), "sandbox.pairing.removed", { ...(pairingId ? { pairingId } : {}) });
+    const removed = removePairingFiles(this.config.dataDir);
+    this.pairing = undefined;
+    this.assignment = undefined;
+    this.refreshSchedule();
+    this.log("info", "Unpaired: the pairing and the assigned schedules were removed. Config schedules keep running.", { removed: removed.join(",") || "none" });
+    return removed;
+  }
+
+  private hostContext(): SandboxAuditContext {
+    return { tenantId: this.config.tenantId, organizationId: this.config.organizationId, sandboxId: this.config.sandbox.id };
   }
 
   async runAgent(agentConfig: SandboxAgentConfig, initiator: Extract<RunInitiator, "schedule" | "person">): Promise<RunOutcome> {
@@ -237,6 +435,7 @@ export class SandboxHost {
     for (const warning of certificate.warnings) this.log("warn", warning, { agent: agentConfig.id });
     const resolved = resolveSandboxAgent(agentConfig);
     const model = await checkLocalModel(this.config.model, this.deps.modelFetch ?? fetch);
+    this.lastModel = model;
     if (agentConfig.delivery) {
       setSecrets(loadSandboxSecrets(this.config.secretsPath, new Set([agentConfig.delivery.connector])));
     }
@@ -451,14 +650,14 @@ export class SandboxHost {
   }
 
   /**
-   * The only roles the identity may hold: the scopes the configured agents
-   * declare in their hashed manifests, read again on every run. An agent
-   * whose own checks fail adds none.
+   * The only roles the identity may hold: the scopes the configured and
+   * assigned agents declare in their hashed manifests, read again on every
+   * run. An agent whose own checks fail adds none.
    */
   private allowedRoles(current: SandboxAgentConfig, resolved: SandboxAgent): { roles: Set<string>; refused: Array<{ id: string; reason: string }> } {
     const roles = new Set(resolved.agent.scopes);
     const refused: Array<{ id: string; reason: string }> = [];
-    for (const agent of this.config.agents) {
+    for (const { agent } of this.schedules().schedules) {
       if (agent.id === current.id) continue;
       try {
         for (const scope of resolveSandboxAgent(agent).agent.scopes) roles.add(scope);
