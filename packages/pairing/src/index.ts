@@ -57,15 +57,22 @@ export {
   type SignedContinuationResult,
 } from "./continuation.js";
 export {
+  MAX_ASSIGNMENT_ENTRIES,
   parseAuditCheckpoint,
   parsePairingRecord,
+  parseScheduleAssignment,
   signAuditCheckpoint,
   signPairingRecord,
+  signScheduleAssignment,
   verifyAuditCheckpoint,
   verifyPairingRecord,
+  verifyScheduleAssignment,
   type AuditCheckpoint,
   type PairingRecord,
   type ParseResult,
+  type ScheduleAssignment,
+  type ScheduleAssignmentEntry,
   type SignedAuditCheckpoint,
   type SignedPairingRecord,
+  type SignedScheduleAssignment,
 } from "./records.js";

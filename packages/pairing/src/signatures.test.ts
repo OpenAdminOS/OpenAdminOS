@@ -78,11 +78,8 @@ describe("domain-separated signatures", () => {
     assert.equal(reasonOf(() => sign("openadminos.pairing.record.v1", { a: shared, b: shared }, identity.privateKey)), "accepted");
   });
 
-  it("knows exactly the two domains whose records exist", () => {
-    assert.deepEqual([...SIGNATURE_DOMAINS], ["openadminos.pairing.record.v1", "openadminos.audit.checkpoint.v1"]);
+  it("knows exactly the three domains whose records exist", () => {
+    assert.deepEqual([...SIGNATURE_DOMAINS], ["openadminos.pairing.record.v1", "openadminos.audit.checkpoint.v1", "openadminos.schedule.assignment.v1"]);
     assert.equal(isSignatureDomain("openadminos.pairing.transcript.v1"), false);
-    // Reserved for signed schedule assignments; not signable until that record exists.
-    assert.equal(isSignatureDomain("openadminos.schedule.assignment.v1"), false);
-    assert.throws(() => sign("openadminos.schedule.assignment.v1" as SignatureDomain, payload, identity.privateKey), PairingError);
   });
 });
