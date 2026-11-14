@@ -187,3 +187,46 @@ describe("entitlementAt", () => {
     assert.ok(Object.isFrozen(entitlementAt(result.entitlement, FIXED_NOW + DAY_SECONDS * 1000)));
   });
 });
+
+// A fixed vector, signed once outside these tests with a key pair whose
+// private half is not kept. It catches a change to the token format, the
+// signing context or the payload rules that the test signer would hide.
+describe("golden licence vector", () => {
+  const GOLDEN_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAvRmGTe3g8diaSk8i58P9ucrCwbJNvpheSioO3h4jR8E=
+-----END PUBLIC KEY-----
+`;
+  const GOLDEN_TOKEN =
+    "eyJ2IjoxLCJsaWNlbnNlZUlkIjoib3JnLWdvbGRlbiIsImZlYXR1cmVzIjpbImFwcHJvdmFscyIsImF1ZGl0LWZvcndhcmRpbmciXSwibm90QmVmb3JlIjoxNzY3MjI1NjAwLCJleHBpcmVzQXQiOjE3OTg3NjE2MDAsImdyYWNlU2Vjb25kcyI6MTIwOTYwMH0" +
+    ".MBLmfFIr9_DVRxhSRx9np3ug4JrJyNXozmwsuCZEVYaMV_G6FoDvMxpeNrjGt8B5-KZ4D6J4eI2SCUbOw2erCw";
+
+  it("verifies at a fixed time", () => {
+    const result = verifyLicence(GOLDEN_TOKEN, { publicKey: GOLDEN_PUBLIC_KEY, now: FIXED_NOW });
+    assert.deepEqual(result, {
+      ok: true,
+      entitlement: {
+        state: "active",
+        licenseeId: "org-golden",
+        features: ["approvals", "audit-forwarding"],
+        notBefore: Date.UTC(2026, 0, 1),
+        expiresAt: Date.UTC(2027, 0, 1),
+        graceEndsAt: Date.UTC(2027, 0, 15),
+      },
+    });
+  });
+
+  it("follows the validity window and the grace period", () => {
+    const at = (now: number) => reasonOf(verifyLicence(GOLDEN_TOKEN, { publicKey: GOLDEN_PUBLIC_KEY, now }));
+    assert.equal(at(Date.UTC(2025, 11, 31, 23, 59, 59)), "not-yet-valid");
+    const grace = verifyLicence(GOLDEN_TOKEN, { publicKey: GOLDEN_PUBLIC_KEY, now: Date.UTC(2027, 0, 10) });
+    assert.ok(grace.ok && grace.entitlement.state === "grace");
+    assert.equal(at(Date.UTC(2027, 0, 15)), "expired");
+  });
+
+  it("refuses the vector with any other key or any changed character", () => {
+    assert.equal(reasonOf(verifyLicence(GOLDEN_TOKEN, { publicKey: keys.publicKeyPem, now: FIXED_NOW })), "signature");
+    assert.equal(reasonOf(verifyLicence(GOLDEN_TOKEN, { now: FIXED_NOW })), "signature");
+    const changed = `${GOLDEN_TOKEN.slice(0, 10)}${GOLDEN_TOKEN[10] === "A" ? "B" : "A"}${GOLDEN_TOKEN.slice(11)}`;
+    assert.equal(reasonOf(verifyLicence(changed, { publicKey: GOLDEN_PUBLIC_KEY, now: FIXED_NOW })), "signature");
+  });
+});
