@@ -362,6 +362,26 @@ describe("loadEnterprise with a valid licence", () => {
     assert.equal(timers[2]?.delay, ENTERPRISE_STOP_TIMEOUT_MS);
   });
 
+  it("says not yet valid, not expired, when the clock moves back before notBefore", async () => {
+    let now = NOW;
+    const { module, seen } = trackingModule();
+    const { options, ipc } = harness({
+      token: licence({ notBefore: NOW_SECONDS - DAY }),
+      module,
+      now: () => now,
+      setTimer: () => () => undefined,
+    });
+    const runtime = await loadEnterprise(options);
+    assert.equal(runtime.status().active, true);
+    now = NOW - 2 * DAY * 1000;
+    const status = runtime.status();
+    assert.ok(!status.active && status.problem?.reason === "licence-not-yet-valid");
+    assert.match(status.problem.message, /not valid before .*Check the date and time on this device, then restart OpenAdminOS\.$/);
+    assert.equal(ipc.handlers.size, 0);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(seen.deactivated, 1);
+  });
+
   it("revokes the module at the grace end even when its deactivate never resolves", async () => {
     let now = NOW;
     const timers: Array<{ callback: () => void; delay: number }> = [];

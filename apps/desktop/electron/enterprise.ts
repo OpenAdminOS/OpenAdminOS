@@ -160,6 +160,17 @@ function licenceProblem(reason: Exclude<LicenceFailureReason, "missing">, messag
   }
 }
 
+/**
+ * The problem for a verified licence that no longer covers `now`: the
+ * clock moved back before `notBefore`, or the grace period ended.
+ */
+function lapsedLicenceProblem(entitlement: { notBefore: number; graceEndsAt: number }, now: number): EnterpriseProblem {
+  if (now < entitlement.notBefore) {
+    return licenceProblem("not-yet-valid", `The licence is not valid before ${new Date(entitlement.notBefore).toISOString()}.`);
+  }
+  return licenceProblem("expired", `The licence expired and its grace period ended ${new Date(entitlement.graceEndsAt).toISOString()}.`);
+}
+
 /** The problem shown for a module that could not be used. */
 function moduleProblem(error: Error, stage: "load" | "activate"): EnterpriseProblem {
   if (error instanceof EnterpriseInterfaceVersionError) {
@@ -342,9 +353,10 @@ export async function loadEnterprise(options: LoadEnterpriseOptions): Promise<En
   const expired = () => entitlementAt(verified, options.now()).state === "expired";
   const expire = () => {
     if (stopped) return;
-    const graceEndsAt = new Date(verified.graceEndsAt).toISOString();
-    options.log("warn", "enterprise: the licence grace period ended, team features are off", { graceEndsAt });
-    stoppedProblem = licenceProblem("expired", `The licence expired and its grace period ended ${graceEndsAt}.`);
+    stoppedProblem = lapsedLicenceProblem(verified, options.now());
+    options.log("warn", "enterprise: the licence no longer covers this time, team features are off", {
+      reason: stoppedProblem.reason,
+    });
     // The licence no longer covers the module: its capabilities go first,
     // and the renderer hears at once (dispose calls onChange). deactivate
     // runs afterwards and cannot hold any of that up.
