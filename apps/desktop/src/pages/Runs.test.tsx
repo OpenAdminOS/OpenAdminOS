@@ -267,7 +267,7 @@ describe("Runs: where each run executed", () => {
     expect(rowFor(history, "Agent A")).toHaveTextContent(/This computer · .*local, stays on this device/);
     expect(rowFor(history, "Agent B")).toHaveTextContent(/This computer · /);
     const sandboxRow = rowFor(history, "Agent C");
-    expect(sandboxRow).toHaveTextContent(/Mini PC · .*local, stays on Mini PC/);
+    expect(sandboxRow).toHaveTextContent(/Mini PC · .*local model on Mini PC/);
     expect(sandboxRow).not.toHaveTextContent(/This computer|stays on this device/);
   });
 

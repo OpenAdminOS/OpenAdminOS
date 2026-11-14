@@ -9,7 +9,7 @@ export const RUN_LOCATION_COPY = {
   /** Run detail line for a sandbox run; it replaces the on-device claim. */
   ranOn: (name: string, model: string) => `Ran on ${name} · local model ${model}`,
   /** Runs list boundary segment for a sandbox run. */
-  sandboxBoundary: (name: string) => `local, stays on ${name}`,
+  sandboxBoundary: (name: string) => `local model on ${name}`,
 } as const;
 
 /** The Where label: absent or desktop is this computer, a sandbox shows its name. */
