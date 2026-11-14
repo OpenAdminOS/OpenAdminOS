@@ -9,14 +9,11 @@ import { isJsonValue } from "./validate.js";
 /**
  * Every purpose a device key signs for. A signature made for one domain
  * never verifies for another, so a signed pairing record cannot be
- * replayed as a checkpoint or an assignment. New purposes get a new
- * domain; a changed payload shape gets a new version.
+ * replayed as a checkpoint. New purposes get a new domain once their
+ * record exists (schedule assignments are reserved in the README); a
+ * changed payload shape gets a new version.
  */
-export const SIGNATURE_DOMAINS = [
-  "openadminos.pairing.record.v1",
-  "openadminos.audit.checkpoint.v1",
-  "openadminos.schedule.assignment.v1",
-] as const;
+export const SIGNATURE_DOMAINS = ["openadminos.pairing.record.v1", "openadminos.audit.checkpoint.v1"] as const;
 
 export type SignatureDomain = (typeof SIGNATURE_DOMAINS)[number];
 

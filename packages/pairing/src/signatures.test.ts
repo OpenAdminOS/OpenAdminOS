@@ -19,9 +19,9 @@ describe("domain-separated signatures", () => {
   });
 
   it("ignores key order, because the payload is canonical", () => {
-    const signature = sign("openadminos.schedule.assignment.v1", payload, identity.privateKey);
+    const signature = sign("openadminos.audit.checkpoint.v1", payload, identity.privateKey);
     const reordered = { a: "x", b: [1, "two", { c: true, d: null }] };
-    assert.ok(verify("openadminos.schedule.assignment.v1", reordered, signature, identity.publicKey));
+    assert.ok(verify("openadminos.audit.checkpoint.v1", reordered, signature, identity.publicKey));
   });
 
   it("does not verify in another domain", () => {
@@ -78,8 +78,11 @@ describe("domain-separated signatures", () => {
     assert.equal(reasonOf(() => sign("openadminos.pairing.record.v1", { a: shared, b: shared }, identity.privateKey)), "accepted");
   });
 
-  it("knows exactly the three domains", () => {
-    assert.deepEqual([...SIGNATURE_DOMAINS], ["openadminos.pairing.record.v1", "openadminos.audit.checkpoint.v1", "openadminos.schedule.assignment.v1"]);
+  it("knows exactly the two domains whose records exist", () => {
+    assert.deepEqual([...SIGNATURE_DOMAINS], ["openadminos.pairing.record.v1", "openadminos.audit.checkpoint.v1"]);
     assert.equal(isSignatureDomain("openadminos.pairing.transcript.v1"), false);
+    // Reserved for signed schedule assignments; not signable until that record exists.
+    assert.equal(isSignatureDomain("openadminos.schedule.assignment.v1"), false);
+    assert.throws(() => sign("openadminos.schedule.assignment.v1" as SignatureDomain, payload, identity.privateKey), PairingError);
   });
 });
