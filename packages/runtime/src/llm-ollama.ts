@@ -6,7 +6,7 @@ import type {
   RunLlmApi,
 } from "@openadminos/agent-sdk";
 
-import { LlmCancelledError, LlmTimeoutError } from "./llm-errors.js";
+import { LlmCancelledError, LlmTimeoutError, readTextUntilAborted } from "./llm-errors.js";
 
 export interface OllamaProviderOptions {
   endpoint?: string;
@@ -140,9 +140,18 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       }
 
       if (!response.ok) {
-        clearTimeout(timer);
-        opts.signal?.removeEventListener("abort", abortFromCaller);
-        const detail = await response.text().catch(() => "");
+        // The error body is read under the same timeout and caller signal,
+        // so a server that leaves it open cannot hold the request forever.
+        let detail = "";
+        try {
+          detail = await readTextUntilAborted(response, controller.signal);
+        } catch {
+          if (opts.signal?.aborted) throw new LlmCancelledError("Ollama request stopped by user.");
+          if (controller.signal.aborted) throw new LlmTimeoutError(`Ollama timed out after ${timeoutMs}ms at ${url}.`);
+        } finally {
+          clearTimeout(timer);
+          opts.signal?.removeEventListener("abort", abortFromCaller);
+        }
         if (response.status === 404 && detail.toLowerCase().includes("model")) {
           throw new Error(
             `Ollama model "${model}" is not pulled. Run \`ollama pull ${model}\`.`,

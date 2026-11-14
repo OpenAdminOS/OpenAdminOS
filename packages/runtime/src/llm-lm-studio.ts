@@ -6,7 +6,7 @@ import type {
   RunLlmApi,
 } from "@openadminos/agent-sdk";
 
-import { LlmCancelledError, LlmTimeoutError } from "./llm-errors.js";
+import { LlmCancelledError, LlmTimeoutError, readTextUntilAborted } from "./llm-errors.js";
 
 export interface LmStudioProviderOptions {
   endpoint?: string;
@@ -179,9 +179,18 @@ export function createLmStudioLlm(
       }
 
       if (!response.ok) {
-        clearTimeout(timer);
-        opts.signal?.removeEventListener("abort", abortFromCaller);
-        const detail = await response.text().catch(() => "");
+        // The error body is read under the same timeout and caller signal,
+        // so a server that leaves it open cannot hold the request forever.
+        let detail = "";
+        try {
+          detail = await readTextUntilAborted(response, controller.signal);
+        } catch {
+          if (opts.signal?.aborted) throw new LlmCancelledError("LM Studio request stopped by user.");
+          if (controller.signal.aborted) throw new LlmTimeoutError(`LM Studio timed out after ${timeoutMs}ms at ${url}.`);
+        } finally {
+          clearTimeout(timer);
+          opts.signal?.removeEventListener("abort", abortFromCaller);
+        }
         throw new Error(`LM Studio responded with HTTP ${response.status}: ${truncate(detail, 200)}`);
       }
 

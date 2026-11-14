@@ -24,3 +24,23 @@ export function llmErrorCode(error: unknown): "model-timeout" | "model-cancelled
   const code = (error as { code?: unknown } | undefined)?.code;
   return code === "model-timeout" || code === "model-cancelled" ? code : undefined;
 }
+
+/**
+ * Reads a response body, ending with the signal's abort even when the
+ * body itself does not notice it.
+ */
+export async function readTextUntilAborted(response: Response, signal: AbortSignal): Promise<string> {
+  if (signal.aborted) throw signal.reason ?? new Error("aborted");
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(signal.reason ?? new Error("aborted"));
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([response.text(), aborted]);
+  } finally {
+    if (onAbort) signal.removeEventListener("abort", onAbort);
+    // A body still open after the abort is cancelled so its stream is released.
+    response.body?.cancel().catch(() => undefined);
+  }
+}

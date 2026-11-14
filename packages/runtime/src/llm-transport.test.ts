@@ -62,3 +62,41 @@ describe("model clients name a stalled stream", () => {
     });
   }
 });
+
+/** Error headers, then a body that never ends; `honoursAbort` errors it on abort, as fetch does. */
+function stallingError(status: number, honoursAbort: boolean): typeof fetch {
+  return (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("internal"));
+        if (honoursAbort) init?.signal?.addEventListener("abort", () => controller.error(new DOMException("aborted", "AbortError")), { once: true });
+      },
+    });
+    return new Response(body, { status });
+  }) as typeof fetch;
+}
+
+describe("model clients bound an error response whose body stays open", () => {
+  const clients = {
+    Ollama: (fetchImpl: typeof fetch, timeoutMs: number) => createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "m", timeoutMs, fetchImpl }),
+    "LM Studio": (fetchImpl: typeof fetch, timeoutMs: number) => createLmStudioLlm({ endpoint: "http://127.0.0.1:1234/v1", defaultModel: "m", timeoutMs, fetchImpl }),
+  };
+  for (const [label, create] of Object.entries(clients)) {
+    for (const honoursAbort of [true, false]) {
+      it(`${label}: a stalled HTTP 500 body ends as model-timeout or model-cancelled${honoursAbort ? "" : " even when the body ignores the abort"}`, async () => {
+        await assert.rejects(drain(create(stallingError(500, honoursAbort), 50)), (error: unknown) => llmErrorCode(error) === "model-timeout");
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 10);
+        try {
+          await assert.rejects(drain(create(stallingError(500, honoursAbort), 60_000), controller.signal), (error: unknown) => llmErrorCode(error) === "model-cancelled");
+        } finally {
+          clearTimeout(timer);
+        }
+      });
+    }
+    it(`${label}: an error body that ends still gives the HTTP status`, async () => {
+      const fetchImpl = (async () => new Response("broken", { status: 500 })) as typeof fetch;
+      await assert.rejects(drain(create(fetchImpl, 5_000)), /responded with HTTP 500: broken/);
+    });
+  }
+});
