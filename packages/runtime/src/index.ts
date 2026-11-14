@@ -189,6 +189,47 @@ export {
   type SandboxBrokerInput,
 } from "./sandbox-broker.js";
 export { createTenantSession } from "./msal.js";
+export {
+  AUDIT_CHAIN_START_HASH,
+  AUDIT_LOG_RETENTION_DAYS,
+  AuditLogBehindError,
+  AuditLogIntegrityError,
+  AuditLogResultKeptError,
+  AuditLogStore,
+  appendSandboxEvent,
+  canonicalJson,
+  chainHash,
+  graphRequestAuditSink,
+  graphWriteAuditSink,
+  trackedAuditSink,
+  type AuditLogActor,
+  type AuditLogChainSummary,
+  type AuditLogEvent,
+  type AuditLogEventSeed,
+  type AuditLogEventSource,
+  type AuditLogUnrecordedResults,
+  type GraphRequestAuditAttempt,
+  type GraphRequestAuditResult,
+  type GraphRequestAuditSink,
+  type SandboxAuditContext,
+} from "./audit-log.js";
+export {
+  APPLICATION_SECRET_BEARING_ROLE_PATTERNS,
+  ApplicationTokenError,
+  GRAPH_APPLICATION_SCOPE,
+  classifyApplicationRoles,
+  createApplicationTokenProvider,
+  createPemAssertionSigner,
+  decodeAccessTokenClaims,
+  isSecretBearingRole,
+  rolesFromAccessToken,
+  type ApplicationRoleClassification,
+  type ApplicationToken,
+  type ApplicationTokenProvider,
+  type ApplicationTokenProviderOptions,
+  type AssertionSigner,
+} from "./graph-application.js";
+export { createSelfSignedCertificate } from "./self-signed-certificate.js";
 export { awaitWithSignal } from "./cancellation.js";
 export {
   disposeBuiltConnectors,
@@ -578,6 +619,12 @@ export interface ExecuteRunInput {
    */
   onConnectorAudit?: (entry: ConnectorAuditEntry) => void;
   onProgress(run: RunRecord): void | Promise<void>;
+  /**
+   * A module the host already built from manifest text it checked, used
+   * instead of loading the manifest from disk again. Only `executeRun`
+   * reads it.
+   */
+  module?: AgentModule;
 }
 
 export interface ExecuteApplyInput extends ExecuteRunInput {
@@ -959,7 +1006,7 @@ export async function executeRun(input: ExecuteRunInput): Promise<RunRecord> {
   );
 
   try {
-    const module = await loadAgentModule(input.agent);
+    const module = input.module ?? await loadAgentModule(input.agent);
     if (module.mode !== "read" || typeof (module as ReadAgentModule).run !== "function") {
       throw new Error(
         `Agent "${input.agent.slug}" is not a read agent. Use executePlan/executeApply for write agents.`,
