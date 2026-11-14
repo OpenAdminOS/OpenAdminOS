@@ -13,11 +13,12 @@
 // working without team features. The version is read from the export, so
 // the module has been imported and its top-level code has run by then.
 
-import { mkdir, open, readFile, rm } from "node:fs/promises";
+import { mkdir, open, rm } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
   ENTERPRISE_INTERFACE_VERSION,
+  ENTERPRISE_LIMITS,
   EnterpriseInterfaceVersionError,
   createEnterpriseHost,
   defaultEnterpriseModule,
@@ -50,6 +51,18 @@ export const ENTERPRISE_LICENCE_FILE = "licence.token";
 export const ENTERPRISE_STORAGE_FILE = "storage.json";
 /** Room for a token of the longest allowed length plus line breaks around it. */
 export const ENTERPRISE_LICENCE_FILE_MAX_BYTES = LICENCE_LIMITS.maxTokenLength * 2;
+/** The host never writes more than this to the storage file. */
+export const ENTERPRISE_STORAGE_FILE_MAX_BYTES = ENTERPRISE_LIMITS.maxStorageBytes;
+
+/** The module storage file is too large, or the path is not a file. */
+export class EnterpriseStorageFileError extends Error {
+  readonly code: "too-large" | "not-a-file";
+  constructor(code: "too-large" | "not-a-file", message: string) {
+    super(message);
+    this.name = "EnterpriseStorageFileError";
+    this.code = code;
+  }
+}
 
 /** The licence file is there but cannot be a licence: too large, or not a file. */
 export class EnterpriseLicenceFileError extends Error {
@@ -359,6 +372,37 @@ function failed(options: LoadEnterpriseOptions, error: unknown, stage: "load" | 
   return inactive({ kind: "failed", error: named }, moduleProblem(named, stage));
 }
 
+/**
+ * Reads a small file whole, or returns undefined when it does not exist.
+ * The size is checked on the open handle before reading, so the file read
+ * is the file checked, and at most `maxBytes + 1` bytes are ever read.
+ */
+async function readBoundedFile(
+  path: string,
+  maxBytes: number,
+  refuse: (code: "too-large" | "not-a-file", size: number) => Error,
+): Promise<string | undefined> {
+  let handle;
+  try {
+    handle = await open(path, "r");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return undefined;
+    throw error;
+  }
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) throw refuse("not-a-file", info.size);
+    if (info.size > maxBytes) throw refuse("too-large", info.size);
+    const buffer = Buffer.alloc(maxBytes + 1);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    // The file grew between the check and the read.
+    if (bytesRead > maxBytes) throw refuse("too-large", bytesRead);
+    return buffer.subarray(0, bytesRead).toString("utf8");
+  } finally {
+    await handle.close();
+  }
+}
+
 /** Reads the licence and keeps module storage in the app's user data folder. */
 export function enterpriseFiles(userDataDir: string): {
   readLicenceToken: () => Promise<string | undefined>;
@@ -367,45 +411,31 @@ export function enterpriseFiles(userDataDir: string): {
   const directory = join(userDataDir, ENTERPRISE_DIRECTORY);
   const storagePath = join(directory, ENTERPRISE_STORAGE_FILE);
   return {
-    readLicenceToken: async () => {
-      let handle;
-      try {
-        handle = await open(join(directory, ENTERPRISE_LICENCE_FILE), "r");
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return undefined;
-        throw error;
-      }
-      try {
-        // Checked on the open handle, so the file read is the file checked.
-        const info = await handle.stat();
-        if (!info.isFile()) {
-          throw new EnterpriseLicenceFileError("not-a-file", "The licence path is not a file.");
-        }
-        if (info.size > ENTERPRISE_LICENCE_FILE_MAX_BYTES) {
-          throw new EnterpriseLicenceFileError(
-            "too-large",
-            `The licence file is ${info.size} bytes; a licence is at most ${ENTERPRISE_LICENCE_FILE_MAX_BYTES} bytes.`,
-          );
-        }
-        const buffer = Buffer.alloc(ENTERPRISE_LICENCE_FILE_MAX_BYTES + 1);
-        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-        if (bytesRead > ENTERPRISE_LICENCE_FILE_MAX_BYTES) {
-          throw new EnterpriseLicenceFileError("too-large", "The licence file grew past the size limit while it was read.");
-        }
-        return buffer.subarray(0, bytesRead).toString("utf8");
-      } finally {
-        await handle.close();
-      }
-    },
+    readLicenceToken: () =>
+      readBoundedFile(
+        join(directory, ENTERPRISE_LICENCE_FILE),
+        ENTERPRISE_LICENCE_FILE_MAX_BYTES,
+        (code, size) =>
+          new EnterpriseLicenceFileError(
+            code,
+            code === "not-a-file"
+              ? "The licence path is not a file."
+              : `The licence file is ${size} bytes or more; a licence is at most ${ENTERPRISE_LICENCE_FILE_MAX_BYTES} bytes.`,
+          ),
+      ),
     storage: {
-      read: async () => {
-        try {
-          return await readFile(storagePath, "utf8");
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return undefined;
-          throw error;
-        }
-      },
+      read: () =>
+        readBoundedFile(
+          storagePath,
+          ENTERPRISE_STORAGE_FILE_MAX_BYTES,
+          (code, size) =>
+            new EnterpriseStorageFileError(
+              code,
+              code === "not-a-file"
+                ? "The team features storage path is not a file."
+                : `The team features storage file is ${size} bytes or more; it is at most ${ENTERPRISE_STORAGE_FILE_MAX_BYTES} bytes.`,
+            ),
+        ),
       write: async (text) => {
         await mkdir(directory, { recursive: true, mode: 0o700 });
         const temporary = `${storagePath}.${process.pid}.tmp`;

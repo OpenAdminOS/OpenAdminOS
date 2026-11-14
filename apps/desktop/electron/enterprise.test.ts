@@ -24,7 +24,9 @@ import {
   DEFAULT_TEAM_STATUS_LABEL,
   ENTERPRISE_LICENCE_FILE_MAX_BYTES,
   ENTERPRISE_MODULE_SPECIFIER,
+  ENTERPRISE_STORAGE_FILE_MAX_BYTES,
   EnterpriseLicenceFileError,
+  EnterpriseStorageFileError,
   MAX_TIMER_DELAY_MS,
   EnterpriseModuleLoadError,
   enterpriseFiles,
@@ -568,6 +570,24 @@ describe("enterprise wiring", () => {
       assert.equal(await files.readLicenceToken(), "token-text\n");
       await writeFile(join(dir, "enterprise", "licence.token"), "x".repeat(ENTERPRISE_LICENCE_FILE_MAX_BYTES));
       assert.equal((await files.readLicenceToken())?.length, ENTERPRISE_LICENCE_FILE_MAX_BYTES);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a storage file over the size limit, or a path that is not a file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-enterprise-"));
+    try {
+      const files = enterpriseFiles(dir);
+      const path = join(dir, "enterprise", "storage.json");
+      await mkdir(join(dir, "enterprise"), { recursive: true });
+      await writeFile(path, "x".repeat(ENTERPRISE_STORAGE_FILE_MAX_BYTES));
+      assert.equal((await files.storage.read())?.length, ENTERPRISE_STORAGE_FILE_MAX_BYTES);
+      await writeFile(path, "x".repeat(ENTERPRISE_STORAGE_FILE_MAX_BYTES + 1));
+      await assert.rejects(files.storage.read(), (error: unknown) => error instanceof EnterpriseStorageFileError && error.code === "too-large");
+      await rm(path);
+      await mkdir(path);
+      await assert.rejects(files.storage.read(), (error: unknown) => error instanceof EnterpriseStorageFileError && error.code === "not-a-file");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
