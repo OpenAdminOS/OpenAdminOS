@@ -34,7 +34,7 @@ import {
   StatusDot,
   type MenuEntry,
 } from "../components/ui";
-import { ORGANIZATION_COPY, RERUN_COPY, userFacingErrorReason } from "../copy";
+import { ORGANIZATION_COPY, RERUN_COPY, RUN_LOCATION_COPY, runLocationLabel, userFacingErrorReason } from "../copy";
 import { Modal, ModalHeader } from "../components/Modal";
 import { createPendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
@@ -115,13 +115,24 @@ function RunResultPage({ run }: { run: RunRecord }) {
     model: run.model,
   });
   const runTrust = derivedTrust;
+  // A sandbox run names the sandbox and its model; it never claims the
+  // data stayed on this device.
+  // Its locality, model and model server come from the run record, not
+  // from this desktop's providers: the host refuses a model that is not
+  // served on the sandbox itself.
+  const sandbox = run.executedOn?.kind === "sandbox" ? run.executedOn : undefined;
+  const trustDetail = sandbox ? RUN_LOCATION_COPY.ranOn(sandbox.name, sandbox.model) : runTrust.detail;
+  const runIsLocal = sandbox ? true : runTrust.isLocal;
+  const providerIsLocal = sandbox ? true : runProvider?.isLocal;
+  const providerName = sandbox ? RUN_LOCATION_COPY.sandboxProvider(sandbox.name) : providerNameForRun(run, state.providers);
+  const modelName = sandbox ? sandbox.model : run.model;
   const displayName = agent
     ? formatAgentDisplayName(agent)
     : agentNameForRun(run, state.installedAgents);
   const tenantName = tenantNameForRun(run, state.tenants);
   const isSystemRun = run.origin !== undefined;
   const requiresTeamReview = Boolean(
-    run.officeContext && (agent?.mode === "write" || !runTrust.isLocal),
+    run.officeContext && (agent?.mode === "write" || !runIsLocal),
   );
 
   const openRerunPreflight = (slug: string, runChoice: RerunChoice) => {
@@ -289,8 +300,8 @@ function RunResultPage({ run }: { run: RunRecord }) {
         displayName={displayName}
         tenant={runTenant}
         tenantName={tenantName}
-        trustDetail={runTrust.detail}
-        providerIsLocal={runProvider?.isLocal === true}
+        trustDetail={trustDetail}
+        providerIsLocal={providerIsLocal === true}
         onBack={closeToRuns}
         onConfirm={confirmRun}
         onReject={rejectRun}
@@ -322,9 +333,10 @@ function RunResultPage({ run }: { run: RunRecord }) {
       run={run}
       displayName={displayName}
       tenantName={tenantName}
-      providerName={providerNameForRun(run, state.providers)}
-      providerIsLocal={runProvider?.isLocal}
-      trustDetail={runTrust.detail}
+      providerName={providerName}
+      providerIsLocal={providerIsLocal}
+      modelName={modelName}
+      trustDetail={trustDetail}
       activeTenantId={state.activeTenantId}
       tenants={state.tenants}
       isSystemRun={isSystemRun}
@@ -384,6 +396,7 @@ function RunPage({
   tenantName,
   providerName,
   providerIsLocal,
+  modelName,
   trustDetail,
   activeTenantId,
   tenants,
@@ -400,6 +413,7 @@ function RunPage({
   providerName: string;
   /** Undefined when the run recorded no provider. */
   providerIsLocal: boolean | undefined;
+  modelName: string | undefined;
   trustDetail: string;
   activeTenantId?: string;
   tenants: TenantRecord[];
@@ -478,6 +492,7 @@ function RunPage({
             tenantName={tenantName}
             providerName={providerName}
             providerIsLocal={providerIsLocal}
+            modelName={modelName}
             trustDetail={trustDetail}
           />
 
@@ -689,12 +704,14 @@ function RunStatusCard({
   tenantName,
   providerName,
   providerIsLocal,
+  modelName,
   trustDetail,
 }: {
   run: RunRecord;
   tenantName: string;
   providerName: string;
   providerIsLocal: boolean | undefined;
+  modelName: string | undefined;
   trustDetail: string;
 }) {
   const live = run.status === "queued" || run.status === "running";
@@ -758,7 +775,8 @@ function RunStatusCard({
           </p>
         ) : null}
 
-        <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-[var(--color-border-soft)] pt-4 sm:grid-cols-3 lg:grid-cols-5">
+        <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-[var(--color-border-soft)] pt-4 sm:grid-cols-3 lg:grid-cols-6">
+          <RunFact label={RUN_LOCATION_COPY.label} value={runLocationLabel(run.executedOn)} />
           <RunFact label="Tenant" value={tenantName} />
           <RunFact
             label="Provider"
@@ -768,7 +786,7 @@ function RunStatusCard({
             }
             tone={providerIsLocal === undefined ? undefined : providerIsLocal ? "success" : "warning"}
           />
-          <RunFact label="Model" value={run.model ?? "Not recorded"} mono={Boolean(run.model)} />
+          <RunFact label="Model" value={modelName ?? "Not recorded"} mono={Boolean(modelName)} />
           <RunFact
             label="Tokens"
             value={tokens > 0 ? tokens.toLocaleString() : live ? "Counting" : "Not recorded"}

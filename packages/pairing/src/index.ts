@@ -1,0 +1,71 @@
+export {
+  createTlsCertificate,
+  DEFAULT_TLS_VALIDITY_DAYS,
+  isTlsSpkiPin,
+  matchesTlsSpkiPin,
+  tlsSpkiSha256,
+  type TlsCertificate,
+  type TlsCertificateOptions,
+} from "./certificate.js";
+export { CROCKFORD_ALPHABET, decodeBase32, encodeBase32, normalizeBase32 } from "./base32.js";
+export {
+  createPairingCode,
+  DesktopPairingSession,
+  formatPairingCode,
+  PAIRING_CODE_GROUP_LENGTH,
+  PAIRING_CODE_FINGERPRINT_LENGTH,
+  PAIRING_CODE_LENGTH,
+  PAIRING_CODE_LIFETIME_MS,
+  PAIRING_CODE_MAX_ATTEMPTS,
+  PAIRING_CODE_SECRET_LENGTH,
+  PairingAttemptLimiter,
+  pairingCodeFingerprint,
+  pairingCodeMatchesSpki,
+  pairingTranscript,
+  parsePairingCode,
+  SandboxPairingSession,
+  type DesktopPairingOffer,
+  type DesktopProofFailure,
+  type DesktopProofResult,
+  type PairingAttemptFailure,
+  type PairingAttemptLimiterOptions,
+  type PairingAttemptResult,
+  type PairingCode,
+  type PairingCodeParseResult,
+  type PairingProofRole,
+  type PairingTranscriptFields,
+  type SandboxPairingSessionOptions,
+} from "./code.js";
+export { PairingError, type PairingErrorReason } from "./errors.js";
+export {
+  deviceFingerprint,
+  exportDevicePrivateKey,
+  exportDevicePublicKey,
+  exportDevicePublicKeySpki,
+  generateDeviceIdentity,
+  importDevicePrivateKey,
+  importDevicePublicKey,
+  isDevicePublicKey,
+  type DeviceIdentity,
+  type FingerprintFormat,
+} from "./identity.js";
+export { isSignatureDomain, sign, SIGNATURE_DOMAINS, signedMessage, verify, type SignatureDomain } from "./signatures.js";
+export {
+  verifySignedContinuation,
+  type SignedContinuationExpectation,
+  type SignedContinuationFailure,
+  type SignedContinuationResult,
+} from "./continuation.js";
+export {
+  parseAuditCheckpoint,
+  parsePairingRecord,
+  signAuditCheckpoint,
+  signPairingRecord,
+  verifyAuditCheckpoint,
+  verifyPairingRecord,
+  type AuditCheckpoint,
+  type PairingRecord,
+  type ParseResult,
+  type SignedAuditCheckpoint,
+  type SignedPairingRecord,
+} from "./records.js";

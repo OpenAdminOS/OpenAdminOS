@@ -14,6 +14,7 @@ import {
   type StatusDotTone,
   type MenuEntry,
 } from "../components/ui";
+import { RUN_LOCATION_COPY, runLocationLabel } from "../copy";
 import { useAppState } from "../state";
 import type { RunRecord, RunStatus } from "../shared/openAdminOS";
 
@@ -43,6 +44,8 @@ export default function Runs() {
   const agentFilter = searchParams.get("agent") ?? "";
   const triggerParam = searchParams.get("trigger");
   const triggerFilter: RunTrigger | "" = isRunTrigger(triggerParam) ? triggerParam : "";
+  // "desktop" for this computer, otherwise a sandbox id.
+  const whereFilter = searchParams.get("where") ?? "";
 
   const runningCount = state.runs.filter(
     (run) => run.status === "queued" || run.status === "running",
@@ -60,6 +63,7 @@ export default function Runs() {
       if (tenantFilter && run.tenantId !== tenantFilter) return false;
       if (agentFilter && run.agentSlug !== agentFilter) return false;
       if (triggerFilter && triggerForRun(run) !== triggerFilter) return false;
+      if (whereFilter && runLocationKey(run) !== whereFilter) return false;
       if (!normalizedQuery) return true;
       const agentName = agentNameForRun(run, state.installedAgents);
       const tenantName = tenantNameForRun(run, state.tenants);
@@ -71,6 +75,7 @@ export default function Runs() {
         run.summary,
         run.plan?.summary,
         run.providerId,
+        runLocationLabel(run.executedOn),
       ].some((value) => value?.toLocaleLowerCase().includes(normalizedQuery));
     });
   }, [
@@ -81,6 +86,7 @@ export default function Runs() {
     state.tenants,
     tenantFilter,
     triggerFilter,
+    whereFilter,
   ]);
 
   const needsReview = useMemo(
@@ -106,7 +112,7 @@ export default function Runs() {
     });
   }, [filteredRuns, statusFilter]);
   const hasActiveHistoryFilters = Boolean(
-    query.trim() || statusFilter !== "all" || tenantFilter || agentFilter || triggerFilter,
+    query.trim() || statusFilter !== "all" || tenantFilter || agentFilter || triggerFilter || whereFilter,
   );
 
   useEffect(() => {
@@ -154,6 +160,14 @@ export default function Runs() {
     return [...options.entries()].sort((left, right) => left[1].localeCompare(right[1]));
   }, [state.installedAgents, state.runs]);
 
+  const sandboxOptions = useMemo(() => {
+    const options = new Map<string, string>();
+    for (const run of state.runs) {
+      if (run.executedOn?.kind === "sandbox") options.set(run.executedOn.sandboxId, run.executedOn.name);
+    }
+    return [...options.entries()].sort((left, right) => left[1].localeCompare(right[1]));
+  }, [state.runs]);
+
   const filterMenuItems: MenuEntry[] = [
     {
       id: "tenant-all",
@@ -178,6 +192,22 @@ export default function Runs() {
         onSelect: () => updateParam("trigger", trigger),
       }),
     ),
+    { id: "separator-where", type: "separator" },
+    {
+      id: "where-all",
+      label: `${RUN_LOCATION_COPY.filterAll}${whereFilter ? "" : " (selected)"}`,
+      onSelect: () => updateParam("where"),
+    },
+    {
+      id: "where-desktop",
+      label: `${RUN_LOCATION_COPY.filterOption(RUN_LOCATION_COPY.thisComputer)}${whereFilter === "desktop" ? " (selected)" : ""}`,
+      onSelect: () => updateParam("where", "desktop"),
+    },
+    ...sandboxOptions.map<MenuEntry>(([sandboxId, name]) => ({
+      id: `where-sandbox-${sandboxId}`,
+      label: `${RUN_LOCATION_COPY.filterOption(name)}${whereFilter === `sandbox:${sandboxId}` ? " (selected)" : ""}`,
+      onSelect: () => updateParam("where", `sandbox:${sandboxId}`),
+    })),
     { id: "separator-agent", type: "separator" },
     {
       id: "agent-all",
@@ -191,7 +221,7 @@ export default function Runs() {
     })),
   ];
 
-  const activeFilterCount = [tenantFilter, agentFilter, triggerFilter].filter(Boolean).length;
+  const activeFilterCount = [tenantFilter, agentFilter, triggerFilter, whereFilter].filter(Boolean).length;
   return (
     <>
       <PageHeader title="Runs" />
@@ -402,11 +432,24 @@ function runDescription(
   providers: { id: string; name: string; isLocal?: boolean }[],
   tenants: { id: string; displayName: string }[],
 ): string {
-  const provider = providers.find((candidate) => candidate.id === run.providerId);
-  const providerName = provider?.name ?? run.providerId ?? "Provider not recorded";
-  const boundary = provider ? (provider.isLocal ? "local, stays on this device" : "hosted") : "location not recorded";
-  const model = run.model ? ` · ${run.model}` : "";
-  return `${providerName}${model} · ${boundary} · ${tenantNameForRun(run, tenants)} · ${capitalize(triggerForRun(run))}`;
+  // A sandbox run names the model on the sandbox, never a desktop provider
+  // that happens to share its id.
+  const sandbox = run.executedOn?.kind === "sandbox" ? run.executedOn : undefined;
+  const provider = sandbox ? undefined : providers.find((candidate) => candidate.id === run.providerId);
+  const providerName = sandbox
+    ? RUN_LOCATION_COPY.sandboxProvider(sandbox.name)
+    : provider?.name ?? run.providerId ?? "Provider not recorded";
+  const boundary = sandbox
+    ? RUN_LOCATION_COPY.sandboxBoundary(sandbox.name)
+    : provider ? (provider.isLocal ? "local, stays on this device" : "hosted") : "location not recorded";
+  const modelName = sandbox ? sandbox.model : run.model;
+  const model = modelName ? ` · ${modelName}` : "";
+  return `${runLocationLabel(run.executedOn)} · ${providerName}${model} · ${boundary} · ${tenantNameForRun(run, tenants)} · ${capitalize(triggerForRun(run))}`;
+}
+
+/** The Where filter value of a run: "desktop", or "sandbox:<id>". */
+function runLocationKey(run: RunRecord): string {
+  return run.executedOn?.kind === "sandbox" ? `sandbox:${run.executedOn.sandboxId}` : "desktop";
 }
 
 export function agentNameForRun(

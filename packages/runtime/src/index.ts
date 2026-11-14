@@ -209,12 +209,20 @@ export {
   type AuditLogEvent,
   type AuditLogEventSeed,
   type AuditLogEventSource,
+  type AuditLogPosition,
+  type AuditLogRangeRow,
   type AuditLogUnrecordedResults,
   type GraphRequestAuditAttempt,
   type GraphRequestAuditResult,
   type GraphRequestAuditSink,
   type SandboxAuditContext,
 } from "./audit-log.js";
+export {
+  AUDIT_CONTINUATION_START,
+  verifyAuditContinuation,
+  type AuditContinuationFailure,
+  type AuditContinuationResult,
+} from "./audit-continuation.js";
 export {
   APPLICATION_SECRET_BEARING_ROLE_PATTERNS,
   ApplicationTokenError,

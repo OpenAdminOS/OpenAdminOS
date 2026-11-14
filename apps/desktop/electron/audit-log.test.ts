@@ -210,6 +210,7 @@ describe("audit log anchor", () => {
         startHash: AUDIT_CHAIN_START_HASH,
         lastHash: AUDIT_CHAIN_START_HASH,
         rowCount: 0,
+        lastSeq: 0,
       });
       storeWith(path, ["a", "b"]);
       const anchorBefore = readFileSync(`${path}-audit-anchor.json`, "utf8");

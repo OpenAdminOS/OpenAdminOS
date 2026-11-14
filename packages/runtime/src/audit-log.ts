@@ -121,6 +121,20 @@ export interface AuditLogChainSummary {
   finalHash: string;
 }
 
+/** One stored row as `readRange` returns it, for checking a continuation elsewhere. */
+export interface AuditLogRangeRow {
+  seq: number;
+  previous_sha256: string;
+  sha256: string;
+  event_json: string;
+}
+
+/** A position in the chain: a row's seq and hash. */
+export interface AuditLogPosition {
+  seq: number;
+  sha256: string;
+}
+
 /** The anchor file is the database path with this suffix. */
 const AUDIT_ANCHOR_SUFFIX = "-audit-anchor.json";
 
@@ -168,6 +182,12 @@ interface AuditLogAnchor {
   lastHash: string;
   /** Rows chained from startHash up to lastHash. */
   rowCount: number;
+  /**
+   * The seq of the row lastHash belongs to, 0 before the first row. Kept
+   * so an empty table after a prune still reports where the chain is.
+   * Anchors written before it existed leave it out.
+   */
+  lastSeq?: number;
 }
 
 type AnchorRead = { kind: "missing" } | { kind: "unreadable" } | { kind: "ok"; anchor: AuditLogAnchor };
@@ -273,6 +293,35 @@ export class AuditLogStore {
       this.db.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  /**
+   * Up to `limit` rows with a seq above `afterSeq`, oldest first, as
+   * stored. Read-only and unverified: the reader checks them, for
+   * example with verifyAuditContinuation.
+   */
+  readRange(afterSeq: number, limit: number): AuditLogRangeRow[] {
+    if (!Number.isSafeInteger(afterSeq) || afterSeq < 0) throw new RangeError("afterSeq must be a non-negative integer.");
+    if (!Number.isSafeInteger(limit) || limit < 1) throw new RangeError("limit must be a positive integer.");
+    return this.db
+      .prepare("SELECT seq, previous_sha256, sha256, event_json FROM audit_log WHERE seq > ? ORDER BY seq ASC LIMIT ?")
+      .all(afterSeq, limit) as unknown as AuditLogRangeRow[];
+  }
+
+  /**
+   * The newest row's seq and hash. An empty table reports the position
+   * its anchor keeps: after a prune that removed every row, the newest
+   * removed row, which the next row is chained to; before the first row,
+   * seq 0 and AUDIT_CHAIN_START_HASH.
+   */
+  tip(): AuditLogPosition {
+    const last = this.db.prepare("SELECT seq, sha256 FROM audit_log ORDER BY seq DESC LIMIT 1").get() as AuditLogPosition | undefined;
+    if (last) return { seq: last.seq, sha256: last.sha256 };
+    const read = this.readAnchor();
+    if (read.kind === "ok" && read.anchor.rowCount === 0 && read.anchor.lastHash !== AUDIT_CHAIN_START_HASH) {
+      return { seq: read.anchor.lastSeq ?? this.lastUsedSeq(), sha256: read.anchor.lastHash };
+    }
+    return { seq: 0, sha256: AUDIT_CHAIN_START_HASH };
   }
 
   has(eventId: string): boolean {
@@ -458,11 +507,11 @@ export class AuditLogStore {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const anchorHolds = this.anchorState().holds;
-      const newest = this.db.prepare("SELECT sha256 FROM audit_log ORDER BY seq DESC LIMIT 1").get() as { sha256: string } | undefined;
+      const newest = this.db.prepare("SELECT seq, sha256 FROM audit_log ORDER BY seq DESC LIMIT 1").get() as AuditLogPosition | undefined;
       while (Number(remove.run().changes) > 0) removed += 1;
       // Before the commit: if it does not happen, the rows the anchor
       // passes over are still chained to its start, which is accepted.
-      if (removed > 0 && anchorHolds) this.writeAnchor(newest?.sha256);
+      if (removed > 0 && anchorHolds) this.writeAnchor(newest ? { seq: newest.seq, sha256: newest.sha256 } : undefined);
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -517,6 +566,12 @@ export class AuditLogStore {
       return `it holds ${between.count.toLocaleString("en-US")} entries where this device recorded ${anchor.rowCount.toLocaleString("en-US")}.`;
     }
     return undefined;
+  }
+
+  /** The highest seq the table ever gave out, for an anchor written before it kept lastSeq. */
+  private lastUsedSeq(): number {
+    const row = this.db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'audit_log'").get() as { seq: number } | undefined;
+    return row?.seq ?? 0;
   }
 
   private isEmpty(): boolean {
@@ -583,7 +638,8 @@ export class AuditLogStore {
         typeof value.lastHash === "string" &&
         typeof value.rowCount === "number" &&
         Number.isInteger(value.rowCount) &&
-        value.rowCount >= 0
+        value.rowCount >= 0 &&
+        (value.lastSeq === undefined || (typeof value.lastSeq === "number" && Number.isSafeInteger(value.lastSeq) && value.lastSeq >= 0))
       ) {
         return { kind: "ok", anchor: value as AuditLogAnchor };
       }
@@ -595,14 +651,14 @@ export class AuditLogStore {
 
   /**
    * Writes the anchor for the table as this connection sees it, durably.
-   * `emptiedAfter` is the newest hash a prune that may empty the table
+   * `emptiedAfter` is the newest row a prune that may empty the table
    * removed, which an empty table stays chained to.
    */
-  private writeAnchor(emptiedAfter?: string): void {
+  private writeAnchor(emptiedAfter?: AuditLogPosition): void {
     if (!this.anchorPath) return;
     const first = this.db.prepare("SELECT seq, previous_sha256 FROM audit_log ORDER BY seq ASC LIMIT 1").get() as { seq: number; previous_sha256: string } | undefined;
     const last = this.db.prepare("SELECT seq, sha256 FROM audit_log ORDER BY seq DESC LIMIT 1").get() as { seq: number; sha256: string } | undefined;
-    const empty = emptiedAfter ?? AUDIT_CHAIN_START_HASH;
+    const empty = emptiedAfter?.sha256 ?? AUDIT_CHAIN_START_HASH;
     const anchor: AuditLogAnchor = {
       version: 1,
       startHash: first?.previous_sha256 ?? empty,
@@ -610,6 +666,7 @@ export class AuditLogStore {
       // Rows are appended with consecutive numbers and removed only from
       // the oldest, so the span of numbers is the count the app left.
       rowCount: first && last ? last.seq - first.seq + 1 : 0,
+      lastSeq: last?.seq ?? emptiedAfter?.seq ?? 0,
     };
     writeFileDurablySync(this.anchorPath, `${JSON.stringify(anchor)}\n`);
   }
