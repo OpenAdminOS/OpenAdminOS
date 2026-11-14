@@ -76,6 +76,7 @@ export {
   type OllamaEndpointTrust,
 } from "./llm-ollama.js";
 export { createCodexLlm, probeCodexLlm } from "./llm-codex.js";
+export { LlmCancelledError, LlmTimeoutError, llmErrorCode } from "./llm-errors.js";
 export {
   createClaudeCodeLlm,
   createClaudeCodeProcessEnv,
@@ -1359,7 +1360,21 @@ function isAbsolutePath(value: string): boolean {
   return /^[/\\]/.test(value) || /^[A-Za-z]:[/\\]/.test(value);
 }
 
+/**
+ * Optional fixed folder of the bundled agents. A headless host sets it to
+ * the `agents` folder of its own release checkout, so the current
+ * directory never decides which agents run. Defaults to undefined: the
+ * folder is searched from the current directory and the runtime's
+ * location, as before.
+ */
+let builtInAgentsRoot: string | undefined;
+
+export function setBuiltInAgentsRoot(dir: string | undefined): void {
+  builtInAgentsRoot = dir;
+}
+
 function findAgentsRoot(): string {
+  if (builtInAgentsRoot !== undefined) return builtInAgentsRoot;
   for (const startPath of getSearchStartPaths()) {
     let currentPath = resolve(startPath);
 

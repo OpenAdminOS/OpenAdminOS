@@ -6,11 +6,13 @@ import type {
   RunLlmApi,
 } from "@openadminos/agent-sdk";
 
+import { LlmCancelledError, LlmTimeoutError } from "./llm-errors.js";
+
 export interface OllamaProviderOptions {
   endpoint?: string;
   defaultModel?: string;
   timeoutMs?: number;
-  /** Transport for the chat requests; defaults to the global fetch. Redirects always fail. */
+  /** Transport for the chat requests; defaults to the global fetch. */
   fetchImpl?: typeof fetch;
 }
 
@@ -119,22 +121,20 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
 
       let response: Response;
       try {
-        // A redirect would replay the prompt to wherever the server points.
         response = await (options.fetchImpl ?? fetch)(url, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(body),
           signal: controller.signal,
-          redirect: "error",
         });
       } catch (error) {
         clearTimeout(timer);
         opts.signal?.removeEventListener("abort", abortFromCaller);
         if (error instanceof Error && error.name === "AbortError") {
           if (opts.signal?.aborted) {
-            throw new Error("Ollama request stopped by user.");
+            throw new LlmCancelledError("Ollama request stopped by user.");
           }
-          throw new Error(`Ollama timed out after ${timeoutMs}ms at ${url}.`);
+          throw new LlmTimeoutError(`Ollama timed out after ${timeoutMs}ms at ${url}.`);
         }
         throw new Error(`Ollama not reachable at ${url}: ${describe(error)}`);
       }
@@ -237,6 +237,12 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
             }
           }
         }
+      } catch (error) {
+        // A stream cut by the timeout or by the caller surfaces as a bare
+        // AbortError; name which one it was.
+        if (opts.signal?.aborted) throw new LlmCancelledError("Ollama request stopped by user.");
+        if (controller.signal.aborted) throw new LlmTimeoutError(`Ollama timed out after ${timeoutMs}ms at ${url}.`);
+        throw error;
       } finally {
         clearTimeout(timer);
         opts.signal?.removeEventListener("abort", abortFromCaller);

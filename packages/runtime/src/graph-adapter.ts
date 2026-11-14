@@ -640,12 +640,13 @@ async function sendGraphRequest<T>(input: GraphRequestInput, exchange: GraphExch
       bodyText = await response.text();
     } catch (error) {
       if (input.signal?.aborted) throw new Error(GRAPH_REQUEST_CANCELLED);
-      const isTimeout = error instanceof Error && error.name === "AbortError";
-      throw new Error(
-        isTimeout
-          ? `Graph request timed out after ${input.timeoutMs}ms while reading the response: ${input.url}`
-          : `Graph response could not be read (${input.url}): ${describe(error)}`,
-      );
+      if (controller.signal.aborted) {
+        throw new Error(`Graph request timed out after ${input.timeoutMs}ms while reading the response: ${input.url}`);
+      }
+      // Any other read failure keeps its earlier meaning: a JSON success
+      // fails with the read error, everything else goes on with no body.
+      if (response.ok && expectJson) throw error;
+      bodyText = "";
     } finally {
       clearTimeout(timer);
       releaseSignal();

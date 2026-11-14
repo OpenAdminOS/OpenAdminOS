@@ -6,13 +6,15 @@ import type {
   RunLlmApi,
 } from "@openadminos/agent-sdk";
 
+import { LlmCancelledError, LlmTimeoutError } from "./llm-errors.js";
+
 export interface LmStudioProviderOptions {
   endpoint?: string;
   /** Stops the request, for the first-launch scan timeout. */
   signal?: AbortSignal;
   defaultModel?: string;
   timeoutMs?: number;
-  /** Transport for the chat requests; defaults to the global fetch. Redirects always fail. */
+  /** Transport for the chat requests; defaults to the global fetch. */
   fetchImpl?: typeof fetch;
 }
 
@@ -98,20 +100,18 @@ export function createLmStudioLlm(
       const url = `${endpoint.replace(/\/$/, "")}/chat/completions`;
       let response: Response;
       try {
-        // A redirect would replay the prompt to wherever the server points.
         response = await (options.fetchImpl ?? fetch)(url, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(createChatRequestBody({ ...opts, model, stream: false })),
           signal: controller.signal,
-          redirect: "error",
         });
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
           if (opts.signal?.aborted) {
-            throw new Error("LM Studio request stopped by user.");
+            throw new LlmCancelledError("LM Studio request stopped by user.");
           }
-          throw new Error(`LM Studio timed out after ${timeoutMs}ms at ${url}.`);
+          throw new LlmTimeoutError(`LM Studio timed out after ${timeoutMs}ms at ${url}.`);
         }
         throw new Error(`LM Studio not reachable at ${url}: ${describe(error)}`);
       } finally {
@@ -165,16 +165,15 @@ export function createLmStudioLlm(
           headers: { "content-type": "application/json" },
           body: JSON.stringify(createChatRequestBody({ ...opts, model, stream: true })),
           signal: controller.signal,
-          redirect: "error",
         });
       } catch (error) {
         clearTimeout(timer);
         opts.signal?.removeEventListener("abort", abortFromCaller);
         if (error instanceof Error && error.name === "AbortError") {
           if (opts.signal?.aborted) {
-            throw new Error("LM Studio request stopped by user.");
+            throw new LlmCancelledError("LM Studio request stopped by user.");
           }
-          throw new Error(`LM Studio timed out after ${timeoutMs}ms at ${url}.`);
+          throw new LlmTimeoutError(`LM Studio timed out after ${timeoutMs}ms at ${url}.`);
         }
         throw new Error(`LM Studio not reachable at ${url}: ${describe(error)}`);
       }
@@ -255,6 +254,12 @@ export function createLmStudioLlm(
           model: actualModel,
           ...(finalTokenUsage ? { tokenUsage: finalTokenUsage } : {}),
         };
+      } catch (error) {
+        // A stream cut by the timeout or by the caller surfaces as a bare
+        // AbortError; name which one it was.
+        if (opts.signal?.aborted) throw new LlmCancelledError("LM Studio request stopped by user.");
+        if (controller.signal.aborted) throw new LlmTimeoutError(`LM Studio timed out after ${timeoutMs}ms at ${url}.`);
+        throw error;
       } finally {
         clearTimeout(timer);
         opts.signal?.removeEventListener("abort", abortFromCaller);
@@ -488,11 +493,11 @@ function truncate(value: string, max: number): string {
  */
 export async function fetchLocal(url: string, init: { signal?: AbortSignal } = {}): Promise<Response> {
   try {
-    return await fetch(url, { ...init, redirect: "error" });
+    return await fetch(url, init);
   } catch (error) {
     const code = (error as { cause?: { code?: unknown } } | undefined)?.cause?.code;
     if (code !== "UND_ERR_SOCKET" || init.signal?.aborted) throw error;
-    return fetch(url, { ...init, redirect: "error" });
+    return fetch(url, init);
   }
 }
 

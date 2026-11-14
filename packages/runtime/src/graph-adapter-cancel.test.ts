@@ -63,3 +63,30 @@ describe("graph adapter cancellation", () => {
     assert.equal(calls, 1);
   });
 });
+
+/** A response whose body fails to read for a reason other than an abort. */
+function brokenBody(status: number): Response {
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.error(new TypeError("terminated"));
+    },
+  });
+  return new Response(body, { status });
+}
+
+describe("graph adapter body read failures keep their earlier meaning", () => {
+  it("reports the HTTP status of an error response whose body cannot be read", async () => {
+    const graph = createGraphAdapter({ tokenProvider: async () => "token", fetchImpl: (async () => brokenBody(500)) as typeof fetch, maxRetries: 0 });
+    await assert.rejects(graph.request({ method: "GET", path: "/users" }), /Graph responded with HTTP 500 for .*\/users: $/);
+  });
+
+  it("treats an unreadable body of a request that expects none as empty", async () => {
+    const graph = createGraphAdapter({ tokenProvider: async () => "token", fetchImpl: (async () => brokenBody(200)) as typeof fetch, unauditedWrites: true });
+    assert.equal(await graph.request({ method: "DELETE", path: "/users/1" }), undefined);
+  });
+
+  it("fails a JSON success whose body cannot be read with the read error", async () => {
+    const graph = createGraphAdapter({ tokenProvider: async () => "token", fetchImpl: (async () => brokenBody(200)) as typeof fetch });
+    await assert.rejects(graph.request({ method: "GET", path: "/users" }), /terminated/);
+  });
+});
