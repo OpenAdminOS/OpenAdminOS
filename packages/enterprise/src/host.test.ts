@@ -397,6 +397,26 @@ describe("createEnterpriseHost", () => {
     assert.deepEqual(logs[0]?.fields, { count: 2, ok: true });
   });
 
+  it("refuses IPC requests once the licence has expired", async () => {
+    let state: EnterpriseEntitlement["state"] = "grace";
+    const ipc = new FakeIpc();
+    let calls = 0;
+    const { host } = createEnterpriseHost({
+      entitlement: () => ({ ...ENTITLEMENT, state }),
+      ipc,
+      storage: new MemoryStorage(),
+      log: () => undefined,
+    });
+    host.registerIpc("team.status", () => {
+      calls += 1;
+      return null;
+    });
+    assert.equal(await ipc.invoke("openadminos-enterprise:team.status", null), null);
+    state = "expired";
+    await assertRejects(ipc.invoke("openadminos-enterprise:team.status", null), "expired");
+    assert.equal(calls, 1);
+  });
+
   it("removes every handler on dispose and refuses later calls", async () => {
     const { host, ipc, controller } = setup();
     host.registerIpc("a", () => null);

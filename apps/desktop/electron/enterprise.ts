@@ -80,6 +80,7 @@ export type EnterpriseOutcome =
   | { readonly kind: "failed"; readonly error: Error };
 
 export interface EnterpriseRuntime {
+  /** What happened at launch. `status()` reflects later changes, such as the end of the grace period. */
   readonly outcome: EnterpriseOutcome;
   status(): EnterpriseStatusView;
   deactivate(): Promise<void>;
@@ -105,6 +106,8 @@ export interface LoadEnterpriseOptions {
   readonly storage: EnterpriseStorageBackend;
   readonly log: EnterpriseLogSink;
   readonly onChange?: () => void;
+  /** Starts a timer and returns its cancel function; defaults to an unref'd setTimeout. */
+  readonly setTimer?: (callback: () => void, delayMs: number) => () => void;
 }
 
 const INACTIVE: EnterpriseStatusView = Object.freeze({ active: false });
@@ -210,9 +213,51 @@ export async function loadEnterprise(options: LoadEnterpriseOptions): Promise<En
   });
   const active = handle;
   let stopped = false;
+  let cancelTimer: (() => void) | undefined;
+
+  const stop = async () => {
+    if (stopped) return;
+    stopped = true;
+    cancelTimer?.();
+    cancelTimer = undefined;
+    try {
+      await active.deactivate();
+    } catch (error) {
+      options.log("error", "enterprise: the team features module failed to stop", { error: errorMessage(error) });
+    } finally {
+      // Removes the module's IPC handlers and calls onChange.
+      controller.dispose();
+    }
+  };
+
+  const expired = () => entitlementAt(verified, options.now()).state === "expired";
+  const expire = () => {
+    if (stopped) return;
+    options.log("warn", "enterprise: the licence grace period ended, team features are off", {
+      graceEndsAt: new Date(verified.graceEndsAt).toISOString(),
+    });
+    void stop();
+  };
+
+  // The grace period can end while the app runs. One timer, unref'd so it
+  // never keeps the app alive, waits in steps no longer than setTimeout
+  // allows and checks the clock again at each step.
+  const setTimer = options.setTimer ?? defaultSetTimer;
+  const scheduleExpiry = () => {
+    if (stopped) return;
+    const remaining = verified.graceEndsAt - options.now();
+    if (remaining <= 0) {
+      expire();
+      return;
+    }
+    cancelTimer = setTimer(scheduleExpiry, Math.min(remaining, MAX_TIMER_DELAY_MS));
+  };
+  scheduleExpiry();
+
   return Object.freeze({
     outcome: Object.freeze({ kind: "active" }),
     status: (): EnterpriseStatusView => {
+      if (!stopped && expired()) expire();
       if (stopped) return INACTIVE;
       const snapshot = controller.snapshot();
       return Object.freeze({
@@ -222,18 +267,17 @@ export async function loadEnterprise(options: LoadEnterpriseOptions): Promise<En
         settingsSections: snapshot.settingsSections,
       });
     },
-    deactivate: async () => {
-      if (stopped) return;
-      stopped = true;
-      try {
-        await active.deactivate();
-      } catch (error) {
-        options.log("error", "enterprise: the team features module failed to stop", { error: errorMessage(error) });
-      } finally {
-        controller.dispose();
-      }
-    },
+    deactivate: stop,
   });
+}
+
+/** The longest delay setTimeout accepts (2^31 - 1 ms). */
+export const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+function defaultSetTimer(callback: () => void, delayMs: number): () => void {
+  const timer = setTimeout(callback, delayMs);
+  timer.unref();
+  return () => clearTimeout(timer);
 }
 
 function failed(options: LoadEnterpriseOptions, error: unknown): EnterpriseRuntime {

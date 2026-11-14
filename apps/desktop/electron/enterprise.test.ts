@@ -25,6 +25,7 @@ import {
   ENTERPRISE_LICENCE_FILE_MAX_BYTES,
   ENTERPRISE_MODULE_SPECIFIER,
   EnterpriseLicenceFileError,
+  MAX_TIMER_DELAY_MS,
   EnterpriseModuleLoadError,
   enterpriseFiles,
   ipcMainRegistrar,
@@ -268,6 +269,105 @@ describe("loadEnterprise with a valid licence", () => {
     const runtime = await loadEnterprise(options);
     assert.equal(runtime.outcome.kind, "active");
     assert.equal(seen.host?.entitlement().state, "grace");
+  });
+
+  it("turns the module off when the grace period ends during the session", async () => {
+    const graceEndsAt = (NOW_SECONDS + 3 * DAY) * 1000 + 30 * 24 * 60 * 60 * 1000;
+    let now = NOW;
+    const timers: Array<{ callback: () => void; delay: number; cancelled: boolean }> = [];
+    const { module, seen } = trackingModule();
+    const changes: number[] = [];
+    const { options, ipc } = harness({
+      // Expires in three days, with a 30 day grace period: past 2^31-1 ms.
+      token: licence({ expiresAt: NOW_SECONDS + 3 * DAY, graceSeconds: 30 * DAY }),
+      module,
+      now: () => now,
+      onChange: () => changes.push(1),
+      setTimer: (callback, delay) => {
+        const timer = { callback, delay, cancelled: false };
+        timers.push(timer);
+        return () => {
+          timer.cancelled = true;
+        };
+      },
+    });
+    const runtime = await loadEnterprise(options);
+    assert.equal(runtime.outcome.kind, "active");
+    assert.equal(timers.length, 1);
+    assert.equal(timers[0]?.delay, MAX_TIMER_DELAY_MS);
+
+    // The first step ends before the grace period does: wait again.
+    now += MAX_TIMER_DELAY_MS;
+    timers[0]?.callback();
+    assert.equal(timers.length, 2);
+    assert.equal(timers[1]?.delay, graceEndsAt - now);
+    assert.equal(seen.deactivated, 0);
+    assert.equal(runtime.status().active, true);
+
+    // Cross graceEndsAt.
+    now = graceEndsAt;
+    timers[1]?.callback();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(seen.deactivated, 1);
+    assert.equal(ipc.handlers.size, 0);
+    assert.equal(runtime.status().active, false);
+    assert.ok(changes.length >= 1);
+    assert.equal(timers.length, 2);
+  });
+
+  it("turns the module off from status() when the clock passed the grace end before the timer fired", async () => {
+    let now = NOW;
+    const cancelled: boolean[] = [];
+    const { module, seen } = trackingModule();
+    const { options, ipc } = harness({
+      token: licence({ expiresAt: NOW_SECONDS + DAY, graceSeconds: DAY }),
+      module,
+      now: () => now,
+      setTimer: () => () => cancelled.push(true),
+    });
+    const runtime = await loadEnterprise(options);
+    assert.equal(runtime.status().active, true);
+    now = NOW + 2 * DAY * 1000;
+    assert.equal(runtime.status().active, false);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(seen.deactivated, 1);
+    assert.equal(ipc.handlers.size, 0);
+    assert.deepEqual(cancelled, [true]);
+  });
+
+  it("uses an unref'd timer that is cleared on deactivate", async () => {
+    const realSetTimeout = globalThis.setTimeout;
+    const realClearTimeout = globalThis.clearTimeout;
+    const created: Array<{ delay: number | undefined; unref: boolean; cleared: boolean; timer: ReturnType<typeof setTimeout> }> = [];
+    globalThis.setTimeout = ((callback: () => void, delay?: number) => {
+      const timer = realSetTimeout(callback, delay);
+      const entry = { delay, unref: false, cleared: false, timer };
+      const unref = timer.unref.bind(timer);
+      timer.unref = () => {
+        entry.unref = true;
+        return unref();
+      };
+      created.push(entry);
+      return timer;
+    }) as typeof setTimeout;
+    globalThis.clearTimeout = ((timer: ReturnType<typeof setTimeout>) => {
+      const entry = created.find((candidate) => candidate.timer === timer);
+      if (entry) entry.cleared = true;
+      realClearTimeout(timer);
+    }) as typeof clearTimeout;
+    try {
+      const { module } = trackingModule();
+      const { options } = harness({ token: licence(), module });
+      const runtime = await loadEnterprise(options);
+      assert.equal(created.length, 1);
+      assert.equal(created[0]?.delay, MAX_TIMER_DELAY_MS);
+      assert.equal(created[0]?.unref, true);
+      await runtime.deactivate();
+      assert.equal(created[0]?.cleared, true);
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+      globalThis.clearTimeout = realClearTimeout;
+    }
   });
 
   it("refuses a module built for another interface version and keeps the app working", async () => {

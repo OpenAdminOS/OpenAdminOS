@@ -48,7 +48,8 @@ export type EnterpriseHostErrorCode =
   | "duplicate"
   | "limit"
   | "invalid-value"
-  | "disposed";
+  | "disposed"
+  | "expired";
 
 export class EnterpriseHostError extends Error {
   readonly code: EnterpriseHostErrorCode;
@@ -138,6 +139,9 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
     const channel = enterpriseIpcChannel(name);
     options.ipc.handle(channel, async (input: unknown) => {
       if (disposed) throw new EnterpriseHostError("disposed", "Team features were turned off for this launch.");
+      if (options.entitlement().state === "expired") {
+        throw new EnterpriseHostError("expired", "The team features licence and its grace period ended. Install a renewed licence, then restart OpenAdminOS.");
+      }
       const request = checkJson(input ?? null, ENTERPRISE_LIMITS.maxIpcInputBytes, `the request to ${name}`);
       let result: EnterpriseJson | void;
       try {
