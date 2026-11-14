@@ -176,7 +176,7 @@ describe("createEnterpriseHost", () => {
     }, TypeError);
   });
 
-  it("gives a module no path to tenant tokens, provider credentials or the keychain", async () => {
+  it("exposes no tenant tokens, provider credentials or keychain on the host surface", async () => {
     // Secrets the app holds next to the host. None of them are passed in.
     const appSecrets = {
       tenantAccessToken: "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.tenant-token",

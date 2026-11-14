@@ -27,7 +27,7 @@ const module: EnterpriseModule = {
 export default module;
 ```
 
-`activate` is called once per launch, and only when the app holds a valid licence. Returning `undefined` keeps the module off; the host then removes anything it registered. The app refuses a module whose `interfaceVersion` is not the version it implements (`EnterpriseInterfaceVersionError`), logs it, and keeps working without team features.
+`activate` is called once per launch, and only when the app holds a valid licence. Returning `undefined` keeps the module off; the host then removes anything it registered. A module whose `interfaceVersion` is not the version the app implements is not activated (`EnterpriseInterfaceVersionError`, logged), and the app keeps working without team features. The check reads the export, so the module has already been imported and its top-level code has run.
 
 `EnterpriseHost` gives a module host APIs only:
 
@@ -41,6 +41,8 @@ export default module;
 | `log` | Writes to the app log, prefixed with `enterprise module:` | 500 characters per message |
 
 The host object and every member are frozen. Nothing reachable from it exposes tenant tokens, provider credentials, the keychain or a secret store, and writes to a tenant still go through the app's diff confirmation. Graph calls and prompts stay on the admin's device.
+
+This is a boundary by contract. The module runs in the app's main process, so code that ignored the interface could import app internals itself; the tests cover the host surface, not the process. Review of the module enforces the contract until the module runs in a separate process.
 
 `src/interface.test.ts` fails on any change to the interface: a compile-time check that a version 1 module and host still type check, and a comparison of the emitted declarations against `api/interface-v1.d.ts`. A compatible change updates the snapshot in the same commit; an incompatible one raises `ENTERPRISE_INTERFACE_VERSION` and adds a new snapshot.
 

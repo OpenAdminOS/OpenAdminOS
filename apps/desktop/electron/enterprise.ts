@@ -8,9 +8,10 @@
 //
 // Without a valid licence the loader stops before resolving or importing
 // anything: no module code runs, and no IPC handler, listener, timer or
-// socket is created. A module built for another interface version is
-// refused with `EnterpriseInterfaceVersionError`, logged, and the app keeps
-// working without team features.
+// socket is created. A module built for another interface version is not
+// activated (`EnterpriseInterfaceVersionError`, logged) and the app keeps
+// working without team features. The version is read from the export, so
+// the module has been imported and its top-level code has run by then.
 
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
