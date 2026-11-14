@@ -10,7 +10,7 @@ Everything is built on `node:crypto`. There is no other dependency besides `@ope
 | --- | --- |
 | Device key | Ed25519. Private key as PKCS #8 PEM. Public key as its 32 raw bytes in base64url without padding (43 characters), in canonical base64url, and not one of the eight small-order encodings (the identity and the points of order 2, 4 and 8), which are refused. |
 | Device fingerprint | SHA-256 of the public key's SubjectPublicKeyInfo DER: 64 lowercase hex characters, or 52 Crockford base32 characters for showing. |
-| TLS certificate | Self-signed X.509 v3, ECDSA P-256 with SHA-256. Subject and issuer CN, a 16 byte random serial, basicConstraints CA false (critical), keyUsage digitalSignature (critical), optional subjectAltName with DNS names and IP addresses. Built with a small DER encoder in `src/der.ts`. |
+| TLS certificate | Self-signed X.509 v3, ECDSA P-256 with SHA-256. Subject and issuer CN, a 16 byte random serial, basicConstraints CA false (critical), keyUsage digitalSignature (critical), extendedKeyUsage serverAuth and clientAuth, optional subjectAltName with DNS names and IP addresses. Built with a small DER encoder in `src/der.ts`. |
 | TLS pin | SHA-256 of the certificate's SubjectPublicKeyInfo DER, 64 lowercase hex characters. It stays the same when the certificate is reissued with the same key. |
 | Signature | Ed25519 over `<domain>\n<canonical JSON of the payload>` in UTF-8, as base64url (86 characters). |
 
