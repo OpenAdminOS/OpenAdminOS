@@ -149,6 +149,16 @@ describe("enterprise interface", () => {
     assert.ok(Object.isFrozen(enterprise.ENTERPRISE_LIMITS));
   });
 
+  it("keeps the version 1 licence limits", () => {
+    // Licences issued by the team service must fit these. Tightening one
+    // can refuse licences already issued.
+    assert.deepEqual(
+      { ...enterprise.LICENCE_LIMITS },
+      { maxTokenLength: 4096, maxFeatures: 64, maxGraceSeconds: 31536000 },
+    );
+    assert.ok(Object.isFrozen(enterprise.LICENCE_LIMITS));
+  });
+
   it("keeps the version 1 name and storage key patterns", () => {
     assert.equal(enterprise.ENTERPRISE_NAME_PATTERN.source, "^[a-z][a-z0-9-]{0,47}(?:\\.[a-z][a-z0-9-]{0,47}){0,3}$");
     assert.equal(enterprise.ENTERPRISE_NAME_PATTERN.flags, "");
