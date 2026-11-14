@@ -139,8 +139,14 @@ export function parseSandboxConfig(value: unknown, path: string): SandboxConfig 
     ? DEFAULT_RUN_DEADLINE_SECONDS
     : integer(root.runDeadlineSeconds, "runDeadlineSeconds", 60, 6 * 3_600);
 
-  if (!Array.isArray(root.agents) || root.agents.length === 0) {
-    throw new FieldError("agents", "must list at least one agent to run.");
+  // A paired sandbox may run assigned schedules only; without pairing an
+  // empty list would run nothing at all.
+  if (!Array.isArray(root.agents)) throw new FieldError("agents", "must be a list of agents to run.");
+  if (root.agents.length === 0 && root.pairing === undefined) {
+    throw new SandboxRefusal(
+      "config-no-agents",
+      'Sandbox config field "agents" lists no agent, and there is no "pairing" section that could assign one. Add an agent with its templateSha256, or add pairing so a desktop can assign schedules.',
+    );
   }
   const seen = new Set<string>();
   const agents = root.agents.map((entry, index) => {

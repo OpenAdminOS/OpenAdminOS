@@ -410,6 +410,25 @@ describe("sandbox pairing API", () => {
     }
   });
 
+  it("runs a sandbox with no config agents on assigned schedules only", async () => {
+    const h = await paired({ configOverrides: { agents: [] } });
+    try {
+      const before = h.host.status();
+      assert.deepEqual(before.schedules, []);
+      assert.equal(before.model.digest, "not checked yet");
+      const applied = await call(h.port, "PUT", "/v1/assignments", { tls: h.tls, body: assignment(h, 1, [entry("compliance-overview")]) });
+      assert.equal(applied.status, 200, JSON.stringify(applied.body));
+      const schedules = h.host.status().schedules;
+      assert.deepEqual(schedules.map((schedule) => [schedule.agentId, schedule.source]), [["compliance-overview", "assigned"]]);
+      assert.ok(schedules[0]!.nextRunAt);
+      const outcome = await h.host.runAgent({ id: "compliance-overview", templateSha256: bundledHash("compliance-overview"), intervalSeconds: 3600 }, "schedule");
+      assert.equal(outcome.kind, "completed", outcome.kind === "completed" ? "" : outcome.message);
+      assert.equal(h.host.status().model.digest, "sha256:abc", "known after the first preflight");
+    } finally {
+      await h.close();
+    }
+  });
+
   it("lets a config schedule win over an assigned one, and unpairing removes assigned schedules only", async () => {
     const h = await paired();
     try {

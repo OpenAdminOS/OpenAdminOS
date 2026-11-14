@@ -46,6 +46,10 @@ describe("pairing listen address", () => {
       assert.deepEqual(parseSandboxConfig({ ...base, pairing: { listen: "127.0.0.1:7443" } }, `${dir}/sandbox.json`).pairing, { listen: { host: "127.0.0.1", port: 7443 } });
       assert.equal(reasonOf(() => parseSandboxConfig({ ...base, pairing: { listen: "8.8.8.8:7443" } }, `${dir}/sandbox.json`)), "listen-address-not-private");
       assert.equal(reasonOf(() => parseSandboxConfig({ ...base, pairing: { listen: "127.0.0.1:7443", open: true } }, `${dir}/sandbox.json`)), "config-invalid");
+      // A paired sandbox may run assigned schedules only; without pairing, no agent is refused by name.
+      assert.deepEqual(parseSandboxConfig({ ...base, agents: [], pairing: { listen: "127.0.0.1:7443" } }, `${dir}/sandbox.json`).agents, []);
+      assert.equal(reasonOf(() => parseSandboxConfig({ ...base, agents: [] }, `${dir}/sandbox.json`)), "config-no-agents");
+      assert.equal(reasonOf(() => parseSandboxConfig({ ...base, agents: "all" }, `${dir}/sandbox.json`)), "config-invalid");
     } finally {
       cleanup();
     }

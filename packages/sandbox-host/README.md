@@ -109,7 +109,7 @@ The secrets go in `secrets.json` next to the config (or `secretsFile`), mode 060
 
 ## Pairing with a desktop (optional)
 
-Without a `pairing` section nothing listens, and the host runs the config schedules alone. With one, the host serves a local API to one paired desktop:
+Without a `pairing` section nothing listens, and the host runs the config schedules alone; `agents` must then list at least one agent (`config-no-agents`). With one, the host serves a local API to one paired desktop, and `agents` may be empty for a sandbox that runs only assigned schedules:
 
 ```json
 "pairing": { "listen": "100.64.0.10:7443" }

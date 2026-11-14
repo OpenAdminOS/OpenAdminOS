@@ -53,7 +53,8 @@ export type RefusalReason =
   | "model-endpoint-socket"
   | "delivery-failed"
   | "listen-address-not-private"
-  | "pairing-files-invalid";
+  | "pairing-files-invalid"
+  | "config-no-agents";
 
 export class SandboxRefusal extends Error {
   constructor(
