@@ -271,6 +271,25 @@ describe("Runs: where each run executed", () => {
     expect(sandboxRow).not.toHaveTextContent(/This computer|stays on this device/);
   });
 
+  it("names the sandbox's model, not a desktop provider with the same id", async () => {
+    const run = createAwaitingConfirmationRun({
+      id: "run-sandbox-shared-id",
+      agentSlug: "agent-c",
+      status: "completed",
+      plan: undefined,
+      finishedAt: "2026-10-10T10:03:00.000Z",
+      executedOn: sandboxExecutedOn,
+      providerId: "anthropic",
+      model: "claude-sonnet",
+    });
+    const bridge = makeMockBridge({}, createMockAppState({ installedAgents: agents, runs: [run] }));
+    renderRoute(<Runs />, { path: "/runs", route: "/runs", bridge });
+
+    const row = rowFor(await screen.findByRole("list", { name: "Run history" }), "Agent C");
+    expect(row).toHaveTextContent(`Mini PC · Local model on Mini PC · ${sandboxExecutedOn.model} · local model on Mini PC`);
+    expect(row).not.toHaveTextContent(/Claude Code|claude-sonnet|hosted/);
+  });
+
   it("filters by this computer or by a sandbox", async () => {
     const user = userEvent.setup();
     const bridge = makeMockBridge({}, createMockAppState({ installedAgents: agents, runs: runsWithLocations() }));

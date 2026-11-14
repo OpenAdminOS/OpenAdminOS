@@ -432,13 +432,18 @@ function runDescription(
   providers: { id: string; name: string; isLocal?: boolean }[],
   tenants: { id: string; displayName: string }[],
 ): string {
-  const provider = providers.find((candidate) => candidate.id === run.providerId);
-  const providerName = provider?.name ?? run.providerId ?? "Provider not recorded";
+  // A sandbox run names the model on the sandbox, never a desktop provider
+  // that happens to share its id.
   const sandbox = run.executedOn?.kind === "sandbox" ? run.executedOn : undefined;
+  const provider = sandbox ? undefined : providers.find((candidate) => candidate.id === run.providerId);
+  const providerName = sandbox
+    ? RUN_LOCATION_COPY.sandboxProvider(sandbox.name)
+    : provider?.name ?? run.providerId ?? "Provider not recorded";
   const boundary = sandbox
     ? RUN_LOCATION_COPY.sandboxBoundary(sandbox.name)
     : provider ? (provider.isLocal ? "local, stays on this device" : "hosted") : "location not recorded";
-  const model = run.model ? ` · ${run.model}` : "";
+  const modelName = sandbox ? sandbox.model : run.model;
+  const model = modelName ? ` · ${modelName}` : "";
   return `${runLocationLabel(run.executedOn)} · ${providerName}${model} · ${boundary} · ${tenantNameForRun(run, tenants)} · ${capitalize(triggerForRun(run))}`;
 }
 
