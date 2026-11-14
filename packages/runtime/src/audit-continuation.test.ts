@@ -97,6 +97,11 @@ describe("verifyAuditContinuation", () => {
         },
         { name: "content that is not JSON", pin: pinAt2, rows: [{ ...rows[2]!, event_json: "{" }], tip, failure: "chain-row-invalid", seq: 3 },
         { name: "a stored hash that was replaced", pin: pinAt2, rows: [{ ...rows[2]!, sha256: "b".repeat(64) }], tip, failure: "chain-row-invalid", seq: 3 },
+        { name: "a seq that is not a number", pin: pinAt2, rows: [{ ...rows[2]!, seq: Number.NaN }], tip, failure: "chain-position-invalid", seq: -1 },
+        { name: "a fractional seq", pin: pinAt2, rows: [{ ...rows[2]!, seq: 2.5 }], tip, failure: "chain-position-invalid", seq: -1 },
+        { name: "a hash that is not hex", pin: pinAt2, rows: [{ ...rows[2]!, previous_sha256: "Z".repeat(64) }], tip, failure: "chain-position-invalid", seq: 3 },
+        { name: "a tip with a negative seq", pin: pinAt2, rows: [], tip: { ...tip, seq: -1 }, failure: "chain-position-invalid", seq: -1 },
+        { name: "a pin seq that is not a number", pin: { ...pinAt2, seq: Number.NaN }, rows: [rows[2]!], tip, failure: "chain-position-invalid", seq: -1 },
       ];
       for (const testCase of cases) {
         const result = verifyAuditContinuation(testCase.pin, testCase.rows, testCase.tip);

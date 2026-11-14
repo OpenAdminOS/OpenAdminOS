@@ -28,7 +28,9 @@ export type AuditContinuationFailure =
   /** The log is now shorter than what was accepted, or holds a different row at the pinned seq. */
   | "chain-rollback"
   /** A row's stored hash is not the hash of its content. */
-  | "chain-row-invalid";
+  | "chain-row-invalid"
+  /** A seq is not a non-negative whole number, or a hash is not 64 lowercase hex characters. */
+  | "chain-position-invalid";
 
 export type AuditContinuationResult =
   | { ok: true; pin: AuditLogPosition }
@@ -44,6 +46,18 @@ export function verifyAuditContinuation(
   rows: readonly AuditLogRangeRow[],
   tip: AuditLogPosition,
 ): AuditContinuationResult {
+  // Reject malformed positions first: NaN or a fraction passes every
+  // comparison below and would let a broken chain through.
+  for (const [name, position] of [["pin", pin], ["tip", tip]] as const) {
+    if (!isPosition(position.seq, position.sha256)) {
+      return fail("chain-position-invalid", Number.isSafeInteger(position.seq) ? position.seq : -1, `the ${name} is not a valid audit position.`);
+    }
+  }
+  for (const row of rows) {
+    if (!isPosition(row.seq, row.sha256) || !HASH.test(row.previous_sha256) || typeof row.event_json !== "string") {
+      return fail("chain-position-invalid", Number.isSafeInteger(row.seq) ? row.seq : -1, "a delivered entry has an invalid seq or hash.");
+    }
+  }
   if (tip.seq < pin.seq) {
     return fail("chain-rollback", tip.seq, `the log ends at entry ${tip.seq}, before entry ${pin.seq} that was already accepted.`);
   }
@@ -81,6 +95,12 @@ export function verifyAuditContinuation(
     return fail("chain-fork", previous.seq, `the newest entry ${previous.seq} differs from the entry delivered.`);
   }
   return { ok: true, pin: previous };
+}
+
+const HASH = /^[0-9a-f]{64}$/;
+
+function isPosition(seq: unknown, sha256: unknown): boolean {
+  return typeof seq === "number" && Number.isSafeInteger(seq) && seq >= 0 && typeof sha256 === "string" && HASH.test(sha256);
 }
 
 function fail(failure: AuditContinuationFailure, seq: number, detail: string): AuditContinuationResult {
