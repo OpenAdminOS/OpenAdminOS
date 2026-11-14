@@ -66,7 +66,26 @@ describe("renderSandboxReport", () => {
       { id: "each", format: "map", label: "", settings: { source: "{{ load.output }}", as: "x", do: [{ id: "inner", format: "llm", label: "", settings: {} }] } },
       { id: "count", format: "transform", label: "", settings: { kind: "count-by-field", source: "{{ load.output }}" } },
     ] as unknown as TemplateStep[];
-    assert.deepEqual([...modelDerivedStepIds(steps)].sort(), ["ask", "each", "shape"]);
+    assert.deepEqual([...modelDerivedStepIds(steps)].sort(), ["ask", "each", "inner", "shape"]);
+  });
+
+  it("follows model output inside a map, and a map item read from model output", () => {
+    const steps = [
+      { id: "load", format: "graph", label: "", settings: { method: "GET", path: "/users", scopes: [] } },
+      { id: "per_user", format: "map", label: "", settings: { source: "{{ load.output }}", as: "user", do: [
+        { id: "inner_ask", format: "llm", label: "", settings: { prompt: "{{ user.id }}" } },
+        { id: "inner_count", format: "transform", label: "", settings: { kind: "count-by-field", source: "{{ inner_ask.output }}" } },
+        { id: "inner_plain", format: "transform", label: "", settings: { kind: "count-by-field", source: "{{ user.groups }}" } },
+      ] } },
+      { id: "ask", format: "llm", label: "", settings: {} },
+      { id: "per_answer", format: "map", label: "", settings: { source: "{{ ask.output }}", as: "answer", do: [
+        { id: "answer_count", format: "transform", label: "", settings: { kind: "count-by-field", source: "{{ answer.items }}" } },
+      ] } },
+    ] as unknown as TemplateStep[];
+    const derived = modelDerivedStepIds(steps);
+    for (const id of ["inner_ask", "inner_count", "per_user", "ask", "answer", "answer_count", "per_answer"]) assert.ok(derived.has(id), id);
+    assert.equal(derived.has("inner_plain"), false);
+    assert.equal(derived.has("load"), false);
   });
 
   it("drops bare and filtered references to model steps", () => {
@@ -140,6 +159,46 @@ describe("sendDelivery", () => {
     assert.equal(result.outcome, "failed");
     assert.equal(calls, 1);
     assert.equal(result.detail.includes("abcDEF"), false);
+  });
+});
+
+describe("sendDelivery when the response body stalls", () => {
+  /** Headers arrive, then the body never ends; `honoursAbort` errors the body when the request aborts, as fetch does. */
+  const stalling = (status: number, honoursAbort: boolean, calls: { count: number }) =>
+    (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      calls.count += 1;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("{"));
+          if (honoursAbort) init?.signal?.addEventListener("abort", () => controller.error(new DOMException("aborted", "AbortError")), { once: true });
+        },
+      });
+      return new Response(body, { status, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+
+  for (const honoursAbort of [true, false]) {
+    it(`settles a stalled Slack and Discord delivery as failed, once${honoursAbort ? "" : ", even when the body ignores the abort"}`, async () => {
+      const calls = { count: 0 };
+      const slack = await sendDelivery({ delivery: { connector: "slack", channel: "C0123456789", notifyOnSuccess: true, notifyOnFailure: true, failureNotice: false }, secrets: { slack: { botToken: "xoxb-1" } }, text: "r", fetch: stalling(200, honoursAbort, calls), timeoutMs: 50 });
+      const discord = await sendDelivery({ delivery: { connector: "discord", notifyOnSuccess: true, notifyOnFailure: true, failureNotice: false }, secrets: { discord: { webhookUrl: WEBHOOK } }, text: "r", fetch: stalling(200, honoursAbort, calls), timeoutMs: 50 });
+      for (const result of [slack, discord]) {
+        assert.equal(result.outcome, "failed");
+        assert.match(result.detail, /did not finish within/);
+      }
+      assert.equal(calls.count, 2, "no retry");
+    });
+  }
+
+  it("stops a delivery when the host shuts down", async () => {
+    const shutdown = new AbortController();
+    const timer = setTimeout(() => shutdown.abort(), 20);
+    try {
+      const result = await sendDelivery({ delivery: { connector: "discord", notifyOnSuccess: true, notifyOnFailure: true, failureNotice: false }, secrets: { discord: { webhookUrl: WEBHOOK } }, text: "r", fetch: stalling(200, true, { count: 0 }), signal: shutdown.signal, timeoutMs: 60_000 });
+      assert.equal(result.outcome, "failed");
+      assert.match(result.detail, /stopped during the delivery/);
+    } finally {
+      clearTimeout(timer);
+    }
   });
 });
 

@@ -4,12 +4,12 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import type { RunLlmApi } from "@openadminos/agent-sdk";
-import { AuditLogStore, LlmTimeoutError } from "@openadminos/runtime";
+import { ApplicationTokenError, AuditLogStore, LlmTimeoutError, type ApplicationTokenProvider, type ApplicationTokenProviderOptions } from "@openadminos/runtime";
 
 import { loadSandboxConfig } from "./config.js";
 import { SandboxHost, type SandboxHostDeps } from "./host.js";
 import { main } from "./main.js";
-import { appClaims, bundledHash, fakeTokenProviders, ollamaFetch, tempDir, writeCertificate, writeConfig, writePrivate } from "./test-support.js";
+import { appClaims, bundledHash, fakeTokenProviders, ollamaFetch, tempDir, tokenFor, writeCertificate, writeConfig, writePrivate } from "./test-support.js";
 
 const READ = "DeviceManagementManagedDevices.Read.All";
 
@@ -478,6 +478,93 @@ describe("SandboxHost round two", () => {
     } finally {
       chmodSync(runsDir, 0o700);
       await host.close();
+      cleanup();
+    }
+  });
+});
+
+describe("SandboxHost round three", () => {
+  it("names the sign-in failure and the audit failure together", async () => {
+    const { dir, cleanup } = tempDir();
+    const config = loadSandboxConfig(writeConfig(dir));
+    const failing = (options: ApplicationTokenProviderOptions): ApplicationTokenProvider => {
+      const acquire = async (): Promise<never> => {
+        const error = new ApplicationTokenError("AADSTS700027", "AADSTS700027: certificate not registered", "AADSTS700027");
+        await options.onFailed?.(error);
+        throw error;
+      };
+      const provider = (async () => acquire()) as unknown as ApplicationTokenProvider;
+      provider.acquire = acquire;
+      return provider;
+    };
+    const host = new SandboxHost(config, { ...deps(), createTokenProvider: failing });
+    try {
+      host.open();
+      const store = (host as unknown as { audit: AuditLogStore }).audit;
+      const append = store.append.bind(store);
+      store.append = (events) => {
+        if (events.some((event) => event.type === "sandbox.token.failed")) throw new Error("disk full");
+        return append(events);
+      };
+      const outcome = await host.runAgent(config.agents[0]!, "schedule");
+      assert.equal(outcome.kind === "refused" && outcome.reason, "signin-certificate-not-registered");
+      assert.match(outcome.kind === "refused" ? outcome.message : "", /AADSTS700027.*audit log could not record this sign-in failure either: .*disk full/);
+    } finally {
+      await host.close();
+      cleanup();
+    }
+  });
+
+  it("puts the run id on token events during the run", async () => {
+    const { dir, cleanup } = tempDir();
+    const config = loadSandboxConfig(writeConfig(dir));
+    // Every Graph request gets a new token, as after an expiry.
+    const everyRequest = (options: ApplicationTokenProviderOptions): ApplicationTokenProvider => {
+      const acquire = async () => {
+        const token = tokenFor(appClaims([READ]));
+        await options.onAcquired?.(token);
+        return token;
+      };
+      const provider = (async () => {
+        const token = await acquire();
+        return { accessToken: token.accessToken, scopes: token.roles };
+      }) as ApplicationTokenProvider;
+      provider.acquire = acquire;
+      return provider;
+    };
+    const host = new SandboxHost(config, { ...deps({ graphFetch: graph().fetchImpl }), createTokenProvider: everyRequest });
+    let runId = "";
+    try {
+      host.open();
+      const outcome = await host.runAgent(config.agents[0]!, "schedule");
+      assert.equal(outcome.kind, "completed");
+      runId = outcome.kind === "completed" ? outcome.run.id : "";
+    } finally {
+      await host.close();
+    }
+    const store = new AuditLogStore(join(config.dataDir, "openadminos.db"));
+    try {
+      const tokens = store.readVerified().events.filter((event) => event.type === "sandbox.token.acquired");
+      assert.equal(tokens[0]?.runId, undefined, "the preflight token comes before the run");
+      assert.ok(tokens.length > 1);
+      assert.ok(tokens.slice(1).every((event) => event.runId === runId));
+    } finally {
+      store.close();
+      cleanup();
+    }
+  });
+
+  it("does not pass the setup check when the report was not delivered", async () => {
+    const { dir, cleanup } = tempDir();
+    try {
+      writePrivate(join(dir, "secrets.json"), JSON.stringify({ discord: { webhookUrl: "https://discord.com/api/webhooks/1234567/token_x" } }));
+      const path = writeConfig(dir, { agents: [{ id: "find-inactive-devices", templateSha256: bundledHash("find-inactive-devices"), intervalSeconds: 3600, delivery: { connector: "discord" } }] });
+      const lines: string[] = [];
+      const deliveryFetch = (async () => new Response("unavailable", { status: 503 })) as typeof fetch;
+      const exit = await main(["--config", path, "--once", "find-inactive-devices"], { log: (_level, message) => lines.push(message), deps: deps({ graphFetch: graph().fetchImpl, deliveryFetch }) });
+      assert.equal(exit, 1);
+      assert.equal(lines.includes("Setup check passed."), false);
+    } finally {
       cleanup();
     }
   });

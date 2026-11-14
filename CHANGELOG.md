@@ -78,6 +78,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Graph requests end when they are stopped while waiting to retry after a 429 or a network error, and a response body that stalls after its headers ends with the request timeout instead of waiting forever; error responses keep their earlier messages.
+- Ollama and LM Studio streams cut by their timeout or by a stop end with a named timeout or cancellation error instead of a bare "This operation was aborted".
 - Sign-in logs, directory audit logs and Intune audit events sync in large tenants: every refresh collects the last 7 days, newest first, up to 10,000 entries, instead of every retained entry, which failed on throttling or the memory limit. A window at the limit shows as capped, not as an error, and Settings, Data and Chat say which window the data covers.
 
 - Chat and the data boundary text show the organization's name instead of the tenant domain (Chat heading, composer, scope, answer headers, status strip tooltip), and follow a rename at once.

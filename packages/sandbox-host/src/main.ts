@@ -75,6 +75,12 @@ export async function main(
       }
       const outcome = await host.runAgent(agent, "person");
       if (outcome.kind === "completed") {
+        // A report that was configured but not delivered fails the setup check.
+        const failedDelivery = outcome.run.steps.some((step) => step.id === `${outcome.run.id}_delivery` && step.status === "failed");
+        if (failedDelivery) {
+          log("error", "Setup check did not pass: the run completed but its report was not delivered.", { agent: agent.id, run: outcome.run.id, reason: "delivery-failed" });
+          return EXIT_RUN_REFUSED;
+        }
         log("info", "Setup check passed.", { agent: agent.id, run: outcome.run.id });
         return EXIT_OK;
       }

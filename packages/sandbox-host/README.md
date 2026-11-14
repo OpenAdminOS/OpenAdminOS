@@ -26,7 +26,7 @@ The run is refused, with a named reason in the log and in `health.json`, when an
 
   The directory role check sees only what the token carries: tenant-wide directory roles, in the `wids` claim (the value every app-only token carries is ignored). A role scoped to an administrative unit or to an application, and permissions the service principal holds on other resources, are not visible in a Graph token. What contains those is the egress limit: the host sends only GET requests, and only to Microsoft Graph. Check the service principal's role assignments in Entra as part of the setup.
 
-During the run, every Graph request is written to the audit log before it is sent (method, path and a digest of the query, never a body). Requests to any other host, any method but GET, `$batch` and `/me` are refused before they are sent, and redirects fail. A run that does not finish within `runDeadlineSeconds` is stopped. The deadline covers the execution of the agent; the checks before it and the report delivery after it are bounded by their own transport timeouts of about 30 seconds per request (10 seconds for the model checks).
+During the run, every Graph request is written to the audit log before it is sent (method, path and a digest of the query, never a body). Requests to any other host, any method but GET, `$batch` and `/me` are refused before they are sent, and redirects fail. A run that does not finish within `runDeadlineSeconds` is stopped. The deadline covers the execution of the agent; the checks before it are bounded by their own transport timeouts of about 30 seconds per request (10 seconds for the model checks), and each report delivery, response included, by 30 seconds and the host's shutdown.
 
 ## Minimum setup
 
@@ -115,7 +115,7 @@ Run one agent once, with every check, as the service user. The exit code is 0 wh
 sudo -u openadminos openadminos-sandbox --config /etc/openadminos-sandbox/sandbox.json --once find-inactive-devices
 ```
 
-Stop the service first; the host takes a lock on the data folder so a setup check and the service never overlap.
+Stop the service first; the host takes a lock on the data folder so a setup check and the service never overlap. Run one host per data volume: the lock is a file and process ids in it, so it does not reach across containers, pid namespaces or machines that share the folder.
 
 ## Running it as a service
 

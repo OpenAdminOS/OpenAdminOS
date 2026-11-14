@@ -34,18 +34,37 @@ export function neutralize(text: string): string {
  * output of one of those.
  */
 export function modelDerivedStepIds(steps: readonly TemplateStep[]): Set<string> {
+  // Every step at every depth, with the map it sits in, so steps inside a
+  // map are followed like top-level ones.
+  const all: Array<{ step: TemplateStep; parent?: TemplateStep }> = [];
+  const walk = (list: readonly TemplateStep[], parent?: TemplateStep) => {
+    for (const step of list) {
+      all.push({ step, ...(parent ? { parent } : {}) });
+      if (step.format === "map") walk(step.settings.do, step);
+    }
+  };
+  walk(steps);
   const derived = new Set<string>();
-  const containsModel = (step: TemplateStep): boolean =>
-    step.format === "llm" || (step.format === "map" && step.settings.do.some(containsModel));
-  for (const step of steps) if (containsModel(step)) derived.add(step.id);
+  for (const { step } of all) if (step.format === "llm") derived.add(step.id);
+  const reads = (step: TemplateStep) => [...stepReferences(JSON.stringify(step.settings ?? {}))];
   for (let changed = true; changed;) {
     changed = false;
-    for (const step of steps) {
-      if (derived.has(step.id)) continue;
-      if ([...stepReferences(JSON.stringify(step.settings ?? {}))].some((id) => derived.has(id))) {
-        derived.add(step.id);
+    const mark = (name: string) => {
+      if (!derived.has(name)) {
+        derived.add(name);
         changed = true;
       }
+    };
+    for (const { step, parent } of all) {
+      if (step.format === "map") {
+        const inner = step.settings.do;
+        // A map is model output when anything inside it is; its item is when its source is.
+        if (inner.some((child) => derived.has(child.id))) mark(step.id);
+        if (stepReferences(step.settings.source).size > 0 && [...stepReferences(step.settings.source)].some((name) => derived.has(name))) mark(step.settings.as);
+      } else if (reads(step).some((name) => derived.has(name))) {
+        mark(step.id);
+      }
+      if (parent && derived.has(step.id)) mark(parent.id);
     }
   }
   return derived;
@@ -197,38 +216,68 @@ export interface DeliveryOutcome {
  * failure is returned, never retried. Requests go only to the
  * destination's own origin, and redirects fail.
  */
+/** A delivery that has not settled by then, body included, is stopped and recorded as failed. */
+export const DELIVERY_TIMEOUT_MS = 30_000;
+
 export async function sendDelivery(input: {
   delivery: SandboxDeliveryConfig;
   secrets: SandboxSecrets;
   text: string;
   fetch?: typeof fetch;
+  /** The host's shutdown signal; a shutdown stops a delivery in progress. */
+  signal?: AbortSignal;
+  timeoutMs?: number;
 }): Promise<DeliveryOutcome> {
-  const base = input.fetch ?? fetch;
+  const timeoutMs = input.timeoutMs ?? DELIVERY_TIMEOUT_MS;
+  // The connector clients stop their own timer once headers arrive; this
+  // one stays active until the response body is read, and a shutdown ends
+  // it too. The request is never retried.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error(`The delivery did not finish within ${Math.round(timeoutMs / 1000)} seconds and was stopped.`)), timeoutMs);
+  const onShutdown = () => controller.abort(new Error("The sandbox host stopped during the delivery."));
+  if (input.signal?.aborted) onShutdown();
+  else input.signal?.addEventListener("abort", onShutdown, { once: true });
+  const stopped = new Promise<never>((_resolve, reject) => {
+    const fail = () => reject(controller.signal.reason);
+    if (controller.signal.aborted) fail();
+    else controller.signal.addEventListener("abort", fail, { once: true });
+  });
+  stopped.catch(() => undefined);
   try {
+    return await Promise.race([send(input, controller.signal), stopped]);
+  } catch (error) {
+    return { outcome: "failed", detail: redactSecrets(describe(error), input.secrets) };
+  } finally {
+    clearTimeout(timer);
+    input.signal?.removeEventListener("abort", onShutdown);
+  }
+}
+
+async function send(input: { delivery: SandboxDeliveryConfig; secrets: SandboxSecrets; text: string; fetch?: typeof fetch }, signal: AbortSignal): Promise<DeliveryOutcome> {
+  const base = input.fetch ?? fetch;
+  {
     if (input.delivery.connector === "slack") {
       const token = input.secrets.slack?.botToken;
       if (!token) return { outcome: "failed", detail: "No Slack bot token in the secrets file." };
-      const client = createSlackClient({ botToken: token, fetchImpl: pinnedFetch(base, "https://slack.com") });
+      const client = createSlackClient({ botToken: token, fetchImpl: pinnedFetch(base, "https://slack.com", signal) });
       await client.postMessage({ channel: input.delivery.channel, text: input.text });
       return { outcome: "sent", detail: `Sent to Slack channel ${input.delivery.channel}.` };
     }
     const webhookUrl = input.secrets.discord?.webhookUrl;
     if (!webhookUrl) return { outcome: "failed", detail: "No Discord webhook URL in the secrets file." };
-    const client = createDiscordWebhookClient({ webhookUrl, fetchImpl: pinnedFetch(base, new URL(webhookUrl).origin), suppressEmbeds: true });
+    const client = createDiscordWebhookClient({ webhookUrl, fetchImpl: pinnedFetch(base, new URL(webhookUrl).origin, signal), suppressEmbeds: true });
     await client.sendMessage({ text: input.text, ...(input.delivery.threadId ? { threadId: input.delivery.threadId } : {}) });
     return { outcome: "sent", detail: "Sent to the Discord webhook." };
-  } catch (error) {
-    return { outcome: "failed", detail: redactSecrets(describe(error), input.secrets) };
   }
 }
 
-function pinnedFetch(base: typeof fetch, origin: string): typeof fetch {
+function pinnedFetch(base: typeof fetch, origin: string, signal: AbortSignal): typeof fetch {
   return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     if (new URL(href).origin !== origin) {
       throw new Error(`The delivery request to ${new URL(href).origin} was refused: this destination sends only to ${origin}.`);
     }
-    return base(input, { ...init, redirect: "error" });
+    return base(input, { ...init, redirect: "error", signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal });
   }) as typeof fetch;
 }
 

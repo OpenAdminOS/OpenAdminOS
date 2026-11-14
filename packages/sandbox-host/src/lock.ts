@@ -113,8 +113,11 @@ export class InstanceLock {
       const moved = this.read(aside);
       if (moved && this.isHeld(moved, aside, GUARD_STALE_MS)) {
         // A live host's guard landed in between: give it back and step aside.
+        // If yet another guard took its place, a takeover is in progress either way.
         try {
           linkSync(aside, this.guardPath);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
         } finally {
           rmSync(aside, { force: true });
         }

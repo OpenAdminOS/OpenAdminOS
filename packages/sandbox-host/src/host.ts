@@ -51,6 +51,8 @@ export interface SandboxHostDeps {
   /** Graph retry backoff; tests pass 0. */
   graphRetryBackoffMs?: number;
   schedulerClock?: SchedulerClock;
+  /** How long one delivery may take, body included; tests pass a short one. */
+  deliveryTimeoutMs?: number;
   /** The platform the host refuses or accepts; tests pass one. */
   platform?: NodeJS.Platform;
 }
@@ -213,7 +215,7 @@ export class SandboxHost {
     const agentId = agentConfig.id;
     const context = this.auditContext(agentId, initiator);
     let secrets: SandboxSecrets = {};
-    let prepared: { resolved: SandboxAgent; model: ModelCheck; tokenProvider: ApplicationTokenProvider; token: ApplicationToken };
+    let prepared: Prepared;
     try {
       prepared = await this.preflight(agentConfig, context, (loaded) => {
         secrets = loaded;
@@ -229,7 +231,7 @@ export class SandboxHost {
     agentConfig: SandboxAgentConfig,
     context: SandboxAuditContext,
     setSecrets: (secrets: SandboxSecrets) => void,
-  ): Promise<{ resolved: SandboxAgent; model: ModelCheck; tokenProvider: ApplicationTokenProvider; token: ApplicationToken }> {
+  ): Promise<Prepared> {
     const now = this.now();
     const certificate = chooseCertificate(this.config.certificates, now);
     for (const warning of certificate.warnings) this.log("warn", warning, { agent: agentConfig.id });
@@ -247,6 +249,9 @@ export class SandboxHost {
 
     const allowlist = this.allowedRoles(agentConfig, resolved);
     const expectation = { tenantId: this.config.tenantId, clientId: this.config.clientId, allowedRoles: allowlist.roles, refusedAgents: allowlist.refused };
+    // Token events carry the run id once the run exists; a failed record of
+    // a sign-in failure is kept and named together with it.
+    const tokenAudit: TokenAudit = { context };
     const factory = this.deps.createTokenProvider ?? createApplicationTokenProvider;
     const tokenProvider = factory({
       tenantId: this.config.tenantId,
@@ -254,7 +259,7 @@ export class SandboxHost {
       signer: certificate.signer,
       ...(this.deps.signInFetch ? { fetch: this.deps.signInFetch } : {}),
       onAcquired: (token) => {
-        this.auditEvent(context, "sandbox.token.acquired", {
+        this.auditEvent(tokenAudit.context, "sandbox.token.acquired", {
           roles: token.roles,
           expiresOn: token.expiresOn.toISOString(),
           certificateSha256: certificate.signer.thumbprintSha256,
@@ -262,31 +267,30 @@ export class SandboxHost {
         assertSandboxIdentity(token, expectation);
       },
       onFailed: (error) => {
-        this.auditEvent(context, "sandbox.token.failed", { code: error.code, ...(error.aadsts ? { aadsts: error.aadsts } : {}) });
+        try {
+          this.auditEvent(tokenAudit.context, "sandbox.token.failed", { code: error.code, ...(error.aadsts ? { aadsts: error.aadsts } : {}) });
+        } catch (auditError) {
+          tokenAudit.auditProblem = isSandboxRefusal(auditError) ? auditError : new SandboxRefusal("audit-failed", describe(auditError));
+        }
       },
     });
     let token: ApplicationToken;
     try {
       token = await tokenProvider.acquire();
     } catch (error) {
-      if (isSandboxRefusal(error)) throw error;
-      if (error instanceof ApplicationTokenError) {
-        if (error.code === "token-undecodable") throw new SandboxRefusal("token-undecodable", "The token from Microsoft sign-in cannot be decoded, so its permissions cannot be checked. Nothing was read.");
-        throw signInRefusal(error.aadsts, error.message);
-      }
-      throw signInRefusal(undefined, describe(error));
+      throw signInFailure(error, tokenAudit);
     }
     assertAgentPermissions(token.roles, resolved.manifest.descriptor.name, resolved.agent.scopes);
-    return { resolved, model, tokenProvider, token };
+    return { resolved, model, tokenProvider, token, tokenAudit };
   }
 
   private async execute(
     agentConfig: SandboxAgentConfig,
     initiator: Extract<RunInitiator, "schedule" | "person">,
-    prepared: { resolved: SandboxAgent; model: ModelCheck; tokenProvider: ApplicationTokenProvider },
+    prepared: Prepared,
     secrets: SandboxSecrets,
   ): Promise<RunOutcome> {
-    const { resolved, model, tokenProvider } = prepared;
+    const { resolved, model, tokenProvider, tokenAudit } = prepared;
     const queued = createQueuedRun({ agent: resolved.agent, providerId: this.config.model.provider, model: model.model });
     let run: RunRecord = {
       ...queued,
@@ -303,6 +307,7 @@ export class SandboxHost {
       },
     };
     const context = this.auditContext(agentConfig.id, initiator, run.id);
+    tokenAudit.context = context;
     this.runs.write(run);
     this.log("info", "Run started.", { agent: agentConfig.id, run: run.id });
 
@@ -336,11 +341,7 @@ export class SandboxHost {
         try {
           return await tokenProvider();
         } catch (error) {
-          const refusal = isSandboxRefusal(error)
-            ? error
-            : error instanceof ApplicationTokenError
-              ? signInRefusal(error.aadsts, error.message)
-              : signInRefusal(undefined, describe(error));
+          const refusal = signInFailure(error, tokenAudit);
           stop(refusal);
           throw refusal;
         }
@@ -526,7 +527,14 @@ export class SandboxHost {
       this.log("error", "Report not delivered: the audit log could not record it.", { agent: agentConfig.id, reason: "audit-failed" });
       return { outcome: "failed", detail: auditFailure.message, auditFailure };
     }
-    const result = await sendDelivery({ delivery, secrets, text, ...(this.deps.deliveryFetch ? { fetch: this.deps.deliveryFetch } : {}) });
+    const result = await sendDelivery({
+      delivery,
+      secrets,
+      text,
+      signal: this.stopController.signal,
+      ...(this.deps.deliveryFetch ? { fetch: this.deps.deliveryFetch } : {}),
+      ...(this.deps.deliveryTimeoutMs !== undefined ? { timeoutMs: this.deps.deliveryTimeoutMs } : {}),
+    });
     let auditFailure: SandboxRefusal | undefined;
     try {
       this.auditEvent(context, "delivery.result", { connector: delivery.connector, payloadDigest: digest, idempotencyKey, outcome: result.outcome });
@@ -601,6 +609,38 @@ export class SandboxHost {
     const times = [latest?.queuedAt, refusal?.at].filter((value): value is string => typeof value === "string").map((value) => Date.parse(value)).filter(Number.isFinite);
     return times.length > 0 ? Math.max(...times) : undefined;
   }
+}
+
+interface TokenAudit {
+  context: SandboxAuditContext;
+  /** The audit log could not record a sign-in failure. */
+  auditProblem?: SandboxRefusal;
+}
+
+interface Prepared {
+  resolved: SandboxAgent;
+  model: ModelCheck;
+  tokenProvider: ApplicationTokenProvider;
+  token: ApplicationToken;
+  tokenAudit: TokenAudit;
+}
+
+/**
+ * The named refusal for a failed sign-in, by its AADSTS code. When the
+ * audit log could not record that failure either, the message says so,
+ * so the admin learns both.
+ */
+function signInFailure(error: unknown, tokenAudit: TokenAudit): SandboxRefusal {
+  let refusal: SandboxRefusal;
+  if (isSandboxRefusal(error)) refusal = error;
+  else if (error instanceof ApplicationTokenError && error.code === "token-undecodable") {
+    refusal = new SandboxRefusal("token-undecodable", "The token from Microsoft sign-in cannot be decoded, so its permissions cannot be checked. Nothing was read.");
+  } else if (error instanceof ApplicationTokenError) refusal = signInRefusal(error.aadsts, error.message);
+  else refusal = signInRefusal(undefined, describe(error));
+  const problem = tokenAudit.auditProblem;
+  if (!problem || refusal.reason === "audit-failed") return refusal;
+  tokenAudit.auditProblem = undefined;
+  return new SandboxRefusal(refusal.reason, `${refusal.message} The audit log could not record this sign-in failure either: ${problem.message}`, { cause: problem });
 }
 
 /** The named reason of a run that failed without the sandbox stopping it. */
