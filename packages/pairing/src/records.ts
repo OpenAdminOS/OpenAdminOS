@@ -35,9 +35,9 @@ export interface AuditCheckpoint {
   seq: number;
   /** The tip's hash; the chain start hash for an empty log. */
   sha256: string;
-  /** Rows the log holds up to the tip, after retention; never more than `seq`. */
+  /** Rows the log holds up to the tip, after retention; never more than `seq`. Attested by the sandbox, checked for shape only. */
   rowCount: number;
-  /** When the sandbox read the tip, ISO 8601 in UTC. */
+  /** When the sandbox read the tip, ISO 8601 in UTC. Attested by the sandbox, checked for shape only. */
   at: string;
 }
 

@@ -18,12 +18,14 @@ import { isIdentifier, isTenantId } from "./validate.js";
  *   transcript proofs. The secret is never sent; only HMACs keyed by a
  *   key derived from it are, inside the pinned TLS connection.
  *
- * Why not a PAKE in v1: the fingerprint part pins the TLS key, so a
- * man in the middle would need an 80 bit second preimage of the SPKI
- * hash within the code's lifetime. Inside that channel only the real
- * sandbox sees a proof; it allows 5 proof checks per code and a code
- * lives 10 minutes. The scrypt key derivation makes each offline guess
- * at a leaked proof memory-hard on top of the 60 bit secret.
+ * Why not a PAKE in v1: the pin is public and lives as long as the TLS
+ * key, so the fingerprint part is not secret. It binds: a man in the
+ * middle needs a P-256 key whose SPKI hash shares the first 80 bits, a
+ * second preimage found by generating keys (about 2^80 work). Inside the
+ * pinned channel only the real sandbox sees a proof; it allows 5 proof
+ * checks per code and a code lives 10 minutes. A captured proof still
+ * leaves an offline search over the 60 bit secret, one memory-hard
+ * scrypt derivation per guess.
  * TODO(ugur): consider CPace (a balanced PAKE) in a later protocol version,
  * so a proof gives an attacker nothing to guess against offline.
  */
