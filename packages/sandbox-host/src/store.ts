@@ -222,8 +222,10 @@ export class HealthStore {
     for (const key of Object.keys(change) as Array<keyof AgentHealth>) {
       if (change[key] === undefined) delete next[key];
     }
-    this.state.agents[agentId] = next;
-    this.state.updatedAt = now.toISOString();
-    writeFileAtomic(this.path, `${JSON.stringify(this.state, null, 2)}\n`);
+    // Written first and kept in memory only once on disk, so what the host
+    // acts on (such as the last notice reason) never runs ahead of the file.
+    const state: HealthFile = { ...this.state, updatedAt: now.toISOString(), agents: { ...this.state.agents, [agentId]: next } };
+    writeFileAtomic(this.path, `${JSON.stringify(state, null, 2)}\n`);
+    this.state = state;
   }
 }

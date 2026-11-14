@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
@@ -91,6 +91,27 @@ describe("unreadable files", () => {
       assert.match(health.problem ?? "", /health\.json-?.*could not be read|could not be read/);
       assert.ok(readdirSync(dir).some((name) => name.startsWith("health.json.unreadable-")));
     } finally {
+      cleanup();
+    }
+  });
+});
+
+describe("HealthStore write failures", () => {
+  it("keeps the earlier state when health.json cannot be written", () => {
+    const { dir, cleanup } = tempDir();
+    const folder = join(dir, "data");
+    try {
+      mkdirSync(folder, { mode: 0o700 });
+      const path = join(folder, "health.json");
+      const health = new HealthStore(path, "mini-pc");
+      health.update("a", { lastNoticeReason: "model-unreachable" }, new Date());
+      chmodSync(folder, 0o500);
+      assert.throws(() => health.update("a", { lastNoticeReason: "certificate-expired" }, new Date()));
+      assert.equal(health.get("a").lastNoticeReason, "model-unreachable", "memory does not run ahead of the file");
+      chmodSync(folder, 0o700);
+      assert.equal(new HealthStore(path, "mini-pc").get("a").lastNoticeReason, "model-unreachable");
+    } finally {
+      chmodSync(folder, 0o700);
       cleanup();
     }
   });

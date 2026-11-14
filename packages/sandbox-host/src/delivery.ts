@@ -58,9 +58,13 @@ export function modelDerivedStepIds(steps: readonly TemplateStep[]): Set<string>
     for (const { step, parent } of all) {
       if (step.format === "map") {
         const inner = step.settings.do;
-        // A map is model output when anything inside it is; its item is when its source is.
+        // A map is model output when anything inside it is, or when its own
+        // settings (its source, its limit) read model output; its item is
+        // model output when its source is.
         if (inner.some((child) => derived.has(child.id))) mark(step.id);
-        if (stepReferences(step.settings.source).size > 0 && [...stepReferences(step.settings.source)].some((name) => derived.has(name))) mark(step.settings.as);
+        const { do: _inner, ...own } = step.settings;
+        if ([...stepReferences(JSON.stringify(own))].some((name) => derived.has(name))) mark(step.id);
+        if ([...stepReferences(step.settings.source)].some((name) => derived.has(name))) mark(step.settings.as);
       } else if (reads(step).some((name) => derived.has(name))) {
         mark(step.id);
       }

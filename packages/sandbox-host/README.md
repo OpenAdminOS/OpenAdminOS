@@ -109,7 +109,7 @@ The secrets go in `secrets.json` next to the config (or `secretsFile`), mode 060
 
 ## Setup check
 
-Run one agent once, with every check, as the service user. The exit code is 0 when the run completed, 1 when it was refused or failed, 2 for a config problem, 3 when the service is already running on the same data folder.
+Run one agent once, with every check, as the service user. The exit code is 0 when the run completed, 1 when it was refused or failed or its configured report was not delivered, 2 for a config problem, 3 when the service is already running on the same data folder. A failure notice or recovery notice that cannot be sent is logged and kept in `health.json`, but does not fail the setup check; only an undelivered report does.
 
 ```sh
 sudo -u openadminos openadminos-sandbox --config /etc/openadminos-sandbox/sandbox.json --once find-inactive-devices

@@ -88,6 +88,24 @@ describe("renderSandboxReport", () => {
     assert.equal(derived.has("load"), false);
   });
 
+  it("excludes a count of a map over model output, even when nothing inside reads the item", () => {
+    const manifest = {
+      ...bundledManifest("team-evidence-review"),
+      skills: [
+        { id: "load", format: "graph", label: "", settings: { method: "GET", path: "/users", scopes: [] } },
+        { id: "ask", format: "llm", label: "", settings: {} },
+        { id: "per_answer", format: "map", label: "", settings: { source: "{{ ask.output }}", as: "answer", do: [
+          { id: "fixed", format: "transform", label: "", settings: { kind: "count-by-field", source: "{{ load.output }}" } },
+        ] } },
+      ],
+      definition: { result: { summary: "", data: { answers: "{{ per_answer | size }}", users: "{{ load.output | size }}" } } },
+    } as unknown as Parameters<typeof renderSandboxReport>[0]["manifest"];
+    assert.ok(modelDerivedStepIds(manifest.skills).has("per_answer"));
+    const text = renderSandboxReport({ run: { ...run, result: { answers: 3, users: 9 } }, agentName: "A", sandboxName: "S", manifest });
+    assert.match(text, /- users: 9/);
+    assert.equal(text.includes("- answers"), false);
+  });
+
   it("drops bare and filtered references to model steps", () => {
     const manifest = {
       ...bundledManifest("team-evidence-review"),

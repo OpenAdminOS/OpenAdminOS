@@ -74,6 +74,9 @@ export async function main(
         return EXIT_CONFIG;
       }
       const outcome = await host.runAgent(agent, "person");
+      if (agent.delivery && outcome.kind !== "refused" && !outcome.run.steps.some((step) => step.id === `${outcome.run.id}_delivery`)) {
+        log("info", "The delivery destination was not used by this check: the run's result did not match the delivery settings, so nothing was sent.", { agent: agent.id, connector: agent.delivery.connector });
+      }
       if (outcome.kind === "completed") {
         // A report that was configured but not delivered fails the setup check.
         const failedDelivery = outcome.run.steps.some((step) => step.id === `${outcome.run.id}_delivery` && step.status === "failed");

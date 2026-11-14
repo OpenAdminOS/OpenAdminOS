@@ -568,6 +568,20 @@ describe("SandboxHost round three", () => {
       cleanup();
     }
   });
+
+  it("says when the setup check did not use the delivery destination", async () => {
+    const { dir, cleanup } = tempDir();
+    try {
+      writePrivate(join(dir, "secrets.json"), JSON.stringify({ discord: { webhookUrl: "https://discord.com/api/webhooks/1234567/token_x" } }));
+      const path = writeConfig(dir, { agents: [{ id: "find-inactive-devices", templateSha256: bundledHash("find-inactive-devices"), intervalSeconds: 3600, delivery: { connector: "discord", notifyOnSuccess: false } }] });
+      const lines: string[] = [];
+      const exit = await main(["--config", path, "--once", "find-inactive-devices"], { log: (_level, message) => lines.push(message), deps: deps({ graphFetch: graph().fetchImpl }) });
+      assert.equal(exit, 0);
+      assert.ok(lines.some((line) => line.startsWith("The delivery destination was not used by this check")));
+    } finally {
+      cleanup();
+    }
+  });
 });
 
 describe("SandboxHost storage failures", () => {
