@@ -10,7 +10,7 @@ export {
   type SandboxDeliveryConfig,
 } from "./config.js";
 export { neutralize, renderFailureNotice, renderSandboxReport, sendDelivery } from "./delivery.js";
-export { assertPrivateFile, ensurePrivateDirectory } from "./files.js";
+export { assertSupportedPlatform, ensurePrivateDirectory, readPrivateFile } from "./files.js";
 export { sandboxGraphFetch, GRAPH_ORIGIN } from "./graph-fetch.js";
 export { SandboxHost, type RunOutcome, type SandboxHostDeps } from "./host.js";
 export { assertAgentPermissions, assertSandboxIdentity } from "./identity.js";

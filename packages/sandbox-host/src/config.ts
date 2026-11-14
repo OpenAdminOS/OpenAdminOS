@@ -1,7 +1,6 @@
-import { readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
-import { assertPrivateFile } from "./files.js";
+import { readPrivateFile } from "./files.js";
 import { SandboxRefusal } from "./refusal.js";
 
 /** Shortest schedule interval: 15 minutes. */
@@ -61,13 +60,7 @@ class FieldError extends SandboxRefusal {
 /** Reads and validates the config. Every problem names the field. */
 export function loadSandboxConfig(path: string): SandboxConfig {
   const absolute = resolve(path);
-  assertPrivateFile(absolute, "sandbox config");
-  let text: string;
-  try {
-    text = readFileSync(absolute, "utf8");
-  } catch (cause) {
-    throw new SandboxRefusal("config-invalid", `The sandbox config at ${absolute} cannot be read.`, { cause });
-  }
+  const text = readPrivateFile(absolute, "sandbox config");
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);

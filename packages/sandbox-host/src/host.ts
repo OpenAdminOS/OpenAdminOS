@@ -11,7 +11,6 @@ import {
   createOllamaLlm,
   createQueuedRun,
   executeRun,
-  findRegistryAgentById,
   graphRequestAuditSink,
   type ApplicationToken,
   type ApplicationTokenProvider,
@@ -23,12 +22,12 @@ import { resolveSandboxAgent, type SandboxAgent } from "./agents.js";
 import { chooseCertificate } from "./certificates.js";
 import type { SandboxAgentConfig, SandboxConfig } from "./config.js";
 import { payloadDigest, renderFailureNotice, renderRecoveryNotice, renderSandboxReport, sendDelivery } from "./delivery.js";
-import { describe, ensurePrivateDirectory } from "./files.js";
+import { assertSupportedPlatform, describe, ensurePrivateDirectory } from "./files.js";
 import { sandboxGraphFetch } from "./graph-fetch.js";
 import { assertAgentPermissions, assertSandboxIdentity } from "./identity.js";
 import { InstanceLock } from "./lock.js";
 import { createLineLogger, type SandboxLogger } from "./log.js";
-import { checkLocalModel, type ModelCheck } from "./model.js";
+import { checkLocalModel, pinnedModelFetch, type ModelCheck } from "./model.js";
 import { isSandboxRefusal, SandboxRefusal, signInRefusal, type RefusalReason } from "./refusal.js";
 import { Scheduler, type SchedulerClock } from "./scheduler.js";
 import { loadSandboxSecrets, type SandboxSecrets } from "./secrets.js";
@@ -74,26 +73,17 @@ export class SandboxHost {
   private readonly health: HealthStore;
   private audit: AuditLogStore | undefined;
   private readonly inFlight = new Set<string>();
-  private readonly allowedRoles: ReadonlySet<string>;
   private scheduler: Scheduler | undefined;
   private readonly stopController = new AbortController();
 
   constructor(private readonly config: SandboxConfig, private readonly deps: SandboxHostDeps = {}) {
     this.now = deps.now ?? (() => new Date());
     this.log = deps.log ?? createLineLogger();
-    if ((deps.platform ?? process.platform) === "win32") {
-      throw new SandboxRefusal(
-        "platform-not-supported",
-        "The sandbox host does not run on Windows yet: it cannot check who can read the config, the private key and the secrets file there. Run it on Linux or macOS.",
-      );
-    }
+    assertSupportedPlatform(deps.platform);
     ensurePrivateDirectory(config.dataDir);
     this.lock = new InstanceLock(join(config.dataDir, "sandbox.lock"));
     this.runs = new RunStore(join(config.dataDir, "runs"));
     this.health = new HealthStore(join(config.dataDir, "health.json"), config.sandbox.id);
-    // Declared scopes of every configured agent, whether or not it passes
-    // its own checks, so one refused agent does not refuse the others.
-    this.allowedRoles = new Set(config.agents.flatMap((agent) => findRegistryAgentById(agent.id)?.scopes ?? []));
   }
 
   /** Takes the instance lock, opens the audit log and marks interrupted runs. */
@@ -101,6 +91,13 @@ export class SandboxHost {
     this.lock.acquire();
     try {
       this.audit = new AuditLogStore(join(this.config.dataDir, "openadminos.db"), this.now);
+      if (this.health.problem) {
+        this.log("error", this.health.problem, { reason: "storage-corrupt", file: "health.json" });
+      }
+      const corrupt = this.runs.unreadableFiles();
+      if (corrupt.length > 0) {
+        this.log("error", `${corrupt.length === 1 ? "A run record" : `${corrupt.length} run records`} in the data folder cannot be read and ${corrupt.length === 1 ? "is" : "are"} left in place for review: ${corrupt.join(", ")}.`, { reason: "storage-corrupt", count: corrupt.length });
+      }
       const interrupted = this.runs.markInterrupted(this.now());
       if (interrupted > 0) this.log("warn", "Runs left running by a stopped host were marked interrupted.", { count: interrupted });
     } catch (error) {
@@ -148,12 +145,16 @@ export class SandboxHost {
     try {
       return await this.runAgentNow(agentConfig, initiator);
     } catch (error) {
-      // Run records, health.json and the audit log live in the data folder;
-      // a failure to write them is named, never dropped.
-      const message = `${agentConfig.id} stopped: the sandbox data folder could not be written. ${describe(error)} Check free disk space and permissions of ${this.config.dataDir}.`;
-      this.log("error", message, { agent: agentConfig.id, reason: "storage-failed" });
-      this.safeHealth(agentConfig.id, { lastRefusal: { reason: "storage-failed", message, at: this.now().toISOString() } });
-      return { kind: "refused", reason: "storage-failed", message };
+      // Never dropped: a filesystem error in the data folder is
+      // storage-failed, anything else is run-failed with its cause.
+      const refusal = isSandboxRefusal(error)
+        ? error
+        : isFilesystemError(error)
+          ? new SandboxRefusal("storage-failed", `${agentConfig.id} stopped: the sandbox data folder could not be written. ${describe(error)} Check free disk space and permissions of ${this.config.dataDir}.`, { cause: error })
+          : new SandboxRefusal("run-failed", `${agentConfig.id} stopped: ${describe(error)}`, { cause: error });
+      this.log("error", refusal.message, { agent: agentConfig.id, reason: refusal.reason });
+      this.safeHealth(agentConfig.id, { lastRefusal: { reason: refusal.reason, message: refusal.message, at: this.now().toISOString() } });
+      return { kind: "refused", reason: refusal.reason, message: refusal.message };
     } finally {
       this.inFlight.delete(agentConfig.id);
     }
@@ -221,11 +222,11 @@ export class SandboxHost {
     this.auditEvent(context, "sandbox.run.preflight", {
       templateSha256: resolved.sha256,
       model: model.model,
-      ...(model.digest ? { modelDigest: model.digest } : {}),
+      modelDigest: model.digest,
       certificateSha256: certificate.signer.thumbprintSha256,
     });
 
-    const expectation = { tenantId: this.config.tenantId, clientId: this.config.clientId, allowedRoles: this.allowedRoles };
+    const expectation = { tenantId: this.config.tenantId, clientId: this.config.clientId, allowedRoles: this.allowedRoles(agentConfig, resolved) };
     const factory = this.deps.createTokenProvider ?? createApplicationTokenProvider;
     const tokenProvider = factory({
       tenantId: this.config.tenantId,
@@ -278,7 +279,7 @@ export class SandboxHost {
         name: this.config.sandbox.name,
         organizationId: this.config.organizationId,
         model: model.model,
-        ...(model.digest ? { modelDigest: model.digest } : {}),
+        modelDigest: model.digest,
       },
     };
     const context = this.auditContext(agentConfig.id, initiator, run.id);
@@ -292,40 +293,44 @@ export class SandboxHost {
       if (!controller.signal.aborted) controller.abort(refusal);
     };
     const onShutdown = () => stop(new SandboxRefusal("run-stopped", "The sandbox host stopped during the run. The next scheduled run starts fresh."));
-    this.stopController.signal.addEventListener("abort", onShutdown, { once: true });
-    if (this.stopController.signal.aborted) onShutdown();
-    const deadline = setTimeout(
-      () => stop(new SandboxRefusal("run-deadline", `The run did not finish within ${this.config.runDeadlineSeconds} seconds and was stopped. Check the model's speed on this machine, or raise runDeadlineSeconds.`)),
-      this.config.runDeadlineSeconds * 1000,
-    );
+    let deadline: ReturnType<typeof setTimeout> | undefined;
     const statuses: number[] = [];
-    const sink = graphRequestAuditSink(this.requireAudit(), context, this.now);
-    const fetchImpl = sandboxGraphFetch({
-      ...(this.deps.graphFetch ? { base: this.deps.graphFetch } : {}),
-      sink,
-      onStop: stop,
-      onStatus: (status) => statuses.push(status),
-    });
-    const guardedTokens = (async () => {
-      try {
-        return await tokenProvider();
-      } catch (error) {
-        const refusal = isSandboxRefusal(error)
-          ? error
-          : error instanceof ApplicationTokenError
-            ? signInRefusal(error.aadsts, error.message)
-            : signInRefusal(undefined, describe(error));
-        stop(refusal);
-        throw refusal;
-      }
-    });
-    const timeoutMs = (this.config.model.timeoutSeconds ?? 300) * 1000;
-    const llm = this.deps.createLlm?.(this.config.model, model) ??
-      (this.config.model.provider === "ollama"
-        ? createOllamaLlm({ endpoint: this.config.model.endpoint, defaultModel: model.model, timeoutMs })
-        : createLmStudioLlm({ endpoint: this.config.model.endpoint, defaultModel: model.model, timeoutMs }));
-
     try {
+      // Set up inside the try, so a throw while building the run cannot
+      // leave the deadline timer or the shutdown listener behind.
+      this.stopController.signal.addEventListener("abort", onShutdown, { once: true });
+      if (this.stopController.signal.aborted) onShutdown();
+      deadline = setTimeout(
+        () => stop(new SandboxRefusal("run-deadline", `The run did not finish within ${this.config.runDeadlineSeconds} seconds and was stopped. Check the model's speed on this machine, or raise runDeadlineSeconds.`)),
+        this.config.runDeadlineSeconds * 1000,
+      );
+      const sink = graphRequestAuditSink(this.requireAudit(), context, this.now);
+      const fetchImpl = sandboxGraphFetch({
+        ...(this.deps.graphFetch ? { base: this.deps.graphFetch } : {}),
+        sink,
+        onStop: stop,
+        onStatus: (status) => statuses.push(status),
+      });
+      const guardedTokens = (async () => {
+        try {
+          return await tokenProvider();
+        } catch (error) {
+          const refusal = isSandboxRefusal(error)
+            ? error
+            : error instanceof ApplicationTokenError
+              ? signInRefusal(error.aadsts, error.message)
+              : signInRefusal(undefined, describe(error));
+          stop(refusal);
+          throw refusal;
+        }
+      });
+      const timeoutMs = (this.config.model.timeoutSeconds ?? 300) * 1000;
+      // The model client sends only to the endpoint that was checked, and never follows a redirect.
+      const modelTransport = pinnedModelFetch(this.config.model.endpoint);
+      const llm = this.deps.createLlm?.(this.config.model, model) ??
+        (this.config.model.provider === "ollama"
+          ? createOllamaLlm({ endpoint: this.config.model.endpoint, defaultModel: model.model, timeoutMs, fetchImpl: modelTransport })
+          : createLmStudioLlm({ endpoint: this.config.model.endpoint, defaultModel: model.model, timeoutMs, fetchImpl: modelTransport }));
       run = await executeRun({
         signal: controller.signal,
         run,
@@ -348,9 +353,11 @@ export class SandboxHost {
         },
       });
     } catch (error) {
+      if (isSandboxRefusal(error)) stop(error);
+      else stop(new SandboxRefusal("run-failed", `The run of ${resolved.manifest.descriptor.name} could not start: ${describe(error)}`, { cause: error }));
       run = { ...run, status: "failed", finishedAt: this.now().toISOString(), error: describe(error), summary: `${resolved.manifest.descriptor.name} failed.` };
     } finally {
-      clearTimeout(deadline);
+      if (deadline !== undefined) clearTimeout(deadline);
       this.stopController.signal.removeEventListener("abort", onShutdown);
     }
 
@@ -368,15 +375,16 @@ export class SandboxHost {
       };
       outcome = { kind: "failed", reason: refusal.reason, message: refusal.message, run };
     }
-    this.runs.write(run);
-    this.safeHealth(agentConfig.id, {
-      lastRun: { runId: run.id, status: run.status, ...(outcome.kind === "failed" ? { reason: outcome.reason } : {}), ...(run.finishedAt ? { finishedAt: run.finishedAt } : {}) },
-    });
     try {
       this.auditEvent(context, "sandbox.run.finished", { status: run.status, ...(outcome.kind === "failed" ? { reason: outcome.reason } : {}) });
     } catch (error) {
-      this.log("error", describe(error), { agent: agentConfig.id, run: run.id, reason: "audit-failed" });
+      // A run the audit log cannot close is not a success, and nothing is sent for it.
+      const refusal = isSandboxRefusal(error) ? error : new SandboxRefusal("audit-failed", describe(error), { cause: error });
+      run = this.failRun(run, refusal);
+      outcome = { kind: "failed", reason: "audit-failed", message: refusal.message, run };
     }
+    this.runs.write(run);
+    this.recordLastRun(agentConfig.id, run, outcome);
     this.log(outcome.kind === "completed" ? "info" : "error", outcome.kind === "completed" ? "Run completed." : "Run failed.", {
       agent: agentConfig.id,
       run: run.id,
@@ -384,12 +392,54 @@ export class SandboxHost {
       steps: run.steps.length,
     });
 
+    if (outcome.kind === "failed" && outcome.reason === "audit-failed") return outcome;
     const delivered = await this.deliverRun(agentConfig, context, run, resolved, outcome, secrets);
     if (delivered) {
-      run = delivered;
+      run = delivered.run;
       outcome = { ...outcome, run };
+      if (delivered.auditFailure) {
+        run = this.failRun(run, delivered.auditFailure);
+        this.runs.write(run);
+        outcome = { kind: "failed", reason: "audit-failed", message: delivered.auditFailure.message, run };
+        this.recordLastRun(agentConfig.id, run, outcome);
+      }
     }
     return outcome;
+  }
+
+  private failRun(run: RunRecord, refusal: SandboxRefusal): RunRecord {
+    const at = this.now().toISOString();
+    return {
+      ...run,
+      status: "failed",
+      finishedAt: run.finishedAt ?? at,
+      error: refusal.message,
+      logs: [...run.logs, { id: `${run.id}_${refusal.reason}`, runId: run.id, timestamp: at, level: "error", message: refusal.message, metadata: { reason: refusal.reason } }],
+    };
+  }
+
+  private recordLastRun(agentId: string, run: RunRecord, outcome: RunOutcome): void {
+    this.safeHealth(agentId, {
+      lastRun: { runId: run.id, status: run.status, ...(outcome.kind === "failed" ? { reason: outcome.reason } : {}), ...(run.finishedAt ? { finishedAt: run.finishedAt } : {}) },
+    });
+  }
+
+  /**
+   * The only roles the identity may hold: the scopes the configured agents
+   * declare in their hashed manifests, read again on every run. An agent
+   * whose own checks fail adds none.
+   */
+  private allowedRoles(current: SandboxAgentConfig, resolved: SandboxAgent): Set<string> {
+    const roles = new Set(resolved.agent.scopes);
+    for (const agent of this.config.agents) {
+      if (agent.id === current.id) continue;
+      try {
+        for (const scope of resolveSandboxAgent(agent).agent.scopes) roles.add(scope);
+      } catch {
+        // That agent is refused on its own run, with its own reason.
+      }
+    }
+    return roles;
   }
 
   /** Sends the report when the config asks for it, once. Records the result on the run. */
@@ -400,7 +450,7 @@ export class SandboxHost {
     resolved: SandboxAgent,
     outcome: RunOutcome,
     secrets: SandboxSecrets,
-  ): Promise<RunRecord | undefined> {
+  ): Promise<{ run: RunRecord; auditFailure?: SandboxRefusal } | undefined> {
     const delivery = agentConfig.delivery;
     if (!delivery) return undefined;
     const completed = outcome.kind === "completed";
@@ -412,7 +462,7 @@ export class SandboxHost {
       run,
       agentName: resolved.manifest.descriptor.name,
       sandboxName: this.config.sandbox.name,
-      resultDefinition: resolved.manifest.definition.result.data,
+      manifest: resolved.manifest,
       ...(outcome.kind === "failed" ? { reason: outcome.reason } : {}),
     });
     const result = await this.send(agentConfig, context, run.id, delivery, secrets, text);
@@ -428,7 +478,7 @@ export class SandboxHost {
       logs: [...run.logs, { id: `${run.id}_delivery_log`, runId: run.id, timestamp: at, level: result.outcome === "sent" ? "info" : "warn", message: result.outcome === "sent" ? "Report delivered." : `Report not delivered: ${result.detail}`, metadata: { reason: result.outcome === "sent" ? "delivered" : "delivery-failed" } }],
     };
     this.runs.write(updated);
-    return updated;
+    return { run: updated, ...(result.auditFailure ? { auditFailure: result.auditFailure } : {}) };
   }
 
   private async send(
@@ -438,7 +488,7 @@ export class SandboxHost {
     delivery: NonNullable<SandboxAgentConfig["delivery"]>,
     secrets: SandboxSecrets,
     text: string,
-  ): Promise<{ outcome: "sent" | "failed"; detail: string }> {
+  ): Promise<{ outcome: "sent" | "failed"; detail: string; auditFailure?: SandboxRefusal }> {
     const digest = payloadDigest(text);
     try {
       this.auditEvent(context, "delivery.attempted", { connector: delivery.connector, payloadDigest: digest, idempotencyKey });
@@ -449,10 +499,12 @@ export class SandboxHost {
       return { outcome: "failed", detail };
     }
     const result = await sendDelivery({ delivery, secrets, text, ...(this.deps.deliveryFetch ? { fetch: this.deps.deliveryFetch } : {}) });
+    let auditFailure: SandboxRefusal | undefined;
     try {
       this.auditEvent(context, "delivery.result", { connector: delivery.connector, payloadDigest: digest, idempotencyKey, outcome: result.outcome });
     } catch (error) {
-      this.log("error", describe(error), { agent: agentConfig.id, reason: "audit-failed" });
+      auditFailure = isSandboxRefusal(error) ? error : new SandboxRefusal("audit-failed", describe(error), { cause: error });
+      this.log("error", auditFailure.message, { agent: agentConfig.id, reason: "audit-failed" });
     }
     this.safeHealth(agentConfig.id, { lastDelivery: { runId: idempotencyKey, outcome: result.outcome, detail: result.detail, at: this.now().toISOString() } });
     this.log(result.outcome === "sent" ? "info" : "warn", result.outcome === "sent" ? "Report delivered." : "Report not delivered.", {
@@ -460,7 +512,7 @@ export class SandboxHost {
       connector: delivery.connector,
       reason: result.outcome === "sent" ? undefined : "delivery-failed",
     });
-    return result;
+    return { ...result, ...(auditFailure ? { auditFailure } : {}) };
   }
 
   private async refuse(agentConfig: SandboxAgentConfig, context: SandboxAuditContext, refusal: SandboxRefusal, secrets: SandboxSecrets): Promise<RunOutcome> {
@@ -486,9 +538,18 @@ export class SandboxHost {
    */
   private async sendNotice(agentConfig: SandboxAgentConfig, context: SandboxAuditContext, reason: string | undefined, secrets: SandboxSecrets): Promise<void> {
     const delivery = agentConfig.delivery;
-    if (!delivery?.failureNotice || !(secrets.slack || secrets.discord)) return;
+    if (!delivery?.failureNotice) return;
     const previous = this.health.get(agentConfig.id).lastNoticeReason;
     if (reason === previous) return;
+    if (!secrets.slack && !secrets.discord) {
+      // A refusal before the preflight reached the secrets still gets its notice.
+      try {
+        secrets = loadSandboxSecrets(this.config.secretsPath, new Set([delivery.connector]));
+      } catch (error) {
+        this.log("error", `Failure notice not sent: ${describe(error)}`, { agent: agentConfig.id, reason: isSandboxRefusal(error) ? error.reason : "delivery-failed" });
+        return;
+      }
+    }
     const at = this.now().toISOString();
     const text = reason === undefined
       ? renderRecoveryNotice({ agentId: agentConfig.id, sandboxName: this.config.sandbox.name, at })
@@ -531,4 +592,11 @@ function failureReason(run: RunRecord, statuses: readonly number[]): SandboxRefu
     return new SandboxRefusal("graph-throttled", "Microsoft Graph kept throttling the sandbox (HTTP 429) after the waits it asked for. The next scheduled run tries again.");
   }
   return new SandboxRefusal("run-failed", `The agent failed: ${error.slice(0, 300) || "no error was recorded."}`);
+}
+
+const FILESYSTEM_CODES = new Set(["ENOSPC", "EACCES", "EPERM", "EROFS", "EDQUOT", "EIO", "ENOENT", "ENOTDIR", "EISDIR", "EEXIST", "EMFILE", "ENFILE", "EBUSY"]);
+
+function isFilesystemError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  return typeof code === "string" && FILESYSTEM_CODES.has(code);
 }

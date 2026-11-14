@@ -105,6 +105,11 @@ describe("classifyApplicationRoles", () => {
     assert.equal(isSecretBearingRole("Mail.ReadBasic.All"), true);
     assert.equal(isSecretBearingRole("MailboxSettings.Read"), true);
     assert.equal(isSecretBearingRole("BitlockerKey.ReadBasic.All"), false);
+    assert.equal(isSecretBearingRole("Chat.Read.All"), true);
+    assert.equal(isSecretBearingRole("ChatMessage.Read.All"), true, "Chat.* stops at the dot, so ChatMessage.* is listed");
+    assert.equal(isSecretBearingRole("ChannelMessage.Read.All"), true);
+    assert.equal(isSecretBearingRole("Channel.ReadBasic.All"), false);
+    assert.equal(isSecretBearingRole("Mail"), false);
     assert.equal(isSecretBearingRole("DeviceManagementManagedDevices.Read.All"), false);
   });
 });

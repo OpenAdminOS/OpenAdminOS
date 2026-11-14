@@ -364,12 +364,18 @@ export const APPLICATION_SECRET_BEARING_ROLE_PATTERNS: readonly string[] = [
   "Files.*",
   "Sites.*",
   "Chat.*",
+  "ChatMessage.*",
   "ChannelMessage.*",
   "Notes.*",
   "Calendars.*",
   "Contacts.*",
 ];
 
+/**
+ * A pattern ending in `.*` matches its prefix up to and including the
+ * dot, so `Chat.*` matches `Chat.Read.All` but not `ChatMessage.Read.All`;
+ * that one has its own entry.
+ */
 export function isSecretBearingRole(role: string): boolean {
   return APPLICATION_SECRET_BEARING_ROLE_PATTERNS.some((pattern) =>
     pattern.endsWith(".*") ? role.startsWith(pattern.slice(0, -1)) : role === pattern,

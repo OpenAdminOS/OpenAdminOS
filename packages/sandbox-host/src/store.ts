@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import type { RunRecord } from "@openadminos/agent-sdk";
 
@@ -57,6 +57,24 @@ export class RunStore {
         return [];
       }
     });
+  }
+
+  /** Run files that are not valid JSON, as `agent/file` names, for the startup log. */
+  unreadableFiles(): string[] {
+    if (!existsSync(this.root)) return [];
+    const names: string[] = [];
+    for (const agent of readdirSync(this.root).sort()) {
+      if (!SAFE_SEGMENT.test(agent)) continue;
+      const folder = join(this.root, agent);
+      for (const name of this.files(folder)) {
+        try {
+          JSON.parse(readFileSync(join(folder, name), "utf8"));
+        } catch {
+          names.push(`${agent}/${name}`);
+        }
+      }
+    }
+    return names;
   }
 
   latest(agentSlug: string): RunRecord | undefined {
@@ -135,14 +153,23 @@ export interface HealthFile {
 /** `<dataDir>/health.json`: the last run and the last refusal per agent. */
 export class HealthStore {
   private state: HealthFile;
+  /** Set when health.json existed but could not be read; the file is kept aside under this name. */
+  readonly problem: string | undefined;
 
   constructor(private readonly path: string, sandboxId: string) {
     let loaded: HealthFile | undefined;
-    try {
-      const parsed = JSON.parse(readFileSync(path, "utf8")) as HealthFile;
-      if (parsed && parsed.version === 1 && typeof parsed.agents === "object") loaded = parsed;
-    } catch {
-      loaded = undefined;
+    if (existsSync(path)) {
+      try {
+        const parsed = JSON.parse(readFileSync(path, "utf8")) as HealthFile;
+        if (parsed && parsed.version === 1 && parsed.agents !== null && typeof parsed.agents === "object") loaded = parsed;
+      } catch {
+        loaded = undefined;
+      }
+      if (!loaded) {
+        const aside = `${path}.unreadable-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+        renameSync(path, aside);
+        this.problem = `health.json in the data folder could not be read. It was kept as ${basename(aside)} for review and a new one was started.`;
+      }
     }
     this.state = loaded ?? { version: 1, sandboxId, updatedAt: new Date(0).toISOString(), agents: {} };
     this.state.sandboxId = sandboxId;

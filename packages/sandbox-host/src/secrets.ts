@@ -1,6 +1,4 @@
-import { readFileSync } from "node:fs";
-
-import { assertPrivateFile } from "./files.js";
+import { readPrivateFile } from "./files.js";
 import { SandboxRefusal } from "./refusal.js";
 
 /** Delivery secrets, kept in a file next to the config with mode 0600. */
@@ -17,10 +15,10 @@ const DISCORD_WEBHOOK = /^https:\/\/(?:discord\.com|discordapp\.com)\/api\/webho
  */
 export function loadSandboxSecrets(path: string, needed: ReadonlySet<"slack" | "discord">): SandboxSecrets {
   if (needed.size === 0) return {};
-  assertPrivateFile(path, "secrets file");
+  const text = readPrivateFile(path, "secrets file");
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(path, "utf8"));
+    parsed = JSON.parse(text);
   } catch {
     throw new SandboxRefusal("config-invalid", `The secrets file at ${path} is not valid JSON.`);
   }

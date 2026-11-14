@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type { RunRecord } from "@openadminos/agent-sdk";
+import type { AgentTemplate, RunRecord, TemplateStep } from "@openadminos/agent-sdk";
 import { createDiscordWebhookClient } from "@openadminos/connector-discord";
 import { createSlackClient } from "@openadminos/connector-slack";
 
@@ -29,17 +29,64 @@ export function neutralize(text: string): string {
 }
 
 /**
+ * The ids of the steps whose output comes from the model: every llm step,
+ * every map step with one inside, and every step whose settings read the
+ * output of one of those.
+ */
+export function modelDerivedStepIds(steps: readonly TemplateStep[]): Set<string> {
+  const derived = new Set<string>();
+  const containsModel = (step: TemplateStep): boolean =>
+    step.format === "llm" || (step.format === "map" && step.settings.do.some(containsModel));
+  for (const step of steps) if (containsModel(step)) derived.add(step.id);
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const step of steps) {
+      if (derived.has(step.id)) continue;
+      if ([...stepReferences(JSON.stringify(step.settings ?? {}))].some((id) => derived.has(id))) {
+        derived.add(step.id);
+        changed = true;
+      }
+    }
+  }
+  return derived;
+}
+
+/** Roots of `{{ root.output... }}` and similar references, with string literals removed. */
+function stepReferences(text: string): Set<string> {
+  const roots = new Set<string>();
+  for (const match of text.matchAll(/\{\{([\s\S]*?)\}\}/g)) {
+    const expression = (match[1] ?? "").replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, "");
+    for (const reference of expression.matchAll(/(?<![\w.])([A-Za-z_][A-Za-z0-9_]*)\s*\./g)) roots.add(reference[1] as string);
+  }
+  return roots;
+}
+
+/**
+ * A result field the report may carry: a literal, or template expressions
+ * that read only settings and steps whose output does not come from the
+ * model.
+ */
+function isDeterministicField(definition: unknown, steps: ReadonlySet<string>, modelDerived: ReadonlySet<string>): boolean {
+  if (typeof definition === "number") return true;
+  if (typeof definition !== "string") return false;
+  const roots = stepReferences(definition);
+  if (roots.size === 0) return false;
+  return [...roots].every((root) => root === "settings" || (steps.has(root) && !modelDerived.has(root)));
+}
+
+/**
  * The report a sandbox sends, rendered only from structured fields: the
  * agent, the status, and the counts the manifest's result declares by
- * name. No text the model wrote, no tenant names and no error text
- * leaves the machine.
+ * name, from expressions that do not read model output. Only
+ * non-negative integers and list lengths are sent: no text the model
+ * wrote, no tenant names and no error text leaves the machine.
  */
 export function renderSandboxReport(input: {
   run: RunRecord;
   agentName: string;
   sandboxName: string;
-  /** `definition.result.data` of the pinned manifest: the allowlist of result keys. */
-  resultDefinition: unknown;
+  /** The pinned manifest: its result definition is the allowlist of fields. */
+  manifest: AgentTemplate;
   reason?: string;
 }): string {
   const lines = [
@@ -52,7 +99,16 @@ export function renderSandboxReport(input: {
   ];
   if (input.run.status !== "completed" && input.reason) lines.push(`Reason: ${input.reason}`);
   const findings: string[] = [];
-  collect(input.resultDefinition, input.run.result, "", 0, findings);
+  const steps = new Set<string>();
+  const addSteps = (list: readonly TemplateStep[]) => {
+    for (const step of list) {
+      steps.add(step.id);
+      if (step.format === "map") addSteps(step.settings.do);
+    }
+  };
+  addSteps(input.manifest.skills);
+  const modelDerived = modelDerivedStepIds(input.manifest.skills);
+  collect(input.manifest.definition.result.data, input.run.result, "", 0, findings, (definition) => isDeterministicField(definition, steps, modelDerived));
   if (findings.length > 0) {
     lines.push("Findings:");
     lines.push(...findings.slice(0, MAX_FINDING_LINES));
@@ -84,19 +140,24 @@ export function renderFailureNotice(input: { agentId: string; sandboxName: strin
   ].join("\n");
 }
 
-function collect(definition: unknown, value: unknown, prefix: string, depth: number, out: string[]): void {
+function collect(
+  definition: unknown,
+  value: unknown,
+  prefix: string,
+  depth: number,
+  out: string[],
+  deterministic: (definition: unknown) => boolean,
+): void {
   if (definition !== null && typeof definition === "object" && !Array.isArray(definition)) {
     if (depth >= MAX_DEPTH || value === null || typeof value !== "object" || Array.isArray(value)) return;
     for (const key of Object.keys(definition)) {
-      if (!RESULT_KEY.test(key) || /^llm/i.test(key)) continue;
-      collect((definition as Record<string, unknown>)[key], (value as Record<string, unknown>)[key], prefix ? `${prefix}.${key}` : key, depth + 1, out);
+      if (!RESULT_KEY.test(key)) continue;
+      collect((definition as Record<string, unknown>)[key], (value as Record<string, unknown>)[key], prefix ? `${prefix}.${key}` : key, depth + 1, out, deterministic);
     }
     return;
   }
-  if (!prefix) return;
-  if (typeof value === "number" && Number.isFinite(value)) out.push(`- ${prefix}: ${value}`);
-  else if (typeof value === "string" && /^-?\d{1,15}(?:\.\d{1,6})?$/.test(value.trim())) out.push(`- ${prefix}: ${value.trim()}`);
-  else if (typeof value === "boolean") out.push(`- ${prefix}: ${value ? "yes" : "no"}`);
+  if (!prefix || !deterministic(definition)) return;
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) out.push(`- ${prefix}: ${value}`);
   else if (Array.isArray(value)) out.push(`- ${prefix}: ${value.length} ${value.length === 1 ? "item" : "items"}`);
 }
 

@@ -8,7 +8,24 @@ const PROBE_TIMEOUT_MS = 10_000;
 
 export interface ModelCheck {
   model: string;
-  digest?: string;
+  /** The digest the server reports, or `unknown` when it reports none (LM Studio). */
+  digest: string;
+}
+
+/**
+ * The transport for the model client: only the checked endpoint's origin,
+ * and redirects fail, so a prompt never goes anywhere else.
+ */
+export function pinnedModelFetch(endpoint: string, base: typeof fetch = fetch): typeof fetch {
+  const origin = new URL(endpoint).origin;
+  return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const target = new URL(href).origin;
+    if (target !== origin) {
+      throw new SandboxRefusal("model-endpoint-not-local", `A model request to ${target} was refused before it was sent. The sandbox sends prompts only to ${origin}.`);
+    }
+    return base(input, { ...init, redirect: "error" });
+  }) as typeof fetch;
 }
 
 /**
@@ -45,16 +62,19 @@ async function checkOllama(model: SandboxConfig["model"], fetchImpl: typeof fetc
   if (entry.remote_host || entry.remote_model) throw cloudModel(model.model);
   const shown = await probe<{ remote_host?: string; remote_model?: string }>(fetchImpl, `${base}/api/show`, "Ollama", model.endpoint, { model: model.model });
   if (shown.remote_host || shown.remote_model) throw cloudModel(model.model);
-  return { model: entry.name ?? model.model, ...(typeof entry.digest === "string" ? { digest: entry.digest } : {}) };
+  return { model: entry.name ?? model.model, digest: typeof entry.digest === "string" && entry.digest.length > 0 ? entry.digest : "unknown" };
 }
 
 async function checkLmStudio(model: SandboxConfig["model"], fetchImpl: typeof fetch): Promise<ModelCheck> {
   const base = model.endpoint.replace(/\/+$/, "");
-  const listing = await probe<{ data?: Array<{ id?: string }> }>(fetchImpl, `${base}/models`, "LM Studio", model.endpoint);
-  if (!listing.data?.some((entry) => entry.id === model.model)) {
+  const listing = await probe<{ data?: Array<{ id?: string; digest?: unknown; sha256?: unknown }> }>(fetchImpl, `${base}/models`, "LM Studio", model.endpoint);
+  const entry = listing.data?.find((candidate) => candidate.id === model.model);
+  if (!entry) {
     throw new SandboxRefusal("model-not-pulled", `LM Studio on this machine has no model ${model.model} loaded. Load it in LM Studio or with \`lms load ${model.model}\`, then run again.`);
   }
-  return { model: model.model };
+  // LM Studio's model listing names no digest today; one is recorded if it ever does.
+  const digest = typeof entry.digest === "string" ? entry.digest : typeof entry.sha256 === "string" ? entry.sha256 : "unknown";
+  return { model: model.model, digest };
 }
 
 async function probe<T>(fetchImpl: typeof fetch, url: string, server: string, endpoint: string, body?: unknown): Promise<T> {

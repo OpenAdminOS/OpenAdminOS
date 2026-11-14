@@ -119,6 +119,7 @@ export {
   runAgentTemplatePlan,
   runAgentTemplateApply,
   agentTemplateToModule,
+  agentTemplateToRegistrySummary,
 } from "./agent-template.js";
 export {
   scriptAgentTemplateToModule,
@@ -229,7 +230,6 @@ export {
   type ApplicationTokenProviderOptions,
   type AssertionSigner,
 } from "./graph-application.js";
-export { createSelfSignedCertificate } from "./self-signed-certificate.js";
 export { awaitWithSignal } from "./cancellation.js";
 export {
   disposeBuiltConnectors,
@@ -619,10 +619,13 @@ export interface ExecuteRunInput {
    */
   onConnectorAudit?: (entry: ConnectorAuditEntry) => void;
   onProgress(run: RunRecord): void | Promise<void>;
+}
+
+/** Input of `executeRun`, the read path. */
+export interface ExecuteReadRunInput extends ExecuteRunInput {
   /**
    * A module the host already built from manifest text it checked, used
-   * instead of loading the manifest from disk again. Only `executeRun`
-   * reads it.
+   * instead of loading the manifest from disk again.
    */
   module?: AgentModule;
 }
@@ -993,7 +996,7 @@ async function failPhase(
   return failed;
 }
 
-export async function executeRun(input: ExecuteRunInput): Promise<RunRecord> {
+export async function executeRun(input: ExecuteReadRunInput): Promise<RunRecord> {
   if (input.run.dryRun) throw new Error("Dry run is only available for write agents. Run this read agent normally.");
   const handle = await createPhaseHandle(
     input,

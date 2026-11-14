@@ -12,7 +12,7 @@ This first version is read-only. A sandbox cannot change anything in the tenant.
 - Microsoft Graph (`https://graph.microsoft.com`), for the reads the agents declare.
 - The delivery destinations you configure (Slack or Discord), if any. Delivery is off unless you add it.
 
-Nothing else. Nothing goes to OpenAdminOS. The model runs on this machine; the host refuses an endpoint that is not a loopback address and refuses Ollama cloud models.
+Nothing else. Nothing goes to OpenAdminOS. The model runs on this machine; the host refuses an endpoint that is not a loopback address and refuses Ollama cloud models. The model client sends only to the endpoint that was checked and never follows a redirect.
 
 ## What the host checks before every run
 
@@ -22,7 +22,9 @@ The run is refused, with a named reason in the log and in `health.json`, when an
 - Certificate: refused when expired or not yet valid; a warning on every run when it expires within 30 days.
 - Agent: a bundled first-party agent, mode `read`, a template agent (script agents are refused), only Graph GET, transform and model steps, no `$batch`, no `/me`, and a manifest that matches the `templateSha256` you pinned.
 - Model: the endpoint is on this machine, the server answers, the model is pulled, and it is not a cloud model.
-- Identity, on a fresh token every run: an app-only token (`idtyp` app) for the configured tenant and app, for Microsoft Graph, with no directory roles (`wids`), at least one role, no role that can change the tenant, no role that reads secrets or personal content (local admin passwords, BitLocker keys, mail, files, chats, calendars, contacts, notes), and no role that no configured agent declares.
+- Identity, on a fresh token every run: an app-only token (`idtyp` app) for the configured tenant and app, for Microsoft Graph, with no directory roles (`wids`), at least one role, no role that can change the tenant, no role that reads secrets or personal content (local admin passwords, BitLocker keys, mail, files, chats, calendars, contacts, notes), and no role that no configured agent declares. The scopes come from the pinned manifests, read again on every run.
+
+  The directory role check sees only what the token carries: tenant-wide directory roles, in the `wids` claim (the value every app-only token carries is ignored). A role scoped to an administrative unit or to an application, and permissions the service principal holds on other resources, are not visible in a Graph token. What contains those is the egress limit: the host sends only GET requests, and only to Microsoft Graph. Check the service principal's role assignments in Entra as part of the setup.
 
 During the run, every Graph request is written to the audit log before it is sent (method, path and a digest of the query, never a body). Requests to any other host, any method but GET, `$batch` and `/me` are refused before they are sent, and redirects fail. A run that does not finish within `runDeadlineSeconds` is stopped.
 
@@ -84,7 +86,7 @@ During the run, every Graph request is written to the audit log before it is sen
 
 ### Delivery (optional)
 
-Off unless an agent has a `delivery` block. The destination is fixed in the config; the model never chooses it. The report holds the agent, the status, the run id and the counts the agent's manifest declares, never text the model wrote or tenant names. Mentions and links are neutralized, Slack link previews are off, and Discord messages suppress embeds and mentions. Each report is sent once; a failed delivery is recorded on the run and in `health.json`, and is not retried. The audit log records each delivery attempt and result with a digest of the payload, never the payload.
+Off unless an agent has a `delivery` block. The destination is fixed in the config; the model never chooses it. The report holds the agent, the status, the run id and the values of the agent's declared result fields that are non-negative whole numbers or list lengths, taken only from expressions that do not read a model step. It never holds text the model wrote, numbers written as text, or tenant names. Mentions and links are neutralized, Slack link previews are off, and Discord messages suppress embeds and mentions. Each report is sent once; a failed delivery is recorded on the run and in `health.json`, and is not retried. The audit log records each delivery attempt and result with a digest of the payload, never the payload.
 
 ```json
 "delivery": { "connector": "discord", "notifyOnSuccess": true, "notifyOnFailure": true, "failureNotice": true }
@@ -170,7 +172,7 @@ SIGINT and SIGTERM stop the schedule, stop a run in progress and record it. A ru
 
 In `dataDir`:
 
-- `runs/<agent>/`: one JSON run record per run, the last 200 per agent, written atomically. Each record says where it ran (`executedOn`: sandbox id and name, organization, model and model digest).
+- `runs/<agent>/`: one JSON run record per run, the last 200 per agent, written atomically. Each record says where it ran (`executedOn`: sandbox id and name, organization, model and model digest; LM Studio reports no digest, so it is recorded as `unknown`).
 - `openadminos.db`: the hash-chained audit log, the same format as the desktop's.
 - `health.json`: the last run, last refusal and last delivery per agent.
 - `sandbox.lock`: present while a host runs.

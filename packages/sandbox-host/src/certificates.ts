@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { ApplicationTokenError, createPemAssertionSigner, type AssertionSigner } from "@openadminos/runtime";
 
 import type { SandboxCertificateConfig } from "./config.js";
-import { assertPrivateFile, describe } from "./files.js";
+import { describe, readPrivateFile } from "./files.js";
 import { SandboxRefusal } from "./refusal.js";
 
 /** A certificate this close to expiry is reported on every run. */
@@ -28,10 +28,10 @@ export function chooseCertificate(certificates: readonly SandboxCertificateConfi
   for (const certificate of certificates) {
     let signer: AssertionSigner;
     try {
-      assertPrivateFile(certificate.privateKeyPath, "private key");
+      const privateKeyPem = readPrivateFile(certificate.privateKeyPath, "private key");
       signer = createPemAssertionSigner({
         certificatePem: readFileSync(certificate.certificatePath, "utf8"),
-        privateKeyPem: readFileSync(certificate.privateKeyPath, "utf8"),
+        privateKeyPem,
       });
     } catch (error) {
       const problem = error instanceof SandboxRefusal

@@ -9,7 +9,7 @@ import { AuditLogStore } from "@openadminos/runtime";
 import { loadSandboxConfig } from "./config.js";
 import { SandboxHost, type SandboxHostDeps } from "./host.js";
 import { main } from "./main.js";
-import { appClaims, bundledHash, fakeTokenProviders, ollamaFetch, tempDir, writeConfig, writePrivate } from "./test-support.js";
+import { appClaims, bundledHash, fakeTokenProviders, ollamaFetch, tempDir, writeCertificate, writeConfig, writePrivate } from "./test-support.js";
 
 const READ = "DeviceManagementManagedDevices.Read.All";
 
@@ -196,6 +196,122 @@ describe("SandboxHost platform and notices", () => {
       await run([READ]);
       assert.equal(sent.length, 3, "no notice while healthy");
     } finally {
+      cleanup();
+    }
+  });
+});
+
+describe("SandboxHost failures before the secrets and after the run", () => {
+  function noticeSetup(dir: string, extra: Record<string, unknown> = {}) {
+    writePrivate(join(dir, "secrets.json"), JSON.stringify({ discord: { webhookUrl: "https://discord.com/api/webhooks/1234567/token_x" } }));
+    return loadSandboxConfig(writeConfig(dir, {
+      agents: [{ id: "find-inactive-devices", templateSha256: bundledHash("find-inactive-devices"), intervalSeconds: 3600, delivery: { connector: "discord", notifyOnSuccess: false, notifyOnFailure: false, failureNotice: true } }],
+      ...extra,
+    }));
+  }
+  function capture() {
+    const sent: string[] = [];
+    const deliveryFetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      sent.push(String((JSON.parse(String(init?.body)) as { content: string }).content));
+      return Response.json({ id: "m" });
+    }) as typeof fetch;
+    return { sent, deliveryFetch };
+  }
+
+  it("sends a notice when the model is unreachable, before the secrets were loaded", async () => {
+    const { dir, cleanup } = tempDir();
+    const config = noticeSetup(dir);
+    const { sent, deliveryFetch } = capture();
+    const modelFetch = (async () => {
+      throw new TypeError("fetch failed");
+    }) as typeof fetch;
+    const host = new SandboxHost(config, { ...deps({ deliveryFetch }), modelFetch });
+    try {
+      host.open();
+      const outcome = await host.runAgent(config.agents[0]!, "schedule");
+      assert.equal(outcome.kind === "refused" && outcome.reason, "model-unreachable");
+      assert.equal(sent.length, 1);
+      assert.match(sent[0] ?? "", /Reason: model-unreachable/);
+    } finally {
+      await host.close();
+      cleanup();
+    }
+  });
+
+  it("sends a notice when the certificate expired", async () => {
+    const { dir, cleanup } = tempDir();
+    const now = Date.now();
+    const config = noticeSetup(dir, { certificates: [writeCertificate(dir, "old", new Date(now - 30 * 86_400_000), new Date(now - 86_400_000))] });
+    const { sent, deliveryFetch } = capture();
+    const host = new SandboxHost(config, deps({ deliveryFetch }));
+    try {
+      host.open();
+      const outcome = await host.runAgent(config.agents[0]!, "schedule");
+      assert.equal(outcome.kind === "refused" && outcome.reason, "certificate-expired");
+      assert.match(sent[0] ?? "", /Reason: certificate-expired/);
+    } finally {
+      await host.close();
+      cleanup();
+    }
+  });
+
+  it("does not count a run whose completion the audit log could not record, and sends nothing for it", async () => {
+    const { dir, cleanup } = tempDir();
+    writePrivate(join(dir, "secrets.json"), JSON.stringify({ discord: { webhookUrl: "https://discord.com/api/webhooks/1234567/token_x" } }));
+    const config = loadSandboxConfig(writeConfig(dir, {
+      agents: [{ id: "find-inactive-devices", templateSha256: bundledHash("find-inactive-devices"), intervalSeconds: 3600, delivery: { connector: "discord" } }],
+    }));
+    const { sent, deliveryFetch } = capture();
+    let host: SandboxHost | undefined;
+    // The model step runs last; closing the audit log there leaves only the completion event to fail.
+    const closingLlm: RunLlmApi = {
+      ...llm,
+      async *stream(options) {
+        (host as unknown as { audit?: AuditLogStore }).audit?.close();
+        yield* llm.stream(options);
+      },
+    };
+    host = new SandboxHost(config, { ...deps({ graphFetch: graph().fetchImpl, deliveryFetch }), createLlm: () => closingLlm });
+    try {
+      host.open();
+      const outcome = await host.runAgent(config.agents[0]!, "schedule");
+      assert.equal(outcome.kind, "failed");
+      assert.equal(outcome.kind === "failed" && outcome.reason, "audit-failed");
+      assert.equal(outcome.kind === "failed" && outcome.run.status, "failed");
+      assert.equal(sent.length, 0);
+    } finally {
+      await host.close().catch(() => undefined);
+      cleanup();
+    }
+  });
+
+  it("names a failure while building the run as run-failed with its cause", async () => {
+    const { dir, cleanup } = tempDir();
+    const config = loadSandboxConfig(writeConfig(dir));
+    const host = new SandboxHost(config, { ...deps({ graphFetch: graph().fetchImpl }), createLlm: () => { throw new Error("no model client"); } });
+    try {
+      host.open();
+      const outcome = await host.runAgent(config.agents[0]!, "schedule");
+      assert.equal(outcome.kind === "failed" && outcome.reason, "run-failed");
+      assert.match(outcome.kind === "failed" ? outcome.message : "", /no model client/);
+    } finally {
+      await host.close();
+      cleanup();
+    }
+  });
+
+  it("logs unreadable run files at open", () => {
+    const { dir, cleanup } = tempDir();
+    const config = loadSandboxConfig(writeConfig(dir));
+    mkdirSync(join(config.dataDir, "runs", "find-inactive-devices"), { recursive: true });
+    writePrivate(join(config.dataDir, "runs", "find-inactive-devices", "broken.json"), "{");
+    const lines: string[] = [];
+    const host = new SandboxHost(config, { ...deps(), log: (_level, message, fields) => lines.push(`${String(fields?.reason)} ${message}`) });
+    try {
+      host.open();
+      assert.ok(lines.some((line) => line.startsWith("storage-corrupt") && line.includes("find-inactive-devices/broken.json")));
+    } finally {
+      void host.close();
       cleanup();
     }
   });

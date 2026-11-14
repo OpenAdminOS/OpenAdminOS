@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
@@ -64,6 +64,24 @@ describe("RunStore", () => {
     try {
       const store = new RunStore(join(dir, "runs"));
       assert.throws(() => store.write({ ...run(1), agentSlug: "../escape" }));
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe("unreadable files", () => {
+  it("names unreadable run files and keeps an unreadable health.json aside", () => {
+    const { dir, cleanup } = tempDir();
+    try {
+      const store = new RunStore(join(dir, "runs"));
+      store.write(run(1));
+      writeFileSync(join(dir, "runs", "find-inactive-devices", "2026-broken.json"), "{not json");
+      assert.deepEqual(store.unreadableFiles(), ["find-inactive-devices/2026-broken.json"]);
+      writeFileSync(join(dir, "health.json"), "{not json");
+      const health = new HealthStore(join(dir, "health.json"), "mini-pc");
+      assert.match(health.problem ?? "", /health\.json-?.*could not be read|could not be read/);
+      assert.ok(readdirSync(dir).some((name) => name.startsWith("health.json.unreadable-")));
     } finally {
       cleanup();
     }

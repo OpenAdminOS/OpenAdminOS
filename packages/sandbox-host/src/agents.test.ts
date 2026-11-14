@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { resolveSandboxAgent } from "./agents.js";
+import type { TemplateStep } from "@openadminos/agent-sdk";
+
+import { assertSteps, resolveSandboxAgent } from "./agents.js";
 import { SandboxRefusal } from "./refusal.js";
 import { bundledHash } from "./test-support.js";
 
@@ -29,6 +31,17 @@ describe("resolveSandboxAgent", () => {
     assert.equal(reason, "agent-hash-mismatch");
     assert.ok(message.includes(pinned));
     assert.ok(message.includes(bundledHash("find-inactive-devices")));
+  });
+
+  it("requires a literal first path segment in every Graph step", () => {
+    const graphStep = (path: string, method = "GET") => [{ id: "s", format: "graph", label: "", settings: { method, path, scopes: [] } }] as unknown as TemplateStep[];
+    for (const path of ["/{{ x }}", "{{ x }}", "/ {{ x }}", "/$batch", "/me", "/me/messages", "/{{x}}/users"]) {
+      assert.throws(() => assertSteps("Agent", graphStep(path)), (error: unknown) => error instanceof SandboxRefusal && error.reason === "agent-step-not-allowed", path);
+    }
+    assert.throws(() => assertSteps("Agent", graphStep("/users", "POST")), SandboxRefusal);
+    for (const path of ["/users", "/users/{{ item.id }}", "/deviceManagement/managedDevices", "/servicePrincipals?$top=5", "/identity/conditionalAccess/policies"]) {
+      assertSteps("Agent", graphStep(path));
+    }
   });
 
   it("refuses write agents, script agents and unknown agents", () => {

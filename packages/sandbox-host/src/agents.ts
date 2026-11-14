@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import type { AgentModule, AgentSummary, AgentTemplate, TemplateStep } from "@openadminos/agent-sdk";
-import { agentTemplateToModule, findRegistryAgentById, getAgentUpdatesDir, loadAgentManifestPreview, parseAgentTemplate, toInstalledAgent } from "@openadminos/runtime";
+import { agentTemplateToModule, agentTemplateToRegistrySummary, findRegistryAgentById, getAgentUpdatesDir, loadAgentManifestPreview, parseAgentTemplate, toInstalledAgent } from "@openadminos/runtime";
 
 import type { SandboxAgentConfig } from "./config.js";
 import { SandboxRefusal } from "./refusal.js";
@@ -20,7 +20,10 @@ export function manifestSha256(sourceText: string): string {
 }
 
 /**
- * Finds a bundled first-party agent and checks it before any request:
+ * Finds a bundled first-party agent and checks it before any request.
+ * The registry summary only locates the manifest; the scopes, mode,
+ * execution and connectors the host relies on come from the hashed
+ * manifest text itself, parsed on every run:
  * the manifest must match the pinned hash, run as a read agent, use the
  * template interpreter, and contain only Graph GET, transform and model
  * steps. Script agents need the MXC sandbox, which a sandbox host does
@@ -37,9 +40,6 @@ export function resolveSandboxAgent(config: SandboxAgentConfig): SandboxAgent {
   if (summary.registryPath && /^([/\\]|[A-Za-z]:[/\\])/.test(summary.registryPath)) {
     throw new SandboxRefusal("agent-not-bundled", `${config.id} is not a bundled agent. A sandbox runs only the agents bundled with this release.`);
   }
-  if (summary.author?.verified !== true) {
-    throw new SandboxRefusal("agent-not-bundled", `${config.id} is not a first-party agent. A sandbox runs only verified OpenAdminOS agents in this release.`);
-  }
   const preview = loadAgentManifestPreview(summary);
   if (!preview) {
     throw new SandboxRefusal("agent-not-found", `${config.id} has no manifest.yaml in the agents folder.`);
@@ -52,21 +52,27 @@ export function resolveSandboxAgent(config: SandboxAgentConfig): SandboxAgent {
     );
   }
   const manifest = parseAgentTemplate(preview.sourceText);
+  const fromManifest = agentTemplateToRegistrySummary(manifest);
   const name = manifest.descriptor.name;
-  if (manifest.descriptor.mode !== "read" || summary.mode !== "read") {
+  if (manifest.descriptor.author?.verified !== true) {
+    throw new SandboxRefusal("agent-not-bundled", `${config.id} is not a first-party agent. A sandbox runs only verified OpenAdminOS agents in this release.`);
+  }
+  if (manifest.descriptor.mode !== "read") {
     throw new SandboxRefusal("agent-not-read", `${name} is a write agent. A sandbox runs only read agents; changes are confirmed and applied on the desktop.`);
   }
-  if (manifest.execution?.kind === "script" || summary.execution?.kind === "script") {
+  if (manifest.execution?.kind === "script") {
     throw new SandboxRefusal("agent-not-template", `${name} is a script agent. Script agents run only in the MXC sandbox on the desktop.`);
   }
-  if ((manifest.descriptor.connectors?.length ?? 0) > 0 || (summary.connectors?.length ?? 0) > 0) {
+  if ((manifest.descriptor.connectors?.length ?? 0) > 0 || (fromManifest.connectors?.length ?? 0) > 0) {
     throw new SandboxRefusal("agent-uses-connectors", `${name} uses connectors. A sandbox runs agents that read Microsoft Graph only.`);
   }
   assertSteps(name, manifest.skills);
-  return { agent: toInstalledAgent(summary, new Date(0)), manifest, module: agentTemplateToModule(manifest), sha256 };
+  const agent = toInstalledAgent({ ...fromManifest, ...(summary.registryPath ? { registryPath: summary.registryPath } : {}) }, new Date(0));
+  return { agent, manifest, module: agentTemplateToModule(manifest), sha256 };
 }
 
-function assertSteps(name: string, steps: readonly TemplateStep[]): void {
+/** Refuses any step a sandbox does not run; exported for tests. */
+export function assertSteps(name: string, steps: readonly TemplateStep[]): void {
   for (const step of steps) {
     switch (step.format) {
       case "transform":
@@ -82,7 +88,7 @@ function assertSteps(name: string, steps: readonly TemplateStep[]): void {
         const path = step.settings.path.trim();
         if (/\$batch/i.test(path)) throw refusedStep(name, step.id, "uses $batch");
         if (/^\/me(?:[/?(]|$)/i.test(path)) throw refusedStep(name, step.id, "reads /me, which an app-only identity has no user for");
-        if (!path.startsWith("/") || path.startsWith("{{")) throw refusedStep(name, step.id, "builds its whole path at run time");
+        if (!/^\/[A-Za-z][A-Za-z0-9_.-]*(?:[/?(]|$)/.test(path)) throw refusedStep(name, step.id, "does not start its path with a literal segment such as /users");
         break;
       }
       case "write":

@@ -2,8 +2,10 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { createSelfSignedCertificate } from "@openadminos/runtime/testing";
+import type { AgentTemplate } from "@openadminos/agent-sdk";
 import {
-  createSelfSignedCertificate,
+  parseAgentTemplate,
   loadAgentManifestPreview,
   findRegistryAgentById,
   type ApplicationToken,
@@ -107,4 +109,11 @@ export function ollamaFetch(options: { models?: Array<Record<string, unknown>>; 
     if (url.endsWith("/api/show")) return Response.json(options.show ?? { details: {} });
     return new Response("not found", { status: 404 });
   }) as typeof fetch;
+}
+
+export function bundledManifest(id: string): AgentTemplate {
+  const agent = findRegistryAgentById(id);
+  const preview = agent ? loadAgentManifestPreview(agent) : undefined;
+  if (!preview) throw new Error(`no manifest for ${id}`);
+  return parseAgentTemplate(preview.sourceText);
 }

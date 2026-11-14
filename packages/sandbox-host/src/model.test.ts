@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { checkLocalModel, isCloudModelName } from "./model.js";
+import { checkLocalModel, isCloudModelName, pinnedModelFetch } from "./model.js";
 import { SandboxRefusal } from "./refusal.js";
 import { ollamaFetch } from "./test-support.js";
 
@@ -20,6 +20,25 @@ async function reasonOf(promise: Promise<unknown>): Promise<string> {
 describe("checkLocalModel", () => {
   it("returns the model and its digest", async () => {
     assert.deepEqual(await checkLocalModel(local, ollamaFetch()), { model: "llama3.1:8b", digest: "sha256:abc" });
+  });
+
+  it("records unknown when LM Studio reports no digest", async () => {
+    const lmStudio = (async () => Response.json({ data: [{ id: "qwen3-8b" }] })) as typeof fetch;
+    assert.deepEqual(await checkLocalModel({ provider: "lm-studio", endpoint: "http://127.0.0.1:1234/v1", model: "qwen3-8b" }, lmStudio), { model: "qwen3-8b", digest: "unknown" });
+  });
+
+  it("pins the model client to the checked origin and refuses redirects", async () => {
+    const inits: RequestInit[] = [];
+    const base = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      inits.push(init ?? {});
+      return new Response("{}");
+    }) as typeof fetch;
+    const pinned = pinnedModelFetch("http://127.0.0.1:11434", base);
+    await pinned("http://127.0.0.1:11434/api/chat", { method: "POST" });
+    assert.equal(inits[0]?.redirect, "error");
+    await assert.rejects(pinned("http://127.0.0.1:11435/api/chat"), (error: unknown) => error instanceof SandboxRefusal && error.reason === "model-endpoint-not-local");
+    await assert.rejects(pinned("https://ollama.com/api/chat"), SandboxRefusal);
+    assert.equal(inits.length, 1);
   });
 
   it("refuses an endpoint that is not on this machine before any request", async () => {

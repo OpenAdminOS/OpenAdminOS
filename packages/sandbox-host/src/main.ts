@@ -1,5 +1,5 @@
 import { loadSandboxConfig, type SandboxConfig } from "./config.js";
-import { describe } from "./files.js";
+import { assertSupportedPlatform, describe } from "./files.js";
 import { SandboxHost, type SandboxHostDeps } from "./host.js";
 import { createLineLogger, type SandboxLogger } from "./log.js";
 import { isSandboxRefusal } from "./refusal.js";
@@ -49,6 +49,7 @@ export async function main(
   let args: ParsedArgs;
   let config: SandboxConfig;
   try {
+    assertSupportedPlatform(options.deps?.platform);
     args = parseArgs(argv);
     config = loadSandboxConfig(args.configPath);
   } catch (error) {
