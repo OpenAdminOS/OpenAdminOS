@@ -58,6 +58,24 @@ describe("device identity", () => {
     assert.equal(reasonOf(() => importDevicePrivateKey("not a key")), "key-invalid");
   });
 
+  it("refuses the eight small-order keys", () => {
+    const smallOrder = [
+      "0100000000000000000000000000000000000000000000000000000000000000",
+      "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+      "0000000000000000000000000000000000000000000000000000000000000000",
+      "0000000000000000000000000000000000000000000000000000000000000080",
+      "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",
+      "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85",
+      "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a",
+      "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa",
+    ];
+    for (const hex of smallOrder) {
+      const encoded = Buffer.from(hex, "hex").toString("base64url");
+      assert.equal(isDevicePublicKey(encoded), false, hex);
+      assert.equal(reasonOf(() => importDevicePublicKey(encoded)), "key-invalid");
+    }
+  });
+
   it("refuses malformed public key encodings", () => {
     const encoded = exportDevicePublicKey(generateDeviceIdentity().publicKey);
     for (const bad of ["", encoded.slice(1), `${encoded}=`, `${encoded.slice(0, 42)}+`, Buffer.alloc(33).toString("base64url")]) {
@@ -65,8 +83,9 @@ describe("device identity", () => {
       assert.equal(reasonOf(() => importDevicePublicKey(bad)), "key-invalid");
     }
     // The last character must not carry stray bits: "A" and "B" decode to the same bytes.
-    const zero = Buffer.alloc(32).toString("base64url");
-    assert.equal(isDevicePublicKey(`${zero.slice(0, 42)}B`), false);
+    const sample = Buffer.alloc(32, 7).toString("base64url");
+    assert.ok(isDevicePublicKey(sample));
+    assert.equal(isDevicePublicKey(`${sample.slice(0, 42)}${sample[42] === "c" ? "d" : "c"}`), false);
     assert.equal(isDevicePublicKey(42), false);
   });
 });

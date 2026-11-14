@@ -16,6 +16,21 @@ export interface DeviceIdentity {
 const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 const ED25519_RAW_LENGTH = 32;
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
+/**
+ * The canonical encodings of the eight Ed25519 points of small order
+ * (the identity and points of order 2, 4 and 8). Such a key can match
+ * signatures it never made, so it is refused as a device key.
+ */
+const SMALL_ORDER_KEYS = new Set([
+  "0100000000000000000000000000000000000000000000000000000000000000",
+  "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+  "0000000000000000000000000000000000000000000000000000000000000000",
+  "0000000000000000000000000000000000000000000000000000000000000080",
+  "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",
+  "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85",
+  "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a",
+  "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa",
+]);
 
 export function generateDeviceIdentity(): DeviceIdentity {
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
@@ -52,7 +67,7 @@ export function exportDevicePublicKeySpki(publicKey: KeyObject): Buffer {
   return publicKey.export({ type: "spki", format: "der" });
 }
 
-/** Reads the base64url raw form; throws `key-invalid` for anything else. */
+/** Reads the base64url raw form; throws `key-invalid` for anything else, a small-order key included. */
 export function importDevicePublicKey(encoded: string): KeyObject {
   const raw = decodeRawPublicKey(encoded);
   if (!raw) {
@@ -61,7 +76,7 @@ export function importDevicePublicKey(encoded: string): KeyObject {
   return createPublicKey({ key: Buffer.concat([ED25519_SPKI_PREFIX, raw]), format: "der", type: "spki" });
 }
 
-/** Whether `encoded` is the canonical base64url form of a 32 byte key. */
+/** Whether `encoded` is the canonical base64url form of a 32 byte key that is not of small order. */
 export function isDevicePublicKey(encoded: unknown): encoded is string {
   return typeof encoded === "string" && decodeRawPublicKey(encoded) !== undefined;
 }
@@ -93,5 +108,6 @@ function decodeRawPublicKey(encoded: string): Buffer | undefined {
   const raw = Buffer.from(encoded, "base64url");
   // Only the canonical encoding: the last character must not carry stray bits.
   if (raw.length !== ED25519_RAW_LENGTH || raw.toString("base64url") !== encoded) return undefined;
+  if (SMALL_ORDER_KEYS.has(raw.toString("hex"))) return undefined;
   return raw;
 }
