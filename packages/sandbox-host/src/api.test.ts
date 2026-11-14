@@ -24,6 +24,7 @@ import type { AuditLogPosition } from "@openadminos/runtime";
 
 import { loadSandboxConfig, type SandboxConfig } from "./config.js";
 import { SandboxHost, type SandboxHostDeps } from "./host.js";
+import { main } from "./main.js";
 import { PAIRING_FILES } from "./pairing-files.js";
 import { SandboxRefusal } from "./refusal.js";
 import type { SchedulerClock } from "./scheduler.js";
@@ -449,6 +450,29 @@ describe("sandbox pairing API", () => {
       assert.equal(after.kind, "completed", after.kind === "completed" ? "" : after.message);
     } finally {
       await h.close();
+    }
+  });
+
+  it("unpairs with --unpair while the service is stopped, and says what it removed", async () => {
+    const { dir, cleanup } = tempDir();
+    try {
+      const h = await paired({ dir });
+      const applied = await call(h.port, "PUT", "/v1/assignments", { tls: h.tls, body: assignment(h, 1, [entry("os-update-posture")]) });
+      assert.equal(applied.status, 200);
+      const lines: string[] = [];
+      const log = (_level: string, message: string) => {
+        lines.push(message);
+      };
+      // The running service holds the lock.
+      assert.equal(await main(["--config", join(dir, "sandbox.json"), "--unpair"], { log }), 3);
+      await h.close();
+      assert.equal(await main(["--config", join(dir, "sandbox.json"), "--unpair"], { log }), 0);
+      assert.ok(lines.some((line) => line.startsWith(`Unpaired: removed ${PAIRING_FILES.assignments} and ${PAIRING_FILES.pairing}.`)), lines.join("\n"));
+      assert.equal(await main(["--config", join(dir, "sandbox.json"), "--unpair"], { log }), 0);
+      assert.ok(lines.some((line) => line.startsWith("Nothing to remove")));
+      assert.equal(await main(["--config", join(dir, "sandbox.json"), "--unpair", "--once", "find-inactive-devices"], { log }), 2);
+    } finally {
+      cleanup();
     }
   });
 

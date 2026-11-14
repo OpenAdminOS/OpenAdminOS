@@ -170,6 +170,30 @@ export class SandboxHost {
     }
   }
 
+  /**
+   * `--unpair` with the service stopped: takes the lock, records the
+   * removal in the audit log, removes pairing.json and assignments.json
+   * and releases the lock. Works when those files are damaged, too.
+   */
+  unpairOffline(): string[] {
+    this.lock.acquire();
+    try {
+      this.audit = new AuditLogStore(join(this.config.dataDir, "openadminos.db"), this.now);
+      let pairingId: string | undefined;
+      try {
+        pairingId = readPairing(this.config.dataDir, loadOrCreateDeviceIdentity(this.config.dataDir))?.record.pairingId;
+      } catch {
+        pairingId = undefined;
+      }
+      this.auditEvent(this.hostContext(), "sandbox.pairing.removed", { ...(pairingId ? { pairingId } : {}), by: "unpair-flag" });
+      return removePairingFiles(this.config.dataDir);
+    } finally {
+      this.audit?.close();
+      this.audit = undefined;
+      this.lock.release();
+    }
+  }
+
   /** Stops the schedule, stops runs in progress, closes the audit log and releases the lock. */
   async close(): Promise<void> {
     for (const stop of this.onClose.splice(0)) await stop();
