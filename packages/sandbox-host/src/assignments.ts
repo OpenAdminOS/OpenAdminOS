@@ -16,7 +16,9 @@ export type AssignmentFailure =
   /** The agent fails the checks every sandbox agent passes. */
   | "assignment-agent-refused"
   /** The interval is outside 15 minutes to 31 days. */
-  | "assignment-interval-invalid";
+  | "assignment-interval-invalid"
+  /** The stored assignment could not be read, so no version floor is known. */
+  | "assignment-state-unknown";
 
 export class AssignmentError extends Error {
   constructor(readonly code: AssignmentFailure, message: string) {

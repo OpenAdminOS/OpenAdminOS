@@ -129,6 +129,7 @@ interface StartOptions {
   configOverrides?: Record<string, unknown>;
   dir?: string;
   timings?: Partial<PairingTimings>;
+  now?: () => Date;
 }
 
 async function start(options: StartOptions = {}): Promise<Harness> {
@@ -145,6 +146,7 @@ async function start(options: StartOptions = {}): Promise<Harness> {
     graphRetryBackoffMs: 0,
     schedulerClock: idleClock,
     pairingClock: () => clock.now,
+    ...(options.now ? { now: options.now } : {}),
     pairingTimings: { exhaustedWaitMs: 50, retryMs: 50, ...options.timings },
   };
   const host = new SandboxHost(config, deps);
@@ -753,6 +755,194 @@ describe("sandbox pairing API", () => {
       assert.ok(lines.some((line) => /neither in the sandbox config nor in a schedule the paired desktop assigned/.test(line)));
     } finally {
       cleanup();
+    }
+  });
+
+  it("keeps a rejected stored assignment as the version floor through a failed replacement and a restart", async () => {
+    const { dir, cleanup } = tempDir();
+    try {
+      const h = await paired({ dir });
+      const desktop = h.desktop;
+      const tls = h.tls;
+      const pairingId = h.pairingId;
+      writeAssignments(h.config.dataDir, assignment(h, 4, [entry("compliance-overview", "0".repeat(64))]));
+      await h.close();
+      const sign = (version: number) =>
+        signScheduleAssignment({ pairingId, version, organizationId: "org-1", tenantId: TENANT, entries: [], issuedAt: new Date().toISOString() }, desktop.privateKey);
+
+      const second = await start({ dir });
+      const host = second.host as unknown as { auditEvent: (...args: unknown[]) => void };
+      const original = host.auditEvent;
+      try {
+        assert.equal(second.host.status().assignmentProblem?.reason, "assignment-template-mismatch");
+        host.auditEvent = () => {
+          throw new SandboxRefusal("audit-failed", "The audit log could not record sandbox.assignment.applied: disk full.");
+        };
+        assert.equal(errorCode(await call(second.port, "PUT", "/v1/assignments", { tls, body: sign(5) })), "audit-failed");
+        assert.ok(existsSync(join(second.config.dataDir, PAIRING_FILES.assignments)), "the stored record was restored, not deleted");
+      } finally {
+        host.auditEvent = original;
+        await second.close();
+      }
+
+      const third = await start({ dir });
+      try {
+        assert.equal(third.host.status().assignmentProblem?.reason, "assignment-template-mismatch", "still the version 4 record");
+        assert.equal(errorCode(await call(third.port, "PUT", "/v1/assignments", { tls, body: sign(3) })), "assignment-replayed");
+        assert.equal(errorCode(await call(third.port, "PUT", "/v1/assignments", { tls, body: sign(4) })), "assignment-replayed");
+      } finally {
+        await third.close();
+      }
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("keeps config schedules running with a damaged assignments.json and refuses new assignments", async () => {
+    const { dir, cleanup } = tempDir();
+    try {
+      const h = await paired({ dir });
+      const tls = h.tls;
+      const later = assignment(h, 9, []);
+      await h.close();
+      writeFileSync(join(h.config.dataDir, PAIRING_FILES.assignments), "{ damaged", { mode: 0o600 });
+      const restarted = await start({ dir });
+      try {
+        const status = restarted.host.status();
+        assert.equal(status.assignmentProblem?.reason, "pairing-files-invalid");
+        assert.match(status.assignmentProblem!.message, /Unpair and pair again; config schedules keep running\./);
+        assert.deepEqual(status.schedules.map((schedule) => [schedule.agentId, schedule.source]), [["find-inactive-devices", "config"]]);
+        const refused = await call(restarted.port, "PUT", "/v1/assignments", { tls, body: later });
+        assert.equal(refused.status, 409);
+        assert.equal(errorCode(refused), "assignment-state-unknown");
+      } finally {
+        await restarted.close();
+      }
+      // A damaged pairing.json still stops the host.
+      writeFileSync(join(h.config.dataDir, PAIRING_FILES.pairing), "{ damaged", { mode: 0o600 });
+      await assert.rejects(start({ dir }), (error) => error instanceof SandboxRefusal && error.reason === "pairing-files-invalid");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("leaves the sandbox unpaired with a fresh code when pairing cannot be recorded", async () => {
+    const h = await start();
+    const host = h.host as unknown as { auditEvent: (...args: unknown[]) => void };
+    const original = host.auditEvent;
+    try {
+      host.auditEvent = () => {
+        throw new SandboxRefusal("audit-failed", "The audit log could not record sandbox.pairing.created: disk full.");
+      };
+      const codesBefore = h.logs.filter((entry) => typeof entry.fields?.code === "string").length;
+      const { reply } = await pair(h);
+      assert.equal(errorCode(reply), "audit-failed");
+      assert.equal(h.host.currentPairing, undefined);
+      assert.equal(existsSync(join(h.config.dataDir, PAIRING_FILES.pairing)), false);
+      await waitFor(() => h.logs.filter((entry) => typeof entry.fields?.code === "string").length > codesBefore);
+      host.auditEvent = original;
+      const again = await pair(h);
+      assert.equal(again.reply.status, 201, JSON.stringify(again.reply.body));
+    } finally {
+      host.auditEvent = original;
+      await h.close();
+    }
+  });
+
+  it("refuses a pairing whose body arrived after another desktop paired", async () => {
+    const h = await start();
+    try {
+      const hello = await call(h.port, "GET", "/v1/pair", { tls: h.tls });
+      const slowTls = peerTls();
+      const body = JSON.stringify({ pairingId: hello.body.pairingId, organizationId: "org-1", tenantId: TENANT, desktopPublicKey: exportDevicePublicKey(generateDeviceIdentity().publicKey), proof: "x".repeat(43) });
+      const slow = new Promise<Reply>((resolve, reject) => {
+        const req = httpsRequest(
+          { host: "127.0.0.1", port: h.port, method: "POST", path: "/v1/pair", agent: false, rejectUnauthorized: false, minVersion: "TLSv1.3", key: slowTls.key, cert: slowTls.cert, headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body) } },
+          (res) => {
+            const chunks: Buffer[] = [];
+            res.on("data", (chunk: Buffer) => chunks.push(chunk));
+            res.on("end", () => resolve({ status: res.statusCode ?? 0, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>, serverPin: "" }));
+          },
+        );
+        req.on("error", reject);
+        req.write(body.slice(0, 10));
+        // The rest follows once the other desktop has paired.
+        void pair(h).then(({ reply }) => {
+          assert.equal(reply.status, 201);
+          req.end(body.slice(10));
+        }, reject);
+      });
+      assert.equal(errorCode(await slow), "already-paired");
+    } finally {
+      await h.close();
+    }
+  });
+
+  it("logs rate-limit refusals at most once a minute per peer, with a count", async () => {
+    const h = await start({ timings: { maxAttemptsPerWindow: 1, windowMs: 61_000 } });
+    try {
+      const attempt = async () => {
+        const hello = await call(h.port, "GET", "/v1/pair", { tls: h.tls });
+        return call(h.port, "POST", "/v1/pair", {
+          tls: h.tls,
+          body: { pairingId: hello.body.pairingId, organizationId: "org-1", tenantId: TENANT, desktopPublicKey: exportDevicePublicKey(h.desktop.publicKey), proof: "x".repeat(43) },
+        });
+      };
+      assert.equal(errorCode(await attempt()), "proof-invalid");
+      for (let index = 0; index < 4; index += 1) assert.equal(errorCode(await attempt()), "pairing-rate-limited");
+      const warnings = h.logs.filter((entry) => entry.fields?.reason === "pairing-rate-limited");
+      assert.equal(warnings.length, 1);
+      assert.equal(warnings[0]!.fields?.count, 1);
+      // Past the minute and the attempt window; the code is still valid.
+      h.clock.now += 61_000;
+      assert.equal(errorCode(await attempt()), "proof-invalid");
+      assert.equal(errorCode(await attempt()), "pairing-rate-limited");
+      const later = h.logs.filter((entry) => entry.fields?.reason === "pairing-rate-limited");
+      assert.equal(later.length, 2);
+      assert.equal(later[1]!.fields?.count, 4, "the refusals since the last line");
+    } finally {
+      await h.close();
+    }
+  });
+
+  it("unpairs when the audit log cannot record it, and says so", async () => {
+    const h = await paired();
+    const host = h.host as unknown as { auditEvent: (...args: unknown[]) => void };
+    const original = host.auditEvent;
+    try {
+      host.auditEvent = () => {
+        throw new SandboxRefusal("audit-failed", "The audit log could not record sandbox.pairing.removed: disk full.");
+      };
+      const removed = await call(h.port, "DELETE", "/v1/pairing", { tls: h.tls });
+      assert.equal(removed.status, 200);
+      assert.match(removed.body.auditProblem as string, /unpaired, but the audit log could not record it/);
+      assert.equal(existsSync(join(h.config.dataDir, PAIRING_FILES.pairing)), false);
+      assert.equal(h.host.status().paired, false);
+    } finally {
+      host.auditEvent = original;
+      await h.close();
+    }
+  });
+
+  it("refuses an audit read that starts in entries retention removed", async () => {
+    // Past the audit log's retention of 3,650 days.
+    const old = new Date(Date.now() - 3_700 * 86_400_000);
+    let now = old;
+    const h = await paired({ now: () => now });
+    try {
+      await h.host.runAgent(h.config.agents[0]!, "schedule");
+      now = new Date();
+      await h.host.runAgent(h.config.agents[0]!, "schedule");
+      assert.ok(h.host.auditLog().pruneExpired() > 0);
+      const first = h.host.auditLog().readRange(0, 1)[0]!;
+      assert.ok(first.seq > 2);
+      const stale = await call(h.port, "GET", "/v1/audit?after=1&limit=10", { tls: h.tls });
+      assert.equal(stale.status, 409);
+      assert.equal(errorCode(stale), "audit-position-unknown");
+      const fromKept = await call(h.port, "GET", `/v1/audit?after=${first.seq - 1}&limit=10`, { tls: h.tls });
+      assert.equal(fromKept.status, 200);
+    } finally {
+      await h.close();
     }
   });
 });

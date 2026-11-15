@@ -155,6 +155,8 @@ export class SandboxHost {
   /** The version of the stored assignment, also when it was not enabled, so it cannot be replayed. */
   private heldVersion: number | undefined;
   private assignmentProblem: SandboxProblem | undefined;
+  /** assignments.json could not be read, so no version floor is known and new assignments are refused. */
+  private assignmentFloorUnknown = false;
   private readonly pairingProblems: SandboxProblem[] = [];
   private lastModel: ModelCheck | undefined;
   private readonly onClose: Array<() => Promise<void>> = [];
@@ -195,7 +197,21 @@ export class SandboxHost {
       if (this.config.pairing) {
         this.identityKey = loadOrCreateDeviceIdentity(this.config.dataDir);
         this.pairing = readPairing(this.config.dataDir, this.identityKey);
-        const stored = this.pairing ? readAssignments(this.config.dataDir, this.pairing.record.desktopPublicKey) : undefined;
+        // A damaged assignments.json does not stop the config schedules; a
+        // damaged pairing.json does (above), since trust starts there.
+        let stored: ReturnType<typeof readAssignments>;
+        try {
+          stored = this.pairing ? readAssignments(this.config.dataDir, this.pairing.record.desktopPublicKey) : undefined;
+        } catch (error) {
+          if (!isSandboxRefusal(error) || error.reason !== "pairing-files-invalid") throw error;
+          stored = undefined;
+          this.assignmentFloorUnknown = true;
+          this.assignmentProblem = {
+            reason: "pairing-files-invalid",
+            message: `${error.message.split(". Run ")[0]}. Assigned schedules are not run and new assignments are refused, because the version they must exceed is unknown. Unpair and pair again; config schedules keep running.`,
+          };
+          this.log("error", this.assignmentProblem.message, { reason: "pairing-files-invalid", file: PAIRING_FILES.assignments });
+        }
         if (this.pairing && this.bindingChanged) {
           this.log("error", "The config's organization or tenant changed since this sandbox was paired. Assigned schedules are not run and the desktop is refused until the sandbox is unpaired and paired again.", { reason: "pairing-binding-changed" });
         }
@@ -217,11 +233,12 @@ export class SandboxHost {
    * run, and named in the log and in status.
    */
   private loadAssignment(pairing: StoredPairing, stored: { signed: SignedScheduleAssignment; assignment: ScheduleAssignment }): void {
+    // Kept whether or not it runs: it is the version floor, and what a failed replacement restores.
+    this.signedAssignment = stored.signed;
     if (this.bindingChanged) return;
     try {
       checkAssignment(stored.assignment, { config: this.config, pairingId: pairing.record.pairingId, heldVersion: undefined });
       this.assignment = stored.assignment;
-      this.signedAssignment = stored.signed;
     } catch (error) {
       if (!(error instanceof AssignmentError)) throw error;
       this.assignmentProblem = {
@@ -440,16 +457,21 @@ export class SandboxHost {
    * cannot record it, the pairing is taken back.
    */
   completePairing(pairing: StoredPairing): void {
-    writePairing(this.config.dataDir, pairing);
-    removePairingFile(this.config.dataDir, PAIRING_FILES.assignments);
     try {
+      writePairing(this.config.dataDir, pairing);
+      removePairingFile(this.config.dataDir, PAIRING_FILES.assignments);
       this.auditEvent(this.hostContext(), "sandbox.pairing.created", {
         pairingId: pairing.record.pairingId,
         desktopFingerprint: deviceFingerprint(importDevicePublicKey(pairing.record.desktopPublicKey)),
         desktopTlsSpkiSha256: pairing.desktopTlsSpkiSha256,
       });
     } catch (error) {
-      removePairingFile(this.config.dataDir, PAIRING_FILES.pairing);
+      // Any step that fails leaves the sandbox unpaired.
+      try {
+        removePairingFile(this.config.dataDir, PAIRING_FILES.pairing);
+      } catch (cleanup) {
+        this.log("error", `pairing.json could not be removed after a failed pairing: ${describe(cleanup)} Run --unpair before pairing again.`, { reason: "storage-failed" });
+      }
       throw error;
     }
     this.pairing = pairing;
@@ -457,6 +479,7 @@ export class SandboxHost {
     this.signedAssignment = undefined;
     this.heldVersion = undefined;
     this.assignmentProblem = undefined;
+    this.assignmentFloorUnknown = false;
     this.refreshSchedule();
     this.log("info", "Paired with a desktop.", { pairing: pairing.record.pairingId });
   }
@@ -473,6 +496,12 @@ export class SandboxHost {
     const verified = verifyScheduleAssignment(signed, pairing.record.desktopPublicKey);
     if (!verified.ok) throw new AssignmentError("assignment-invalid", verified.detail);
     const assignment = verified.value;
+    if (this.assignmentFloorUnknown) {
+      throw new AssignmentError(
+        "assignment-state-unknown",
+        "assignments.json on the sandbox could not be read, so the version a new assignment must exceed is unknown. Unpair and pair again, then assign the schedules.",
+      );
+    }
     checkAssignment(assignment, { config: this.config, pairingId: pairing.record.pairingId, heldVersion: this.heldVersion });
     const rolesBefore = this.rolesFor(this.schedules().schedules);
     const next: SignedScheduleAssignment = { assignment, signature: (signed as { signature: string }).signature };
@@ -508,23 +537,31 @@ export class SandboxHost {
    * agents needed, which the admin removes so config runs pass the
    * identity check.
    */
-  unpair(): { removed: string[] } & RoleChange {
+  unpair(): { removed: string[]; auditProblem?: string } & RoleChange {
     const pairingId = this.pairing?.record.pairingId;
     const change = this.roleChange(this.rolesFor(this.schedules().schedules), this.rolesFor(effectiveSchedules(this.config, undefined).schedules));
-    this.auditEvent(this.hostContext(), "sandbox.pairing.removed", { ...(pairingId ? { pairingId } : {}), rolesNoLongerNeeded: change.rolesNoLongerNeeded });
+    // The files go first: an unpair the audit log cannot record still unpairs.
     const removed = removePairingFiles(this.config.dataDir);
     this.pairing = undefined;
     this.assignment = undefined;
     this.signedAssignment = undefined;
     this.heldVersion = undefined;
     this.assignmentProblem = undefined;
+    this.assignmentFloorUnknown = false;
     this.refreshSchedule();
+    let auditProblem: string | undefined;
+    try {
+      this.auditEvent(this.hostContext(), "sandbox.pairing.removed", { ...(pairingId ? { pairingId } : {}), rolesNoLongerNeeded: change.rolesNoLongerNeeded });
+    } catch (error) {
+      auditProblem = `The sandbox was unpaired, but the audit log could not record it: ${describe(error)}`;
+      this.log("error", auditProblem, { reason: "audit-failed" });
+    }
     this.log(
       change.notice ? "warn" : "info",
       `Unpaired: the pairing and the assigned schedules were removed. ${change.notice ?? "Config schedules keep running."}`,
       { removed: removed.join(",") || "none" },
     );
-    return { removed, ...change };
+    return { removed, ...change, ...(auditProblem ? { auditProblem } : {}) };
   }
 
   private hostContext(): SandboxAuditContext {

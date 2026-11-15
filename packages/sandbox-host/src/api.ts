@@ -94,6 +94,7 @@ export class SandboxApi {
   private nextCodeAt: number | undefined;
   /** Times of pairing attempts across codes, for the rate limit. */
   private attempts: number[] = [];
+  private readonly rateWarnings = new Map<string, { loggedAt: number; count: number }>();
   private readonly timings: PairingTimings;
 
   constructor(
@@ -252,7 +253,7 @@ export class SandboxApi {
       const apiError = error instanceof ApiError
         ? error
         : error instanceof AssignmentError
-          ? new ApiError(error.code === "assignment-replayed" ? 409 : error.code === "assignment-binding-mismatch" ? 403 : 422, error.code, error.message)
+          ? new ApiError(error.code === "assignment-replayed" || error.code === "assignment-state-unknown" ? 409 : error.code === "assignment-binding-mismatch" ? 403 : 422, error.code, error.message)
           : isSandboxRefusal(error)
             ? new ApiError(500, error.reason, error.message)
             : new ApiError(500, "internal-error", `The sandbox could not answer this request: ${describe(error)}`);
@@ -316,6 +317,20 @@ export class SandboxApi {
     };
   }
 
+  /** At most one rate-limit warning per peer address per minute, with the refusals counted in between. */
+  private warnRateLimited(peer: string | undefined): void {
+    const key = peer ?? "unknown";
+    const now = this.clock();
+    const entry = this.rateWarnings.get(key) ?? { loggedAt: Number.NEGATIVE_INFINITY, count: 0 };
+    entry.count += 1;
+    if (now - entry.loggedAt >= 60_000) {
+      this.log("warn", "Pairing attempts were refused: too many attempts in a short time.", { reason: "pairing-rate-limited", peer: key, count: entry.count });
+      entry.loggedAt = now;
+      entry.count = 0;
+    }
+    this.rateWarnings.set(key, entry);
+  }
+
   private codeNotReady(): ApiError {
     const wait = this.nextCodeAt === undefined ? undefined : Math.max(0, Math.ceil((this.nextCodeAt - this.clock()) / 1000));
     return new ApiError(
@@ -336,6 +351,8 @@ export class SandboxApi {
       throw new ApiError(400, "client-certificate-missing", "Pairing needs the desktop's client certificate on the connection; the sandbox pins it.");
     }
     const offer = objectBody(await readJson(request));
+    // Another desktop may have paired while this body arrived.
+    if (this.host.currentPairing) throw alreadyPaired();
     const shown = this.shown;
     if (!shown) throw this.codeNotReady();
     if (offer.pairingId !== shown.pairingId) {
@@ -345,7 +362,7 @@ export class SandboxApi {
     const now = this.clock();
     this.attempts = this.attempts.filter((at) => now - at < this.timings.windowMs);
     if (this.attempts.length >= this.timings.maxAttemptsPerWindow) {
-      this.log("warn", "A pairing attempt was refused: too many attempts in a short time.", { reason: "pairing-rate-limited", peer });
+      this.warnRateLimited(peer);
       throw new ApiError(429, "pairing-rate-limited", `More than ${this.timings.maxAttemptsPerWindow} pairing attempts in ${Math.round(this.timings.windowMs / 60_000)} minutes. Wait, then pair again. If no one here was pairing, another client on the network is trying.`);
     }
     this.attempts.push(now);
@@ -375,7 +392,13 @@ export class SandboxApi {
     };
     const signed = signPairingRecord(record, this.host.identity.privateKey);
     const sandboxProof = shown.session.sandboxProof();
-    this.host.completePairing({ ...signed, desktopTlsSpkiSha256: tlsSpkiSha256(certificate) });
+    try {
+      this.host.completePairing({ ...signed, desktopTlsSpkiSha256: tlsSpkiSha256(certificate) });
+    } catch (error) {
+      // The proof verified and used the code; a fresh one follows at once.
+      this.safeShowCode();
+      throw error;
+    }
     this.stopCode();
     const audit = this.host.auditLog();
     return { status: 201, body: { sandboxProof, pairing: signed, startCheckpoint: this.checkpoint(audit, oldestKeptPosition(audit)) } };
@@ -393,6 +416,10 @@ export class SandboxApi {
     const limit = queryInteger(url, "limit", 1, MAX_AUDIT_LIMIT, DEFAULT_AUDIT_LIMIT);
     const audit = this.host.auditLog();
     const rows = audit.readRange(after, limit);
+    // Rows that do not start right after `after` mean the entries in between were removed by retention.
+    if (rows[0] && rows[0].seq !== after + 1) {
+      throw new ApiError(409, "audit-position-unknown", `The sandbox's audit log no longer holds the entries after ${after}: retention removed them. Start again from the start checkpoint of the pairing.`);
+    }
     const last = rows[rows.length - 1];
     const position = last ? { seq: last.seq, sha256: last.sha256 } : positionAt(audit, after);
     if (!position) {
