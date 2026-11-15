@@ -299,6 +299,13 @@ describe("loadEnterprise with a valid licence", () => {
     });
     assert.equal(changes.length, 2);
     assert.equal(seen.host?.entitlement().state, "active");
+    // Declarative UI reaches the window in the status, checked.
+    seen.host?.updateSettingsSection("team", { elements: [{ type: "status", label: "Team", value: "Joined", tone: "success" }] });
+    seen.host?.setScheduleTargets({ action: "team.schedule", targets: [{ id: "mini-pc", label: "Office mini PC" }] });
+    const status = runtime.status();
+    assert.ok(status.active);
+    assert.deepEqual(status.active ? status.settingsSections[0]?.body : undefined, { elements: [{ type: "status", label: "Team", value: "Joined", tone: "success" }] });
+    assert.deepEqual(status.active ? status.scheduleTargets : undefined, { action: "team.schedule", targets: [{ id: "mini-pc", label: "Office mini PC" }] });
 
     await runtime.deactivate();
     await runtime.deactivate();

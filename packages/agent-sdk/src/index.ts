@@ -3318,6 +3318,8 @@ export type EnterpriseStatus =
       readonly label: string;
       readonly detail?: string;
       readonly settingsSections: readonly EnterpriseSettingsSectionView[];
+      /** Where else an agent's schedule can run; absent unless the module offers places. */
+      readonly scheduleTargets?: EnterpriseScheduleTargetsView;
     };
 
 export type EnterpriseProblemReason =
@@ -3341,6 +3343,78 @@ export interface EnterpriseSettingsSectionView {
   readonly id: string;
   readonly title: string;
   readonly description: string;
+  /** Checked by the main process; the renderer draws it with its own components. */
+  readonly body?: EnterpriseUiBodyView;
+}
+
+/**
+ * Declarative module UI as the renderer receives it: the closed element
+ * set of `@openadminos/enterprise`, already checked in the main process.
+ */
+export type EnterpriseUiToneView = "neutral" | "success" | "warning" | "danger";
+
+export interface EnterpriseUiNoticeView {
+  readonly type: "notice";
+  readonly tone: EnterpriseUiToneView;
+  readonly title: string;
+  readonly message: string;
+  readonly recovery?: string;
+}
+
+export type EnterpriseUiElementView =
+  | { readonly type: "status"; readonly label: string; readonly value: string; readonly tone: EnterpriseUiToneView }
+  | { readonly type: "text"; readonly text: string }
+  | EnterpriseUiNoticeView
+  | {
+      readonly type: "field";
+      readonly id: string;
+      readonly label: string;
+      readonly kind: "text" | "code";
+      readonly placeholder?: string;
+      readonly maxLength?: number;
+      readonly value?: string;
+    }
+  | {
+      readonly type: "select";
+      readonly id: string;
+      readonly label: string;
+      readonly options: readonly { readonly value: string; readonly label: string }[];
+      readonly value?: string;
+    }
+  | {
+      readonly type: "button";
+      readonly id: string;
+      readonly label: string;
+      readonly kind: "primary" | "secondary" | "danger";
+      readonly action: string;
+      readonly confirm?: { readonly title: string; readonly message: string; readonly typedPhrase?: string };
+    }
+  | {
+      readonly type: "list";
+      readonly rows: readonly { readonly label: string; readonly status?: { readonly value: string; readonly tone: EnterpriseUiToneView } }[];
+    };
+
+export interface EnterpriseUiBodyView {
+  readonly elements: readonly EnterpriseUiElementView[];
+}
+
+/** What a module's UI action answers: a new body, a notice, or both. */
+export interface EnterpriseUiReplyView {
+  readonly body?: EnterpriseUiBodyView;
+  readonly notice?: EnterpriseUiNoticeView;
+}
+
+export interface EnterpriseScheduleTargetView {
+  readonly id: string;
+  readonly label: string;
+  readonly detail?: string;
+  readonly disabledReason?: string;
+  readonly agentIds?: readonly string[];
+}
+
+export interface EnterpriseScheduleTargetsView {
+  readonly action: string;
+  readonly targets: readonly EnterpriseScheduleTargetView[];
 }
 
 export type SupportIssueSource =
