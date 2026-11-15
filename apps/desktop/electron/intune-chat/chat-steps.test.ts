@@ -409,7 +409,7 @@ describe("source labels and steps", () => {
     assert.deepEqual([done.status, done.title, done.detail], ["completed", "Asked Microsoft Learn", "microsoft_docs_search · 2 results"]);
     // A tool that reads one item by its id sent only that id, so its step names the item.
     const article = { id: "t", tool: learnTool.name, params: {}, resultSummary: "", durationMs: 1, createdAt: "", completedAt: "",
-      mcpSource: { serverId: "packr", serverName: "Splashtop Agentic Packr Docs MCP", host: "support-splashtopagenticpackr.splashtop.com", tool: "get_article", results: [{ title: "Package your own installer with AI", url: "https://a" }] } };
+      mcpSource: { serverId: "packr", serverName: "Splashtop Agentic Packr Docs", host: "support-splashtopagenticpackr.splashtop.com", tool: "get_article", results: [{ title: "Package your own installer with AI", url: "https://a" }] } };
     assert.equal(toolStepFinish(article, true).detail, "get_article · Package your own installer with AI");
     assert.equal(toolStepFinish(article).detail, "get_article · 1 result", "a search that found one result still shows its count");
     assert.equal(toolStepFinish({ ...article, mcpSource: { ...article.mcpSource, results: [{ title: "a" }, { title: "b" }] } }, true).detail, "get_article · 2 results");

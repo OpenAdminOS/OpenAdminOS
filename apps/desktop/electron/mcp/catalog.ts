@@ -264,8 +264,8 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
   },
   {
     id: "splashtop-kb",
-    name: "Splashtop Docs MCP",
-    publisher: "Splashtop",
+    name: "Splashtop Docs",
+    publisher: "OpenAdminOS",
     url: SPLASHTOP_KB_URL,
     description:
       "Ask questions about Splashtop and get answers from the Splashtop documentation at support-splashtopbusiness.splashtop.com: setup, deployment, how-tos and troubleshooting for Splashtop Business, Enterprise, SOS and Remote Support. Chat finds the matching articles, reads them and answers with links to the sources. Built into OpenAdminOS: the documentation is searched directly from this device, with no sign-in.",
@@ -286,15 +286,15 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
         { title: [["title"]], requires: ["id"], url: ["url"], text: ["snippet", "body"], facts: ["updated_at", "locale"], id: ["id"] },
       ],
     },
-    operator: "Splashtop runs its Help Center on Zendesk. OpenAdminOS calls its public article search and article API from this device.",
+    operator: "OpenAdminOS builds this reference over Splashtop's public Help Center, which Splashtop runs on Zendesk. This device calls its public article search and article API.",
     policy: { label: "Splashtop privacy policy", url: "https://www.splashtop.com/legal/privacy-policy" },
     builtin: SPLASHTOP_KNOWLEDGE_BASE,
     logo: "splashtop",
   },
   {
     id: "splashtop-packr-kb",
-    name: "Splashtop Agentic Packr Docs MCP",
-    publisher: "Splashtop",
+    name: "Splashtop Agentic Packr Docs",
+    publisher: "OpenAdminOS",
     url: SPLASHTOP_PACKR_KB_URL,
     description:
       "Ask questions about Splashtop Agentic Packr and get answers from its documentation at support-splashtopagenticpackr.splashtop.com: connecting Intune, single sign-on with Entra ID, packaging installers, deployment and user experience templates, and deploying catalog apps to Intune. Chat finds the matching articles, reads them and answers with links to the sources. Built into OpenAdminOS: the documentation is searched directly from this device, with no sign-in.",
@@ -315,7 +315,7 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
         { title: [["title"]], requires: ["id"], url: ["url"], text: ["snippet", "body"], facts: ["updated_at", "locale"], id: ["id"] },
       ],
     },
-    operator: "Splashtop runs the Agentic Packr Help Center on Zendesk. OpenAdminOS calls its public article search and article API from this device.",
+    operator: "OpenAdminOS builds this reference over the public Agentic Packr Help Center, which Splashtop runs on Zendesk. This device calls its public article search and article API.",
     policy: { label: "Splashtop privacy policy", url: "https://www.splashtop.com/legal/privacy-policy" },
     builtin: SPLASHTOP_PACKR_KNOWLEDGE_BASE,
     logo: "splashtop",

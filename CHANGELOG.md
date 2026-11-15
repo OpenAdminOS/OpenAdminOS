@@ -8,10 +8,10 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 - The homepage shows a Member of row under the quote, with the NVIDIA Inception Program badge and the KI Bundesverband logo, each linking to its owner's home page.
 - Nova profile, notes and follow-ups: Settings > Nova edits the voice, greeting, standing instructions with 10 versions, instructions per organization, abilities and read-only shortcuts; Nova keeps reviewed notes per organization (a click confirms each, unconfirmed ones expire after 30 days, Disconnect deletes them), sets one-time read-only follow-ups that answer in Chat, lists what needs the admin, and nudges answers that only promise work in Chat, Agent Team and voice; IT can restrict voice modes, instructions, abilities and notes in `policy.json`, and every change, note, follow-up and hosted voice consent is in the audit log.
-- Splashtop Agentic Packr Docs MCP: a built-in Marketplace reference that answers Agentic Packr questions from support-splashtopagenticpackr.splashtop.com with links to the articles; both Splashtop references show the Splashtop logo in the Marketplace and on Connections.
-- Splashtop Docs MCP: the Splashtop documentation listing is named Splashtop Docs MCP and answers Splashtop questions from support-splashtopbusiness.splashtop.com with links to the articles.
+- Splashtop Agentic Packr Docs: a built-in Marketplace reference that answers Agentic Packr questions from support-splashtopagenticpackr.splashtop.com with links to the articles; both Splashtop references show the Splashtop logo in the Marketplace and on Connections.
+- Splashtop Docs: the Splashtop documentation listing answers Splashtop questions from support-splashtopbusiness.splashtop.com with links to the articles.
 - Managed configuration for IT rollouts: a local `policy.json` (machine and user path per OS, schema in `schemas/policy.schema.json`) sets allowed providers, the provider and model, allowed public references, a pre-seeded own app registration, skipping the first-run scan (straight to Connect Microsoft 365 when the policy provider is ready) and locked settings, enforced in the main process, with the scan offering only allowed providers; Settings shows "Set by your IT department" and an IT policy panel, problems name the file and line, and the configuration audit records policy load, change, removal and problems.
-- Splashtop: a built-in Splashtop Docs MCP search in the Marketplace, off by default; the Splashtop Open API connects per organization on Connections with an Enterprise API token kept in this device's secure storage and sent only to the region's host (webapi.splashtop.com, .eu or .nr), Chat reads computers, inventory, users, groups, sessions, team history, policies and vulnerabilities, and Plan a change prepares reboots, deletions, renames, disabled users and ended sessions that apply only after a typed phrase such as `REBOOT 12 COMPUTERS`.
+- Splashtop: a built-in Splashtop Docs search in the Marketplace, off by default; the Splashtop Open API connects per organization on Connections with an Enterprise API token kept in this device's secure storage and sent only to the region's host (webapi.splashtop.com, .eu or .nr), Chat reads computers, inventory, users, groups, sessions, team history, policies and vulnerabilities, and Plan a change prepares reboots, deletions, renames, disabled users and ended sessions that apply only after a typed phrase such as `REBOOT 12 COMPUTERS`.
 
 - The first run works with organizations and Connections: the scan and Connect Microsoft 365 use the shared device tile and motion, the active scope reads "No organization", Connect Microsoft 365 reopens from Connections, provider and model changes from the scan and Chat's model choice are in the audit log, and Connections, the organization switcher, need chips and the run review show the real provider and service logos.
 
@@ -49,6 +49,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- The Splashtop Docs and Splashtop Agentic Packr Docs references name OpenAdminOS as their publisher, and the install footer of a built-in reference names the host it reads; the earlier names ending in MCP still work in Chat.
 - Nightly release notes list only what that nightly adds: its pull requests and commits, and the changelog entries added since the previous release, not the whole unreleased changelog.
 - Claude Code and Codex requests no longer stop at 180 seconds in total: they end after a silence limit (90 seconds for Claude Code, 180 for Codex, also before the first output) or a 15 minute cap, each with its own error. `OPENADMINOS_CLAUDE_CODE_IDLE_TIMEOUT_MS` and `OPENADMINOS_CODEX_IDLE_TIMEOUT_MS` raise the silence limit; the existing `_TIMEOUT_MS` variables set the cap. A value above 2147483647 ms, the longest a Node timer waits, is ignored. Time a slow consumer of the stream spends on a chunk does not count as silence.
 - Intune shows the icon Microsoft introduced in 2025 in place of the earlier design, and each connector row under Results go to shows the connector's logo, as its card and its reach map row already do.
@@ -70,7 +71,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Removed
 
-- Marketplace: Splashtop API Reference (docs.splashtop.com/mcp) is removed, so Splashtop Docs MCP is the one Splashtop reference; existing installs of it are dropped.
+- Marketplace: Splashtop API Reference (docs.splashtop.com/mcp) is removed, so Splashtop Docs is the one Splashtop reference; existing installs of it are dropped.
 - Pilot mode and its sample data: the sample tenant and organization, the built-in fictional Graph data, prepared Chat prompts and answers, pilot agent text, the pilot banner and production-only pages. Updating from a version with pilot mode removes the sample tenant once, with its runs, conversations, cache and organization, and says so in one line.
 - Remove the GitBook sync config now that docs.openadminos.com is served by the self-hosted docs site.
 

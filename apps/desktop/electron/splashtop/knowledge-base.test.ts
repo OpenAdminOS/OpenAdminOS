@@ -47,7 +47,7 @@ const SEARCH = {
   ],
 };
 
-describe("Splashtop Docs MCP (built-in reference)", () => {
+describe("Splashtop Docs (built-in reference)", () => {
   it("is a public, read-only catalog entry with the two tools, on Splashtop's Help Center host", () => {
     assert.ok(entry.builtin);
     assert.equal(new URL(entry.url).hostname, SPLASHTOP_KB_HOST);
@@ -61,7 +61,7 @@ describe("Splashtop Docs MCP (built-in reference)", () => {
     const connected = await host.connect(entry);
     assert.deepEqual(connected.tools.map((tool) => tool.name), ["search_articles", "get_article"]);
     assert.deepEqual(connected.missingTools, []);
-    assert.equal(connected.serverName, "Splashtop Docs MCP");
+    assert.equal(connected.serverName, "Splashtop Docs");
     assert.equal(requests.length, 0);
   });
 
@@ -146,20 +146,20 @@ describe("Splashtop Docs MCP (built-in reference)", () => {
   });
 });
 
-describe("Splashtop Agentic Packr Docs MCP (built-in reference)", () => {
+describe("Splashtop Agentic Packr Docs (built-in reference)", () => {
   const packr = mcpCatalogEntry("splashtop-packr-kb")!;
 
   it("is a public, read-only catalog entry with the two tools, on the Agentic Packr Help Center host", async () => {
     assert.ok(packr.builtin);
-    assert.equal(packr.name, "Splashtop Agentic Packr Docs MCP");
-    assert.equal(packr.publisher, "Splashtop");
+    assert.equal(packr.name, "Splashtop Agentic Packr Docs");
+    assert.equal(packr.publisher, "OpenAdminOS");
     assert.equal(new URL(packr.url).hostname, SPLASHTOP_PACKR_KB_HOST);
     assert.equal(packr.auth, "none");
     assert.deepEqual(packr.tools, ["search_articles", "get_article"]);
     assert.deepEqual(packr.itemIds?.get_article, { params: ["id"], form: { kind: "number" } });
     const { host, requests } = hostWith(() => json(500, {}));
     const connected = await host.connect(packr);
-    assert.equal(connected.serverName, "Splashtop Agentic Packr Docs MCP");
+    assert.equal(connected.serverName, "Splashtop Agentic Packr Docs");
     assert.deepEqual(connected.tools.map((tool) => tool.name), ["search_articles", "get_article"]);
     assert.equal(requests.length, 0);
   });
@@ -191,12 +191,20 @@ describe("Splashtop Agentic Packr Docs MCP (built-in reference)", () => {
 
   it("names itself and its host in its errors", async () => {
     const down = hostWith(() => { throw new TypeError("fetch failed"); });
-    await assert.rejects(down.host.callTool(packr, "search_articles", { query: "sso" }), /Splashtop Agentic Packr Docs MCP could not be reached at support-splashtopagenticpackr\.splashtop\.com/);
+    await assert.rejects(down.host.callTool(packr, "search_articles", { query: "sso" }), /Splashtop Agentic Packr Docs could not be reached at support-splashtopagenticpackr\.splashtop\.com/);
     const missing = hostWith(() => json(404, {}));
-    await assert.rejects(missing.host.callTool(packr, "get_article", { id: 7 }), /Splashtop Agentic Packr Docs MCP has no article 7 in en-us \(HTTP 404\)/);
+    await assert.rejects(missing.host.callTool(packr, "get_article", { id: 7 }), /Splashtop Agentic Packr Docs has no article 7 in en-us \(HTTP 404\)/);
   });
 
-  it("shows the Splashtop logo, like Splashtop Docs MCP", () => {
+  it("names OpenAdminOS as publisher of both Splashtop references, and Splashtop as who runs the Help Center", () => {
+    for (const listing of [entry, packr]) {
+      assert.equal(listing.publisher, "OpenAdminOS");
+      assert.doesNotMatch(listing.name, /MCP/);
+      assert.match(listing.operator ?? "", /^OpenAdminOS builds this reference over .*public .*Help Center, which Splashtop runs on Zendesk\./);
+    }
+  });
+
+  it("shows the Splashtop logo, like Splashtop Docs", () => {
     assert.equal(packr.logo, "splashtop");
     assert.equal(entry.logo, "splashtop");
   });
@@ -209,6 +217,8 @@ describe("Chat sources for the two Splashtop Help Centers", () => {
   it("an Agentic Packr question asks only the Agentic Packr Help Center", () => {
     assert.deepEqual(chosen("How do I create a deployment template in Splashtop Agentic Packr?"), ["splashtop-packr-kb"]);
     assert.deepEqual(chosen("Does Agentic Packr support Entra ID single sign-on?"), ["splashtop-packr-kb"]);
+    assert.deepEqual(chosen("Ask the Splashtop Agentic Packr Docs about branding", "tenant"), ["splashtop-packr-kb"]);
+    // The earlier name still asks it.
     assert.deepEqual(chosen("Ask the Splashtop Agentic Packr Docs MCP about branding", "tenant"), ["splashtop-packr-kb"]);
     assert.deepEqual(namedServers("What can Packr do?", servers).map((server) => server.id), ["splashtop-packr-kb"]);
     for (const question of ["How does Splashtop's Agentic Packr connect to Intune?", "How does Splashtop\u2019s Agentic Packr connect to Intune?", "How do I configure Splashtop Packr?", "How do I configure Splashtop's Packr?"]) {
@@ -217,8 +227,9 @@ describe("Chat sources for the two Splashtop Help Centers", () => {
     }
   });
 
-  it("a Splashtop question still asks Splashtop Docs MCP, and naming both asks both", () => {
+  it("a Splashtop question still asks Splashtop Docs, and naming both asks both", () => {
     assert.deepEqual(chosen("How do I reboot a computer with Splashtop?"), ["splashtop-kb"]);
+    assert.deepEqual(chosen("Ask Splashtop Docs about SOS", "tenant"), ["splashtop-kb"]);
     assert.deepEqual(chosen("Ask Splashtop Docs MCP about SOS", "tenant"), ["splashtop-kb"]);
     assert.deepEqual(chosen("Compare Splashtop Streamer deployment with Splashtop Agentic Packr").sort(), ["splashtop-kb", "splashtop-packr-kb"]);
   });
@@ -242,7 +253,7 @@ describe("Chat sources for the two Splashtop Help Centers", () => {
     assert.deepEqual(chosen("Read https://support-splashtopagenticpackr.splashtop.com/hc/en-us/articles/1?ref=splashtop and compare it with Splashtop Streamer").sort(), ["splashtop-kb", "splashtop-packr-kb"]);
   });
 
-  it("an Agentic Packr question does not fall back to Splashtop Docs MCP when Agentic Packr is off or not installed", () => {
+  it("an Agentic Packr question does not fall back to Splashtop Docs when Agentic Packr is off or not installed", () => {
     const withoutPackr = servers.filter((server) => server.id !== "splashtop-packr-kb");
     const only = (question: string, kind: "docs" | "mixed" | "tenant" = "docs") => planChatSources({ question, kind, servers: withoutPackr, docsIndexAvailable: true }).requiredServerIds;
     assert.deepEqual(only("How do I configure Splashtop Agentic Packr?").includes("splashtop-kb"), false);
@@ -256,7 +267,7 @@ describe("Chat sources for the two Splashtop Help Centers", () => {
       const required = only(`Summarize https://support-splashtopagenticpackr.splashtop.com/hc/en-us/articles/1?utm_source=${source}`);
       assert.equal(required.includes("windowsforum") || required.includes("kql-search"), false);
     }
-    // Splashtop on its own still asks Splashtop Docs MCP.
+    // Splashtop on its own still asks Splashtop Docs.
     assert.deepEqual(only("How do I reboot a computer with Splashtop?"), ["splashtop-kb"]);
     assert.deepEqual(only("Compare Splashtop Streamer deployment with Splashtop Agentic Packr"), ["splashtop-kb"]);
   });

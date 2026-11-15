@@ -850,7 +850,7 @@ describe("The MCP query writer boundary", () => {
 
   describe("a how-to answered from search results", () => {
     const format = { items: [{ title: [["title"]], url: ["url"], text: ["snippet", "body"], id: ["id"] }] };
-    const search: McpChatTool = { ...docsTool, name: mcpChatToolName("splashtop-packr-kb", "search_articles"), serverId: "splashtop-packr-kb", serverName: "Splashtop Agentic Packr Docs MCP", host: "support-splashtopagenticpackr.splashtop.com", tool: "search_articles",
+    const search: McpChatTool = { ...docsTool, name: mcpChatToolName("splashtop-packr-kb", "search_articles"), serverId: "splashtop-packr-kb", serverName: "Splashtop Agentic Packr Docs", host: "support-splashtopagenticpackr.splashtop.com", tool: "search_articles",
       inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] }, resultFormat: format };
     const article: McpChatTool = { ...search, name: mcpChatToolName("splashtop-packr-kb", "get_article"), tool: "get_article",
       inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] }, itemIds: { params: ["id"], form: { kind: "number" } } };
