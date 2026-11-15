@@ -22,6 +22,7 @@ import {
 import {
   deviceFingerprint,
   importDevicePublicKey,
+  runRecordDigest as runDigest,
   verifyScheduleAssignment,
   type DeviceIdentity,
   type ScheduleAssignment,
@@ -826,7 +827,8 @@ export class SandboxHost {
       outcome = { kind: "failed", reason: refusal.reason, message: refusal.message, run };
     }
     try {
-      this.auditEvent(context, "sandbox.run.finished", { status: run.status, ...(outcome.kind === "failed" ? { reason: outcome.reason } : {}) });
+      // The digest binds the record the desktop will read to this event.
+      this.auditEvent(context, "sandbox.run.finished", { status: run.status, runDigest: runDigest(run), ...(outcome.kind === "failed" ? { reason: outcome.reason } : {}) });
     } catch (error) {
       // A run the audit log cannot close is not a success, and nothing is sent for it.
       const refusal = isSandboxRefusal(error) ? error : new SandboxRefusal("audit-failed", describe(error), { cause: error });
@@ -850,12 +852,30 @@ export class SandboxHost {
       outcome = { ...outcome, run };
       if (delivered.auditFailure) {
         run = this.failRun(run, delivered.auditFailure);
+        // The audit log just failed, so this event may not be recorded; the desktop then shows the run as not verified.
+        this.auditRewrite(context, run);
         this.runs.write(run);
         outcome = { kind: "failed", reason: "audit-failed", message: delivered.auditFailure.message, run };
         this.recordLastRun(agentConfig.id, run, outcome);
       }
     }
     return outcome;
+  }
+
+  /**
+   * Records that a finished run's record changed, with the digest of the
+   * new record, before it is written. Returns the refusal when the audit
+   * log cannot record it; the record is then written all the same.
+   */
+  private auditRewrite(context: SandboxAuditContext, run: RunRecord): SandboxRefusal | undefined {
+    try {
+      this.auditEvent(context, "sandbox.run.rewritten", { status: run.status, runDigest: runDigest(run) });
+      return undefined;
+    } catch (error) {
+      const refusal = isSandboxRefusal(error) ? error : new SandboxRefusal("audit-failed", describe(error), { cause: error });
+      this.log("error", refusal.message, { reason: "audit-failed", run: run.id });
+      return refusal;
+    }
   }
 
   private failRun(run: RunRecord, refusal: SandboxRefusal): RunRecord {
@@ -930,8 +950,10 @@ export class SandboxHost {
       steps: [...run.steps, { id: `${run.id}_delivery`, runId: run.id, label, status: result.outcome === "sent" ? "completed" : "failed", detail: result.detail, startedAt: at, finishedAt: at }],
       logs: [...run.logs, { id: `${run.id}_delivery_log`, runId: run.id, timestamp: at, level: result.outcome === "sent" ? "info" : "warn", message: result.outcome === "sent" ? "Report delivered." : `Report not delivered: ${result.detail}`, metadata: { reason: result.outcome === "sent" ? "delivered" : "delivery-failed" } }],
     };
+    const rewriteFailure = this.auditRewrite(context, updated);
     this.runs.write(updated);
-    return { run: updated, ...(result.auditFailure ? { auditFailure: result.auditFailure } : {}) };
+    const auditFailure = result.auditFailure ?? rewriteFailure;
+    return { run: updated, ...(auditFailure ? { auditFailure } : {}) };
   }
 
   private async send(

@@ -221,7 +221,7 @@ SIGINT and SIGTERM stop the schedule, stop a run in progress and record it. A ru
 In `dataDir`:
 
 - `runs/<agent>/`: one JSON run record per run, the last 200 per agent, written atomically. Each record says where it ran (`executedOn`: sandbox id and name, organization, model and model digest; LM Studio reports no digest, so it is recorded as `unknown`).
-- `openadminos.db`: the hash-chained audit log, the same format as the desktop's.
+- `openadminos.db`: the hash-chained audit log, the same format as the desktop's. `sandbox.run.finished` and `sandbox.run.rewritten` carry the digest of the run record as written (`runRecordDigest` in `packages/pairing`), so the paired desktop can tell a record that changed after its event.
 - `health.json`: the last run, last refusal and last delivery per agent.
 - `sandbox.lock`: present while a host runs.
 - With pairing: `device-identity.pem`, `tls-key.pem`, `tls-certificate.pem`, `pairing.json` and `assignments.json`, all mode 0600, and `runs/cursor.json`, which numbers every run write for `GET /v1/runs`.

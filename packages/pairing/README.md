@@ -62,6 +62,10 @@ A PAKE is not used in v1, for those reasons together with the 5 attempt limit an
 
 - `ScheduleAssignment`: pairing id, a version, organization id, tenant id, a list of at most 50 entries (`agentId`, `templateSha256`, `intervalSeconds`, one per agent) and the time, signed by the paired desktop's device key. A sandbox accepts it only with a version higher than the one it holds, so an old record cannot be replayed; an empty list removes every assigned schedule.
 
+### Run digests
+
+`runRecordDigest(run)` is SHA-256 hex of the run record's canonical JSON. The sandbox puts it in `sandbox.run.finished` as `runDigest`, and each time it changes a finished record (a delivery step, a failure the audit log could not close) it records `sandbox.run.rewritten` with the new `runDigest` and status before writing the record. A reader trusts a record only when its digest is the one in the newest verified event for that run.
+
 ### Reading a sandbox's audit log
 
 1. First sync: the sandbox sends a signed checkpoint for the position its oldest kept row is chained to. For a log that was never pruned that is seq 0 and the chain start hash; after a prune it is the newest pruned row (seq of the oldest kept row minus 1, and that row's previous hash), and for a log that a prune emptied, `AuditLogStore.tip()`. The desktop checks it with `verifyAuditCheckpoint` against the key and ids in the pairing record and adopts its seq and hash as the first pin. Rows pruned before pairing are not part of what the desktop can check.

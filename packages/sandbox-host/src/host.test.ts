@@ -6,6 +6,8 @@ import { describe, it } from "node:test";
 import type { RunLlmApi } from "@openadminos/agent-sdk";
 import { ApplicationTokenError, AuditLogStore, LlmTimeoutError, type ApplicationTokenProvider, type ApplicationTokenProviderOptions } from "@openadminos/runtime";
 
+import { runRecordDigest } from "@openadminos/pairing";
+
 import { loadSandboxConfig } from "./config.js";
 import { SandboxHost, type SandboxHostDeps } from "./host.js";
 import { main } from "./main.js";
@@ -148,6 +150,62 @@ describe("SandboxHost", () => {
     const types = auditTypes(config.dataDir);
     assert.ok(types.indexOf("delivery.attempted") < types.indexOf("delivery.result"));
     cleanup();
+  });
+});
+
+describe("SandboxHost run digests", () => {
+  function events(dataDir: string): Array<{ type: string; runId?: string; details: Record<string, unknown> }> {
+    const store = new AuditLogStore(join(dataDir, "openadminos.db"));
+    try {
+      return store.readVerified().events as unknown as Array<{ type: string; runId?: string; details: Record<string, unknown> }>;
+    } finally {
+      store.close();
+    }
+  }
+
+  it("names the digest of the stored record when a run finishes", async () => {
+    const { dir, cleanup } = tempDir();
+    const config = loadSandboxConfig(writeConfig(dir));
+    const host = new SandboxHost(config, deps({ graphFetch: graph().fetchImpl }));
+    try {
+      host.open();
+      const outcome = await host.runAgent(config.agents[0]!, "schedule");
+      assert.equal(outcome.kind, "completed");
+      const stored = host.runsAfter(0, 10).runs.map((entry) => entry.run);
+      const finished = events(config.dataDir).filter((event) => event.type === "sandbox.run.finished");
+      assert.equal(finished.length, 1);
+      assert.equal(finished[0]!.details.runDigest, runRecordDigest(stored[0]));
+      assert.equal(events(config.dataDir).some((event) => event.type === "sandbox.run.rewritten"), false);
+    } finally {
+      await host.close();
+      cleanup();
+    }
+  });
+
+  it("records a rewrite with the new digest when a delivery step is added", async () => {
+    const { dir, cleanup } = tempDir();
+    writePrivate(join(dir, "secrets.json"), JSON.stringify({ discord: { webhookUrl: "https://discord.com/api/webhooks/1234567/token_x" } }));
+    const config = loadSandboxConfig(writeConfig(dir, {
+      agents: [{ id: "find-inactive-devices", templateSha256: bundledHash("find-inactive-devices"), intervalSeconds: 3600, delivery: { connector: "discord" } }],
+    }));
+    const deliveryFetch = (async () => Response.json({ id: "m" })) as typeof fetch;
+    const host = new SandboxHost(config, deps({ graphFetch: graph().fetchImpl, deliveryFetch }));
+    try {
+      host.open();
+      await host.runAgent(config.agents[0]!, "schedule");
+      const stored = host.runsAfter(0, 10).runs.map((entry) => entry.run)[0]!;
+      const all = events(config.dataDir);
+      const finished = all.find((event) => event.type === "sandbox.run.finished")!;
+      const rewritten = all.filter((event) => event.type === "sandbox.run.rewritten");
+      assert.equal(rewritten.length, 1);
+      assert.notEqual(finished.details.runDigest, rewritten[0]!.details.runDigest);
+      assert.equal(rewritten[0]!.details.runDigest, runRecordDigest(stored));
+      assert.equal(rewritten[0]!.details.status, stored.status);
+      assert.ok(all.indexOf(rewritten[0]!) > all.indexOf(finished));
+    } finally {
+      await host.close();
+      cleanup();
+    }
   });
 });
 
