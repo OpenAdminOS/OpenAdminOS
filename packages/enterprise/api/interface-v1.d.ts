@@ -91,6 +91,7 @@ export interface EnterpriseSandboxSyncResult {
     readonly runsImported: number;
     readonly runsVerified: number;
     readonly runsUnverified: number;
+    readonly runsSkipped: number;
     readonly auditRowsAccepted: number;
     readonly auditBatches: number;
     readonly problems: readonly string[];

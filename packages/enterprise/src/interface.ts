@@ -164,9 +164,11 @@ export interface EnterpriseSandboxSyncResult {
   /** Of those, runs whose finished event is in the verified audit rows. */
   readonly runsVerified: number;
   readonly runsUnverified: number;
+  /** Runs not taken: not finished yet, malformed, or a reread that would replace a verified record without a newer verified event. */
+  readonly runsSkipped: number;
   readonly auditRowsAccepted: number;
   readonly auditBatches: number;
-  /** Runs the sandbox could not read or the desktop could not take, by run id and reason. */
+  /** What the desktop could not take or verify, and what a capped sync left for the next one; at most 21 lines. */
   readonly problems: readonly string[];
 }
 
