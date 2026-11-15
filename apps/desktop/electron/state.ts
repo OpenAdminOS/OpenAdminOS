@@ -1,7 +1,6 @@
 import { OfficeService } from "./office.js";
-import { ranOnThisDesktop, sandboxRunBinding } from "./sandbox-runs.js";
-import { runRecordDigest } from "@openadminos/pairing";
-import type { SandboxRunAttestation } from "./sandboxes/service.js";
+import { ranOnThisDesktop, sandboxRunBinding, storedSandboxRun, storedSandboxRunDigest } from "./sandbox-runs.js";
+import type { SandboxRunAttestation, SandboxRunWrite, SandboxRunAttestResult } from "./sandboxes/service.js";
 import { describeNetworkFailure, timeoutWhenAborted, type ProxyResolver } from "./network-failure.js";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -8792,21 +8791,23 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * replaces it. A run of this desktop with the same id is never replaced.
    * Called under the organization's tenant lease: the organization must
    * still be connected and the lease current, or nothing is written.
-   * Returns the ids it added or replaced.
+   * Returns the runs it added or replaced, each with the digest of the
+   * record as stored, normalized as a read of state.json normalizes it.
    */
-  async importSandboxRuns(runs: readonly RunRecord[]): Promise<string[]> {
+  async importSandboxRuns(input: readonly RunRecord[]): Promise<SandboxRunWrite[]> {
+    const runs = input.map((run) => (run.attestedBy ? { ...storedSandboxRun(run), attestedBy: run.attestedBy } : storedSandboxRun(run)));
     const written = await this.serialize(async () => {
       const persisted = await this.read();
       this.assertSandboxImportAllowed(persisted, runs);
       const next = [...persisted.runs];
-      const ids: string[] = [];
+      const ids: SandboxRunWrite[] = [];
       for (const run of runs) {
         const binding = sandboxRunBinding(run);
         if (!binding) continue;
         const index = next.findIndex((entry) => entry.id === run.id);
         if (index < 0) {
           next.unshift(run);
-          ids.push(run.id);
+          ids.push({ id: run.id, storedDigest: storedSandboxRunDigest(run) });
           continue;
         }
         const existing = next[index]!;
@@ -8814,7 +8815,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         const newer = run.attestedBy !== undefined && (existing.attestedBy === undefined || run.attestedBy.checkpointSeq > existing.attestedBy.checkpointSeq);
         if (!newer) continue;
         next[index] = run;
-        ids.push(run.id);
+        ids.push({ id: run.id, storedDigest: storedSandboxRunDigest(run) });
       }
       if (ids.length > 0) await this.write({ ...persisted, runs: next });
       return ids;
@@ -8824,28 +8825,44 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   /** Sets the attestation of sandbox runs imported unverified, matched on the full binding. */
-  async attestSandboxRuns(entries: readonly SandboxRunAttestation[]): Promise<number> {
-    const count = await this.serialize(async () => {
+  /**
+   * Sets the attestation of sandbox runs imported unverified. Returns the
+   * ids attested, and the ids whose stored record is no longer the one the
+   * entry describes (replaced, removed or attested already).
+   */
+  async attestSandboxRuns(entries: readonly SandboxRunAttestation[]): Promise<SandboxRunAttestResult> {
+    const result = await this.serialize(async () => {
       const persisted = await this.read();
       const tenants = [...new Set(entries.map((entry) => entry.tenantId))];
       for (const tenantId of tenants) this.assertSandboxTenantOpen(persisted, tenantId, entries.find((entry) => entry.tenantId === tenantId)!.organizationId);
-      let changed = 0;
-      const next = persisted.runs.map((run) => {
-        const entry = entries.find((candidate) => candidate.runId === run.id);
-        const executedOn = run.executedOn;
-        if (!entry || run.attestedBy || executedOn?.kind !== "sandbox") return run;
+      const attested: string[] = [];
+      const stale: string[] = [];
+      const byId = new Map(persisted.runs.map((run, index) => [run.id, index]));
+      const next = [...persisted.runs];
+      for (const entry of entries) {
+        const index = byId.get(entry.runId);
+        const run = index === undefined ? undefined : next[index];
         const binding = JSON.stringify([entry.sandboxId, entry.organizationId, entry.tenantId.toLowerCase(), entry.pairingKeyFingerprint]);
-        if (sandboxRunBinding(run) !== binding) return run;
         // Only the record imported then: a later or older record in history is not the one the event names.
-        if (run.agentSlug !== entry.agentSlug || run.status !== entry.status || runRecordDigest(run) !== entry.storedDigest) return run;
-        changed += 1;
-        return { ...run, attestedBy: entry.attestedBy };
-      });
-      if (changed > 0) await this.write({ ...persisted, runs: next });
-      return changed;
+        if (
+          !run ||
+          run.attestedBy ||
+          sandboxRunBinding(run) !== binding ||
+          run.agentSlug !== entry.agentSlug ||
+          run.status !== entry.status ||
+          storedSandboxRunDigest(run) !== entry.storedDigest
+        ) {
+          stale.push(entry.runId);
+          continue;
+        }
+        next[index!] = { ...run, attestedBy: entry.attestedBy };
+        attested.push(entry.runId);
+      }
+      if (attested.length > 0) await this.write({ ...persisted, runs: next });
+      return { attested, stale };
     });
-    if (count > 0) this.emitStateChanged("sandbox-runs-imported");
-    return count;
+    if (result.attested.length > 0) this.emitStateChanged("sandbox-runs-imported");
+    return result;
   }
 
   /** Runs sandbox work under the tenant's lease, so Disconnect aborts it and waits for it. */

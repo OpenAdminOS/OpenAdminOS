@@ -8,9 +8,7 @@ import type { RunRecord, TenantRecord } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 
 import { latestScheduledRunForAgent } from "./companion-schedules.js";
-import { ranOnThisDesktop } from "./sandbox-runs.js";
-import { runRecordDigest } from "@openadminos/pairing";
-
+import { ranOnThisDesktop, storedSandboxRunDigest } from "./sandbox-runs.js";
 import { AppStateStore } from "./state.js";
 import { TenantClosedError } from "./tenant-lifecycle.js";
 
@@ -101,15 +99,15 @@ describe("AppStateStore for paired sandboxes", () => {
         pairingKeyFingerprint: KEY_A,
         agentSlug: storedB.agentSlug,
         status: storedB.status,
-        storedDigest: runRecordDigest(storedB),
+        storedDigest: storedSandboxRunDigest(storedB),
         attestedBy: attested(9),
       };
       // Another record than the one stored, or another status, is not attested.
-      assert.equal(await store.attestSandboxRuns([{ ...entry, storedDigest: "0".repeat(64) }]), 0);
-      assert.equal(await store.attestSandboxRuns([{ ...entry, status: "failed" }]), 0);
+      assert.deepEqual((await store.attestSandboxRuns([{ ...entry, storedDigest: "0".repeat(64) }])).attested, []);
+      assert.deepEqual((await store.attestSandboxRuns([{ ...entry, status: "failed" }])).attested, []);
       await assert.rejects(store.attestSandboxRuns([{ ...entry, organizationId: "org-b" }]), (error: unknown) => error instanceof TenantClosedError);
-      assert.equal(await store.attestSandboxRuns([{ ...entry, pairingKeyFingerprint: "B".repeat(52) }]), 0);
-      assert.equal(await store.attestSandboxRuns([entry]), 1);
+      assert.deepEqual((await store.attestSandboxRuns([{ ...entry, pairingKeyFingerprint: "B".repeat(52) }])).attested, []);
+      assert.deepEqual((await store.attestSandboxRuns([entry])).attested, ["run-b"]);
       assert.equal((await store.getRun("run-b"))?.attestedBy?.checkpointSeq, 9);
     } finally {
       store.close();
@@ -141,6 +139,49 @@ describe("AppStateStore for paired sandboxes", () => {
         (error: unknown) => error instanceof TenantClosedError,
       );
       assert.equal(await store.getRun("run-y"), undefined);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("attests a run imported unverified after a state.json round trip, and only that record", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-state-sandbox-"));
+    const filePath = join(dir, "state.json");
+    await writeFile(filePath, JSON.stringify({ activeProviderId: "ollama", installedAgents: [], runs: [], tenants: [tenant], activeTenantId: tenant.id }));
+    const first = new AppStateStore({ filePath, tokenStore, userDataPath: dir, statsApiUrl: "" });
+    let written: Awaited<ReturnType<AppStateStore["importSandboxRuns"]>>;
+    try {
+      written = await first.importSandboxRuns([run("run-c", onSandbox("mini-pc"))]);
+    } finally {
+      first.close();
+    }
+    assert.equal(written.length, 1);
+    // A new store reads state.json again, with its normalization.
+    const store = new AppStateStore({ filePath, tokenStore, userDataPath: dir, statsApiUrl: "" });
+    try {
+      const stored = (await store.getRun("run-c"))!;
+      assert.equal(stored.usage, null);
+      const entry = {
+        runId: "run-c",
+        sandboxId: "mini-pc",
+        organizationId: "org-tenant-1",
+        tenantId: tenant.id,
+        pairingKeyFingerprint: KEY_A,
+        agentSlug: stored.agentSlug,
+        status: stored.status,
+        storedDigest: written[0]!.storedDigest,
+        attestedBy: attested(3),
+      };
+      assert.deepEqual(await store.attestSandboxRuns([{ ...entry, storedDigest: "0".repeat(64) }]), { attested: [], stale: ["run-c"] });
+      assert.deepEqual(await store.attestSandboxRuns([{ ...entry, sandboxId: "other-pc" }]), { attested: [], stale: ["run-c"] });
+      assert.deepEqual(await store.attestSandboxRuns([entry]), { attested: ["run-c"], stale: [] });
+      assert.equal((await store.getRun("run-c"))?.attestedBy?.checkpointSeq, 3);
+      // Attested already: stale from now on.
+      assert.deepEqual(await store.attestSandboxRuns([entry]), { attested: [], stale: ["run-c"] });
+      // A closing tenant takes nothing.
+      (store as unknown as { tenantLifecycle: { close(id: string): void } }).tenantLifecycle.close(tenant.id);
+      await assert.rejects(store.attestSandboxRuns([entry]), (error: unknown) => error instanceof TenantClosedError);
     } finally {
       store.close();
       await rm(dir, { recursive: true, force: true });
