@@ -75,8 +75,9 @@ export class EnterpriseLicenceFileError extends Error {
   }
 }
 
-// TODO(ugur): settings sections reach the renderer in the status, but no
-// Settings page renders them yet; where and in what form is not decided.
+// Settings sections reach the renderer in the status. Settings shows each
+// one with its title and description only, above About; a module adds no
+// UI of its own to the free app.
 // TODO(ugur): the module runs in the main process, so the frozen host is
 // the boundary by contract and review. Decide whether it should run in a
 // utilityProcess so module code cannot import app internals at all.

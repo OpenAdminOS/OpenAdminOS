@@ -1,9 +1,6 @@
-import { useEffect, useState } from "react";
-
-import type { EnterpriseStatus } from "@openadminos/agent-sdk";
-
 import { IconWarning, IconCloud } from "./icons";
 import { Tooltip } from "./ui";
+import { useEnterpriseStatus } from "./useEnterpriseStatus";
 
 /**
  * Says in the status strip when optional team features are on. Without a
@@ -14,29 +11,7 @@ import { Tooltip } from "./ui";
 export const ENTERPRISE_PROBLEM_LABEL = "Team features off";
 
 export function EnterpriseStatusChip() {
-  const [status, setStatus] = useState<EnterpriseStatus>({ active: false });
-
-  useEffect(() => {
-    const bridge = window.openAdminOS;
-    if (!bridge?.getEnterpriseStatus) return;
-    let current = true;
-    const refresh = () => {
-      bridge.getEnterpriseStatus?.().then(
-        (next) => {
-          if (current) setStatus(next);
-        },
-        (error: unknown) => {
-          console.error("[enterprise] the team features status could not be read", error);
-        },
-      );
-    };
-    refresh();
-    const unsubscribe = bridge.onEnterpriseStatusChanged?.(refresh);
-    return () => {
-      current = false;
-      unsubscribe?.();
-    };
-  }, []);
+  const status = useEnterpriseStatus();
 
   if (!status.active) {
     if (!status.problem) return null;
