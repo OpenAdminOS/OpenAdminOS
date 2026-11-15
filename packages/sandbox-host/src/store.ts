@@ -37,6 +37,8 @@ export function writeFileAtomic(path: string, content: string): void {
 interface RunCursorFile {
   version: 1;
   counter: number;
+  /** Changes only when the cursors had to start over; a reader that sees a new one reads everything again. */
+  generation: string;
   /** `sha256` is the digest of the file as last indexed, so a write the index missed is found at startup. */
   runs: Record<string, { agentSlug: string; file: string; cursor: number; sha256: string }>;
 }
@@ -51,7 +53,18 @@ export interface RunAfterCursor {
 export interface RunPage {
   runs: RunAfterCursor[];
   next: number;
+  /** A reader keeps this with its cursor; when it changes, the cursor no longer means anything and the reader starts from 0. */
+  generation: string;
   problems: Array<{ cursor: number; runId: string; file: string; reason: "storage-corrupt"; message: string }>;
+  /** Set when the cursors started over in this process because the index and its high-water mark were both lost. */
+  condition?: { code: "cursor-reset"; message: string };
+}
+
+/** The highest cursor given out, kept apart from the index so a lost index never numbers below it. */
+interface HighWaterFile {
+  version: 1;
+  highWater: number;
+  generation: string;
 }
 
 /** A run file name as `write` makes it: `<stamp>_<run id>.json`. */
@@ -60,8 +73,13 @@ const RUN_FILE = /^[0-9T-]+Z_[A-Za-z0-9][A-Za-z0-9_-]{0,127}\.json$/;
 /** Run records as JSON files under `<dataDir>/runs/<agent>/`, newest last by name. */
 export class RunStore {
   private index: RunCursorFile | undefined;
+  private reset = false;
 
-  constructor(private readonly root: string, private readonly retention = RUN_RETENTION_PER_AGENT) {}
+  constructor(
+    private readonly root: string,
+    private readonly retention = RUN_RETENTION_PER_AGENT,
+    private readonly clock: () => number = Date.now,
+  ) {}
 
   write(run: RunRecord): string {
     const folder = this.folderFor(run.agentSlug);
@@ -75,6 +93,7 @@ export class RunStore {
     index.counter += 1;
     index.runs[run.id] = { agentSlug: run.agentSlug, file, cursor: index.counter, sha256: digest(content) };
     this.prune(folder, index);
+    this.writeHighWater(index);
     this.writeIndex(index);
     return path;
   }
@@ -90,10 +109,19 @@ export class RunStore {
   listAfter(cursor: number, limit: number): RunPage {
     if (!Number.isSafeInteger(cursor) || cursor < 0) throw new RangeError("cursor must be a non-negative integer.");
     if (!Number.isSafeInteger(limit) || limit < 1) throw new RangeError("limit must be a positive integer.");
-    const entries = Object.entries(this.cursorIndex().runs)
+    const index = this.cursorIndex();
+    const entries = Object.entries(index.runs)
       .filter(([, entry]) => entry.cursor > cursor)
       .sort(([, left], [, right]) => left.cursor - right.cursor);
-    const page: RunPage = { runs: [], next: cursor, problems: [] };
+    const page: RunPage = {
+      runs: [],
+      next: cursor,
+      generation: index.generation,
+      problems: [],
+      ...(this.reset
+        ? { condition: { code: "cursor-reset" as const, message: "The sandbox lost its run index and the record of the cursors it gave out, so cursors started over. Read every run again from cursor 0." } }
+        : {}),
+    };
     for (const [runId, entry] of entries) {
       if (page.runs.length >= limit) break;
       page.next = entry.cursor;
@@ -122,27 +150,35 @@ export class RunStore {
     return join(this.root, "cursor.json");
   }
 
+  private get highWaterPath(): string {
+    return join(this.root, "cursor-high-water.json");
+  }
+
   /**
    * The index, read once and checked against the run files: a run file
    * written after the last index update (a crash between the two) or
    * missing from the index gets a new cursor, and entries whose file is
-   * gone are dropped. A missing or unreadable index is numbered from the
-   * current time in milliseconds: above any number an earlier index gave
-   * out, so a reader's cursor never skips the rebuilt runs.
+   * gone are dropped. A lost index is numbered from the higher of the
+   * high-water mark and the clock, so a reader's cursor never skips the
+   * rebuilt runs; when the high-water mark is lost too, the cursors start
+   * a new generation and pages say `cursor-reset`.
    */
   private cursorIndex(): RunCursorFile {
     if (this.index) return this.index;
-    let loaded: RunCursorFile | undefined;
-    if (existsSync(this.indexPath)) {
-      try {
-        const parsed: unknown = JSON.parse(readFileSync(this.indexPath, "utf8"));
-        if (isCursorFile(parsed)) loaded = parsed;
-      } catch {
-        loaded = undefined;
-      }
+    const loaded = readJsonFile(this.indexPath, isCursorFile);
+    const highWater = readJsonFile(this.highWaterPath, isHighWaterFile);
+    let index: RunCursorFile;
+    if (loaded) {
+      index = loaded;
+      if (highWater && highWater.generation === loaded.generation) index.counter = Math.max(index.counter, highWater.highWater);
+    } else if (highWater) {
+      index = { version: 1, counter: Math.max(highWater.highWater, this.clock()), generation: highWater.generation, runs: {} };
+    } else {
+      const existedBefore = existsSync(this.indexPath) || existsSync(this.highWaterPath) || this.hasRunFiles();
+      index = { version: 1, counter: existedBefore ? this.clock() : 0, generation: randomUUID(), runs: {} };
+      this.reset = existedBefore;
     }
-    const index: RunCursorFile = loaded ?? { version: 1, counter: existsSync(this.indexPath) || existsSync(this.root) ? Date.now() : 0, runs: {} };
-    let changed = loaded === undefined && existsSync(this.root);
+    let changed = loaded === undefined || highWater === undefined || highWater.highWater !== index.counter;
     const present = new Set<string>();
     if (existsSync(this.root)) {
       for (const agent of readdirSync(this.root).sort()) {
@@ -167,8 +203,23 @@ export class RunStore {
       changed = true;
     }
     this.index = index;
-    if (changed) this.writeIndex(index);
+    if (changed && existsSync(this.root)) {
+      this.writeHighWater(index);
+      this.writeIndex(index);
+    }
     return index;
+  }
+
+  private hasRunFiles(): boolean {
+    if (!existsSync(this.root)) return false;
+    return readdirSync(this.root).some((agent) => SAFE_SEGMENT.test(agent) && this.files(join(this.root, agent)).length > 0);
+  }
+
+  /** Written before the index, so the mark is never below a cursor the index gave out. */
+  private writeHighWater(index: RunCursorFile): void {
+    mkdirSync(this.root, { recursive: true, mode: 0o700 });
+    const file: HighWaterFile = { version: 1, highWater: index.counter, generation: index.generation };
+    writeFileAtomic(this.highWaterPath, `${JSON.stringify(file)}\n`);
   }
 
   private writeIndex(index: RunCursorFile): void {
@@ -280,19 +331,51 @@ function isRunRecord(value: unknown): value is RunRecord {
   );
 }
 
-/** The index as written; agent and file names must be safe path segments, never joined unchecked. */
+/**
+ * The index as written; agent and file names must be safe path segments,
+ * never joined unchecked, and cursors are unique, from 1, and not above
+ * the counter. Anything else is rebuilt.
+ */
 function isCursorFile(value: unknown): value is RunCursorFile {
-  if (!isPlainObject(value) || value.version !== 1 || !Number.isSafeInteger(value.counter) || !isPlainObject(value.runs)) return false;
-  return Object.values(value.runs).every(
-    (entry) =>
-      isPlainObject(entry) &&
-      typeof entry.agentSlug === "string" &&
-      SAFE_SEGMENT.test(entry.agentSlug) &&
-      typeof entry.file === "string" &&
-      RUN_FILE.test(entry.file) &&
-      Number.isSafeInteger(entry.cursor) &&
-      typeof entry.sha256 === "string",
-  );
+  if (!isPlainObject(value) || value.version !== 1 || !isCount(value.counter) || typeof value.generation !== "string" || value.generation.length === 0 || !isPlainObject(value.runs)) return false;
+  const cursors = new Set<number>();
+  for (const entry of Object.values(value.runs)) {
+    if (
+      !isPlainObject(entry) ||
+      typeof entry.agentSlug !== "string" ||
+      !SAFE_SEGMENT.test(entry.agentSlug) ||
+      typeof entry.file !== "string" ||
+      !RUN_FILE.test(entry.file) ||
+      !isCount(entry.cursor) ||
+      entry.cursor < 1 ||
+      entry.cursor > value.counter ||
+      cursors.has(entry.cursor) ||
+      typeof entry.sha256 !== "string"
+    ) {
+      return false;
+    }
+    cursors.add(entry.cursor);
+  }
+  return true;
+}
+
+function isHighWaterFile(value: unknown): value is HighWaterFile {
+  return isPlainObject(value) && value.version === 1 && isCount(value.highWater) && typeof value.generation === "string" && value.generation.length > 0;
+}
+
+function isCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+/** A JSON file that passes `check`, or undefined when it is missing, unreadable or malformed. */
+function readJsonFile<T>(path: string, check: (value: unknown) => value is T): T | undefined {
+  if (!existsSync(path)) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    return check(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function digest(content: string): string {

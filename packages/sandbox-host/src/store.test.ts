@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
@@ -25,7 +25,8 @@ describe("RunStore", () => {
       assert.deepEqual(first.map((entry) => entry.run.id), ["run_0001", "run_0002"]);
       const second = store.listAfter(first[1]!.cursor, 10).runs;
       assert.deepEqual(second.map((entry) => entry.run.id), ["run_0003"]);
-      assert.deepEqual(store.listAfter(second[0]!.cursor, 10), { runs: [], next: second[0]!.cursor, problems: [] });
+      const empty = store.listAfter(second[0]!.cursor, 10);
+      assert.deepEqual(empty, { runs: [], next: second[0]!.cursor, generation: empty.generation, problems: [] }, "no cursor-reset condition");
       // A run written again moves to a new cursor, once.
       store.write({ ...run(2), summary: "again" });
       const changed = store.listAfter(second[0]!.cursor, 10).runs;
@@ -92,6 +93,75 @@ describe("RunStore", () => {
       assert.deepEqual(page.runs.map((entry) => entry.run.id), ["run_0001"]);
       const written = JSON.parse(readFileSync(join(dir, "runs", "cursor.json"), "utf8")) as { runs: Record<string, { file: string }> };
       assert.match(written.runs.run_0001!.file, /^[0-9T-]+Z_run_0001\.json$/);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("numbers a lost index above its high-water mark even when the clock went back", () => {
+    const { dir, cleanup } = tempDir();
+    try {
+      let now = 5_000_000;
+      const store = new RunStore(join(dir, "runs"), undefined, () => now);
+      for (let index = 0; index < 3; index += 1) store.write(run(index));
+      const seen = store.listAfter(0, 10);
+      // The index is lost and the clock was set back, below every cursor given out.
+      rmSync(join(dir, "runs", "cursor.json"));
+      now = 10;
+      const rebuilt = new RunStore(join(dir, "runs"), undefined, () => now).listAfter(seen.next, 10);
+      assert.deepEqual(rebuilt.runs.map((entry) => entry.run.id), ["run_0000", "run_0001", "run_0002"]);
+      assert.ok(rebuilt.runs.every((entry) => entry.cursor > seen.next));
+      assert.equal(rebuilt.generation, seen.generation, "the same generation: the reader's cursor still holds");
+      assert.equal(rebuilt.condition, undefined);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("says cursor-reset with a new generation when the index and its high-water mark are both lost", () => {
+    const { dir, cleanup } = tempDir();
+    try {
+      const store = new RunStore(join(dir, "runs"), undefined, () => 1_000);
+      store.write(run(1));
+      const before = store.listAfter(0, 10);
+      rmSync(join(dir, "runs", "cursor.json"));
+      rmSync(join(dir, "runs", "cursor-high-water.json"));
+      const after = new RunStore(join(dir, "runs"), undefined, () => 2).listAfter(0, 10);
+      assert.equal(after.condition?.code, "cursor-reset");
+      assert.notEqual(after.generation, before.generation);
+      assert.deepEqual(after.runs.map((entry) => entry.run.id), ["run_0001"]);
+      // A fresh data folder is not a reset.
+      const { dir: fresh, cleanup: cleanFresh } = tempDir();
+      try {
+        assert.equal(new RunStore(join(fresh, "runs")).listAfter(0, 10).condition, undefined);
+      } finally {
+        cleanFresh();
+      }
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("rebuilds an index with duplicate cursors, a cursor of 0, or a counter below its cursors", () => {
+    const { dir, cleanup } = tempDir();
+    try {
+      const store = new RunStore(join(dir, "runs"));
+      store.write(run(1));
+      store.write(run(2));
+      const path = join(dir, "runs", "cursor.json");
+      const good = JSON.parse(readFileSync(path, "utf8")) as { counter: number; runs: Record<string, { cursor: number }> };
+      const variants = [
+        { ...good, runs: { ...good.runs, run_0002: { ...good.runs.run_0002!, cursor: good.runs.run_0001!.cursor } } },
+        { ...good, runs: { ...good.runs, run_0001: { ...good.runs.run_0001!, cursor: 0 } } },
+        { ...good, counter: 1 },
+      ];
+      for (const variant of variants) {
+        writeFileSync(path, JSON.stringify(variant));
+        const page = new RunStore(join(dir, "runs")).listAfter(0, 10);
+        const cursors = page.runs.map((entry) => entry.cursor);
+        assert.equal(new Set(cursors).size, 2);
+        assert.ok(cursors.every((cursor) => cursor > good.counter), "rebuilt above the high-water mark");
+      }
     } finally {
       cleanup();
     }

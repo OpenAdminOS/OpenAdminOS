@@ -165,7 +165,7 @@ export class SandboxHost {
     assertSupportedPlatform(deps.platform);
     ensurePrivateDirectory(config.dataDir);
     this.lock = new InstanceLock(join(config.dataDir, "sandbox.lock"));
-    this.runs = new RunStore(join(config.dataDir, "runs"));
+    this.runs = new RunStore(join(config.dataDir, "runs"), undefined, () => this.now().getTime());
     useReleaseAgents();
   }
 
