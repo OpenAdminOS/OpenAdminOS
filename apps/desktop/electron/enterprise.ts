@@ -27,6 +27,7 @@ import {
   LICENCE_LIMITS,
   verifyLicence,
   type EnterpriseHandle,
+  type EnterpriseHostCapabilities,
   type EnterpriseHostController,
   type EnterpriseIpcRegistrar,
   type EnterpriseLogSink,
@@ -125,6 +126,8 @@ export interface LoadEnterpriseOptions {
   readonly storage: EnterpriseStorageBackend;
   readonly log: EnterpriseLogSink;
   readonly onChange?: () => void;
+  /** Organizations, read-only agents and sandboxes, lent to an active module only. */
+  readonly capabilities?: EnterpriseHostCapabilities;
   /** Starts a timer and returns its cancel function; defaults to an unref'd setTimeout. */
   readonly setTimer?: (callback: () => void, delayMs: number) => () => void;
 }
@@ -278,6 +281,7 @@ export async function loadEnterprise(options: LoadEnterpriseOptions): Promise<En
     storage: options.storage,
     log: options.log,
     ...(options.onChange ? { onChange: options.onChange } : {}),
+    ...(options.capabilities ? { capabilities: options.capabilities } : {}),
   });
 
   let handle: EnterpriseHandle | undefined;

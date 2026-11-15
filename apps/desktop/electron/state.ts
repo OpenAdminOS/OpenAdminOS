@@ -1169,7 +1169,7 @@ function compareAuditEvents(left: AuditLogEventSeed, right: AuditLogEventSeed): 
     "graph-write": 4,
     gateway: 5,
     nova: 6,
-    // Written only by a sandbox host; the desktop records none yet.
+    // Written by a sandbox host, and by this desktop about its paired sandboxes.
     sandbox: 7,
   };
   const sourceDiff = sourceOrder[left.source] - sourceOrder[right.source];
@@ -8767,6 +8767,49 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
   async getRun(id: string): Promise<RunRecord | undefined> {
     return this.runService.getRun(id);
+  }
+
+  /** Organizations whose Microsoft 365 tenant is connected and open: id, name and tenant id only. */
+  async listConnectedOrganizations(): Promise<Array<{ id: string; name: string; tenantId: string }>> {
+    const persisted = await this.read();
+    return (persisted.organizations ?? []).flatMap((organization) => {
+      const tenantId = organization.connections.microsoft365?.tenantId;
+      if (!tenantId || !persisted.tenants.some((tenant) => tenant.id === tenantId) || this.tenantLifecycle.phase(tenantId) !== "open") return [];
+      return [{ id: organization.id, name: organization.name, tenantId }];
+    });
+  }
+
+  /**
+   * Adds runs a paired sandbox reported to run history, or updates ones it
+   * reported before. A run of this desktop with the same id is never
+   * replaced. Returns how many were added or updated.
+   */
+  async importSandboxRuns(runs: readonly RunRecord[]): Promise<number> {
+    const count = await this.serialize(async () => {
+      const persisted = await this.read();
+      const next = [...persisted.runs];
+      let changed = 0;
+      for (const run of runs) {
+        if (run.executedOn?.kind !== "sandbox") continue;
+        const index = next.findIndex((entry) => entry.id === run.id);
+        if (index < 0) {
+          next.unshift(run);
+          changed += 1;
+        } else if (next[index]!.executedOn?.kind === "sandbox" && next[index]!.executedOn.sandboxId === run.executedOn.sandboxId) {
+          next[index] = run;
+          changed += 1;
+        }
+      }
+      if (changed > 0) await this.write({ ...persisted, runs: next });
+      return changed;
+    });
+    if (count > 0) this.emitStateChanged("sandbox-runs-imported");
+    return count;
+  }
+
+  /** Records what the desktop did with a paired sandbox in its own audit log; throws when it cannot. */
+  recordSandboxAuditEvents(events: readonly AuditLogEventSeed[]): void {
+    this.appendAuditEvents(events);
   }
 
   private async buildLlm(

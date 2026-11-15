@@ -3,6 +3,9 @@ import { saveAuditLogExport } from "./save-audit-log-export.js";
 import { NovaService } from "./nova.js";
 import { NOVA_SESSION_CONTEXT_ENDED_REASON, NOVA_SESSION_ENDED_REASON } from "../src/shared/nova-session.js";
 import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
+import { createSandboxCapabilities } from "./sandboxes/capabilities.js";
+import { readOnlyCatalog } from "./sandboxes/catalog.js";
+import { SandboxService } from "./sandboxes/service.js";
 import { officeFullscreen } from "./office-fullscreen.js";
 import { runOfficeRehearsal } from "./office-rehearsal.js";
 import { runOfficeSmoke } from "./office-smoke.js";
@@ -3257,6 +3260,24 @@ async function startEnterprise(userDataDir: string): Promise<void> {
   const notify = () => mainWindow?.webContents.send("openadminos:enterprise-status-changed");
   const log = (level: "info" | "warn" | "error", message: string, fields?: Readonly<Record<string, string | number | boolean>>) =>
     console[level](`[enterprise] ${message}`, fields ?? {});
+  // Lent to an active module only. The service holds the sandbox keys and
+  // verification in this process and is created on the first sandbox call.
+  const sandboxes = createSandboxCapabilities({
+    organizations: () => store.listConnectedOrganizations(),
+    catalog: async () => readOnlyCatalog(),
+    createService: () => {
+      const rootDir = join(userDataDir, "sandboxes");
+      return new SandboxService({
+        rootDir,
+        secrets: new SafeStorageProviderSecretStore(join(rootDir, "secrets")).forProvider("desktop"),
+        organizations: () => store.listConnectedOrganizations(),
+        catalog: async () => readOnlyCatalog(),
+        importRuns: (runs) => store.importSandboxRuns(runs),
+        recordAudit: (events) => store.recordSandboxAuditEvents(events),
+      });
+    },
+  });
+  app.on("will-quit", () => sandboxes.close());
   const service = createEnterpriseService({
     load: () =>
       loadEnterprise({
@@ -3268,6 +3289,7 @@ async function startEnterprise(userDataDir: string): Promise<void> {
         storage: files.storage,
         log,
         onChange: notify,
+        capabilities: sandboxes.capabilities,
       }),
     notify,
     log,
