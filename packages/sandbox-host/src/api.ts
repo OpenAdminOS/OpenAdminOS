@@ -38,6 +38,27 @@ const REQUEST_TIMEOUT_MS = 15_000;
 const HEADERS_TIMEOUT_MS = 10_000;
 /** The certificate is checked for renewal this often while the host runs. */
 const CERTIFICATE_CHECK_MS = 24 * 3_600_000;
+/** Connections at once, and how long a TLS handshake may take. */
+const MAX_CONNECTIONS = 16;
+const HANDSHAKE_TIMEOUT_MS = 10_000;
+
+/** Pairing timings; tests shorten them. */
+export interface PairingTimings {
+  /** After a code's attempts are used up, the next code follows after this wait. */
+  exhaustedWaitMs: number;
+  /** A code that could not be made is tried again after this. */
+  retryMs: number;
+  /** Pairing attempts across all codes, at most this many per window. */
+  maxAttemptsPerWindow: number;
+  windowMs: number;
+}
+
+export const DEFAULT_PAIRING_TIMINGS: PairingTimings = {
+  exhaustedWaitMs: 2 * 60_000,
+  retryMs: 30_000,
+  maxAttemptsPerWindow: 20,
+  windowMs: 10 * 60_000,
+};
 
 /** Every error the API answers with: a code, an HTTP status and a message that says what to do. */
 export class ApiError extends Error {
@@ -69,6 +90,11 @@ export class SandboxApi {
   private tlsPin = "";
   private readonly clock: () => number;
   private closed = false;
+  /** When the next code is due after a wait, for the hello answer. */
+  private nextCodeAt: number | undefined;
+  /** Times of pairing attempts across codes, for the rate limit. */
+  private attempts: number[] = [];
+  private readonly timings: PairingTimings;
 
   constructor(
     private readonly host: SandboxHost,
@@ -76,8 +102,10 @@ export class SandboxApi {
     private readonly log: SandboxLogger,
     private readonly now: () => Date,
     clock?: () => number,
+    timings: Partial<PairingTimings> = {},
   ) {
     this.clock = clock ?? Date.now;
+    this.timings = { ...DEFAULT_PAIRING_TIMINGS, ...timings };
   }
 
   /** Binds, then shows a pairing code when unpaired. Returns the bound address. */
@@ -87,6 +115,13 @@ export class SandboxApi {
     const tls = loadOrCreateTlsCertificate(config.dataDir, config.sandbox.id, this.now());
     this.tlsPin = tls.spkiSha256;
     if (tls.reissued) this.log("info", "The pairing TLS certificate was reissued with the same key.", { pin: tls.spkiSha256 });
+    const paired = this.host.currentPairing;
+    if (paired && paired.record.tlsSpkiSha256 !== tls.spkiSha256) {
+      this.host.reportPairingProblem({
+        reason: "pairing-tls-pin-changed",
+        message: `The sandbox's TLS key changed since the desktop paired (paired pin ${paired.record.tlsSpkiSha256}, now ${tls.spkiSha256}), so the desktop refuses to connect. The key files in the data folder were replaced or removed. Restore them from a backup, or unpair and pair again.`,
+      });
+    }
     const server = createServer(
       {
         key: tls.privateKeyPem,
@@ -96,6 +131,7 @@ export class SandboxApi {
         requestCert: true,
         // Client certificates are self-signed; the pin decides, per route.
         rejectUnauthorized: false,
+        handshakeTimeout: HANDSHAKE_TIMEOUT_MS,
       },
       (request, response) => {
         void this.handle(request, response);
@@ -105,6 +141,7 @@ export class SandboxApi {
     server.headersTimeout = HEADERS_TIMEOUT_MS;
     server.keepAliveTimeout = 5_000;
     server.maxHeadersCount = 50;
+    server.maxConnections = MAX_CONNECTIONS;
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
       server.listen(this.listen.port, this.listen.host, () => {
@@ -118,6 +155,23 @@ export class SandboxApi {
     this.log("info", "Pairing API listening.", { address: address.address, port: address.port, pin: tls.spkiSha256 });
     if (!this.host.currentPairing) await this.showCode();
     return { host: address.address, port: address.port };
+  }
+
+  /** Shows a new code now; when that fails it is logged and tried again later. */
+  private safeShowCode(): void {
+    this.showCode().catch((error: unknown) => {
+      this.log("error", `A new pairing code could not be made: ${describe(error)} It is tried again in ${Math.round(this.timings.retryMs / 1000)} seconds.`, { reason: "pairing-code-failed" });
+      this.scheduleCode(this.timings.retryMs);
+    });
+  }
+
+  /** No code until `delayMs` has passed, then a new one. */
+  private scheduleCode(delayMs: number): void {
+    this.stopCode();
+    if (this.closed || this.host.currentPairing) return;
+    this.nextCodeAt = this.clock() + delayMs;
+    // Referenced, so the service stays up; cleared on pairing and close.
+    this.renewTimer = setTimeout(() => this.safeShowCode(), delayMs);
   }
 
   async close(): Promise<void> {
@@ -175,14 +229,13 @@ export class SandboxApi {
     });
     if (generation !== this.codeGeneration || this.closed || this.host.currentPairing) return;
     this.shown = { pairingId, session, expiresAt: issuedAt + PAIRING_CODE_LIFETIME_MS };
+    this.nextCodeAt = undefined;
     this.log("info", "Pairing code for this sandbox. Type it on the desktop within 10 minutes; a new code follows when it expires.", {
       code: formatPairingCode(code),
       expires: new Date(issuedAt + PAIRING_CODE_LIFETIME_MS).toISOString(),
     });
     // Referenced, so the service stays up; cleared on pairing and close.
-    this.renewTimer = setTimeout(() => {
-      void this.showCode().catch((error: unknown) => this.log("error", `A new pairing code could not be made: ${describe(error)}`, { reason: "pairing-code-failed" }));
-    }, PAIRING_CODE_LIFETIME_MS);
+    this.renewTimer = setTimeout(() => this.safeShowCode(), PAIRING_CODE_LIFETIME_MS);
   }
 
   private stopCode(): void {
@@ -214,7 +267,7 @@ export class SandboxApi {
     const routes: Record<string, Record<string, () => Promise<{ status?: number; body: unknown }>>> = {
       "/v1/pair": {
         GET: async () => ({ body: this.hello() }),
-        POST: async () => this.pair(request, await readJson(request)),
+        POST: async () => this.pair(request),
       },
       "/v1/status": { GET: async () => ({ body: this.host.status() }) },
       "/v1/health": { GET: async () => ({ body: this.host.healthSnapshot() }) },
@@ -234,6 +287,7 @@ export class SandboxApi {
       if (pairing) {
         const certificate = peerCertificate(request);
         if (!certificate || !matchesTlsSpkiPin(certificate, pairing.desktopTlsSpkiSha256)) {
+          this.log("warn", "A request from a client that is not the paired desktop was refused.", { reason: "client-not-paired", peer: request.socket.remoteAddress, path: url.pathname });
           throw new ApiError(401, "client-not-paired", "This client is not the desktop this sandbox is paired with. Pair it, or use the desktop that paired.");
         }
         // Unpairing stays possible, so a changed binding can be recovered.
@@ -250,7 +304,7 @@ export class SandboxApi {
   private hello(): unknown {
     if (this.host.currentPairing) throw alreadyPaired();
     const shown = this.shown;
-    if (!shown) throw new ApiError(503, "pairing-code-not-ready", "The sandbox is making a new pairing code. Try again in a few seconds.");
+    if (!shown) throw this.codeNotReady();
     const config = this.host.sandboxConfig;
     return {
       pairingId: shown.pairingId,
@@ -262,25 +316,48 @@ export class SandboxApi {
     };
   }
 
-  private async pair(request: IncomingMessage, body: unknown): Promise<{ status?: number; body: unknown }> {
+  private codeNotReady(): ApiError {
+    const wait = this.nextCodeAt === undefined ? undefined : Math.max(0, Math.ceil((this.nextCodeAt - this.clock()) / 1000));
+    return new ApiError(
+      503,
+      "pairing-code-not-ready",
+      wait === undefined
+        ? "The sandbox is making a new pairing code. Try again in a few seconds."
+        : `The sandbox shows no pairing code right now; the next one follows in ${wait} seconds. Read it from the sandbox log, then pair again.`,
+    );
+  }
+
+  /** Checks paired state and the client certificate before the body is read. */
+  private async pair(request: IncomingMessage): Promise<{ status?: number; body: unknown }> {
+    const peer = request.socket.remoteAddress;
     if (this.host.currentPairing) throw alreadyPaired();
     const certificate = peerCertificate(request);
     if (!certificate) {
       throw new ApiError(400, "client-certificate-missing", "Pairing needs the desktop's client certificate on the connection; the sandbox pins it.");
     }
+    const offer = objectBody(await readJson(request));
     const shown = this.shown;
-    if (!shown) throw new ApiError(503, "pairing-code-not-ready", "The sandbox is making a new pairing code. Try again in a few seconds.");
-    const offer = objectBody(body);
+    if (!shown) throw this.codeNotReady();
     if (offer.pairingId !== shown.pairingId) {
       throw new ApiError(409, "pairing-code-renewed", "The sandbox shows a new pairing code. Read the new code, then pair again.");
     }
+    // A limit across codes, so a client cannot try code after code.
+    const now = this.clock();
+    this.attempts = this.attempts.filter((at) => now - at < this.timings.windowMs);
+    if (this.attempts.length >= this.timings.maxAttemptsPerWindow) {
+      this.log("warn", "A pairing attempt was refused: too many attempts in a short time.", { reason: "pairing-rate-limited", peer });
+      throw new ApiError(429, "pairing-rate-limited", `More than ${this.timings.maxAttemptsPerWindow} pairing attempts in ${Math.round(this.timings.windowMs / 60_000)} minutes. Wait, then pair again. If no one here was pairing, another client on the network is trying.`);
+    }
+    this.attempts.push(now);
     const result = shown.session.verifyDesktopProof(
       { organizationId: offer.organizationId as string, tenantId: offer.tenantId as string, desktopPublicKey: offer.desktopPublicKey as string },
       offer.proof,
     );
     if (!result.ok) {
-      this.log("warn", "A pairing attempt was refused.", { reason: result.failure, remaining: result.remaining });
-      if (result.failure === "code-expired" || result.failure === "code-attempts-exhausted") void this.showCode();
+      this.log("warn", "A pairing attempt was refused.", { reason: result.failure, remaining: result.remaining, peer });
+      if (result.failure === "code-expired") this.safeShowCode();
+      // Used up: the next code waits, so a client guessing codes gains little.
+      if (result.failure === "code-attempts-exhausted") this.scheduleCode(this.timings.exhaustedWaitMs);
       const status = result.failure === "code-attempts-exhausted" ? 429 : result.failure === "code-expired" ? 410 : result.failure === "transcript-invalid" ? 400 : result.failure === "code-used" ? 409 : 403;
       throw new ApiError(status, result.failure, result.detail);
     }
@@ -335,10 +412,11 @@ export class SandboxApi {
     );
   }
 
+  /** Answers once the files are gone; a code that cannot be made yet is logged and tried again. */
   private async unpair(): Promise<unknown> {
-    const removed = this.host.unpair();
-    await this.showCode();
-    return { removed };
+    const result = this.host.unpair();
+    this.safeShowCode();
+    return result;
   }
 }
 

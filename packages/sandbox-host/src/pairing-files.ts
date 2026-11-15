@@ -130,6 +130,14 @@ export function writeAssignments(dataDir: string, signed: SignedScheduleAssignme
   writeFileAtomic(join(dataDir, PAIRING_FILES.assignments), `${JSON.stringify(signed, null, 2)}\n`);
 }
 
+/** Removes one pairing file; true when it existed. */
+export function removePairingFile(dataDir: string, name: (typeof PAIRING_FILES)["pairing" | "assignments"]): boolean {
+  const path = join(dataDir, name);
+  if (!existsSync(path)) return false;
+  rmSync(path, { force: true });
+  return true;
+}
+
 /** Removes pairing.json and assignments.json; returns the names of the files that existed. */
 export function removePairingFiles(dataDir: string): string[] {
   const removed: string[] = [];

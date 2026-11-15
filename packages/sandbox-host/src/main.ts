@@ -63,13 +63,13 @@ export async function main(
   }
   if (args.unpair) {
     try {
-      const removed = new SandboxHost(config, { ...options.deps, log }).unpairOffline();
+      const { removed, notice, rolesNoLongerNeeded } = new SandboxHost(config, { ...options.deps, log }).unpairOffline();
       log(
-        "info",
+        notice ? "warn" : "info",
         removed.length > 0
-          ? `Unpaired: removed ${removed.join(" and ")}. Config schedules are unchanged. The app registration and its certificate stay in Microsoft Entra; remove them there if this sandbox is retired.`
+          ? `Unpaired: removed ${removed.join(" and ")}. ${notice ?? "Config schedules are unchanged."} The app registration and its certificate stay in Microsoft Entra; remove them there if this sandbox is retired.`
           : "Nothing to remove: this sandbox is not paired. Config schedules are unchanged.",
-        { sandbox: config.sandbox.id, removed: removed.length },
+        { sandbox: config.sandbox.id, removed: removed.length, ...(rolesNoLongerNeeded.length > 0 ? { roles: rolesNoLongerNeeded.join(",") } : {}) },
       );
       return EXIT_OK;
     } catch (error) {
@@ -89,10 +89,11 @@ export async function main(
   log("info", "Sandbox host started.", { sandbox: config.sandbox.id, agents: config.agents.length, mode: args.once ? "once" : "service" });
 
   if (args.once) {
-    const agent = config.agents.find((candidate) => candidate.id === args.once);
+    // The config, or an assignment from the paired desktop that passes its checks.
+    const agent = host.scheduledAgent(args.once)?.agent;
     try {
       if (!agent) {
-        log("error", `${args.once} is not in the sandbox config. Add it under agents with its templateSha256.`, { reason: "agent-not-found" });
+        log("error", `${args.once} is neither in the sandbox config nor in a schedule the paired desktop assigned. Add it under agents with its templateSha256, or assign it from the desktop.`, { reason: "agent-not-found" });
         return EXIT_CONFIG;
       }
       const outcome = await host.runAgent(agent, "person");

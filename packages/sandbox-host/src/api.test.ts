@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { statSync } from "node:fs";
+import { existsSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { request as httpsRequest } from "node:https";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -12,6 +12,7 @@ import {
   exportDevicePublicKey,
   generateDeviceIdentity,
   parsePairingCode,
+  SandboxPairingSession,
   signScheduleAssignment,
   tlsSpkiSha256,
   verifyAuditCheckpoint,
@@ -23,9 +24,10 @@ import {
 import type { AuditLogPosition } from "@openadminos/runtime";
 
 import { loadSandboxConfig, type SandboxConfig } from "./config.js";
+import type { PairingTimings } from "./api.js";
 import { SandboxHost, type SandboxHostDeps } from "./host.js";
 import { main } from "./main.js";
-import { PAIRING_FILES } from "./pairing-files.js";
+import { PAIRING_FILES, writeAssignments } from "./pairing-files.js";
 import { SandboxRefusal } from "./refusal.js";
 import type { SchedulerClock } from "./scheduler.js";
 import { appClaims, bundledHash, fakeTokenProviders, ollamaFetch, tempDir, TENANT, writeConfig } from "./test-support.js";
@@ -122,7 +124,14 @@ interface Harness {
   code(): string;
 }
 
-async function start(options: { roles?: string[]; configOverrides?: Record<string, unknown>; dir?: string } = {}): Promise<Harness> {
+interface StartOptions {
+  roles?: string[];
+  configOverrides?: Record<string, unknown>;
+  dir?: string;
+  timings?: Partial<PairingTimings>;
+}
+
+async function start(options: StartOptions = {}): Promise<Harness> {
   const temp = options.dir ? { dir: options.dir, cleanup: () => undefined } : tempDir();
   const logs: Log[] = [];
   const clock = { now: Date.now() };
@@ -136,6 +145,7 @@ async function start(options: { roles?: string[]; configOverrides?: Record<strin
     graphRetryBackoffMs: 0,
     schedulerClock: idleClock,
     pairingClock: () => clock.now,
+    pairingTimings: { exhaustedWaitMs: 50, retryMs: 50, ...options.timings },
   };
   const host = new SandboxHost(config, deps);
   host.open();
@@ -337,6 +347,10 @@ describe("sandbox pairing API", () => {
       assert.equal(errorCode(await call(h.port, "PUT", "/v1/assignments", { tls: h.tls, raw: "{" })), "body-invalid");
       assert.equal(errorCode(await call(h.port, "PUT", "/v1/assignments", { tls: h.tls, raw: JSON.stringify({ pad: "x".repeat(70 * 1024) }) })), "body-too-large");
       assert.equal(errorCode(await call(h.port, "GET", "/v1/runs?after=-1", { tls: h.tls })), "query-invalid");
+      // POST /v1/pair answers already-paired before it reads a body, however large.
+      assert.equal(errorCode(await call(h.port, "POST", "/v1/pair", { tls: peerTls(), raw: JSON.stringify({ pad: "x".repeat(70 * 1024) }) })), "already-paired");
+      const refused = h.logs.filter((entry) => entry.fields?.reason === "client-not-paired");
+      assert.ok(refused.length > 0 && refused.every((entry) => typeof entry.fields?.peer === "string"), "401s are logged with the peer address");
     } finally {
       await h.close();
     }
@@ -513,6 +527,230 @@ describe("sandbox pairing API", () => {
       } finally {
         await second.close();
       }
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("waits before the next code after a code is used up, and limits attempts across codes", async () => {
+    const h = await start({ timings: { exhaustedWaitMs: 60_000, maxAttemptsPerWindow: 7 } });
+    try {
+      const wrong = async () => {
+        const hello = await call(h.port, "GET", "/v1/pair", { tls: h.tls });
+        if (hello.status !== 200) return hello;
+        return call(h.port, "POST", "/v1/pair", {
+          tls: h.tls,
+          body: { pairingId: hello.body.pairingId, organizationId: "org-1", tenantId: TENANT, desktopPublicKey: exportDevicePublicKey(h.desktop.publicKey), proof: "x".repeat(43) },
+        });
+      };
+      for (let index = 0; index < 5; index += 1) assert.equal(errorCode(await wrong()), "proof-invalid");
+      assert.equal(errorCode(await wrong()), "code-attempts-exhausted");
+      const waiting = await call(h.port, "GET", "/v1/pair", { tls: h.tls });
+      assert.equal(waiting.status, 503);
+      assert.equal(errorCode(waiting), "pairing-code-not-ready");
+      assert.match((waiting.body.error as { message: string }).message, /next one follows in \d+ seconds/);
+      const refusals = h.logs.filter((entry) => entry.message.startsWith("A pairing attempt was refused"));
+      assert.ok(refusals.length >= 6 && refusals.every((entry) => typeof entry.fields?.peer === "string"), "refusals name the peer");
+    } finally {
+      await h.close();
+    }
+
+    const limited = await start({ timings: { exhaustedWaitMs: 10, maxAttemptsPerWindow: 7 } });
+    try {
+      const codes: string[] = [];
+      let last: Reply | undefined;
+      for (let index = 0; index < 12 && errorCode(last ?? { status: 0, body: {}, serverPin: "" }) !== "pairing-rate-limited"; index += 1) {
+        let hello = await call(limited.port, "GET", "/v1/pair", { tls: limited.tls });
+        for (let tries = 0; hello.status !== 200 && tries < 100; tries += 1) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 20));
+          hello = await call(limited.port, "GET", "/v1/pair", { tls: limited.tls });
+        }
+        codes.push(hello.body.pairingId as string);
+        last = await call(limited.port, "POST", "/v1/pair", {
+          tls: limited.tls,
+          body: { pairingId: hello.body.pairingId, organizationId: "org-1", tenantId: TENANT, desktopPublicKey: exportDevicePublicKey(limited.desktop.publicKey), proof: "x".repeat(43) },
+        });
+      }
+      assert.equal(errorCode(last!), "pairing-rate-limited");
+      assert.equal(last!.status, 429);
+      assert.ok(new Set(codes).size >= 2, "the limit holds across codes");
+    } finally {
+      await limited.close();
+    }
+  });
+
+  it("answers DELETE /v1/pairing when the next code fails, and tries the code again", async () => {
+    const h = await paired();
+    const original = SandboxPairingSession.create;
+    try {
+      let failures = 1;
+      SandboxPairingSession.create = async (options) => {
+        if (failures > 0) {
+          failures -= 1;
+          throw new Error("scrypt is out of memory");
+        }
+        return original.call(SandboxPairingSession, options);
+      };
+      const codesBefore = h.logs.filter((entry) => typeof entry.fields?.code === "string").length;
+      const removed = await call(h.port, "DELETE", "/v1/pairing", { tls: h.tls });
+      assert.equal(removed.status, 200);
+      await waitFor(() => h.logs.some((entry) => entry.fields?.reason === "pairing-code-failed"));
+      await waitFor(() => h.logs.filter((entry) => typeof entry.fields?.code === "string").length > codesBefore);
+    } finally {
+      SandboxPairingSession.create = original;
+      await h.close();
+    }
+  });
+
+  it("names the permissions that fall away when assigned schedules are removed", async () => {
+    const h = await paired();
+    try {
+      const put = (body: unknown) => call(h.port, "PUT", "/v1/assignments", { tls: h.tls, body });
+      const first = await put(assignment(h, 1, [entry("dormant-app-registrations")]));
+      assert.deepEqual(first.body.rolesNoLongerNeeded, []);
+      const second = await put(assignment(h, 2, []));
+      assert.equal(second.status, 200);
+      assert.deepEqual(second.body.rolesNoLongerNeeded, ["Application.Read.All"]);
+      assert.match(second.body.notice as string, /^Remove Application\.Read\.All from the sandbox app registration, or config schedules will be refused/);
+      await put(assignment(h, 3, [entry("dormant-app-registrations")]));
+      const removed = await call(h.port, "DELETE", "/v1/pairing", { tls: h.tls });
+      assert.deepEqual(removed.body.rolesNoLongerNeeded, ["Application.Read.All"]);
+      const line = h.logs.find((entry) => entry.message.startsWith("Unpaired:"));
+      assert.ok(line && /Remove Application\.Read\.All/.test(line.message) && !/keep running/.test(line.message), line?.message);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it("names the permissions that fall away in the --unpair output", async () => {
+    const { dir, cleanup } = tempDir();
+    try {
+      const h = await paired({ dir });
+      await call(h.port, "PUT", "/v1/assignments", { tls: h.tls, body: assignment(h, 1, [entry("dormant-app-registrations")]) });
+      await h.close();
+      const lines: string[] = [];
+      assert.equal(await main(["--config", join(dir, "sandbox.json"), "--unpair"], { log: (_level, message) => lines.push(message) }), 0);
+      assert.ok(lines.some((line) => /Remove Application\.Read\.All from the sandbox app registration/.test(line) && !/Config schedules are unchanged/.test(line)), lines.join("\n"));
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("checks a stored assignment again at start and does not run one that no longer passes", async () => {
+    const { dir, cleanup } = tempDir();
+    try {
+      const h = await paired({ dir });
+      const tls = h.tls;
+      const desktop = h.desktop;
+      // Signed by the paired desktop, but for an agent whose bundled manifest is not the one pinned:
+      // what a sandbox update that changed the manifest leaves behind.
+      writeAssignments(h.config.dataDir, assignment(h, 4, [entry("compliance-overview", "0".repeat(64))]));
+      await h.close();
+
+      const restarted = await start({ dir });
+      try {
+        const status = restarted.host.status();
+        assert.equal(status.assignmentProblem?.reason, "assignment-template-mismatch");
+        assert.match(status.assignmentProblem!.message, /Send a new assignment from the desktop, or unpair\./);
+        assert.deepEqual(status.schedules.map((schedule) => schedule.source), ["config"]);
+        const health = await call(restarted.port, "GET", "/v1/health", { tls });
+        assert.ok((health.body.problems as Array<{ reason: string }>).some((problem) => problem.reason === "assignment-template-mismatch"));
+        assert.ok(restarted.logs.some((entry) => entry.fields?.reason === "assignment-template-mismatch"));
+        // The stored version still counts, so it cannot be replayed below it.
+        const replay = await call(restarted.port, "PUT", "/v1/assignments", {
+          tls,
+          body: signScheduleAssignment({ pairingId: restarted.host.currentPairing!.record.pairingId, version: 4, organizationId: "org-1", tenantId: TENANT, entries: [], issuedAt: new Date().toISOString() }, desktop.privateKey),
+        });
+        assert.equal(errorCode(replay), "assignment-replayed");
+        writeAssignments(restarted.config.dataDir, signScheduleAssignment({ pairingId: "pairing_other", version: 5, organizationId: "org-1", tenantId: TENANT, entries: [], issuedAt: new Date().toISOString() }, desktop.privateKey));
+      } finally {
+        await restarted.close();
+      }
+      const again = await start({ dir });
+      try {
+        assert.equal(again.host.status().assignmentProblem?.reason, "assignment-binding-mismatch");
+      } finally {
+        await again.close();
+      }
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("removes a leftover assignments.json when a desktop pairs", async () => {
+    const h = await start();
+    try {
+      writeFileSync(join(h.config.dataDir, PAIRING_FILES.assignments), "{}", { mode: 0o600 });
+      const { reply } = await pair(h);
+      assert.equal(reply.status, 201);
+      assert.equal(existsSync(join(h.config.dataDir, PAIRING_FILES.assignments)), false);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it("writes assignments.json before the audit event and takes it back when the audit log fails", async () => {
+    const h = await paired();
+    const host = h.host as unknown as { auditEvent: (...args: unknown[]) => void };
+    const original = host.auditEvent;
+    try {
+      host.auditEvent = () => {
+        assert.ok(existsSync(join(h.config.dataDir, PAIRING_FILES.assignments)), "written before the audit event");
+        throw new SandboxRefusal("audit-failed", "The audit log could not record sandbox.assignment.applied: disk full.");
+      };
+      const reply = await call(h.port, "PUT", "/v1/assignments", { tls: h.tls, body: assignment(h, 1, [entry("os-update-posture")]) });
+      assert.equal(errorCode(reply), "audit-failed");
+      assert.equal(existsSync(join(h.config.dataDir, PAIRING_FILES.assignments)), false);
+      assert.equal(h.host.status().assignmentVersion, undefined);
+    } finally {
+      host.auditEvent = original;
+      await h.close();
+    }
+  });
+
+  it("reports a TLS key that changed since pairing", async () => {
+    const { dir, cleanup } = tempDir();
+    try {
+      const h = await paired({ dir });
+      const tls = h.tls;
+      await h.close();
+      rmSync(join(h.config.dataDir, PAIRING_FILES.tlsKey));
+      rmSync(join(h.config.dataDir, PAIRING_FILES.tlsCertificate));
+      const restarted = await start({ dir });
+      try {
+        assert.ok(restarted.logs.some((entry) => entry.fields?.reason === "pairing-tls-pin-changed"));
+        const health = await call(restarted.port, "GET", "/v1/health", { tls });
+        const problem = (health.body.problems as Array<{ reason: string; message: string }>).find((entry) => entry.reason === "pairing-tls-pin-changed");
+        assert.ok(problem);
+        assert.match(problem.message, /unpair and pair again/);
+      } finally {
+        await restarted.close();
+      }
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("runs an assigned agent with --once and names both sources for an unknown one", async () => {
+    const { dir, cleanup } = tempDir();
+    try {
+      const h = await paired({ dir });
+      await call(h.port, "PUT", "/v1/assignments", { tls: h.tls, body: assignment(h, 1, [entry("compliance-overview")]) });
+      await h.close();
+      const lines: string[] = [];
+      const deps: SandboxHostDeps = {
+        modelFetch: ollamaFetch(),
+        createLlm: () => llm,
+        createTokenProvider: fakeTokenProviders(appClaims([READ])),
+        graphFetch,
+        graphRetryBackoffMs: 0,
+      };
+      const log = (_level: string, message: string) => {
+        lines.push(message);
+      };
+      assert.equal(await main(["--config", join(dir, "sandbox.json"), "--once", "compliance-overview"], { log, deps }), 0, lines.join("\n"));
+      assert.equal(await main(["--config", join(dir, "sandbox.json"), "--once", "no-such-agent"], { log, deps }), 2);
+      assert.ok(lines.some((line) => /neither in the sandbox config nor in a schedule the paired desktop assigned/.test(line)));
     } finally {
       cleanup();
     }
