@@ -170,6 +170,7 @@ export class SandboxAuditStore {
         stored_digest TEXT NOT NULL,
         agent_slug TEXT NOT NULL,
         status TEXT NOT NULL,
+        checked_at TEXT,
         PRIMARY KEY (pairing_id, run_id)
       );
     `);
@@ -244,9 +245,16 @@ export class SandboxAuditStore {
 
   listUnverified(pairingId: string, limit: number): UnverifiedRun[] {
     const rows = this.db
-      .prepare("SELECT run_id, digest, stored_digest, agent_slug, status FROM sandbox_unverified WHERE pairing_id = ? ORDER BY run_id LIMIT ?")
+      // The ones checked longest ago first, never checked before all of them, so every entry gets a turn.
+      .prepare("SELECT run_id, digest, stored_digest, agent_slug, status FROM sandbox_unverified WHERE pairing_id = ? ORDER BY checked_at IS NOT NULL, checked_at, run_id LIMIT ?")
       .all(pairingId, limit) as Array<{ run_id: string; digest: string; stored_digest: string; agent_slug: string; status: string }>;
     return rows.map((row) => ({ runId: row.run_id, digest: row.digest, storedDigest: row.stored_digest, agentSlug: row.agent_slug, status: row.status }));
+  }
+
+  /** Records that these entries were checked now, so the next sync starts with others. */
+  markChecked(pairingId: string, runIds: readonly string[], at: string): void {
+    const update = this.db.prepare("UPDATE sandbox_unverified SET checked_at = ? WHERE pairing_id = ? AND run_id = ?");
+    for (const runId of runIds) update.run(at, pairingId, runId);
   }
 
   removeUnverified(pairingId: string, runId: string): void {

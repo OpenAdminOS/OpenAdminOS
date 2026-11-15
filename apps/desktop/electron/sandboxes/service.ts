@@ -68,11 +68,12 @@ export const SYNC_LIMITS = Object.freeze({
   runBytes: 64 * 1024 * 1024,
   auditBatches: 50,
   problems: 20,
+  /** Runs waiting for verification checked per sync, the ones checked longest ago first. */
+  recheck: 500,
 });
 export type SyncLimits = { readonly [K in keyof typeof SYNC_LIMITS]: number };
 const RUNS_PAGE = 100;
 const AUDIT_BATCH = 500;
-const UNVERIFIED_RECHECK = 500;
 const MIN_INTERVAL_SECONDS = 900;
 const MAX_INTERVAL_SECONDS = 31 * 86_400;
 const MAX_MESSAGE = 300;
@@ -141,6 +142,18 @@ export interface SandboxRunAttestation {
   attestedBy: RunAttestation;
 }
 
+/** A run importRuns wrote, with the digest of the record as stored (normalized as state.json reads it). */
+export interface SandboxRunWrite {
+  id: string;
+  storedDigest: string;
+}
+
+export interface SandboxRunAttestResult {
+  attested: string[];
+  /** The stored record is no longer the one the entry describes: replaced, removed or attested already. */
+  stale: string[];
+}
+
 export interface SandboxServiceOptions {
   /** `<userData>/sandboxes`. */
   rootDir: string;
@@ -161,9 +174,9 @@ export interface SandboxServiceOptions {
    * or replaced). Called inside the lease; it checks again that the
    * organization is connected and the lease current before it writes.
    */
-  importRuns(runs: readonly RunRecord[]): Promise<readonly string[]>;
-  /** Sets the attestation of runs imported unverified; returns how many it set. */
-  attestRuns(entries: readonly SandboxRunAttestation[]): Promise<number>;
+  importRuns(runs: readonly RunRecord[]): Promise<readonly SandboxRunWrite[]>;
+  /** Sets the attestation of runs imported unverified; returns the ids attested and those whose stored record changed. */
+  attestRuns(entries: readonly SandboxRunAttestation[]): Promise<SandboxRunAttestResult>;
   /** Appends to the desktop's audit log; throws when it cannot. */
   recordAudit(events: readonly AuditLogEventSeed[]): void;
   /** Raw failure detail for the app log; never shown to the module. */
@@ -308,11 +321,16 @@ export class SandboxService implements EnterpriseSandboxes {
     if (!organization) {
       throw new Refusal("organization-not-connected", "That organization is not connected in OpenAdminOS. Connect it, then pair the sandbox for it.");
     }
-    const tenantId = organization.tenantId.toLowerCase();
+    // Under the organization's own lease, by its own tenant id string, so Disconnect stops the pairing too.
+    return this.leasedTenant(organization.tenantId, (signal) => this.pairUnderLease(address, parsed.code, organization, signal));
+  }
+
+  private async pairUnderLease(address: SandboxAddress, code: PairingCode, organization: EnterpriseOrganization, signal: AbortSignal): Promise<EnterpriseSandbox> {
+    const protocolTenantId = organization.tenantId.toLowerCase();
     const where = formatSandboxAddress(address);
 
     // The probe carries no client certificate: the sandbox answers it before pairing.
-    const hello = await this.request(address, undefined, (pin) => pairingCodeMatches(parsed.code, pin), "GET", "/v1/pair").catch((error: unknown) => {
+    const hello = await this.request(address, undefined, (pin) => pairingCodeMatches(code, pin), "GET", "/v1/pair", undefined, signal).catch((error: unknown) => {
       if (error instanceof SandboxTransportError && error.code === "tls-pin-mismatch") {
         throw new Refusal("fingerprint-mismatch", `The sandbox at ${where} presented a TLS key that is not the one the pairing code names. Check the code on the sandbox, and that the address is the sandbox's.`);
       }
@@ -339,19 +357,21 @@ export class SandboxService implements EnterpriseSandboxes {
     const desktopPublicKey = exportDevicePublicKey(credentials.identity.publicKey);
     let session: DesktopPairingSession;
     try {
-      session = await DesktopPairingSession.create(parsed.code, { pairingId, organizationId: organization.id, tenantId, sandboxPublicKey, desktopPublicKey, tlsSpkiSha256: pin });
+      session = await DesktopPairingSession.create(code, { pairingId, organizationId: organization.id, tenantId: protocolTenantId, sandboxPublicKey, desktopPublicKey, tlsSpkiSha256: pin });
     } catch (error) {
       if (error instanceof PairingError) throw new Refusal(error.reason, error.message);
       throw error;
     }
     const reply = sandboxBody(
-      await this.request(address, credentials, (presented) => presented === pin, "POST", "/v1/pair", {
-        pairingId,
-        organizationId: organization.id,
-        tenantId,
-        desktopPublicKey,
-        proof: session.desktopProof(),
-      }),
+      await this.request(
+        address,
+        credentials,
+        (presented) => presented === pin,
+        "POST",
+        "/v1/pair",
+        { pairingId, organizationId: organization.id, tenantId: protocolTenantId, desktopPublicKey, proof: session.desktopProof() },
+        signal,
+      ),
     );
     const partial = `The sandbox may now count itself paired with this desktop. ${PAIR_AGAIN}`;
     if (!session.verifySandboxProof(reply.sandboxProof)) {
@@ -369,7 +389,7 @@ export class SandboxService implements EnterpriseSandboxes {
     ) {
       throw new Refusal("pairing-record-invalid", `The sandbox's signed pairing record names other keys than the ones this pairing used. ${partial}`);
     }
-    if (value.organizationId !== organization.id || value.tenantId !== tenantId) {
+    if (value.organizationId !== organization.id || value.tenantId !== protocolTenantId) {
       throw new Refusal("binding-mismatch", `The sandbox is configured for another organization or tenant than ${organization.name}. ${partial}`);
     }
     const start = verifyAuditCheckpoint(reply.startCheckpoint, sandboxPublicKey);
@@ -382,12 +402,19 @@ export class SandboxService implements EnterpriseSandboxes {
       name: value.sandboxName,
       address: where,
       organizationId: organization.id,
-      tenantId,
+      // The organization's own tenant id string, so its lease and its runs match Disconnect exactly.
+      tenantId: organization.tenantId,
       pairing: { record: value, signature: (reply.pairing as { signature: string }).signature },
       pairedAt: this.now().toISOString(),
       runCursor: { after: 0 },
       assignmentVersion: 0,
     };
+    // Still connected, right before anything is written.
+    if (signal.aborted) throw new TenantClosedError(organization.tenantId, "sandbox pairing");
+    const current = (await this.options.organizations()).find((entry) => entry.id === organization.id);
+    if (!current || current.tenantId.toLowerCase() !== protocolTenantId) {
+      throw new Refusal("organization-disconnected", `The organization was disconnected while the sandbox was paired, so the pairing was not kept. ${partial}`);
+    }
     // State first, then the audit event that records it.
     this.withAuditStore((store) => {
       if (held) store.removePairing(held.pairing.record.pairingId);
@@ -463,11 +490,27 @@ export class SandboxService implements EnterpriseSandboxes {
       }
       const body = sandboxBody(reply);
       const rows = Array.isArray(body.rows) ? (body.rows as AuditLogRangeRow[]) : undefined;
-      if (!rows) throw new Refusal("sandbox-reply-invalid", "The sandbox sent audit rows in a form this desktop does not read.");
+      if (!rows || rows.length > AUDIT_BATCH) throw new Refusal("sandbox-reply-invalid", "The sandbox sent audit rows in a form this desktop does not read.");
       const result = verifySignedContinuation(pin, rows, body.checkpoint, record.sandboxPublicKey, { pairingId: record.pairingId, sandboxId: record.sandboxId });
       if (!result.ok) throw new IntegrityStop(result.failure, `${result.detail} Sync is stopped for this sandbox. ${PAIR_AGAIN}`);
       if (rows.length === 0) return;
-      // The desktop's event has a fixed id, so a batch accepted again after a crash records it once.
+      if (context.signal.aborted) throw new TenantClosedError(sandbox.tenantId, "sandbox sync");
+      // The batch is stored first, then the desktop records that it accepted it.
+      try {
+        this.withAuditStore((store) => store.acceptBatch(record.pairingId, record.sandboxId, rows, result.pin, this.now().toISOString()));
+      } catch (error) {
+        if (error instanceof AuditSeqConflictError) {
+          try {
+            this.options.recordAudit([
+              this.event(sandbox, `sandbox-audit:${record.pairingId}:${error.seq}:rejected:${randomUUID()}`, "sandbox.audit.rejected", { seq: error.seq, reason: "chain-fork" }),
+            ]);
+          } catch (recordError) {
+            this.log("the desktop audit log could not record a rejected batch", recordError);
+          }
+          throw new IntegrityStop("chain-fork", `${error.message} Sync is stopped for this sandbox. ${PAIR_AGAIN}`);
+        }
+        throw error;
+      }
       this.record([
         this.event(sandbox, `sandbox-audit:${record.pairingId}:${result.pin.seq}`, "sandbox.audit.accepted", {
           fromSeq: rows[0]!.seq,
@@ -476,12 +519,6 @@ export class SandboxService implements EnterpriseSandboxes {
           finalSha256: result.pin.sha256,
         }),
       ]);
-      try {
-        this.withAuditStore((store) => store.acceptBatch(record.pairingId, record.sandboxId, rows, result.pin, this.now().toISOString()));
-      } catch (error) {
-        if (error instanceof AuditSeqConflictError) throw new IntegrityStop("chain-fork", `${error.message} Sync is stopped for this sandbox. ${PAIR_AGAIN}`);
-        throw error;
-      }
       context.auditBatches += 1;
       context.auditRows += rows.length;
     }
@@ -492,8 +529,10 @@ export class SandboxService implements EnterpriseSandboxes {
     const sandboxId = context.sandbox.sandboxId;
     let cursor = { ...context.sandbox.runCursor };
     let restarted = false;
-    for (;;) {
-      if (context.runsSeen >= this.limits.runs || context.runBytes >= this.limits.runBytes) {
+    // Requests are capped apart from the run budget, so empty or repeating pages cannot keep a sync going.
+    const maxPages = Math.ceil(this.limits.runs / RUNS_PAGE) + 2;
+    for (let pages = 0; ; pages += 1) {
+      if (pages >= maxPages || context.runsSeen >= this.limits.runs || context.runBytes >= this.limits.runBytes) {
         context.problems.notice("More runs remain on the sandbox; sync again to read them.");
         return;
       }
@@ -513,19 +552,26 @@ export class SandboxService implements EnterpriseSandboxes {
         cursor = reset ? { after: 0, generation, resetSeen: generation } : { after: 0, generation, ...(cursor.resetSeen ? { resetSeen: cursor.resetSeen } : {}) };
         continue;
       }
+      // Same generation: a page larger than asked for, or a cursor that does not move forward, is not a page.
+      if (body.runs.length > limit || next < cursor.after || (body.runs.length > 0 && next === cursor.after)) {
+        throw new Refusal("sandbox-reply-invalid", "The sandbox sent a page of runs that does not fit the request or does not move its cursor forward. Update the sandbox host to this release.");
+      }
       if (reset) cursor.resetSeen = generation;
       cursor.generation = generation;
-      for (const problem of Array.isArray(body.problems) ? body.problems : []) {
+      for (const problem of Array.isArray(body.problems) ? body.problems.slice(0, RUNS_PAGE) : []) {
         if (isObject(problem)) context.problems.push(`Run ${clipId(text(problem.runId))} could not be read on the sandbox: ${text(problem.message) ?? "no reason given"}`);
       }
 
-      const page: Array<{ run: RunRecord; digest: string }> = [];
-      // The cursor of the last run taken; a truncated page resumes after it.
+      // Deduplicated by run id: the newest entry of a page wins.
+      const page = new Map<string, { run: RunRecord; digest: string }>();
       let pageEnd = cursor.after;
       let truncated = false;
       for (const entry of body.runs) {
-        if (!isObject(entry)) continue;
-        const bytes = Buffer.byteLength(JSON.stringify(entry.run ?? null), "utf8");
+        if (context.runsSeen >= this.limits.runs) {
+          truncated = true;
+          break;
+        }
+        const bytes = Buffer.byteLength(JSON.stringify(isObject(entry) ? entry.run ?? null : entry ?? null), "utf8");
         if (context.runBytes + bytes > this.limits.runBytes && context.runsSeen > 0) {
           // Stop before this run; the next sync starts with it.
           truncated = true;
@@ -533,17 +579,24 @@ export class SandboxService implements EnterpriseSandboxes {
         }
         context.runBytes += bytes;
         context.runsSeen += 1;
-        if (typeof entry.cursor === "number" && Number.isSafeInteger(entry.cursor)) pageEnd = entry.cursor;
+        if (isObject(entry) && typeof entry.cursor === "number" && Number.isSafeInteger(entry.cursor) && entry.cursor > pageEnd && entry.cursor <= next) pageEnd = entry.cursor;
+        if (!isObject(entry)) {
+          context.skipped += 1;
+          continue;
+        }
         const checked = sandboxRun(entry.run, context.sandbox);
-        if (checked.kind === "run") page.push(checked);
-        else {
+        if (checked.kind === "run") {
+          if (page.has(checked.run.id)) context.skipped += 1;
+          page.delete(checked.run.id);
+          page.set(checked.run.id, checked);
+        } else {
           context.skipped += 1;
           if (checked.kind === "problem") context.problems.push(checked.message);
         }
       }
 
       await this.readAudit(context);
-      await this.importPage(context, page);
+      await this.importPage(context, [...page.values()]);
       const after = truncated ? pageEnd : next;
       const moved = after !== cursor.after;
       cursor = { ...cursor, after };
@@ -562,32 +615,30 @@ export class SandboxService implements EnterpriseSandboxes {
     if (page.length === 0) return;
     const record = context.sandbox.pairing.record;
     const runs: RunRecord[] = [];
-    const pending = new Map<string, UnverifiedRun>();
-    const reasons = new Map<string, UnverifiedReason | undefined>();
+    const pending = new Map<string, { digest: string; reason: UnverifiedReason | undefined }>();
     for (const { run, digest } of page) {
       const check = this.verifyRun(record, { runId: run.id, digest, storedDigest: "", agentSlug: run.agentSlug, status: run.status });
       if (check.attestedBy) {
         runs.push({ ...run, attestedBy: check.attestedBy });
       } else {
         runs.push(run);
-        // The digest of the record as it will be stored, so a later attestation applies to this record only.
-        pending.set(run.id, { runId: run.id, digest, storedDigest: runRecordDigest(run), agentSlug: run.agentSlug, status: run.status });
-        reasons.set(run.id, check.reason);
+        pending.set(run.id, { digest, reason: check.reason });
       }
     }
     if (context.signal.aborted) throw new TenantClosedError(context.sandbox.tenantId, "sandbox sync");
-    const written = new Set(await this.options.importRuns(runs));
+    const written = new Map((await this.options.importRuns(runs)).map((entry) => [entry.id, entry.storedDigest]));
     context.imported += written.size;
     context.skipped += runs.length - written.size;
     // Only what was written is counted and tracked: a skipped record is not the one in history.
     this.withAuditStore((store) => {
       for (const run of runs) {
-        if (!written.has(run.id)) continue;
+        const storedDigest = written.get(run.id);
+        if (storedDigest === undefined) continue;
         const entry = pending.get(run.id);
         if (entry) {
           context.unverified += 1;
-          context.problems.push(`Run ${clipId(run.id)} was imported unverified: ${unverifiedText(reasons.get(run.id))}`);
-          store.addUnverified(record.pairingId, entry);
+          context.problems.push(`Run ${clipId(run.id)} was imported unverified: ${unverifiedText(entry.reason)}`);
+          store.addUnverified(record.pairingId, { runId: run.id, digest: entry.digest, storedDigest, agentSlug: run.agentSlug, status: run.status });
         } else {
           context.verified += 1;
           store.removeUnverified(record.pairingId, run.id);
@@ -596,32 +647,43 @@ export class SandboxService implements EnterpriseSandboxes {
     });
   }
 
-  /** Runs imported unverified that the audit rows verified since: they get their attestation now. */
+  /**
+   * Runs imported unverified that the audit rows verified since get their
+   * attestation now. Each sync checks the entries checked longest ago, so
+   * every entry gets a turn. An entry whose newest event names another
+   * record, or whose stored record changed, can never be verified and is
+   * dropped; one without an event yet stays.
+   */
   private async recheckUnverified(context: SyncContext): Promise<void> {
     const record = context.sandbox.pairing.record;
-    const waiting = this.withAuditStore((store) => store.listUnverified(record.pairingId, UNVERIFIED_RECHECK));
+    const waiting = this.withAuditStore((store) => store.listUnverified(record.pairingId, this.limits.recheck));
+    if (waiting.length === 0) return;
     const attestations: SandboxRunAttestation[] = [];
+    const dropped: string[] = [];
     for (const entry of waiting) {
       const check = this.verifyRun(record, entry);
-      if (!check.attestedBy) continue;
-      attestations.push({
-        runId: entry.runId,
-        sandboxId: context.sandbox.sandboxId,
-        organizationId: context.sandbox.organizationId,
-        tenantId: context.sandbox.tenantId,
-        pairingKeyFingerprint: fingerprintOf(record),
-        agentSlug: entry.agentSlug,
-        status: entry.status,
-        storedDigest: entry.storedDigest,
-        attestedBy: check.attestedBy,
-      });
+      if (check.attestedBy) {
+        attestations.push({
+          runId: entry.runId,
+          sandboxId: context.sandbox.sandboxId,
+          organizationId: context.sandbox.organizationId,
+          tenantId: context.sandbox.tenantId,
+          pairingKeyFingerprint: fingerprintOf(record),
+          agentSlug: entry.agentSlug,
+          status: entry.status,
+          storedDigest: entry.storedDigest,
+          attestedBy: check.attestedBy,
+        });
+      } else if (check.reason !== "no-verified-event") {
+        dropped.push(entry.runId);
+      }
     }
-    if (attestations.length === 0) return;
     if (context.signal.aborted) throw new TenantClosedError(context.sandbox.tenantId, "sandbox sync");
-    const set = await this.options.attestRuns(attestations);
-    context.verified += set;
+    const result = attestations.length > 0 ? await this.options.attestRuns(attestations) : { attested: [], stale: [] };
+    context.verified += result.attested.length;
     this.withAuditStore((store) => {
-      for (const entry of attestations) store.removeUnverified(record.pairingId, entry.runId);
+      store.markChecked(record.pairingId, waiting.map((entry) => entry.runId), this.now().toISOString());
+      for (const id of [...result.attested, ...result.stale, ...dropped]) store.removeUnverified(record.pairingId, id);
     });
   }
 
@@ -656,57 +718,84 @@ export class SandboxService implements EnterpriseSandboxes {
       return { agentId: agent.id, templateSha256: agent.manifestSha256, intervalSeconds: entry.intervalSeconds };
     });
     const credentials = await this.credentials(false);
-    return this.leased(sandbox, async (signal) => {
-      const context = { sandbox, address: addressOf(sandbox), credentials, signal };
-      const record = sandbox.pairing.record;
-      let floor = sandbox.assignmentVersion;
-      if (sandbox.assignmentPending !== undefined) {
-        // The last outcome is not known: ask the sandbox which version it holds.
-        const status = sandboxBody(await this.pinned(context, "GET", "/v1/status"));
-        const held = typeof status.assignmentVersion === "number" && Number.isSafeInteger(status.assignmentVersion) ? status.assignmentVersion : 0;
-        floor = Math.max(floor, held);
-      }
-      const version = floor + 1;
-      // Reserved before it is sent, so a lost answer never leads to the same version twice.
-      await this.update(sandboxId, (entry) => ({ ...entry, assignmentVersion: version, assignmentPending: version }));
-      const signed = signScheduleAssignment(
-        { pairingId: record.pairingId, version, organizationId: record.organizationId, tenantId: record.tenantId, entries: signedEntries, issuedAt: this.now().toISOString() },
-        credentials.identity.privateKey,
-      );
-      let reply: SandboxReply;
-      try {
-        reply = await this.pinned(context, "PUT", "/v1/assignments", signed);
-      } catch (error) {
-        if (error instanceof Refusal && (error.code === "sandbox-unreachable" || error.code === "reply-invalid")) {
-          throw new Refusal("assignment-outcome-unknown", `The assignment was sent, but no answer came back, so it is not known whether ${sandbox.name} took it. Assign again; the desktop then checks which version the sandbox holds.`);
+    const record = sandbox.pairing.record;
+    let reserved = false;
+    try {
+      return await this.leased(sandbox, async (signal) => {
+        const context = { sandbox, address: addressOf(sandbox), credentials, signal };
+        let floor = sandbox.assignmentVersion;
+        const pendingVersion = sandbox.assignmentPending;
+        if (pendingVersion !== undefined) {
+          // The last outcome is not known: ask the sandbox which version it holds.
+          const status = sandboxBody(await this.pinned(context, "GET", "/v1/status"));
+          const held = typeof status.assignmentVersion === "number" && Number.isSafeInteger(status.assignmentVersion) ? status.assignmentVersion : 0;
+          if (held >= pendingVersion) {
+            this.record([this.event(sandbox, `sandbox-assignment:${record.pairingId}:${pendingVersion}`, "sandbox.assignment.sent", { version: pendingVersion, reconciled: true })]);
+          }
+          floor = Math.max(floor, held);
         }
-        throw error;
-      }
-      if (reply.status >= 500) {
-        throw new Refusal("assignment-outcome-unknown", `${sandbox.name} could not answer the assignment. Assign again; the desktop then checks which version the sandbox holds.`);
-      }
-      // A named refusal means the sandbox did not take it.
-      await this.update(sandboxId, (entry) => {
-        const { assignmentPending: _pending, ...rest } = entry;
-        return rest;
-      });
-      const body = sandboxBody(reply);
-      const result: EnterpriseSandboxAssignResult = {
-        version,
-        assigned: strings(body.assigned),
-        shadowed: strings(body.shadowed),
-        rolesNoLongerNeeded: strings(body.rolesNoLongerNeeded),
-        ...(text(body.notice) ? { notice: clip(text(body.notice)!) } : {}),
-      };
-      this.record([
-        this.event(sandbox, `sandbox-assignment:${record.pairingId}:${version}`, "sandbox.assignment.sent", {
+        const version = floor + 1;
+        // Reserved before it is sent, so a lost answer never leads to the same version twice.
+        await this.update(sandboxId, (entry) => ({ ...entry, assignmentVersion: version, assignmentPending: version }));
+        reserved = true;
+        const signed = signScheduleAssignment(
+          { pairingId: record.pairingId, version, organizationId: record.organizationId, tenantId: record.tenantId, entries: signedEntries, issuedAt: this.now().toISOString() },
+          credentials.identity.privateKey,
+        );
+        const unknown = (message: string): Refusal => {
+          try {
+            this.options.recordAudit([
+              this.event(sandbox, `sandbox-assignment:${record.pairingId}:${version}:unknown`, "sandbox.assignment.unknown", { version, agents: signedEntries.map((entry) => entry.agentId) }),
+            ]);
+          } catch (error) {
+            this.log("the desktop audit log could not record an assignment with an unknown outcome", error);
+          }
+          return new Refusal("assignment-outcome-unknown", message);
+        };
+        let reply: SandboxReply;
+        try {
+          reply = await this.pinned(context, "PUT", "/v1/assignments", signed);
+        } catch (error) {
+          if (error instanceof Refusal && (error.code === "sandbox-unreachable" || error.code === "reply-invalid")) {
+            throw unknown(`The assignment was sent, but no answer came back, so it is not known whether ${sandbox.name} took it. Assign again; the desktop then checks which version the sandbox holds.`);
+          }
+          if (error instanceof Refusal && error.code === "organization-disconnected") {
+            throw unknown(`The organization was disconnected while the assignment was sent. ${sandbox.name} may hold it; the next assignment checks which version the sandbox holds.`);
+          }
+          throw error;
+        }
+        if (reply.status >= 500) {
+          throw unknown(`${sandbox.name} could not answer the assignment. Assign again; the desktop then checks which version the sandbox holds.`);
+        }
+        // A named refusal means the sandbox did not take it.
+        await this.update(sandboxId, (entry) => {
+          const { assignmentPending: _pending, ...rest } = entry;
+          return rest;
+        });
+        const body = sandboxBody(reply);
+        const result: EnterpriseSandboxAssignResult = {
           version,
-          agents: signedEntries.map((entry) => entry.agentId),
-          rolesNoLongerNeeded: [...result.rolesNoLongerNeeded],
-        }),
-      ]);
-      return result;
-    });
+          assigned: strings(body.assigned),
+          shadowed: strings(body.shadowed),
+          rolesNoLongerNeeded: strings(body.rolesNoLongerNeeded),
+          ...(text(body.notice) ? { notice: clip(text(body.notice)!) } : {}),
+        };
+        this.record([
+          this.event(sandbox, `sandbox-assignment:${record.pairingId}:${version}`, "sandbox.assignment.sent", {
+            version,
+            agents: signedEntries.map((entry) => entry.agentId),
+            rolesNoLongerNeeded: [...result.rolesNoLongerNeeded],
+          }),
+        ]);
+        return result;
+      });
+    } catch (error) {
+      // Disconnect after the version was reserved: the sandbox may hold it.
+      if (reserved && error instanceof Refusal && error.code === "organization-disconnected") {
+        throw new Refusal("organization-disconnected", `The organization was disconnected while the assignment was sent. ${sandbox.name} may hold it; the next assignment checks which version the sandbox holds.`);
+      }
+      throw error;
+    }
   }
 
   // ---- unpairing and status ----
@@ -770,19 +859,30 @@ export class SandboxService implements EnterpriseSandboxes {
    * or a lease that closed, ends it with organization-disconnected.
    */
   private async leased<T>(sandbox: StoredSandbox, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    try {
+      return await this.leasedTenant(sandbox.tenantId, work);
+    } catch (error) {
+      if (error instanceof IntegrityStop) await this.stop(sandbox, error);
+      throw error;
+    }
+  }
+
+  /** Runs work under the lease of a tenant, by the organization's own tenant id string. */
+  private async leasedTenant<T>(tenantId: string, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
     let signal: AbortSignal | undefined;
     try {
-      return await this.options.withTenantLease(sandbox.tenantId, (lease) => {
+      return await this.options.withTenantLease(tenantId, (lease) => {
         signal = lease.signal;
         return work(lease.signal);
       });
     } catch (error) {
-      if (error instanceof IntegrityStop) {
-        await this.stop(sandbox, error);
-        throw error;
+      if (error instanceof IntegrityStop) throw error;
+      if (signal?.aborted) {
+        if (error instanceof Refusal && error.code === "organization-disconnected") throw error;
+        throw new Refusal("organization-disconnected", DISCONNECTED);
       }
-      if (error instanceof TenantClosedError || signal?.aborted) {
-        if (!signal) throw new Refusal("organization-not-connected", `The organization ${sandbox.name} is paired for is not connected in OpenAdminOS. Connect it again, then try again.`);
+      if (error instanceof TenantClosedError) {
+        if (!signal) throw new Refusal("organization-not-connected", "The organization is not connected in OpenAdminOS, or is being disconnected. Connect it again, then try again.");
         throw new Refusal("organization-disconnected", DISCONNECTED);
       }
       throw error;
@@ -812,7 +912,7 @@ export class SandboxService implements EnterpriseSandboxes {
    */
   private async connectedOrganization(sandbox: StoredSandbox): Promise<void> {
     const organization = (await this.options.organizations()).find((entry) => entry.id === sandbox.organizationId);
-    if (!organization || organization.tenantId.toLowerCase() !== sandbox.tenantId) {
+    if (!organization || organization.tenantId.toLowerCase() !== sandbox.tenantId.toLowerCase()) {
       throw new Refusal("organization-not-connected", `The organization ${sandbox.name} is paired for is not connected in OpenAdminOS. Connect it again, then sync.`);
     }
   }
@@ -1060,7 +1160,7 @@ function sandboxRun(raw: unknown, sandbox: StoredSandbox): CheckedRun {
     executedOn.kind !== "sandbox" ||
     executedOn.sandboxId !== sandbox.sandboxId ||
     executedOn.organizationId !== sandbox.organizationId ||
-    (tenantId !== undefined && tenantId !== sandbox.tenantId)
+    (tenantId !== undefined && tenantId !== sandbox.tenantId.toLowerCase())
   ) {
     throw new IntegrityStop("binding-mismatch", `The sandbox reported run ${id} for another sandbox, organization or tenant than the one paired. ${PAIR_AGAIN}`);
   }
