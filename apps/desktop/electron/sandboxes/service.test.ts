@@ -332,6 +332,64 @@ describe("SandboxService sync", () => {
     }
   });
 
+  it("keeps only the allowlisted run fields and sets where, trigger, initiator and tenant itself", async () => {
+    const h = await paired();
+    try {
+      await h.sandbox.runAgent();
+      h.desk.intercept.current = async (next, request) => {
+        const reply = await next(request);
+        if (!request.path.startsWith("/v1/runs")) return reply;
+        const body = structuredClone(reply.body) as { runs: Array<{ run: Record<string, unknown> }> };
+        for (const entry of body.runs) {
+          Object.assign(entry.run, {
+            assessmentKey: "forged",
+            accessDenial: { scope: "x" },
+            usage: { calls: 1 },
+            tokens: { input: 1, output: 1 },
+            initiator: "gateway",
+            trigger: "manual",
+            changeState: "unchanged",
+            plan: { actions: [] },
+            attestedBy: { sandboxId: "mini-pc", pairingKeyFingerprint: "X".repeat(52), checkpointSeq: 1, verifiedAt: "2026-01-01T00:00:00.000Z" },
+            tenantId: TEST_SANDBOX_TENANT.toUpperCase(),
+          });
+          (entry.run.executedOn as Record<string, unknown>).name = "Renamed by the sandbox";
+          (entry.run.executedOn as Record<string, unknown>).extra = "dropped";
+        }
+        return { ...reply, body };
+      };
+      value(await h.desk.service.sync("mini-pc"));
+      const [run] = [...h.desk.runs.values()];
+      assert.ok(run);
+      for (const field of ["assessmentKey", "accessDenial", "usage", "tokens", "changeState", "plan", "providerId"]) {
+        assert.equal(field in run, false, `${field} is dropped`);
+      }
+      assert.equal(run.initiator, "schedule");
+      assert.equal(run.trigger, "schedule");
+      assert.equal(run.tenantId, TEST_SANDBOX_TENANT);
+      assert.equal(run.executedOn?.kind === "sandbox" ? run.executedOn.name : "", "Office mini PC", "the name is the paired one");
+      assert.equal("extra" in (run.executedOn ?? {}), false);
+      assert.notEqual(run.attestedBy?.pairingKeyFingerprint, "X".repeat(52), "the attestation is the desktop's own");
+      assert.equal(run.executedOn?.kind === "sandbox" ? run.executedOn.pairingKeyFingerprint : "", run.attestedBy?.pairingKeyFingerprint);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it("refuses to pair a sandbox id already paired for another organization", async () => {
+    const h = await paired();
+    const other = await startTestSandbox({ organizationId: "org-2" });
+    try {
+      h.desk.organizations.push({ id: "org-2", name: "Fabrikam", tenantId: TEST_SANDBOX_TENANT });
+      assert.equal(code(await h.desk.service.pair({ address: other.address, code: other.code(), organizationId: "org-2" })), "sandbox-paired-for-another-organization");
+      assert.equal(other.host.currentPairing, undefined, "refused before the proof was sent");
+      assert.deepEqual((await h.desk.service.list()).map((entry) => entry.organizationId), ["org-1"]);
+    } finally {
+      await other.close();
+      await h.close();
+    }
+  });
+
   it("refuses to contact a sandbox whose organization is no longer connected", async () => {
     const h = await paired();
     try {

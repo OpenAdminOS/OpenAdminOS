@@ -67,31 +67,26 @@ const AUDIT_BATCH = 500;
 /** Per sync call; a sandbox with more pages is read further by the next sync. */
 const MAX_RUN_PAGES = 100;
 const MAX_AUDIT_BATCHES = 200;
-const MAX_RUN_BYTES = 1024 * 1024;
 const MIN_INTERVAL_SECONDS = 900;
 const MAX_INTERVAL_SECONDS = 31 * 86_400;
 const MAX_MESSAGE = 300;
 const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
+const SLUG = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
-/** Fields a sandbox run never carries in: write plans, other origins and the desktop's own attestation. */
-const DROPPED_RUN_FIELDS = [
-  "attestedBy",
-  "plan",
-  "riskAssessment",
-  "origin",
-  "rollback",
-  "external",
-  "splashtop",
-  "office",
-  "officeContext",
-  "dryRun",
-  "inputSettings",
-  "runForRealOfRunId",
-  "retryOfRunId",
-  "liveSummary",
-  "confirmedAt",
-  "rejectedAt",
-] as const;
+const STEP_STATUSES = new Set(["pending", "running", "completed", "failed", "skipped", "cancelled"]);
+const LOG_LEVELS = new Set(["debug", "info", "warn", "error"]);
+// eslint-disable-next-line no-control-regex
+const CONTROL = /[\u0000-\u001f\u007f]/;
+/** Bounds on what one imported run may hold. */
+const RUN_LIMITS = Object.freeze({
+  steps: 500,
+  logs: 2000,
+  short: 200,
+  text: 8 * 1024,
+  summary: 64 * 1024,
+  resultBytes: 512 * 1024,
+  metadataBytes: 4 * 1024,
+});
 
 /**
  * Integrity failures stop sync and stay the sandbox's state until it is
@@ -232,6 +227,11 @@ export class SandboxService implements EnterpriseSandboxes {
     if (!pairingId || !sandboxId || !sandboxPublicKey || helloBody.tlsSpkiSha256 !== pin) {
       throw new Refusal("pairing-reply-invalid", `The sandbox at ${where} answered the pairing request in a form this desktop does not read. Update the sandbox host to this release.`);
     }
+    // Sandboxes are kept by organization and sandbox id; one id belongs to one organization at a time.
+    const held = (await this.state.read()).find((entry) => entry.sandboxId === sandboxId);
+    if (held && held.organizationId !== organization.id) {
+      throw new Refusal("sandbox-paired-for-another-organization", `A sandbox named ${sandboxId} is paired with this desktop for another organization. Unpair it first, then pair again.`);
+    }
     const desktopPublicKey = exportDevicePublicKey(credentials.identity.publicKey);
     let session: DesktopPairingSession;
     try {
@@ -293,7 +293,7 @@ export class SandboxService implements EnterpriseSandboxes {
         auditSeq: start.value.seq,
       }),
     ]);
-    const others = (await this.state.read()).filter((entry) => entry.sandboxId !== sandboxId);
+    const others = (await this.state.read()).filter((entry) => !(entry.sandboxId === sandboxId && entry.organizationId === organization.id));
     await this.state.write([...others, stored]);
     return summary(stored);
   }
@@ -659,16 +659,18 @@ export class SandboxService implements EnterpriseSandboxes {
 type CheckedRun = { kind: "run"; run: RunRecord } | { kind: "pending" } | { kind: "problem"; message: string };
 
 /**
- * A run record as the sandbox sent it, checked and trimmed: it must have
- * run on this sandbox for its organization and tenant, it must have
- * finished, and it carries no write plan and no attestation of its own.
+ * Builds the desktop's record of a sandbox run from an allowlist of the
+ * fields the sandbox sent, each checked for shape and size. The run must
+ * have run on this sandbox for its organization and tenant and must have
+ * finished. Where it ran, its trigger, initiator and tenant are set here;
+ * nothing else the sandbox sent is kept. The change state is left out:
+ * the desktop compares its own scheduled runs only.
  */
 function sandboxRun(raw: unknown, sandbox: StoredSandbox): CheckedRun {
   if (!isObject(raw) || typeof raw.id !== "string" || !RUN_ID.test(raw.id)) {
     return { kind: "problem", message: "The sandbox sent a run without a valid id; it was not imported." };
   }
   const id = raw.id;
-  if (JSON.stringify(raw).length > MAX_RUN_BYTES) return { kind: "problem", message: `Run ${id} is larger than ${MAX_RUN_BYTES} bytes; it was not imported.` };
   const executedOn = raw.executedOn;
   const tenantId = typeof raw.tenantId === "string" ? raw.tenantId.toLowerCase() : undefined;
   if (
@@ -681,12 +683,139 @@ function sandboxRun(raw: unknown, sandbox: StoredSandbox): CheckedRun {
     throw new IntegrityStop("binding-mismatch", `The sandbox reported run ${id} for another sandbox, organization or tenant than the one paired. ${PAIR_AGAIN}`);
   }
   if (typeof raw.status !== "string" || !TERMINAL.has(raw.status)) return { kind: "pending" };
-  if (typeof raw.agentSlug !== "string" || typeof raw.queuedAt !== "string" || !Array.isArray(raw.steps) || !Array.isArray(raw.logs) || typeof executedOn.name !== "string" || typeof executedOn.model !== "string") {
-    return { kind: "problem", message: `Run ${id} is missing fields a run record has; it was not imported.` };
+  const problem = (what: string): CheckedRun => ({ kind: "problem", message: `Run ${id} has ${what}; it was not imported.` });
+
+  const model = shortText(executedOn.model);
+  const modelDigest = executedOn.modelDigest === undefined ? undefined : shortText(executedOn.modelDigest);
+  if (!model || (executedOn.modelDigest !== undefined && !modelDigest)) return problem("no valid model name");
+  if (typeof raw.agentSlug !== "string" || !SLUG.test(raw.agentSlug)) return problem("no valid agent id");
+  const queuedAt = isoTime(raw.queuedAt);
+  if (!queuedAt) return problem("no valid queue time");
+  const startedAt = raw.startedAt === undefined ? undefined : isoTime(raw.startedAt);
+  const finishedAt = raw.finishedAt === undefined ? undefined : isoTime(raw.finishedAt);
+  if ((raw.startedAt !== undefined && !startedAt) || (raw.finishedAt !== undefined && !finishedAt)) return problem("a start or finish time that is not a time");
+  const summary = optionalText(raw.summary, RUN_LIMITS.summary);
+  const error = optionalText(raw.error, RUN_LIMITS.text);
+  if (summary === null || error === null) return problem("a summary or error that is not text of the allowed size");
+  let result: unknown;
+  if (raw.result !== undefined) {
+    result = plainJson(raw.result, RUN_LIMITS.resultBytes);
+    if (result === undefined) return problem(`a result that is not plain JSON of at most ${RUN_LIMITS.resultBytes} bytes`);
   }
-  const run: Record<string, unknown> = { ...raw, tenantId: sandbox.tenantId };
-  for (const field of DROPPED_RUN_FIELDS) delete run[field];
-  return { kind: "run", run: run as unknown as RunRecord };
+  const steps = sandboxSteps(raw.steps, id);
+  if (!steps) return problem("steps that are not step records of the allowed size");
+  const logs = sandboxLogs(raw.logs, id);
+  if (!logs) return problem("logs that are not log records of the allowed size");
+
+  const run: RunRecord = {
+    id,
+    agentSlug: raw.agentSlug,
+    status: raw.status as RunRecord["status"],
+    queuedAt,
+    ...(startedAt ? { startedAt } : {}),
+    ...(finishedAt ? { finishedAt } : {}),
+    ...(summary !== undefined ? { summary } : {}),
+    ...(error !== undefined ? { error } : {}),
+    ...(raw.result !== undefined ? { result } : {}),
+    steps,
+    logs,
+    model,
+    trigger: "schedule",
+    initiator: "schedule",
+    tenantId: sandbox.tenantId,
+    executedOn: {
+      kind: "sandbox",
+      sandboxId: sandbox.sandboxId,
+      name: sandbox.name,
+      organizationId: sandbox.organizationId,
+      model,
+      ...(modelDigest ? { modelDigest } : {}),
+      pairingKeyFingerprint: fingerprintOf(sandbox.pairing.record),
+    },
+  };
+  return { kind: "run", run };
+}
+
+function sandboxSteps(value: unknown, runId: string): RunRecord["steps"] | undefined {
+  if (!Array.isArray(value) || value.length > RUN_LIMITS.steps) return undefined;
+  const steps: RunRecord["steps"] = [];
+  for (const entry of value) {
+    if (!isObject(entry)) return undefined;
+    const id = shortText(entry.id);
+    const label = optionalText(entry.label, RUN_LIMITS.short);
+    const detail = optionalText(entry.detail, RUN_LIMITS.text);
+    const startedAt = entry.startedAt === undefined ? undefined : isoTime(entry.startedAt);
+    const finishedAt = entry.finishedAt === undefined ? undefined : isoTime(entry.finishedAt);
+    if (!id || label == null || detail === null || typeof entry.status !== "string" || !STEP_STATUSES.has(entry.status)) return undefined;
+    if ((entry.startedAt !== undefined && !startedAt) || (entry.finishedAt !== undefined && !finishedAt)) return undefined;
+    steps.push({
+      id,
+      runId,
+      label,
+      status: entry.status as RunRecord["steps"][number]["status"],
+      ...(detail !== undefined ? { detail } : {}),
+      ...(startedAt ? { startedAt } : {}),
+      ...(finishedAt ? { finishedAt } : {}),
+    });
+  }
+  return steps;
+}
+
+function sandboxLogs(value: unknown, runId: string): RunRecord["logs"] | undefined {
+  if (!Array.isArray(value) || value.length > RUN_LIMITS.logs) return undefined;
+  const logs: RunRecord["logs"] = [];
+  for (const entry of value) {
+    if (!isObject(entry)) return undefined;
+    const id = shortText(entry.id);
+    const timestamp = isoTime(entry.timestamp);
+    const message = optionalText(entry.message, RUN_LIMITS.text);
+    const stepId = entry.stepId === undefined ? undefined : shortText(entry.stepId);
+    if (!id || !timestamp || message == null || typeof entry.level !== "string" || !LOG_LEVELS.has(entry.level)) return undefined;
+    if (entry.stepId !== undefined && !stepId) return undefined;
+    let metadata: Record<string, unknown> | undefined;
+    if (entry.metadata !== undefined) {
+      const copied = plainJson(entry.metadata, RUN_LIMITS.metadataBytes);
+      if (!isObject(copied)) return undefined;
+      metadata = copied;
+    }
+    logs.push({
+      id,
+      runId,
+      timestamp,
+      level: entry.level as RunRecord["logs"][number]["level"],
+      message,
+      ...(stepId ? { stepId } : {}),
+      ...(metadata ? { metadata } : {}),
+    });
+  }
+  return logs;
+}
+
+/** Text of 1 to 200 characters without control characters. */
+function shortText(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 && value.length <= RUN_LIMITS.short && !CONTROL.test(value) ? value : undefined;
+}
+
+/** Undefined when absent, null when present but not text of at most `max` characters. */
+function optionalText(value: unknown, max: number): string | undefined | null {
+  if (value === undefined) return undefined;
+  return typeof value === "string" && value.length <= max ? value : null;
+}
+
+function isoTime(value: unknown): string | undefined {
+  return typeof value === "string" && value.length <= 40 && !Number.isNaN(Date.parse(value)) ? value : undefined;
+}
+
+/** A copy that is plain JSON within `maxBytes`, or undefined. */
+function plainJson(value: unknown, maxBytes: number): unknown {
+  let text: string | undefined;
+  try {
+    text = JSON.stringify(value);
+  } catch {
+    return undefined;
+  }
+  if (text === undefined || Buffer.byteLength(text, "utf8") > maxBytes) return undefined;
+  return JSON.parse(text) as unknown;
 }
 
 function remoteStatus(body: Record<string, unknown>): EnterpriseSandboxRemoteStatus {
