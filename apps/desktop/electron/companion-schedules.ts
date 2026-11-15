@@ -9,6 +9,7 @@ import {
 } from "@openadminos/agent-sdk";
 
 import { OrganizationBoundaryError } from "./runs.js";
+import { ranOnThisDesktop } from "./sandbox-runs.js";
 
 /** When an enabled schedule is next due; a schedule that never fired is due now. */
 export function nextRunTimeForSchedule(
@@ -28,7 +29,7 @@ export function latestScheduledRunForAgent(
   agentSlug: string,
 ): RunRecord | undefined {
   return runs
-    .filter((run) => run.agentSlug === agentSlug && run.trigger === "schedule")
+    .filter((run) => run.agentSlug === agentSlug && run.trigger === "schedule" && ranOnThisDesktop(run))
     .sort((a, b) => Date.parse(b.queuedAt) - Date.parse(a.queuedAt))[0];
 }
 

@@ -14,10 +14,17 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
     }
   },
   "files": [
     "dist",
+    "!dist/testing.*",
+    "!dist/test-support.*",
+    "!dist/**/*.test.*",
     "README.md"
   ],
   "scripts": {

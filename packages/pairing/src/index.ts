@@ -1,3 +1,5 @@
+export { RUN_DIGEST_EVENTS, runRecordDigest } from "./run-digest.js";
+export { formatSandboxAddress, isPrivateAddress, parseSandboxAddress, type SandboxAddress } from "./address.js";
 export {
   createTlsCertificate,
   DEFAULT_TLS_VALIDITY_DAYS,

@@ -3,6 +3,9 @@ import { saveAuditLogExport } from "./save-audit-log-export.js";
 import { NovaService } from "./nova.js";
 import { NOVA_SESSION_CONTEXT_ENDED_REASON, NOVA_SESSION_ENDED_REASON } from "../src/shared/nova-session.js";
 import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
+import { createSandboxCapabilities } from "./sandboxes/capabilities.js";
+import { readOnlyCatalog } from "./sandboxes/catalog.js";
+import { SandboxService } from "./sandboxes/service.js";
 import { officeFullscreen } from "./office-fullscreen.js";
 import { runOfficeRehearsal } from "./office-rehearsal.js";
 import { runOfficeSmoke } from "./office-smoke.js";
@@ -26,6 +29,7 @@ import {
   nativeImage,
   nativeTheme,
   Notification,
+  powerMonitor,
   session,
   shell,
   screen,
@@ -42,6 +46,14 @@ import { arch as osArch, release as osRelease } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, win32 } from "node:path";
 import { AppStateStore, TENANT_CLOSING_REASON } from "./state.js";
+import {
+  createEnterpriseService,
+  enterpriseFiles,
+  ipcMainRegistrar,
+  loadEnterprise,
+  resolveInstalledModule,
+  type EnterpriseService,
+} from "./enterprise.js";
 import { loadManagedPolicy, resolveManagedPolicyPaths } from "./managed-policy.js";
 import { MCP_CATALOG } from "./mcp/catalog.js";
 import { SafeStorageTokenCacheStore } from "./secret-store.js";
@@ -310,6 +322,8 @@ let mainWindow: BrowserWindow | null = null;
 let companionWindow: BrowserWindow | null = null;
 let menuBarTray: Tray | null = null;
 let store: AppStateStore;
+// Team features stay off until a valid licence is found; see enterprise.ts.
+let enterprise: EnterpriseService | undefined;
 /** The Nova service, once IPC is registered: settings changes check its live voice session. */
 let novaService: NovaService | undefined;
 const activeNotifications = new Set<Notification>();
@@ -3237,6 +3251,68 @@ function isAllowedAppNavigation(url: string): boolean {
   }
 }
 
+/**
+ * Checks the licence and, only when it is valid, loads the team features
+ * module. Without a valid licence this reads one file and does nothing else.
+ */
+async function startEnterprise(userDataDir: string): Promise<void> {
+  const files = enterpriseFiles(userDataDir);
+  const notify = () => mainWindow?.webContents.send("openadminos:enterprise-status-changed");
+  const log = (level: "info" | "warn" | "error", message: string, fields?: Readonly<Record<string, string | number | boolean>>) =>
+    console[level](`[enterprise] ${message}`, fields ?? {});
+  // Lent to an active module only. The service holds the sandbox keys and
+  // verification in this process and is created on the first sandbox call.
+  const sandboxes = createSandboxCapabilities({
+    organizations: () => store.listConnectedOrganizations(),
+    catalog: async () => readOnlyCatalog(),
+    createService: () => {
+      const rootDir = join(userDataDir, "sandboxes");
+      return new SandboxService({
+        rootDir,
+        secrets: new SafeStorageProviderSecretStore(join(rootDir, "secrets")).forProvider("desktop"),
+        organizations: () => store.listConnectedOrganizations(),
+        catalog: async () => readOnlyCatalog(),
+        withTenantLease: (tenantId, work) => store.withSandboxTenantLease(tenantId, work),
+        importRuns: (runs) => store.importSandboxRuns(runs),
+        attestRuns: (entries) => store.attestSandboxRuns(entries),
+        recordAudit: (events) => store.recordSandboxAuditEvents(events),
+      });
+    },
+  });
+  app.on("will-quit", () => sandboxes.close());
+  const service = createEnterpriseService({
+    load: () =>
+      loadEnterprise({
+        readLicenceToken: files.readLicenceToken,
+        now: () => Date.now(),
+        resolveModule: (specifier) => resolveInstalledModule(specifier, (name) => import.meta.resolve(name)),
+        importModule: (url) => import(url),
+        ipc: ipcMainRegistrar(ipcMain, requireTrustedIpcSender),
+        storage: files.storage,
+        log,
+        onChange: notify,
+        capabilities: sandboxes.capabilities,
+      }),
+    notify,
+    log,
+  });
+  enterprise = service;
+  // The service stores the final runtime and notifies the window for every outcome.
+  const runtime = await service.start();
+  if (runtime.outcome.kind !== "active") return;
+  // A clock that moved while the device slept is checked on wake, not at
+  // the next timer step.
+  powerMonitor.on("resume", () => service.recheck());
+  // Quit waits for the module to stop; deactivate is bounded to two seconds.
+  let stopping = false;
+  app.on("will-quit", (event) => {
+    if (stopping) return;
+    stopping = true;
+    event.preventDefault();
+    void runtime.deactivate().finally(() => app.quit());
+  });
+}
+
 function requireTrustedIpcSender(event: IpcMainInvokeEvent): void {
   const senderUrl = event.senderFrame?.url || event.sender.getURL();
   if (!isAllowedAppNavigation(senderUrl)) {
@@ -5366,6 +5442,10 @@ function registerIpcHandlers() {
     handleTrusted(() => getSandboxSettings()),
   );
   ipcMain.handle(
+    "openadminos:get-enterprise-status",
+    handleTrusted(() => enterprise?.status() ?? { active: false }),
+  );
+  ipcMain.handle(
     "openadminos:get-release-diagnostics",
     handleTrusted(() => getReleaseDiagnostics()),
   );
@@ -7056,6 +7136,9 @@ if (!gotLock) {
     await store.recoverInterruptedRuns();
     applySandboxedCodeEnabled(await store.getSandboxedCodeEnabled());
     registerIpcHandlers();
+    void startEnterprise(userDataDir).catch((error: unknown) => {
+      console.error("[enterprise] team features could not be checked, they stay off", error);
+    });
     void store.processPendingRunDeliveries();
     debugStartupLog("registered ipc handlers");
     void store.processPendingRunDeliveries();

@@ -1,4 +1,5 @@
 import { TENANT_CLOSED_COPY } from "./tenant-lifecycle.js";
+import { ranOnThisDesktop } from "./sandbox-runs.js";
 import { createHash, randomUUID } from "node:crypto";
 
 import {
@@ -1834,7 +1835,8 @@ export class RunService {
         candidate.tenantId === run.tenantId &&
         candidate.assessmentKey === run.assessmentKey &&
         candidate.trigger === "schedule" &&
-        candidate.status === "completed",
+        candidate.status === "completed" &&
+        ranOnThisDesktop(candidate),
     );
     if (!previous) return { ...run, changeState: "new" };
     return {

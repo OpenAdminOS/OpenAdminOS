@@ -60,7 +60,10 @@ export type AuditLogEventSource =
   | "graph-write"
   | "gateway"
   | "nova"
-  | "sandbox";
+  /** Written by a sandbox host. */
+  | "sandbox"
+  /** Written by the desktop about its paired sandboxes: pairing, accepted audit batches, assignments, stopped sync. */
+  | "sandbox-link";
 
 export interface AuditLogActor {
   kind: "connected-admin" | "local-admin";

@@ -1,4 +1,6 @@
 import { OfficeService } from "./office.js";
+import { ranOnThisDesktop, sandboxRunBinding, storedSandboxRun, storedSandboxRunDigest } from "./sandbox-runs.js";
+import type { SandboxRunAttestation, SandboxRunWrite, SandboxRunAttestResult } from "./sandboxes/service.js";
 import { describeNetworkFailure, timeoutWhenAborted, type ProxyResolver } from "./network-failure.js";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -1169,8 +1171,10 @@ function compareAuditEvents(left: AuditLogEventSeed, right: AuditLogEventSeed): 
     "graph-write": 4,
     gateway: 5,
     nova: 6,
-    // Written only by a sandbox host; the desktop records none yet.
+    // Written only by a sandbox host.
     sandbox: 7,
+    // Written by this desktop about its paired sandboxes.
+    "sandbox-link": 8,
   };
   const sourceDiff = sourceOrder[left.source] - sourceOrder[right.source];
   if (sourceDiff !== 0) return sourceDiff;
@@ -7767,7 +7771,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         };
       }), ...this.officeService.state().personas.filter(p => p.enabled && p.nextRunAt).map(p => ({ agent: { name: p.name }, dueAt: Date.parse(p.nextRunAt!) }))]
       .sort((a, b) => a.dueAt - b.dueAt)[0];
-    const scheduledRuns = persisted.runs.filter((run) => run.trigger === "schedule");
+    const scheduledRuns = persisted.runs.filter((run) => run.trigger === "schedule" && ranOnThisDesktop(run));
     const latestWake = scheduledRuns[0];
     const latestSuccess = scheduledRuns.find((run) => run.status === "completed");
     const latestFailureMessage = latestWake?.status === "failed"
@@ -8767,6 +8771,126 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
   async getRun(id: string): Promise<RunRecord | undefined> {
     return this.runService.getRun(id);
+  }
+
+  /** Organizations whose Microsoft 365 tenant is connected and open: id, name and tenant id only. */
+  async listConnectedOrganizations(): Promise<Array<{ id: string; name: string; tenantId: string }>> {
+    const persisted = await this.read();
+    return (persisted.organizations ?? []).flatMap((organization) => {
+      const tenantId = organization.connections.microsoft365?.tenantId;
+      if (!tenantId || !persisted.tenants.some((tenant) => tenant.id === tenantId) || this.tenantLifecycle.phase(tenantId) !== "open") return [];
+      return [{ id: organization.id, name: organization.name, tenantId }];
+    });
+  }
+
+  /**
+   * Adds runs a paired sandbox reported to run history. A run is replaced
+   * only by one with the same binding (sandbox, organization, tenant and
+   * sandbox key) that is verified against a newer verified audit event than
+   * the stored one; a reread of the same run, or an unverified one, never
+   * replaces it. A run of this desktop with the same id is never replaced.
+   * Called under the organization's tenant lease: the organization must
+   * still be connected and the lease current, or nothing is written.
+   * Returns the runs it added or replaced, each with the digest of the
+   * record as stored, normalized as a read of state.json normalizes it.
+   */
+  async importSandboxRuns(input: readonly RunRecord[]): Promise<SandboxRunWrite[]> {
+    const runs = input.map((run) => (run.attestedBy ? { ...storedSandboxRun(run), attestedBy: run.attestedBy } : storedSandboxRun(run)));
+    const written = await this.serialize(async () => {
+      const persisted = await this.read();
+      this.assertSandboxImportAllowed(persisted, runs);
+      const next = [...persisted.runs];
+      const ids: SandboxRunWrite[] = [];
+      for (const run of runs) {
+        const binding = sandboxRunBinding(run);
+        if (!binding) continue;
+        const index = next.findIndex((entry) => entry.id === run.id);
+        if (index < 0) {
+          next.unshift(run);
+          ids.push({ id: run.id, storedDigest: storedSandboxRunDigest(run) });
+          continue;
+        }
+        const existing = next[index]!;
+        if (sandboxRunBinding(existing) !== binding) continue;
+        const newer = run.attestedBy !== undefined && (existing.attestedBy === undefined || run.attestedBy.checkpointSeq > existing.attestedBy.checkpointSeq);
+        if (!newer) continue;
+        next[index] = run;
+        ids.push({ id: run.id, storedDigest: storedSandboxRunDigest(run) });
+      }
+      if (ids.length > 0) await this.write({ ...persisted, runs: next });
+      return ids;
+    });
+    if (written.length > 0) this.emitStateChanged("sandbox-runs-imported");
+    return written;
+  }
+
+  /** Sets the attestation of sandbox runs imported unverified, matched on the full binding. */
+  /**
+   * Sets the attestation of sandbox runs imported unverified. Returns the
+   * ids attested, and the ids whose stored record is no longer the one the
+   * entry describes (replaced, removed or attested already).
+   */
+  async attestSandboxRuns(entries: readonly SandboxRunAttestation[]): Promise<SandboxRunAttestResult> {
+    const result = await this.serialize(async () => {
+      const persisted = await this.read();
+      const tenants = [...new Set(entries.map((entry) => entry.tenantId))];
+      for (const tenantId of tenants) this.assertSandboxTenantOpen(persisted, tenantId, entries.find((entry) => entry.tenantId === tenantId)!.organizationId);
+      const attested: string[] = [];
+      const stale: string[] = [];
+      const byId = new Map(persisted.runs.map((run, index) => [run.id, index]));
+      const next = [...persisted.runs];
+      for (const entry of entries) {
+        const index = byId.get(entry.runId);
+        const run = index === undefined ? undefined : next[index];
+        const binding = JSON.stringify([entry.sandboxId, entry.organizationId, entry.tenantId.toLowerCase(), entry.pairingKeyFingerprint]);
+        // Only the record imported then: a later or older record in history is not the one the event names.
+        if (
+          !run ||
+          run.attestedBy ||
+          sandboxRunBinding(run) !== binding ||
+          run.agentSlug !== entry.agentSlug ||
+          run.status !== entry.status ||
+          storedSandboxRunDigest(run) !== entry.storedDigest
+        ) {
+          stale.push(entry.runId);
+          continue;
+        }
+        next[index!] = { ...run, attestedBy: entry.attestedBy };
+        attested.push(entry.runId);
+      }
+      if (attested.length > 0) await this.write({ ...persisted, runs: next });
+      return { attested, stale };
+    });
+    if (result.attested.length > 0) this.emitStateChanged("sandbox-runs-imported");
+    return result;
+  }
+
+  /** Runs sandbox work under the tenant's lease, so Disconnect aborts it and waits for it. */
+  withSandboxTenantLease<T>(tenantId: string, work: (lease: { signal: AbortSignal }) => Promise<T>): Promise<T> {
+    return this.tenantLifecycle.withTenantLease(tenantId, (lease) => work({ signal: lease.signal }));
+  }
+
+  private assertSandboxImportAllowed(persisted: PersistedState, runs: readonly RunRecord[]): void {
+    for (const run of runs) {
+      if (run.executedOn?.kind !== "sandbox" || !run.tenantId) continue;
+      this.assertSandboxTenantOpen(persisted, run.tenantId, run.executedOn.organizationId);
+    }
+  }
+
+  /** The organization is still connected with this tenant, and the ambient lease, if any, is of the current generation. */
+  private assertSandboxTenantOpen(persisted: PersistedState, tenantId: string, organizationId: string): void {
+    const organization = (persisted.organizations ?? []).find((entry) => entry.id === organizationId);
+    const connected = organization?.connections.microsoft365?.tenantId?.toLowerCase() === tenantId.toLowerCase()
+      && persisted.tenants.some((tenant) => tenant.id.toLowerCase() === tenantId.toLowerCase());
+    const tenant = organization?.connections.microsoft365?.tenantId ?? tenantId;
+    if (!connected || this.tenantLifecycle.phase(tenant) !== "open" || !this.tenantLifecycle.isWritable(tenant)) {
+      throw new TenantClosedError(tenant, "sandbox run import");
+    }
+  }
+
+  /** Records what the desktop did with a paired sandbox in its own audit log; throws when it cannot. */
+  recordSandboxAuditEvents(events: readonly AuditLogEventSeed[]): void {
+    this.appendAuditEvents(events);
   }
 
   private async buildLlm(

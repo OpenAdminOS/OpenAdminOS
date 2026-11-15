@@ -10,6 +10,7 @@ const VERSIONED_PACKAGES = [
   "packages/runtime/package.json",
   "packages/sandbox-host/package.json",
   "packages/pairing/package.json",
+  "packages/enterprise/package.json",
   "packages/qa-graph/package.json",
   "packages/connector-discord/package.json",
   "packages/connector-outlook/package.json",

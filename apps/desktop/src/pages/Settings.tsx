@@ -1,4 +1,5 @@
 import { ProviderLogo } from "../components/ProviderLogo";
+import { EnterpriseSettingsSections } from "../components/EnterpriseSettingsSections";
 import { THEMES, useAppearance } from "../styles/appearance";
 import { useAnswerFont } from "../styles/answer-font";
 import { useDensity } from "../styles/density";
@@ -514,6 +515,7 @@ export default function Settings() {
                 onSetUsageTelemetryEnabled={setUsageTelemetryEnabled}
               />
             </SettingsPageSection>
+            <EnterpriseSettingsSections query={settingsQuery} />
             <SettingsPageSection id="about" visible={visibleSectionIds.has("about")} query={settingsQuery}>
               <AboutSection />
             </SettingsPageSection>
