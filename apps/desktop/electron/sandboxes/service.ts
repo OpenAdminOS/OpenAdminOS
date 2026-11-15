@@ -4,13 +4,15 @@
 // `sandboxes` capability of the extension point) and draws the UI.
 //
 // Nothing here runs on its own. There is no timer and no listener: without
-// a paired sandbox and a call, no connection is opened.
+// a paired sandbox and a call, no connection is opened. Sync, assignments
+// and status run under the organization's tenant lease, so Disconnect
+// stops them and waits for them.
 
 import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-import type { RunRecord, SecretAccessor } from "@openadminos/agent-sdk";
+import type { RunAttestation, RunRecord, SecretAccessor } from "@openadminos/agent-sdk";
 import type {
   EnterpriseOrganization,
   EnterpriseReadOnlyAgent,
@@ -40,6 +42,7 @@ import {
   pairingCodeMatchesSpki,
   parsePairingCode,
   parseSandboxAddress,
+  runRecordDigest,
   signScheduleAssignment,
   tlsSpkiSha256,
   verifyAuditCheckpoint,
@@ -50,27 +53,32 @@ import {
   type PairingRecord,
   type SandboxAddress,
 } from "@openadminos/pairing";
-import type { AuditLogEventSeed, AuditLogPosition, AuditLogRangeRow } from "@openadminos/runtime";
+import type { AuditLogEventSeed, AuditLogRangeRow } from "@openadminos/runtime";
 
-import { SandboxAuditStore, SandboxStateStore, type StoredSandbox } from "./store.js";
+import { TenantClosedError } from "../tenant-lifecycle.js";
+import { AuditSeqConflictError, SandboxAuditStore, SandboxStateError, SandboxStateStore, type StoredSandbox, type UnverifiedRun } from "./store.js";
 import { SandboxTransportError, tlsSandboxTransport, type ClientCredentials, type SandboxReply, type SandboxTransport } from "./transport.js";
 
-/** Secret store keys. The values never leave the main process. */
-export const SANDBOX_SECRET_KEYS = Object.freeze({
-  identity: "device-identity",
-  tlsKey: "tls-key",
-  tlsCertificate: "tls-certificate",
-});
+/** The secret store key of the desktop's sandbox identity: one bundle, so it is never half written. */
+export const SANDBOX_IDENTITY_SECRET = "sandbox-identity";
 
+/** Bounds of one sync call; what is left is read by the next sync. */
+export const SYNC_LIMITS = Object.freeze({
+  runs: 500,
+  runBytes: 64 * 1024 * 1024,
+  auditBatches: 50,
+  problems: 20,
+});
+export type SyncLimits = { readonly [K in keyof typeof SYNC_LIMITS]: number };
 const RUNS_PAGE = 100;
 const AUDIT_BATCH = 500;
-/** Per sync call; a sandbox with more pages is read further by the next sync. */
-const MAX_RUN_PAGES = 100;
-const MAX_AUDIT_BATCHES = 200;
+const UNVERIFIED_RECHECK = 500;
 const MIN_INTERVAL_SECONDS = 900;
 const MAX_INTERVAL_SECONDS = 31 * 86_400;
 const MAX_MESSAGE = 300;
 const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
+/** The sandbox host's own rule for sandbox ids. */
+const SANDBOX_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const SLUG = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 const STEP_STATUSES = new Set(["pending", "running", "completed", "failed", "skipped", "cancelled"]);
@@ -108,23 +116,56 @@ export type SandboxIntegrityFailure =
   | "tls-pin-changed"
   | "sandbox-unpaired";
 
+/** Why an imported run is not verified. */
+export type UnverifiedReason = "no-verified-event" | "digest-mismatch" | "status-mismatch" | "agent-mismatch";
+
+export interface SandboxTenantLease {
+  readonly signal: AbortSignal;
+}
+
+/** A run imported unverified that the verified audit rows now cover, with the binding it was imported under. */
+export interface SandboxRunAttestation {
+  runId: string;
+  sandboxId: string;
+  organizationId: string;
+  tenantId: string;
+  pairingKeyFingerprint: string;
+  attestedBy: RunAttestation;
+}
+
 export interface SandboxServiceOptions {
   /** `<userData>/sandboxes`. */
   rootDir: string;
-  /** The desktop's device key and TLS client certificate. */
+  /** The desktop's device key and TLS client certificate, one bundle. */
   secrets: SecretAccessor;
   /** Organizations whose Microsoft 365 tenant is connected now. */
   organizations(): Promise<readonly EnterpriseOrganization[]>;
   /** Bundled read-only agents with their manifest hashes. */
   catalog(): Promise<readonly EnterpriseReadOnlyAgent[]>;
-  /** Adds sandbox runs to run history; a desktop run with the same id is never replaced. */
+  /**
+   * Runs work under the tenant's lifecycle lease. It refuses when the
+   * tenant is not open (TenantClosedError), and Disconnect aborts the
+   * lease's signal and waits for the work.
+   */
+  withTenantLease<T>(tenantId: string, work: (lease: SandboxTenantLease) => Promise<T>): Promise<T>;
+  /**
+   * Adds sandbox runs to run history and returns how many were added or
+   * replaced. Called inside the lease; it checks again that the
+   * organization is connected and the lease current before it writes.
+   */
   importRuns(runs: readonly RunRecord[]): Promise<number>;
+  /** Sets the attestation of runs imported unverified; returns how many it set. */
+  attestRuns(entries: readonly SandboxRunAttestation[]): Promise<number>;
   /** Appends to the desktop's audit log; throws when it cannot. */
   recordAudit(events: readonly AuditLogEventSeed[]): void;
+  /** Raw failure detail for the app log; never shown to the module. */
+  log?: (message: string, fields: Record<string, string>) => void;
   now?: () => Date;
   transport?: SandboxTransport;
-  /** The verified audit rows; `<rootDir>/audit.db` when left out. */
-  auditDbPath?: string;
+  /** The verified audit store; `<rootDir>/audit.db` when left out. */
+  auditStore?: () => SandboxAuditStore;
+  /** Tighter sync bounds, for tests. */
+  limits?: Partial<SyncLimits>;
 }
 
 /** Ends an operation with a named error for the caller. */
@@ -148,12 +189,58 @@ interface Credentials {
   tls: ClientCredentials & { pin: string };
 }
 
+interface IdentityBundle {
+  version: 1;
+  identityPem: string;
+  tlsKeyPem: string;
+  tlsCertificatePem: string;
+}
+
+/** Problems of one sync: at most `SYNC_LIMITS.problems` lines and a count of the rest. */
+class Problems {
+  private readonly lines: string[] = [];
+  /** What a capped sync left for the next one; always listed, first. */
+  private readonly notices = new Set<string>();
+  private more = 0;
+  constructor(private readonly max: number) {}
+  push(line: string): void {
+    if (this.lines.length + this.notices.size < this.max) this.lines.push(clip(line));
+    else this.more += 1;
+  }
+  notice(line: string): void {
+    this.notices.add(line);
+  }
+  list(): string[] {
+    const lines = [...this.notices, ...this.lines].slice(0, this.max);
+    const more = this.more + Math.max(0, this.notices.size + this.lines.length - this.max);
+    return more > 0 ? [...lines, `${more} more not listed.`] : lines;
+  }
+}
+
+interface SyncContext {
+  sandbox: StoredSandbox;
+  address: SandboxAddress;
+  credentials: Credentials;
+  signal: AbortSignal;
+  problems: Problems;
+  runsSeen: number;
+  runBytes: number;
+  auditBatches: number;
+  auditRows: number;
+  imported: number;
+  verified: number;
+  unverified: number;
+  skipped: number;
+}
+
 const PAIR_AGAIN = "Unpair the sandbox here and on the sandbox (openadminos-sandbox --unpair), then pair it again with a new code.";
+const DISCONNECTED = "The organization was disconnected while the sandbox request ran, so nothing more was taken. Connect it again, then try again.";
 
 export class SandboxService implements EnterpriseSandboxes {
   private readonly state: SandboxStateStore;
   private readonly now: () => Date;
   private readonly transport: SandboxTransport;
+  private readonly limits: SyncLimits;
   private audit: SandboxAuditStore | undefined;
   /** One operation at a time, so the state file is never written from two at once. */
   private queue: Promise<unknown> = Promise.resolve();
@@ -162,30 +249,34 @@ export class SandboxService implements EnterpriseSandboxes {
     this.state = new SandboxStateStore(join(options.rootDir, "sandboxes.json"));
     this.now = options.now ?? (() => new Date());
     this.transport = options.transport ?? tlsSandboxTransport;
+    this.limits = { ...SYNC_LIMITS, ...options.limits };
   }
 
   list(): Promise<readonly EnterpriseSandbox[]> {
-    return this.serial(async () => (await this.state.read()).map(summary));
+    return this.serial(async () => {
+      const sandboxes = await this.state.read();
+      return sandboxes.map((sandbox) => this.summary(sandbox));
+    });
   }
 
   pair(input: EnterpriseSandboxPairInput): Promise<EnterpriseResult<EnterpriseSandbox>> {
-    return this.operation(() => this.pairNow(input));
+    return this.operation("pair", () => this.pairNow(input));
   }
 
   sync(sandboxId: string): Promise<EnterpriseResult<EnterpriseSandboxSyncResult>> {
-    return this.operation(() => this.syncNow(sandboxId));
+    return this.operation("sync", () => this.syncNow(sandboxId));
   }
 
   assign(sandboxId: string, entries: readonly EnterpriseSandboxAssignmentEntry[]): Promise<EnterpriseResult<EnterpriseSandboxAssignResult>> {
-    return this.operation(() => this.assignNow(sandboxId, entries));
+    return this.operation("assign", () => this.assignNow(sandboxId, entries));
   }
 
   unpair(sandboxId: string): Promise<EnterpriseResult<EnterpriseSandboxUnpairResult>> {
-    return this.operation(() => this.unpairNow(sandboxId));
+    return this.operation("unpair", () => this.unpairNow(sandboxId));
   }
 
   status(sandboxId: string): Promise<EnterpriseResult<EnterpriseSandboxStatus>> {
-    return this.operation(() => this.statusNow(sandboxId));
+    return this.operation("status", () => this.statusNow(sandboxId));
   }
 
   close(): void {
@@ -210,10 +301,10 @@ export class SandboxService implements EnterpriseSandboxes {
       throw new Refusal("organization-not-connected", "That organization is not connected in OpenAdminOS. Connect it, then pair the sandbox for it.");
     }
     const tenantId = organization.tenantId.toLowerCase();
-    const credentials = await this.credentials(true);
     const where = formatSandboxAddress(address);
 
-    const hello = await this.request(address, credentials, (pin) => pairingCodeMatches(parsed.code, pin), "GET", "/v1/pair").catch((error: unknown) => {
+    // The probe carries no client certificate: the sandbox answers it before pairing.
+    const hello = await this.request(address, undefined, (pin) => pairingCodeMatches(parsed.code, pin), "GET", "/v1/pair").catch((error: unknown) => {
       if (error instanceof SandboxTransportError && error.code === "tls-pin-mismatch") {
         throw new Refusal("fingerprint-mismatch", `The sandbox at ${where} presented a TLS key that is not the one the pairing code names. Check the code on the sandbox, and that the address is the sandbox's.`);
       }
@@ -227,11 +318,16 @@ export class SandboxService implements EnterpriseSandboxes {
     if (!pairingId || !sandboxId || !sandboxPublicKey || helloBody.tlsSpkiSha256 !== pin) {
       throw new Refusal("pairing-reply-invalid", `The sandbox at ${where} answered the pairing request in a form this desktop does not read. Update the sandbox host to this release.`);
     }
+    if (!SANDBOX_ID.test(sandboxId)) {
+      throw new Refusal("sandbox-id-invalid", `The sandbox at ${where} names itself with an id the sandbox host does not allow. Update the sandbox host to this release.`);
+    }
     // Sandboxes are kept by organization and sandbox id; one id belongs to one organization at a time.
-    const held = (await this.state.read()).find((entry) => entry.sandboxId === sandboxId);
+    const stored = await this.state.read();
+    const held = stored.find((entry) => entry.sandboxId === sandboxId);
     if (held && held.organizationId !== organization.id) {
       throw new Refusal("sandbox-paired-for-another-organization", `A sandbox named ${sandboxId} is paired with this desktop for another organization. Unpair it first, then pair again.`);
     }
+    const credentials = await this.credentials(stored.filter((entry) => entry !== held).length === 0);
     const desktopPublicKey = exportDevicePublicKey(credentials.identity.publicKey);
     let session: DesktopPairingSession;
     try {
@@ -273,29 +369,31 @@ export class SandboxService implements EnterpriseSandboxes {
       throw new Refusal("checkpoint-signature-invalid", `The sandbox's first audit checkpoint does not verify for this pairing. ${partial}`);
     }
 
-    const pairedAt = this.now().toISOString();
-    const stored: StoredSandbox = {
+    const next: StoredSandbox = {
       sandboxId,
       name: value.sandboxName,
       address: where,
       organizationId: organization.id,
       tenantId,
       pairing: { record: value, signature: (reply.pairing as { signature: string }).signature },
-      pairedAt,
-      auditPin: { seq: start.value.seq, sha256: start.value.sha256 },
+      pairedAt: this.now().toISOString(),
       runCursor: { after: 0 },
       assignmentVersion: 0,
     };
-    this.options.recordAudit([
-      this.event(stored, `sandbox-pairing:${pairingId}:created`, "sandbox.pairing.created", {
+    // State first, then the audit event that records it.
+    this.withAuditStore((store) => {
+      if (held) store.removePairing(held.pairing.record.pairingId);
+      store.start(pairingId, { seq: start.value.seq, sha256: start.value.sha256 });
+    });
+    await this.state.write([...stored.filter((entry) => entry !== held), next]);
+    this.record([
+      this.event(next, `sandbox-pairing:${pairingId}:created`, "sandbox.pairing.created", {
         address: where,
         pairingKeyFingerprint: fingerprintOf(value),
         auditSeq: start.value.seq,
       }),
     ]);
-    const others = (await this.state.read()).filter((entry) => !(entry.sandboxId === sandboxId && entry.organizationId === organization.id));
-    await this.state.write([...others, stored]);
-    return summary(stored);
+    return this.summary(next);
   }
 
   // ---- sync ----
@@ -303,86 +401,96 @@ export class SandboxService implements EnterpriseSandboxes {
   private async syncNow(sandboxId: string): Promise<EnterpriseSandboxSyncResult> {
     const sandbox = await this.usable(sandboxId);
     const credentials = await this.credentials(false);
-    const address = addressOf(sandbox);
-    const record = sandbox.pairing.record;
-    const problems: string[] = [];
-    try {
-      // Runs first: the sandbox records a run's finished event before it
-      // writes the run, so the audit rows read after cover every run read.
-      const { runs, cursor } = await this.readRuns(sandbox, address, credentials, problems);
-
-      let pin: AuditLogPosition = sandbox.auditPin;
-      let accepted = 0;
-      let batches = 0;
-      for (let batch = 0; batch < MAX_AUDIT_BATCHES; batch += 1) {
-        const reply = await this.pinned(sandbox, address, credentials, "GET", `/v1/audit?after=${pin.seq}&limit=${AUDIT_BATCH}`);
-        if (reply.status === 409 && errorCode(reply.body) === "audit-position-unknown") {
-          throw new IntegrityStop("audit-position-unknown", `The sandbox no longer holds the audit entries after ${pin.seq}, so what happened there cannot be checked. ${PAIR_AGAIN}`);
-        }
-        const body = sandboxBody(reply);
-        const rows = Array.isArray(body.rows) ? (body.rows as AuditLogRangeRow[]) : undefined;
-        if (!rows) throw new Refusal("sandbox-reply-invalid", "The sandbox sent audit rows in a form this desktop does not read.");
-        const result = verifySignedContinuation(pin, rows, body.checkpoint, record.sandboxPublicKey, { pairingId: record.pairingId, sandboxId: record.sandboxId });
-        if (!result.ok) {
-          throw new IntegrityStop(result.failure, `${result.detail} Sync is stopped for this sandbox. ${PAIR_AGAIN}`);
-        }
-        if (rows.length === 0) break;
-        const verifiedAt = this.now().toISOString();
-        this.auditStore().addBatch(record.pairingId, record.sandboxId, rows, result.pin.seq, verifiedAt);
-        this.options.recordAudit([
-          this.event(sandbox, `sandbox-audit:${record.pairingId}:${result.pin.seq}`, "sandbox.audit.accepted", {
-            fromSeq: rows[0]!.seq,
-            toSeq: result.pin.seq,
-            rows: rows.length,
-            finalSha256: result.pin.sha256,
-          }),
-        ]);
-        pin = result.pin;
-        accepted += rows.length;
-        batches += 1;
-        await this.update(sandboxId, (entry) => ({ ...entry, auditPin: pin }));
-        if (batch === MAX_AUDIT_BATCHES - 1) problems.push("More audit entries remain on the sandbox; sync again to read them.");
-      }
-
-      const imported: RunRecord[] = [];
-      let verified = 0;
-      for (const run of runs) {
-        const finish = this.auditStore().finished(record.pairingId, run.id);
-        if (finish) {
-          verified += 1;
-          imported.push({
-            ...run,
-            attestedBy: { sandboxId: record.sandboxId, pairingKeyFingerprint: fingerprintOf(record), checkpointSeq: finish.checkpointSeq, verifiedAt: finish.verifiedAt },
-          });
-        } else {
-          imported.push(run);
-        }
-      }
-      const count = imported.length > 0 ? await this.options.importRuns(imported) : 0;
-      const lastSyncAt = this.now().toISOString();
-      const next = await this.update(sandboxId, (entry) => ({ ...entry, runCursor: cursor, lastSyncAt }));
-      return {
-        sandbox: summary(next),
-        runsImported: count,
-        runsVerified: verified,
-        runsUnverified: imported.length - verified,
-        auditRowsAccepted: accepted,
-        auditBatches: batches,
-        problems,
+    return this.leased(sandbox, async (signal) => {
+      const context: SyncContext = {
+        sandbox,
+        address: addressOf(sandbox),
+        credentials,
+        signal,
+        problems: new Problems(this.limits.problems),
+        runsSeen: 0,
+        runBytes: 0,
+        auditBatches: 0,
+        auditRows: 0,
+        imported: 0,
+        verified: 0,
+        unverified: 0,
+        skipped: 0,
       };
-    } catch (error) {
-      if (error instanceof IntegrityStop) await this.stop(sandbox, error);
-      throw error;
+      // Audit first, then each page of runs followed by the audit rows
+      // written since: the sandbox records a run's finished event before
+      // it writes the run, so rows read after a page cover its runs.
+      await this.readAudit(context);
+      await this.readRuns(context);
+      await this.recheckUnverified(context);
+      const lastSyncAt = this.now().toISOString();
+      const next = await this.update(sandboxId, (entry) => ({ ...entry, lastSyncAt }));
+      return {
+        sandbox: this.summary(next),
+        runsImported: context.imported,
+        runsVerified: context.verified,
+        runsUnverified: context.unverified,
+        runsSkipped: context.skipped,
+        auditRowsAccepted: context.auditRows,
+        auditBatches: context.auditBatches,
+        problems: context.problems.list(),
+      };
+    });
+  }
+
+  /** Reads verified audit batches until the sandbox has no more, or the per sync cap. */
+  private async readAudit(context: SyncContext): Promise<void> {
+    const { sandbox } = context;
+    const record = sandbox.pairing.record;
+    for (;;) {
+      if (context.auditBatches >= this.limits.auditBatches) {
+        context.problems.notice("More audit entries remain on the sandbox; sync again to read them.");
+        return;
+      }
+      const pin = this.withAuditStore((store) => store.pin(record.pairingId));
+      if (!pin) throw new Refusal("sandbox-audit-store-failed", `The desktop has no audit position for ${sandbox.name}. ${PAIR_AGAIN}`);
+      const reply = await this.pinned(context, "GET", `/v1/audit?after=${pin.seq}&limit=${AUDIT_BATCH}`);
+      if (reply.status === 409 && errorCode(reply.body) === "audit-position-unknown") {
+        throw new IntegrityStop("audit-position-unknown", `The sandbox no longer holds the audit entries after ${pin.seq}, so what happened there cannot be checked. ${PAIR_AGAIN}`);
+      }
+      const body = sandboxBody(reply);
+      const rows = Array.isArray(body.rows) ? (body.rows as AuditLogRangeRow[]) : undefined;
+      if (!rows) throw new Refusal("sandbox-reply-invalid", "The sandbox sent audit rows in a form this desktop does not read.");
+      const result = verifySignedContinuation(pin, rows, body.checkpoint, record.sandboxPublicKey, { pairingId: record.pairingId, sandboxId: record.sandboxId });
+      if (!result.ok) throw new IntegrityStop(result.failure, `${result.detail} Sync is stopped for this sandbox. ${PAIR_AGAIN}`);
+      if (rows.length === 0) return;
+      // The desktop's event has a fixed id, so a batch accepted again after a crash records it once.
+      this.record([
+        this.event(sandbox, `sandbox-audit:${record.pairingId}:${result.pin.seq}`, "sandbox.audit.accepted", {
+          fromSeq: rows[0]!.seq,
+          toSeq: result.pin.seq,
+          rows: rows.length,
+          finalSha256: result.pin.sha256,
+        }),
+      ]);
+      try {
+        this.withAuditStore((store) => store.acceptBatch(record.pairingId, record.sandboxId, rows, result.pin, this.now().toISOString()));
+      } catch (error) {
+        if (error instanceof AuditSeqConflictError) throw new IntegrityStop("chain-fork", `${error.message} Sync is stopped for this sandbox. ${PAIR_AGAIN}`);
+        throw error;
+      }
+      context.auditBatches += 1;
+      context.auditRows += rows.length;
     }
   }
 
-  /** Reads run pages after the cursor; a new generation or a cursor reset reads again from 0, once. */
-  private async readRuns(sandbox: StoredSandbox, address: SandboxAddress, credentials: Credentials, problems: string[]) {
-    let cursor = { ...sandbox.runCursor };
-    const byId = new Map<string, RunRecord>();
+  /** Reads run pages after the cursor, importing and saving the cursor page by page. */
+  private async readRuns(context: SyncContext): Promise<void> {
+    const sandboxId = context.sandbox.sandboxId;
+    let cursor = { ...context.sandbox.runCursor };
     let restarted = false;
-    for (let page = 0; page < MAX_RUN_PAGES; page += 1) {
-      const body = sandboxBody(await this.pinned(sandbox, address, credentials, "GET", `/v1/runs?after=${cursor.after}&limit=${RUNS_PAGE}`));
+    for (;;) {
+      if (context.runsSeen >= this.limits.runs || context.runBytes >= this.limits.runBytes) {
+        context.problems.notice("More runs remain on the sandbox; sync again to read them.");
+        return;
+      }
+      const limit = Math.min(RUNS_PAGE, this.limits.runs - context.runsSeen);
+      const body = sandboxBody(await this.pinned(context, "GET", `/v1/runs?after=${cursor.after}&limit=${limit}`));
       const generation = text(body.generation);
       const next = body.next;
       if (!generation || typeof next !== "number" || !Number.isSafeInteger(next) || next < 0 || !Array.isArray(body.runs)) {
@@ -400,18 +508,115 @@ export class SandboxService implements EnterpriseSandboxes {
       if (reset) cursor.resetSeen = generation;
       cursor.generation = generation;
       for (const problem of Array.isArray(body.problems) ? body.problems : []) {
-        if (isObject(problem)) problems.push(`Run ${text(problem.runId) ?? "unknown"} could not be read on the sandbox: ${clip(text(problem.message) ?? "no reason given")}`);
+        if (isObject(problem)) context.problems.push(`Run ${clipId(text(problem.runId))} could not be read on the sandbox: ${text(problem.message) ?? "no reason given"}`);
       }
+
+      const page: Array<{ run: RunRecord; digest: string }> = [];
+      // The cursor of the last run taken; a truncated page resumes after it.
+      let pageEnd = cursor.after;
+      let truncated = false;
       for (const entry of body.runs) {
-        const checked = sandboxRun(isObject(entry) ? entry.run : undefined, sandbox);
-        if (checked.kind === "run") byId.set(checked.run.id, checked.run);
-        else if (checked.kind === "problem") problems.push(checked.message);
+        if (!isObject(entry)) continue;
+        const bytes = Buffer.byteLength(JSON.stringify(entry.run ?? null), "utf8");
+        if (context.runBytes + bytes > this.limits.runBytes && context.runsSeen > 0) {
+          // Stop before this run; the next sync starts with it.
+          truncated = true;
+          break;
+        }
+        context.runBytes += bytes;
+        context.runsSeen += 1;
+        if (typeof entry.cursor === "number" && Number.isSafeInteger(entry.cursor)) pageEnd = entry.cursor;
+        const checked = sandboxRun(entry.run, context.sandbox);
+        if (checked.kind === "run") page.push(checked);
+        else {
+          context.skipped += 1;
+          if (checked.kind === "problem") context.problems.push(checked.message);
+        }
       }
-      if (next === cursor.after) break;
-      cursor.after = next;
-      if (page === MAX_RUN_PAGES - 1) problems.push("More runs remain on the sandbox; sync again to read them.");
+
+      await this.readAudit(context);
+      await this.importPage(context, page);
+      const after = truncated ? pageEnd : next;
+      const moved = after !== cursor.after;
+      cursor = { ...cursor, after };
+      const saved = { ...cursor };
+      await this.update(sandboxId, (entry) => ({ ...entry, runCursor: saved }));
+      if (truncated) {
+        context.problems.notice("More runs remain on the sandbox; sync again to read them.");
+        return;
+      }
+      if (!moved) return;
     }
-    return { runs: [...byId.values()], cursor };
+  }
+
+  /** Verifies each run of a page against the newest verified event for it, then imports the page. */
+  private async importPage(context: SyncContext, page: ReadonlyArray<{ run: RunRecord; digest: string }>): Promise<void> {
+    if (page.length === 0) return;
+    const record = context.sandbox.pairing.record;
+    const runs: RunRecord[] = [];
+    const pending: UnverifiedRun[] = [];
+    const verifiedIds = new Set<string>();
+    for (const { run, digest } of page) {
+      const check = this.verifyRun(record, { runId: run.id, digest, agentSlug: run.agentSlug, status: run.status });
+      if (check.attestedBy) {
+        runs.push({ ...run, attestedBy: check.attestedBy });
+        verifiedIds.add(run.id);
+      } else {
+        runs.push(run);
+        pending.push({ runId: run.id, digest, agentSlug: run.agentSlug, status: run.status });
+        context.problems.push(`Run ${clipId(run.id)} was imported unverified: ${unverifiedText(check.reason)}`);
+      }
+    }
+    if (context.signal.aborted) throw new TenantClosedError(context.sandbox.tenantId, "sandbox sync");
+    const imported = await this.options.importRuns(runs);
+    context.imported += imported;
+    context.skipped += runs.length - imported;
+    for (const run of runs) {
+      if (verifiedIds.has(run.id)) context.verified += 1;
+      else context.unverified += 1;
+    }
+    this.withAuditStore((store) => {
+      for (const id of verifiedIds) store.removeUnverified(record.pairingId, id);
+      for (const entry of pending) store.addUnverified(record.pairingId, entry);
+    });
+  }
+
+  /** Runs imported unverified that the audit rows verified since: they get their attestation now. */
+  private async recheckUnverified(context: SyncContext): Promise<void> {
+    const record = context.sandbox.pairing.record;
+    const waiting = this.withAuditStore((store) => store.listUnverified(record.pairingId, UNVERIFIED_RECHECK));
+    const attestations: SandboxRunAttestation[] = [];
+    for (const entry of waiting) {
+      const check = this.verifyRun(record, entry);
+      if (!check.attestedBy) continue;
+      attestations.push({
+        runId: entry.runId,
+        sandboxId: context.sandbox.sandboxId,
+        organizationId: context.sandbox.organizationId,
+        tenantId: context.sandbox.tenantId,
+        pairingKeyFingerprint: fingerprintOf(record),
+        attestedBy: check.attestedBy,
+      });
+    }
+    if (attestations.length === 0) return;
+    if (context.signal.aborted) throw new TenantClosedError(context.sandbox.tenantId, "sandbox sync");
+    const set = await this.options.attestRuns(attestations);
+    context.verified += set;
+    this.withAuditStore((store) => {
+      for (const entry of attestations) store.removeUnverified(record.pairingId, entry.runId);
+    });
+  }
+
+  /** Verified only when the newest verified event for the run names its agent, status and digest. */
+  private verifyRun(record: PairingRecord, run: UnverifiedRun): { attestedBy?: RunAttestation; reason?: UnverifiedReason } {
+    const event = this.withAuditStore((store) => store.latestRunEvent(record.pairingId, run.runId));
+    if (!event) return { reason: "no-verified-event" };
+    if (event.agentSlug !== run.agentSlug) return { reason: "agent-mismatch" };
+    if (event.status !== run.status) return { reason: "status-mismatch" };
+    if (event.runDigest !== run.digest) return { reason: "digest-mismatch" };
+    return {
+      attestedBy: { sandboxId: record.sandboxId, pairingKeyFingerprint: fingerprintOf(record), checkpointSeq: event.checkpointSeq, verifiedAt: event.verifiedAt },
+    };
   }
 
   // ---- assignments ----
@@ -421,27 +626,53 @@ export class SandboxService implements EnterpriseSandboxes {
     const catalog = new Map((await this.options.catalog()).map((agent) => [agent.id, agent]));
     const seen = new Set<string>();
     const signedEntries = entries.map((entry) => {
-      if (seen.has(entry.agentId)) throw new Refusal("assignment-duplicate-agent", `${entry.agentId} is listed twice; assign each agent once.`);
+      if (seen.has(entry.agentId)) throw new Refusal("assignment-duplicate-agent", `${clipId(entry.agentId)} is listed twice; assign each agent once.`);
       seen.add(entry.agentId);
       const agent = catalog.get(entry.agentId);
       if (!agent) {
-        throw new Refusal("agent-not-read-only", `${entry.agentId} is not a bundled read-only agent. A sandbox runs read-only agents only; changes stay on the desktop with diff confirmation.`);
+        throw new Refusal("agent-not-read-only", `${clipId(entry.agentId)} is not a bundled read-only agent. A sandbox runs read-only agents only; changes stay on the desktop with diff confirmation.`);
       }
       if (!Number.isSafeInteger(entry.intervalSeconds) || entry.intervalSeconds < MIN_INTERVAL_SECONDS || entry.intervalSeconds > MAX_INTERVAL_SECONDS) {
-        throw new Refusal("assignment-interval-invalid", `The interval for ${entry.agentId} is ${entry.intervalSeconds} seconds; it is 15 minutes to 31 days.`);
+        throw new Refusal("assignment-interval-invalid", `The interval for ${clipId(entry.agentId)} is ${entry.intervalSeconds} seconds; it is 15 minutes to 31 days.`);
       }
       return { agentId: agent.id, templateSha256: agent.manifestSha256, intervalSeconds: entry.intervalSeconds };
     });
     const credentials = await this.credentials(false);
-    const record = sandbox.pairing.record;
-    const version = sandbox.assignmentVersion + 1;
-    const signed = signScheduleAssignment(
-      { pairingId: record.pairingId, version, organizationId: record.organizationId, tenantId: record.tenantId, entries: signedEntries, issuedAt: this.now().toISOString() },
-      credentials.identity.privateKey,
-    );
-    try {
-      const body = sandboxBody(await this.pinned(sandbox, addressOf(sandbox), credentials, "PUT", "/v1/assignments", signed));
-      await this.update(sandboxId, (entry) => ({ ...entry, assignmentVersion: version }));
+    return this.leased(sandbox, async (signal) => {
+      const context = { sandbox, address: addressOf(sandbox), credentials, signal };
+      const record = sandbox.pairing.record;
+      let floor = sandbox.assignmentVersion;
+      if (sandbox.assignmentPending !== undefined) {
+        // The last outcome is not known: ask the sandbox which version it holds.
+        const status = sandboxBody(await this.pinned(context, "GET", "/v1/status"));
+        const held = typeof status.assignmentVersion === "number" && Number.isSafeInteger(status.assignmentVersion) ? status.assignmentVersion : 0;
+        floor = Math.max(floor, held);
+      }
+      const version = floor + 1;
+      // Reserved before it is sent, so a lost answer never leads to the same version twice.
+      await this.update(sandboxId, (entry) => ({ ...entry, assignmentVersion: version, assignmentPending: version }));
+      const signed = signScheduleAssignment(
+        { pairingId: record.pairingId, version, organizationId: record.organizationId, tenantId: record.tenantId, entries: signedEntries, issuedAt: this.now().toISOString() },
+        credentials.identity.privateKey,
+      );
+      let reply: SandboxReply;
+      try {
+        reply = await this.pinned(context, "PUT", "/v1/assignments", signed);
+      } catch (error) {
+        if (error instanceof Refusal && (error.code === "sandbox-unreachable" || error.code === "reply-invalid")) {
+          throw new Refusal("assignment-outcome-unknown", `The assignment was sent, but no answer came back, so it is not known whether ${sandbox.name} took it. Assign again; the desktop then checks which version the sandbox holds.`);
+        }
+        throw error;
+      }
+      if (reply.status >= 500) {
+        throw new Refusal("assignment-outcome-unknown", `${sandbox.name} could not answer the assignment. Assign again; the desktop then checks which version the sandbox holds.`);
+      }
+      // A named refusal means the sandbox did not take it.
+      await this.update(sandboxId, (entry) => {
+        const { assignmentPending: _pending, ...rest } = entry;
+        return rest;
+      });
+      const body = sandboxBody(reply);
       const result: EnterpriseSandboxAssignResult = {
         version,
         assigned: strings(body.assigned),
@@ -449,7 +680,7 @@ export class SandboxService implements EnterpriseSandboxes {
         rolesNoLongerNeeded: strings(body.rolesNoLongerNeeded),
         ...(text(body.notice) ? { notice: clip(text(body.notice)!) } : {}),
       };
-      this.options.recordAudit([
+      this.record([
         this.event(sandbox, `sandbox-assignment:${record.pairingId}:${version}`, "sandbox.assignment.sent", {
           version,
           agents: signedEntries.map((entry) => entry.agentId),
@@ -457,17 +688,13 @@ export class SandboxService implements EnterpriseSandboxes {
         }),
       ]);
       return result;
-    } catch (error) {
-      if (error instanceof IntegrityStop) await this.stop(sandbox, error);
-      throw error;
-    }
+    });
   }
 
   // ---- unpairing and status ----
 
   private async unpairNow(sandboxId: string): Promise<EnterpriseSandboxUnpairResult> {
-    const sandbox = (await this.state.read()).find((entry) => entry.sandboxId === sandboxId);
-    if (!sandbox) throw new Refusal("sandbox-not-paired", `No sandbox ${sandboxId} is paired with this desktop.`);
+    const sandbox = await this.find(sandboxId);
     let confirmed = false;
     let roles: string[] = [];
     let reason = "";
@@ -482,13 +709,17 @@ export class SandboxService implements EnterpriseSandboxes {
           reason = clip(errorMessage(reply.body) ?? `The sandbox answered ${reply.status}.`);
         }
       } catch (error) {
-        reason = clip((error as Error).message);
+        reason = error instanceof SandboxTransportError && error.code === "tls-pin-mismatch"
+          ? "The sandbox presented another TLS key than the one paired, so it was not asked."
+          : clip((error as Error).message);
       }
     } else {
-      reason = "This desktop's device key is gone, so the sandbox cannot be asked.";
+      reason = "This desktop's sandbox key is gone, so the sandbox cannot be asked.";
     }
     await this.state.write((await this.state.read()).filter((entry) => entry.sandboxId !== sandboxId));
-    this.options.recordAudit([
+    // The verified rows of this pairing go with it; imported runs keep their attestation.
+    this.withAuditStore((store) => store.removePairing(sandbox.pairing.record.pairingId));
+    this.record([
       this.event(sandbox, `sandbox-pairing:${sandbox.pairing.record.pairingId}:removed`, "sandbox.pairing.removed", { sandboxConfirmed: confirmed, rolesNoLongerNeeded: roles }),
     ]);
     const roleNote = roles.length > 0 ? ` Remove ${roles.join(", ")} from the sandbox app registration: only the assigned agents needed them.` : "";
@@ -504,19 +735,41 @@ export class SandboxService implements EnterpriseSandboxes {
 
   private async statusNow(sandboxId: string): Promise<EnterpriseSandboxStatus> {
     const sandbox = await this.find(sandboxId);
-    if (sandbox.failure) return { sandbox: summary(sandbox) };
+    if (sandbox.failure) return { sandbox: this.summary(sandbox) };
     await this.connectedOrganization(sandbox);
     const credentials = await this.credentials(false);
-    try {
-      const body = sandboxBody(await this.pinned(sandbox, addressOf(sandbox), credentials, "GET", "/v1/status"));
-      return { sandbox: summary(sandbox), remote: remoteStatus(body) };
-    } catch (error) {
-      if (error instanceof IntegrityStop) await this.stop(sandbox, error);
-      throw error;
-    }
+    return this.leased(sandbox, async (signal) => {
+      const body = sandboxBody(await this.pinned({ sandbox, address: addressOf(sandbox), credentials, signal }, "GET", "/v1/status"));
+      return { sandbox: this.summary(sandbox), remote: remoteStatus(body) };
+    });
   }
 
   // ---- helpers ----
+
+  /**
+   * Runs work under the tenant lease of the sandbox's organization. An
+   * integrity failure inside is kept as the sandbox's state; Disconnect,
+   * or a lease that closed, ends it with organization-disconnected.
+   */
+  private async leased<T>(sandbox: StoredSandbox, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    let signal: AbortSignal | undefined;
+    try {
+      return await this.options.withTenantLease(sandbox.tenantId, (lease) => {
+        signal = lease.signal;
+        return work(lease.signal);
+      });
+    } catch (error) {
+      if (error instanceof IntegrityStop) {
+        await this.stop(sandbox, error);
+        throw error;
+      }
+      if (error instanceof TenantClosedError || signal?.aborted) {
+        if (!signal) throw new Refusal("organization-not-connected", `The organization ${sandbox.name} is paired for is not connected in OpenAdminOS. Connect it again, then try again.`);
+        throw new Refusal("organization-disconnected", DISCONNECTED);
+      }
+      throw error;
+    }
+  }
 
   /** A paired sandbox whose sync is not stopped, for a connected organization. */
   private async usable(sandboxId: string): Promise<StoredSandbox> {
@@ -530,11 +783,15 @@ export class SandboxService implements EnterpriseSandboxes {
 
   private async find(sandboxId: string): Promise<StoredSandbox> {
     const sandbox = (await this.state.read()).find((entry) => entry.sandboxId === sandboxId);
-    if (!sandbox) throw new Refusal("sandbox-not-paired", `No sandbox ${sandboxId} is paired with this desktop.`);
+    if (!sandbox) throw new Refusal("sandbox-not-paired", `No sandbox ${clipId(sandboxId)} is paired with this desktop.`);
     return sandbox;
   }
 
-  /** Hard constraint: a sandbox of an organization that is not connected is not contacted. */
+  /**
+   * Hard constraint: a sandbox of an organization that is not connected is
+   * not contacted. The organization need not be the active one: a sandbox
+   * runs while another organization is active, and each call names its own.
+   */
   private async connectedOrganization(sandbox: StoredSandbox): Promise<void> {
     const organization = (await this.options.organizations()).find((entry) => entry.id === sandbox.organizationId);
     if (!organization || organization.tenantId.toLowerCase() !== sandbox.tenantId) {
@@ -543,10 +800,16 @@ export class SandboxService implements EnterpriseSandboxes {
   }
 
   /** A request to a paired sandbox: the pin must be the paired one, and pairing answers become integrity stops. */
-  private async pinned(sandbox: StoredSandbox, address: SandboxAddress, credentials: Credentials, method: "GET" | "PUT", path: string, body?: unknown): Promise<SandboxReply> {
+  private async pinned(
+    context: { sandbox: StoredSandbox; address: SandboxAddress; credentials: Credentials; signal: AbortSignal },
+    method: "GET" | "PUT",
+    path: string,
+    body?: unknown,
+  ): Promise<SandboxReply> {
+    const { sandbox } = context;
     let reply: SandboxReply;
     try {
-      reply = await this.request(address, credentials, (pin) => pin === sandbox.pairing.record.tlsSpkiSha256, method, path, body);
+      reply = await this.request(context.address, context.credentials, (pin) => pin === sandbox.pairing.record.tlsSpkiSha256, method, path, body, context.signal);
     } catch (error) {
       if (error instanceof SandboxTransportError && error.code === "tls-pin-mismatch") {
         throw new IntegrityStop("tls-pin-changed", `The sandbox at ${sandbox.address} presented another TLS key than the one paired (paired pin ${sandbox.pairing.record.tlsSpkiSha256}, now ${error.pin || "none"}). ${PAIR_AGAIN}`);
@@ -563,10 +826,27 @@ export class SandboxService implements EnterpriseSandboxes {
     return reply;
   }
 
-  private async request(address: SandboxAddress, credentials: Credentials, acceptPin: (pin: string) => boolean, method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown): Promise<SandboxReply> {
+  private async request(
+    address: SandboxAddress,
+    credentials: Credentials | undefined,
+    acceptPin: (pin: string) => boolean,
+    method: "GET" | "POST" | "PUT" | "DELETE",
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal,
+  ): Promise<SandboxReply> {
     try {
-      return await this.transport({ address, credentials: credentials.tls, acceptPin, method, path, ...(body === undefined ? {} : { body }) });
+      return await this.transport({
+        address,
+        ...(credentials ? { credentials: credentials.tls } : {}),
+        acceptPin,
+        method,
+        path,
+        ...(body === undefined ? {} : { body }),
+        ...(signal ? { signal } : {}),
+      });
     } catch (error) {
+      if (error instanceof SandboxTransportError && error.code === "aborted") throw new Refusal("organization-disconnected", DISCONNECTED);
       if (error instanceof SandboxTransportError && error.code !== "tls-pin-mismatch") throw new Refusal(error.code === "unreachable" ? "sandbox-unreachable" : error.code, error.message);
       throw error;
     }
@@ -579,50 +859,88 @@ export class SandboxService implements EnterpriseSandboxes {
       this.options.recordAudit([
         this.event(sandbox, `sandbox-sync:${sandbox.pairing.record.pairingId}:stopped:${randomUUID()}`, "sandbox.sync.stopped", { reason: stop.code }),
       ]);
-    } catch {
+    } catch (error) {
       // The failure is kept in the sandbox's state either way.
+      this.log("the desktop audit log could not record a stopped sync", error);
     }
   }
 
   private async update(sandboxId: string, change: (entry: StoredSandbox) => StoredSandbox): Promise<StoredSandbox> {
     const all = await this.state.read();
     const index = all.findIndex((entry) => entry.sandboxId === sandboxId);
-    if (index < 0) throw new Refusal("sandbox-not-paired", `No sandbox ${sandboxId} is paired with this desktop.`);
+    if (index < 0) throw new Refusal("sandbox-not-paired", `No sandbox ${clipId(sandboxId)} is paired with this desktop.`);
     const next = change(all[index]!);
     all[index] = next;
     await this.state.write(all);
     return next;
   }
 
-  private auditStore(): SandboxAuditStore {
-    if (!this.audit) {
-      mkdirSync(this.options.rootDir, { recursive: true, mode: 0o700 });
-      this.audit = new SandboxAuditStore(this.options.auditDbPath ?? join(this.options.rootDir, "audit.db"));
+  /** Runs a call on the verified audit store; a storage failure becomes a named error. */
+  private withAuditStore<T>(call: (store: SandboxAuditStore) => T): T {
+    try {
+      if (!this.audit) {
+        if (this.options.auditStore) {
+          this.audit = this.options.auditStore();
+        } else {
+          mkdirSync(this.options.rootDir, { recursive: true, mode: 0o700 });
+          chmodSync(this.options.rootDir, 0o700);
+          this.audit = new SandboxAuditStore(join(this.options.rootDir, "audit.db"));
+        }
+      }
+      return call(this.audit);
+    } catch (error) {
+      if (error instanceof Refusal || error instanceof IntegrityStop || error instanceof AuditSeqConflictError) throw error;
+      this.log("the sandbox audit store failed", error);
+      throw new Refusal("sandbox-audit-store-failed", "The desktop's record of verified sandbox audit entries could not be read or written. Check free disk space and the permissions of the OpenAdminOS data folder, then try again.");
     }
-    return this.audit;
   }
 
-  /** The desktop's device key and TLS client certificate; made on first pairing only. */
-  private async credentials(create: boolean): Promise<Credentials> {
-    const secrets = this.options.secrets;
-    const [identityPem, keyPem, certificatePem] = await Promise.all([
-      secrets.get(SANDBOX_SECRET_KEYS.identity),
-      secrets.get(SANDBOX_SECRET_KEYS.tlsKey),
-      secrets.get(SANDBOX_SECRET_KEYS.tlsCertificate),
-    ]);
-    if (identityPem && keyPem && certificatePem) {
-      return { identity: importDevicePrivateKey(identityPem), tls: { keyPem, certificatePem, pin: tlsSpkiSha256(certificatePem) } };
+  private record(events: readonly AuditLogEventSeed[]): void {
+    try {
+      this.options.recordAudit(events);
+    } catch (error) {
+      this.log("the desktop audit log could not record a sandbox event", error);
+      throw new Refusal("audit-log-failed", "The desktop's audit log could not record this, so it was not done. Check free disk space and the permissions of the OpenAdminOS data folder, then try again.");
     }
-    if (!create) {
+  }
+
+  /**
+   * The desktop's device key and TLS client certificate, one bundle in the
+   * secret store. A new one is made only while no sandbox is paired;
+   * otherwise a missing key is refused, because the paired sandboxes know
+   * only the old one.
+   */
+  private async credentials(mayCreate: boolean): Promise<Credentials> {
+    let text: string | undefined;
+    try {
+      text = await this.options.secrets.get(SANDBOX_IDENTITY_SECRET);
+    } catch (error) {
+      this.log("the sandbox identity could not be read from the secret store", error);
+      throw new Refusal("keychain-unavailable", "The system keychain did not answer, so the desktop's sandbox key cannot be read. Unlock the keychain, or check that secure storage is available, then try again.");
+    }
+    const bundle = parseBundle(text);
+    if (bundle) {
+      return { identity: importDevicePrivateKey(bundle.identityPem), tls: { keyPem: bundle.tlsKeyPem, certificatePem: bundle.tlsCertificatePem, pin: tlsSpkiSha256(bundle.tlsCertificatePem) } };
+    }
+    if (!mayCreate) {
       throw new Refusal("desktop-identity-missing", `This desktop's sandbox key is gone from the system keychain, so paired sandboxes no longer know it. ${PAIR_AGAIN}`);
     }
     const identity = generateDeviceIdentity();
     // Sandboxes trust the key by its pin, not the certificate dates.
     const tls = createTlsCertificate({ commonName: "openadminos-desktop", validityDays: 3650 });
-    await secrets.set(SANDBOX_SECRET_KEYS.identity, exportDevicePrivateKey(identity));
-    await secrets.set(SANDBOX_SECRET_KEYS.tlsKey, tls.privateKeyPem);
-    await secrets.set(SANDBOX_SECRET_KEYS.tlsCertificate, tls.certificatePem);
+    const next: IdentityBundle = { version: 1, identityPem: exportDevicePrivateKey(identity), tlsKeyPem: tls.privateKeyPem, tlsCertificatePem: tls.certificatePem };
+    try {
+      await this.options.secrets.set(SANDBOX_IDENTITY_SECRET, JSON.stringify(next));
+    } catch (error) {
+      this.log("the sandbox identity could not be written to the secret store", error);
+      throw new Refusal("keychain-unavailable", "The system keychain did not take the desktop's sandbox key. Unlock the keychain, or check that secure storage is available, then pair again.");
+    }
     return { identity, tls: { keyPem: tls.privateKeyPem, certificatePem: tls.certificatePem, pin: tls.spkiSha256 } };
+  }
+
+  private summary(sandbox: StoredSandbox): EnterpriseSandbox {
+    const pin = this.withAuditStore((store) => store.pin(sandbox.pairing.record.pairingId));
+    return summary(sandbox, pin?.seq ?? 0);
   }
 
   private event(sandbox: StoredSandbox, id: string, type: string, details: Record<string, unknown>): AuditLogEventSeed {
@@ -630,11 +948,17 @@ export class SandboxService implements EnterpriseSandboxes {
       id,
       timestamp: this.now().toISOString(),
       type,
-      source: "sandbox",
+      source: "sandbox-link",
       tenantId: sandbox.tenantId,
       organizationId: sandbox.organizationId,
       details: { sandboxId: sandbox.sandboxId, pairingId: sandbox.pairing.record.pairingId, ...details },
     };
+  }
+
+  private log(message: string, error: unknown): void {
+    const detail = error instanceof Error ? error.message : String(error);
+    if (this.options.log) this.options.log(`[sandboxes] ${message}`, { detail });
+    else console.warn(`[sandboxes] ${message}`, { detail });
   }
 
   private serial<T>(task: () => Promise<T>): Promise<T> {
@@ -643,20 +967,60 @@ export class SandboxService implements EnterpriseSandboxes {
     return next;
   }
 
-  /** Runs an operation in turn and turns every failure into a named error. */
-  private operation<T>(task: () => Promise<T>): Promise<EnterpriseResult<T>> {
+  /** Runs an operation in turn and turns every failure into a named error with a recovery step. */
+  private operation<T>(name: string, task: () => Promise<T>): Promise<EnterpriseResult<T>> {
     return this.serial(async () => {
       try {
         return { ok: true as const, value: await task() };
       } catch (error) {
         if (error instanceof Refusal || error instanceof IntegrityStop) return { ok: false as const, error: { code: error.code, message: clip(error.message) } };
-        return { ok: false as const, error: { code: "sandbox-failed", message: clip(`The sandbox request failed: ${(error as Error).message}`) } };
+        if (error instanceof TenantClosedError) return { ok: false as const, error: { code: "organization-disconnected", message: DISCONNECTED } };
+        if (error instanceof SandboxStateError) {
+          this.log("the list of paired sandboxes could not be read", error);
+          return {
+            ok: false as const,
+            error: { code: "sandbox-state-unreadable", message: "The list of paired sandboxes in the OpenAdminOS data folder cannot be read. Restore sandboxes.json from a backup, or remove it and pair the sandboxes again." },
+          };
+        }
+        this.log(`the sandbox ${name} request failed`, error);
+        return { ok: false as const, error: { code: "sandbox-failed", message: `The sandbox ${name} request could not be completed. Try again; the app log names the cause.` } };
       }
     });
   }
 }
 
-type CheckedRun = { kind: "run"; run: RunRecord } | { kind: "pending" } | { kind: "problem"; message: string };
+function parseBundle(text: string | undefined): IdentityBundle | undefined {
+  if (!text) return undefined;
+  try {
+    const value = JSON.parse(text) as Partial<IdentityBundle>;
+    if (value.version !== 1 || typeof value.identityPem !== "string" || typeof value.tlsKeyPem !== "string" || typeof value.tlsCertificatePem !== "string") return undefined;
+    importDevicePrivateKey(value.identityPem);
+    tlsSpkiSha256(value.tlsCertificatePem);
+    return value as IdentityBundle;
+  } catch {
+    return undefined;
+  }
+}
+
+function unverifiedText(reason: UnverifiedReason | undefined): string {
+  switch (reason) {
+    case "agent-mismatch":
+      return "the verified audit rows name another agent for it.";
+    case "status-mismatch":
+      return "the verified audit rows name another status for it.";
+    case "digest-mismatch":
+      return "the record differs from the one the verified audit rows name.";
+    default:
+      return "the verified audit rows hold no finished event for it yet.";
+  }
+}
+
+function clipId(value: string | undefined): string {
+  if (!value) return "unknown";
+  return value.length > 64 ? `${value.slice(0, 61)}...` : value;
+}
+
+type CheckedRun = { kind: "run"; run: RunRecord; digest: string } | { kind: "pending" } | { kind: "problem"; message: string };
 
 /**
  * Builds the desktop's record of a sandbox run from an allowlist of the
@@ -733,7 +1097,8 @@ function sandboxRun(raw: unknown, sandbox: StoredSandbox): CheckedRun {
       pairingKeyFingerprint: fingerprintOf(sandbox.pairing.record),
     },
   };
-  return { kind: "run", run };
+  // The digest of the record as received, which the audit event must name.
+  return { kind: "run", run, digest: runRecordDigest(raw) };
 }
 
 function sandboxSteps(value: unknown, runId: string): RunRecord["steps"] | undefined {
@@ -838,7 +1203,7 @@ function remoteStatus(body: Record<string, unknown>): EnterpriseSandboxRemoteSta
   };
 }
 
-function summary(sandbox: StoredSandbox): EnterpriseSandbox {
+function summary(sandbox: StoredSandbox, auditSeq: number): EnterpriseSandbox {
   return {
     sandboxId: sandbox.sandboxId,
     name: sandbox.name,
@@ -850,7 +1215,7 @@ function summary(sandbox: StoredSandbox): EnterpriseSandbox {
     state: sandbox.failure ? "stopped" : "paired",
     ...(sandbox.failure ? { failure: { ...sandbox.failure } } : {}),
     ...(sandbox.lastSyncAt ? { lastSyncAt: sandbox.lastSyncAt } : {}),
-    auditSeq: sandbox.auditPin.seq,
+    auditSeq,
     assignmentVersion: sandbox.assignmentVersion,
   };
 }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -10,10 +10,12 @@ import { parsePairingCode } from "@openadminos/pairing";
 import { canonicalJson, chainHash, type AuditLogEventSeed } from "@openadminos/runtime";
 import { bundledHash, startTestSandbox, TEST_SANDBOX_TENANT, type TestSandbox } from "@openadminos/sandbox-host/testing";
 
+import { TenantClosedError, TenantLifecycle } from "../tenant-lifecycle.js";
 import { createSandboxCapabilities } from "./capabilities.js";
 import { readOnlyCatalog } from "./catalog.js";
-import { SANDBOX_SECRET_KEYS, SandboxService } from "./service.js";
-import { tlsSandboxTransport, type SandboxReply, type SandboxRequest, type SandboxTransport } from "./transport.js";
+import { SANDBOX_IDENTITY_SECRET, SandboxService, type SandboxServiceOptions } from "./service.js";
+import { SandboxAuditStore } from "./store.js";
+import { SandboxTransportError, tlsSandboxTransport, type SandboxReply, type SandboxRequest, type SandboxTransport } from "./transport.js";
 
 const ORG: EnterpriseOrganization = { id: "org-1", name: "Contoso", tenantId: TEST_SANDBOX_TENANT };
 
@@ -37,6 +39,17 @@ function catalogEntry(id: string): EnterpriseReadOnlyAgent {
   return { id, name: id, scopes: [], manifestSha256: bundledHash(id) };
 }
 
+/** An audit store that fails once before its commit, as a crash between rows and pin would. */
+class CrashingAuditStore extends SandboxAuditStore {
+  crashes = 0;
+  protected override beforeCommit(): void {
+    if (this.crashes > 0) {
+      this.crashes -= 1;
+      throw new Error("crashed before commit");
+    }
+  }
+}
+
 interface Desktop {
   service: SandboxService;
   rootDir: string;
@@ -46,10 +59,12 @@ interface Desktop {
   requests: SandboxRequest[];
   organizations: EnterpriseOrganization[];
   intercept: { current: Intercept | undefined };
+  lifecycle: TenantLifecycle;
+  store: CrashingAuditStore;
   close(): Promise<void>;
 }
 
-async function desktop(options: { organizations?: EnterpriseOrganization[] } = {}): Promise<Desktop> {
+async function desktop(options: { organizations?: EnterpriseOrganization[]; limits?: SandboxServiceOptions["limits"] } = {}): Promise<Desktop> {
   const rootDir = await mkdtemp(join(tmpdir(), "oaos-desktop-sandboxes-"));
   const secrets = memorySecrets();
   const runs = new Map<string, RunRecord>();
@@ -57,18 +72,47 @@ async function desktop(options: { organizations?: EnterpriseOrganization[] } = {
   const requests: SandboxRequest[] = [];
   const organizations = options.organizations ?? [ORG];
   const intercept: { current: Intercept | undefined } = { current: undefined };
+  const lifecycle = new TenantLifecycle();
+  let store: CrashingAuditStore | undefined;
+  const openStore = () => (store ??= new CrashingAuditStore(join(rootDir, "audit.db")));
+  const assertOpen = (tenantId: string) => {
+    if (lifecycle.phase(tenantId) !== "open" || !lifecycle.isWritable(tenantId)) throw new TenantClosedError(tenantId, "test import");
+  };
   const service = new SandboxService({
     rootDir,
     secrets,
     organizations: async () => organizations,
     catalog: async () => [catalogEntry("compliance-overview"), catalogEntry("dormant-app-registrations"), catalogEntry("os-update-posture")],
+    withTenantLease: (tenantId, work) => lifecycle.withTenantLease(tenantId, (lease) => work({ signal: lease.signal })),
+    // The same replace rule as AppStateStore.importSandboxRuns.
     importRuns: async (imported) => {
-      for (const run of imported) runs.set(run.id, run);
-      return imported.length;
+      let changed = 0;
+      for (const run of imported) {
+        assertOpen(run.tenantId!);
+        const existing = runs.get(run.id);
+        if (existing && !(run.attestedBy && (!existing.attestedBy || run.attestedBy.checkpointSeq > existing.attestedBy.checkpointSeq))) continue;
+        runs.set(run.id, run);
+        changed += 1;
+      }
+      return changed;
+    },
+    attestRuns: async (entries) => {
+      let changed = 0;
+      for (const entry of entries) {
+        assertOpen(entry.tenantId);
+        const run = runs.get(entry.runId);
+        if (!run || run.attestedBy) continue;
+        runs.set(entry.runId, { ...run, attestedBy: entry.attestedBy });
+        changed += 1;
+      }
+      return changed;
     },
     recordAudit: (events) => {
-      audit.push(...events);
+      for (const event of events) if (!audit.some((existing) => existing.id === event.id)) audit.push(event);
     },
+    log: () => undefined,
+    auditStore: openStore,
+    ...(options.limits ? { limits: options.limits } : {}),
     transport: (request) => {
       requests.push(request);
       return intercept.current ? intercept.current(tlsSandboxTransport, request) : tlsSandboxTransport(request);
@@ -83,6 +127,10 @@ async function desktop(options: { organizations?: EnterpriseOrganization[] } = {
     requests,
     organizations,
     intercept,
+    lifecycle,
+    get store() {
+      return openStore();
+    },
     async close() {
       service.close();
       await rm(rootDir, { recursive: true, force: true });
@@ -128,9 +176,9 @@ async function nextCode(sandbox: TestSandbox, after: string): Promise<string> {
   return sandbox.code();
 }
 
-async function paired(): Promise<{ sandbox: TestSandbox; desk: Desktop; close(): Promise<void> }> {
+async function paired(options: Parameters<typeof desktop>[0] = {}): Promise<{ sandbox: TestSandbox; desk: Desktop; close(): Promise<void> }> {
   const sandbox = await startTestSandbox();
-  const desk = await desktop();
+  const desk = await desktop(options);
   const result = await desk.service.pair({ address: sandbox.address, code: sandbox.code(), organizationId: "org-1" });
   value(result);
   return {
@@ -174,13 +222,13 @@ describe("SandboxService pairing", () => {
       assert.equal(sandboxed.pairingKeyFingerprint.length, 52);
       assert.equal(sandbox.host.currentPairing?.record.organizationId, "org-1");
       assert.deepEqual((await desk.service.list()).map((entry) => entry.sandboxId), ["mini-pc"]);
-      assert.deepEqual([...desk.secrets.values.keys()].sort(), Object.values(SANDBOX_SECRET_KEYS).sort());
+      assert.deepEqual([...desk.secrets.values.keys()], [SANDBOX_IDENTITY_SECRET]);
       // The keys are never written next to the pairing records.
       for (const file of await readdir(desk.rootDir)) {
         const text = await readFile(join(desk.rootDir, file), "utf8").catch(() => "");
         assert.ok(!/PRIVATE KEY/.test(text), `${file} holds no private key`);
       }
-      assert.ok(desk.audit.some((event) => event.type === "sandbox.pairing.created" && event.source === "sandbox"));
+      assert.ok(desk.audit.some((event) => event.type === "sandbox.pairing.created" && event.source === "sandbox-link"));
     } finally {
       await desk.close();
       await sandbox.close();
@@ -284,6 +332,10 @@ describe("SandboxService sync", () => {
       assert.equal(unverified.runsImported, 1);
       assert.equal(unverified.runsUnverified, 1);
       assert.equal([...h.desk.runs.values()].filter((run) => !run.attestedBy).length, 1);
+      // The next sync reads the event and verifies the waiting run.
+      h.desk.intercept.current = undefined;
+      assert.equal(value(await h.desk.service.sync("mini-pc")).runsVerified, 1);
+      assert.equal([...h.desk.runs.values()].filter((run) => !run.attestedBy).length, 0);
     } finally {
       await h.close();
     }
@@ -326,7 +378,10 @@ describe("SandboxService sync", () => {
         if (!request.path.startsWith("/v1/runs")) return reply;
         return { ...reply, body: { ...(reply.body as object), generation: "another-generation" } };
       };
-      assert.equal(value(await h.desk.service.sync("mini-pc")).runsImported, 2, "a new generation reads from 0");
+      const reread = value(await h.desk.service.sync("mini-pc"));
+      // Read again from 0, but a reread never replaces the verified records.
+      assert.equal(reread.runsImported, 0, "a new generation reads from 0");
+      assert.equal(reread.runsSkipped, 2);
     } finally {
       await h.close();
     }
@@ -369,8 +424,9 @@ describe("SandboxService sync", () => {
       assert.equal(run.tenantId, TEST_SANDBOX_TENANT);
       assert.equal(run.executedOn?.kind === "sandbox" ? run.executedOn.name : "", "Office mini PC", "the name is the paired one");
       assert.equal("extra" in (run.executedOn ?? {}), false);
-      assert.notEqual(run.attestedBy?.pairingKeyFingerprint, "X".repeat(52), "the attestation is the desktop's own");
-      assert.equal(run.executedOn?.kind === "sandbox" ? run.executedOn.pairingKeyFingerprint : "", run.attestedBy?.pairingKeyFingerprint);
+      // The record differs from the one the audit event names, so the sandbox's own attestation is not taken and none is set.
+      assert.equal(run.attestedBy, undefined);
+      assert.equal(run.executedOn?.kind === "sandbox" ? run.executedOn.pairingKeyFingerprint?.length : 0, 52);
     } finally {
       await h.close();
     }
@@ -618,7 +674,9 @@ describe("SandboxService without a paired sandbox", () => {
           secrets: memorySecrets(),
           organizations: async () => [ORG],
           catalog: async () => [],
+          withTenantLease: (_tenantId, work) => work({ signal: new AbortController().signal }),
           importRuns: async () => 0,
+          attestRuns: async () => 0,
           recordAudit: () => undefined,
           transport: () => Promise.reject(new Error("no connection is expected")),
         });
@@ -641,5 +699,277 @@ describe("readOnlyCatalog", () => {
     assert.equal(inactive.manifestSha256, bundledHash("find-inactive-devices"));
     assert.ok(inactive.scopes.includes("DeviceManagementManagedDevices.Read.All"));
     assert.equal(catalog.find((agent) => agent.id === "offboarding-agent"), undefined, "a write agent is not offered");
+  });
+});
+
+/** Changes every run the sandbox lists, as a sandbox that lies about a record would. */
+function onRuns(change: (run: Record<string, unknown>) => void, extra: (body: Record<string, unknown>) => void = () => undefined): Intercept {
+  return async (next, request) => {
+    const reply = await next(request);
+    if (!request.path.startsWith("/v1/runs") || reply.status !== 200) return reply;
+    const body = structuredClone(reply.body) as { runs: Array<{ run: Record<string, unknown> }> } & Record<string, unknown>;
+    for (const entry of body.runs) change(entry.run);
+    extra(body);
+    return { ...reply, body };
+  };
+}
+
+describe("SandboxService run verification binds content", () => {
+  for (const [name, change, reason] of [
+    ["a tampered result", (run: Record<string, unknown>) => {
+      run.result = { forged: true };
+    }, "the record differs"],
+    ["a tampered status", (run: Record<string, unknown>) => {
+      run.status = "failed";
+    }, "another status"],
+    ["a tampered agent", (run: Record<string, unknown>) => {
+      run.agentSlug = "compliance-overview";
+    }, "another agent"],
+  ] as const) {
+    it(`imports a run with ${name} as unverified, with the reason`, async () => {
+      const h = await paired();
+      try {
+        await h.sandbox.runAgent();
+        h.desk.intercept.current = onRuns(change);
+        const result = value(await h.desk.service.sync("mini-pc"));
+        assert.equal(result.runsVerified, 0);
+        assert.equal(result.runsUnverified, 1);
+        assert.ok(result.problems.some((line) => line.includes("imported unverified") && line.includes(reason)), JSON.stringify(result.problems));
+        assert.equal([...h.desk.runs.values()][0]?.attestedBy, undefined);
+        // Checked again on every sync, and still not verified: the record differs.
+        h.desk.intercept.current = undefined;
+        assert.equal(value(await h.desk.service.sync("mini-pc")).runsVerified, 0);
+      } finally {
+        await h.close();
+      }
+    });
+  }
+
+  it("takes an honest rewrite verified against the newer event, and never a reread that differs", async () => {
+    const h = await paired();
+    try {
+      const outcome = await h.sandbox.runAgent();
+      assert.equal(outcome.kind, "completed");
+      const runId = outcome.kind === "completed" ? outcome.run.id : "";
+      const first = value(await h.desk.service.sync("mini-pc"));
+      assert.equal(first.runsVerified, 1);
+      const before = h.desk.runs.get(runId)!;
+
+      h.sandbox.rewriteRun(runId, (run) => ({ ...run, status: "failed", error: "The report could not be recorded." }));
+      const rewritten = value(await h.desk.service.sync("mini-pc"));
+      assert.equal(rewritten.runsImported, 1);
+      assert.equal(rewritten.runsVerified, 1);
+      const after = h.desk.runs.get(runId)!;
+      assert.equal(after.status, "failed");
+      assert.ok(after.attestedBy!.checkpointSeq > before.attestedBy!.checkpointSeq);
+
+      // A cursor reset rereads the run with a tampered result: it stays as verified, not replaced.
+      h.desk.intercept.current = onRuns(
+        (run) => {
+          run.result = { forged: true };
+        },
+        (body) => {
+          body.generation = "after-reset";
+          body.condition = { code: "cursor-reset", message: "Cursors started over." };
+        },
+      );
+      const reread = value(await h.desk.service.sync("mini-pc"));
+      assert.equal(reread.runsImported, 0);
+      assert.equal(reread.runsSkipped, 1);
+      assert.deepEqual(h.desk.runs.get(runId), after);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it("verifies a run on a later sync when a capped audit read left its event for later", async () => {
+    const h = await paired({ limits: { auditBatches: 1 } });
+    try {
+      await h.sandbox.runAgent();
+      h.desk.intercept.current = smallPages;
+      const first = value(await h.desk.service.sync("mini-pc"));
+      assert.equal(first.runsUnverified, 1);
+      assert.ok(first.problems.some((line) => line.includes("More audit entries remain")));
+      let verified = 0;
+      for (let round = 0; round < 20 && verified === 0; round += 1) verified = value(await h.desk.service.sync("mini-pc")).runsVerified;
+      assert.equal(verified, 1, "the waiting run was verified once its event was read");
+      assert.ok([...h.desk.runs.values()][0]?.attestedBy);
+    } finally {
+      await h.close();
+    }
+  });
+});
+
+describe("SandboxService under the tenant lease", () => {
+  it("stops a pending sync on Disconnect, takes nothing and settles for the drain", async () => {
+    const h = await paired();
+    try {
+      await h.sandbox.runAgent();
+      let reached!: () => void;
+      const waiting = new Promise<void>((resolve) => {
+        reached = resolve;
+      });
+      h.desk.intercept.current = async (next, request) => {
+        if (request.path.startsWith("/v1/runs")) {
+          reached();
+          await new Promise<void>((resolve) => request.signal?.addEventListener("abort", () => resolve(), { once: true }));
+        }
+        return next(request);
+      };
+      const pending = h.desk.service.sync("mini-pc");
+      await waiting;
+      h.desk.lifecycle.close(TEST_SANDBOX_TENANT);
+      assert.equal(code(await pending), "organization-disconnected");
+      assert.equal((await h.desk.lifecycle.drain(TEST_SANDBOX_TENANT, 1000)).drained, true);
+      assert.equal(h.desk.runs.size, 0);
+      // While it is closed nothing starts.
+      const before = h.desk.requests.length;
+      assert.equal(code(await h.desk.service.sync("mini-pc")), "organization-not-connected");
+      assert.equal(h.desk.requests.length, before);
+      assert.equal((await h.desk.service.list())[0]?.state, "paired", "a disconnect is not an integrity failure");
+    } finally {
+      await h.close();
+    }
+  });
+});
+
+describe("SandboxService assignment versions", () => {
+  it("reserves the version before sending and reconciles after a lost answer", async () => {
+    const h = await paired();
+    try {
+      h.desk.intercept.current = async (next, request) => {
+        const reply = await next(request);
+        if (request.method === "PUT") throw new SandboxTransportError("unreachable", "The connection broke before the answer.");
+        return reply;
+      };
+      assert.equal(code(await h.desk.service.assign("mini-pc", [{ agentId: "os-update-posture", intervalSeconds: 3600 }])), "assignment-outcome-unknown");
+      assert.equal(h.sandbox.host.status().assignmentVersion, 1, "the sandbox took it");
+      assert.equal((await h.desk.service.list())[0]?.assignmentVersion, 1, "the version was reserved");
+
+      h.desk.intercept.current = undefined;
+      const mark = h.desk.requests.length;
+      const next = value(await h.desk.service.assign("mini-pc", [{ agentId: "compliance-overview", intervalSeconds: 3600 }]));
+      assert.equal(next.version, 2);
+      assert.deepEqual(h.desk.requests.slice(mark).map((request) => `${request.method} ${request.path}`), ["GET /v1/status", "PUT /v1/assignments"]);
+      assert.equal(h.sandbox.host.status().assignmentVersion, 2);
+    } finally {
+      await h.close();
+    }
+  });
+});
+
+describe("SandboxService keys and storage", () => {
+  it("keeps the identity as one bundle and never makes a new one while a sandbox is paired", async () => {
+    const h = await paired();
+    const other = await startTestSandbox({ sandboxId: "other-pc" });
+    try {
+      const bundle = JSON.parse(h.desk.secrets.values.get(SANDBOX_IDENTITY_SECRET)!) as Record<string, unknown>;
+      assert.deepEqual(Object.keys(bundle).sort(), ["identityPem", "tlsCertificatePem", "tlsKeyPem", "version"]);
+      h.desk.secrets.values.clear();
+      assert.equal(code(await h.desk.service.sync("mini-pc")), "desktop-identity-missing");
+      assert.equal(code(await h.desk.service.pair({ address: other.address, code: other.code(), organizationId: "org-1" })), "desktop-identity-missing");
+      assert.equal(h.desk.secrets.values.size, 0, "no new key was made");
+      assert.equal(other.host.currentPairing, undefined);
+    } finally {
+      await other.close();
+      await h.close();
+    }
+  });
+
+  it("moves audit rows and the pin together: a crash before the commit leaves both as they were", async () => {
+    const h = await paired();
+    try {
+      await h.sandbox.runAgent();
+      const pairingId = h.sandbox.host.currentPairing!.record.pairingId;
+      const seqBefore = (await h.desk.service.list())[0]!.auditSeq;
+      h.desk.store.crashes = 1;
+      assert.equal(code(await h.desk.service.sync("mini-pc")), "sandbox-audit-store-failed");
+      assert.equal((await h.desk.service.list())[0]!.auditSeq, seqBefore);
+      assert.equal(h.desk.store.count(pairingId), 0);
+      const recovered = value(await h.desk.service.sync("mini-pc"));
+      assert.equal(recovered.runsVerified, 1);
+      assert.equal(h.desk.store.count(pairingId), recovered.auditRowsAccepted);
+      const ids = h.desk.audit.filter((event) => event.type === "sandbox.audit.accepted").map((event) => event.id);
+      assert.equal(new Set(ids).size, ids.length, "each accepted batch is recorded once");
+    } finally {
+      await h.close();
+    }
+  });
+
+  it("refuses a stored seq with another hash as a fork", () => {
+    const store = new SandboxAuditStore(":memory:");
+    try {
+      const row = { seq: 1, previous_sha256: "0".repeat(64), sha256: "a".repeat(64), event_json: "{}" };
+      store.start("pairing-1", { seq: 0, sha256: "0".repeat(64) });
+      store.acceptBatch("pairing-1", "mini-pc", [row], { seq: 1, sha256: row.sha256 }, new Date().toISOString());
+      store.acceptBatch("pairing-1", "mini-pc", [row], { seq: 1, sha256: row.sha256 }, new Date().toISOString());
+      assert.throws(() => store.acceptBatch("pairing-1", "mini-pc", [{ ...row, sha256: "b".repeat(64) }], { seq: 1, sha256: "b".repeat(64) }, new Date().toISOString()), /another hash/);
+      assert.deepEqual(store.pin("pairing-1"), { seq: 1, sha256: "a".repeat(64) });
+      assert.equal(store.count("pairing-1"), 1);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("keeps its folder 0700 and audit.db 0600, and removes a pairing's rows on unpair", async () => {
+    const h = await paired();
+    try {
+      await h.sandbox.runAgent();
+      value(await h.desk.service.sync("mini-pc"));
+      assert.equal((await stat(h.desk.rootDir)).mode & 0o777, 0o700);
+      assert.equal((await stat(join(h.desk.rootDir, "audit.db"))).mode & 0o777, 0o600);
+      const pairingId = h.sandbox.host.currentPairing!.record.pairingId;
+      assert.ok(h.desk.store.count(pairingId) > 0);
+      value(await h.desk.service.unpair("mini-pc"));
+      assert.equal(h.desk.store.count(pairingId), 0);
+      assert.equal(h.desk.store.pin(pairingId), undefined);
+    } finally {
+      await h.close();
+    }
+  });
+});
+
+describe("SandboxService bounds and checks", () => {
+  it("caps runs per sync, saves the cursor page by page and lists at most 20 problems", async () => {
+    const h = await paired({ limits: { runs: 2 } });
+    try {
+      for (let index = 0; index < 3; index += 1) await h.sandbox.runAgent();
+      h.desk.intercept.current = onRuns(() => undefined, (body) => {
+        body.problems = Array.from({ length: 30 }, (_, index) => ({ runId: `run-${"x".repeat(100)}-${index}`, message: "unreadable" }));
+      });
+      const first = value(await h.desk.service.sync("mini-pc"));
+      assert.equal(first.runsImported, 2);
+      assert.ok(first.problems.length <= 21);
+      assert.match(first.problems.at(-1)!, /more not listed/);
+      assert.ok(first.problems.some((line) => line.includes("More runs remain")));
+      assert.ok(first.problems.every((line) => line.length <= 300));
+      h.desk.intercept.current = undefined;
+      const second = value(await h.desk.service.sync("mini-pc"));
+      assert.equal(second.runsImported, 1, "the next sync takes the rest");
+      assert.equal(h.desk.runs.size, 3);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it("refuses a sandbox id the host does not allow, and probes without a client certificate", async () => {
+    const sandbox = await startTestSandbox();
+    const desk = await desktop();
+    try {
+      desk.intercept.current = async (next, request) => {
+        const reply = await next(request);
+        if (request.method === "GET" && request.path === "/v1/pair") return { ...reply, body: { ...(reply.body as object), sandboxId: "bad id!" } };
+        return reply;
+      };
+      assert.equal(code(await desk.service.pair({ address: sandbox.address, code: sandbox.code(), organizationId: "org-1" })), "sandbox-id-invalid");
+      assert.equal(desk.requests[0]?.credentials, undefined, "the probe carries no client certificate");
+      desk.intercept.current = undefined;
+      value(await desk.service.pair({ address: sandbox.address, code: sandbox.code(), organizationId: "org-1" }));
+      const post = desk.requests.find((request) => request.method === "POST");
+      assert.ok(post?.credentials, "the proof is sent with the client certificate");
+    } finally {
+      await desk.close();
+      await sandbox.close();
+    }
   });
 });

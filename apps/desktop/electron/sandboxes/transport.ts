@@ -20,7 +20,10 @@ export interface ClientCredentials {
 
 export interface SandboxRequest {
   address: SandboxAddress;
-  credentials: ClientCredentials;
+  /** Left out for the pairing probe, which the sandbox answers without a client certificate. */
+  credentials?: ClientCredentials;
+  /** Aborts the request, for example when the organization is disconnected. */
+  signal?: AbortSignal;
   /** Called with the pin of the key the sandbox presented; false stops before anything is sent. */
   acceptPin(pin: string): boolean;
   method: "GET" | "POST" | "PUT" | "DELETE";
@@ -37,7 +40,7 @@ export interface SandboxReply {
 
 export type SandboxTransport = (request: SandboxRequest) => Promise<SandboxReply>;
 
-export type SandboxTransportFailure = "address-not-private" | "unreachable" | "tls-pin-mismatch" | "reply-invalid";
+export type SandboxTransportFailure = "address-not-private" | "unreachable" | "tls-pin-mismatch" | "reply-invalid" | "aborted";
 
 export class SandboxTransportError extends Error {
   constructor(readonly code: SandboxTransportFailure, message: string, readonly pin?: string) {
@@ -53,17 +56,22 @@ export const tlsSandboxTransport: SandboxTransport = (request) => {
   if (!isPrivateAddress(address.host)) {
     return Promise.reject(new SandboxTransportError("address-not-private", `${where} is not a private address. A sandbox is reached only on loopback, a private network, link-local, a tailnet or fd00::/8.`));
   }
+  const aborted = () => new SandboxTransportError("aborted", `The request to the sandbox at ${where} was stopped.`);
+  if (request.signal?.aborted) return Promise.reject(aborted());
   return new Promise<SandboxReply>((resolve, reject) => {
     let settled = false;
     let socket: TLSSocket | undefined;
+    const onAbort = () => finish(aborted());
     const finish = (error: Error | undefined, reply?: SandboxReply) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      request.signal?.removeEventListener("abort", onAbort);
       socket?.destroy();
       if (error) reject(error);
       else resolve(reply!);
     };
+    request.signal?.addEventListener("abort", onAbort, { once: true });
     const timer = setTimeout(() => {
       finish(new SandboxTransportError("unreachable", `The sandbox at ${where} did not answer within ${REQUEST_TIMEOUT_MS / 1000} seconds. Check that it runs and that this device can reach it.`));
     }, REQUEST_TIMEOUT_MS);
@@ -71,8 +79,7 @@ export const tlsSandboxTransport: SandboxTransport = (request) => {
     socket = tlsConnect({
       host: address.host,
       port: address.port,
-      key: request.credentials.keyPem,
-      cert: request.credentials.certificatePem,
+      ...(request.credentials ? { key: request.credentials.keyPem, cert: request.credentials.certificatePem } : {}),
       minVersion: "TLSv1.3",
       maxVersion: "TLSv1.3",
       // The sandbox's certificate is self-signed; the pin decides, below.
