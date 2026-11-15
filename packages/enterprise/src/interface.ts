@@ -58,6 +58,141 @@ export interface EnterpriseSettingsSection {
   readonly id: string;
   readonly title: string;
   readonly description: string;
+  /** What the section shows, drawn by the app. No module code runs in the window. */
+  readonly body?: EnterpriseUiBody;
+}
+
+/**
+ * Module UI is declarative: an ordered list of elements from a closed set,
+ * drawn by the app's own renderer with its design system. Text is shown as
+ * text, never as HTML, and nothing is drawn as a link.
+ */
+export type EnterpriseUiTone = "neutral" | "success" | "warning" | "danger";
+
+export interface EnterpriseUiStatus {
+  readonly type: "status";
+  readonly label: string;
+  readonly value: string;
+  readonly tone: EnterpriseUiTone;
+}
+
+export interface EnterpriseUiText {
+  readonly type: "text";
+  readonly text: string;
+}
+
+export interface EnterpriseUiNotice {
+  readonly type: "notice";
+  readonly tone: EnterpriseUiTone;
+  readonly title: string;
+  readonly message: string;
+  /** The step that fixes it. */
+  readonly recovery?: string;
+}
+
+export interface EnterpriseUiField {
+  readonly type: "field";
+  readonly id: string;
+  readonly label: string;
+  /** `code` is drawn in a monospace face, for an address or a pairing code. Fields never hold secrets. */
+  readonly kind: "text" | "code";
+  readonly placeholder?: string;
+  readonly maxLength?: number;
+  readonly value?: string;
+}
+
+export interface EnterpriseUiSelectOption {
+  readonly value: string;
+  readonly label: string;
+}
+
+export interface EnterpriseUiSelect {
+  readonly type: "select";
+  readonly id: string;
+  readonly label: string;
+  readonly options: readonly EnterpriseUiSelectOption[];
+  readonly value?: string;
+}
+
+export interface EnterpriseUiConfirm {
+  readonly title: string;
+  readonly message: string;
+  /** When set, the admin types it exactly before the button acts. */
+  readonly typedPhrase?: string;
+}
+
+export interface EnterpriseUiButton {
+  readonly type: "button";
+  readonly id: string;
+  readonly label: string;
+  readonly kind: "primary" | "secondary" | "danger";
+  /** The action registered with `registerUiAction` that the button calls. */
+  readonly action: string;
+  readonly confirm?: EnterpriseUiConfirm;
+}
+
+export interface EnterpriseUiListRow {
+  readonly label: string;
+  readonly status?: { readonly value: string; readonly tone: EnterpriseUiTone };
+}
+
+export interface EnterpriseUiList {
+  readonly type: "list";
+  readonly rows: readonly EnterpriseUiListRow[];
+}
+
+export type EnterpriseUiElement =
+  | EnterpriseUiStatus
+  | EnterpriseUiText
+  | EnterpriseUiNotice
+  | EnterpriseUiField
+  | EnterpriseUiSelect
+  | EnterpriseUiButton
+  | EnterpriseUiList;
+
+export interface EnterpriseUiBody {
+  readonly elements: readonly EnterpriseUiElement[];
+}
+
+/** What a UI action receives: the button and the section's current values, or a schedule target choice. */
+export type EnterpriseUiActionInput =
+  | {
+      readonly kind: "button";
+      readonly sectionId: string;
+      readonly buttonId: string;
+      /** Field and select values of the section, by element id. */
+      readonly values: { readonly [id: string]: string };
+    }
+  | {
+      readonly kind: "schedule";
+      readonly agentId: string;
+      readonly targetId: string;
+      readonly intervalSeconds: number;
+    };
+
+/** A new body for the section, a notice, or both. */
+export interface EnterpriseUiReply {
+  readonly body?: EnterpriseUiBody;
+  readonly notice?: EnterpriseUiNotice;
+}
+
+export type EnterpriseUiActionHandler = (input: EnterpriseUiActionInput) => EnterpriseUiReply | Promise<EnterpriseUiReply>;
+
+/** A place besides this computer where an agent's schedule can run. */
+export interface EnterpriseScheduleTarget {
+  readonly id: string;
+  readonly label: string;
+  readonly detail?: string;
+  /** Shown, and the target cannot be chosen, when set. */
+  readonly disabledReason?: string;
+  /** The agents it is offered for; every agent when left out. */
+  readonly agentIds?: readonly string[];
+}
+
+export interface EnterpriseScheduleTargets {
+  /** The UI action called with `{ kind: "schedule", agentId, targetId, intervalSeconds }`. */
+  readonly action: string;
+  readonly targets: readonly EnterpriseScheduleTarget[];
 }
 
 /**
@@ -244,6 +379,16 @@ export interface EnterpriseHost {
   /** Registers `openadminos-enterprise:<name>` for the renderer. */
   registerIpc(name: string, handler: EnterpriseIpcHandler): void;
   registerSettingsSection(section: EnterpriseSettingsSection): void;
+  /** Replaces the body of a registered section; the window draws it at once. */
+  updateSettingsSection(id: string, body: EnterpriseUiBody | undefined): void;
+  /**
+   * Registers `openadminos-enterprise:<name>` for buttons and schedule
+   * targets. The input is checked before the handler runs, and the reply
+   * is checked before the window draws it; a failure becomes a notice.
+   */
+  registerUiAction(name: string, handler: EnterpriseUiActionHandler): void;
+  /** Sets or clears the schedule targets the agent schedule card offers. */
+  setScheduleTargets(targets: EnterpriseScheduleTargets | undefined): void;
   /** Sets or clears the status strip entry. */
   setStatusContribution(status: EnterpriseStatusContribution | undefined): void;
   readonly storage: EnterpriseStorage;

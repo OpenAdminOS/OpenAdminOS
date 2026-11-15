@@ -26,8 +26,26 @@ export {
   type EnterpriseSandboxStatus,
   type EnterpriseSandboxSyncResult,
   type EnterpriseSandboxUnpairResult,
+  type EnterpriseScheduleTarget,
+  type EnterpriseScheduleTargets,
   type EnterpriseSettingsSection,
   type EnterpriseStatusContribution,
+  type EnterpriseUiActionHandler,
+  type EnterpriseUiActionInput,
+  type EnterpriseUiBody,
+  type EnterpriseUiButton,
+  type EnterpriseUiConfirm,
+  type EnterpriseUiElement,
+  type EnterpriseUiField,
+  type EnterpriseUiList,
+  type EnterpriseUiListRow,
+  type EnterpriseUiNotice,
+  type EnterpriseUiReply,
+  type EnterpriseUiSelect,
+  type EnterpriseUiSelectOption,
+  type EnterpriseUiStatus,
+  type EnterpriseUiText,
+  type EnterpriseUiTone,
   type EnterpriseStorage,
 } from "./interface.js";
 export {
@@ -59,3 +77,4 @@ export {
   type VerifyLicenceOptions,
 } from "./licence.js";
 export { EnterpriseInterfaceVersionError, defaultEnterpriseModule, isEnterpriseModule } from "./stub.js";
+export { checkScheduleTargets, checkUiAction, checkUiActionInput, checkUiBody, checkUiNotice, checkUiReply, ENTERPRISE_UI_LIMITS } from "./ui.js";

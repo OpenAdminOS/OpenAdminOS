@@ -166,9 +166,12 @@ describe("createEnterpriseHost", () => {
       "organizations",
       "registerIpc",
       "registerSettingsSection",
+      "registerUiAction",
       "sandboxes",
+      "setScheduleTargets",
       "setStatusContribution",
       "storage",
+      "updateSettingsSection",
     ]);
     assert.deepEqual(Object.keys(host.organizations), ["list"]);
     assert.deepEqual(Object.keys(host.agents), ["readOnlyCatalog"]);
@@ -445,7 +448,7 @@ describe("createEnterpriseHost", () => {
     controller.dispose();
     controller.dispose();
     assert.equal(ipc.handlers.size, 0);
-    assert.deepEqual(controller.snapshot(), { status: undefined, settingsSections: [], ipcChannels: [] });
+    assert.deepEqual(controller.snapshot(), { status: undefined, settingsSections: [], scheduleTargets: undefined, ipcChannels: [] });
     assertError(() => host.registerIpc("c", () => null), "disposed");
     assertError(() => host.setStatusContribution(undefined), "disposed");
     await assertRejects(host.storage.keys(), "disposed");
@@ -516,5 +519,64 @@ describe("createEnterpriseHost", () => {
     controller.dispose();
     await assertRejects(host.agents.readOnlyCatalog(), "disposed");
     assertError(() => host.sandboxes.unpair("mini-pc"), "disposed");
+  });
+
+  it("keeps a section body, replaces it and clears it, telling the window each time", () => {
+    const { host, controller, changes } = setup();
+    host.registerSettingsSection({ id: "sandboxes", title: "Sandboxes", description: "Machines you run.", body: { elements: [{ type: "text", text: "None paired." }] } });
+    assert.deepEqual(controller.snapshot().settingsSections[0]?.body, { elements: [{ type: "text", text: "None paired." }] });
+    const before = changes();
+    host.updateSettingsSection("sandboxes", { elements: [{ type: "status", label: "Office mini PC", value: "Paired", tone: "success" }] });
+    assert.equal(changes(), before + 1);
+    assert.equal(controller.snapshot().settingsSections[0]?.body?.elements[0]?.type, "status");
+    host.updateSettingsSection("sandboxes", undefined);
+    assert.equal(controller.snapshot().settingsSections[0]?.body, undefined);
+    assertError(() => host.updateSettingsSection("nothing", undefined), "invalid-name");
+    assertError(() => host.updateSettingsSection("sandboxes", { elements: [{ type: "iframe" }] } as never), "invalid-value");
+    assertError(() => host.registerSettingsSection({ id: "x", title: "X", description: "X", body: { elements: [{ type: "html" }] } as never }), "invalid-value");
+  });
+
+  it("runs a UI action with checked input and draws only a checked reply, a failure as a notice", async () => {
+    const { host, ipc, logs } = setup();
+    const seen: unknown[] = [];
+    host.registerUiAction("sandboxes.pair", async (input) => {
+      seen.push(input);
+      if (input.kind === "button" && input.values.address === "fail") throw new Error("The sandbox at 10.0.0.1:7443 did not answer.");
+      if (input.kind === "button" && input.values.address === "bad") return { body: { elements: [{ type: "iframe" }] } } as never;
+      return { body: { elements: [{ type: "status", label: "Sandbox", value: "Paired", tone: "success" }] } };
+    });
+    const channel = "openadminos-enterprise:sandboxes.pair";
+    const ok = (await ipc.invoke(channel, { kind: "button", sectionId: "sandboxes", buttonId: "pair", values: { address: "10.0.0.1:7443" } })) as { body: { elements: unknown[] } };
+    assert.equal(ok.body.elements.length, 1);
+    assert.deepEqual(seen[0], { kind: "button", sectionId: "sandboxes", buttonId: "pair", values: { address: "10.0.0.1:7443" } });
+
+    const failed = (await ipc.invoke(channel, { kind: "button", sectionId: "sandboxes", buttonId: "pair", values: { address: "fail" } })) as { notice: { tone: string; message: string; recovery: string } };
+    assert.equal(failed.notice.tone, "danger");
+    assert.match(failed.notice.message, /did not answer/);
+    assert.ok(failed.notice.recovery.length > 0);
+    assert.ok(logs.some((entry) => entry.message.includes("a UI action failed")));
+
+    const drawnNot = (await ipc.invoke(channel, { kind: "button", sectionId: "sandboxes", buttonId: "pair", values: { address: "bad" } })) as { notice: { tone: string; message: string } };
+    assert.equal(drawnNot.notice.tone, "danger");
+    assert.match(drawnNot.notice.message, /not an element type/);
+
+    // Input the window should never send is refused before the handler runs.
+    await assertRejects(ipc.invoke(channel, { kind: "button", sectionId: "sandboxes", buttonId: "pair", values: { address: 7 } }) as Promise<unknown>, "invalid-value");
+    assert.equal(seen.length, 3);
+    // Names are shared with IPC handlers.
+    assertError(() => host.registerIpc("sandboxes.pair", () => null), "duplicate");
+  });
+
+  it("offers checked schedule targets and clears them on dispose", () => {
+    const { host, controller } = setup();
+    host.setScheduleTargets({ action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC" }] });
+    assert.equal(controller.snapshot().scheduleTargets?.targets[0]?.label, "Office mini PC");
+    assertError(() => host.setScheduleTargets({ action: "sandboxes.schedule", targets: [{ id: "this-computer", label: "Mine" }] }), "invalid-value");
+    host.setScheduleTargets(undefined);
+    assert.equal(controller.snapshot().scheduleTargets, undefined);
+    host.setScheduleTargets({ action: "sandboxes.schedule", targets: [] });
+    controller.dispose();
+    assert.equal(controller.snapshot().scheduleTargets, undefined);
+    assertError(() => host.setScheduleTargets(undefined), "disposed");
   });
 });

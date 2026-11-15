@@ -18,10 +18,18 @@ import {
   type EnterpriseResult,
   type EnterpriseSandboxAssignmentEntry,
   type EnterpriseSandboxes,
+  type EnterpriseScheduleTargets,
   type EnterpriseSettingsSection,
+  type EnterpriseUiActionHandler,
+  type EnterpriseUiBody,
+  type EnterpriseUiReply,
   type EnterpriseStatusContribution,
   type EnterpriseStorage,
 } from "./interface.js";
+import { EnterpriseHostError } from "./errors.js";
+import { checkScheduleTargets, checkUiActionInput, checkUiBody, checkUiReply, ENTERPRISE_UI_LIMITS } from "./ui.js";
+
+export { EnterpriseHostError, type EnterpriseHostErrorCode } from "./errors.js";
 
 export const ENTERPRISE_LIMITS = Object.freeze({
   maxIpcHandlers: 32,
@@ -53,23 +61,6 @@ const STORAGE_KEY = ENTERPRISE_STORAGE_KEY_PATTERN;
 // C0 and C1 control characters, which have no place in a single line label.
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
-
-export type EnterpriseHostErrorCode =
-  | "invalid-name"
-  | "duplicate"
-  | "limit"
-  | "invalid-value"
-  | "disposed"
-  | "expired";
-
-export class EnterpriseHostError extends Error {
-  readonly code: EnterpriseHostErrorCode;
-  constructor(code: EnterpriseHostErrorCode, message: string) {
-    super(message);
-    this.name = "EnterpriseHostError";
-    this.code = code;
-  }
-}
 
 /** Registers and removes IPC handlers; the desktop passes an `ipcMain` adapter. */
 export interface EnterpriseIpcRegistrar {
@@ -110,6 +101,7 @@ export interface EnterpriseHostCapabilities {
 export interface EnterpriseHostSnapshot {
   readonly status: EnterpriseStatusContribution | undefined;
   readonly settingsSections: readonly EnterpriseSettingsSection[];
+  readonly scheduleTargets: EnterpriseScheduleTargets | undefined;
   readonly ipcChannels: readonly string[];
 }
 
@@ -128,6 +120,7 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
   const channels = new Map<string, string>();
   const sections = new Map<string, EnterpriseSettingsSection>();
   let status: EnterpriseStatusContribution | undefined;
+  let scheduleTargets: EnterpriseScheduleTargets | undefined;
   let disposed = false;
 
   const assertLive = () => {
@@ -147,17 +140,18 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
     error: freezeFn((message: string, fields?: EnterpriseLogFields) => writeLog(options.log, "error", message, fields)),
   });
 
-  const registerIpc = (name: string, handler: EnterpriseIpcHandler): void => {
+  /** Registers one channel under the prefix; IPC handlers and UI actions share the names and the limit. */
+  const register = (name: string, handler: unknown, what: string, listener: (request: EnterpriseJson) => Promise<EnterpriseJson>): void => {
     assertLive();
-    assertName(name, "IPC handler name");
+    assertName(name, `${what} name`);
     if (typeof handler !== "function") {
-      throw new EnterpriseHostError("invalid-value", `The IPC handler for ${name} is not a function.`);
+      throw new EnterpriseHostError("invalid-value", `The ${what} for ${name} is not a function.`);
     }
     if (channels.has(name)) {
-      throw new EnterpriseHostError("duplicate", `An IPC handler named ${name} is already registered.`);
+      throw new EnterpriseHostError("duplicate", `An IPC handler or UI action named ${name} is already registered.`);
     }
     if (channels.size >= ENTERPRISE_LIMITS.maxIpcHandlers) {
-      throw new EnterpriseHostError("limit", `A module can register at most ${ENTERPRISE_LIMITS.maxIpcHandlers} IPC handlers.`);
+      throw new EnterpriseHostError("limit", `A module can register at most ${ENTERPRISE_LIMITS.maxIpcHandlers} IPC handlers and UI actions.`);
     }
     const channel = enterpriseIpcChannel(name);
     options.ipc.handle(channel, async (input: unknown) => {
@@ -166,6 +160,13 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
         throw new EnterpriseHostError("expired", "The team features licence and its grace period ended. Install a renewed licence, then restart OpenAdminOS.");
       }
       const request = checkJson(input ?? null, ENTERPRISE_LIMITS.maxIpcInputBytes, `the request to ${name}`);
+      return checkJson(await listener(request), ENTERPRISE_LIMITS.maxIpcOutputBytes, `the reply from ${name}`);
+    });
+    channels.set(name, channel);
+  };
+
+  const registerIpc = (name: string, handler: EnterpriseIpcHandler): void => {
+    register(name, handler, "IPC handler", async (request) => {
       let result: EnterpriseJson | void;
       try {
         result = await handler(request);
@@ -173,9 +174,27 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
         options.log("error", "enterprise: an IPC handler failed", { name, error: errorMessage(error) });
         throw new Error(`The team feature request ${name} failed: ${errorMessage(error)}`);
       }
-      return checkJson(result ?? null, ENTERPRISE_LIMITS.maxIpcOutputBytes, `the reply from ${name}`);
+      return result ?? null;
     });
-    channels.set(name, channel);
+  };
+
+  /**
+   * A UI action: the window's input is checked before the handler runs, and
+   * the handler's reply before the window draws it. A failure, or a reply
+   * the app does not draw, becomes a danger notice with the reason.
+   */
+  const registerUiAction = (name: string, handler: EnterpriseUiActionHandler): void => {
+    register(name, handler, "UI action", async (request) => {
+      const input = checkUiActionInput(request);
+      let reply: EnterpriseUiReply;
+      try {
+        reply = checkUiReply(await handler(input));
+      } catch (error) {
+        options.log("error", "enterprise: a UI action failed", { name, error: errorMessage(error) });
+        return failedReply(error) as unknown as EnterpriseJson;
+      }
+      return reply as unknown as EnterpriseJson;
+    });
   };
 
   const registerSettingsSection = (section: EnterpriseSettingsSection): void => {
@@ -190,11 +209,29 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
     if (sections.size >= ENTERPRISE_LIMITS.maxSettingsSections) {
       throw new EnterpriseHostError("limit", `A module can register at most ${ENTERPRISE_LIMITS.maxSettingsSections} settings sections.`);
     }
+    const body = section.body === undefined ? undefined : checkUiBody(section.body);
     sections.set(section.id, Object.freeze({
       id: section.id,
       title: checkText(section.title, ENTERPRISE_LIMITS.maxTitleLength, "settings section title"),
       description: checkText(section.description, ENTERPRISE_LIMITS.maxDetailLength, "settings section description"),
+      ...(body ? { body } : {}),
     }));
+    changed();
+  };
+
+  const updateSettingsSection = (id: string, body: EnterpriseUiBody | undefined): void => {
+    assertLive();
+    const section = typeof id === "string" ? sections.get(id) : undefined;
+    if (!section) throw new EnterpriseHostError("invalid-name", "No settings section with that id is registered.");
+    const checked = body === undefined ? undefined : checkUiBody(body);
+    const { body: _previous, ...rest } = section;
+    sections.set(id, Object.freeze({ ...rest, ...(checked ? { body: checked } : {}) }));
+    changed();
+  };
+
+  const setScheduleTargets = (next: EnterpriseScheduleTargets | undefined): void => {
+    assertLive();
+    scheduleTargets = next === undefined ? undefined : checkScheduleTargets(next);
     changed();
   };
 
@@ -219,6 +256,9 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
     entitlement: freezeFn(() => options.entitlement()),
     registerIpc: freezeFn(registerIpc),
     registerSettingsSection: freezeFn(registerSettingsSection),
+    updateSettingsSection: freezeFn(updateSettingsSection),
+    registerUiAction: freezeFn(registerUiAction),
+    setScheduleTargets: freezeFn(setScheduleTargets),
     setStatusContribution: freezeFn(setStatusContribution),
     storage: createStorage(options.storage, assertLive),
     log,
@@ -230,6 +270,7 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
     snapshot: () => Object.freeze({
       status,
       settingsSections: Object.freeze([...sections.values()]),
+      scheduleTargets,
       ipcChannels: Object.freeze([...channels.values()]),
     }),
     dispose: () => {
@@ -245,8 +286,23 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
       channels.clear();
       sections.clear();
       status = undefined;
+      scheduleTargets = undefined;
       changed();
     },
+  });
+}
+
+/** The notice a failed UI action answers with: the reason, and the step that fixes it. */
+function failedReply(error: unknown): EnterpriseUiReply {
+  const reason = errorMessage(error).replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").replace(/<\s*[a-z!/?]/gi, " ").trim().slice(0, ENTERPRISE_UI_LIMITS.maxMessageLength - 1) || "No reason was given.";
+  return Object.freeze({
+    notice: Object.freeze({
+      type: "notice" as const,
+      tone: "danger" as const,
+      title: "The team feature did not complete",
+      message: reason,
+      recovery: "Try again. If it keeps failing, the app log names the cause.",
+    }),
   });
 }
 

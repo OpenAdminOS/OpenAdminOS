@@ -35,7 +35,10 @@ export default module;
 | --- | --- | --- |
 | `entitlement()` | The licence: licensee id, features, validity window and state (`active`, `grace`, `expired`), checked against the clock on each call | |
 | `registerIpc(name, handler)` | Registers `openadminos-enterprise:<name>` for the renderer. The handler gets the validated input only, never the IPC event or window | Lower case names, up to four dot separated parts; 32 handlers; plain JSON input up to 64 KiB and 16 levels deep, replies up to 256 KiB |
-| `registerSettingsSection(section)` | A section for Settings while the module is active | 8 sections; title up to 60 and description up to 300 characters |
+| `registerSettingsSection(section)` | A section for Settings while the module is active, with an optional declarative `body` | 8 sections; title up to 60 and description up to 300 characters; a body as below |
+| `updateSettingsSection(id, body)` | Replaces or clears the body of a registered section; the window draws it at once | A body as below |
+| `registerUiAction(name, handler)` | Registers `openadminos-enterprise:<name>` for buttons and schedule targets; the input is checked before the handler runs and the reply before the window draws it | Shares names and the 32 handler limit with `registerIpc` |
+| `setScheduleTargets(targets)` | Sets or clears where else an agent's schedule can run; the agent schedule card offers them next to This computer | 8 targets |
 | `setStatusContribution(status)` | What the status strip shows while team features are on. With no entry the strip says "Team features on" | Label up to 80 characters, one line |
 | `storage` | Key value storage of plain JSON, kept in its own file apart from app state | 256 keys, 64 KiB per value, 1 MiB in all |
 | `log` | Writes to the app log, prefixed with `enterprise module:` | 500 characters per message |
@@ -46,6 +49,24 @@ export default module;
 The sandbox calls answer `{ ok: true, value }` or `{ ok: false, error: { code, message } }` with a named code; a failure inside the app becomes `internal-error` and is logged. Malformed input throws `invalid-value`, and every call throws `disposed` or `expired` like `storage` once team features are off. Without the app's sandbox support (a host built without it) the calls answer `sandboxes-unavailable` and the lists are empty.
 
 The keys and the verification stay in the public app: the desktop's device key and TLS client certificate are in the app's secret store, and the app pins the sandbox's TLS key, runs the pairing proof, verifies the signed pairing record, checks every audit batch with `verifySignedContinuation` from `@openadminos/pairing`, and signs schedule assignments. A run is attested only when the newest verified finished or rewritten event for it names the digest of the record as received. A sync reads at most 500 runs, 64 MiB of run records and 50 audit batches, saves its place page by page, and lists at most 20 problems and a count of the rest; the next sync goes on from there. Sandbox calls need the sandbox's organization connected, not active, and Disconnect stops them. Unpairing removes the pairing's verified audit rows from the desktop; imported runs keep their attestation. A module decides only when to call. No call crosses a token, key or secret, and nothing runs on a timer: without a call the app opens no connection to a sandbox.
+
+### Declarative UI
+
+Module UI reaches the window as data, never as code: the app's own renderer draws it with its design system, so no module code runs in the window. A body is an ordered list of at most 40 elements from a closed set:
+
+| Element | Fields |
+| --- | --- |
+| `status` | `label`, `value`, `tone` (neutral, success, warning, danger) |
+| `text` | `text`, a paragraph of up to 1000 characters |
+| `notice` | `tone`, `title`, `message`, optional `recovery` |
+| `field` | `id`, `label`, `kind` (`text`, or `code` for a monospace value such as an address), optional `placeholder`, `maxLength` (1 to 2000, default 200) and `value`. Fields never hold secrets |
+| `select` | `id`, `label`, 1 to 50 `options` of `value` and `label`, optional `value` |
+| `button` | `id`, `label`, `kind` (primary, secondary, danger), `action`, optional `confirm` with `title`, `message` and a `typedPhrase` of upper case words and digits the admin types exactly |
+| `list` | up to 50 `rows` of `label` and an optional `status` of `value` and `tone` |
+
+Any other type or field is refused (`invalid-value`). Text is plain text: control characters and anything that looks like markup are refused, and nothing is drawn as a link. Labels are up to 80 characters, values up to 120, messages up to 500.
+
+A button calls its `action` with `{ kind: "button", sectionId, buttonId, values }`, where `values` holds the section's field and select values by id. A schedule target calls the targets' `action` with `{ kind: "schedule", agentId, targetId, intervalSeconds }`. The handler returns `{ body?, notice? }`: a new body replaces the section's, a notice is shown above it. A handler that throws, or a reply the app does not draw, is answered with a danger notice that gives the reason and the step that fixes it, and is logged. `checkUiBody`, `checkUiReply`, `checkUiActionInput` and `checkScheduleTargets` are the checks the host runs.
 
 The host object and every member are frozen. Nothing reachable from it exposes tenant tokens, provider credentials, the keychain or a secret store, and writes to a tenant still go through the app's diff confirmation. Graph calls and prompts stay on the admin's device.
 
