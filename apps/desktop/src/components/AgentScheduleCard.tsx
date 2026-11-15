@@ -13,6 +13,9 @@ import { useAppState } from "../state";
 import { SCHEDULE_ORGANIZATION_COPY, userFacingErrorReason } from "../copy";
 import { resolveOrganizations } from "../shared/openAdminOS";
 import { useToast } from "./Toast";
+import { EnterpriseNotice, invokeUiAction } from "./EnterpriseUi";
+import { useEnterpriseStatus } from "./useEnterpriseStatus";
+import type { EnterpriseUiNoticeView } from "@openadminos/agent-sdk";
 
 const PRESETS = [
   { id: "900", label: "15m", seconds: 15 * 60 },
@@ -91,6 +94,7 @@ export function AgentScheduleCard({
     <div className="space-y-4">
       <SchedulesPausedNotice />
       {schedule ? <ScheduleOrganizationRow agent={agent} /> : null}
+      <ScheduleTargetRow agent={agent} intervalSeconds={draftSeconds} />
       <Switch
         checked={enabled}
         disabled={busy || (!enabled && draftSeconds < 60)}
@@ -351,5 +355,73 @@ function ScheduleOrganizationRow({ agent }: { agent: AgentSummary }) {
       )}
       {error ? <p role="alert" className="mt-1 text-sm text-[var(--color-danger)]">{error}</p> : null}
     </div>
+  );
+}
+
+export const SCHEDULE_TARGET_COPY = {
+  legend: "Where it runs",
+  thisComputer: "This computer",
+  thisComputerDetail: "Runs here while OpenAdminOS is open.",
+  needsInterval: "Choose an interval of at least one minute first.",
+} as const;
+
+/**
+ * Where the schedule runs: this computer, or a place a team features
+ * module offers for this agent. Without a module, or with no place for
+ * this agent, nothing is drawn and the card is as before.
+ */
+function ScheduleTargetRow({ agent, intervalSeconds }: { agent: AgentSummary; intervalSeconds: number }) {
+  const status = useEnterpriseStatus();
+  const contribution = status.active ? status.scheduleTargets : undefined;
+  const targets = (contribution?.targets ?? []).filter((target) => !target.agentIds || target.agentIds.includes(agent.id));
+  const [selected, setSelected] = useState("this-computer");
+  const [notice, setNotice] = useState<EnterpriseUiNoticeView | undefined>();
+  const [busy, setBusy] = useState(false);
+  if (!contribution || targets.length === 0) return null;
+  const tooShort = intervalSeconds < 60;
+
+  const choose = async (targetId: string) => {
+    setSelected(targetId);
+    setNotice(undefined);
+    if (targetId === "this-computer") return;
+    setBusy(true);
+    const reply = await invokeUiAction(contribution.action, { kind: "schedule", agentId: agent.id, targetId, intervalSeconds });
+    setNotice(reply.notice);
+    setBusy(false);
+  };
+
+  const options = [
+    { id: "this-computer", label: SCHEDULE_TARGET_COPY.thisComputer, detail: SCHEDULE_TARGET_COPY.thisComputerDetail, disabledReason: undefined as string | undefined },
+    ...targets.map((target) => ({ id: target.id, label: target.label, detail: target.detail, disabledReason: target.disabledReason ?? (tooShort ? SCHEDULE_TARGET_COPY.needsInterval : undefined) })),
+  ];
+  return (
+    <fieldset className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2.5 ring-1 ring-[var(--color-border-soft)]" aria-busy={busy}>
+      <legend className="float-left w-full text-sm font-medium text-[var(--color-text)]">{SCHEDULE_TARGET_COPY.legend}</legend>
+      <div className="clear-both grid gap-1.5 pt-1.5">
+        {options.map((option) => (
+          <label key={option.id} className={`flex items-start gap-2 text-sm ${option.disabledReason ? "opacity-60" : ""}`}>
+            <input
+              type="radio"
+              name={`schedule-target-${agent.id}`}
+              value={option.id}
+              checked={selected === option.id}
+              disabled={busy || option.disabledReason !== undefined}
+              onChange={() => void choose(option.id)}
+              className="mt-0.5"
+            />
+            <span>
+              <span className="text-[var(--color-text)]">{option.label}</span>
+              {option.detail ? <span className="block text-xs text-[var(--color-text-muted)]">{option.detail}</span> : null}
+              {option.disabledReason ? <span className="block text-xs text-[var(--color-warning)]">{option.disabledReason}</span> : null}
+            </span>
+          </label>
+        ))}
+      </div>
+      {notice ? (
+        <div className="mt-2">
+          <EnterpriseNotice notice={notice} />
+        </div>
+      ) : null}
+    </fieldset>
   );
 }
