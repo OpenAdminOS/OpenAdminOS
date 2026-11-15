@@ -34,7 +34,7 @@ export function isRunVerified(run: { executedOn?: RunExecutedOn; attestedBy?: Ru
     attested.sandboxId === sandbox.sandboxId &&
     typeof attested.pairingKeyFingerprint === "string" &&
     FINGERPRINT.test(attested.pairingKeyFingerprint) &&
-    (sandbox.pairingKeyFingerprint === undefined || sandbox.pairingKeyFingerprint === attested.pairingKeyFingerprint) &&
+    sandbox.pairingKeyFingerprint === attested.pairingKeyFingerprint &&
     Number.isSafeInteger(attested.checkpointSeq) &&
     attested.checkpointSeq >= 0 &&
     typeof attested.verifiedAt === "string" &&

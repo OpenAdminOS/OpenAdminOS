@@ -837,7 +837,7 @@ describe("RunResult: where the run executed", () => {
 
   it("says a sandbox run was verified against its audit chain only when the desktop attested it", async () => {
     renderRun(completedRun({
-      executedOn: sandboxExecutedOn,
+      executedOn: { ...sandboxExecutedOn, pairingKeyFingerprint: "A".repeat(52) },
       attestedBy: { sandboxId: "mini-pc", pairingKeyFingerprint: "A".repeat(52), checkpointSeq: 12, verifiedAt: "2026-10-10T10:02:00.000Z" },
     }));
     const card = await screen.findByRole("region", { name: "Run status" });
@@ -882,10 +882,11 @@ describe("RunResult: where the run executed", () => {
   });
 
   it.each([
-    ["a negative checkpoint", { checkpointSeq: -1 }, undefined],
-    ["a malformed key fingerprint", { pairingKeyFingerprint: "short" }, undefined],
-    ["a time that is not a time", { verifiedAt: "yesterday" }, undefined],
+    ["a negative checkpoint", { checkpointSeq: -1 }, "A".repeat(52)],
+    ["a malformed key fingerprint", { pairingKeyFingerprint: "short" }, "A".repeat(52)],
+    ["a time that is not a time", { verifiedAt: "yesterday" }, "A".repeat(52)],
     ["another key than the one recorded at import", {}, "B".repeat(52)],
+    ["no key recorded at import", {}, undefined],
   ])("does not take an attestation with %s", async (_name, change, recorded) => {
     renderRun(completedRun({
       executedOn: { ...sandboxExecutedOn, ...(recorded ? { pairingKeyFingerprint: recorded } : {}) },
