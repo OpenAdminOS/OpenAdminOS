@@ -4,7 +4,7 @@ Product names and logos are trademarks or registered trademarks of their respect
 
 To request removal of a logo, contact the maintainers through GitHub issues or the security contact in SECURITY.md.
 
-OpenAdminOS shows each icon beside the service's name to identify the service it connects to: the Microsoft 365 services, vendor services such as Splashtop, including the Marketplace references Splashtop publishes (Splashtop Docs MCP and Splashtop Agentic Packr Docs MCP), the result connectors a run report can be sent to, and the public reference hosts Chat can query. The icons are not covered by the MIT license of OpenAdminOS. Every file is used as its owner provides it: not redrawn, recoloured, cropped or combined with other marks. Microsoft provides one colour file for each of its services, shown on light and dark surfaces alike. Splashtop's square logo has a dark wordmark, so its tile is always white.
+OpenAdminOS shows each icon beside the service's name to identify the service it connects to: the Microsoft 365 services, vendor services such as Splashtop, including the Marketplace references OpenAdminOS builds over Splashtop's public Help Centers (Splashtop Docs and Splashtop Agentic Packr Docs), the result connectors a run report can be sent to, and the public reference hosts Chat can query. The icons are not covered by the MIT license of OpenAdminOS. Every file is used as its owner provides it: not redrawn, recoloured, cropped or combined with other marks. Microsoft provides one colour file for each of its services, shown on light and dark surfaces alike. Splashtop's square logo has a dark wordmark, so its tile is always white.
 
 | File | Icon | Owner | Source | Retrieved |
 |---|---|---|---|---|

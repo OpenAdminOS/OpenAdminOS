@@ -111,8 +111,8 @@ describe("Connections reach map", () => {
     const packr = {
       ...createMockMcpServers()[0]!,
       id: "splashtop-packr-kb",
-      name: "Splashtop Agentic Packr Docs MCP",
-      publisher: "Splashtop",
+      name: "Splashtop Agentic Packr Docs",
+      publisher: "OpenAdminOS",
       url: "https://support-splashtopagenticpackr.splashtop.com/api/v2/help_center",
       host: "support-splashtopagenticpackr.splashtop.com",
       builtIn: true as const,
