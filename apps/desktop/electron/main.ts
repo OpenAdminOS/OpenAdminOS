@@ -3272,7 +3272,9 @@ async function startEnterprise(userDataDir: string): Promise<void> {
         secrets: new SafeStorageProviderSecretStore(join(rootDir, "secrets")).forProvider("desktop"),
         organizations: () => store.listConnectedOrganizations(),
         catalog: async () => readOnlyCatalog(),
+        withTenantLease: (tenantId, work) => store.withSandboxTenantLease(tenantId, work),
         importRuns: (runs) => store.importSandboxRuns(runs),
+        attestRuns: (entries) => store.attestSandboxRuns(entries),
         recordAudit: (events) => store.recordSandboxAuditEvents(events),
       });
     },
