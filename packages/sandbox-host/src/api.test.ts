@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { request as httpsRequest } from "node:https";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -810,7 +810,7 @@ describe("sandbox pairing API", () => {
       try {
         const status = restarted.host.status();
         assert.equal(status.assignmentProblem?.reason, "pairing-files-invalid");
-        assert.match(status.assignmentProblem!.message, /Unpair and pair again; config schedules keep running\./);
+        assert.match(status.assignmentProblem!.message, /config schedules keep running\. Unpair and pair again\./);
         assert.deepEqual(status.schedules.map((schedule) => [schedule.agentId, schedule.source]), [["find-inactive-devices", "config"]]);
         const refused = await call(restarted.port, "PUT", "/v1/assignments", { tls, body: later });
         assert.equal(refused.status, 409);
@@ -818,6 +818,26 @@ describe("sandbox pairing API", () => {
       } finally {
         await restarted.close();
       }
+      // A file other users can read, or a directory in its place: the same unknown state, with its own recovery.
+      for (const [label, prepare] of [
+        ["mode 0644", () => writeFileSync(join(h.config.dataDir, PAIRING_FILES.assignments), "{}", { mode: 0o644 })],
+        ["a directory", () => mkdirSync(join(h.config.dataDir, PAIRING_FILES.assignments))],
+      ] as Array<[string, () => void]>) {
+        rmSync(join(h.config.dataDir, PAIRING_FILES.assignments), { recursive: true, force: true });
+        prepare();
+        chmodSync(join(h.config.dataDir, PAIRING_FILES.assignments), label === "mode 0644" ? 0o644 : 0o700);
+        const again = await start({ dir });
+        try {
+          const status = again.host.status();
+          assert.equal(status.assignmentProblem?.reason, "file-permissions", label);
+          assert.match(status.assignmentProblem!.message, /config schedules keep running/, label);
+          assert.deepEqual(status.schedules.map((schedule) => schedule.source), ["config"], label);
+          assert.equal(errorCode(await call(again.port, "PUT", "/v1/assignments", { tls, body: later })), "assignment-state-unknown", label);
+        } finally {
+          await again.close();
+        }
+      }
+      rmSync(join(h.config.dataDir, PAIRING_FILES.assignments), { recursive: true, force: true });
       // A damaged pairing.json still stops the host.
       writeFileSync(join(h.config.dataDir, PAIRING_FILES.pairing), "{ damaged", { mode: 0o600 });
       await assert.rejects(start({ dir }), (error) => error instanceof SandboxRefusal && error.reason === "pairing-files-invalid");
