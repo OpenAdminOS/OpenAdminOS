@@ -203,14 +203,18 @@ export class SandboxHost {
         try {
           stored = this.pairing ? readAssignments(this.config.dataDir, this.pairing.record.desktopPublicKey) : undefined;
         } catch (error) {
-          if (!isSandboxRefusal(error) || error.reason !== "pairing-files-invalid") throw error;
+          // Any read failure (damaged, wrong mode, not a file, unreadable)
+          // leaves the assignment state unknown; only pairing.json is fatal.
           stored = undefined;
           this.assignmentFloorUnknown = true;
-          this.assignmentProblem = {
-            reason: "pairing-files-invalid",
-            message: `${error.message.split(". Run ")[0]}. Assigned schedules are not run and new assignments are refused, because the version they must exceed is unknown. Unpair and pair again; config schedules keep running.`,
-          };
-          this.log("error", this.assignmentProblem.message, { reason: "pairing-files-invalid", file: PAIRING_FILES.assignments });
+          const reason = isSandboxRefusal(error) ? error.reason : "pairing-files-invalid";
+          const effect = "Assigned schedules are not run and new assignments are refused, because the version they must exceed is unknown; config schedules keep running.";
+          // A permission problem is fixed in place; damaged content needs a new pairing.
+          const message = reason === "file-permissions"
+            ? `${error instanceof Error ? error.message : String(error)} Until then: ${effect}`
+            : `${isSandboxRefusal(error) ? error.message.split(". Run openadminos-sandbox")[0].replace(/\.$/, "") : `${PAIRING_FILES.assignments} could not be read: ${describe(error)}`}. ${effect} Unpair and pair again.`;
+          this.assignmentProblem = { reason, message };
+          this.log("error", this.assignmentProblem.message, { reason, file: PAIRING_FILES.assignments });
         }
         if (this.pairing && this.bindingChanged) {
           this.log("error", "The config's organization or tenant changed since this sandbox was paired. Assigned schedules are not run and the desktop is refused until the sandbox is unpaired and paired again.", { reason: "pairing-binding-changed" });

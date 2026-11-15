@@ -25,6 +25,7 @@ import type { SandboxHost } from "./host.js";
 import { assertPrivateListenAddress, type ListenAddress } from "./listen.js";
 import type { SandboxLogger } from "./log.js";
 import { loadOrCreateTlsCertificate } from "./pairing-files.js";
+import { RefusalLog } from "./refusal-log.js";
 import { isSandboxRefusal } from "./refusal.js";
 
 /** Request bodies larger than this are refused before they are read. */
@@ -94,7 +95,7 @@ export class SandboxApi {
   private nextCodeAt: number | undefined;
   /** Times of pairing attempts across codes, for the rate limit. */
   private attempts: number[] = [];
-  private readonly rateWarnings = new Map<string, { loggedAt: number; count: number }>();
+  private readonly refusals: RefusalLog;
   private readonly timings: PairingTimings;
 
   constructor(
@@ -107,6 +108,7 @@ export class SandboxApi {
   ) {
     this.clock = clock ?? Date.now;
     this.timings = { ...DEFAULT_PAIRING_TIMINGS, ...timings };
+    this.refusals = new RefusalLog(log, this.clock);
   }
 
   /** Binds, then shows a pairing code when unpaired. Returns the bound address. */
@@ -178,6 +180,7 @@ export class SandboxApi {
   async close(): Promise<void> {
     this.closed = true;
     this.stopCode();
+    this.refusals.close();
     if (this.certificateTimer !== undefined) clearInterval(this.certificateTimer);
     this.certificateTimer = undefined;
     const server = this.server;
@@ -288,7 +291,12 @@ export class SandboxApi {
       if (pairing) {
         const certificate = peerCertificate(request);
         if (!certificate || !matchesTlsSpkiPin(certificate, pairing.desktopTlsSpkiSha256)) {
-          this.log("warn", "A request from a client that is not the paired desktop was refused.", { reason: "client-not-paired", peer: request.socket.remoteAddress, path: url.pathname });
+          this.refusals.note(
+            "client-not-paired",
+            certificate ? "Requests with a client certificate that is not the paired desktop's were refused." : "Requests without a client certificate were refused.",
+            request.socket.remoteAddress,
+            { path: url.pathname },
+          );
           throw new ApiError(401, "client-not-paired", "This client is not the desktop this sandbox is paired with. Pair it, or use the desktop that paired.");
         }
         // Unpairing stays possible, so a changed binding can be recovered.
@@ -315,20 +323,6 @@ export class SandboxApi {
       tlsSpkiSha256: this.tlsPin,
       expiresAt: new Date(shown.expiresAt).toISOString(),
     };
-  }
-
-  /** At most one rate-limit warning per peer address per minute, with the refusals counted in between. */
-  private warnRateLimited(peer: string | undefined): void {
-    const key = peer ?? "unknown";
-    const now = this.clock();
-    const entry = this.rateWarnings.get(key) ?? { loggedAt: Number.NEGATIVE_INFINITY, count: 0 };
-    entry.count += 1;
-    if (now - entry.loggedAt >= 60_000) {
-      this.log("warn", "Pairing attempts were refused: too many attempts in a short time.", { reason: "pairing-rate-limited", peer: key, count: entry.count });
-      entry.loggedAt = now;
-      entry.count = 0;
-    }
-    this.rateWarnings.set(key, entry);
   }
 
   private codeNotReady(): ApiError {
@@ -362,7 +356,7 @@ export class SandboxApi {
     const now = this.clock();
     this.attempts = this.attempts.filter((at) => now - at < this.timings.windowMs);
     if (this.attempts.length >= this.timings.maxAttemptsPerWindow) {
-      this.warnRateLimited(peer);
+      this.refusals.note("pairing-rate-limited", "Pairing attempts were refused: too many attempts in a short time.", peer);
       throw new ApiError(429, "pairing-rate-limited", `More than ${this.timings.maxAttemptsPerWindow} pairing attempts in ${Math.round(this.timings.windowMs / 60_000)} minutes. Wait, then pair again. If no one here was pairing, another client on the network is trying.`);
     }
     this.attempts.push(now);
