@@ -22,6 +22,9 @@
   },
   "files": [
     "dist",
+    "!dist/testing.*",
+    "!dist/test-support.*",
+    "!dist/**/*.test.*",
     "README.md"
   ],
   "scripts": {

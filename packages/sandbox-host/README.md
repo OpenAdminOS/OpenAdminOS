@@ -228,6 +228,8 @@ In `dataDir`:
 
 The log on stdout carries ids, reason codes and counts. It never carries tokens, secrets or tenant data.
 
+`@openadminos/sandbox-host/testing` starts an in-process host with fake sign-in, Graph and model for tests in this repository, such as the desktop's. It is left out of the package files and is not for production use.
+
 ## Certificate rotation and revocation
 
 Rotation, without a gap:
