@@ -307,8 +307,7 @@ export class SandboxApi {
   private runs(url: URL): unknown {
     const after = queryInteger(url, "after", 0, Number.MAX_SAFE_INTEGER, 0);
     const limit = queryInteger(url, "limit", 1, MAX_RUNS_LIMIT, DEFAULT_RUNS_LIMIT);
-    const runs = this.host.runsAfter(after, limit);
-    return { runs, next: runs.length > 0 ? runs[runs.length - 1]!.cursor : after };
+    return this.host.runsAfter(after, limit);
   }
 
   /** Rows after `after` and a checkpoint signed at the batch's last row, or at `after` for an empty batch. */

@@ -350,6 +350,7 @@ describe("sandbox pairing API", () => {
         assert.equal(outcome.kind, "completed", outcome.kind === "completed" ? "" : outcome.message);
       }
       const first = await call(h.port, "GET", "/v1/runs?after=0&limit=1", { tls: h.tls });
+      assert.deepEqual(first.body.problems, []);
       assert.equal(first.status, 200);
       const firstRuns = first.body.runs as Array<{ cursor: number; run: { status: string } }>;
       assert.equal(firstRuns.length, 1);

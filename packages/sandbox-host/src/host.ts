@@ -44,7 +44,7 @@ import { isSandboxRefusal, SandboxRefusal, signInRefusal, type RefusalReason } f
 import { loadOrCreateDeviceIdentity, readAssignments, readPairing, removePairingFiles, writeAssignments, writePairing, type StoredPairing } from "./pairing-files.js";
 import { Scheduler, type ScheduledJob, type SchedulerClock } from "./scheduler.js";
 import { loadSandboxSecrets, type SandboxSecrets } from "./secrets.js";
-import { HealthStore, RunStore, type HealthFile, type RunAfterCursor } from "./store.js";
+import { HealthStore, RunStore, type HealthFile, type RunPage } from "./store.js";
 import { hostVersion } from "./version.js";
 
 /** Seams for tests and for a future key store; production uses the defaults. */
@@ -325,7 +325,7 @@ export class SandboxHost {
     return this.health.snapshot();
   }
 
-  runsAfter(cursor: number, limit: number): RunAfterCursor[] {
+  runsAfter(cursor: number, limit: number): RunPage {
     return this.runs.listAfter(cursor, limit);
   }
 

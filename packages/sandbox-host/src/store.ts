@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
@@ -37,7 +37,8 @@ export function writeFileAtomic(path: string, content: string): void {
 interface RunCursorFile {
   version: 1;
   counter: number;
-  runs: Record<string, { agentSlug: string; file: string; cursor: number }>;
+  /** `sha256` is the digest of the file as last indexed, so a write the index missed is found at startup. */
+  runs: Record<string, { agentSlug: string; file: string; cursor: number; sha256: string }>;
 }
 
 /** A run and the cursor of its latest write. */
@@ -45,6 +46,16 @@ export interface RunAfterCursor {
   cursor: number;
   run: RunRecord;
 }
+
+/** A page of runs after a cursor. `next` passes entries that could not be read, which `problems` names. */
+export interface RunPage {
+  runs: RunAfterCursor[];
+  next: number;
+  problems: Array<{ cursor: number; runId: string; file: string; reason: "storage-corrupt"; message: string }>;
+}
+
+/** A run file name as `write` makes it: `<stamp>_<run id>.json`. */
+const RUN_FILE = /^[0-9T-]+Z_[A-Za-z0-9][A-Za-z0-9_-]{0,127}\.json$/;
 
 /** Run records as JSON files under `<dataDir>/runs/<agent>/`, newest last by name. */
 export class RunStore {
@@ -58,10 +69,11 @@ export class RunStore {
     if (!SAFE_SEGMENT.test(run.id)) throw new Error(`Run id ${JSON.stringify(run.id)} cannot be used as a file name.`);
     const file = `${fileStamp(run.queuedAt)}_${run.id}.json`;
     const path = join(folder, file);
-    writeFileAtomic(path, `${JSON.stringify(run, null, 2)}\n`);
+    const content = `${JSON.stringify(run, null, 2)}\n`;
+    writeFileAtomic(path, content);
     const index = this.cursorIndex();
     index.counter += 1;
-    index.runs[run.id] = { agentSlug: run.agentSlug, file, cursor: index.counter };
+    index.runs[run.id] = { agentSlug: run.agentSlug, file, cursor: index.counter, sha256: digest(content) };
     this.prune(folder, index);
     this.writeIndex(index);
     return path;
@@ -71,22 +83,34 @@ export class RunStore {
    * Runs written after `cursor`, oldest write first, at most `limit`. A
    * run written again (queued, then finished) moves to its newest
    * cursor, so a reader that keeps the last cursor it saw gets every
-   * change once. Cursors only grow.
+   * change once. Cursors only grow. A file that can no longer be read is
+   * named in `problems` and passed, so the reader does not ask for the
+   * same cursor forever.
    */
-  listAfter(cursor: number, limit: number): RunAfterCursor[] {
+  listAfter(cursor: number, limit: number): RunPage {
     if (!Number.isSafeInteger(cursor) || cursor < 0) throw new RangeError("cursor must be a non-negative integer.");
     if (!Number.isSafeInteger(limit) || limit < 1) throw new RangeError("limit must be a positive integer.");
-    const entries = Object.values(this.cursorIndex().runs)
-      .filter((entry) => entry.cursor > cursor)
-      .sort((left, right) => left.cursor - right.cursor);
-    const result: RunAfterCursor[] = [];
-    for (const entry of entries) {
-      if (result.length >= limit) break;
-      if (!SAFE_SEGMENT.test(entry.agentSlug)) continue;
+    const entries = Object.entries(this.cursorIndex().runs)
+      .filter(([, entry]) => entry.cursor > cursor)
+      .sort(([, left], [, right]) => left.cursor - right.cursor);
+    const page: RunPage = { runs: [], next: cursor, problems: [] };
+    for (const [runId, entry] of entries) {
+      if (page.runs.length >= limit) break;
+      page.next = entry.cursor;
       const run = readRunFile(join(this.root, entry.agentSlug, entry.file));
-      if (run) result.push({ cursor: entry.cursor, run });
+      if (run) {
+        page.runs.push({ cursor: entry.cursor, run });
+      } else {
+        page.problems.push({
+          cursor: entry.cursor,
+          runId,
+          file: `${entry.agentSlug}/${entry.file}`,
+          reason: "storage-corrupt",
+          message: `The run record ${entry.agentSlug}/${entry.file} in the sandbox data folder cannot be read. It is left in place for review on the sandbox.`,
+        });
+      }
     }
-    return result;
+    return page;
   }
 
   /** The newest cursor given out; 0 before any write. */
@@ -99,10 +123,12 @@ export class RunStore {
   }
 
   /**
-   * The index, read once. When it is missing or unreadable it is built
-   * again from the run files, numbered from the current time in
-   * milliseconds: above any number an earlier index gave out, so a
-   * reader's cursor never skips the rebuilt runs.
+   * The index, read once and checked against the run files: a run file
+   * written after the last index update (a crash between the two) or
+   * missing from the index gets a new cursor, and entries whose file is
+   * gone are dropped. A missing or unreadable index is numbered from the
+   * current time in milliseconds: above any number an earlier index gave
+   * out, so a reader's cursor never skips the rebuilt runs.
    */
   private cursorIndex(): RunCursorFile {
     if (this.index) return this.index;
@@ -115,22 +141,34 @@ export class RunStore {
         loaded = undefined;
       }
     }
-    if (!loaded) {
-      loaded = { version: 1, counter: existsSync(this.indexPath) || existsSync(this.root) ? Date.now() : 0, runs: {} };
-      if (existsSync(this.root)) {
-        for (const agent of readdirSync(this.root).sort()) {
-          if (!SAFE_SEGMENT.test(agent)) continue;
-          for (const file of this.files(join(this.root, agent))) {
-            const run = readRunFile(join(this.root, agent, file));
-            if (!run) continue;
-            loaded.counter += 1;
-            loaded.runs[run.id] = { agentSlug: agent, file, cursor: loaded.counter };
-          }
+    const index: RunCursorFile = loaded ?? { version: 1, counter: existsSync(this.indexPath) || existsSync(this.root) ? Date.now() : 0, runs: {} };
+    let changed = loaded === undefined && existsSync(this.root);
+    const present = new Set<string>();
+    if (existsSync(this.root)) {
+      for (const agent of readdirSync(this.root).sort()) {
+        if (!SAFE_SEGMENT.test(agent)) continue;
+        for (const file of this.files(join(this.root, agent))) {
+          present.add(`${agent}/${file}`);
+          const path = join(this.root, agent, file);
+          const run = readRunFile(path);
+          if (!run) continue;
+          const sha256 = digest(readFileSync(path, "utf8"));
+          const entry = index.runs[run.id];
+          if (entry && entry.agentSlug === agent && entry.file === file && entry.sha256 === sha256) continue;
+          index.counter += 1;
+          index.runs[run.id] = { agentSlug: agent, file, cursor: index.counter, sha256 };
+          changed = true;
         }
       }
     }
-    this.index = loaded;
-    return loaded;
+    for (const [id, entry] of Object.entries(index.runs)) {
+      if (present.has(`${entry.agentSlug}/${entry.file}`)) continue;
+      delete index.runs[id];
+      changed = true;
+    }
+    this.index = index;
+    if (changed) this.writeIndex(index);
+    return index;
   }
 
   private writeIndex(index: RunCursorFile): void {
@@ -242,11 +280,23 @@ function isRunRecord(value: unknown): value is RunRecord {
   );
 }
 
+/** The index as written; agent and file names must be safe path segments, never joined unchecked. */
 function isCursorFile(value: unknown): value is RunCursorFile {
   if (!isPlainObject(value) || value.version !== 1 || !Number.isSafeInteger(value.counter) || !isPlainObject(value.runs)) return false;
   return Object.values(value.runs).every(
-    (entry) => isPlainObject(entry) && typeof entry.agentSlug === "string" && typeof entry.file === "string" && Number.isSafeInteger(entry.cursor),
+    (entry) =>
+      isPlainObject(entry) &&
+      typeof entry.agentSlug === "string" &&
+      SAFE_SEGMENT.test(entry.agentSlug) &&
+      typeof entry.file === "string" &&
+      RUN_FILE.test(entry.file) &&
+      Number.isSafeInteger(entry.cursor) &&
+      typeof entry.sha256 === "string",
   );
+}
+
+function digest(content: string): string {
+  return createHash("sha256").update(content).digest("hex");
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

@@ -25,4 +25,4 @@ export { SandboxRefusal, signInRefusal, type RefusalReason } from "./refusal.js"
 export { PAIRING_FILES, TLS_REISSUE_DAYS, TLS_VALIDITY_DAYS } from "./pairing-files.js";
 export { Scheduler, type ScheduledJob, type SchedulerClock } from "./scheduler.js";
 export { loadSandboxSecrets, type SandboxSecrets } from "./secrets.js";
-export { HealthStore, RunStore, RUN_RETENTION_PER_AGENT, writeFileAtomic, type RunAfterCursor } from "./store.js";
+export { HealthStore, RunStore, RUN_RETENTION_PER_AGENT, writeFileAtomic, type RunAfterCursor, type RunPage } from "./store.js";
