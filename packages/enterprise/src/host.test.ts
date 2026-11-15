@@ -6,11 +6,12 @@ import {
   EnterpriseHostError,
   checkJson,
   createEnterpriseHost,
+  type CreateEnterpriseHostOptions,
   type EnterpriseIpcRegistrar,
   type EnterpriseLogLevel,
   type EnterpriseStorageBackend,
 } from "./host.js";
-import type { EnterpriseEntitlement, EnterpriseJson } from "./interface.js";
+import type { EnterpriseEntitlement, EnterpriseJson, EnterpriseSandboxes } from "./interface.js";
 
 const ENTITLEMENT: EnterpriseEntitlement = Object.freeze({
   state: "active",
@@ -66,6 +67,18 @@ function setup(storage = new MemoryStorage()) {
     },
   });
   return { controller, host: controller.host, ipc, storage, logs, changes: () => changes };
+}
+
+function setupWithCapabilities(capabilities: CreateEnterpriseHostOptions["capabilities"], entitlement: () => EnterpriseEntitlement = () => ENTITLEMENT) {
+  const logs: Array<{ level: EnterpriseLogLevel; message: string; fields: unknown }> = [];
+  const controller = createEnterpriseHost({
+    entitlement,
+    ipc: new FakeIpc(),
+    storage: new MemoryStorage(),
+    log: (level, message, fields) => logs.push({ level, message, fields }),
+    ...(capabilities ? { capabilities } : {}),
+  });
+  return { controller, host: controller.host, logs };
 }
 
 function assertError(fn: () => unknown, code: string): void {
@@ -146,14 +159,20 @@ describe("createEnterpriseHost", () => {
   it("exposes only the documented host APIs", () => {
     const { host } = setup();
     assert.deepEqual(Object.keys(host).sort(), [
+      "agents",
       "entitlement",
       "interfaceVersion",
       "log",
+      "organizations",
       "registerIpc",
       "registerSettingsSection",
+      "sandboxes",
       "setStatusContribution",
       "storage",
     ]);
+    assert.deepEqual(Object.keys(host.organizations), ["list"]);
+    assert.deepEqual(Object.keys(host.agents), ["readOnlyCatalog"]);
+    assert.deepEqual(Object.keys(host.sandboxes).sort(), ["assign", "list", "pair", "status", "sync", "unpair"]);
     assert.deepEqual(Object.keys(host.storage).sort(), ["delete", "get", "keys", "set"]);
     assert.deepEqual(Object.keys(host.log).sort(), ["error", "info", "warn"]);
     assert.equal(host.interfaceVersion, 1);
@@ -431,5 +450,71 @@ describe("createEnterpriseHost", () => {
     assertError(() => host.setStatusContribution(undefined), "disposed");
     await assertRejects(host.storage.keys(), "disposed");
     await assertRejects(stale?.(null) ?? Promise.resolve(), "disposed");
+  });
+
+  it("answers empty or sandboxes-unavailable without the app's capabilities", async () => {
+    const { host } = setupWithCapabilities(undefined);
+    assert.deepEqual(await host.organizations.list(), []);
+    assert.deepEqual(await host.agents.readOnlyCatalog(), []);
+    assert.deepEqual(await host.sandboxes.list(), []);
+    const paired = await host.sandboxes.pair({ address: "127.0.0.1:7443", code: "x", organizationId: "org-1" });
+    assert.equal(paired.ok, false);
+    assert.equal(paired.ok ? "" : paired.error.code, "sandboxes-unavailable");
+  });
+
+  it("passes checked input to the sandboxes and returns frozen plain JSON", async () => {
+    const calls: unknown[] = [];
+    const secret = { token: "never" };
+    const sandboxes: EnterpriseSandboxes = {
+      list: async () => [],
+      pair: async (input) => {
+        calls.push(input);
+        // An object with a prototype or a function never crosses the boundary.
+        return { ok: true, value: { sandboxId: "mini-pc", leak: () => secret } as never };
+      },
+      sync: async (id) => {
+        calls.push(id);
+        return { ok: false, error: { code: "chain-gap", message: "A row is missing." } };
+      },
+      assign: async (id, entries) => {
+        calls.push([id, entries]);
+        throw new Error("boom");
+      },
+      unpair: async () => ({ ok: false, error: { code: "x", message: "x" } }),
+      status: async () => ({ ok: false, error: { code: "x", message: "x" } }),
+    };
+    const { host, logs } = setupWithCapabilities({ sandboxes, organizations: { list: async () => [{ id: "org-1", name: "Contoso", tenantId: "t" }] } });
+
+    await assertRejects(host.sandboxes.pair({ address: "127.0.0.1:7443", code: "x", organizationId: "org-1" }), "invalid-value");
+    const synced = await host.sandboxes.sync("mini-pc");
+    assert.deepEqual(synced, { ok: false, error: { code: "chain-gap", message: "A row is missing." } });
+    assert.ok(Object.isFrozen(synced));
+    const assigned = await host.sandboxes.assign("mini-pc", [{ agentId: "find-inactive-devices", intervalSeconds: 3600 }]);
+    assert.equal(assigned.ok ? "" : assigned.error.code, "internal-error");
+    assert.ok(logs.some((entry) => entry.message.includes("a sandbox call failed")));
+    const organizations = await host.organizations.list();
+    assert.deepEqual(organizations, [{ id: "org-1", name: "Contoso", tenantId: "t" }]);
+    assert.ok(Object.isFrozen(organizations[0]));
+
+    for (const id of ["", "../x", "a b", "x".repeat(65), 7]) {
+      assertError(() => host.sandboxes.sync(id as string), "invalid-value");
+    }
+    assertError(() => host.sandboxes.pair({ address: "", code: "x", organizationId: "org-1" }), "invalid-value");
+    assertError(() => host.sandboxes.pair(null as never), "invalid-value");
+    assertError(() => host.sandboxes.assign("mini-pc", [{ agentId: "a", intervalSeconds: 1.5 }]), "invalid-value");
+    assertError(() => host.sandboxes.assign("mini-pc", Array.from({ length: 51 }, () => ({ agentId: "a", intervalSeconds: 900 }))), "invalid-value");
+    assert.deepEqual(calls.slice(1), ["mini-pc", ["mini-pc", [{ agentId: "find-inactive-devices", intervalSeconds: 3600 }]]]);
+  });
+
+  it("refuses capability calls after dispose and after the grace period", async () => {
+    let state: EnterpriseEntitlement["state"] = "active";
+    const { host, controller } = setupWithCapabilities(undefined, () => ({ ...ENTITLEMENT, state }));
+    state = "expired";
+    await assertRejects(host.organizations.list(), "expired");
+    assertError(() => host.sandboxes.sync("mini-pc"), "expired");
+    state = "active";
+    controller.dispose();
+    await assertRejects(host.agents.readOnlyCatalog(), "disposed");
+    assertError(() => host.sandboxes.unpair("mini-pc"), "disposed");
   });
 });

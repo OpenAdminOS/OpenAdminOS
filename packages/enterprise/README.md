@@ -39,6 +39,13 @@ export default module;
 | `setStatusContribution(status)` | What the status strip shows while team features are on. With no entry the strip says "Team features on" | Label up to 80 characters, one line |
 | `storage` | Key value storage of plain JSON, kept in its own file apart from app state | 256 keys, 64 KiB per value, 1 MiB in all |
 | `log` | Writes to the app log, prefixed with `enterprise module:` | 500 characters per message |
+| `organizations.list()` | The organizations whose Microsoft 365 tenant is connected now: id, name and tenant id only | |
+| `agents.readOnlyCatalog()` | Bundled read-only agents a sandbox can run: id, name, scopes and the SHA-256 of `manifest.yaml` | |
+| `sandboxes` | `list`, `pair({ address, code, organizationId })`, `sync(id)`, `assign(id, entries)`, `unpair(id)` and `status(id)` for sandboxes paired with this desktop | Sandbox ids of up to 64 characters; address, code and organization id one line each; at most 50 assignment entries of `agentId` and a whole `intervalSeconds`; replies up to 256 KiB |
+
+The sandbox calls answer `{ ok: true, value }` or `{ ok: false, error: { code, message } }` with a named code; a failure inside the app becomes `internal-error` and is logged. Malformed input throws `invalid-value`, and every call throws `disposed` or `expired` like `storage` once team features are off. Without the app's sandbox support (a host built without it) the calls answer `sandboxes-unavailable` and the lists are empty.
+
+The keys and the verification stay in the public app: the desktop's device key and TLS client certificate are in the app's secret store, and the app pins the sandbox's TLS key, runs the pairing proof, verifies the signed pairing record, checks every audit batch with `verifySignedContinuation` from `@openadminos/pairing`, and signs schedule assignments. A module decides only when to call. No call crosses a token, key or secret, and nothing runs on a timer: without a call the app opens no connection to a sandbox.
 
 The host object and every member are frozen. Nothing reachable from it exposes tenant tokens, provider credentials, the keychain or a secret store, and writes to a tenant still go through the app's diff confirmation. Graph calls and prompts stay on the admin's device.
 

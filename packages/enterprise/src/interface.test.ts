@@ -25,6 +25,14 @@ import {
   type EnterpriseHandle,
   type EnterpriseHost,
   type EnterpriseModule,
+  type EnterpriseOrganization,
+  type EnterpriseReadOnlyAgent,
+  type EnterpriseResult,
+  type EnterpriseSandbox,
+  type EnterpriseSandboxAssignResult,
+  type EnterpriseSandboxStatus,
+  type EnterpriseSandboxSyncResult,
+  type EnterpriseSandboxUnpairResult,
 } from "./interface.js";
 
 const packageDir = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -60,6 +68,26 @@ const v1Module: EnterpriseModule = {
     host.log.info("activated", { features: 1, grace: false, licensee: "x" });
     host.log.warn("warn");
     host.log.error("error");
+    const lent: [
+      Promise<readonly EnterpriseOrganization[]>,
+      Promise<readonly EnterpriseReadOnlyAgent[]>,
+      Promise<readonly EnterpriseSandbox[]>,
+      Promise<EnterpriseResult<EnterpriseSandbox>>,
+      Promise<EnterpriseResult<EnterpriseSandboxSyncResult>>,
+      Promise<EnterpriseResult<EnterpriseSandboxAssignResult>>,
+      Promise<EnterpriseResult<EnterpriseSandboxUnpairResult>>,
+      Promise<EnterpriseResult<EnterpriseSandboxStatus>>,
+    ] = [
+      host.organizations.list(),
+      host.agents.readOnlyCatalog(),
+      host.sandboxes.list(),
+      host.sandboxes.pair({ address: "100.64.0.10:7443", code: "code", organizationId: "org-1" }),
+      host.sandboxes.sync("mini-pc"),
+      host.sandboxes.assign("mini-pc", [{ agentId: "find-inactive-devices", intervalSeconds: 86400 }]),
+      host.sandboxes.unpair("mini-pc"),
+      host.sandboxes.status("mini-pc"),
+    ];
+    void lent;
     return { deactivate: async () => undefined };
   },
 };
@@ -78,6 +106,16 @@ const v1Host: EnterpriseHost = {
     keys: async () => [],
   },
   log: { info: () => undefined, warn: () => undefined, error: () => undefined },
+  organizations: { list: async () => [{ id: "org-1", name: "Contoso", tenantId: "t" }] },
+  agents: { readOnlyCatalog: async () => [{ id: "a", name: "A", scopes: [], manifestSha256: "0".repeat(64) }] },
+  sandboxes: {
+    list: async () => [],
+    pair: async () => ({ ok: false, error: { code: "x", message: "x" } }),
+    sync: async () => ({ ok: false, error: { code: "x", message: "x" } }),
+    assign: async () => ({ ok: true, value: { version: 1, assigned: [], shadowed: [], rolesNoLongerNeeded: [] } }),
+    unpair: async () => ({ ok: true, value: { sandboxId: "x", sandboxConfirmed: true, rolesNoLongerNeeded: [], message: "x" } }),
+    status: async () => ({ ok: false, error: { code: "x", message: "x" } }),
+  },
 };
 
 // ---- 2. Runtime: the emitted declarations match the snapshot. ----
@@ -144,6 +182,12 @@ describe("enterprise interface", () => {
         maxTitleLength: 60,
         maxDetailLength: 300,
         maxLogMessageLength: 500,
+        maxSandboxIdLength: 64,
+        maxSandboxAddressLength: 64,
+        maxPairingCodeLength: 64,
+        maxOrganizationIdLength: 200,
+        maxAssignmentEntries: 50,
+        maxAgentIdLength: 200,
       },
     );
     assert.ok(Object.isFrozen(enterprise.ENTERPRISE_LIMITS));

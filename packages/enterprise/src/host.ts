@@ -7,12 +7,17 @@
 import {
   ENTERPRISE_INTERFACE_VERSION,
   ENTERPRISE_IPC_PREFIX,
+  type EnterpriseAgents,
   type EnterpriseEntitlement,
   type EnterpriseHost,
   type EnterpriseIpcHandler,
   type EnterpriseJson,
   type EnterpriseLog,
   type EnterpriseLogFields,
+  type EnterpriseOrganizations,
+  type EnterpriseResult,
+  type EnterpriseSandboxAssignmentEntry,
+  type EnterpriseSandboxes,
   type EnterpriseSettingsSection,
   type EnterpriseStatusContribution,
   type EnterpriseStorage,
@@ -31,6 +36,12 @@ export const ENTERPRISE_LIMITS = Object.freeze({
   maxTitleLength: 60,
   maxDetailLength: 300,
   maxLogMessageLength: 500,
+  maxSandboxIdLength: 64,
+  maxSandboxAddressLength: 64,
+  maxPairingCodeLength: 64,
+  maxOrganizationIdLength: 200,
+  maxAssignmentEntries: 50,
+  maxAgentIdLength: 200,
 });
 
 /** IPC handler names and settings section ids. Part of interface version 1. */
@@ -82,6 +93,18 @@ export interface CreateEnterpriseHostOptions {
   readonly log: EnterpriseLogSink;
   /** Called after the status contribution or the settings sections change. */
   readonly onChange?: () => void;
+  /**
+   * What the app lends a module beyond its own state. Each one left out
+   * answers empty (organizations, agents, the sandbox list) or with the
+   * named error `sandboxes-unavailable`.
+   */
+  readonly capabilities?: EnterpriseHostCapabilities;
+}
+
+export interface EnterpriseHostCapabilities {
+  readonly organizations?: EnterpriseOrganizations;
+  readonly agents?: EnterpriseAgents;
+  readonly sandboxes?: EnterpriseSandboxes;
 }
 
 export interface EnterpriseHostSnapshot {
@@ -199,6 +222,7 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
     setStatusContribution: freezeFn(setStatusContribution),
     storage: createStorage(options.storage, assertLive),
     log,
+    ...createCapabilities(options, assertLive),
   });
 
   return Object.freeze({
@@ -314,6 +338,133 @@ function createStorage(backend: EnterpriseStorageBackend, assertLive: () => void
       return run(async (entries) => Object.freeze([...entries.keys()]));
     }),
   });
+}
+
+const SANDBOX_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+const UNAVAILABLE = Object.freeze({
+  ok: false as const,
+  error: Object.freeze({ code: "sandboxes-unavailable", message: "Sandboxes are not available in this build of OpenAdminOS." }),
+});
+
+/**
+ * Wraps what the app lends a module. Every call checks that the host is
+ * live and the licence not expired, checks its input, and returns a deep
+ * frozen copy of plain JSON within the reply limit, so no app object,
+ * function or secret crosses the boundary.
+ */
+function createCapabilities(
+  options: CreateEnterpriseHostOptions,
+  assertLive: () => void,
+): Pick<EnterpriseHost, "organizations" | "agents" | "sandboxes"> {
+  const capabilities = options.capabilities ?? {};
+  const guard = () => {
+    assertLive();
+    if (options.entitlement().state === "expired") {
+      throw new EnterpriseHostError("expired", "The team features licence and its grace period ended. Install a renewed licence, then restart OpenAdminOS.");
+    }
+  };
+  const reply = async <T>(what: string, call: () => Promise<T>): Promise<T> => {
+    guard();
+    const value = await call();
+    return checkJson(value, ENTERPRISE_LIMITS.maxIpcOutputBytes, `the reply from ${what}`) as T;
+  };
+  const result = async <T>(what: string, call: (() => Promise<EnterpriseResult<T>>) | undefined): Promise<EnterpriseResult<T>> => {
+    guard();
+    if (!call) return UNAVAILABLE;
+    let value: EnterpriseResult<T>;
+    try {
+      value = await call();
+    } catch (error) {
+      options.log("error", "enterprise: a sandbox call failed", { call: what, error: errorMessage(error) });
+      value = { ok: false, error: { code: "internal-error", message: `The sandbox request ${what} failed: ${errorMessage(error)}` } };
+    }
+    return checkJson(value, ENTERPRISE_LIMITS.maxIpcOutputBytes, `the reply from ${what}`) as EnterpriseResult<T>;
+  };
+  const sandboxes = capabilities.sandboxes;
+
+  const organizations: EnterpriseOrganizations = Object.freeze({
+    list: freezeFn(() => reply("organizations.list", async () => (capabilities.organizations ? capabilities.organizations.list() : []))),
+  });
+  const agents: EnterpriseAgents = Object.freeze({
+    readOnlyCatalog: freezeFn(() => reply("agents.readOnlyCatalog", async () => (capabilities.agents ? capabilities.agents.readOnlyCatalog() : []))),
+  });
+  const sandboxApi: EnterpriseSandboxes = Object.freeze({
+    list: freezeFn(() => reply("sandboxes.list", async () => (sandboxes ? sandboxes.list() : []))),
+    pair: freezeFn((input: Parameters<EnterpriseSandboxes["pair"]>[0]) => {
+      guard();
+      const checked = checkPairInput(input);
+      return result("sandboxes.pair", sandboxes && (() => sandboxes.pair(checked)));
+    }),
+    sync: freezeFn((sandboxId: string) => {
+      guard();
+      const id = checkSandboxId(sandboxId);
+      return result("sandboxes.sync", sandboxes && (() => sandboxes.sync(id)));
+    }),
+    assign: freezeFn((sandboxId: string, entries: readonly EnterpriseSandboxAssignmentEntry[]) => {
+      guard();
+      const id = checkSandboxId(sandboxId);
+      const checked = checkAssignmentEntries(entries);
+      return result("sandboxes.assign", sandboxes && (() => sandboxes.assign(id, checked)));
+    }),
+    unpair: freezeFn((sandboxId: string) => {
+      guard();
+      const id = checkSandboxId(sandboxId);
+      return result("sandboxes.unpair", sandboxes && (() => sandboxes.unpair(id)));
+    }),
+    status: freezeFn((sandboxId: string) => {
+      guard();
+      const id = checkSandboxId(sandboxId);
+      return result("sandboxes.status", sandboxes && (() => sandboxes.status(id)));
+    }),
+  });
+  return { organizations, agents, sandboxes: sandboxApi };
+}
+
+function checkSandboxId(value: unknown): string {
+  if (typeof value !== "string" || !SANDBOX_ID.test(value)) {
+    throw new EnterpriseHostError("invalid-value", `A sandbox id is letters, digits, dot, dash and underscore, up to ${ENTERPRISE_LIMITS.maxSandboxIdLength} characters.`);
+  }
+  return value;
+}
+
+function checkShortText(value: unknown, maxLength: number, what: string): string {
+  if (typeof value !== "string" || value.trim() === "" || value.length > maxLength || CONTROL.test(value)) {
+    throw new EnterpriseHostError("invalid-value", `The ${what} must be one line of 1 to ${maxLength} characters.`);
+  }
+  return value;
+}
+
+function checkPairInput(input: unknown): { address: string; code: string; organizationId: string } {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    throw new EnterpriseHostError("invalid-value", "Pairing takes an object with address, code and organizationId.");
+  }
+  const fields = input as Record<string, unknown>;
+  return Object.freeze({
+    address: checkShortText(fields.address, ENTERPRISE_LIMITS.maxSandboxAddressLength, "sandbox address"),
+    code: checkShortText(fields.code, ENTERPRISE_LIMITS.maxPairingCodeLength, "pairing code"),
+    organizationId: checkShortText(fields.organizationId, ENTERPRISE_LIMITS.maxOrganizationIdLength, "organization id"),
+  });
+}
+
+function checkAssignmentEntries(entries: unknown): readonly EnterpriseSandboxAssignmentEntry[] {
+  if (!Array.isArray(entries) || entries.length > ENTERPRISE_LIMITS.maxAssignmentEntries) {
+    throw new EnterpriseHostError("invalid-value", `An assignment is a list of at most ${ENTERPRISE_LIMITS.maxAssignmentEntries} entries.`);
+  }
+  return Object.freeze(entries.map((entry: unknown) => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      throw new EnterpriseHostError("invalid-value", "Each assignment entry is an object with agentId and intervalSeconds.");
+    }
+    const fields = entry as Record<string, unknown>;
+    const intervalSeconds = fields.intervalSeconds;
+    if (typeof intervalSeconds !== "number" || !Number.isSafeInteger(intervalSeconds) || intervalSeconds < 1) {
+      throw new EnterpriseHostError("invalid-value", "intervalSeconds must be a positive whole number.");
+    }
+    return Object.freeze({
+      agentId: checkShortText(fields.agentId, ENTERPRISE_LIMITS.maxAgentIdLength, "agent id"),
+      intervalSeconds,
+    });
+  }));
 }
 
 /**

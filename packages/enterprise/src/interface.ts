@@ -85,6 +85,155 @@ export interface EnterpriseLog {
   error(message: string, fields?: EnterpriseLogFields): void;
 }
 
+/** An organization connected in the app: ids and name only. */
+export interface EnterpriseOrganization {
+  readonly id: string;
+  readonly name: string;
+  /** Lowercase Microsoft 365 tenant id. */
+  readonly tenantId: string;
+}
+
+export interface EnterpriseOrganizations {
+  /** Organizations whose Microsoft 365 tenant is connected now. */
+  list(): Promise<readonly EnterpriseOrganization[]>;
+}
+
+/** A bundled read-only agent a sandbox can run. */
+export interface EnterpriseReadOnlyAgent {
+  readonly id: string;
+  readonly name: string;
+  readonly scopes: readonly string[];
+  /** SHA-256 hex of the agent's manifest.yaml. */
+  readonly manifestSha256: string;
+}
+
+export interface EnterpriseAgents {
+  readOnlyCatalog(): Promise<readonly EnterpriseReadOnlyAgent[]>;
+}
+
+/** Every sandbox call answers with a value or a named error; nothing is thrown across the interface. */
+export type EnterpriseResult<T> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly error: EnterpriseError };
+
+export interface EnterpriseError {
+  readonly code: string;
+  readonly message: string;
+}
+
+/** Why sync stopped for a sandbox. It stays until the sandbox is paired again. */
+export interface EnterpriseSandboxFailure {
+  readonly code: string;
+  readonly message: string;
+  /** ISO 8601. */
+  readonly at: string;
+}
+
+/** A sandbox paired with this desktop, as the desktop holds it. */
+export interface EnterpriseSandbox {
+  readonly sandboxId: string;
+  readonly name: string;
+  /** `<IP>:<port>`, IPv6 in brackets. */
+  readonly address: string;
+  readonly organizationId: string;
+  readonly tenantId: string;
+  /** ISO 8601. */
+  readonly pairedAt: string;
+  /** SHA-256 of the sandbox's device key, 52 Crockford base32 characters. */
+  readonly pairingKeyFingerprint: string;
+  /** `stopped`: an integrity failure stopped sync; pair again to recover. */
+  readonly state: "paired" | "stopped";
+  readonly failure?: EnterpriseSandboxFailure;
+  readonly lastSyncAt?: string;
+  /** The last audit row of the sandbox the desktop verified. */
+  readonly auditSeq: number;
+  /** The version of the last schedule assignment sent; 0 before the first. */
+  readonly assignmentVersion: number;
+}
+
+export interface EnterpriseSandboxPairInput {
+  readonly address: string;
+  readonly code: string;
+  readonly organizationId: string;
+}
+
+export interface EnterpriseSandboxSyncResult {
+  readonly sandbox: EnterpriseSandbox;
+  /** Runs added to or updated in run history. */
+  readonly runsImported: number;
+  /** Of those, runs whose finished event is in the verified audit rows. */
+  readonly runsVerified: number;
+  readonly runsUnverified: number;
+  readonly auditRowsAccepted: number;
+  readonly auditBatches: number;
+  /** Runs the sandbox could not read or the desktop could not take, by run id and reason. */
+  readonly problems: readonly string[];
+}
+
+export interface EnterpriseSandboxAssignmentEntry {
+  /** A bundled read-only agent from `agents.readOnlyCatalog()`. */
+  readonly agentId: string;
+  readonly intervalSeconds: number;
+}
+
+export interface EnterpriseSandboxAssignResult {
+  readonly version: number;
+  readonly assigned: readonly string[];
+  /** Assigned agents the sandbox config also lists; the config one runs. */
+  readonly shadowed: readonly string[];
+  /** Permissions only the agents that fell away needed. */
+  readonly rolesNoLongerNeeded: readonly string[];
+  readonly notice?: string;
+}
+
+export interface EnterpriseSandboxUnpairResult {
+  readonly sandboxId: string;
+  /** False when the sandbox could not be reached; it is unpaired on this desktop either way. */
+  readonly sandboxConfirmed: boolean;
+  readonly rolesNoLongerNeeded: readonly string[];
+  readonly message: string;
+}
+
+/** What the sandbox reports about itself. No secrets, keys or tokens. */
+export interface EnterpriseSandboxRemoteStatus {
+  readonly hostVersion: string;
+  readonly bindingChanged: boolean;
+  readonly model: { readonly provider: string; readonly model: string; readonly digest: string };
+  readonly assignmentVersion?: number;
+  readonly schedules: readonly {
+    readonly agentId: string;
+    readonly source: "config" | "assigned";
+    readonly intervalSeconds: number;
+    readonly nextRunAt?: string;
+    readonly status?: string;
+  }[];
+  readonly problems: readonly { readonly reason: string; readonly message: string }[];
+}
+
+export interface EnterpriseSandboxStatus {
+  readonly sandbox: EnterpriseSandbox;
+  /** Absent while sync is stopped: a stopped sandbox is not contacted. */
+  readonly remote?: EnterpriseSandboxRemoteStatus;
+}
+
+/**
+ * Sandboxes the customer runs, paired with this desktop. The desktop
+ * holds the keys and verifies everything a sandbox sends; a module only
+ * decides when to call. Nothing here runs on its own: without a call no
+ * connection is made.
+ */
+export interface EnterpriseSandboxes {
+  list(): Promise<readonly EnterpriseSandbox[]>;
+  /** Pairs with the code the sandbox shows, for a connected organization. */
+  pair(input: EnterpriseSandboxPairInput): Promise<EnterpriseResult<EnterpriseSandbox>>;
+  /** Imports runs and verified audit rows since the last sync. */
+  sync(sandboxId: string): Promise<EnterpriseResult<EnterpriseSandboxSyncResult>>;
+  /** Replaces the assigned schedules; read-only agents only. */
+  assign(sandboxId: string, entries: readonly EnterpriseSandboxAssignmentEntry[]): Promise<EnterpriseResult<EnterpriseSandboxAssignResult>>;
+  unpair(sandboxId: string): Promise<EnterpriseResult<EnterpriseSandboxUnpairResult>>;
+  status(sandboxId: string): Promise<EnterpriseResult<EnterpriseSandboxStatus>>;
+}
+
 /** Everything a module can reach. The object and its members are frozen. */
 export interface EnterpriseHost {
   readonly interfaceVersion: typeof ENTERPRISE_INTERFACE_VERSION;
@@ -97,6 +246,9 @@ export interface EnterpriseHost {
   setStatusContribution(status: EnterpriseStatusContribution | undefined): void;
   readonly storage: EnterpriseStorage;
   readonly log: EnterpriseLog;
+  readonly organizations: EnterpriseOrganizations;
+  readonly agents: EnterpriseAgents;
+  readonly sandboxes: EnterpriseSandboxes;
 }
 
 /** Returned by `activate`; the host calls `deactivate` when the app quits. */
