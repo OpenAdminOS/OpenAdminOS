@@ -851,14 +851,49 @@ describe("RunResult: where the run executed", () => {
     expect(within(card).getByText("Audit").nextElementSibling).toHaveTextContent("Reported by Mini PC, not verified");
   });
 
-  it("does not take an attestation for another sandbox", async () => {
+  // The audit fact's icon: the shield path starts "M12 3 L20 6", the warning triangle "M12 3 L21 19".
+  const auditFact = (card: HTMLElement) => {
+    const value = within(card).getByText("Audit").nextElementSibling as HTMLElement;
+    const icon = value.querySelector("span[aria-hidden='true']") as HTMLElement;
+    return { value, icon, path: icon.querySelector("path")?.getAttribute("d") ?? "" };
+  };
+
+  it("shows the shield and success tone for a verified run", async () => {
+    renderRun(completedRun({
+      executedOn: { ...sandboxExecutedOn, pairingKeyFingerprint: "A".repeat(52) },
+      attestedBy: { sandboxId: "mini-pc", pairingKeyFingerprint: "A".repeat(52), checkpointSeq: 12, verifiedAt: "2026-10-10T10:02:00.000Z" },
+    }));
+    const fact = auditFact(await screen.findByRole("region", { name: "Run status" }));
+    expect(fact.path.startsWith("M12 3 L20 6")).toBe(true);
+    expect(fact.icon.className).toContain("color-success");
+  });
+
+  it("does not take an attestation for another sandbox: warning label, icon and tone", async () => {
     renderRun(completedRun({
       id: "run-other",
       executedOn: sandboxExecutedOn,
       attestedBy: { sandboxId: "other-pc", pairingKeyFingerprint: "A".repeat(52), checkpointSeq: 1, verifiedAt: "2026-10-10T10:02:00.000Z" },
     }));
-    const card = await screen.findByRole("region", { name: "Run status" });
-    expect(within(card).getByText("Audit").nextElementSibling).toHaveTextContent("Reported by Mini PC, not verified");
+    const fact = auditFact(await screen.findByRole("region", { name: "Run status" }));
+    expect(fact.value).toHaveTextContent("Reported by Mini PC, not verified");
+    expect(fact.path.startsWith("M12 3 L21 19")).toBe(true);
+    expect(fact.icon.className).toContain("color-warning");
+    expect(fact.icon.className).not.toContain("color-success");
+  });
+
+  it.each([
+    ["a negative checkpoint", { checkpointSeq: -1 }, undefined],
+    ["a malformed key fingerprint", { pairingKeyFingerprint: "short" }, undefined],
+    ["a time that is not a time", { verifiedAt: "yesterday" }, undefined],
+    ["another key than the one recorded at import", {}, "B".repeat(52)],
+  ])("does not take an attestation with %s", async (_name, change, recorded) => {
+    renderRun(completedRun({
+      executedOn: { ...sandboxExecutedOn, ...(recorded ? { pairingKeyFingerprint: recorded } : {}) },
+      attestedBy: { sandboxId: "mini-pc", pairingKeyFingerprint: "A".repeat(52), checkpointSeq: 1, verifiedAt: "2026-10-10T10:02:00.000Z", ...change },
+    }));
+    const fact = auditFact(await screen.findByRole("region", { name: "Run status" }));
+    expect(fact.value).toHaveTextContent("Reported by Mini PC, not verified");
+    expect(fact.icon.className).toContain("color-warning");
   });
 
   it("shows no audit line for a run on this computer", async () => {

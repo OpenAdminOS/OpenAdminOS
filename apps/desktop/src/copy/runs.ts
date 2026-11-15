@@ -1,4 +1,4 @@
-import type { RunExecutedOn } from "../shared/openAdminOS";
+import type { RunAttestation, RunExecutedOn } from "../shared/openAdminOS";
 
 /** Where a run executed: this desktop, or a sandbox on the customer's own infrastructure. */
 export const RUN_LOCATION_COPY = {
@@ -18,15 +18,35 @@ export const RUN_LOCATION_COPY = {
   notVerified: (name: string) => `Reported by ${name}, not verified`,
 } as const;
 
+const FINGERPRINT = /^[0-9A-HJKMNP-TV-Z]{52}$/;
+
 /**
- * The audit line of a sandbox run: verified only when the desktop found
- * the run's finished event in audit rows it checked against a checkpoint
- * signed by that sandbox. Undefined for a run on this computer.
+ * Whether the run detail may say a sandbox run was verified: a sandbox
+ * run whose attestation names that same sandbox, with every field well
+ * formed and the key fingerprint the desktop recorded at import. The one
+ * check behind the audit label, its icon and its tone.
  */
-export function runVerificationLabel(run: { executedOn?: RunExecutedOn; attestedBy?: { sandboxId: string } }): string | undefined {
+export function isRunVerified(run: { executedOn?: RunExecutedOn; attestedBy?: RunAttestation }): boolean {
+  const sandbox = run.executedOn?.kind === "sandbox" ? run.executedOn : undefined;
+  const attested = run.attestedBy;
+  if (!sandbox || !attested || typeof attested !== "object") return false;
+  return (
+    attested.sandboxId === sandbox.sandboxId &&
+    typeof attested.pairingKeyFingerprint === "string" &&
+    FINGERPRINT.test(attested.pairingKeyFingerprint) &&
+    (sandbox.pairingKeyFingerprint === undefined || sandbox.pairingKeyFingerprint === attested.pairingKeyFingerprint) &&
+    Number.isSafeInteger(attested.checkpointSeq) &&
+    attested.checkpointSeq >= 0 &&
+    typeof attested.verifiedAt === "string" &&
+    !Number.isNaN(Date.parse(attested.verifiedAt))
+  );
+}
+
+/** The audit line of a sandbox run; undefined for a run on this computer. */
+export function runVerificationLabel(run: { executedOn?: RunExecutedOn; attestedBy?: RunAttestation }): string | undefined {
   const sandbox = run.executedOn?.kind === "sandbox" ? run.executedOn : undefined;
   if (!sandbox) return undefined;
-  return run.attestedBy?.sandboxId === sandbox.sandboxId ? RUN_LOCATION_COPY.verified(sandbox.name) : RUN_LOCATION_COPY.notVerified(sandbox.name);
+  return isRunVerified(run) ? RUN_LOCATION_COPY.verified(sandbox.name) : RUN_LOCATION_COPY.notVerified(sandbox.name);
 }
 
 /** The Where label: absent or desktop is this computer, a sandbox shows its name. */
