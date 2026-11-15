@@ -1084,6 +1084,12 @@ export type RunExecutedOn =
       model: string;
       /** Model digest, when the local model server reports one. */
       modelDigest?: string;
+      /**
+       * Set by the desktop when it imports the run: the fingerprint of the
+       * device key of the sandbox it paired with. A later import replaces
+       * the run only for the same sandbox, organization, tenant and key.
+       */
+      pairingKeyFingerprint?: string;
     };
 
 /**

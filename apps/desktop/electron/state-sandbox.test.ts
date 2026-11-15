@@ -7,6 +7,8 @@ import { describe, it } from "node:test";
 import type { RunRecord, TenantRecord } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 
+import { latestScheduledRunForAgent } from "./companion-schedules.js";
+import { ranOnThisDesktop } from "./sandbox-runs.js";
 import { AppStateStore } from "./state.js";
 
 const tokenStore: TokenCacheStorage = { read: async () => "", write: async () => undefined };
@@ -36,7 +38,15 @@ function run(id: string, executedOn?: RunRecord["executedOn"], summary = id): Ru
   };
 }
 
-const onSandbox = (sandboxId: string): RunRecord["executedOn"] => ({ kind: "sandbox", sandboxId, name: "Office mini PC", organizationId: "org-tenant-1", model: "llama3.1:8b" });
+const KEY_A = "A".repeat(52);
+const onSandbox = (sandboxId: string, organizationId = "org-tenant-1", pairingKeyFingerprint = KEY_A): RunRecord["executedOn"] => ({
+  kind: "sandbox",
+  sandboxId,
+  name: "Office mini PC",
+  organizationId,
+  model: "llama3.1:8b",
+  pairingKeyFingerprint,
+});
 
 describe("AppStateStore for paired sandboxes", () => {
   it("lists connected organizations with ids, name and tenant id only, and imports sandbox runs", async () => {
@@ -61,9 +71,25 @@ describe("AppStateStore for paired sandboxes", () => {
       assert.equal((await store.getRun("run-a"))?.summary, "updated");
       assert.equal(await store.importSandboxRuns([run("run-a", onSandbox("other-pc"), "other")]), 0);
       assert.equal((await store.getRun("run-a"))?.summary, "updated");
+      // The same sandbox id under another organization, or with another key, does not either.
+      assert.equal(await store.importSandboxRuns([run("run-a", onSandbox("mini-pc", "org-b"), "organization b")]), 0);
+      assert.equal(await store.importSandboxRuns([run("run-a", onSandbox("mini-pc", "org-tenant-1", "B".repeat(52)), "another key")]), 0);
+      assert.equal(await store.importSandboxRuns([{ ...run("run-a", onSandbox("mini-pc"), "another tenant"), tenantId: "tenant-2" }]), 0);
+      assert.equal((await store.getRun("run-a"))?.summary, "updated");
+      // A sandbox run without the binding the desktop sets is not taken.
+      const unbound = { kind: "sandbox" as const, sandboxId: "mini-pc", name: "Office mini PC", organizationId: "org-tenant-1", model: "llama3.1:8b" };
+      assert.equal(await store.importSandboxRuns([run("run-unbound", unbound)]), 0);
     } finally {
       store.close();
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it("never takes a sandbox run as this desktop's earlier scheduled run", () => {
+    const desktopRun = { ...run("run-desktop"), trigger: "schedule" as const, queuedAt: "2026-11-01T00:00:00.000Z" };
+    const sandboxRun = { ...run("run-sandbox", onSandbox("mini-pc")), trigger: "schedule" as const, queuedAt: "2026-11-02T00:00:00.000Z" };
+    assert.equal(ranOnThisDesktop(sandboxRun), false);
+    assert.equal(ranOnThisDesktop(desktopRun), true);
+    assert.equal(latestScheduledRunForAgent([sandboxRun, desktopRun], "find-inactive-devices")?.id, "run-desktop");
   });
 });

@@ -1,4 +1,5 @@
 import { OfficeService } from "./office.js";
+import { ranOnThisDesktop, sandboxRunBinding } from "./sandbox-runs.js";
 import { describeNetworkFailure, timeoutWhenAborted, type ProxyResolver } from "./network-failure.js";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -7767,7 +7768,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         };
       }), ...this.officeService.state().personas.filter(p => p.enabled && p.nextRunAt).map(p => ({ agent: { name: p.name }, dueAt: Date.parse(p.nextRunAt!) }))]
       .sort((a, b) => a.dueAt - b.dueAt)[0];
-    const scheduledRuns = persisted.runs.filter((run) => run.trigger === "schedule");
+    const scheduledRuns = persisted.runs.filter((run) => run.trigger === "schedule" && ranOnThisDesktop(run));
     const latestWake = scheduledRuns[0];
     const latestSuccess = scheduledRuns.find((run) => run.status === "completed");
     const latestFailureMessage = latestWake?.status === "failed"
@@ -8781,8 +8782,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
   /**
    * Adds runs a paired sandbox reported to run history, or updates ones it
-   * reported before. A run of this desktop with the same id is never
-   * replaced. Returns how many were added or updated.
+   * reported before. A run is replaced only by one with the same binding:
+   * the same sandbox, organization, tenant and sandbox key. A run of this
+   * desktop, or of another binding, with the same id is never replaced.
+   * Returns how many were added or updated.
    */
   async importSandboxRuns(runs: readonly RunRecord[]): Promise<number> {
     const count = await this.serialize(async () => {
@@ -8790,12 +8793,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       const next = [...persisted.runs];
       let changed = 0;
       for (const run of runs) {
-        if (run.executedOn?.kind !== "sandbox") continue;
+        const binding = sandboxRunBinding(run);
+        if (!binding) continue;
         const index = next.findIndex((entry) => entry.id === run.id);
         if (index < 0) {
           next.unshift(run);
           changed += 1;
-        } else if (next[index]!.executedOn?.kind === "sandbox" && next[index]!.executedOn.sandboxId === run.executedOn.sandboxId) {
+        } else if (sandboxRunBinding(next[index]!) === binding) {
           next[index] = run;
           changed += 1;
         }
