@@ -143,7 +143,7 @@ export function McpServerDialog({
           <>
             <div>
               <div className="text-sm font-medium text-[var(--color-text)]">No sign-in needed</div>
-              <div className="text-sm text-[var(--color-text-muted)]">Public server from {server.publisher}</div>
+              <div className="text-sm text-[var(--color-text-muted)]">{server.builtIn ? `Built into OpenAdminOS · reads ${server.host}` : `Public server from ${server.publisher}`}</div>
             </div>
             <Button variant="primary" onClick={() => setView("install")}>Install</Button>
           </>
@@ -244,7 +244,9 @@ function InstallReview({
       <h3 className="font-serif text-2xl font-normal text-[var(--color-text)]">Install {server.name}?</h3>
       <ol className="grid gap-4 text-sm text-[var(--color-text-soft)]">
         <Step icon={<IconLock size={16} />} title="Authentication">
-          No sign-in needed. This server is public and asks for no account, key or token.
+          {server.builtIn
+            ? "No sign-in needed. OpenAdminOS calls this public API from this device and asks for no account, key or token."
+            : "No sign-in needed. This server is public and asks for no account, key or token."}
         </Step>
         <Step icon={<IconCloud size={16} />} title="Where queries go" warning>
           Tool queries go to <code className="font-mono text-xs">{server.host}</code>. Each query is written from your current question only, never from Graph or cache data. The status strip names this host while the server is on.

@@ -2314,3 +2314,16 @@ Branch `splashtop/agentic-packr-docs-mcp`, based on `main` after PR #183.
 - [x] IT policy files accept `splashtop-packr-kb`; the schema enum matches the catalog.
 - [x] Live probe: search and article read on the Packr Help Center answer without sign-in.
 - [x] Docs (gitbook and web copy), SPEC.md and CHANGELOG updated.
+
+# Splashtop references: publisher and names (2026-11-15)
+
+Both Splashtop documentation references are built by OpenAdminOS over Splashtop's public Help Centers. The listings say so.
+
+## Acceptance criteria
+
+- [ ] `splashtop-kb` is named Splashtop Docs and `splashtop-packr-kb` Splashtop Agentic Packr Docs; neither name ends in MCP. Both have publisher OpenAdminOS.
+- [ ] Their operator line says OpenAdminOS builds the reference and Splashtop runs the Help Center on Zendesk.
+- [ ] The Marketplace card, spotlight and details dialog show OpenAdminOS as publisher and keep the Splashtop logo; the install footer of a built-in listing reads "Built into OpenAdminOS · reads" its host.
+- [ ] Chat still routes the earlier names ("Splashtop Docs MCP", "Splashtop Agentic Packr Docs MCP") and the new ones to the same reference; designed errors use the new names.
+- [ ] The logo NOTICE, user docs (both trees, identical), SPEC and CHANGELOG use the new names and publisher.
+- [ ] Typecheck, electron and renderer tests (Node 22) and docs:check pass; GPT-6.1-Sol, Muse and a Claude evaluator have no open blocking findings.
