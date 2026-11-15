@@ -835,6 +835,38 @@ describe("RunResult: where the run executed", () => {
     expect(whereValue(card)).toHaveTextContent("This computer");
   });
 
+  it("says a sandbox run was verified against its audit chain only when the desktop attested it", async () => {
+    renderRun(completedRun({
+      executedOn: sandboxExecutedOn,
+      attestedBy: { sandboxId: "mini-pc", pairingKeyFingerprint: "A".repeat(52), checkpointSeq: 12, verifiedAt: "2026-10-10T10:02:00.000Z" },
+    }));
+    const card = await screen.findByRole("region", { name: "Run status" });
+    expect(within(card).getByText("Audit").nextElementSibling).toHaveTextContent("Verified against Mini PC's audit chain");
+    expect(card).not.toHaveTextContent("not verified");
+  });
+
+  it("says a sandbox run without an attestation was reported, not verified", async () => {
+    renderRun(completedRun({ executedOn: sandboxExecutedOn }));
+    const card = await screen.findByRole("region", { name: "Run status" });
+    expect(within(card).getByText("Audit").nextElementSibling).toHaveTextContent("Reported by Mini PC, not verified");
+  });
+
+  it("does not take an attestation for another sandbox", async () => {
+    renderRun(completedRun({
+      id: "run-other",
+      executedOn: sandboxExecutedOn,
+      attestedBy: { sandboxId: "other-pc", pairingKeyFingerprint: "A".repeat(52), checkpointSeq: 1, verifiedAt: "2026-10-10T10:02:00.000Z" },
+    }));
+    const card = await screen.findByRole("region", { name: "Run status" });
+    expect(within(card).getByText("Audit").nextElementSibling).toHaveTextContent("Reported by Mini PC, not verified");
+  });
+
+  it("shows no audit line for a run on this computer", async () => {
+    renderRun(completedRun());
+    const card = await screen.findByRole("region", { name: "Run status" });
+    expect(within(card).queryByText("Audit")).toBeNull();
+  });
+
   it("names the sandbox and its model and makes no on-device claim for a sandbox run", async () => {
     renderRun(completedRun({ executedOn: sandboxExecutedOn }));
     const card = await screen.findByRole("region", { name: "Run status" });

@@ -34,7 +34,7 @@ import {
   StatusDot,
   type MenuEntry,
 } from "../components/ui";
-import { ORGANIZATION_COPY, RERUN_COPY, RUN_LOCATION_COPY, runLocationLabel, userFacingErrorReason } from "../copy";
+import { ORGANIZATION_COPY, RERUN_COPY, RUN_LOCATION_COPY, runLocationLabel, runVerificationLabel, userFacingErrorReason } from "../copy";
 import { Modal, ModalHeader } from "../components/Modal";
 import { createPendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
@@ -719,6 +719,7 @@ function RunStatusCard({
   const status = describeRunStatus(run, nowMs);
   const tone = STATUS_TONE[status.tone];
   const tokens = totalTokens(run);
+  const verification = runVerificationLabel(run);
 
   return (
     <section
@@ -777,6 +778,14 @@ function RunStatusCard({
 
         <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-[var(--color-border-soft)] pt-4 sm:grid-cols-3 lg:grid-cols-6">
           <RunFact label={RUN_LOCATION_COPY.label} value={runLocationLabel(run.executedOn)} />
+          {verification ? (
+            <RunFact
+              label={RUN_LOCATION_COPY.auditLabel}
+              value={verification}
+              icon={run.attestedBy ? <IconShield size={12} /> : <IconWarning size={12} />}
+              tone={run.attestedBy ? "success" : "warning"}
+            />
+          ) : null}
           <RunFact label="Tenant" value={tenantName} />
           <RunFact
             label="Provider"
