@@ -27,6 +27,10 @@ Signed payloads, proof transcripts and audit rows use the runtime's `canonicalJs
 
 An audit row is accepted only when its stored text is already canonical, and its hash is taken over that stored text, as the writer does. Text that parses to the same value but is spelled differently, such as `1e400` or a duplicate key, is refused.
 
+## Addresses
+
+`parseSandboxAddress` reads `<IPv4>:<port>` or `[<IPv6>]:<port>`; host names are refused, so what is checked is what is reached. `isPrivateAddress` accepts loopback, 10/8, 172.16/12, 192.168/16, link-local, 100.64/10 and fd00::/8 only. The sandbox host listens and the desktop connects under the same rules.
+
 ## Pairing code
 
 The sandbox shows a code of 28 Crockford base32 characters (digits and letters without I, L, O and U), in seven groups of four, such as `7K3M-Q9X2-...`. Typed input may leave out the hyphens, use spaces and any case; O is read as 0, I and L as 1.

@@ -1,3 +1,4 @@
+export { formatSandboxAddress, isPrivateAddress, parseSandboxAddress, type SandboxAddress } from "./address.js";
 export {
   createTlsCertificate,
   DEFAULT_TLS_VALIDITY_DAYS,

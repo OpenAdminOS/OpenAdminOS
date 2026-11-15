@@ -1,34 +1,15 @@
-import { BlockList, isIP } from "node:net";
+import { isPrivateAddress, parseSandboxAddress } from "@openadminos/pairing";
 
 import { SandboxRefusal } from "./refusal.js";
-
-/**
- * Where the pairing API may listen: this machine, a private network, a
- * link-local address or a tailnet. Never an address that is reachable
- * from the internet.
- */
-const PRIVATE = new BlockList();
-PRIVATE.addSubnet("127.0.0.0", 8, "ipv4");
-PRIVATE.addSubnet("10.0.0.0", 8, "ipv4");
-PRIVATE.addSubnet("172.16.0.0", 12, "ipv4");
-PRIVATE.addSubnet("192.168.0.0", 16, "ipv4");
-PRIVATE.addSubnet("169.254.0.0", 16, "ipv4");
-// Carrier-grade NAT space, which tailnets such as Tailscale use.
-PRIVATE.addSubnet("100.64.0.0", 10, "ipv4");
-PRIVATE.addAddress("::1", "ipv6");
-PRIVATE.addSubnet("fe80::", 10, "ipv6");
-// Unique local addresses with the local bit set, which tailnets use too.
-PRIVATE.addSubnet("fd00::", 8, "ipv6");
 
 export interface ListenAddress {
   host: string;
   port: number;
 }
 
+/** The address rules are in `@openadminos/pairing`, shared with the desktop. */
 export function isPrivateListenHost(host: string): boolean {
-  const family = isIP(host);
-  if (family === 0) return false;
-  return PRIVATE.check(host, family === 4 ? "ipv4" : "ipv6");
+  return isPrivateAddress(host);
 }
 
 /**
@@ -36,17 +17,15 @@ export function isPrivateListenHost(host: string): boolean {
  * what is checked is what is bound. Port 0 picks a free port.
  */
 export function parseListenAddress(value: string, field = "pairing.listen"): ListenAddress {
-  const match = /^(?:\[([0-9A-Fa-f:.]+)\]|(\d{1,3}(?:\.\d{1,3}){3})):(\d{1,5})$/.exec(value.trim());
-  const host = match?.[1] ?? match?.[2];
-  const port = match ? Number(match[3]) : Number.NaN;
-  if (!match || !host || isIP(host) === 0 || !Number.isInteger(port) || port < 0 || port > 65_535) {
+  const address = parseSandboxAddress(value);
+  if (!address) {
     throw new SandboxRefusal(
       "config-invalid",
       `Sandbox config field "${field}" must be an IP address and port, such as 100.64.0.10:7443 or [fd7a:115c:a1e0::10]:7443.`,
     );
   }
-  assertPrivateListenAddress(host, field);
-  return { host: host.toLowerCase(), port };
+  assertPrivateListenAddress(address.host, field);
+  return address;
 }
 
 export function assertPrivateListenAddress(host: string, field = "pairing.listen"): void {
