@@ -1045,6 +1045,27 @@ export interface RunRecord {
   usage?: RunModelUsage | null;
   /** Where the run executed. Absent means this desktop. */
   executedOn?: RunExecutedOn;
+  /**
+   * Set by the desktop on a sandbox run it imported, only when the
+   * sandbox's audit rows it verified hold the run's finished event.
+   * Absent on a sandbox run means it was reported, not verified.
+   */
+  attestedBy?: RunAttestation;
+}
+
+/**
+ * How the desktop verified a sandbox run: against the audit chain of the
+ * sandbox it paired with, up to a checkpoint signed with that sandbox's
+ * device key. It shows what the customer's sandbox attested, not more.
+ */
+export interface RunAttestation {
+  sandboxId: string;
+  /** SHA-256 of the sandbox's device key, 52 Crockford base32 characters. */
+  pairingKeyFingerprint: string;
+  /** The signed checkpoint that covers the run's finished event. */
+  checkpointSeq: number;
+  /** When the desktop accepted that checkpoint, ISO 8601. */
+  verifiedAt: string;
 }
 
 /**
