@@ -6,7 +6,7 @@ import { describe, it } from "node:test";
 
 import type { RunRecord, SecretAccessor } from "@openadminos/agent-sdk";
 import type { EnterpriseOrganization, EnterpriseReadOnlyAgent, EnterpriseResult } from "@openadminos/enterprise";
-import { parsePairingCode } from "@openadminos/pairing";
+import { parsePairingCode, runRecordDigest } from "@openadminos/pairing";
 import { canonicalJson, chainHash, type AuditLogEventSeed } from "@openadminos/runtime";
 import { bundledHash, startTestSandbox, TEST_SANDBOX_TENANT, type TestSandbox } from "@openadminos/sandbox-host/testing";
 
@@ -86,22 +86,23 @@ async function desktop(options: { organizations?: EnterpriseOrganization[]; limi
     withTenantLease: (tenantId, work) => lifecycle.withTenantLease(tenantId, (lease) => work({ signal: lease.signal })),
     // The same replace rule as AppStateStore.importSandboxRuns.
     importRuns: async (imported) => {
-      let changed = 0;
+      const written: string[] = [];
       for (const run of imported) {
         assertOpen(run.tenantId!);
         const existing = runs.get(run.id);
         if (existing && !(run.attestedBy && (!existing.attestedBy || run.attestedBy.checkpointSeq > existing.attestedBy.checkpointSeq))) continue;
         runs.set(run.id, run);
-        changed += 1;
+        written.push(run.id);
       }
-      return changed;
+      return written;
     },
+    // The same check as AppStateStore.attestSandboxRuns: only the record imported then.
     attestRuns: async (entries) => {
       let changed = 0;
       for (const entry of entries) {
         assertOpen(entry.tenantId);
         const run = runs.get(entry.runId);
-        if (!run || run.attestedBy) continue;
+        if (!run || run.attestedBy || run.agentSlug !== entry.agentSlug || run.status !== entry.status || runRecordDigest(run) !== entry.storedDigest) continue;
         runs.set(entry.runId, { ...run, attestedBy: entry.attestedBy });
         changed += 1;
       }
@@ -675,7 +676,7 @@ describe("SandboxService without a paired sandbox", () => {
           organizations: async () => [ORG],
           catalog: async () => [],
           withTenantLease: (_tenantId, work) => work({ signal: new AbortController().signal }),
-          importRuns: async () => 0,
+          importRuns: async () => [],
           attestRuns: async () => 0,
           recordAudit: () => undefined,
           transport: () => Promise.reject(new Error("no connection is expected")),
@@ -794,6 +795,54 @@ describe("SandboxService run verification binds content", () => {
       for (let round = 0; round < 20 && verified === 0; round += 1) verified = value(await h.desk.service.sync("mini-pc")).runsVerified;
       assert.equal(verified, 1, "the waiting run was verified once its event was read");
       assert.ok([...h.desk.runs.values()][0]?.attestedBy);
+    } finally {
+      await h.close();
+    }
+  });
+});
+
+describe("SandboxService pending verification follows the stored record", () => {
+  it("does not attest an older stored record after an import of another record was skipped", async () => {
+    const h = await paired();
+    try {
+      await h.sandbox.runAgent();
+      const pairingId = h.sandbox.host.currentPairing!.record.pairingId;
+      // Audit hidden: the sandbox answers an empty batch signed at the desktop's pin.
+      const hideAudit = onAudit((body) => {
+        const pin = h.desk.store.pin(pairingId)!;
+        body.rows = [];
+        body.checkpoint = h.sandbox.signCheckpoint({ pairingId, sandboxId: "mini-pc", seq: pin.seq, sha256: pin.sha256, rowCount: pin.seq, at: new Date().toISOString() }) as unknown as Record<string, unknown>;
+      });
+      const tamper = onRuns((run) => {
+        run.result = { forged: true };
+      });
+      // 1. A tampered record is stored, unverified.
+      h.desk.intercept.current = async (next, request) => (request.path.startsWith("/v1/audit") ? hideAudit(next, request) : tamper(next, request));
+      const first = value(await h.desk.service.sync("mini-pc"));
+      assert.equal(first.runsUnverified, 1);
+      const stored = [...h.desk.runs.values()][0]!;
+      assert.deepEqual(stored.result, { forged: true });
+
+      // 2. A cursor reset rereads the honest record, still without its event: unverified, so it is skipped.
+      const reset = onRuns(() => undefined, (body) => {
+        body.generation = "after-reset";
+        body.condition = { code: "cursor-reset", message: "Cursors started over." };
+      });
+      h.desk.intercept.current = async (next, request) => (request.path.startsWith("/v1/audit") ? hideAudit(next, request) : reset(next, request));
+      const second = value(await h.desk.service.sync("mini-pc"));
+      assert.equal(second.runsImported, 0);
+      assert.equal(second.runsSkipped, 1);
+      assert.equal(second.runsUnverified, 0, "a skipped record is not counted or tracked");
+
+      // 3. The event arrives; it names the honest record, not the stored one. Same generation, so no reread.
+      h.desk.intercept.current = onRuns(() => undefined, (body) => {
+        body.generation = "after-reset";
+      });
+      const third = value(await h.desk.service.sync("mini-pc"));
+      assert.equal(third.runsVerified, 0);
+      const after = h.desk.runs.get(stored.id)!;
+      assert.equal(after.attestedBy, undefined, "the older stored record is not labelled verified");
+      assert.deepEqual(after.result, { forged: true });
     } finally {
       await h.close();
     }

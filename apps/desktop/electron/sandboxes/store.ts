@@ -117,7 +117,10 @@ export interface VerifiedRunEvent {
 /** A run imported unverified, checked again on every sync. */
 export interface UnverifiedRun {
   runId: string;
+  /** The digest of the record as the sandbox sent it, which a verified event must name. */
   digest: string;
+  /** The digest of the record as stored in run history, which must still be there to attest it. */
+  storedDigest: string;
   agentSlug: string;
   status: string;
 }
@@ -164,6 +167,7 @@ export class SandboxAuditStore {
         pairing_id TEXT NOT NULL,
         run_id TEXT NOT NULL,
         digest TEXT NOT NULL,
+        stored_digest TEXT NOT NULL,
         agent_slug TEXT NOT NULL,
         status TEXT NOT NULL,
         PRIMARY KEY (pairing_id, run_id)
@@ -234,15 +238,15 @@ export class SandboxAuditStore {
 
   addUnverified(pairingId: string, run: UnverifiedRun): void {
     this.db
-      .prepare("INSERT OR REPLACE INTO sandbox_unverified (pairing_id, run_id, digest, agent_slug, status) VALUES (?, ?, ?, ?, ?)")
-      .run(pairingId, run.runId, run.digest, run.agentSlug, run.status);
+      .prepare("INSERT OR REPLACE INTO sandbox_unverified (pairing_id, run_id, digest, stored_digest, agent_slug, status) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(pairingId, run.runId, run.digest, run.storedDigest, run.agentSlug, run.status);
   }
 
   listUnverified(pairingId: string, limit: number): UnverifiedRun[] {
     const rows = this.db
-      .prepare("SELECT run_id, digest, agent_slug, status FROM sandbox_unverified WHERE pairing_id = ? ORDER BY run_id LIMIT ?")
-      .all(pairingId, limit) as Array<{ run_id: string; digest: string; agent_slug: string; status: string }>;
-    return rows.map((row) => ({ runId: row.run_id, digest: row.digest, agentSlug: row.agent_slug, status: row.status }));
+      .prepare("SELECT run_id, digest, stored_digest, agent_slug, status FROM sandbox_unverified WHERE pairing_id = ? ORDER BY run_id LIMIT ?")
+      .all(pairingId, limit) as Array<{ run_id: string; digest: string; stored_digest: string; agent_slug: string; status: string }>;
+    return rows.map((row) => ({ runId: row.run_id, digest: row.digest, storedDigest: row.stored_digest, agentSlug: row.agent_slug, status: row.status }));
   }
 
   removeUnverified(pairingId: string, runId: string): void {

@@ -1,5 +1,6 @@
 import { OfficeService } from "./office.js";
 import { ranOnThisDesktop, sandboxRunBinding } from "./sandbox-runs.js";
+import { runRecordDigest } from "@openadminos/pairing";
 import type { SandboxRunAttestation } from "./sandboxes/service.js";
 import { describeNetworkFailure, timeoutWhenAborted, type ProxyResolver } from "./network-failure.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -8791,21 +8792,21 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * replaces it. A run of this desktop with the same id is never replaced.
    * Called under the organization's tenant lease: the organization must
    * still be connected and the lease current, or nothing is written.
-   * Returns how many were added or replaced.
+   * Returns the ids it added or replaced.
    */
-  async importSandboxRuns(runs: readonly RunRecord[]): Promise<number> {
-    const count = await this.serialize(async () => {
+  async importSandboxRuns(runs: readonly RunRecord[]): Promise<string[]> {
+    const written = await this.serialize(async () => {
       const persisted = await this.read();
       this.assertSandboxImportAllowed(persisted, runs);
       const next = [...persisted.runs];
-      let changed = 0;
+      const ids: string[] = [];
       for (const run of runs) {
         const binding = sandboxRunBinding(run);
         if (!binding) continue;
         const index = next.findIndex((entry) => entry.id === run.id);
         if (index < 0) {
           next.unshift(run);
-          changed += 1;
+          ids.push(run.id);
           continue;
         }
         const existing = next[index]!;
@@ -8813,13 +8814,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         const newer = run.attestedBy !== undefined && (existing.attestedBy === undefined || run.attestedBy.checkpointSeq > existing.attestedBy.checkpointSeq);
         if (!newer) continue;
         next[index] = run;
-        changed += 1;
+        ids.push(run.id);
       }
-      if (changed > 0) await this.write({ ...persisted, runs: next });
-      return changed;
+      if (ids.length > 0) await this.write({ ...persisted, runs: next });
+      return ids;
     });
-    if (count > 0) this.emitStateChanged("sandbox-runs-imported");
-    return count;
+    if (written.length > 0) this.emitStateChanged("sandbox-runs-imported");
+    return written;
   }
 
   /** Sets the attestation of sandbox runs imported unverified, matched on the full binding. */
@@ -8835,6 +8836,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         if (!entry || run.attestedBy || executedOn?.kind !== "sandbox") return run;
         const binding = JSON.stringify([entry.sandboxId, entry.organizationId, entry.tenantId.toLowerCase(), entry.pairingKeyFingerprint]);
         if (sandboxRunBinding(run) !== binding) return run;
+        // Only the record imported then: a later or older record in history is not the one the event names.
+        if (run.agentSlug !== entry.agentSlug || run.status !== entry.status || runRecordDigest(run) !== entry.storedDigest) return run;
         changed += 1;
         return { ...run, attestedBy: entry.attestedBy };
       });

@@ -9,6 +9,8 @@ import type { TokenCacheStorage } from "@openadminos/runtime";
 
 import { latestScheduledRunForAgent } from "./companion-schedules.js";
 import { ranOnThisDesktop } from "./sandbox-runs.js";
+import { runRecordDigest } from "@openadminos/pairing";
+
 import { AppStateStore } from "./state.js";
 import { TenantClosedError } from "./tenant-lifecycle.js";
 
@@ -63,34 +65,48 @@ describe("AppStateStore for paired sandboxes", () => {
       assert.equal(organizations[0]!.tenantId, tenant.id);
 
       // A desktop run is never replaced, and a run without a sandbox is not taken.
-      assert.equal(await store.importSandboxRuns([run("run-desktop", onSandbox("mini-pc")), run("run-plain"), run("run-a", onSandbox("mini-pc"))]), 1);
+      assert.equal((await store.importSandboxRuns([run("run-desktop", onSandbox("mini-pc")), run("run-plain"), run("run-a", onSandbox("mini-pc"))])).length, 1);
       assert.equal((await store.getRun("run-desktop"))?.executedOn, undefined);
       assert.equal(await store.getRun("run-plain"), undefined);
       assert.equal((await store.getRun("run-a"))?.executedOn?.kind, "sandbox");
 
       // An unverified reread never replaces a run; a record verified against a newer event does.
-      assert.equal(await store.importSandboxRuns([run("run-a", onSandbox("mini-pc"), "unverified reread")]), 0);
-      assert.equal(await store.importSandboxRuns([{ ...run("run-a", onSandbox("mini-pc"), "updated"), attestedBy: attested(5) }]), 1);
+      assert.equal((await store.importSandboxRuns([run("run-a", onSandbox("mini-pc"), "unverified reread")])).length, 0);
+      assert.equal((await store.importSandboxRuns([{ ...run("run-a", onSandbox("mini-pc"), "updated"), attestedBy: attested(5) }])).length, 1);
       assert.equal((await store.getRun("run-a"))?.summary, "updated");
-      assert.equal(await store.importSandboxRuns([{ ...run("run-a", onSandbox("mini-pc"), "same event"), attestedBy: attested(5) }]), 0);
-      assert.equal(await store.importSandboxRuns([{ ...run("run-a", onSandbox("mini-pc"), "older event"), attestedBy: attested(4) }]), 0);
+      assert.equal((await store.importSandboxRuns([{ ...run("run-a", onSandbox("mini-pc"), "same event"), attestedBy: attested(5) }])).length, 0);
+      assert.equal((await store.importSandboxRuns([{ ...run("run-a", onSandbox("mini-pc"), "older event"), attestedBy: attested(4) }])).length, 0);
       assert.equal((await store.getRun("run-a"))?.summary, "updated");
       // Another sandbox does not replace it either.
-      assert.equal(await store.importSandboxRuns([run("run-a", onSandbox("other-pc"), "other")]), 0);
+      assert.equal((await store.importSandboxRuns([run("run-a", onSandbox("other-pc"), "other")])).length, 0);
       assert.equal((await store.getRun("run-a"))?.summary, "updated");
       // The same sandbox id under another organization, or with another key, does not either.
       // An organization that is not connected here is refused outright.
       await assert.rejects(store.importSandboxRuns([run("run-a", onSandbox("mini-pc", "org-b"), "organization b")]), (error: unknown) => error instanceof TenantClosedError);
-      assert.equal(await store.importSandboxRuns([run("run-a", onSandbox("mini-pc", "org-tenant-1", "B".repeat(52)), "another key")]), 0);
+      assert.equal((await store.importSandboxRuns([run("run-a", onSandbox("mini-pc", "org-tenant-1", "B".repeat(52)), "another key")])).length, 0);
       await assert.rejects(store.importSandboxRuns([{ ...run("run-a", onSandbox("mini-pc"), "another tenant"), tenantId: "tenant-2" }]), (error: unknown) => error instanceof TenantClosedError);
       assert.equal((await store.getRun("run-a"))?.summary, "updated");
       // A sandbox run without the binding the desktop sets is not taken.
       const unbound = { kind: "sandbox" as const, sandboxId: "mini-pc", name: "Office mini PC", organizationId: "org-tenant-1", model: "llama3.1:8b" };
-      assert.equal(await store.importSandboxRuns([run("run-unbound", unbound)]), 0);
+      assert.equal((await store.importSandboxRuns([run("run-unbound", unbound)])).length, 0);
 
       // A run imported unverified gets its attestation later, on the full binding only.
-      assert.equal(await store.importSandboxRuns([run("run-b", onSandbox("mini-pc"))]), 1);
-      const entry = { runId: "run-b", sandboxId: "mini-pc", organizationId: "org-tenant-1", tenantId: tenant.id, pairingKeyFingerprint: KEY_A, attestedBy: attested(9) };
+      assert.equal((await store.importSandboxRuns([run("run-b", onSandbox("mini-pc"))])).length, 1);
+      const storedB = (await store.getRun("run-b"))!;
+      const entry = {
+        runId: "run-b",
+        sandboxId: "mini-pc",
+        organizationId: "org-tenant-1",
+        tenantId: tenant.id,
+        pairingKeyFingerprint: KEY_A,
+        agentSlug: storedB.agentSlug,
+        status: storedB.status,
+        storedDigest: runRecordDigest(storedB),
+        attestedBy: attested(9),
+      };
+      // Another record than the one stored, or another status, is not attested.
+      assert.equal(await store.attestSandboxRuns([{ ...entry, storedDigest: "0".repeat(64) }]), 0);
+      assert.equal(await store.attestSandboxRuns([{ ...entry, status: "failed" }]), 0);
       await assert.rejects(store.attestSandboxRuns([{ ...entry, organizationId: "org-b" }]), (error: unknown) => error instanceof TenantClosedError);
       assert.equal(await store.attestSandboxRuns([{ ...entry, pairingKeyFingerprint: "B".repeat(52) }]), 0);
       assert.equal(await store.attestSandboxRuns([entry]), 1);

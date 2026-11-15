@@ -123,13 +123,21 @@ export interface SandboxTenantLease {
   readonly signal: AbortSignal;
 }
 
-/** A run imported unverified that the verified audit rows now cover, with the binding it was imported under. */
+/**
+ * A run imported unverified that the verified audit rows now cover. It is
+ * attested only when the run in history is still the record imported then:
+ * same binding, agent and status, and `storedDigest` equal to the digest
+ * of the stored record.
+ */
 export interface SandboxRunAttestation {
   runId: string;
   sandboxId: string;
   organizationId: string;
   tenantId: string;
   pairingKeyFingerprint: string;
+  agentSlug: string;
+  status: string;
+  storedDigest: string;
   attestedBy: RunAttestation;
 }
 
@@ -149,11 +157,11 @@ export interface SandboxServiceOptions {
    */
   withTenantLease<T>(tenantId: string, work: (lease: SandboxTenantLease) => Promise<T>): Promise<T>;
   /**
-   * Adds sandbox runs to run history and returns how many were added or
-   * replaced. Called inside the lease; it checks again that the
+   * Adds sandbox runs to run history and returns the ids it wrote (added
+   * or replaced). Called inside the lease; it checks again that the
    * organization is connected and the lease current before it writes.
    */
-  importRuns(runs: readonly RunRecord[]): Promise<number>;
+  importRuns(runs: readonly RunRecord[]): Promise<readonly string[]>;
   /** Sets the attestation of runs imported unverified; returns how many it set. */
   attestRuns(entries: readonly SandboxRunAttestation[]): Promise<number>;
   /** Appends to the desktop's audit log; throws when it cannot. */
@@ -554,30 +562,37 @@ export class SandboxService implements EnterpriseSandboxes {
     if (page.length === 0) return;
     const record = context.sandbox.pairing.record;
     const runs: RunRecord[] = [];
-    const pending: UnverifiedRun[] = [];
-    const verifiedIds = new Set<string>();
+    const pending = new Map<string, UnverifiedRun>();
+    const reasons = new Map<string, UnverifiedReason | undefined>();
     for (const { run, digest } of page) {
-      const check = this.verifyRun(record, { runId: run.id, digest, agentSlug: run.agentSlug, status: run.status });
+      const check = this.verifyRun(record, { runId: run.id, digest, storedDigest: "", agentSlug: run.agentSlug, status: run.status });
       if (check.attestedBy) {
         runs.push({ ...run, attestedBy: check.attestedBy });
-        verifiedIds.add(run.id);
       } else {
         runs.push(run);
-        pending.push({ runId: run.id, digest, agentSlug: run.agentSlug, status: run.status });
-        context.problems.push(`Run ${clipId(run.id)} was imported unverified: ${unverifiedText(check.reason)}`);
+        // The digest of the record as it will be stored, so a later attestation applies to this record only.
+        pending.set(run.id, { runId: run.id, digest, storedDigest: runRecordDigest(run), agentSlug: run.agentSlug, status: run.status });
+        reasons.set(run.id, check.reason);
       }
     }
     if (context.signal.aborted) throw new TenantClosedError(context.sandbox.tenantId, "sandbox sync");
-    const imported = await this.options.importRuns(runs);
-    context.imported += imported;
-    context.skipped += runs.length - imported;
-    for (const run of runs) {
-      if (verifiedIds.has(run.id)) context.verified += 1;
-      else context.unverified += 1;
-    }
+    const written = new Set(await this.options.importRuns(runs));
+    context.imported += written.size;
+    context.skipped += runs.length - written.size;
+    // Only what was written is counted and tracked: a skipped record is not the one in history.
     this.withAuditStore((store) => {
-      for (const id of verifiedIds) store.removeUnverified(record.pairingId, id);
-      for (const entry of pending) store.addUnverified(record.pairingId, entry);
+      for (const run of runs) {
+        if (!written.has(run.id)) continue;
+        const entry = pending.get(run.id);
+        if (entry) {
+          context.unverified += 1;
+          context.problems.push(`Run ${clipId(run.id)} was imported unverified: ${unverifiedText(reasons.get(run.id))}`);
+          store.addUnverified(record.pairingId, entry);
+        } else {
+          context.verified += 1;
+          store.removeUnverified(record.pairingId, run.id);
+        }
+      }
     });
   }
 
@@ -595,6 +610,9 @@ export class SandboxService implements EnterpriseSandboxes {
         organizationId: context.sandbox.organizationId,
         tenantId: context.sandbox.tenantId,
         pairingKeyFingerprint: fingerprintOf(record),
+        agentSlug: entry.agentSlug,
+        status: entry.status,
+        storedDigest: entry.storedDigest,
         attestedBy: check.attestedBy,
       });
     }
