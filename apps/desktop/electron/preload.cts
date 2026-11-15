@@ -43,6 +43,20 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:get-scheduler-launch-settings"),
   getSandboxSettings: () =>
     ipcRenderer.invoke("openadminos:get-sandbox-settings"),
+  getEnterpriseStatus: () =>
+    ipcRenderer.invoke("openadminos:get-enterprise-status"),
+  onEnterpriseStatusChanged: (listener: () => void) => {
+    const wrapped = () => listener();
+    ipcRenderer.on("openadminos:enterprise-status-changed", wrapped);
+    return () => ipcRenderer.off("openadminos:enterprise-status-changed", wrapped);
+  },
+  invokeEnterprise: (name: string, input?: unknown) => {
+    // Only the team features channels; the host checks the name again.
+    if (typeof name !== "string" || !/^[a-z][a-z0-9-]{0,47}(?:\.[a-z][a-z0-9-]{0,47}){0,3}$/.test(name)) {
+      return Promise.reject(new Error("A team features request needs a lower case name."));
+    }
+    return ipcRenderer.invoke(`openadminos-enterprise:${name}`, input ?? null);
+  },
   getReleaseDiagnostics: () =>
     ipcRenderer.invoke("openadminos:get-release-diagnostics"),
   exportSupportBundle: (input: SupportBundleInput) =>
