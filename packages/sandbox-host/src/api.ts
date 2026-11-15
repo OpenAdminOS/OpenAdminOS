@@ -180,6 +180,7 @@ export class SandboxApi {
   async close(): Promise<void> {
     this.closed = true;
     this.stopCode();
+    this.refusals.close();
     if (this.certificateTimer !== undefined) clearInterval(this.certificateTimer);
     this.certificateTimer = undefined;
     const server = this.server;
