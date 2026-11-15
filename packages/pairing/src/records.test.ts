@@ -7,12 +7,16 @@ import { exportDevicePublicKey, generateDeviceIdentity } from "./identity.js";
 import {
   parseAuditCheckpoint,
   parsePairingRecord,
+  parseScheduleAssignment,
   signAuditCheckpoint,
   signPairingRecord,
+  signScheduleAssignment,
   verifyAuditCheckpoint,
   verifyPairingRecord,
+  verifyScheduleAssignment,
   type AuditCheckpoint,
   type PairingRecord,
+  type ScheduleAssignment,
 } from "./records.js";
 import { sign } from "./signatures.js";
 
@@ -128,5 +132,54 @@ describe("AuditCheckpoint", () => {
     const crossDomain = { checkpoint: signed.checkpoint, signature: sign("openadminos.pairing.record.v1", signed.checkpoint, sandbox.privateKey) };
     assert.equal(verifyAuditCheckpoint(crossDomain, sandbox.publicKey).ok, false);
     assert.throws(() => signAuditCheckpoint(checkpoint({ rowCount: 99 }), sandbox.privateKey), PairingError);
+  });
+});
+
+describe("ScheduleAssignment", () => {
+  const assignment = (overrides: Record<string, unknown> = {}): ScheduleAssignment => ({
+    pairingId: "pairing-1",
+    version: 1,
+    organizationId: "org-1",
+    tenantId: "11111111-2222-3333-4444-555555555555",
+    entries: [{ agentId: "compliance-overview", templateSha256: "b".repeat(64), intervalSeconds: 3600 }],
+    issuedAt: "2026-11-15T10:00:00.000Z",
+    ...overrides,
+  }) as ScheduleAssignment;
+
+  it("accepts an assignment, including an empty one", () => {
+    assert.ok(parseScheduleAssignment(assignment()).ok);
+    assert.ok(parseScheduleAssignment(assignment({ entries: [] })).ok);
+  });
+
+  it("refuses each malformed field", () => {
+    const entry = { agentId: "compliance-overview", templateSha256: "b".repeat(64), intervalSeconds: 3600 };
+    const cases: Record<string, unknown>[] = [
+      { version: 0 },
+      { version: 1.5 },
+      { tenantId: "TENANT" },
+      { organizationId: "" },
+      { issuedAt: "today" },
+      { entries: "all" },
+      { entries: Array.from({ length: 51 }, (_, index) => ({ ...entry, agentId: `agent-${index}` })) },
+      { entries: [entry, entry] },
+      { entries: [{ ...entry, agentId: "Bad Id" }] },
+      { entries: [{ ...entry, templateSha256: "B".repeat(64) }] },
+      { entries: [{ ...entry, intervalSeconds: 0 }] },
+      { entries: [{ ...entry, delivery: {} }] },
+      { extra: 1 },
+    ];
+    for (const change of cases) {
+      assert.equal(parseScheduleAssignment(assignment(change)).ok, false, JSON.stringify(change).slice(0, 80));
+    }
+  });
+
+  it("verifies only with the desktop key, untampered and in its own domain", () => {
+    const signed = signScheduleAssignment(assignment(), desktop.privateKey);
+    assert.ok(verifyScheduleAssignment(signed, desktop.publicKey).ok);
+    assert.equal(verifyScheduleAssignment(signed, sandbox.publicKey).ok, false);
+    assert.equal(verifyScheduleAssignment({ ...signed, assignment: { ...signed.assignment, version: 2 } }, desktop.publicKey).ok, false);
+    const crossDomain = { assignment: signed.assignment, signature: sign("openadminos.pairing.record.v1", signed.assignment, desktop.privateKey) };
+    assert.equal(verifyScheduleAssignment(crossDomain, desktop.publicKey).ok, false);
+    assert.throws(() => signScheduleAssignment(assignment({ version: 0 }), desktop.privateKey), PairingError);
   });
 });

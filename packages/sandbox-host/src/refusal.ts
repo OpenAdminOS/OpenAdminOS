@@ -51,7 +51,10 @@ export type RefusalReason =
   | "storage-failed"
   | "platform-not-supported"
   | "model-endpoint-socket"
-  | "delivery-failed";
+  | "delivery-failed"
+  | "listen-address-not-private"
+  | "pairing-files-invalid"
+  | "config-no-agents";
 
 export class SandboxRefusal extends Error {
   constructor(

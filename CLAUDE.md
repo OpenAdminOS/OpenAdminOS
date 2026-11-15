@@ -78,7 +78,7 @@ These are non-negotiable. If you find yourself about to violate one, stop and as
 
 4. **No silent failures.** Every error has a designed state with a clear recovery path (see `06-error-states.html`). Generic "something went wrong" messages are forbidden.
 
-5. **One UI, one surface.** The desktop app is the only end-user surface. No CLI fork, no separate web tree. Repo scripts and contributor tooling are not the same thing as a published end-user CLI. Exception: iOS and Android companion apps that pair with the user's own desktop instances (see SPEC.md §8b); the desktop stays the host for tenant access and writes. The sandbox host (SPEC.md §8b) is a non-interactive service, not a CLI: it is started with a configuration file, and its only option besides that is a setup check.
+5. **One UI, one surface.** The desktop app is the only end-user surface. No CLI fork, no separate web tree. Repo scripts and contributor tooling are not the same thing as a published end-user CLI. Exception: iOS and Android companion apps that pair with the user's own desktop instances (see SPEC.md §8b); the desktop stays the host for tenant access and writes. The sandbox host (SPEC.md §8b) is a non-interactive service, not a CLI: it is started with a configuration file, and its only options besides that are a setup check and unpairing it from the desktop while the service is stopped.
 
 6. **Open-source from day one.** Public GitHub repo, MIT license, contributing guide, code of conduct. No "we'll open source it later" — it's open from commit zero.
 

@@ -1,6 +1,7 @@
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
 import { readPrivateFile } from "./files.js";
+import { parseListenAddress, type ListenAddress } from "./listen.js";
 import { SandboxRefusal } from "./refusal.js";
 
 /** Shortest schedule interval: 15 minutes. */
@@ -44,6 +45,8 @@ export interface SandboxConfig {
   secretsPath: string;
   runDeadlineSeconds: number;
   agents: SandboxAgentConfig[];
+  /** Absent: no pairing API, and nothing listens. */
+  pairing?: { listen: ListenAddress };
 }
 
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -73,7 +76,7 @@ export function loadSandboxConfig(path: string): SandboxConfig {
 export function parseSandboxConfig(value: unknown, path: string): SandboxConfig {
   const root = object(value, "(root)");
   const base = dirname(path);
-  knownKeys(root, "(root)", ["version", "sandbox", "organizationId", "tenantId", "clientId", "certificates", "model", "dataDir", "secretsFile", "runDeadlineSeconds", "agents"]);
+  knownKeys(root, "(root)", ["version", "sandbox", "organizationId", "tenantId", "clientId", "certificates", "model", "dataDir", "secretsFile", "runDeadlineSeconds", "agents", "pairing"]);
   if (root.version !== 1) throw new FieldError("version", "must be 1.");
   const sandbox = object(root.sandbox, "sandbox");
   knownKeys(sandbox, "sandbox", ["id", "name"]);
@@ -136,8 +139,14 @@ export function parseSandboxConfig(value: unknown, path: string): SandboxConfig 
     ? DEFAULT_RUN_DEADLINE_SECONDS
     : integer(root.runDeadlineSeconds, "runDeadlineSeconds", 60, 6 * 3_600);
 
-  if (!Array.isArray(root.agents) || root.agents.length === 0) {
-    throw new FieldError("agents", "must list at least one agent to run.");
+  // A paired sandbox may run assigned schedules only; without pairing an
+  // empty list would run nothing at all.
+  if (!Array.isArray(root.agents)) throw new FieldError("agents", "must be a list of agents to run.");
+  if (root.agents.length === 0 && root.pairing === undefined) {
+    throw new SandboxRefusal(
+      "config-no-agents",
+      'Sandbox config field "agents" lists no agent, and there is no "pairing" section that could assign one. Add an agent with its templateSha256, or add pairing so a desktop can assign schedules.',
+    );
   }
   const seen = new Set<string>();
   const agents = root.agents.map((entry, index) => {
@@ -161,6 +170,13 @@ export function parseSandboxConfig(value: unknown, path: string): SandboxConfig 
     };
   });
 
+  let pairing: SandboxConfig["pairing"];
+  if (root.pairing !== undefined) {
+    const section = object(root.pairing, "pairing");
+    knownKeys(section, "pairing", ["listen"]);
+    pairing = { listen: parseListenAddress(string(section.listen, "pairing.listen")) };
+  }
+
   return {
     path,
     sandbox: { id, name },
@@ -173,6 +189,7 @@ export function parseSandboxConfig(value: unknown, path: string): SandboxConfig 
     secretsPath,
     runDeadlineSeconds,
     agents,
+    ...(pairing ? { pairing } : {}),
   };
 }
 

@@ -21,14 +21,15 @@
     "README.md"
   ],
   "scripts": {
-    "build": "npm run build -w @openadminos/runtime && tsc -p tsconfig.json",
-    "typecheck": "npm run build -w @openadminos/runtime && tsc -p tsconfig.json --noEmit",
+    "build": "npm run build -w @openadminos/runtime && npm run build -w @openadminos/pairing && tsc -p tsconfig.json",
+    "typecheck": "npm run build -w @openadminos/runtime && npm run build -w @openadminos/pairing && tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@openadminos/agent-sdk": "0.7.2",
     "@openadminos/connector-discord": "0.7.2",
     "@openadminos/connector-slack": "0.7.2",
+    "@openadminos/pairing": "0.7.2",
     "@openadminos/runtime": "0.7.2"
   },
   "devDependencies": {

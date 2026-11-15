@@ -10,11 +10,11 @@ Everything is built on `node:crypto`. There is no other dependency besides `@ope
 | --- | --- |
 | Device key | Ed25519. Private key as PKCS #8 PEM. Public key as its 32 raw bytes in base64url without padding (43 characters), in canonical base64url, and not one of the eight small-order encodings (the identity and the points of order 2, 4 and 8), which are refused. |
 | Device fingerprint | SHA-256 of the public key's SubjectPublicKeyInfo DER: 64 lowercase hex characters, or 52 Crockford base32 characters for showing. |
-| TLS certificate | Self-signed X.509 v3, ECDSA P-256 with SHA-256. Subject and issuer CN, a 16 byte random serial, basicConstraints CA false (critical), keyUsage digitalSignature (critical), optional subjectAltName with DNS names and IP addresses. Built with a small DER encoder in `src/der.ts`. |
+| TLS certificate | Self-signed X.509 v3, ECDSA P-256 with SHA-256. Subject and issuer CN, a 16 byte random serial, basicConstraints CA false (critical), keyUsage digitalSignature (critical), extendedKeyUsage serverAuth and clientAuth, optional subjectAltName with DNS names and IP addresses. Built with a small DER encoder in `src/der.ts`. |
 | TLS pin | SHA-256 of the certificate's SubjectPublicKeyInfo DER, 64 lowercase hex characters. It stays the same when the certificate is reissued with the same key. |
 | Signature | Ed25519 over `<domain>\n<canonical JSON of the payload>` in UTF-8, as base64url (86 characters). |
 
-Signature domains are a closed list: `openadminos.pairing.record.v1` and `openadminos.audit.checkpoint.v1`. A signature never verifies in another domain. `openadminos.schedule.assignment.v1` is reserved for signed schedule assignments; it is added to the list, and becomes signable, only when that record exists.
+Signature domains are a closed list: `openadminos.pairing.record.v1`, `openadminos.audit.checkpoint.v1` and `openadminos.schedule.assignment.v1`. A signature never verifies in another domain.
 
 ### Canonical JSON
 
@@ -55,6 +55,8 @@ A PAKE is not used in v1, for those reasons together with the 5 attempt limit an
 - `PairingRecord`: pairing id, sandbox id and name, organization id, tenant id, both public keys, TLS pin and creation time. `signPairingRecord` and `verifyPairingRecord`. One desktop per sandbox: a new pairing replaces the old one. After an integrity failure the recovery is pairing again.
 - `AuditCheckpoint`: pairing id, sandbox id, a seq and hash, the row count (at most seq) and the time, signed by the sandbox with its device key. The position is the last row of the batch it comes with, not the log's newest row; for an empty batch it is the reader's pin. `rowCount` and `at` are what the sandbox attests; they are checked for shape only, not against the rows.
 - `verifySignedContinuation(pin, rows, signedCheckpoint, sandboxPublicKey, expected)` checks `expected` first (`expectation-invalid`), then the checkpoint signature (`checkpoint-signature-invalid`), then the pairing and sandbox ids from the stored pairing record (`checkpoint-pairing-mismatch`), then the hash chain from the pin to the signed position with the runtime's continuation verifier (`chain-gap`, `chain-fork`, `chain-rollback`, `chain-row-invalid`, `chain-position-invalid`). A batch is accepted only when its last row is the signed position; a batch that ends before it fails with `checkpoint-not-reached` and the pin does not move, because rows short of a signature are not covered by one.
+
+- `ScheduleAssignment`: pairing id, a version, organization id, tenant id, a list of at most 50 entries (`agentId`, `templateSha256`, `intervalSeconds`, one per agent) and the time, signed by the paired desktop's device key. A sandbox accepts it only with a version higher than the one it holds, so an old record cannot be replayed; an empty list removes every assigned schedule.
 
 ### Reading a sandbox's audit log
 

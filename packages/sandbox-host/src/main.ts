@@ -9,16 +9,18 @@ export const EXIT_RUN_REFUSED = 1;
 export const EXIT_CONFIG = 2;
 export const EXIT_ALREADY_RUNNING = 3;
 
-const USAGE = "Usage: openadminos-sandbox --config <path> [--once <agentId>]";
+const USAGE = "Usage: openadminos-sandbox --config <path> [--once <agentId> | --unpair]";
 
 export interface ParsedArgs {
   configPath: string;
   once?: string;
+  unpair?: boolean;
 }
 
 export function parseArgs(argv: readonly string[]): ParsedArgs {
   let configPath: string | undefined;
   let once: string | undefined;
+  let unpair = false;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const value = argv[index + 1];
@@ -28,12 +30,15 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     } else if (arg === "--once" && value && !value.startsWith("--")) {
       once = value;
       index += 1;
+    } else if (arg === "--unpair") {
+      unpair = true;
     } else {
       throw new Error(`${arg} is not a known option. ${USAGE}`);
     }
   }
   if (!configPath) throw new Error(`--config is required. ${USAGE}`);
-  return { configPath, ...(once ? { once } : {}) };
+  if (once && unpair) throw new Error(`--once and --unpair cannot be combined. ${USAGE}`);
+  return { configPath, ...(once ? { once } : {}), ...(unpair ? { unpair } : {}) };
 }
 
 /**
@@ -56,6 +61,23 @@ export async function main(
     log("error", describe(error), { reason: isSandboxRefusal(error) ? error.reason : "usage" });
     return EXIT_CONFIG;
   }
+  if (args.unpair) {
+    try {
+      const { removed, notice, rolesNoLongerNeeded } = new SandboxHost(config, { ...options.deps, log }).unpairOffline();
+      log(
+        notice ? "warn" : "info",
+        removed.length > 0
+          ? `Unpaired: removed ${removed.join(" and ")}. ${notice ?? "Config schedules are unchanged."} The app registration and its certificate stay in Microsoft Entra; remove them there if this sandbox is retired.`
+          : "Nothing to remove: this sandbox is not paired. Config schedules are unchanged.",
+        { sandbox: config.sandbox.id, removed: removed.length, ...(rolesNoLongerNeeded.length > 0 ? { roles: rolesNoLongerNeeded.join(",") } : {}) },
+      );
+      return EXIT_OK;
+    } catch (error) {
+      log("error", describe(error), { reason: isSandboxRefusal(error) ? error.reason : "unpair-failed" });
+      return isSandboxRefusal(error) && error.reason === "already-running" ? EXIT_ALREADY_RUNNING : EXIT_CONFIG;
+    }
+  }
+
   let host: SandboxHost;
   try {
     host = new SandboxHost(config, { ...options.deps, log });
@@ -67,10 +89,11 @@ export async function main(
   log("info", "Sandbox host started.", { sandbox: config.sandbox.id, agents: config.agents.length, mode: args.once ? "once" : "service" });
 
   if (args.once) {
-    const agent = config.agents.find((candidate) => candidate.id === args.once);
+    // The config, or an assignment from the paired desktop that passes its checks.
+    const agent = host.scheduledAgent(args.once)?.agent;
     try {
       if (!agent) {
-        log("error", `${args.once} is not in the sandbox config. Add it under agents with its templateSha256.`, { reason: "agent-not-found" });
+        log("error", `${args.once} is neither in the sandbox config nor in a schedule the paired desktop assigned. Add it under agents with its templateSha256, or assign it from the desktop.`, { reason: "agent-not-found" });
         return EXIT_CONFIG;
       }
       const outcome = await host.runAgent(agent, "person");
@@ -94,6 +117,13 @@ export async function main(
     }
   }
 
+  try {
+    await host.startApi();
+  } catch (error) {
+    log("error", describe(error), { reason: isSandboxRefusal(error) ? error.reason : "startup-failed" });
+    await host.close();
+    return EXIT_CONFIG;
+  }
   host.startSchedule();
   await (options.waitForSignal ?? waitForStopSignal)();
   log("info", "Stopping: runs in progress are stopped and recorded.", { sandbox: config.sandbox.id });

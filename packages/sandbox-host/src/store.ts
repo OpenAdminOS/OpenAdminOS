@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
@@ -33,18 +33,198 @@ export function writeFileAtomic(path: string, content: string): void {
   }
 }
 
+/** The sync index: every write of a run gets the next number, so a reader can ask for what changed after a number. */
+interface RunCursorFile {
+  version: 1;
+  counter: number;
+  /** Changes only when the cursors had to start over; a reader that sees a new one reads everything again. */
+  generation: string;
+  /** `sha256` is the digest of the file as last indexed, so a write the index missed is found at startup. */
+  runs: Record<string, { agentSlug: string; file: string; cursor: number; sha256: string }>;
+}
+
+/** A run and the cursor of its latest write. */
+export interface RunAfterCursor {
+  cursor: number;
+  run: RunRecord;
+}
+
+/** A page of runs after a cursor. `next` passes entries that could not be read, which `problems` names. */
+export interface RunPage {
+  runs: RunAfterCursor[];
+  next: number;
+  /** A reader keeps this with its cursor; when it changes, the cursor no longer means anything and the reader starts from 0. */
+  generation: string;
+  problems: Array<{ cursor: number; runId: string; file: string; reason: "storage-corrupt"; message: string }>;
+  /** Set when the cursors started over in this process because the index and its high-water mark were both lost. */
+  condition?: { code: "cursor-reset"; message: string };
+}
+
+/** The highest cursor given out, kept apart from the index so a lost index never numbers below it. */
+interface HighWaterFile {
+  version: 1;
+  highWater: number;
+  generation: string;
+}
+
+/** A run file name as `write` makes it: `<stamp>_<run id>.json`. */
+const RUN_FILE = /^[0-9T-]+Z_[A-Za-z0-9][A-Za-z0-9_-]{0,127}\.json$/;
+
 /** Run records as JSON files under `<dataDir>/runs/<agent>/`, newest last by name. */
 export class RunStore {
-  constructor(private readonly root: string, private readonly retention = RUN_RETENTION_PER_AGENT) {}
+  private index: RunCursorFile | undefined;
+  private reset = false;
+
+  constructor(
+    private readonly root: string,
+    private readonly retention = RUN_RETENTION_PER_AGENT,
+    private readonly clock: () => number = Date.now,
+  ) {}
 
   write(run: RunRecord): string {
     const folder = this.folderFor(run.agentSlug);
     mkdirSync(folder, { recursive: true, mode: 0o700 });
     if (!SAFE_SEGMENT.test(run.id)) throw new Error(`Run id ${JSON.stringify(run.id)} cannot be used as a file name.`);
-    const path = join(folder, `${fileStamp(run.queuedAt)}_${run.id}.json`);
-    writeFileAtomic(path, `${JSON.stringify(run, null, 2)}\n`);
-    this.prune(folder);
+    const file = `${fileStamp(run.queuedAt)}_${run.id}.json`;
+    const path = join(folder, file);
+    const content = `${JSON.stringify(run, null, 2)}\n`;
+    writeFileAtomic(path, content);
+    const index = this.cursorIndex();
+    index.counter += 1;
+    index.runs[run.id] = { agentSlug: run.agentSlug, file, cursor: index.counter, sha256: digest(content) };
+    this.prune(folder, index);
+    this.writeHighWater(index);
+    this.writeIndex(index);
     return path;
+  }
+
+  /**
+   * Runs written after `cursor`, oldest write first, at most `limit`. A
+   * run written again (queued, then finished) moves to its newest
+   * cursor, so a reader that keeps the last cursor it saw gets every
+   * change once. Cursors only grow. A file that can no longer be read is
+   * named in `problems` and passed, so the reader does not ask for the
+   * same cursor forever.
+   */
+  listAfter(cursor: number, limit: number): RunPage {
+    if (!Number.isSafeInteger(cursor) || cursor < 0) throw new RangeError("cursor must be a non-negative integer.");
+    if (!Number.isSafeInteger(limit) || limit < 1) throw new RangeError("limit must be a positive integer.");
+    const index = this.cursorIndex();
+    const entries = Object.entries(index.runs)
+      .filter(([, entry]) => entry.cursor > cursor)
+      .sort(([, left], [, right]) => left.cursor - right.cursor);
+    const page: RunPage = {
+      runs: [],
+      next: cursor,
+      generation: index.generation,
+      problems: [],
+      ...(this.reset
+        ? { condition: { code: "cursor-reset" as const, message: "The sandbox lost its run index and the record of the cursors it gave out, so cursors started over. Read every run again from cursor 0." } }
+        : {}),
+    };
+    for (const [runId, entry] of entries) {
+      if (page.runs.length >= limit) break;
+      page.next = entry.cursor;
+      const run = readRunFile(join(this.root, entry.agentSlug, entry.file));
+      if (run) {
+        page.runs.push({ cursor: entry.cursor, run });
+      } else {
+        page.problems.push({
+          cursor: entry.cursor,
+          runId,
+          file: `${entry.agentSlug}/${entry.file}`,
+          reason: "storage-corrupt",
+          message: `The run record ${entry.agentSlug}/${entry.file} in the sandbox data folder cannot be read. It is left in place for review on the sandbox.`,
+        });
+      }
+    }
+    return page;
+  }
+
+  /** The newest cursor given out; 0 before any write. */
+  latestCursor(): number {
+    return this.cursorIndex().counter;
+  }
+
+  private get indexPath(): string {
+    return join(this.root, "cursor.json");
+  }
+
+  private get highWaterPath(): string {
+    return join(this.root, "cursor-high-water.json");
+  }
+
+  /**
+   * The index, read once and checked against the run files: a run file
+   * written after the last index update (a crash between the two) or
+   * missing from the index gets a new cursor, and entries whose file is
+   * gone are dropped. A lost index is numbered from the higher of the
+   * high-water mark and the clock, so a reader's cursor never skips the
+   * rebuilt runs; when the high-water mark is lost too, the cursors start
+   * a new generation and pages say `cursor-reset`.
+   */
+  private cursorIndex(): RunCursorFile {
+    if (this.index) return this.index;
+    const loaded = readJsonFile(this.indexPath, isCursorFile);
+    const highWater = readJsonFile(this.highWaterPath, isHighWaterFile);
+    let index: RunCursorFile;
+    if (loaded) {
+      index = loaded;
+      if (highWater && highWater.generation === loaded.generation) index.counter = Math.max(index.counter, highWater.highWater);
+    } else if (highWater) {
+      index = { version: 1, counter: Math.max(highWater.highWater, this.clock()), generation: highWater.generation, runs: {} };
+    } else {
+      const existedBefore = existsSync(this.indexPath) || existsSync(this.highWaterPath) || this.hasRunFiles();
+      index = { version: 1, counter: existedBefore ? this.clock() : 0, generation: randomUUID(), runs: {} };
+      this.reset = existedBefore;
+    }
+    let changed = loaded === undefined || highWater === undefined || highWater.highWater !== index.counter;
+    const present = new Set<string>();
+    if (existsSync(this.root)) {
+      for (const agent of readdirSync(this.root).sort()) {
+        if (!SAFE_SEGMENT.test(agent)) continue;
+        for (const file of this.files(join(this.root, agent))) {
+          present.add(`${agent}/${file}`);
+          const path = join(this.root, agent, file);
+          const run = readRunFile(path);
+          if (!run) continue;
+          const sha256 = digest(readFileSync(path, "utf8"));
+          const entry = index.runs[run.id];
+          if (entry && entry.agentSlug === agent && entry.file === file && entry.sha256 === sha256) continue;
+          index.counter += 1;
+          index.runs[run.id] = { agentSlug: agent, file, cursor: index.counter, sha256 };
+          changed = true;
+        }
+      }
+    }
+    for (const [id, entry] of Object.entries(index.runs)) {
+      if (present.has(`${entry.agentSlug}/${entry.file}`)) continue;
+      delete index.runs[id];
+      changed = true;
+    }
+    this.index = index;
+    if (changed && existsSync(this.root)) {
+      this.writeHighWater(index);
+      this.writeIndex(index);
+    }
+    return index;
+  }
+
+  private hasRunFiles(): boolean {
+    if (!existsSync(this.root)) return false;
+    return readdirSync(this.root).some((agent) => SAFE_SEGMENT.test(agent) && this.files(join(this.root, agent)).length > 0);
+  }
+
+  /** Written before the index, so the mark is never below a cursor the index gave out. */
+  private writeHighWater(index: RunCursorFile): void {
+    mkdirSync(this.root, { recursive: true, mode: 0o700 });
+    const file: HighWaterFile = { version: 1, highWater: index.counter, generation: index.generation };
+    writeFileAtomic(this.highWaterPath, `${JSON.stringify(file)}\n`);
+  }
+
+  private writeIndex(index: RunCursorFile): void {
+    mkdirSync(this.root, { recursive: true, mode: 0o700 });
+    writeFileAtomic(this.indexPath, `${JSON.stringify(index)}\n`);
   }
 
   /**
@@ -117,10 +297,13 @@ export class RunStore {
     return readdirSync(folder).filter((name) => name.endsWith(".json")).sort();
   }
 
-  private prune(folder: string): void {
+  private prune(folder: string, index: RunCursorFile): void {
     const files = this.files(folder);
-    for (const name of files.slice(0, Math.max(0, files.length - this.retention))) {
-      rmSync(join(folder, name), { force: true });
+    const removed = new Set(files.slice(0, Math.max(0, files.length - this.retention)));
+    for (const name of removed) rmSync(join(folder, name), { force: true });
+    if (removed.size === 0) return;
+    for (const [id, entry] of Object.entries(index.runs)) {
+      if (join(this.root, entry.agentSlug) === folder && removed.has(entry.file)) delete index.runs[id];
     }
   }
 }
@@ -146,6 +329,57 @@ function isRunRecord(value: unknown): value is RunRecord {
     Array.isArray(value.steps) &&
     Array.isArray(value.logs)
   );
+}
+
+/**
+ * The index as written; agent and file names must be safe path segments,
+ * never joined unchecked, and cursors are unique, from 1, and not above
+ * the counter. Anything else is rebuilt.
+ */
+function isCursorFile(value: unknown): value is RunCursorFile {
+  if (!isPlainObject(value) || value.version !== 1 || !isCount(value.counter) || typeof value.generation !== "string" || value.generation.length === 0 || !isPlainObject(value.runs)) return false;
+  const cursors = new Set<number>();
+  for (const entry of Object.values(value.runs)) {
+    if (
+      !isPlainObject(entry) ||
+      typeof entry.agentSlug !== "string" ||
+      !SAFE_SEGMENT.test(entry.agentSlug) ||
+      typeof entry.file !== "string" ||
+      !RUN_FILE.test(entry.file) ||
+      !isCount(entry.cursor) ||
+      entry.cursor < 1 ||
+      entry.cursor > value.counter ||
+      cursors.has(entry.cursor) ||
+      typeof entry.sha256 !== "string"
+    ) {
+      return false;
+    }
+    cursors.add(entry.cursor);
+  }
+  return true;
+}
+
+function isHighWaterFile(value: unknown): value is HighWaterFile {
+  return isPlainObject(value) && value.version === 1 && isCount(value.highWater) && typeof value.generation === "string" && value.generation.length > 0;
+}
+
+function isCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+/** A JSON file that passes `check`, or undefined when it is missing, unreadable or malformed. */
+function readJsonFile<T>(path: string, check: (value: unknown) => value is T): T | undefined {
+  if (!existsSync(path)) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    return check(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function digest(content: string): string {
+  return createHash("sha256").update(content).digest("hex");
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -215,6 +449,11 @@ export class HealthStore {
 
   get(agentId: string): AgentHealth {
     return this.state.agents[agentId] ?? {};
+  }
+
+  /** A copy of health.json as it is now. */
+  snapshot(): HealthFile {
+    return structuredClone(this.state);
   }
 
   update(agentId: string, change: Partial<AgentHealth>, now: Date): void {

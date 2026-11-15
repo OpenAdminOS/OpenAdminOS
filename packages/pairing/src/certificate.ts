@@ -23,6 +23,9 @@ const OID = {
   basicConstraints: "2.5.29.19",
   keyUsage: "2.5.29.15",
   subjectAltName: "2.5.29.17",
+  extendedKeyUsage: "2.5.29.37",
+  serverAuth: "1.3.6.1.5.5.7.3.1",
+  clientAuth: "1.3.6.1.5.5.7.3.2",
 } as const;
 
 export const DEFAULT_TLS_VALIDITY_DAYS = 365;
@@ -62,8 +65,8 @@ export interface TlsCertificate {
 /**
  * Creates a self-signed ECDSA P-256 certificate for the sandbox's TLS
  * listener. Peers trust it by its SPKI pin, never by a CA, so it carries
- * only what TLS stacks check: CA false, digitalSignature, and the names
- * it answers on.
+ * only what TLS stacks check: CA false, digitalSignature, serverAuth and
+ * clientAuth, and the names it answers on.
  */
 export function createTlsCertificate(options: TlsCertificateOptions): TlsCertificate {
   const now = options.now ?? new Date();
@@ -93,6 +96,8 @@ export function createTlsCertificate(options: TlsCertificateOptions): TlsCertifi
     extension(OID.basicConstraints, true, sequence()),
     // digitalSignature is bit 0: one byte 0x80 with seven unused bits.
     extension(OID.keyUsage, true, bitString(Buffer.from([0x80]), 7)),
+    // The same certificate kind serves the sandbox's listener and the desktop's client side.
+    extension(OID.extendedKeyUsage, false, sequence(objectIdentifier(OID.serverAuth), objectIdentifier(OID.clientAuth))),
   ];
   if (altNames.length > 0) extensions.push(extension(OID.subjectAltName, false, sequence(...altNames)));
 

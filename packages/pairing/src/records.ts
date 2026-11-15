@@ -56,6 +56,41 @@ export interface SignedAuditCheckpoint {
   signature: string;
 }
 
+/** One schedule the desktop assigns to the sandbox. */
+export interface ScheduleAssignmentEntry {
+  /** A bundled agent's id, such as find-inactive-devices. */
+  agentId: string;
+  /** SHA-256 hex of the agent's manifest.yaml; the sandbox refuses an entry whose bundled manifest differs. */
+  templateSha256: string;
+  intervalSeconds: number;
+}
+
+/**
+ * The schedules a paired desktop assigns to its sandbox, signed with the
+ * desktop's device key. Each new record replaces the previous one and
+ * must carry a higher version, so an old record cannot be replayed.
+ */
+export interface ScheduleAssignment {
+  pairingId: string;
+  /** Whole number from 1; strictly higher than the version the sandbox holds. */
+  version: number;
+  organizationId: string;
+  /** Lowercase tenant id. */
+  tenantId: string;
+  /** At most one entry per agent; an empty list removes every assigned schedule. */
+  entries: ScheduleAssignmentEntry[];
+  /** ISO 8601 in UTC. */
+  issuedAt: string;
+}
+
+export interface SignedScheduleAssignment {
+  assignment: ScheduleAssignment;
+  signature: string;
+}
+
+/** Entries per assignment, at most. */
+export const MAX_ASSIGNMENT_ENTRIES = 50;
+
 export type ParseResult<T> = { ok: true; value: T } | { ok: false; detail: string };
 
 const PAIRING_RECORD_KEYS = [
@@ -73,6 +108,10 @@ const PAIRING_RECORD_KEYS = [
 const AUDIT_CHECKPOINT_KEYS = ["pairingId", "sandboxId", "seq", "sha256", "rowCount", "at"] as const;
 const SIGNED_RECORD_KEYS = ["record", "signature"] as const;
 const SIGNED_CHECKPOINT_KEYS = ["checkpoint", "signature"] as const;
+const ASSIGNMENT_KEYS = ["pairingId", "version", "organizationId", "tenantId", "entries", "issuedAt"] as const;
+const ASSIGNMENT_ENTRY_KEYS = ["agentId", "templateSha256", "intervalSeconds"] as const;
+const SIGNED_ASSIGNMENT_KEYS = ["assignment", "signature"] as const;
+const AGENT_ID = /^[a-z0-9][a-z0-9-]{0,79}$/;
 
 /** Checks every field and refuses unknown ones; returns a copy holding only the record's fields. */
 export function parsePairingRecord(value: unknown): ParseResult<PairingRecord> {
@@ -142,6 +181,54 @@ export function verifyAuditCheckpoint(signed: unknown, publicKey: KeyObject | st
   if (!parsed.ok) return parsed;
   if (!verify("openadminos.audit.checkpoint.v1", parsed.value, signed.signature, publicKey)) {
     return invalid("The audit checkpoint's signature does not verify with the sandbox key.");
+  }
+  return parsed;
+}
+
+export function parseScheduleAssignment(value: unknown): ParseResult<ScheduleAssignment> {
+  if (!isPlainObject(value)) return invalid("The schedule assignment is not an object.");
+  const keys = keyProblems(value, ASSIGNMENT_KEYS);
+  if (keys) return invalid(`The schedule assignment has a ${keys}.`);
+  if (!isIdentifier(value.pairingId)) return invalid("The schedule assignment's pairingId is not a valid id.");
+  if (!isCount(value.version) || value.version < 1) return invalid("The schedule assignment's version is not a whole number from 1.");
+  if (!isIdentifier(value.organizationId)) return invalid("The schedule assignment's organizationId is not a valid id.");
+  if (!isTenantId(value.tenantId)) return invalid("The schedule assignment's tenantId is not a lowercase tenant id.");
+  if (!isIsoTimestamp(value.issuedAt)) return invalid("The schedule assignment's issuedAt is not an ISO 8601 UTC time.");
+  if (!Array.isArray(value.entries) || value.entries.length > MAX_ASSIGNMENT_ENTRIES) {
+    return invalid(`The schedule assignment's entries are not a list of at most ${MAX_ASSIGNMENT_ENTRIES}.`);
+  }
+  const seen = new Set<string>();
+  const entries: ScheduleAssignmentEntry[] = [];
+  for (const [index, entry] of value.entries.entries()) {
+    if (!isPlainObject(entry)) return invalid(`Entry ${index} of the schedule assignment is not an object.`);
+    const entryKeys = keyProblems(entry, ASSIGNMENT_ENTRY_KEYS);
+    if (entryKeys) return invalid(`Entry ${index} of the schedule assignment has a ${entryKeys}.`);
+    if (typeof entry.agentId !== "string" || !AGENT_ID.test(entry.agentId)) return invalid(`Entry ${index} of the schedule assignment has an agentId that is not a bundled agent id.`);
+    if (seen.has(entry.agentId)) return invalid(`The schedule assignment lists ${entry.agentId} twice.`);
+    seen.add(entry.agentId);
+    if (!isSha256Hex(entry.templateSha256)) return invalid(`Entry ${index} of the schedule assignment has a templateSha256 that is not 64 lowercase hex characters.`);
+    if (!isCount(entry.intervalSeconds) || entry.intervalSeconds < 1) return invalid(`Entry ${index} of the schedule assignment has an intervalSeconds that is not a whole number of seconds.`);
+    entries.push({ agentId: entry.agentId, templateSha256: entry.templateSha256, intervalSeconds: entry.intervalSeconds });
+  }
+  return { ok: true, value: { ...(pick(value, ASSIGNMENT_KEYS) as unknown as ScheduleAssignment), entries } };
+}
+
+/** Signs an assignment with the desktop's device key; throws `payload-invalid` for one out of shape. */
+export function signScheduleAssignment(assignment: ScheduleAssignment, privateKey: KeyObject): SignedScheduleAssignment {
+  const parsed = parseScheduleAssignment(assignment);
+  if (!parsed.ok) throw new PairingError("payload-invalid", parsed.detail);
+  return { assignment: parsed.value, signature: sign("openadminos.schedule.assignment.v1", parsed.value, privateKey) };
+}
+
+/** Checks shape and signature; `publicKey` is the pinned desktop key from the pairing record. */
+export function verifyScheduleAssignment(signed: unknown, publicKey: KeyObject | string): ParseResult<ScheduleAssignment> {
+  if (!isPlainObject(signed)) return invalid("The signed schedule assignment is not an object.");
+  const keys = keyProblems(signed, SIGNED_ASSIGNMENT_KEYS);
+  if (keys) return invalid(`The signed schedule assignment has a ${keys}.`);
+  const parsed = parseScheduleAssignment(signed.assignment);
+  if (!parsed.ok) return parsed;
+  if (!verify("openadminos.schedule.assignment.v1", parsed.value, signed.signature, publicKey)) {
+    return invalid("The schedule assignment's signature does not verify with the paired desktop's key.");
   }
   return parsed;
 }

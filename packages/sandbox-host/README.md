@@ -2,7 +2,7 @@
 
 A sandbox is an always-on machine you run yourself, such as a mini PC in the office. The sandbox host is a service on that machine. It runs bundled, read-only OpenAdminOS agents on a schedule, signs in to your tenant with its own app registration and a certificate, and uses a model on the same machine (Ollama or LM Studio). Schedules keep running while your laptop is off.
 
-It is a service, not an end-user tool. `openadminos-sandbox` is the service entry point: it is non-interactive, reads one config file and writes lines to stdout. `--once <agentId>` is a setup check. The desktop app stays the only user interface.
+It is a service, not an end-user tool. `openadminos-sandbox` is the service entry point: it is non-interactive, reads one config file and writes lines to stdout. `--once <agentId>` is a setup check, for an agent in the config or one the paired desktop assigned. The desktop app stays the only user interface.
 
 This first version is read-only. A sandbox cannot change anything in the tenant. Every change is still confirmed and applied on the desktop.
 
@@ -107,6 +107,54 @@ The secrets go in `secrets.json` next to the config (or `secretsFile`), mode 060
 }
 ```
 
+## Pairing with a desktop (optional)
+
+Without a `pairing` section nothing listens, and the host runs the config schedules alone; `agents` must then list at least one agent (`config-no-agents`). With one, the host serves a local API to one paired desktop, and `agents` may be empty for a sandbox that runs only assigned schedules:
+
+```json
+"pairing": { "listen": "100.64.0.10:7443" }
+```
+
+- The address is an IP address and port (`[fd7a:115c:a1e0::10]:7443` for IPv6). When the host cannot bind it, for example because the port is in use, the service stops, config schedules included: fix the address, then start again. The host refuses to start unless it is loopback, a private network (10/8, 172.16/12, 192.168/16), link-local, a tailnet (100.64/10) or fd00::/8 (`listen-address-not-private`). Host names are refused, so what is checked is what is bound. 100.64.0.0/10 is also the shared address space of carrier NAT networks: there the pin still keeps data safe, but other subscribers can reach the port and use up pairing attempts. Prefer a tailnet or a private network you control.
+- TLS 1.3 only, with the sandbox's own self-signed P-256 certificate in the data folder (`tls-key.pem`, `tls-certificate.pem`, mode 0600). It is created on first start, valid for a year, and reissued with the same key 30 days before it expires, so the desktop's pin stays valid. The sandbox's Ed25519 device key is `device-identity.pem`.
+- While unpaired the host logs a pairing code at start and a new one every 10 minutes. Type it on the desktop. A code allows 5 tries and pairs once; a dropped connection after a valid proof needs the next code. The desktop must be in the organization and tenant of the sandbox config (`binding-mismatch`). The code is printed in the service log, which journald (or the launchd log file) keeps; it expires after 10 minutes and works for one pairing only.
+- When a code's 5 tries are used up, the next code follows after 2 minutes. Across all codes the host accepts at most 20 pairing attempts in 10 minutes, then refuses with `pairing-rate-limited`. It takes at most 16 connections at once, and a TLS handshake must finish within 10 seconds. Every refused pairing attempt is logged with the peer address (the attempt limits bound them). Rate-limited attempts and requests from a client that is not the paired desktop are logged at most once per peer and reason a minute, with a count. Pairing refusals and access refusals each have their own budget of 10 lines a minute, so a flood of one never hides the other; what a budget leaves out is summarized when the minute ends, with each reason, its count and up to 5 sample peer addresses: repeated `code-attempts-exhausted`, `pairing-rate-limited` or `client-not-paired` lines mean another client on the network is trying.
+- When the sandbox's TLS key no longer matches the one the desktop paired with (the key files were replaced or removed), the host logs `pairing-tls-pin-changed` and reports it in health; restore the files, or unpair and pair again.
+- `pairing.json` carries the sandbox's own signature over the pairing record. It detects a corrupted file, not a change by someone who can write the data folder: that person can also replace the device key. Protect the data folder with its permissions and disk encryption.
+- After pairing, every route but `POST /v1/pair` needs the client certificate the desktop paired with. Trust is that pin alone, never a certificate authority. One desktop per sandbox; a second one is refused (`already-paired`).
+- When `organizationId` or `tenantId` in the config changes after pairing, assigned schedules stop and the desktop is refused with `pairing-binding-changed` until the sandbox is unpaired and paired again.
+
+The protocol is in `packages/pairing`. Routes, all JSON:
+
+| Route | What it does |
+| --- | --- |
+| `GET /v1/pair` | Before pairing: the pairing id, sandbox id and name, the sandbox's public key and TLS pin. |
+| `POST /v1/pair` | The desktop's offer and proof; returns the sandbox's proof, the signed pairing record and the first signed audit checkpoint. |
+| `GET /v1/status` | Sandbox, organization, tenant, host version, model and digest ("not checked yet" until the first run's preflight), and the schedules with their source (`config` or `assigned`), next run times and `assignment-shadowed`. No secrets, keys or tokens. |
+| `GET /v1/health` | `health.json`. |
+| `GET /v1/runs?after=&limit=` | Run records written after a cursor, at most 100. `next` is the cursor to ask from next; a record that cannot be read is passed and named in `problems`. Keep `generation` with the cursor: when it changes, or the page carries the `cursor-reset` condition (the index and its high-water mark were both lost), read again from 0. |
+| `GET /v1/audit?after=&limit=` | Audit rows after a seq, at most 500, with a checkpoint signed at the batch's last row. `audit-position-unknown` when retention removed the entries right after `after`. |
+| `PUT /v1/assignments` | A schedule assignment signed by the paired desktop. |
+| `DELETE /v1/pairing` | Unpairs: removes `pairing.json` and `assignments.json`, and names the permissions only assigned agents needed. |
+
+Request bodies are limited to 64 KiB and requests to 15 seconds. Every error is `{ "error": { "code", "message" } }` with a named code.
+
+### Schedule assignments
+
+A paired desktop can assign read-only schedules. The host accepts an assignment only with a version higher than the one it holds (`assignment-replayed`), for its pairing, organization and tenant (`assignment-binding-mismatch`), with intervals of 15 minutes to 31 days (`assignment-interval-invalid`), with each `templateSha256` equal to the hash of the manifest bundled with this sandbox (`assignment-template-mismatch`), and for agents that pass every check a config agent passes (`assignment-agent-refused`). It is written to `assignments.json` (0600), then audited as `sandbox.assignment.applied`, and applied without a restart. At every start a stored assignment is checked again the same way; one that no longer passes, for example after an update changed a bundled manifest, is not run and is named in the log, status and health. A new pairing removes an old `assignments.json`. A stored record that is not run still sets the version a new one must exceed, and a failed replacement puts it back. When `assignments.json` cannot be read, config schedules keep running, assigned ones do not, and new assignments are refused (`assignment-state-unknown`) until the sandbox is unpaired and paired again; a `pairing.json` that cannot be read stops the host.
+
+The schedule is the config's agents plus the assigned ones, by agent id. When both list an agent, the config entry runs and the assigned one is reported as `assignment-shadowed`. The identity check allows the scopes of the assigned agents too.
+
+### Unpairing
+
+From the desktop (`DELETE /v1/pairing`), or on the sandbox with the service stopped:
+
+```sh
+sudo -u openadminos openadminos-sandbox --config /etc/openadminos-sandbox/sandbox.json --unpair
+```
+
+Both remove the pairing and the assigned schedules only, record `sandbox.pairing.removed` in the audit log and say what was removed. Config schedules stay. When the assigned agents needed permissions the config agents do not, the answer, the log and the `--unpair` output name them: remove them from the sandbox app registration, or config schedules will be refused, because the identity check refuses a permission no scheduled agent needs. A changed assignment that drops agents says the same. The app registration and its certificate stay in Microsoft Entra.
+
 ## Setup check
 
 Run one agent once, with every check, as the service user. The exit code is 0 when the run completed, 1 when it was refused or failed or its configured report was not delivered, 2 for a config problem, 3 when the service is already running on the same data folder. A failure notice or recovery notice that cannot be sent is logged and kept in `health.json`, but does not fail the setup check; only an undelivered report does.
@@ -176,6 +224,7 @@ In `dataDir`:
 - `openadminos.db`: the hash-chained audit log, the same format as the desktop's.
 - `health.json`: the last run, last refusal and last delivery per agent.
 - `sandbox.lock`: present while a host runs.
+- With pairing: `device-identity.pem`, `tls-key.pem`, `tls-certificate.pem`, `pairing.json` and `assignments.json`, all mode 0600, and `runs/cursor.json`, which numbers every run write for `GET /v1/runs`.
 
 The log on stdout carries ids, reason codes and counts. It never carries tokens, secrets or tenant data.
 

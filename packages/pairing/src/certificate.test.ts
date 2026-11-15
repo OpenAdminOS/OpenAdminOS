@@ -55,6 +55,7 @@ describe("createTlsCertificate", () => {
     const der = new X509Certificate(createTlsCertificate({ commonName: "a", now: NOW }).certificatePem).raw.toString("hex");
     assert.ok(der.includes("300c0603551d130101ff04023000"), "basicConstraints critical, CA false");
     assert.ok(der.includes("300e0603551d0f0101ff040403020780"), "keyUsage critical, digitalSignature");
+    assert.ok(der.includes("301d0603551d250416301406082b0601050507030106082b06010505070302"), "extendedKeyUsage serverAuth and clientAuth");
     assert.ok(!der.includes("0603551d11"), "no subjectAltName without names");
   });
 
@@ -70,14 +71,23 @@ describe("createTlsCertificate", () => {
     assert.equal(certificate.checkPrivateKey(createPrivateKey(other.privateKeyPem)), false);
   });
 
-  it("is accepted by node:tls with the pin as the only trust", async () => {
+  it("is accepted by node:tls on both sides with the pins as the only trust", async () => {
     const created = createTlsCertificate({ commonName: "openadminos-sandbox", ipAddresses: ["127.0.0.1"], now: new Date() });
-    const server = createServer({ cert: created.certificatePem, key: created.privateKeyPem, minVersion: "TLSv1.3" }, (socket) => socket.end("ok"));
+    const client = createTlsCertificate({ commonName: "openadminos-desktop", now: new Date() });
+    let clientPin = "";
+    const server = createServer(
+      { cert: created.certificatePem, key: created.privateKeyPem, minVersion: "TLSv1.3", requestCert: true, rejectUnauthorized: false },
+      (socket) => {
+        const peer = socket.getPeerX509Certificate();
+        clientPin = peer ? tlsSpkiSha256(peer) : "";
+        socket.end("ok");
+      },
+    );
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     try {
       const { port } = server.address() as AddressInfo;
       const received = await new Promise<string>((resolve, reject) => {
-        const socket = connect({ host: "127.0.0.1", port, rejectUnauthorized: false, minVersion: "TLSv1.3" }, () => {
+        const socket = connect({ host: "127.0.0.1", port, rejectUnauthorized: false, minVersion: "TLSv1.3", cert: client.certificatePem, key: client.privateKeyPem }, () => {
           if (!matchesTlsSpkiPin(socket.getPeerX509Certificate() as X509Certificate, created.spkiSha256)) {
             socket.destroy();
             reject(new Error("pin mismatch"));
@@ -89,6 +99,7 @@ describe("createTlsCertificate", () => {
         socket.on("error", reject);
       });
       assert.equal(received, "ok");
+      assert.equal(clientPin, client.spkiSha256, "the client certificate works for clientAuth");
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }
