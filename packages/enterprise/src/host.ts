@@ -32,6 +32,7 @@ import { EnterpriseHostError } from "./errors.js";
 import {
   alsoRunsOnFor,
   placementSnapshot,
+  type EnterprisePlacement,
   type EnterprisePlacements,
   checkModuleText,
   checkScheduleTargets,
@@ -123,8 +124,16 @@ export interface EnterpriseHostCapabilities {
 }
 
 export interface EnterprisePlacementStore {
-  /** Replaces the kept placements with these, each time the module sets its targets. */
-  save(placements: EnterprisePlacements): void;
+  /**
+   * Merges what the module set: `placements` are set; a kept placement is
+   * removed only when the module reports the agent at this computer
+   * (`here`) and still offers the kept place (`offered`). Gaps keep it.
+   */
+  publish(update: { readonly placements: EnterprisePlacements; readonly offered: readonly string[]; readonly here: readonly string[] }): void;
+  /** Records a move away as not certain before the module is asked; throws when it cannot be kept. */
+  begin(agentId: string, placement: EnterprisePlacement): void;
+  /** After a move: where it is now, back here, or not known (the not certain placement stays). */
+  settle(agentId: string, outcome: EnterprisePlacement | "here" | "unknown"): void;
 }
 
 export interface EnterpriseLocalSchedules {
@@ -281,6 +290,19 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
         const refused = await scheduleRefusal(input);
         if (refused) return refused;
       }
+      // A move away is recorded as not certain before the module is asked, so a crash meanwhile leaves the
+      // schedule held, not free to run here as well.
+      const placements = input.kind === "schedule" ? capabilities.placements : undefined;
+      if (input.kind === "schedule" && placements && input.targetId !== "this-computer") {
+        const target = scheduleTargets?.targets.find((candidate) => candidate.id === input.targetId);
+        try {
+          if (target) placements.begin(input.agentId, { targetId: target.id, label: target.label, organizationId: target.organizationId, reason: "uncertain" });
+        } catch (error) {
+          options.log("error", "enterprise: a move could not be recorded before it started", { agentId: input.agentId, error: errorMessage(error) });
+          return danger("The schedule did not move", "The app could not record the move before it started, so it was not started.", "Check free disk space and the permissions of the OpenAdminOS data folder, then try again.");
+        }
+      }
+      let outcome: EnterprisePlacement | "here" | "unknown" = "unknown";
       // While a move runs, the app does not delete the schedule here.
       if (input.kind === "schedule") local?.beginMove?.(input.agentId);
       try {
@@ -290,6 +312,10 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
         } catch (error) {
           options.log("error", "enterprise: a UI action failed", { name, error: errorMessage(error) });
           return checkJson(failedReply(error), ENTERPRISE_LIMITS.maxIpcOutputBytes, `the reply from ${name}`);
+        }
+        // The module answered: what it reports now is where a move away stands.
+        if (input.kind === "schedule" && input.targetId !== "this-computer") {
+          outcome = placementSnapshot(scheduleTargets ?? { action: name, targets: [] })[input.agentId] ?? (currentTargetFor(scheduleTargets, input.agentId) === "this-computer" ? "here" : "unknown");
         }
         // A schedule choice answers with a notice; a body there has no section to go to.
         if (input.kind === "schedule" && reply.body) {
@@ -312,10 +338,23 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
             reply = Object.freeze({ notice: reply.notice ?? SUPERSEDED_NOTICE });
           }
         }
-        if (input.kind === "schedule") reply = await handOff(input, reply, noScheduleHere);
+        if (input.kind === "schedule") {
+          reply = await handOff(input, reply, noScheduleHere);
+          // A move back loosens the kept placement only once the handoff confirmed it.
+          if (input.targetId === "this-computer" && reply.notice?.tone !== "danger" && currentTargetFor(scheduleTargets, input.agentId) === "this-computer") outcome = "here";
+        }
         return checkJson(reply, ENTERPRISE_LIMITS.maxIpcOutputBytes, `the reply from ${name}`);
       } finally {
-        if (input.kind === "schedule") local?.endMove?.(input.agentId);
+        if (input.kind === "schedule") {
+          local?.endMove?.(input.agentId);
+          if (placements && (input.targetId !== "this-computer" || outcome === "here")) {
+            try {
+              placements.settle(input.agentId, outcome);
+            } catch (error) {
+              options.log("error", "enterprise: the outcome of a move could not be kept", { agentId: input.agentId, error: errorMessage(error) });
+            }
+          }
+        }
       }
     });
     uiChannels.set(name, channel);
@@ -487,7 +526,12 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
     // that ran elsewhere does not run here before the module says where it runs.
     if (scheduleTargets && capabilities.placements) {
       try {
-        capabilities.placements.save(placementSnapshot(scheduleTargets));
+        const published = scheduleTargets;
+        capabilities.placements.publish({
+          placements: placementSnapshot(published),
+          offered: published.targets.map((target) => target.id),
+          here: Object.entries(published.current ?? {}).filter(([, targetId]) => targetId === "this-computer").map(([agentId]) => agentId),
+        });
       } catch (error) {
         options.log("error", "enterprise: the last known schedule placements could not be saved", { error: errorMessage(error) });
       }

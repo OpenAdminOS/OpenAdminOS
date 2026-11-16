@@ -934,14 +934,14 @@ describe("createEnterpriseHost", () => {
     assert.deepEqual(local, []);
   });
 
-  it("keeps the last accepted placements for the app each time targets are set", () => {
-    const saved: unknown[] = [];
+  it("hands the app what the module set, with the places it offers and the agents it reports here", () => {
+    const published: unknown[] = [];
     const controller = createEnterpriseHost({
       entitlement: () => ENTITLEMENT,
       ipc: new FakeIpc(),
       storage: new MemoryStorage(),
       log: () => undefined,
-      capabilities: { placements: { save: (placements) => saved.push(placements) } },
+      capabilities: { placements: { publish: (update) => published.push(update), begin: () => undefined, settle: () => undefined } },
     });
     controller.host.registerUiAction("sandboxes.schedule", async () => ({ notice: { type: "notice", tone: "neutral", title: "x", message: "y" } }));
     const targets = [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso" }];
@@ -952,13 +952,89 @@ describe("createEnterpriseHost", () => {
       alsoRunsOn: { "os-update-posture": "mini-pc" },
       uncertain: { "dormant-app-registrations": { targetId: "mini-pc", message: "No answer.", recovery: "Sync again." } },
     });
-    assert.deepEqual(saved.at(-1), {
-      "dormant-app-registrations": { targetId: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", reason: "uncertain" },
-      "os-update-posture": { targetId: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", reason: "configuration" },
-      "find-inactive-devices": { targetId: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", reason: "runs" },
+    assert.deepEqual(published.at(-1), {
+      placements: {
+        "dormant-app-registrations": { targetId: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", reason: "uncertain" },
+        "os-update-posture": { targetId: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", reason: "configuration" },
+        "find-inactive-devices": { targetId: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", reason: "runs" },
+      },
+      offered: ["mini-pc"],
+      here: ["compliance-overview"],
     });
-    // Back here: the next save no longer names it.
-    controller.host.setScheduleTargets({ action: "sandboxes.schedule", targets, current: { "find-inactive-devices": "this-computer" } });
-    assert.deepEqual(saved.at(-1), {});
+  });
+
+  it("records a move away as not certain before the module is asked, and settles it from what the module reports", async () => {
+    const calls: string[] = [];
+    const ipc = new FakeIpc();
+    const controller = createEnterpriseHost({
+      entitlement: () => ENTITLEMENT,
+      ipc,
+      storage: new MemoryStorage(),
+      log: () => undefined,
+      capabilities: {
+        placements: {
+          publish: () => undefined,
+          begin: (agentId, placement) => calls.push(`begin ${agentId} ${placement.targetId} ${placement.reason}`),
+          settle: (agentId, outcome) => calls.push(`settle ${agentId} ${typeof outcome === "string" ? outcome : `${outcome.targetId} ${outcome.reason}`}`),
+        },
+        localSchedules: { has: async () => true, organizationOf: async () => "org-contoso", setEnabled: async () => true },
+      },
+    });
+    const targets = [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso" }];
+    let mode: "move" | "refuse" | "crash" = "move";
+    controller.host.registerUiAction("sandboxes.schedule", async (input) => {
+      calls.push("module");
+      if (input.kind !== "schedule") return { notice: { type: "notice", tone: "neutral", title: "x", message: "y" } };
+      if (mode === "crash") throw new Error("The sandbox connection broke.");
+      if (mode === "move") controller.host.setScheduleTargets({ action: "sandboxes.schedule", targets, current: { [input.agentId]: input.targetId } });
+      if (mode === "refuse") return { notice: { type: "notice", tone: "danger", title: "Not moved", message: "The sandbox said no.", recovery: "Try again later." } };
+      return { notice: { type: "notice", tone: "success", title: "Moved", message: "Moved." } };
+    });
+    controller.host.setScheduleTargets({ action: "sandboxes.schedule", targets });
+    const choose = (targetId: string) => ipc.invoke("openadminos-enterprise-ui:sandboxes.schedule", { kind: "schedule", agentId: "find-inactive-devices", targetId, intervalSeconds: 3600 });
+
+    await choose("mini-pc");
+    assert.deepEqual(calls, ["begin find-inactive-devices mini-pc uncertain", "module", "settle find-inactive-devices mini-pc runs"]);
+
+    // Back here, confirmed by the handoff: it loosens.
+    calls.length = 0;
+    await choose("this-computer");
+    assert.deepEqual(calls, ["module", "settle find-inactive-devices here"]);
+
+    // A refusal the module answered with its schedule reported here: the recorded move is withdrawn.
+    calls.length = 0;
+    mode = "refuse";
+    await choose("mini-pc");
+    assert.deepEqual(calls, ["begin find-inactive-devices mini-pc uncertain", "module", "settle find-inactive-devices here"]);
+
+    // The module failed: the outcome is not known, and the not certain placement stays.
+    calls.length = 0;
+    mode = "crash";
+    await choose("mini-pc");
+    assert.deepEqual(calls, ["begin find-inactive-devices mini-pc uncertain", "module", "settle find-inactive-devices unknown"]);
+  });
+
+  it("does not start a move it cannot record", async () => {
+    const ipc = new FakeIpc();
+    let asked = 0;
+    const controller = createEnterpriseHost({
+      entitlement: () => ENTITLEMENT,
+      ipc,
+      storage: new MemoryStorage(),
+      log: () => undefined,
+      capabilities: {
+        placements: { publish: () => undefined, begin: () => { throw new Error("disk full"); }, settle: () => undefined },
+        localSchedules: { has: async () => true, organizationOf: async () => "org-contoso", setEnabled: async () => true },
+      },
+    });
+    controller.host.registerUiAction("sandboxes.schedule", async () => {
+      asked += 1;
+      return { notice: { type: "notice", tone: "neutral", title: "x", message: "y" } };
+    });
+    controller.host.setScheduleTargets({ action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso" }] });
+    const reply = (await ipc.invoke("openadminos-enterprise-ui:sandboxes.schedule", { kind: "schedule", agentId: "find-inactive-devices", targetId: "mini-pc", intervalSeconds: 3600 })) as { notice: { tone: string; message: string } };
+    assert.equal(reply.notice.tone, "danger");
+    assert.match(reply.notice.message, /could not record the move/);
+    assert.equal(asked, 0);
   });
 });
