@@ -194,7 +194,7 @@ export function AgentScheduleCard({
         <p className="text-xs text-[var(--color-text-muted)]">Enter an interval of at least one minute to see expected usage.</p>
       )}
       {enabled && !elsewhere && draftSeconds !== currentSeconds && (
-        <Button size="sm" variant="secondary" disabled={busy || draftSeconds < 60}
+        <Button size="sm" variant="secondary" disabled={busy || locked || draftSeconds < 60}
           onClick={() => void apply(buildSchedule(draftSeconds))}>
           Save interval
         </Button>
@@ -252,7 +252,8 @@ export function AgentScheduleCard({
 
       {error ? (
         <div role="alert" className="text-sm text-[var(--color-danger)]">
-          {error} Review the interval and try again.
+          {/* An error that already carries its own recovery step (such as a schedule held by a move) gets no interval hint. */}
+          {/try again\.?$/i.test(error.trim()) ? error : `${error} Review the interval and try again.`}
         </div>
       ) : null}
     </div>
@@ -471,7 +472,7 @@ function ScheduleTargetRow({
       id: target.id,
       label: target.label,
       detail: target.detail,
-      disabledReason: !hasSchedule ? SCHEDULE_TARGET_COPY.needsSchedule : target.disabledReason ?? (tooShort ? SCHEDULE_TARGET_COPY.needsInterval : undefined),
+      disabledReason: !hasSchedule && where.current !== target.id ? SCHEDULE_TARGET_COPY.needsSchedule : target.disabledReason ?? (tooShort ? SCHEDULE_TARGET_COPY.needsInterval : undefined),
     })),
   ];
   return (

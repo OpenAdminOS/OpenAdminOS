@@ -326,7 +326,7 @@ function ConfirmDialog({ button, onCancel, onConfirm }: { button: Button; onCanc
   return (
     <Modal open onClose={onCancel} size="md">
       <ModalHeader title={confirm.title} subtitle={ENTERPRISE_UI_COPY.provenance} onClose={onCancel} />
-      <div className="space-y-4 p-6">
+      <div className="max-h-[60vh] min-h-0 space-y-4 overflow-y-auto px-6 pt-6 pb-4">
         <p className="whitespace-pre-line text-sm leading-relaxed text-[var(--color-text-soft)]">{confirm.message}</p>
         <p className="text-xs text-[var(--color-text-muted)]">{ENTERPRISE_UI_COPY.confirmScope}</p>
         {confirm.typedPhrase ? (
@@ -344,12 +344,13 @@ function ConfirmDialog({ button, onCancel, onConfirm }: { button: Button; onCanc
             />
           </div>
         ) : null}
-        <div className="flex flex-wrap justify-end gap-2">
-          <Button variant="ghost" onClick={onCancel}>{ENTERPRISE_UI_COPY.cancel}</Button>
-          <Button variant={BUTTON_VARIANTS[button.kind] ?? "secondary"} disabled={!ready} onClick={() => onConfirm(confirm.typedPhrase === undefined ? undefined : typed)}>
-            {button.label}
-          </Button>
-        </div>
+      </div>
+      {/* The actions stay outside the scrolling body so a long message cannot push them out of view. */}
+      <div className="flex flex-wrap justify-end gap-2 px-6 pb-6">
+        <Button variant="ghost" onClick={onCancel}>{ENTERPRISE_UI_COPY.cancel}</Button>
+        <Button variant={BUTTON_VARIANTS[button.kind] ?? "secondary"} disabled={!ready} onClick={() => onConfirm(confirm.typedPhrase === undefined ? undefined : typed)}>
+          {button.label}
+        </Button>
       </div>
     </Modal>
   );

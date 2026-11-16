@@ -433,6 +433,8 @@ describe("schedule card: where it runs", () => {
     await waitFor(() => expect(invokeEnterpriseUi).toHaveBeenCalledWith("sandboxes.schedule", { kind: "schedule", agentId: agent.id, targetId: "mini-pc", intervalSeconds: 7200 }));
     expect(screen.getByRole("switch", { name: /Automatic runs/ })).toBeDisabled();
     expect(screen.getByRole("radio", { name: "4h" })).toBeDisabled();
+    // The unsaved 24h draft cannot be saved while the move runs.
+    expect(screen.getByRole("button", { name: "Save interval" })).toBeDisabled();
     await act(async () => {
       answer({ notice: { type: "notice", tone: "danger", title: "Not moved", message: "The sandbox did not answer.", recovery: "Check the sandbox, then try again." } });
     });
