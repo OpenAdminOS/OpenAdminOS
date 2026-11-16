@@ -3311,7 +3311,10 @@ async function startEnterprise(userDataDir: string): Promise<void> {
   // A schedule a module reports running in another place does not run here as well.
   store.setScheduleRunsElsewhere((agentId) => {
     const status = service.status();
-    return status.active && (currentTargetFor(status.scheduleTargets, agentId) !== "this-computer" || alsoRunsOnFor(status.scheduleTargets, agentId) !== undefined);
+    if (!status.active || !status.scheduleTargets) return undefined;
+    const current = currentTargetFor(status.scheduleTargets, agentId);
+    const place = current !== "this-computer" ? current : alsoRunsOnFor(status.scheduleTargets, agentId);
+    return place ? status.scheduleTargets.targets.find((target) => target.id === place)?.organizationId ?? place : undefined;
   });
   // The service stores the final runtime and notifies the window for every outcome.
   const runtime = await service.start();

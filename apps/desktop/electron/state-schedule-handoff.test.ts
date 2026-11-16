@@ -120,7 +120,7 @@ describe("schedule handoff on this computer", () => {
       const asked: string[] = [];
       f.store.setScheduleRunsElsewhere((agentId) => {
         asked.push(agentId);
-        return true;
+        return "org-contoso";
       });
       await f.store.fireDueSchedules();
       assert.deepEqual(asked, [agent.id]);
@@ -187,8 +187,24 @@ describe("schedule handoff on this computer", () => {
     try {
       assert.equal(await f.store.agentScheduleOrganization(agent.id), "org-contoso");
       assert.equal(await f.store.agentScheduleOrganization("not-installed"), undefined);
-      f.store.setScheduleRunsElsewhere(() => true);
+      f.store.setScheduleRunsElsewhere(() => "org-contoso");
       await assert.rejects(f.store.assignAgentSchedule(agent.slug, "org-fabrikam"), /runs in another place/);
+      assert.equal((await f.schedule())?.organizationId, "org-contoso");
+      // While a move runs, assigning waits too.
+      f.store.setScheduleRunsElsewhere(undefined);
+      f.store.beginScheduleMove(agent.id);
+      await assert.rejects(f.store.assignAgentSchedule(agent.slug, "org-fabrikam"), (error: unknown) => error instanceof ScheduleMoveInProgressError);
+      f.store.endScheduleMove(agent.id);
+
+      // No schedule here, a Contoso place runs it, Fabrikam active: a new schedule here is refused.
+      await f.store.updateAgentSchedule(agent.slug, null);
+      await f.store.setActiveTenant("fabrikam");
+      f.store.setScheduleRunsElsewhere(() => "org-contoso");
+      await assert.rejects(f.store.updateAgentSchedule(agent.slug, { enabled: true, intervalSeconds: 3600 }), /paired for another organization/);
+      assert.equal(await f.schedule(), undefined);
+      // Under Contoso it can be made.
+      await f.store.setActiveTenant("contoso");
+      await f.store.updateAgentSchedule(agent.slug, { enabled: true, intervalSeconds: 3600 });
       assert.equal((await f.schedule())?.organizationId, "org-contoso");
     } finally {
       await f.close();

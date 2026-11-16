@@ -1835,7 +1835,8 @@ export class AppStateStore {
    */
   private migrationAuditInFlight: Record<string, string | number | string[]> | undefined;
   private migrationAuditRecorded = false;
-  private scheduleRunsElsewhere: ((agentId: string) => boolean) | undefined;
+  /** The organization of the module place running an agent's schedule, when one does. */
+  private scheduleRunsElsewhere: ((agentId: string) => string | undefined) | undefined;
   /** Agents whose schedule a team features module is moving right now, counted. */
   private readonly movingSchedules = new Map<string, number>();
   private writeChain: Promise<unknown> = Promise.resolve();
@@ -5855,6 +5856,11 @@ export class AppStateStore {
           : activeTenant
             ? organizationForTenant(persisted.organizations ?? [], activeTenant.id)?.id
             : undefined;
+        // A new schedule here for an agent a module place runs belongs to that place's organization, or it is not made.
+        const placeOrganization = existing.schedule ? undefined : this.scheduleRunsElsewhere?.(existing.id);
+        if (placeOrganization && placeOrganization !== organizationId) {
+          throw new Error(`${existing.name} runs in a team features place paired for another organization. Make that organization active, or bring the schedule back, before scheduling it here.`);
+        }
         next[idx] = {
           ...existing,
           schedule: {
@@ -5934,7 +5940,7 @@ export class AppStateStore {
    * in another place. The scheduler does not run such an agent here, so a
    * schedule never runs in two places, until the admin resolves it.
    */
-  setScheduleRunsElsewhere(check: ((agentId: string) => boolean) | undefined): void {
+  setScheduleRunsElsewhere(check: ((agentId: string) => string | undefined) | undefined): void {
     this.scheduleRunsElsewhere = check;
   }
 
@@ -8590,13 +8596,14 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   async assignAgentSchedule(slug: string, organizationId: string): Promise<AppState> {
-    // A schedule a module place runs keeps its organization: that place is paired for it.
-    const elsewhere = (await this.listAgents()).find((entry) => entry.slug === slug || entry.id === slug);
-    if (elsewhere && this.scheduleRunsElsewhere?.(elsewhere.id)) {
-      throw new Error(`The schedule of ${elsewhere.name} runs in another place, which is paired for its organization. Move it back here first, then assign it.`);
-    }
     await this.serialize(async () => {
       const persisted = await this.read();
+      // A schedule that is moving, or that a module place runs, keeps its organization: that place is paired for it.
+      const held = persisted.installedAgents.find((entry) => entry.slug === slug || entry.id === slug);
+      if (held && (this.movingSchedules.has(held.id) || this.movingSchedules.has(held.slug))) throw new ScheduleMoveInProgressError(held.name);
+      if (held && this.scheduleRunsElsewhere?.(held.id)) {
+        throw new Error(`The schedule of ${held.name} runs in another place, which is paired for its organization. Move it back here first, then assign it.`);
+      }
       const organization = (persisted.organizations ?? []).find((entry) => entry.id === organizationId);
       if (!organization) {
         throw new Error("That organization is no longer on this device. Choose another one for this schedule.");
