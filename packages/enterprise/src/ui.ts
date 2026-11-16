@@ -76,14 +76,21 @@ const FORMAT_ALL = /[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu;
  * marks module UI as the module's for that reason.
  */
 export function normalizeForPhraseMatch(value: string): string {
-  return value.normalize("NFKC").replace(FORMAT_ALL, "").replace(/\s+/gu, " ").trim().toLowerCase();
+  return value
+    .normalize("NFKC")
+    .replace(FORMAT_ALL, "")
+    // Hyphens, dots, middle dots, slashes, underscores and other separators count as spaces.
+    .replace(/[\p{P}\p{S}]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .toLowerCase();
 }
 
 /** Refuses invisible formatting characters and the app's reserved phrases in module text. */
 export function checkModuleText(value: string, what: string): void {
   if (FORMAT.test(value)) invalid(`The ${what} has an invisible formatting character.`);
-  const normalized = normalizeForPhraseMatch(value);
-  const reserved = ENTERPRISE_UI_RESERVED_PHRASES.find((phrase) => normalized.includes(phrase));
+  const normalized = ` ${normalizeForPhraseMatch(value)} `;
+  const reserved = ENTERPRISE_UI_RESERVED_PHRASES.find((phrase) => normalized.includes(` ${normalizeForPhraseMatch(phrase)} `));
   if (reserved) invalid(`The ${what} uses "${reserved}", which the app keeps for its own messages.`);
 }
 

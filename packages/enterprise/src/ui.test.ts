@@ -168,4 +168,12 @@ describe("declarative module UI", () => {
     const targets = checkScheduleTargets({ action: "x", targets: [{ id: "mini-pc", label: "Office mini PC", agentIds: ["os-update-posture"] }], current: { "os-update-posture": "mini-pc" } });
     assert.equal(currentTargetFor(targets, "os-update-posture"), "mini-pc");
   });
+
+  it("counts punctuation and symbol separators as spaces before matching", () => {
+    for (const text of ["Runs on This-computer", "Runs on This.computer", "Local\u2011only", "No-data leaves the office", "Runs on this_computer", "this/computer"]) {
+      refused(() => checkUiBody(body({ type: "text", text })));
+    }
+    // A word that merely contains a phrase's letters is not refused.
+    assert.equal(checkUiBody(body({ type: "text", text: "Thisco mputer lab" })).elements.length, 1);
+  });
 });

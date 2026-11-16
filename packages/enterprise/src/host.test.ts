@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
-import { ENTERPRISE_UI_LIMITS } from "./ui.js";
+import { checkUiReply, ENTERPRISE_UI_LIMITS } from "./ui.js";
 import {
   ENTERPRISE_LIMITS,
   EnterpriseHostError,
@@ -625,6 +625,7 @@ describe("createEnterpriseHost", () => {
   it("hands a schedule off in the main process only when the module reports it at the chosen place", async () => {
     const local: Array<[string, boolean]> = [];
     let failLocal = false;
+    let hasLocal = true;
     const ipc = new FakeIpc();
     const controller = createEnterpriseHost({
       entitlement: () => ENTITLEMENT,
@@ -633,9 +634,11 @@ describe("createEnterpriseHost", () => {
       log: () => undefined,
       capabilities: {
         localSchedules: {
+          has: async () => hasLocal,
           setEnabled: async (agentId, enabled) => {
             if (failLocal) throw new Error("state.json is read-only");
             local.push([agentId, enabled]);
+            return hasLocal;
           },
         },
       },
@@ -650,8 +653,12 @@ describe("createEnterpriseHost", () => {
       return { body: { elements: [] } };
     });
     host.setScheduleTargets({ action: "sandboxes.schedule", targets });
-    const choose = async (targetId: string) =>
-      (await ipc.invoke("openadminos-enterprise-ui:sandboxes.schedule", { kind: "schedule", agentId: "find-inactive-devices", targetId, intervalSeconds: 3600 })) as { notice: { tone: string; title: string; message: string; recovery?: string } };
+    const replies: unknown[] = [];
+    const choose = async (targetId: string) => {
+      const reply = (await ipc.invoke("openadminos-enterprise-ui:sandboxes.schedule", { kind: "schedule", agentId: "find-inactive-devices", targetId, intervalSeconds: 3600 })) as { notice: { tone: string; title: string; message: string; recovery?: string } };
+      replies.push(reply);
+      return reply;
+    };
 
     // Moved and reported: the schedule here is turned off, in place.
     const moved = await choose("mini-pc");
@@ -682,6 +689,20 @@ describe("createEnterpriseHost", () => {
     assert.equal(both.notice.tone, "danger");
     assert.match(both.notice.message, /runs in both places/);
     assert.match(both.notice.recovery ?? "", /Turn off here/);
+    failLocal = false;
+
+    // Back here with no schedule here: the module is not asked and its place stays.
+    hasLocal = false;
+    const before = local.length;
+    const none = await choose("this-computer");
+    assert.equal(none.notice.title, "No schedule here");
+    assert.match(none.notice.recovery ?? "", /Turn on Automatic runs/);
+    assert.equal(local.length, before);
+    assert.equal(controller.snapshot().scheduleTargets?.current?.["find-inactive-devices"], "mini-pc");
+
+    // Every notice the host wrote reaches the window as written: the renderer runs the same check.
+    assert.ok(replies.length >= 6);
+    for (const reply of replies) assert.deepEqual(checkUiReply(reply), reply);
   });
 
   it("refuses reserved phrases in section titles and replaces a failure reason that fails the text check", async () => {
@@ -709,8 +730,17 @@ describe("createEnterpriseHost", () => {
     assert.equal(await press(), "The team features module did not say why.");
     // Trailing text past the limit is cut before the check, and the checked text is what is shown.
     reason = `  The sandbox did not answer.${"x".repeat(600)}`;
+    const reply = await ipc.invoke("openadminos-enterprise-ui:sandboxes.sync", { kind: "button", sectionId: "sandboxes", buttonId: "sync", values: {} });
+    assert.deepEqual(checkUiReply(reply), reply, "a failure notice reaches the window as written");
     const shown = await press();
     assert.ok(shown.startsWith("The sandbox did not answer."));
     assert.equal(shown.length, ENTERPRISE_UI_LIMITS.maxMessageLength);
+  });
+
+  it("refuses the app's trust phrases and format characters in the status strip contribution", () => {
+    const { host } = setup();
+    assertError(() => host.setStatusContribution({ label: "Local-only · No data leaves this device" }), "invalid-value");
+    assertError(() => host.setStatusContribution({ label: "Team service", detail: "Payloads \u202eare ciphertext." }), "invalid-value");
+    host.setStatusContribution({ label: "Team service · Frankfurt · end-to-end encrypted" });
   });
 });

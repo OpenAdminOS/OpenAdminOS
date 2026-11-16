@@ -402,9 +402,11 @@ export interface EnterpriseHost {
   /** Replaces the body of a registered section; the window draws it at once. */
   updateSettingsSection(id: string, body: EnterpriseUiBody | undefined): void;
   /**
-   * Registers `openadminos-enterprise:<name>` for buttons and schedule
-   * targets. The input is checked before the handler runs, and the reply
-   * is checked before the window draws it; a failure becomes a notice.
+   * Registers `openadminos-enterprise-ui:<name>` for buttons and schedule
+   * targets, in a registry of its own apart from `registerIpc`. The input
+   * is checked against the UI the window was given before the handler
+   * runs, and the reply before the window draws it; a failure becomes a
+   * notice.
    */
   registerUiAction(name: string, handler: EnterpriseUiActionHandler): void;
   /** Sets or clears the schedule targets the agent schedule card offers. */

@@ -117,8 +117,10 @@ export interface EnterpriseHostCapabilities {
 }
 
 export interface EnterpriseLocalSchedules {
-  /** Turns the agent's schedule on this computer off or back on, keeping its organization, interval and settings. */
-  setEnabled(agentId: string, enabled: boolean): Promise<void>;
+  /** Whether the agent has a schedule on this computer, on or off. */
+  has(agentId: string): Promise<boolean>;
+  /** Turns the agent's schedule on this computer off or back on, keeping its organization, interval and settings; false when it has none. */
+  setEnabled(agentId: string, enabled: boolean): Promise<boolean>;
 }
 
 /** A section as the window gets it: with the revision of its body. */
@@ -183,7 +185,7 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
     error: freezeFn((message: string, fields?: EnterpriseLogFields) => writeLog(options.log, "error", message, fields)),
   });
 
-  /** Registers one channel under the prefix; IPC handlers and UI actions share the names and the limit. */
+  /** Registers one IPC handler channel under ENTERPRISE_IPC_PREFIX; UI actions have their own prefix and registry. */
   const register = (name: string, handler: unknown, what: string, listener: (request: EnterpriseJson) => Promise<EnterpriseJson>): void => {
     assertLive();
     assertName(name, `${what} name`);
@@ -246,6 +248,10 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
       const input = checkUiActionInput(checkJson(raw ?? null, ENTERPRISE_LIMITS.maxIpcInputBytes, `the request to ${name}`));
       checkUiActionAgainst(input, name, { body: (id) => sections.get(id)?.body, scheduleTargets });
       const revision = input.kind === "button" ? revisions.get(input.sectionId) : undefined;
+      // Moving back needs a schedule here to turn on: without one the module is not asked, and its place stays.
+      if (input.kind === "schedule" && input.targetId === "this-computer" && capabilities.localSchedules && !(await capabilities.localSchedules.has(input.agentId))) {
+        return checkJson(danger("No schedule here", "There is no schedule here to take this agent back, so it keeps running where it runs now.", "Turn on Automatic runs in the schedule card first, then choose here."), ENTERPRISE_LIMITS.maxIpcOutputBytes, `the reply from ${name}`);
+      }
       let reply: EnterpriseUiReply;
       try {
         reply = checkUiReply(await handler(input), new Set(uiChannels.keys()));
@@ -277,40 +283,29 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
    */
   const handOff = async (input: Extract<EnterpriseUiActionInput, { kind: "schedule" }>, reply: EnterpriseUiReply): Promise<EnterpriseUiReply> => {
     if (reply.notice?.tone === "danger") return reply;
-    const labelOf = (targetId: string) => (targetId === "this-computer" ? "this computer" : scheduleTargets?.targets.find((target) => target.id === targetId)?.label ?? targetId);
+    // App copy says "here" for this computer: the reply passes the same text check as module text.
+    const place = (targetId: string) => (targetId === "this-computer" ? "here" : `on ${scheduleTargets?.targets.find((target) => target.id === targetId)?.label ?? targetId}`);
     const now = currentTargetFor(scheduleTargets, input.agentId);
     if (now !== input.targetId) {
-      return Object.freeze({
-        notice: Object.freeze({
-          type: "notice" as const,
-          tone: "danger" as const,
-          title: "The schedule did not move",
-          message: `The team features module did not report the schedule on ${labelOf(input.targetId)}; it reports ${labelOf(now)}. Nothing changed on this computer.`,
-          recovery: "Try again. If it keeps happening, check the team features module.",
-        }),
-      });
+      return danger("The schedule did not move", `The team features module did not report the schedule ${place(input.targetId)}; it reports it ${place(now)}. Nothing changed here.`, "Try again. If it keeps happening, check the team features module.");
     }
     const local = capabilities.localSchedules;
     if (local) {
       const here = input.targetId === "this-computer";
+      let found: boolean;
       try {
-        await local.setEnabled(input.agentId, here);
+        found = await local.setEnabled(input.agentId, here);
       } catch (error) {
-        options.log("error", "enterprise: the schedule on this computer could not follow a move", { agentId: input.agentId, error: errorMessage(error) });
-        return Object.freeze({
-          notice: Object.freeze({
-            type: "notice" as const,
-            tone: "danger" as const,
-            title: here ? "The schedule is not on here" : "The schedule runs in two places",
-            message: here
-              ? "The team features module moved the schedule back, but it could not be turned on here."
-              : `The schedule now runs on ${labelOf(input.targetId)}, and the schedule on this computer could not be turned off, so it runs in both places.`,
-            recovery: here ? "Turn on Automatic runs in the schedule card." : "Use Turn off here in the schedule card.",
-          }),
-        });
+        options.log("error", "enterprise: the schedule here could not follow a move", { agentId: input.agentId, error: errorMessage(error) });
+        return here
+          ? danger("The schedule is not on here", "The team features module moved the schedule back, but it could not be turned on here.", "Turn on Automatic runs in the schedule card.")
+          : danger("The schedule runs in two places", `The schedule now runs ${place(input.targetId)}, and it could not be turned off here, so it runs in both places.`, "Use Turn off here in the schedule card.");
+      }
+      if (here && !found) {
+        return danger("No schedule here", "The team features module moved the schedule back, but there is no schedule here to turn on.", "Turn on Automatic runs in the schedule card.");
       }
     }
-    return reply.notice ? reply : Object.freeze({ ...reply, notice: Object.freeze({ type: "notice" as const, tone: "success" as const, title: "Saved", message: `The schedule now runs on ${labelOf(input.targetId)}.` }) });
+    return reply.notice ? reply : Object.freeze({ ...reply, notice: Object.freeze({ type: "notice" as const, tone: "success" as const, title: "Saved", message: `The schedule now runs ${place(input.targetId)}.` }) });
   };
 
   /** Stores a checked body and moves the section's revision on. */
@@ -365,10 +360,11 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
       if (typeof next !== "object" || next === null) {
         throw new EnterpriseHostError("invalid-value", "A status contribution must be an object.");
       }
-      const label = checkText(next.label, ENTERPRISE_LIMITS.maxLabelLength, "status label");
+      // The status strip is where the app speaks about where data goes: module text there passes the same phrase check.
+      const label = checkText(next.label, ENTERPRISE_LIMITS.maxLabelLength, "status label", true);
       status = next.detail === undefined
         ? Object.freeze({ label })
-        : Object.freeze({ label, detail: checkText(next.detail, ENTERPRISE_LIMITS.maxDetailLength, "status detail") });
+        : Object.freeze({ label, detail: checkText(next.detail, ENTERPRISE_LIMITS.maxDetailLength, "status detail", true) });
     }
     changed();
   };
@@ -414,6 +410,11 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
       changed();
     },
   });
+}
+
+/** A danger notice in the app's own words. */
+function danger(title: string, message: string, recovery: string): EnterpriseUiReply {
+  return Object.freeze({ notice: Object.freeze({ type: "notice" as const, tone: "danger" as const, title, message, recovery }) });
 }
 
 /** The notice a failed UI action answers with: the reason, and the step that fixes it. */
