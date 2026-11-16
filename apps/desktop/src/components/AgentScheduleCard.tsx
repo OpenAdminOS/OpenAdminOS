@@ -13,9 +13,9 @@ import { useAppState } from "../state";
 import { SCHEDULE_ORGANIZATION_COPY, userFacingErrorReason } from "../copy";
 import { resolveOrganizations } from "../shared/openAdminOS";
 import { useToast } from "./Toast";
-import { EnterpriseNotice, invokeUiAction } from "./EnterpriseUi";
+import { EnterpriseNotice, invokeUiAction, ModuleUiBoundary } from "./EnterpriseUi";
 import { useEnterpriseStatus } from "./useEnterpriseStatus";
-import type { EnterpriseUiNoticeView } from "@openadminos/agent-sdk";
+import type { EnterpriseScheduleTargetView, EnterpriseUiNoticeView } from "@openadminos/agent-sdk";
 
 const PRESETS = [
   { id: "900", label: "15m", seconds: 15 * 60 },
@@ -32,6 +32,9 @@ export function AgentScheduleCard({
   onChange: (next: AgentSchedule | null) => Promise<void> | void;
 }) {
   const schedule = agent.schedule;
+  const where = useScheduleTarget(agent);
+  // While the schedule runs elsewhere, this card does not run or change it here.
+  const elsewhere = where && where.current !== "this-computer" ? where.currentLabel : undefined;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [customValue, setCustomValue] = useState("30");
@@ -94,15 +97,33 @@ export function AgentScheduleCard({
     <div className="space-y-4">
       <SchedulesPausedNotice />
       {schedule ? <ScheduleOrganizationRow agent={agent} /> : null}
-      <ScheduleTargetRow agent={agent} intervalSeconds={draftSeconds} />
+      {where ? (
+        <ModuleUiBoundary>
+          <ScheduleTargetRow
+            agent={agent}
+            where={where}
+            intervalSeconds={draftSeconds}
+            onMoved={(targetId) => {
+              // One place per schedule: a sandbox takes it from this computer, and This computer takes it back.
+              if (targetId !== "this-computer") {
+                if (enabled) void apply(null);
+              } else if (draftSeconds >= 60) {
+                void apply(buildSchedule(draftSeconds));
+              }
+            }}
+          />
+        </ModuleUiBoundary>
+      ) : null}
       <Switch
-        checked={enabled}
-        disabled={busy || (!enabled && draftSeconds < 60)}
+        checked={enabled && !elsewhere}
+        disabled={busy || elsewhere !== undefined || (!enabled && draftSeconds < 60)}
         label="Automatic runs"
         description={
-          enabled
-            ? `Runs every ${formatInterval(currentSeconds)}.`
-            : "Manual only. Enabling starts one full interval from now."
+          elsewhere
+            ? SCHEDULE_TARGET_COPY.runsElsewhere(elsewhere)
+            : enabled
+              ? `Runs every ${formatInterval(currentSeconds)}.`
+              : "Manual only. Enabling starts one full interval from now."
         }
         onCheckedChange={(checked) =>
           void apply(checked ? buildSchedule(draftSeconds) : null)
@@ -116,8 +137,8 @@ export function AgentScheduleCard({
           value={selectedInterval}
           onValueChange={setSelectedInterval}
           options={[
-            ...PRESETS.map(({ id, label }) => ({ id, label, disabled: busy })),
-            { id: "custom", label: "Custom", disabled: busy },
+            ...PRESETS.map(({ id, label }) => ({ id, label, disabled: busy || elsewhere !== undefined })),
+            { id: "custom", label: "Custom", disabled: busy || elsewhere !== undefined },
           ]}
           className="max-w-full flex-wrap"
         />
@@ -163,7 +184,7 @@ export function AgentScheduleCard({
       ) : (
         <p className="text-xs text-[var(--color-text-muted)]">Enter an interval of at least one minute to see expected usage.</p>
       )}
-      {enabled && draftSeconds !== currentSeconds && (
+      {enabled && !elsewhere && draftSeconds !== currentSeconds && (
         <Button size="sm" variant="secondary" disabled={busy || draftSeconds < 60}
           onClick={() => void apply(buildSchedule(draftSeconds))}>
           Save interval
@@ -363,39 +384,77 @@ export const SCHEDULE_TARGET_COPY = {
   thisComputer: "This computer",
   thisComputerDetail: "Runs here while OpenAdminOS is open.",
   needsInterval: "Choose an interval of at least one minute first.",
+  provenance: "Places other than this computer are provided by the team features module.",
+  moved: "Saved",
+  movedTo: (label: string) => `The schedule now runs on ${label}.`,
+  working: "Working",
+  runsElsewhere: (label: string) => `This schedule runs on ${label}. Its interval is set there.`,
 } as const;
+
+interface ScheduleTargetChoice {
+  action: string;
+  targets: readonly EnterpriseScheduleTargetView[];
+  /** Where the schedule runs now, as the module reports it. */
+  current: string;
+  currentLabel: string;
+}
+
+/** Where an agent's schedule runs, when a team features module offers places for it. */
+function useScheduleTarget(agent: AgentSummary): ScheduleTargetChoice | undefined {
+  const status = useEnterpriseStatus();
+  const contribution = status.active ? status.scheduleTargets : undefined;
+  if (!contribution) return undefined;
+  const targets = contribution.targets.filter((target) => !target.agentIds || target.agentIds.includes(agent.id));
+  const reported = contribution.current?.[agent.id];
+  const current = reported && targets.some((target) => target.id === reported) ? reported : "this-computer";
+  if (targets.length === 0) return undefined;
+  const currentLabel = current === "this-computer" ? SCHEDULE_TARGET_COPY.thisComputer : targets.find((target) => target.id === current)!.label;
+  return { action: contribution.action, targets, current, currentLabel };
+}
 
 /**
  * Where the schedule runs: this computer, or a place a team features
- * module offers for this agent. Without a module, or with no place for
- * this agent, nothing is drawn and the card is as before.
+ * module offers for this agent. The checked place is always the one the
+ * module reports, never a local guess: a choice changes it only after the
+ * module took it and reported it back.
  */
-function ScheduleTargetRow({ agent, intervalSeconds }: { agent: AgentSummary; intervalSeconds: number }) {
-  const status = useEnterpriseStatus();
-  const contribution = status.active ? status.scheduleTargets : undefined;
-  const targets = (contribution?.targets ?? []).filter((target) => !target.agentIds || target.agentIds.includes(agent.id));
-  const [selected, setSelected] = useState("this-computer");
+function ScheduleTargetRow({
+  agent,
+  where,
+  intervalSeconds,
+  onMoved,
+}: {
+  agent: AgentSummary;
+  where: ScheduleTargetChoice;
+  intervalSeconds: number;
+  onMoved: (targetId: string) => void;
+}) {
   const [notice, setNotice] = useState<EnterpriseUiNoticeView | undefined>();
-  const [busy, setBusy] = useState(false);
-  if (!contribution || targets.length === 0) return null;
+  const [busy, setBusy] = useState<string | undefined>();
   const tooShort = intervalSeconds < 60;
 
   const choose = async (targetId: string) => {
-    setSelected(targetId);
+    if (targetId === where.current) return;
     setNotice(undefined);
-    if (targetId === "this-computer") return;
-    setBusy(true);
-    const reply = await invokeUiAction(contribution.action, { kind: "schedule", agentId: agent.id, targetId, intervalSeconds });
-    setNotice(reply.notice);
-    setBusy(false);
+    setBusy(targetId);
+    const reply = await invokeUiAction(where.action, { kind: "schedule", agentId: agent.id, targetId, intervalSeconds });
+    setBusy(undefined);
+    if (reply.notice?.tone === "danger") {
+      setNotice(reply.notice);
+      return;
+    }
+    // A reply without a notice still says what happened.
+    const label = targetId === "this-computer" ? SCHEDULE_TARGET_COPY.thisComputer : where.targets.find((target) => target.id === targetId)?.label ?? targetId;
+    setNotice(reply.notice ?? { type: "notice", tone: "success", title: SCHEDULE_TARGET_COPY.moved, message: SCHEDULE_TARGET_COPY.movedTo(label) });
+    onMoved(targetId);
   };
 
   const options = [
-    { id: "this-computer", label: SCHEDULE_TARGET_COPY.thisComputer, detail: SCHEDULE_TARGET_COPY.thisComputerDetail, disabledReason: undefined as string | undefined },
-    ...targets.map((target) => ({ id: target.id, label: target.label, detail: target.detail, disabledReason: target.disabledReason ?? (tooShort ? SCHEDULE_TARGET_COPY.needsInterval : undefined) })),
+    { id: "this-computer", label: SCHEDULE_TARGET_COPY.thisComputer, detail: SCHEDULE_TARGET_COPY.thisComputerDetail, disabledReason: tooShort && where.current !== "this-computer" ? SCHEDULE_TARGET_COPY.needsInterval : undefined },
+    ...where.targets.map((target) => ({ id: target.id, label: target.label, detail: target.detail, disabledReason: target.disabledReason ?? (tooShort ? SCHEDULE_TARGET_COPY.needsInterval : undefined) })),
   ];
   return (
-    <fieldset className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2.5 ring-1 ring-[var(--color-border-soft)]" aria-busy={busy}>
+    <fieldset className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2.5 ring-1 ring-[var(--color-border-soft)]" aria-busy={busy !== undefined}>
       <legend className="float-left w-full text-sm font-medium text-[var(--color-text)]">{SCHEDULE_TARGET_COPY.legend}</legend>
       <div className="clear-both grid gap-1.5 pt-1.5">
         {options.map((option) => (
@@ -404,22 +463,24 @@ function ScheduleTargetRow({ agent, intervalSeconds }: { agent: AgentSummary; in
               type="radio"
               name={`schedule-target-${agent.id}`}
               value={option.id}
-              checked={selected === option.id}
-              disabled={busy || option.disabledReason !== undefined}
+              checked={where.current === option.id}
+              disabled={busy !== undefined || (option.disabledReason !== undefined && where.current !== option.id)}
               onChange={() => void choose(option.id)}
               className="mt-0.5"
             />
             <span>
               <span className="text-[var(--color-text)]">{option.label}</span>
+              {busy === option.id ? <span className="ml-1.5 text-xs text-[var(--color-text-muted)]">{SCHEDULE_TARGET_COPY.working}</span> : null}
               {option.detail ? <span className="block text-xs text-[var(--color-text-muted)]">{option.detail}</span> : null}
               {option.disabledReason ? <span className="block text-xs text-[var(--color-warning)]">{option.disabledReason}</span> : null}
             </span>
           </label>
         ))}
       </div>
+      <p className="mt-2 text-xs text-[var(--color-text-muted)]">{SCHEDULE_TARGET_COPY.provenance}</p>
       {notice ? (
         <div className="mt-2">
-          <EnterpriseNotice notice={notice} />
+          <EnterpriseNotice notice={notice} live />
         </div>
       ) : null}
     </fieldset>
