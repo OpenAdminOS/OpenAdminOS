@@ -172,7 +172,7 @@ describe("team features bodies in Settings", () => {
     let changed: (() => void) | undefined;
     const invokeEnterpriseUi = vi.fn<Invoke>(async () => {
       // The host stores the reply body as the next revision and tells the window.
-      status = { ...status, settingsSections: [section(2, { elements: [{ type: "status", label: "Office mini PC", value: "Paired", tone: "success" }] })] };
+      status = { active: true, label: "Team features on", settingsSections: [section(2, { elements: [{ type: "status", label: "Office mini PC", value: "Paired", tone: "success" }] })] };
       changed?.();
       return {
         body: { elements: [{ type: "status", label: "Office mini PC", value: "Paired", tone: "success" }] },
@@ -222,7 +222,7 @@ describe("team features bodies in Settings", () => {
     await user.click(screen.getByRole("button", { name: "Unpair" }));
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
 
-    status = { ...status, settingsSections: [section(2, { elements: [{ type: "status", label: "Office mini PC", value: "Paired", tone: "success" }, ...form.elements] })] };
+    status = { active: true, label: "Team features on", settingsSections: [section(2, { elements: [{ type: "status", label: "Office mini PC", value: "Paired", tone: "success" }, ...form.elements] })] };
     await act(async () => {
       changed?.();
     });
@@ -230,7 +230,7 @@ describe("team features bodies in Settings", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(screen.getByLabelText("Address")).toHaveValue("100.64.0.10:7443");
 
-    status = { ...status, settingsSections: [section(3, { elements: [{ type: "text", text: "No sandbox is paired." }] })] };
+    status = { active: true, label: "Team features on", settingsSections: [section(3, { elements: [{ type: "text", text: "No sandbox is paired." }] })] };
     await act(async () => {
       changed?.();
     });
