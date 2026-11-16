@@ -57,6 +57,13 @@ const api: OpenAdminOSApi = {
     }
     return ipcRenderer.invoke(`openadminos-enterprise:${name}`, input ?? null);
   },
+  invokeEnterpriseUi: (name: string, input?: unknown) => {
+    // Only the team features UI action channels; the host checks the input against the UI it gave.
+    if (typeof name !== "string" || !/^[a-z][a-z0-9-]{0,47}(?:\.[a-z][a-z0-9-]{0,47}){0,3}$/.test(name)) {
+      return Promise.reject(new Error("A team features action needs a lower case name."));
+    }
+    return ipcRenderer.invoke(`openadminos-enterprise-ui:${name}`, input ?? null);
+  },
   getReleaseDiagnostics: () =>
     ipcRenderer.invoke("openadminos:get-release-diagnostics"),
   exportSupportBundle: (input: SupportBundleInput) =>

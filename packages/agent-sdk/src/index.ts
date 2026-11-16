@@ -3345,6 +3345,8 @@ export interface EnterpriseSettingsSectionView {
   readonly description: string;
   /** Checked by the main process; the renderer draws it with its own components. */
   readonly body?: EnterpriseUiBodyView;
+  /** Moves on with every body the host stores; the renderer draws the newest. */
+  readonly revision?: number;
 }
 
 /**
@@ -3415,6 +3417,8 @@ export interface EnterpriseScheduleTargetView {
 export interface EnterpriseScheduleTargetsView {
   readonly action: string;
   readonly targets: readonly EnterpriseScheduleTargetView[];
+  /** Where each agent's schedule runs now, by agent id; an agent left out runs on this computer. */
+  readonly current?: { readonly [agentId: string]: string };
 }
 
 export type SupportIssueSource =
@@ -3472,6 +3476,8 @@ export interface OpenAdminOSApi {
    * Rejects when no module registered that name.
    */
   invokeEnterprise?(name: string, input?: unknown): Promise<unknown>;
+  /** Calls a team features UI action, on its own channels apart from `invokeEnterprise`. */
+  invokeEnterpriseUi?(name: string, input?: unknown): Promise<unknown>;
   getReleaseDiagnostics(): Promise<ReleaseDiagnostics>;
   /**
    * Export a reviewed, sanitized diagnostics JSON file for manual
