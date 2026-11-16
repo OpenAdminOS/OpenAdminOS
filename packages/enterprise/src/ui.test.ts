@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
 import { EnterpriseHostError } from "./errors.js";
-import { checkModuleText, checkScheduleTargets, checkUiActionAgainst, checkUiActionInput, checkUiBody, checkUiReply, currentTargetFor, ENTERPRISE_UI_LIMITS, normalizeForPhraseMatch } from "./ui.js";
+import { alsoRunsOnFor, checkModuleText, checkScheduleTargets, checkUiActionAgainst, checkUiActionInput, checkUiBody, checkUiReply, currentTargetFor, ENTERPRISE_UI_LIMITS, normalizeForPhraseMatch, uncertainFor } from "./ui.js";
 
 function refused(action: () => unknown, code: "invalid-value" | "limit" = "invalid-value"): void {
   assert.throws(action, (error: unknown) => error instanceof EnterpriseHostError && error.code === code);
@@ -77,10 +77,10 @@ describe("declarative module UI", () => {
     refused(() => checkUiActionInput({ kind: "schedule", agentId: "find-inactive-devices", targetId: "mini-pc", intervalSeconds: 1.5 }));
     refused(() => checkUiActionInput({ kind: "eval" }));
 
-    const targets = checkScheduleTargets({ action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC", detail: "Local model", agentIds: ["find-inactive-devices"] }, { id: "lab", label: "Lab", disabledReason: "Sync is stopped." }] });
+    const targets = checkScheduleTargets({ action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", detail: "Local model", agentIds: ["find-inactive-devices"] }, { id: "lab", label: "Lab", organizationId: "org-contoso", disabledReason: "Sync is stopped." }] });
     assert.equal(targets.targets.length, 2);
-    refused(() => checkScheduleTargets({ action: "x", targets: [{ id: "this-computer", label: "This computer" }] }));
-    refused(() => checkScheduleTargets({ action: "x", targets: [{ id: "a", label: "A" }, { id: "a", label: "B" }] }));
+    refused(() => checkScheduleTargets({ action: "x", targets: [{ id: "this-computer", label: "This computer", organizationId: "org-contoso" }] }));
+    refused(() => checkScheduleTargets({ action: "x", targets: [{ id: "a", label: "A", organizationId: "org-contoso" }, { id: "a", label: "B", organizationId: "org-contoso" }] }));
     refused(() => checkScheduleTargets({ action: "x", targets: Array.from({ length: ENTERPRISE_UI_LIMITS.maxScheduleTargets + 1 }, (_, i) => ({ id: `t${i}`, label: "T" })) }));
   });
 
@@ -92,7 +92,7 @@ describe("declarative module UI", () => {
       refused(() => checkUiBody(body({ type: "status", label: `Sandbox${character}`, value: "Paired", tone: "success" })));
       refused(() => checkUiBody(body({ type: "field", id: "a", label: "A", kind: "text", value: `x${character}` })));
     }
-    refused(() => checkScheduleTargets({ action: "x", targets: [{ id: "laptop", label: "This computer" }] }));
+    refused(() => checkScheduleTargets({ action: "x", targets: [{ id: "laptop", label: "This computer", organizationId: "org-contoso" }] }));
   });
 
   it("asks before a danger button and names a registered action", () => {
@@ -104,7 +104,7 @@ describe("declarative module UI", () => {
   });
 
   it("reports the current target per agent and refuses one that is not offered", () => {
-    const targets = checkScheduleTargets({ action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC" }], current: { "find-inactive-devices": "mini-pc", "os-update-posture": "this-computer" } });
+    const targets = checkScheduleTargets({ action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso" }], current: { "find-inactive-devices": "mini-pc", "os-update-posture": "this-computer" } });
     assert.equal(currentTargetFor(targets, "find-inactive-devices"), "mini-pc");
     assert.equal(currentTargetFor(targets, "os-update-posture"), "this-computer");
     assert.equal(currentTargetFor(targets, "compliance-overview"), "this-computer");
@@ -119,7 +119,7 @@ describe("declarative module UI", () => {
       { type: "button", id: "pair", label: "Pair", kind: "primary", action: "sandboxes.pair" },
       { type: "button", id: "unpair", label: "Unpair", kind: "danger", action: "sandboxes.unpair", confirm: { title: "Unpair", message: "Unpair it?", typedPhrase: "UNPAIR" } },
     ));
-    const targets = checkScheduleTargets({ action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC", agentIds: ["find-inactive-devices"] }, { id: "lab", label: "Lab", disabledReason: "Sync is stopped." }] });
+    const targets = checkScheduleTargets({ action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", agentIds: ["find-inactive-devices"] }, { id: "lab", label: "Lab", organizationId: "org-contoso", disabledReason: "Sync is stopped." }] });
     const ui = { body: (id: string) => (id === "sandboxes" ? section : undefined), scheduleTargets: targets };
     const button = (buttonId: string, values: Record<string, string>, confirmedPhrase?: string) =>
       checkUiActionInput({ kind: "button", sectionId: "sandboxes", buttonId, values, ...(confirmedPhrase ? { confirmedPhrase } : {}) });
@@ -164,8 +164,8 @@ describe("declarative module UI", () => {
   });
 
   it("refuses a current place that is not offered for that agent", () => {
-    refused(() => checkScheduleTargets({ action: "x", targets: [{ id: "mini-pc", label: "Office mini PC", agentIds: ["os-update-posture"] }], current: { "find-inactive-devices": "mini-pc" } }));
-    const targets = checkScheduleTargets({ action: "x", targets: [{ id: "mini-pc", label: "Office mini PC", agentIds: ["os-update-posture"] }], current: { "os-update-posture": "mini-pc" } });
+    refused(() => checkScheduleTargets({ action: "x", targets: [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", agentIds: ["os-update-posture"] }], current: { "find-inactive-devices": "mini-pc" } }));
+    const targets = checkScheduleTargets({ action: "x", targets: [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", agentIds: ["os-update-posture"] }], current: { "os-update-posture": "mini-pc" } });
     assert.equal(currentTargetFor(targets, "os-update-posture"), "mini-pc");
   });
 
@@ -196,5 +196,25 @@ describe("declarative module UI", () => {
     for (const text of ["Kept on your device", "Data never leaves the office", "It stays on your device", "Nothing leaves this device unencrypted"]) {
       refused(() => checkUiBody(body({ type: "text", text })));
     }
+  });
+
+  it("requires the organization of each place and bounds alsoRunsOn and uncertain", () => {
+    refused(() => checkScheduleTargets({ action: "x", targets: [{ id: "mini-pc", label: "Office mini PC" }] }));
+    const targets = checkScheduleTargets({
+      action: "x",
+      targets: [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso" }],
+      alsoRunsOn: { "find-inactive-devices": "mini-pc" },
+      uncertain: { "os-update-posture": { targetId: "mini-pc", message: "No answer.", recovery: "Sync again." } },
+    });
+    assert.equal(alsoRunsOnFor(targets, "find-inactive-devices"), "mini-pc");
+    assert.equal(uncertainFor(targets, "os-update-posture")?.recovery, "Sync again.");
+    assert.equal(currentTargetFor(targets, "os-update-posture"), "mini-pc");
+    refused(() => checkScheduleTargets({ action: "x", targets: [{ id: "mini-pc", label: "M", organizationId: "org-1" }], alsoRunsOn: { a: "lab" } }));
+    refused(() => checkScheduleTargets({ action: "x", targets: [{ id: "mini-pc", label: "M", organizationId: "org-1" }], uncertain: { a: { targetId: "mini-pc", message: "x" } } }));
+    refused(() => checkScheduleTargets({ action: "x", targets: [{ id: "mini-pc", label: "M", organizationId: "org-1" }], uncertain: { a: { targetId: "mini-pc", message: "Runs on this computer", recovery: "y" } } }));
+    refused(() => checkScheduleTargets({ action: "x", targets: [{ id: "mini-pc", label: "M", organizationId: "org-1" }], alsoRunsOn: Object.fromEntries(Array.from({ length: 501 }, (_, i) => [`a${i}`, "mini-pc"])) }));
+    // The pure check refuses a place of another organization when the schedule's is given.
+    const ui = { body: () => undefined, scheduleTargets: targets, scheduleOrganization: "org-fabrikam" };
+    refused(() => checkUiActionAgainst(checkUiActionInput({ kind: "schedule", agentId: "compliance-overview", targetId: "mini-pc", intervalSeconds: 3600 }), "x", ui));
   });
 });

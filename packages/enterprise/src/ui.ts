@@ -62,6 +62,7 @@ const L = ENTERPRISE_UI_LIMITS;
 const ID = /^[a-z][a-z0-9-]{0,47}$/;
 const ACTION = /^[a-z][a-z0-9-]{0,47}(?:\.[a-z][a-z0-9-]{0,47}){0,3}$/;
 const AGENT_ID = /^[a-z0-9][a-z0-9._-]{0,127}$/;
+const ORGANIZATION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
 /** Typed phrases are upper case words and digits, such as RETIRE 47 DEVICES. */
 const PHRASE = /^[A-Z0-9]+(?: [A-Z0-9]+)*$/;
 const TONES: ReadonlySet<string> = new Set(["neutral", "success", "warning", "danger"]);
@@ -354,12 +355,13 @@ export function checkUiActionInput(value: unknown): EnterpriseUiActionInput {
 /** `actions`, when given, are the registered UI actions the targets may call. */
 export function checkScheduleTargets(value: unknown, actions?: ReadonlySet<string>): EnterpriseScheduleTargets {
   const fields = object(value, "schedule targets");
-  only(fields, ["action", "targets", "current"], "schedule targets");
+  only(fields, ["action", "targets", "current", "alsoRunsOn", "uncertain"], "schedule targets");
   if (!Array.isArray(fields.targets) || fields.targets.length > L.maxScheduleTargets) invalid(`At most ${L.maxScheduleTargets} schedule targets.`);
   const ids = new Set<string>();
   const targets = fields.targets.map((target: unknown): EnterpriseScheduleTarget => {
     const entry = object(target, "schedule target");
-    only(entry, ["id", "label", "detail", "disabledReason", "agentIds"], "schedule target");
+    only(entry, ["id", "label", "organizationId", "detail", "disabledReason", "agentIds"], "schedule target");
+    if (typeof entry.organizationId !== "string" || !ORGANIZATION_ID.test(entry.organizationId)) invalid("A schedule target names the organization it is paired for in organizationId.");
     const targetId = id(entry.id, "schedule target");
     if (targetId === "this-computer" || ids.has(targetId)) invalid(`The schedule target id ${targetId} is taken.`);
     ids.add(targetId);
@@ -375,6 +377,7 @@ export function checkScheduleTargets(value: unknown, actions?: ReadonlySet<strin
     return Object.freeze({
       id: targetId,
       label: text(entry.label, L.maxLabelLength, "schedule target label"),
+      organizationId: entry.organizationId,
       ...(detail ? { detail } : {}),
       ...(disabledReason ? { disabledReason } : {}),
       ...(agentIds ? { agentIds } : {}),
@@ -396,11 +399,56 @@ export function checkScheduleTargets(value: unknown, actions?: ReadonlySet<strin
       Object.defineProperty(current, agentId, { value: targetId, enumerable: true });
     }
   }
+  const placesFor = (what: string, value: unknown): Record<string, string> | undefined => {
+    if (value === undefined) return undefined;
+    const entries = Object.entries(object(value, what));
+    if (entries.length > L.maxCurrentTargets) invalid(`${what} names at most ${L.maxCurrentTargets} agents.`);
+    const out: Record<string, string> = {};
+    for (const [agentId, targetId] of entries) {
+      if (!AGENT_ID.test(agentId) || typeof targetId !== "string" || !ids.has(targetId)) invalid(`${what} maps agent ids to offered target ids.`);
+      Object.defineProperty(out, agentId, { value: targetId, enumerable: true });
+    }
+    return Object.freeze(out);
+  };
+  const alsoRunsOn = placesFor("alsoRunsOn", fields.alsoRunsOn);
+  let uncertain: Record<string, { targetId: string; message: string; recovery: string }> | undefined;
+  if (fields.uncertain !== undefined) {
+    const entries = Object.entries(object(fields.uncertain, "uncertain"));
+    if (entries.length > L.maxCurrentTargets) invalid(`uncertain names at most ${L.maxCurrentTargets} agents.`);
+    uncertain = {};
+    for (const [agentId, value] of entries) {
+      const entry = object(value, "uncertain entry");
+      only(entry, ["targetId", "message", "recovery"], "uncertain entry");
+      if (!AGENT_ID.test(agentId) || typeof entry.targetId !== "string" || !ids.has(entry.targetId)) invalid("uncertain maps agent ids to an offered target id with a message and a recovery.");
+      Object.defineProperty(uncertain, agentId, {
+        value: Object.freeze({
+          targetId: entry.targetId,
+          message: text(entry.message, L.maxMessageLength, "uncertain message", true),
+          recovery: text(entry.recovery, L.maxMessageLength, "uncertain recovery"),
+        }),
+        enumerable: true,
+      });
+    }
+  }
   return Object.freeze({
     action,
     targets: Object.freeze(targets),
     ...(current ? { current: Object.freeze(current) } : {}),
+    ...(alsoRunsOn ? { alsoRunsOn } : {}),
+    ...(uncertain ? { uncertain: Object.freeze(uncertain) } : {}),
   });
+}
+
+/** Where a place also runs an agent from its own configuration, if it does. */
+export function alsoRunsOnFor(targets: EnterpriseScheduleTargets | undefined, agentId: string): string | undefined {
+  const targetId = targets?.alsoRunsOn?.[agentId];
+  return targetId && targets!.targets.some((target) => target.id === targetId) ? targetId : undefined;
+}
+
+/** Whether the module is not certain where an agent's schedule runs. */
+export function uncertainFor(targets: EnterpriseScheduleTargets | undefined, agentId: string): { targetId: string; message: string; recovery: string } | undefined {
+  const entry = targets?.uncertain?.[agentId];
+  return entry && targets!.targets.some((target) => target.id === entry.targetId) ? entry : undefined;
 }
 
 /** The places the card may offer an agent: the targets it is eligible for. */
@@ -410,6 +458,9 @@ export function targetsForAgent(targets: EnterpriseScheduleTargets, agentId: str
 
 /** Where an agent's schedule runs now, as the module reports it. */
 export function currentTargetFor(targets: EnterpriseScheduleTargets | undefined, agentId: string): string {
+  // Not certain counts as running there: the schedule here stays off and nothing moves.
+  const uncertain = uncertainFor(targets, agentId);
+  if (uncertain) return uncertain.targetId;
   const current = targets?.current?.[agentId];
   return current && (current === "this-computer" || targets!.targets.some((target) => target.id === current)) ? current : "this-computer";
 }
@@ -423,7 +474,12 @@ export function currentTargetFor(targets: EnterpriseScheduleTargets | undefined,
 export function checkUiActionAgainst(
   input: EnterpriseUiActionInput,
   action: string,
-  ui: { readonly body: (sectionId: string) => EnterpriseUiBody | undefined; readonly scheduleTargets: EnterpriseScheduleTargets | undefined },
+  ui: {
+    readonly body: (sectionId: string) => EnterpriseUiBody | undefined;
+    readonly scheduleTargets: EnterpriseScheduleTargets | undefined;
+    /** The organization of the agent's schedule here, when known; a place paired for another one is refused. */
+    readonly scheduleOrganization?: string;
+  },
 ): void {
   if (input.kind === "button") {
     const body = ui.body(input.sectionId);
@@ -450,4 +506,7 @@ export function checkUiActionAgainst(
   const target = targetsForAgent(targets, input.agentId).find((candidate) => candidate.id === input.targetId);
   if (!target) invalid("That schedule target is not offered for this agent.");
   if (target.disabledReason) invalid(target.disabledReason);
+  if ("scheduleOrganization" in ui && target.organizationId !== ui.scheduleOrganization) {
+    invalid(`${target.label} is paired for another organization than this schedule's.`);
+  }
 }

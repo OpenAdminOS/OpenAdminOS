@@ -108,15 +108,27 @@ export type EnterpriseUiActionHandler = (input: EnterpriseUiActionInput) => Ente
 export interface EnterpriseScheduleTarget {
     readonly id: string;
     readonly label: string;
+    readonly organizationId: string;
     readonly detail?: string;
     readonly disabledReason?: string;
     readonly agentIds?: readonly string[];
+}
+export interface EnterpriseScheduleUncertainty {
+    readonly targetId: string;
+    readonly message: string;
+    readonly recovery: string;
 }
 export interface EnterpriseScheduleTargets {
     readonly action: string;
     readonly targets: readonly EnterpriseScheduleTarget[];
     readonly current?: {
         readonly [agentId: string]: string;
+    };
+    readonly alsoRunsOn?: {
+        readonly [agentId: string]: string;
+    };
+    readonly uncertain?: {
+        readonly [agentId: string]: EnterpriseScheduleUncertainty;
     };
 }
 export interface EnterpriseStatusContribution {

@@ -29,6 +29,7 @@ export {
   type EnterpriseSandboxUnpairResult,
   type EnterpriseScheduleTarget,
   type EnterpriseScheduleTargets,
+  type EnterpriseScheduleUncertainty,
   type EnterpriseSettingsSection,
   type EnterpriseStatusContribution,
   type EnterpriseUiActionHandler,
@@ -82,6 +83,7 @@ export {
 } from "./licence.js";
 export { EnterpriseInterfaceVersionError, defaultEnterpriseModule, isEnterpriseModule } from "./stub.js";
 export {
+  alsoRunsOnFor,
   checkScheduleTargets,
   checkModuleText,
   checkUiAction,
@@ -95,4 +97,5 @@ export {
   ENTERPRISE_UI_RESERVED_PHRASES,
   normalizeForPhraseMatch,
   targetsForAgent,
+  uncertainFor,
 } from "./ui.js";

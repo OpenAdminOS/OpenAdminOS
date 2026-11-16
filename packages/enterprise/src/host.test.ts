@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
-import { checkUiReply, ENTERPRISE_UI_LIMITS } from "./ui.js";
+import { checkUiReply, currentTargetFor, ENTERPRISE_UI_LIMITS } from "./ui.js";
 import {
   ENTERPRISE_LIMITS,
   EnterpriseHostError,
@@ -599,20 +599,20 @@ describe("createEnterpriseHost", () => {
 
   it("offers checked schedule targets with the current one, checks choices, and clears them on dispose", async () => {
     const { host, ipc, controller } = setup();
-    assertError(() => host.setScheduleTargets({ action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC" }] }), "invalid-value");
+    assertError(() => host.setScheduleTargets({ action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso" }] }), "invalid-value");
     const chosen: unknown[] = [];
     host.registerUiAction("sandboxes.schedule", async (input) => {
       chosen.push(input);
       return { notice: { type: "notice", tone: "success", title: "Moved", message: "The schedule moved." } };
     });
-    host.setScheduleTargets({ action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC" }, { id: "lab", label: "Lab", disabledReason: "Sync is stopped." }], current: { "find-inactive-devices": "mini-pc" } });
+    host.setScheduleTargets({ action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso" }, { id: "lab", label: "Lab", organizationId: "org-contoso", disabledReason: "Sync is stopped." }], current: { "find-inactive-devices": "mini-pc" } });
     assert.equal(controller.snapshot().scheduleTargets?.current?.["find-inactive-devices"], "mini-pc");
     const choose = (targetId: string, intervalSeconds = 3600) => ipc.invoke("openadminos-enterprise-ui:sandboxes.schedule", { kind: "schedule", agentId: "find-inactive-devices", targetId, intervalSeconds });
     await assertRejects(choose("lab") as Promise<unknown>, "invalid-value");
     await assertRejects(choose("nowhere") as Promise<unknown>, "invalid-value");
     await assertRejects(choose("mini-pc", 30) as Promise<unknown>, "invalid-value");
     assert.equal(chosen.length, 0);
-    assertError(() => host.setScheduleTargets({ action: "sandboxes.schedule", targets: [{ id: "this-computer", label: "Mine" }] }), "invalid-value");
+    assertError(() => host.setScheduleTargets({ action: "sandboxes.schedule", targets: [{ id: "this-computer", label: "Mine", organizationId: "org-contoso" }] }), "invalid-value");
     host.setScheduleTargets(undefined);
     assert.equal(controller.snapshot().scheduleTargets, undefined);
     host.setScheduleTargets({ action: "sandboxes.schedule", targets: [] });
@@ -637,6 +637,7 @@ describe("createEnterpriseHost", () => {
       capabilities: {
         localSchedules: {
           has: async () => hasLocal,
+          organizationOf: async () => "org-contoso",
           setEnabled: async (agentId, enabled) => {
             if (failLocal) throw new Error("state.json is read-only");
             local.push([agentId, enabled]);
@@ -648,7 +649,7 @@ describe("createEnterpriseHost", () => {
       },
     });
     const host = controller.host;
-    const targets = [{ id: "mini-pc", label: "Office mini PC" }];
+    const targets = [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso" }];
     let report: "move" | "stay" | "refuse" | "body" | "lost" = "move";
     host.registerUiAction("sandboxes.schedule", async (input) => {
       if (input.kind !== "schedule") return { notice: { type: "notice", tone: "neutral", title: "x", message: "y" } };
@@ -779,14 +780,14 @@ describe("createEnterpriseHost", () => {
       ipc,
       storage: new MemoryStorage(),
       log: (_level, message) => logs.push(message),
-      capabilities: { localSchedules: { has: async () => { throw new Error("state.json is locked"); }, setEnabled: async () => true } },
+      capabilities: { localSchedules: { has: async () => { throw new Error("state.json is locked"); }, organizationOf: async () => "org-contoso", setEnabled: async () => true } },
     });
     let asked = 0;
     controller.host.registerUiAction("sandboxes.schedule", async () => {
       asked += 1;
       return { notice: { type: "notice", tone: "neutral", title: "x", message: "y" } };
     });
-    controller.host.setScheduleTargets({ action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC" }] });
+    controller.host.setScheduleTargets({ action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso" }] });
     const reply = (await ipc.invoke("openadminos-enterprise-ui:sandboxes.schedule", { kind: "schedule", agentId: "find-inactive-devices", targetId: "mini-pc", intervalSeconds: 3600 })) as { notice: { tone: string; title: string } };
     assert.equal(reply.notice.tone, "danger");
     assert.equal(reply.notice.title, "The schedule here could not be read");
@@ -817,5 +818,110 @@ describe("createEnterpriseHost", () => {
     const { host } = setup();
     host.registerIpc("team.status", () => null);
     assert.throws(() => host.registerIpc("team.status", () => null), (error: unknown) => error instanceof Error && error.message === "An IPC handler named team.status is already registered.");
+  });
+
+  it("offers a place only for a schedule of the organization it is paired for", async () => {
+    const ipc = new FakeIpc();
+    const organizationOfSchedule: Record<string, string> = { "find-inactive-devices": "org-contoso", "os-update-posture": "org-fabrikam" };
+    const local: Array<[string, boolean]> = [];
+    const controller = createEnterpriseHost({
+      entitlement: () => ENTITLEMENT,
+      ipc,
+      storage: new MemoryStorage(),
+      log: () => undefined,
+      capabilities: {
+        organizations: { list: async () => [{ id: "org-contoso", name: "Contoso", tenantId: "t1" }, { id: "org-fabrikam", name: "Fabrikam", tenantId: "t2" }] },
+        localSchedules: {
+          has: async () => true,
+          organizationOf: async (agentId) => organizationOfSchedule[agentId],
+          setEnabled: async (agentId, enabled) => {
+            local.push([agentId, enabled]);
+            return true;
+          },
+        },
+      },
+    });
+    let asked = 0;
+    const targets = [{ id: "contoso-pc", label: "Contoso mini PC", organizationId: "org-contoso" }];
+    controller.host.registerUiAction("sandboxes.schedule", async (input) => {
+      asked += 1;
+      if (input.kind === "schedule") controller.host.setScheduleTargets({ action: "sandboxes.schedule", targets, current: { [input.agentId]: input.targetId } });
+      return { notice: { type: "notice", tone: "success", title: "Moved", message: "Moved." } };
+    });
+    controller.host.setScheduleTargets({ action: "sandboxes.schedule", targets });
+    const choose = async (agentId: string) =>
+      (await ipc.invoke("openadminos-enterprise-ui:sandboxes.schedule", { kind: "schedule", agentId, targetId: "contoso-pc", intervalSeconds: 3600 })) as { notice: { tone: string; title: string; message: string } };
+
+    // Fabrikam's schedule cannot move to Contoso's sandbox: refused before the module is asked.
+    const refused = await choose("os-update-posture");
+    assert.equal(refused.notice.tone, "danger");
+    assert.equal(refused.notice.message, "Contoso mini PC is paired for Contoso; this schedule belongs to Fabrikam.");
+    assert.equal(asked, 0);
+    assert.deepEqual(checkUiReply(refused), refused);
+
+    // Contoso's schedule moves.
+    assert.equal((await choose("find-inactive-devices")).notice.title, "Moved");
+    assert.deepEqual(local, [["find-inactive-devices", false]]);
+
+    // The organization changed while the module ran: nothing changes here.
+    controller.host.setScheduleTargets({ action: "sandboxes.schedule", targets });
+    let flip = true;
+    controller.host.registerUiAction("sandboxes.flip", async (input) => {
+      if (input.kind === "schedule" && flip) {
+        organizationOfSchedule[input.agentId] = "org-fabrikam";
+        flip = false;
+        controller.host.setScheduleTargets({ action: "sandboxes.flip", targets, current: { [input.agentId]: input.targetId } });
+      }
+      return { notice: { type: "notice", tone: "success", title: "Moved", message: "Moved." } };
+    });
+    controller.host.setScheduleTargets({ action: "sandboxes.flip", targets });
+    organizationOfSchedule["os-update-posture"] = "org-contoso";
+    const late = (await ipc.invoke("openadminos-enterprise-ui:sandboxes.flip", { kind: "schedule", agentId: "os-update-posture", targetId: "contoso-pc", intervalSeconds: 3600 })) as { notice: { tone: string } };
+    assert.equal(late.notice.tone, "danger");
+    assert.deepEqual(local, [["find-inactive-devices", false]]);
+  });
+
+  it("refuses moving back a schedule a place also runs from its own configuration, and any move while uncertain", async () => {
+    const ipc = new FakeIpc();
+    const local: Array<[string, boolean]> = [];
+    const controller = createEnterpriseHost({
+      entitlement: () => ENTITLEMENT,
+      ipc,
+      storage: new MemoryStorage(),
+      log: () => undefined,
+      capabilities: { localSchedules: { has: async () => true, organizationOf: async () => "org-contoso", setEnabled: async (agentId, enabled) => (local.push([agentId, enabled]), true) } },
+    });
+    let asked = 0;
+    controller.host.registerUiAction("sandboxes.schedule", async () => {
+      asked += 1;
+      return { notice: { type: "notice", tone: "success", title: "Moved", message: "Moved." } };
+    });
+    const targets = [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso" }];
+    controller.host.setScheduleTargets({
+      action: "sandboxes.schedule",
+      targets,
+      current: { "find-inactive-devices": "mini-pc" },
+      alsoRunsOn: { "find-inactive-devices": "mini-pc" },
+      uncertain: { "os-update-posture": { targetId: "mini-pc", message: "The sandbox has not answered for 2 hours.", recovery: "Check that the sandbox runs, then sync." } },
+    });
+    const choose = async (agentId: string, targetId: string) =>
+      (await ipc.invoke("openadminos-enterprise-ui:sandboxes.schedule", { kind: "schedule", agentId, targetId, intervalSeconds: 3600 })) as { notice: { tone: string; title: string; message: string; recovery: string } };
+
+    const twice = await choose("find-inactive-devices", "this-computer");
+    assert.equal(twice.notice.tone, "danger");
+    assert.match(twice.notice.message, /own configuration/);
+    assert.match(twice.notice.recovery, /Remove the agent from Office mini PC's own configuration first/);
+
+    // Not certain: treated as running there, and nothing moves either way.
+    assert.equal(currentTargetFor(controller.snapshot().scheduleTargets, "os-update-posture"), "mini-pc");
+    for (const targetId of ["this-computer", "mini-pc"]) {
+      const unsure = await choose("os-update-posture", targetId);
+      assert.equal(unsure.notice.tone, "warning");
+      assert.match(unsure.notice.message, /not answered for 2 hours/);
+      assert.equal(unsure.notice.recovery, "Check that the sandbox runs, then sync.");
+      assert.deepEqual(checkUiReply(unsure), unsure);
+    }
+    assert.equal(asked, 0);
+    assert.deepEqual(local, []);
   });
 });

@@ -193,11 +193,19 @@ export type EnterpriseUiActionHandler = (input: EnterpriseUiActionInput) => Ente
 export interface EnterpriseScheduleTarget {
   readonly id: string;
   readonly label: string;
+  /** The organization the place is paired for; it is offered only for schedules of that organization. */
+  readonly organizationId: string;
   readonly detail?: string;
   /** Shown, and the target cannot be chosen, when set. */
   readonly disabledReason?: string;
   /** The agents it is offered for; every agent when left out. */
   readonly agentIds?: readonly string[];
+}
+
+export interface EnterpriseScheduleUncertainty {
+  readonly targetId: string;
+  readonly message: string;
+  readonly recovery: string;
 }
 
 export interface EnterpriseScheduleTargets {
@@ -213,6 +221,19 @@ export interface EnterpriseScheduleTargets {
    * agent left out runs on this computer. The card shows only this.
    */
   readonly current?: { readonly [agentId: string]: string };
+  /**
+   * Agents a place also runs from its own configuration, by agent id: a
+   * target id. The card warns, and moving such an agent back here is
+   * refused until it is removed from that place's configuration.
+   */
+  readonly alsoRunsOn?: { readonly [agentId: string]: string };
+  /**
+   * Agents whose place is not certain, for example while a sandbox does
+   * not answer. The app treats the schedule as running there: the one
+   * here stays off and it does not move. The card shows the message and
+   * the recovery.
+   */
+  readonly uncertain?: { readonly [agentId: string]: EnterpriseScheduleUncertainty };
 }
 
 /**

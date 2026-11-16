@@ -77,7 +77,7 @@ const v1Module: EnterpriseModule = {
       input.kind === "button"
         ? { body: { elements: [] }, notice: { type: "notice", tone: "success", title: "Paired", message: input.values.address ?? "" } }
         : { notice: { type: "notice", tone: "success", title: "Moved", message: input.targetId } });
-    host.setScheduleTargets({ action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC", detail: "Local model", disabledReason: "Sync is stopped.", agentIds: ["find-inactive-devices"] }] });
+    host.setScheduleTargets({ action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", detail: "Local model", disabledReason: "Sync is stopped.", agentIds: ["find-inactive-devices"] }] });
     host.setScheduleTargets(undefined);
     host.setStatusContribution({ label: "Team service", detail: "End-to-end encrypted." });
     host.setStatusContribution({ label: "Team service" });
@@ -281,6 +281,7 @@ describe("enterprise interface", () => {
       "LICENCE_LIMITS",
       "LICENCE_PUBLIC_KEY_PEM",
       "LICENCE_SIGNING_CONTEXT",
+      "alsoRunsOnFor",
       "checkJson",
       "checkModuleText",
       "checkScheduleTargets",
@@ -299,6 +300,7 @@ describe("enterprise interface", () => {
       "isEnterpriseModule",
       "normalizeForPhraseMatch",
       "targetsForAgent",
+      "uncertainFor",
       "verifyLicence",
     ]);
   });

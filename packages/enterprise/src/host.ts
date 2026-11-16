@@ -30,6 +30,7 @@ import {
 } from "./interface.js";
 import { EnterpriseHostError } from "./errors.js";
 import {
+  alsoRunsOnFor,
   checkModuleText,
   checkScheduleTargets,
   checkUiActionAgainst,
@@ -39,6 +40,7 @@ import {
   checkUiReply,
   currentTargetFor,
   ENTERPRISE_UI_LIMITS,
+  uncertainFor,
 } from "./ui.js";
 
 export { EnterpriseHostError, type EnterpriseHostErrorCode } from "./errors.js";
@@ -119,6 +121,8 @@ export interface EnterpriseHostCapabilities {
 export interface EnterpriseLocalSchedules {
   /** Whether the agent has a schedule on this computer, on or off. */
   has(agentId: string): Promise<boolean>;
+  /** The organization the agent's schedule on this computer belongs to, for the host alone. */
+  organizationOf(agentId: string): Promise<string | undefined>;
   /** Turns the agent's schedule on this computer off or back on, keeping its organization, interval and settings; false when it has none. */
   setEnabled(agentId: string, enabled: boolean): Promise<boolean>;
   /** A move of the agent's schedule starts; the app refuses deleting its schedule here until `endMove`. */
@@ -264,6 +268,10 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
         }
         if (noScheduleHere && input.targetId !== "this-computer") return NO_SCHEDULE_HERE;
       }
+      if (input.kind === "schedule") {
+        const refused = await scheduleRefusal(input);
+        if (refused) return refused;
+      }
       // While a move runs, the app does not delete the schedule here.
       if (input.kind === "schedule") local?.beginMove?.(input.agentId);
       try {
@@ -319,6 +327,11 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
     if (now !== input.targetId) {
       return danger("The schedule did not move", `The team features module did not report the schedule ${place(input.targetId)}; it reports it ${place(now)}. Nothing changed here.`, "Try again. If it keeps happening, check the team features module.");
     }
+    // The schedule's organization may have changed while the module ran.
+    if (input.targetId !== "this-computer") {
+      const refused = await organizationRefusal(input);
+      if (refused) return refused;
+    }
     const local = capabilities.localSchedules;
     if (local) {
       const here = input.targetId === "this-computer";
@@ -352,6 +365,64 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
       }
     }
     return reply.notice ? reply : Object.freeze({ ...reply, notice: Object.freeze({ type: "notice" as const, tone: "success" as const, title: "Saved", message: `The schedule now runs ${place(input.targetId)}.` }) });
+  };
+
+  /**
+   * What stops a schedule choice before the module is asked: a place that
+   * is not certain, a place that also runs the agent from its own
+   * configuration when it would come back here, or a place paired for
+   * another organization than the schedule's.
+   */
+  const scheduleRefusal = async (input: Extract<EnterpriseUiActionInput, { kind: "schedule" }>): Promise<EnterpriseUiReply | undefined> => {
+    const labelOf = (targetId: string) => scheduleTargets?.targets.find((target) => target.id === targetId)?.label ?? targetId;
+    const uncertain = uncertainFor(scheduleTargets, input.agentId);
+    if (uncertain) {
+      return Object.freeze({
+        notice: Object.freeze({
+          type: "notice" as const,
+          tone: "warning" as const,
+          title: `Not certain where it runs`,
+          message: `The team features module is not certain about ${labelOf(uncertain.targetId)}, so the schedule stays where it is and nothing moves. ${uncertain.message}`.slice(0, ENTERPRISE_UI_LIMITS.maxMessageLength),
+          recovery: uncertain.recovery,
+        }),
+      });
+    }
+    const also = alsoRunsOnFor(scheduleTargets, input.agentId);
+    if (input.targetId === "this-computer" && also) {
+      return danger(
+        `Also scheduled on ${labelOf(also)}`.slice(0, ENTERPRISE_UI_LIMITS.maxLabelLength),
+        `${labelOf(also)} also runs this agent from its own configuration, so bringing the schedule here would run it twice.`,
+        `Remove the agent from ${labelOf(also)}'s own configuration first, then choose here.`,
+      );
+    }
+    return input.targetId === "this-computer" ? undefined : organizationRefusal(input);
+  };
+
+  /** A place is offered only for a schedule of the organization it is paired for. */
+  const organizationRefusal = async (input: Extract<EnterpriseUiActionInput, { kind: "schedule" }>): Promise<EnterpriseUiReply | undefined> => {
+    const local = capabilities.localSchedules;
+    const target = scheduleTargets?.targets.find((candidate) => candidate.id === input.targetId);
+    if (!local || !target) return undefined;
+    let organizationId: string | undefined;
+    try {
+      organizationId = await local.organizationOf(input.agentId);
+    } catch (error) {
+      options.log("error", "enterprise: the organization of the schedule here could not be read", { agentId: input.agentId, error: errorMessage(error) });
+      return danger("The schedule here could not be read", "The app could not read which organization the schedule here belongs to, so nothing moved.", "Try again. If it keeps failing, restart OpenAdminOS.");
+    }
+    if (organizationId === target.organizationId) return undefined;
+    const names = new Map<string, string>();
+    try {
+      for (const organization of capabilities.organizations ? await capabilities.organizations.list() : []) names.set(organization.id, organization.name);
+    } catch {
+      // Ids stand in for names.
+    }
+    const nameOf = (id: string | undefined) => (id ? names.get(id) ?? id : "no organization");
+    return danger(
+      "Another organization",
+      `${target.label} is paired for ${nameOf(target.organizationId)}; this schedule belongs to ${nameOf(organizationId)}.`,
+      `Choose a place paired for ${nameOf(organizationId)}, or keep the schedule here.`,
+    );
   };
 
   /** Stores a checked body and moves the section's revision on. */
