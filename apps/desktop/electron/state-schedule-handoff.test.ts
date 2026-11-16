@@ -7,7 +7,9 @@ import { describe, it } from "node:test";
 import type { AgentSummary, TenantRecord } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 
-import { AppStateStore } from "./state.js";
+import { createEnterpriseHost, type EnterpriseIpcRegistrar } from "@openadminos/enterprise";
+
+import { AppStateStore, ScheduleMoveInProgressError } from "./state.js";
 
 const tokenStore: TokenCacheStorage = { read: async () => "", write: async () => undefined };
 
@@ -125,6 +127,56 @@ describe("schedule handoff on this computer", () => {
       assert.deepEqual((await f.store.getAppState()).runs, []);
       assert.equal((await f.schedule())?.lastScheduledRunAt, "2026-01-01T00:00:00.000Z", "not counted as fired");
     } finally {
+      await f.close();
+    }
+  });
+
+  it("refuses deleting the schedule here while a move runs, then completes the move", async () => {
+    const f = await fixture("contoso");
+    const handlers = new Map<string, (input: unknown) => Promise<unknown>>();
+    const ipc: EnterpriseIpcRegistrar = { handle: (channel, listener) => handlers.set(channel, listener), removeHandler: (channel) => handlers.delete(channel) };
+    const controller = createEnterpriseHost({
+      entitlement: () => ({ state: "active", licenseeId: "x", features: [], notBefore: 0, expiresAt: Number.MAX_SAFE_INTEGER, graceEndsAt: Number.MAX_SAFE_INTEGER }),
+      ipc,
+      storage: { read: async () => undefined, write: async () => undefined },
+      log: () => undefined,
+      capabilities: {
+        localSchedules: {
+          has: (agentId) => f.store.hasAgentSchedule(agentId),
+          setEnabled: (agentId, enabled) => f.store.setAgentScheduleEnabled(agentId, enabled),
+          beginMove: (agentId) => f.store.beginScheduleMove(agentId),
+          endMove: (agentId) => f.store.endScheduleMove(agentId),
+        },
+      },
+    });
+    try {
+      const targets = [{ id: "mini-pc", label: "Office mini PC" }];
+      let release!: () => void;
+      let reached!: () => void;
+      const paused = new Promise<void>((resolve) => (release = resolve));
+      const atHandler = new Promise<void>((resolve) => (reached = resolve));
+      controller.host.registerUiAction("sandboxes.schedule", async (input) => {
+        reached();
+        await paused;
+        if (input.kind === "schedule") controller.host.setScheduleTargets({ action: "sandboxes.schedule", targets, current: { [input.agentId]: input.targetId } });
+        return { notice: { type: "notice", tone: "success", title: "Moved", message: "The schedule moved." } };
+      });
+      controller.host.setScheduleTargets({ action: "sandboxes.schedule", targets });
+      const move = handlers.get("openadminos-enterprise-ui:sandboxes.schedule")!({ kind: "schedule", agentId: agent.id, targetId: "mini-pc", intervalSeconds: 7200 });
+      await atHandler;
+      // The switch turned off by deleting the schedule, while the module is moving it: refused.
+      await assert.rejects(f.store.updateAgentSchedule(agent.slug, null), (error: unknown) => error instanceof ScheduleMoveInProgressError);
+      release();
+      const reply = (await move) as { notice: { title: string } };
+      assert.equal(reply.notice.title, "Moved");
+      const after = await f.schedule();
+      assert.equal(after?.enabled, false, "turned off in place by the move");
+      assert.equal(after?.organizationId, "org-contoso");
+      // Once the move ended, deleting is allowed again.
+      await f.store.updateAgentSchedule(agent.slug, null);
+      assert.equal(await f.schedule(), undefined);
+    } finally {
+      controller.dispose();
       await f.close();
     }
   });

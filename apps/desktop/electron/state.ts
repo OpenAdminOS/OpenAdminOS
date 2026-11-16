@@ -1810,6 +1810,14 @@ function novaProviderEndpoint(providerId: ProviderId, persisted?: Pick<Persisted
   return undefined;
 }
 
+/** A schedule cannot be deleted while a team features module moves it. */
+export class ScheduleMoveInProgressError extends Error {
+  constructor(agentName: string) {
+    super(`The schedule of ${agentName} is moving to another place right now. Wait for the move to finish, then try again.`);
+    this.name = "ScheduleMoveInProgressError";
+  }
+}
+
 export class AppStateStore {
   /**
    * The lifecycle of each tenant (open, closing, removed) and the one place
@@ -1828,6 +1836,8 @@ export class AppStateStore {
   private migrationAuditInFlight: Record<string, string | number | string[]> | undefined;
   private migrationAuditRecorded = false;
   private scheduleRunsElsewhere: ((agentId: string) => boolean) | undefined;
+  /** Agents whose schedule a team features module is moving right now, counted. */
+  private readonly movingSchedules = new Map<string, number>();
   private writeChain: Promise<unknown> = Promise.resolve();
   private readonly filePath: string;
   private readonly tokenStore: TokenCacheStorage;
@@ -5782,6 +5792,13 @@ export class AppStateStore {
     schedule: AgentSchedule | null,
   ): Promise<AppState> {
     const updatedAt = new Date().toISOString();
+    // A schedule that is moving to or from another place is not deleted midway.
+    if (schedule === null && this.movingSchedules.size > 0) {
+      const agent = (await this.listAgents()).find((entry) => entry.slug === slug || entry.id === slug);
+      if (agent && (this.movingSchedules.has(agent.id) || this.movingSchedules.has(agent.slug))) {
+        throw new ScheduleMoveInProgressError(agent.name);
+      }
+    }
     if (schedule !== null) {
       if (typeof schedule !== "object") {
         throw new Error("updateAgentSchedule: schedule must be an object or null.");
@@ -5913,6 +5930,17 @@ export class AppStateStore {
    */
   setScheduleRunsElsewhere(check: ((agentId: string) => boolean) | undefined): void {
     this.scheduleRunsElsewhere = check;
+  }
+
+  /** A team features module is moving this agent's schedule; deleting it here is refused until it ends. */
+  beginScheduleMove(agentId: string): void {
+    this.movingSchedules.set(agentId, (this.movingSchedules.get(agentId) ?? 0) + 1);
+  }
+
+  endScheduleMove(agentId: string): void {
+    const count = (this.movingSchedules.get(agentId) ?? 1) - 1;
+    if (count > 0) this.movingSchedules.set(agentId, count);
+    else this.movingSchedules.delete(agentId);
   }
 
   async updateAgentTeamsDelivery(

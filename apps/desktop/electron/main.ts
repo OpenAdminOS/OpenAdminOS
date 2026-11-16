@@ -3298,6 +3298,8 @@ async function startEnterprise(userDataDir: string): Promise<void> {
           localSchedules: {
             has: (agentId) => store.hasAgentSchedule(agentId),
             setEnabled: (agentId, enabled) => store.setAgentScheduleEnabled(agentId, enabled),
+            beginMove: (agentId) => store.beginScheduleMove(agentId),
+            endMove: (agentId) => store.endScheduleMove(agentId),
           },
         },
       }),
