@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import type { AgentSchedule, AgentSummary } from "../shared/openAdminOS";
 import { ScheduleUsageForecast } from "./ScheduleUsageForecast";
 import {
@@ -36,6 +36,9 @@ export function AgentScheduleCard({
   const where = useScheduleTarget(agent);
   // While the schedule runs elsewhere, this card does not run or change it here.
   const elsewhere = where && where.current !== "this-computer" ? where.currentLabel : undefined;
+  // While a move runs, nothing here changes the schedule: the main process is moving it.
+  const [moving, setMoving] = useState(false);
+  const locked = elsewhere !== undefined || moving;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [customValue, setCustomValue] = useState("30");
@@ -101,21 +104,28 @@ export function AgentScheduleCard({
       {where ? (
         <ModuleUiBoundary resetKey={JSON.stringify([where.targets, where.current])}>
           {/* The move and the schedule here change in the main process; this draws what they report. */}
-          <ScheduleTargetRow agent={agent} where={where} intervalSeconds={draftSeconds} hasSchedule={schedule !== undefined} />
+          <ScheduleTargetRow
+            agent={agent}
+            where={where}
+            // The saved interval when a schedule exists here, not an unsaved draft.
+            intervalSeconds={schedule?.intervalSeconds ?? draftSeconds}
+            hasSchedule={schedule !== undefined}
+            onMoving={setMoving}
+          />
         </ModuleUiBoundary>
       ) : null}
       {elsewhere && enabled && schedule ? (
         <div role="alert" className="rounded-[10px] bg-[var(--color-danger-soft)] px-3 py-2.5 text-sm text-[var(--color-danger)]">
           <p className="font-medium">{SCHEDULE_TARGET_COPY.bothTitle(elsewhere)}</p>
           <p className="mt-0.5 text-[var(--color-text-soft)]">{SCHEDULE_TARGET_COPY.bothMessage}</p>
-          <Button size="sm" variant="danger" className="mt-2" disabled={busy} onClick={() => void apply({ ...schedule, enabled: false })}>
+          <Button size="sm" variant="danger" className="mt-2" disabled={busy || moving} onClick={() => void apply({ ...schedule, enabled: false })}>
             {SCHEDULE_TARGET_COPY.turnOffHere}
           </Button>
         </div>
       ) : null}
       <Switch
         checked={enabled}
-        disabled={busy || elsewhere !== undefined || (!enabled && draftSeconds < 60)}
+        disabled={busy || locked || (!enabled && draftSeconds < 60)}
         label="Automatic runs"
         description={
           elsewhere
@@ -136,8 +146,8 @@ export function AgentScheduleCard({
           value={selectedInterval}
           onValueChange={setSelectedInterval}
           options={[
-            ...PRESETS.map(({ id, label }) => ({ id, label, disabled: busy || elsewhere !== undefined })),
-            { id: "custom", label: "Custom", disabled: busy || elsewhere !== undefined },
+            ...PRESETS.map(({ id, label }) => ({ id, label, disabled: busy || locked })),
+            { id: "custom", label: "Custom", disabled: busy || locked },
           ]}
           className="max-w-full flex-wrap"
         />
@@ -155,7 +165,7 @@ export function AgentScheduleCard({
               step={1}
               inputMode="numeric"
               value={customValue}
-              disabled={busy || elsewhere !== undefined}
+              disabled={busy || locked}
               onChange={(event) => setCustomValue(event.target.value)}
               className="h-9 w-24 rounded-md bg-[var(--color-surface)] px-3 text-base tabular-nums text-[var(--color-text)] ring-1 ring-[var(--color-border)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
             />
@@ -165,7 +175,7 @@ export function AgentScheduleCard({
             <select
               name="schedule-interval-unit"
               value={customUnit}
-              disabled={busy || elsewhere !== undefined}
+              disabled={busy || locked}
               onChange={(event) =>
                 setCustomUnit(event.target.value === "hours" ? "hours" : "minutes")
               }
@@ -201,7 +211,7 @@ export function AgentScheduleCard({
           <ScheduleNotificationSwitch
             label="Notify on success"
             checked={notificationPrefs.notifyOnSuccess}
-            disabled={busy || elsewhere !== undefined}
+            disabled={busy || locked}
             onChange={(checked) =>
               void apply({
                 ...buildSchedule(currentSeconds),
@@ -212,7 +222,7 @@ export function AgentScheduleCard({
           <ScheduleNotificationSwitch
             label="Notify on failure"
             checked={notificationPrefs.notifyOnFailure}
-            disabled={busy || elsewhere !== undefined}
+            disabled={busy || locked}
             onChange={(checked) =>
               void apply({
                 ...buildSchedule(currentSeconds),
@@ -223,7 +233,7 @@ export function AgentScheduleCard({
           <ScheduleNotificationSwitch
             label="Only when findings change"
             checked={notificationPrefs.notifyOnChangeOnly}
-            disabled={busy || elsewhere !== undefined}
+            disabled={busy || locked}
             onChange={(checked) =>
               void apply({
                 ...buildSchedule(currentSeconds),
@@ -428,23 +438,29 @@ function ScheduleTargetRow({
   where,
   intervalSeconds,
   hasSchedule,
+  onMoving,
 }: {
   agent: AgentSummary;
   where: ScheduleTargetChoice;
   intervalSeconds: number;
   /** Module places are offered only once the agent has a schedule here. */
   hasSchedule: boolean;
+  /** Tells the card a move runs, so its own controls wait. */
+  onMoving: (moving: boolean) => void;
 }) {
   const [notice, setNotice] = useState<EnterpriseUiNoticeView | undefined>();
   const [busy, setBusy] = useState<string | undefined>();
+  const reasonPrefix = useId();
   const tooShort = intervalSeconds < 60;
 
   const choose = async (targetId: string) => {
     if (targetId === where.current) return;
     setNotice(undefined);
     setBusy(targetId);
+    onMoving(true);
     const reply = await invokeUiAction(where.action, { kind: "schedule", agentId: agent.id, targetId, intervalSeconds });
     setBusy(undefined);
+    onMoving(false);
     // The main process moved the schedule here or not, and says which; this shows what it says.
     setNotice(reply.notice);
   };
@@ -467,6 +483,7 @@ function ScheduleTargetRow({
             <input
               type="radio"
               name={`schedule-target-${agent.id}`}
+              aria-describedby={option.disabledReason ? `${reasonPrefix}-${option.id}` : undefined}
               value={option.id}
               checked={where.current === option.id}
               disabled={busy !== undefined || (option.disabledReason !== undefined && where.current !== option.id)}
@@ -480,7 +497,7 @@ function ScheduleTargetRow({
               ) : null}
               {busy === option.id ? <span className="ml-1.5 text-xs text-[var(--color-text-muted)]">{SCHEDULE_TARGET_COPY.working}</span> : null}
               {option.detail ? <span className="block text-xs text-[var(--color-text-muted)]">{option.detail}</span> : null}
-              {option.disabledReason ? <span className="block text-xs text-[var(--color-warning)]">{option.disabledReason}</span> : null}
+              {option.disabledReason ? <span id={`${reasonPrefix}-${option.id}`} className="block text-xs text-[var(--color-warning)]">{option.disabledReason}</span> : null}
             </span>
           </label>
         ))}

@@ -377,6 +377,69 @@ describe("schedule card: where it runs", () => {
     expect(onChange).toHaveBeenCalledTimes(1);
   });
 
+  it("moves back with no schedule here, and the switch can then be turned on", async () => {
+    const user = userEvent.setup();
+    let status = statusWith({ [agent.id]: "mini-pc" });
+    let changed: (() => void) | undefined;
+    const invokeEnterpriseUi = vi.fn<Invoke>(async () => {
+      status = statusWith({ [agent.id]: "this-computer" });
+      changed?.();
+      return { notice: { type: "notice", tone: "neutral", title: "Moved back", message: "Moved back. Turn on Automatic runs to schedule it here." } };
+    });
+    const bridge = makeMockBridge({
+      getEnterpriseStatus: async () => status,
+      onEnterpriseStatusChanged: (listener) => {
+        changed = listener;
+        return () => undefined;
+      },
+      invokeEnterpriseUi,
+    });
+    renderWithAppState(<AgentScheduleCard agent={agent} onChange={vi.fn()} />, { bridge });
+    expect(await screen.findByRole("radio", { name: /Office mini PC/ })).toBeChecked();
+    expect(screen.getByRole("switch", { name: /Automatic runs/ })).toBeDisabled();
+    const thisComputer = screen.getByRole("radio", { name: /This computer/ });
+    expect(thisComputer).toBeEnabled();
+    await user.click(thisComputer);
+    expect(await screen.findByText("Moved back. Turn on Automatic runs to schedule it here.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("radio", { name: /This computer/ })).toBeChecked());
+    expect(screen.getByRole("switch", { name: /Automatic runs/ })).toBeEnabled();
+  });
+
+  it("after a reinstall with the schedule elsewhere, offers only This computer and says why", async () => {
+    const bridge = makeMockBridge({ getEnterpriseStatus: async () => statusWith({ [agent.id]: "mini-pc" }) });
+    renderWithAppState(<AgentScheduleCard agent={createMockAgent({ id: agent.id })} onChange={vi.fn()} />, { bridge });
+    const miniPc = await screen.findByRole("radio", { name: /Office mini PC/ });
+    expect(miniPc).toBeChecked();
+    expect(screen.getByRole("radio", { name: /This computer/ })).toBeEnabled();
+    expect(screen.queryByText(/Turned on here and on/)).toBeNull();
+    expect(screen.getByText("This schedule runs on Office mini PC. Its interval is set there.")).toBeInTheDocument();
+    // Each disabled place names its reason for assistive technology.
+    const lab = screen.getByRole("radio", { name: /Lab sandbox/ });
+    expect(lab).toBeDisabled();
+    const reason = document.getElementById(lab.getAttribute("aria-describedby") ?? "");
+    expect(reason).toHaveTextContent("Turn on Automatic runs first; a schedule can move only once it exists here.");
+  });
+
+  it("holds the card's own controls while a move runs, and sends the saved interval", async () => {
+    const user = userEvent.setup();
+    let answer!: (value: unknown) => void;
+    const invokeEnterpriseUi = vi.fn<Invoke>(() => new Promise((resolve) => (answer = resolve)));
+    const bridge = makeMockBridge({ getEnterpriseStatus: async () => statusWith(), invokeEnterpriseUi });
+    renderWithAppState(<AgentScheduleCard agent={createMockAgent({ id: agent.id, schedule: { organizationId: "org-contoso", enabled: true, intervalSeconds: 7200 } })} onChange={vi.fn()} />, { bridge });
+    expect(await screen.findByRole("switch", { name: /Automatic runs/ })).toBeEnabled();
+    // An unsaved draft interval is not what moves.
+    await user.click(screen.getByRole("radio", { name: "24h" }));
+    await user.click(screen.getByRole("radio", { name: /Office mini PC/ }));
+    await waitFor(() => expect(invokeEnterpriseUi).toHaveBeenCalledWith("sandboxes.schedule", { kind: "schedule", agentId: agent.id, targetId: "mini-pc", intervalSeconds: 7200 }));
+    expect(screen.getByRole("switch", { name: /Automatic runs/ })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "4h" })).toBeDisabled();
+    await act(async () => {
+      answer({ notice: { type: "notice", tone: "danger", title: "Not moved", message: "The sandbox did not answer.", recovery: "Check the sandbox, then try again." } });
+    });
+    expect(await screen.findByText("The sandbox did not answer.")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: /Automatic runs/ })).toBeEnabled();
+  });
+
   it("shows a schedule running here and elsewhere as a danger state, and turns the one here off in place", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
