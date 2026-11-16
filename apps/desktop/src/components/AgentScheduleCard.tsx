@@ -13,7 +13,7 @@ import { useAppState } from "../state";
 import { SCHEDULE_ORGANIZATION_COPY, userFacingErrorReason } from "../copy";
 import { resolveOrganizations } from "../shared/openAdminOS";
 import { useToast } from "./Toast";
-import { currentTargetFor } from "@openadminos/enterprise/ui";
+import { alsoRunsOnFor, currentTargetFor, uncertainFor } from "@openadminos/enterprise/ui";
 import { EnterpriseNotice, invokeUiAction, ModuleUiBoundary } from "./EnterpriseUi";
 import { useEnterpriseStatus } from "./useEnterpriseStatus";
 import type { EnterpriseScheduleTargetView, EnterpriseUiNoticeView } from "@openadminos/agent-sdk";
@@ -399,6 +399,10 @@ export const SCHEDULE_TARGET_COPY = {
   bothTitle: (label: string) => `Turned on here and on ${label}`,
   bothMessage: "The team features module reports this schedule running in another place, and the schedule on this computer is on too. It does not run here until this is resolved.",
   needsSchedule: "Turn on Automatic runs first; a schedule can move only once it exists here.",
+  needsOrganization: "Assign this schedule to an organization first; a place is paired for one organization.",
+  alsoRunsOn: (label: string) => `Also scheduled in ${label}'s own configuration.`,
+  removeFromConfiguration: (label: string) => `Remove it from ${label}'s own configuration first.`,
+  uncertainTitle: (label: string) => `Not certain it runs on ${label}`,
   turnOffHere: "Turn off here",
   working: "Working",
   runsElsewhere: (label: string) => `This schedule runs on ${label}. Its interval is set there.`,
@@ -410,6 +414,12 @@ interface ScheduleTargetChoice {
   /** Where the schedule runs now, as the module reports it. */
   current: string;
   currentLabel: string;
+  /** Why no place can be chosen now, such as a schedule without an organization. */
+  blockedReason?: string;
+  /** A place that also runs the agent from its own configuration. */
+  alsoRunsOnLabel?: string;
+  /** The module is not certain where it runs: shown with its recovery, and nothing moves. */
+  uncertain?: { label: string; message: string; recovery: string };
 }
 
 /** Where an agent's schedule runs, when a team features module offers places for it or reports one. */
@@ -419,13 +429,28 @@ function useScheduleTarget(agent: AgentSummary): ScheduleTargetChoice | undefine
   if (!contribution) return undefined;
   // The shared resolution, against every place the module reports: a place elsewhere is never shown as this computer.
   const current = currentTargetFor(contribution, agent.id);
-  const eligible = contribution.targets.filter((target) => !target.agentIds || target.agentIds.includes(agent.id));
+  const labelOf = (targetId: string) => contribution.targets.find((target) => target.id === targetId)?.label ?? targetId;
+  // A place is offered only for a schedule of the organization it is paired for.
+  const organizationId = agent.schedule?.organizationId;
+  const eligible = contribution.targets.filter(
+    (target) => (!target.agentIds || target.agentIds.includes(agent.id)) && (organizationId === undefined || target.organizationId === organizationId),
+  );
   const targets = current === "this-computer" || eligible.some((target) => target.id === current)
     ? eligible
     : [...eligible, ...contribution.targets.filter((target) => target.id === current)];
   if (targets.length === 0) return undefined;
-  const currentLabel = current === "this-computer" ? SCHEDULE_TARGET_COPY.thisComputer : contribution.targets.find((target) => target.id === current)?.label ?? current;
-  return { action: contribution.action, targets, current, currentLabel };
+  const currentLabel = current === "this-computer" ? SCHEDULE_TARGET_COPY.thisComputer : labelOf(current);
+  const also = alsoRunsOnFor(contribution, agent.id);
+  const unsure = uncertainFor(contribution, agent.id);
+  return {
+    action: contribution.action,
+    targets,
+    current,
+    currentLabel,
+    ...(agent.schedule && organizationId === undefined ? { blockedReason: SCHEDULE_TARGET_COPY.needsOrganization } : {}),
+    ...(also ? { alsoRunsOnLabel: labelOf(also) } : {}),
+    ...(unsure ? { uncertain: { label: labelOf(unsure.targetId), message: unsure.message, recovery: unsure.recovery } } : {}),
+  };
 }
 
 /**
@@ -467,12 +492,29 @@ function ScheduleTargetRow({
   };
 
   const options = [
-    { id: "this-computer", label: SCHEDULE_TARGET_COPY.thisComputer, detail: SCHEDULE_TARGET_COPY.thisComputerDetail, disabledReason: tooShort && where.current !== "this-computer" ? SCHEDULE_TARGET_COPY.needsInterval : undefined },
+    {
+      id: "this-computer",
+      label: SCHEDULE_TARGET_COPY.thisComputer,
+      detail: SCHEDULE_TARGET_COPY.thisComputerDetail,
+      disabledReason:
+        where.current === "this-computer"
+          ? undefined
+          : where.alsoRunsOnLabel
+            ? SCHEDULE_TARGET_COPY.removeFromConfiguration(where.alsoRunsOnLabel)
+            : tooShort
+              ? SCHEDULE_TARGET_COPY.needsInterval
+              : undefined,
+    },
     ...where.targets.map((target) => ({
       id: target.id,
       label: target.label,
       detail: target.detail,
-      disabledReason: !hasSchedule && where.current !== target.id ? SCHEDULE_TARGET_COPY.needsSchedule : target.disabledReason ?? (tooShort ? SCHEDULE_TARGET_COPY.needsInterval : undefined),
+      disabledReason:
+        where.current === target.id
+          ? undefined
+          : !hasSchedule
+            ? SCHEDULE_TARGET_COPY.needsSchedule
+            : where.blockedReason ?? target.disabledReason ?? (tooShort ? SCHEDULE_TARGET_COPY.needsInterval : undefined),
     })),
   ];
   return (
@@ -487,7 +529,7 @@ function ScheduleTargetRow({
               aria-describedby={option.disabledReason ? `${reasonPrefix}-${option.id}` : undefined}
               value={option.id}
               checked={where.current === option.id}
-              disabled={busy !== undefined || (option.disabledReason !== undefined && where.current !== option.id)}
+              disabled={busy !== undefined || where.uncertain !== undefined || (option.disabledReason !== undefined && where.current !== option.id)}
               onChange={() => void choose(option.id)}
               className="mt-0.5"
             />
@@ -503,6 +545,14 @@ function ScheduleTargetRow({
           </label>
         ))}
       </div>
+      {where.alsoRunsOnLabel ? (
+        <p className="mt-2 text-sm text-[var(--color-warning)]">{SCHEDULE_TARGET_COPY.alsoRunsOn(where.alsoRunsOnLabel)}</p>
+      ) : null}
+      {where.uncertain ? (
+        <div className="mt-2">
+          <EnterpriseNotice notice={{ type: "notice", tone: "warning", title: SCHEDULE_TARGET_COPY.uncertainTitle(where.uncertain.label), message: where.uncertain.message, recovery: where.uncertain.recovery }} />
+        </div>
+      ) : null}
       <p className="mt-2 text-xs text-[var(--color-text-muted)]">{SCHEDULE_TARGET_COPY.provenance}</p>
       {notice ? (
         <div className="mt-2">

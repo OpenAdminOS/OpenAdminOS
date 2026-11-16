@@ -2,7 +2,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import type { EnterpriseStatus, EnterpriseUiBodyView } from "@openadminos/agent-sdk";
+import type { EnterpriseScheduleTargetsView, EnterpriseStatus, EnterpriseUiBodyView } from "@openadminos/agent-sdk";
 
 import { createMockAgent, makeMockBridge, renderRoute, renderWithAppState } from "../test/test-utils";
 import { AgentScheduleCard } from "./AgentScheduleCard";
@@ -248,12 +248,17 @@ describe("schedule card: where it runs", () => {
     scheduleTargets: {
       action: "sandboxes.schedule",
       targets: [
-        { id: "mini-pc", label: "Office mini PC", detail: "Local model llama3.1:8b" },
-        { id: "lab", label: "Lab sandbox", disabledReason: "Sync is stopped for this sandbox." },
+        { id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", detail: "Local model llama3.1:8b" },
+        { id: "lab", label: "Lab sandbox", organizationId: "org-contoso", disabledReason: "Sync is stopped for this sandbox." },
       ],
       ...(current ? { current } : {}),
     },
   });
+
+  const withTargets = (extra: Partial<EnterpriseScheduleTargetsView>): EnterpriseStatus => {
+    const base = statusWith();
+    return base.active && base.scheduleTargets ? { ...base, scheduleTargets: { ...base.scheduleTargets, ...extra } } : base;
+  };
 
   it("is unchanged without a module", async () => {
     renderWithAppState(<AgentScheduleCard agent={agent} onChange={vi.fn()} />);
@@ -266,7 +271,7 @@ describe("schedule card: where it runs", () => {
       active: true,
       label: "Team features on",
       settingsSections: [],
-      scheduleTargets: { action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC", agentIds: ["another-agent"] }] },
+      scheduleTargets: { action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", agentIds: ["another-agent"] }] },
     }));
     renderWithAppState(<AgentScheduleCard agent={agent} onChange={vi.fn()} />, { bridge: makeMockBridge({ getEnterpriseStatus }) });
     await waitFor(() => expect(getEnterpriseStatus).toHaveBeenCalled());
@@ -292,7 +297,7 @@ describe("schedule card: where it runs", () => {
       },
       invokeEnterpriseUi,
     });
-    renderWithAppState(<AgentScheduleCard agent={createMockAgent({ id: agent.id, schedule: { enabled: false, intervalSeconds: 3600 } })} onChange={onChange} />, { bridge });
+    renderWithAppState(<AgentScheduleCard agent={createMockAgent({ id: agent.id, schedule: { organizationId: "org-contoso", enabled: false, intervalSeconds: 3600 } })} onChange={onChange} />, { bridge });
     expect(await screen.findByText("Where it runs")).toBeInTheDocument();
     expect(screen.getByText(/provided by the team features module/)).toBeInTheDocument();
     expect(screen.getAllByText("Team features")).toHaveLength(2);
@@ -442,6 +447,57 @@ describe("schedule card: where it runs", () => {
     expect(screen.getByRole("switch", { name: /Automatic runs/ })).toBeEnabled();
   });
 
+  it("offers only the places paired for the schedule's organization", async () => {
+    const bridge = makeMockBridge({
+      getEnterpriseStatus: async () => ({
+        active: true,
+        label: "Team features on",
+        settingsSections: [],
+        scheduleTargets: {
+          action: "sandboxes.schedule",
+          targets: [
+            { id: "contoso-pc", label: "Contoso mini PC", organizationId: "org-contoso" },
+            { id: "fabrikam-pc", label: "Fabrikam mini PC", organizationId: "org-fabrikam" },
+          ],
+        },
+      }),
+    });
+    const { rerender } = renderWithAppState(<AgentScheduleCard agent={createMockAgent({ id: agent.id, schedule: { organizationId: "org-contoso", enabled: true, intervalSeconds: 3600 } })} onChange={vi.fn()} />, { bridge });
+    expect(await screen.findByRole("radio", { name: /Contoso mini PC/ })).toBeEnabled();
+    expect(screen.queryByRole("radio", { name: /Fabrikam mini PC/ })).toBeNull();
+    // A schedule without an organization cannot move: a place is paired for one.
+    rerender(<AgentScheduleCard agent={createMockAgent({ id: agent.id, schedule: { enabled: true, intervalSeconds: 3600 } })} onChange={vi.fn()} />);
+    const contoso = await screen.findByRole("radio", { name: /Contoso mini PC/ });
+    expect(contoso).toBeDisabled();
+    expect(document.getElementById(contoso.getAttribute("aria-describedby") ?? "")).toHaveTextContent("Assign this schedule to an organization first");
+  });
+
+  it("warns when a place also runs the agent from its own configuration, and does not offer moving back", async () => {
+    const bridge = makeMockBridge({
+      getEnterpriseStatus: async () => withTargets({ current: { [agent.id]: "mini-pc" }, alsoRunsOn: { [agent.id]: "mini-pc" } }),
+    });
+    renderWithAppState(<AgentScheduleCard agent={createMockAgent({ id: agent.id, schedule: { organizationId: "org-contoso", enabled: false, intervalSeconds: 3600 } })} onChange={vi.fn()} />, { bridge });
+    expect(await screen.findByText("Also scheduled in Office mini PC's own configuration.")).toBeInTheDocument();
+    const thisComputer = screen.getByRole("radio", { name: /This computer/ });
+    expect(thisComputer).toBeDisabled();
+    expect(document.getElementById(thisComputer.getAttribute("aria-describedby") ?? "")).toHaveTextContent("Remove it from Office mini PC's own configuration first.");
+  });
+
+  it("shows an uncertain place with the module's recovery and holds every choice", async () => {
+    const bridge = makeMockBridge({
+      getEnterpriseStatus: async () =>
+        withTargets({ uncertain: { [agent.id]: { targetId: "mini-pc", message: "The sandbox has not answered for 2 hours.", recovery: "Check that the sandbox runs, then sync." } } }),
+    });
+    renderWithAppState(<AgentScheduleCard agent={createMockAgent({ id: agent.id, schedule: { organizationId: "org-contoso", enabled: false, intervalSeconds: 3600 } })} onChange={vi.fn()} />, { bridge });
+    expect(await screen.findByText("Not certain it runs on Office mini PC")).toBeInTheDocument();
+    expect(screen.getByText("Check that the sandbox runs, then sync.")).toBeInTheDocument();
+    // Treated as running there: the switch here is held and no place can be chosen.
+    expect(screen.getByRole("radio", { name: /Office mini PC/ })).toBeChecked();
+    expect(screen.getByRole("radio", { name: /This computer/ })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: /Office mini PC/ })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: /Automatic runs/ })).toBeDisabled();
+  });
+
   it("shows a schedule running here and elsewhere as a danger state, and turns the one here off in place", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
@@ -481,7 +537,7 @@ describe("schedule card: where it runs", () => {
         active: true,
         label: "Team features on",
         settingsSections: [],
-        scheduleTargets: { action: "sandboxes.schedule", targets: [{ id: "lookalike", label: "This c\u043emputer" }], current: { [agent.id]: "lookalike" } },
+        scheduleTargets: { action: "sandboxes.schedule", targets: [{ id: "lookalike", label: "This c\u043emputer", organizationId: "org-contoso" }], current: { [agent.id]: "lookalike" } },
       }),
     });
     renderWithAppState(<AgentScheduleCard agent={agent} onChange={vi.fn()} />, { bridge });
