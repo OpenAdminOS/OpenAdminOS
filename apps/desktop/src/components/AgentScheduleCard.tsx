@@ -99,9 +99,9 @@ export function AgentScheduleCard({
       <SchedulesPausedNotice />
       {schedule ? <ScheduleOrganizationRow agent={agent} /> : null}
       {where ? (
-        <ModuleUiBoundary>
+        <ModuleUiBoundary resetKey={JSON.stringify([where.targets, where.current])}>
           {/* The move and the schedule here change in the main process; this draws what they report. */}
-          <ScheduleTargetRow agent={agent} where={where} intervalSeconds={draftSeconds} />
+          <ScheduleTargetRow agent={agent} where={where} intervalSeconds={draftSeconds} hasSchedule={schedule !== undefined} />
         </ModuleUiBoundary>
       ) : null}
       {elsewhere && enabled && schedule ? (
@@ -386,7 +386,8 @@ export const SCHEDULE_TARGET_COPY = {
   provenance: "Places other than this computer are provided by the team features module.",
   moduleBadge: "Team features",
   bothTitle: (label: string) => `Turned on here and on ${label}`,
-  bothMessage: "The team features module reports this schedule on another place, and the schedule on this computer is on too. It does not run here until this is resolved.",
+  bothMessage: "The team features module reports this schedule running in another place, and the schedule on this computer is on too. It does not run here until this is resolved.",
+  needsSchedule: "Turn on Automatic runs first; a schedule can move only once it exists here.",
   turnOffHere: "Turn off here",
   working: "Working",
   runsElsewhere: (label: string) => `This schedule runs on ${label}. Its interval is set there.`,
@@ -426,10 +427,13 @@ function ScheduleTargetRow({
   agent,
   where,
   intervalSeconds,
+  hasSchedule,
 }: {
   agent: AgentSummary;
   where: ScheduleTargetChoice;
   intervalSeconds: number;
+  /** Module places are offered only once the agent has a schedule here. */
+  hasSchedule: boolean;
 }) {
   const [notice, setNotice] = useState<EnterpriseUiNoticeView | undefined>();
   const [busy, setBusy] = useState<string | undefined>();
@@ -447,7 +451,12 @@ function ScheduleTargetRow({
 
   const options = [
     { id: "this-computer", label: SCHEDULE_TARGET_COPY.thisComputer, detail: SCHEDULE_TARGET_COPY.thisComputerDetail, disabledReason: tooShort && where.current !== "this-computer" ? SCHEDULE_TARGET_COPY.needsInterval : undefined },
-    ...where.targets.map((target) => ({ id: target.id, label: target.label, detail: target.detail, disabledReason: target.disabledReason ?? (tooShort ? SCHEDULE_TARGET_COPY.needsInterval : undefined) })),
+    ...where.targets.map((target) => ({
+      id: target.id,
+      label: target.label,
+      detail: target.detail,
+      disabledReason: !hasSchedule ? SCHEDULE_TARGET_COPY.needsSchedule : target.disabledReason ?? (tooShort ? SCHEDULE_TARGET_COPY.needsInterval : undefined),
+    })),
   ];
   return (
     <fieldset className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2.5 ring-1 ring-[var(--color-border-soft)]" aria-busy={busy !== undefined}>

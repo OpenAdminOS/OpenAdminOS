@@ -5994,6 +5994,9 @@ export class AppStateStore {
       const schedule = agent.schedule;
       if (!schedule?.enabled) continue;
       if (nowMs < scheduleDueAtMs(agent, nowMs)) continue;
+      // TODO(ugur): when the module goes away or the licence lapses, a schedule
+      // moved to a sandbox stays off here, and nothing says the sandbox may
+      // still run it. Decide whether the app should say so, or turn it back on.
       if (this.scheduleRunsElsewhere?.(agent.id)) {
         console.info(`[scheduler] skipped "${agent.slug}" because a team features module reports its schedule running in another place`);
         continue;

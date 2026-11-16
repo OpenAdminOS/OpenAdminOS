@@ -292,7 +292,7 @@ describe("schedule card: where it runs", () => {
       },
       invokeEnterpriseUi,
     });
-    renderWithAppState(<AgentScheduleCard agent={agent} onChange={onChange} />, { bridge });
+    renderWithAppState(<AgentScheduleCard agent={createMockAgent({ id: agent.id, schedule: { enabled: false, intervalSeconds: 3600 } })} onChange={onChange} />, { bridge });
     expect(await screen.findByText("Where it runs")).toBeInTheDocument();
     expect(screen.getByText(/provided by the team features module/)).toBeInTheDocument();
     expect(screen.getAllByText("Team features")).toHaveLength(2);
@@ -322,6 +322,59 @@ describe("schedule card: where it runs", () => {
     await waitFor(() => expect(screen.queryByText("Turned on here and on Office mini PC")).toBeNull());
     expect(screen.getByRole("switch", { name: /Automatic runs/ })).not.toBeChecked();
     expect(screen.getByText("This schedule runs on Office mini PC. Its interval is set there.")).toBeInTheDocument();
+  });
+
+  it("offers module places only once a schedule exists here, then moves it away and back", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    let status = statusWith();
+    let changed: (() => void) | undefined;
+    const invokeEnterpriseUi = vi.fn<Invoke>(async (_name, input) => {
+      const targetId = (input as { targetId: string }).targetId;
+      status = statusWith({ [agent.id]: targetId });
+      changed?.();
+      return { notice: { type: "notice", tone: "success", title: "Saved", message: targetId === "mini-pc" ? "The schedule now runs on Office mini PC." : "The schedule now runs here." } };
+    });
+    const bridge = makeMockBridge({
+      getEnterpriseStatus: async () => status,
+      onEnterpriseStatusChanged: (listener) => {
+        changed = listener;
+        return () => undefined;
+      },
+      invokeEnterpriseUi,
+    });
+    const card = (schedule?: { enabled: boolean }) => (
+      <AgentScheduleCard agent={createMockAgent({ id: agent.id, ...(schedule ? { schedule: { organizationId: "org-contoso", intervalSeconds: 3600, ...schedule } } : {}) })} onChange={onChange} />
+    );
+    const { rerender } = renderWithAppState(card(), { bridge });
+
+    // No schedule here: module places cannot be chosen, and say why.
+    const miniPc = await screen.findByRole("radio", { name: /Office mini PC/ });
+    expect(miniPc).toBeDisabled();
+    expect(screen.getAllByText("Turn on Automatic runs first; a schedule can move only once it exists here.").length).toBeGreaterThan(0);
+    expect(invokeEnterpriseUi).not.toHaveBeenCalled();
+
+    // Turn on Automatic runs; the app state then carries the schedule.
+    await user.click(screen.getByRole("switch", { name: /Automatic runs/ }));
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ enabled: true, intervalSeconds: 3600 })));
+    rerender(card({ enabled: true }));
+    expect(screen.getByRole("radio", { name: /Office mini PC/ })).toBeEnabled();
+
+    // Move away: the main process turns the schedule here off.
+    await user.click(screen.getByRole("radio", { name: /Office mini PC/ }));
+    expect(await screen.findByText("The schedule now runs on Office mini PC.")).toBeInTheDocument();
+    rerender(card({ enabled: false }));
+    await waitFor(() => expect(screen.getByRole("radio", { name: /Office mini PC/ })).toBeChecked());
+    expect(screen.getByRole("switch", { name: /Automatic runs/ })).toBeDisabled();
+
+    // Move back: the main process turns it on again here.
+    await user.click(screen.getByRole("radio", { name: /This computer/ }));
+    expect(await screen.findByText("The schedule now runs here.")).toBeInTheDocument();
+    rerender(card({ enabled: true }));
+    await waitFor(() => expect(screen.getByRole("radio", { name: /This computer/ })).toBeChecked());
+    expect(screen.getByRole("switch", { name: /Automatic runs/ })).toBeChecked();
+    expect(invokeEnterpriseUi.mock.calls.map(([, input]) => (input as { targetId: string }).targetId)).toEqual(["mini-pc", "this-computer"]);
+    expect(onChange).toHaveBeenCalledTimes(1);
   });
 
   it("shows a schedule running here and elsewhere as a danger state, and turns the one here off in place", async () => {
