@@ -16,7 +16,8 @@ import { useToast } from "./Toast";
 import { alsoRunsOnFor, currentTargetFor, uncertainFor } from "@openadminos/enterprise/ui";
 import { EnterpriseNotice, invokeUiAction, ModuleUiBoundary } from "./EnterpriseUi";
 import { useEnterpriseStatus } from "./useEnterpriseStatus";
-import type { EnterpriseScheduleTargetView, EnterpriseUiNoticeView } from "@openadminos/agent-sdk";
+import type { EnterpriseScheduleTargetView, EnterpriseUiNoticeView, SchedulePlacementView } from "@openadminos/agent-sdk";
+import { Modal, ModalHeader } from "./Modal";
 
 const PRESETS = [
   { id: "900", label: "15m", seconds: 15 * 60 },
@@ -101,6 +102,7 @@ export function AgentScheduleCard({
     <div className="space-y-4">
       <SchedulesPausedNotice />
       {schedule ? <ScheduleOrganizationRow agent={agent} /> : null}
+      {!where ? <LastKnownPlacement agent={agent} /> : null}
       {where ? (
         <ModuleUiBoundary resetKey={JSON.stringify([where.targets, where.current])}>
           {/* The move and the schedule here change in the main process; this draws what they report. */}
@@ -400,7 +402,17 @@ export const SCHEDULE_TARGET_COPY = {
   bothMessage: "The team features module reports this schedule running in another place, and the schedule on this computer is on too. It does not run here until this is resolved.",
   needsSchedule: "Turn on Automatic runs first; a schedule can move only once it exists here.",
   needsOrganization: "Assign this schedule to an organization first; a place is paired for one organization.",
-  alsoRunsOn: (label: string) => `Also scheduled in ${label}'s own configuration.`,
+  alsoRunsOn: (label: string) => `The schedule here does not run while ${label}'s own configuration runs it. Remove it from ${label}'s own configuration to run it here or move it.`,
+  notOffered: "Not offered for this agent.",
+  lastKnown: (label: string) => `Last known to run on ${label}`,
+  lastKnownOff: "Team features are off, so it does not run here until you bring it back or remove it there.",
+  lastKnownWaiting: "Team features have not said where it runs yet, so it does not run here meanwhile.",
+  runItHere: "Run it here",
+  runItHerePhrase: "RUN IT HERE",
+  runItHereTitle: (label: string) => `Run it here instead of ${label}`,
+  runItHereMessage: (label: string) => `The app forgets that this schedule ran on ${label}, and it can run here again. Remove it on ${label} too, or it may run in both places.`,
+  cancel: "Cancel",
+  typeToConfirm: (phrase: string) => `Type ${phrase} to confirm`,
   removeFromConfiguration: (label: string) => `Remove it from ${label}'s own configuration first.`,
   uncertainTitle: (label: string) => `Not certain it runs on ${label}`,
   turnOffHere: "Turn off here",
@@ -435,13 +447,20 @@ function useScheduleTarget(agent: AgentSummary): ScheduleTargetChoice | undefine
   const eligible = contribution.targets.filter(
     (target) => (!target.agentIds || target.agentIds.includes(agent.id)) && (organizationId === undefined || target.organizationId === organizationId),
   );
-  const targets = current === "this-computer" || eligible.some((target) => target.id === current)
-    ? eligible
-    : [...eligible, ...contribution.targets.filter((target) => target.id === current)];
-  if (targets.length === 0) return undefined;
-  const currentLabel = current === "this-computer" ? SCHEDULE_TARGET_COPY.thisComputer : labelOf(current);
   const also = alsoRunsOnFor(contribution, agent.id);
   const unsure = uncertainFor(contribution, agent.id);
+  // Every place the module names for this agent is shown, offered or not: the current one, one whose own
+  // configuration runs it, and one it is not certain about.
+  const named = [current, also, unsure?.targetId].filter((id): id is string => id !== undefined && id !== "this-computer");
+  const targets = [
+    ...eligible,
+    ...contribution.targets
+      .filter((target) => named.includes(target.id) && !eligible.some((offered) => offered.id === target.id))
+      // Shown so the card says where the schedule is, but not offered for a choice.
+      .map((target) => ({ ...target, disabledReason: target.disabledReason ?? SCHEDULE_TARGET_COPY.notOffered })),
+  ];
+  if (targets.length === 0) return undefined;
+  const currentLabel = current === "this-computer" ? SCHEDULE_TARGET_COPY.thisComputer : labelOf(current);
   return {
     action: contribution.action,
     targets,
@@ -560,5 +579,86 @@ function ScheduleTargetRow({
         </div>
       ) : null}
     </fieldset>
+  );
+}
+
+/**
+ * Where a schedule was last known to run, when no module reports places in
+ * this session: kept by the app, so the schedule does not run here as well.
+ * With team features off, Run it here forgets the place after typed
+ * confirmation.
+ */
+function LastKnownPlacement({ agent }: { agent: AgentSummary }) {
+  const status = useEnterpriseStatus();
+  const [placements, setPlacements] = useState<Readonly<Record<string, SchedulePlacementView>>>({});
+  const [confirming, setConfirming] = useState(false);
+  const [typed, setTyped] = useState("");
+  const [error, setError] = useState<string | undefined>();
+  const inputId = useId();
+  useEffect(() => {
+    const bridge = window.openAdminOS;
+    if (!bridge?.getSchedulePlacements) return;
+    let current = true;
+    bridge.getSchedulePlacements().then(
+      (next) => {
+        if (current) setPlacements(next);
+      },
+      () => undefined,
+    );
+    return () => {
+      current = false;
+    };
+  }, [status]);
+  const placement = placements[agent.id];
+  if (!placement) return null;
+  const off = !status.active;
+  const clear = async () => {
+    setConfirming(false);
+    setTyped("");
+    try {
+      const next = await window.openAdminOS?.clearSchedulePlacement?.(agent.id);
+      if (next) setPlacements(next);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+  return (
+    <div role="status" className="rounded-[10px] bg-[var(--color-warning-soft)] px-3 py-2.5 text-sm text-[var(--color-warning)]">
+      <p className="font-medium">{SCHEDULE_TARGET_COPY.lastKnown(placement.label)}</p>
+      <p className="mt-0.5 text-[var(--color-text-soft)]">{off ? SCHEDULE_TARGET_COPY.lastKnownOff : SCHEDULE_TARGET_COPY.lastKnownWaiting}</p>
+      {off ? (
+        <Button size="sm" variant="secondary" className="mt-2" onClick={() => setConfirming(true)}>
+          {SCHEDULE_TARGET_COPY.runItHere}
+        </Button>
+      ) : null}
+      {error ? <p role="alert" className="mt-1 text-[var(--color-danger)]">{error}</p> : null}
+      {confirming ? (
+        <Modal open onClose={() => setConfirming(false)} size="md">
+          <ModalHeader title={SCHEDULE_TARGET_COPY.runItHereTitle(placement.label)} onClose={() => setConfirming(false)} />
+          <div className="space-y-4 p-6">
+            <p className="text-sm leading-relaxed text-[var(--color-text-soft)]">{SCHEDULE_TARGET_COPY.runItHereMessage(placement.label)}</p>
+            <div className="grid gap-1">
+              <label htmlFor={inputId} className="text-sm text-[var(--color-text-muted)]">{SCHEDULE_TARGET_COPY.typeToConfirm(SCHEDULE_TARGET_COPY.runItHerePhrase)}</label>
+              <input
+                id={inputId}
+                data-autofocus
+                type="text"
+                autoComplete="off"
+                spellCheck={false}
+                value={typed}
+                onChange={(event) => setTyped(event.target.value)}
+                className="h-9 rounded-md bg-[var(--color-surface)] px-3 font-mono text-base text-[var(--color-text)] ring-1 ring-[var(--color-border)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+              />
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="ghost" onClick={() => setConfirming(false)}>{SCHEDULE_TARGET_COPY.cancel}</Button>
+              <Button variant="primary" disabled={typed !== SCHEDULE_TARGET_COPY.runItHerePhrase} onClick={() => void clear()}>
+                {SCHEDULE_TARGET_COPY.runItHere}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+    </div>
   );
 }

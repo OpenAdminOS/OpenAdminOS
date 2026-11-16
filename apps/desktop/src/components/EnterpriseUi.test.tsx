@@ -477,7 +477,7 @@ describe("schedule card: where it runs", () => {
       getEnterpriseStatus: async () => withTargets({ current: { [agent.id]: "mini-pc" }, alsoRunsOn: { [agent.id]: "mini-pc" } }),
     });
     renderWithAppState(<AgentScheduleCard agent={createMockAgent({ id: agent.id, schedule: { organizationId: "org-contoso", enabled: false, intervalSeconds: 3600 } })} onChange={vi.fn()} />, { bridge });
-    expect(await screen.findByText("Also scheduled in Office mini PC's own configuration.")).toBeInTheDocument();
+    expect(await screen.findByText(/The schedule here does not run while Office mini PC's own configuration runs it\./)).toBeInTheDocument();
     const thisComputer = screen.getByRole("radio", { name: /This computer/ });
     expect(thisComputer).toBeDisabled();
     expect(document.getElementById(thisComputer.getAttribute("aria-describedby") ?? "")).toHaveTextContent("Remove it from Office mini PC's own configuration first.");
@@ -496,6 +496,83 @@ describe("schedule card: where it runs", () => {
     expect(screen.getByRole("radio", { name: /This computer/ })).toBeDisabled();
     expect(screen.getByRole("radio", { name: /Office mini PC/ })).toBeDisabled();
     expect(screen.getByRole("switch", { name: /Automatic runs/ })).toBeDisabled();
+  });
+
+  it("keeps the row for an agent a place runs from its own configuration, in the module's real shape", async () => {
+    // The agent is left out of agentIds and has no current entry; only alsoRunsOn names it.
+    const bridge = makeMockBridge({
+      getEnterpriseStatus: async (): Promise<EnterpriseStatus> => ({
+        active: true,
+        label: "Team features on",
+        settingsSections: [],
+        scheduleTargets: {
+          action: "sandboxes.schedule",
+          targets: [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", agentIds: ["another-agent"] }],
+          alsoRunsOn: { [agent.id]: "mini-pc" },
+        },
+      }),
+    });
+    renderWithAppState(<AgentScheduleCard agent={createMockAgent({ id: agent.id, schedule: { organizationId: "org-contoso", enabled: true, intervalSeconds: 3600 } })} onChange={vi.fn()} />, { bridge });
+    expect(await screen.findByText("Where it runs")).toBeInTheDocument();
+    expect(screen.getByText(/does not run while Office mini PC's own configuration runs it\. Remove it from Office mini PC's own configuration/)).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /Office mini PC/ })).toBeDisabled();
+  });
+
+  it("keeps the row for an agent whose place is not certain, in the module's real shape", async () => {
+    const bridge = makeMockBridge({
+      getEnterpriseStatus: async (): Promise<EnterpriseStatus> => ({
+        active: true,
+        label: "Team features on",
+        settingsSections: [],
+        scheduleTargets: {
+          action: "sandboxes.schedule",
+          targets: [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", agentIds: ["another-agent"] }],
+          uncertain: { [agent.id]: { targetId: "mini-pc", message: "The sandbox has not answered.", recovery: "Check that it runs, then sync." } },
+        },
+      }),
+    });
+    renderWithAppState(<AgentScheduleCard agent={createMockAgent({ id: agent.id, schedule: { organizationId: "org-contoso", enabled: false, intervalSeconds: 3600 } })} onChange={vi.fn()} />, { bridge });
+    expect(await screen.findByText("Not certain it runs on Office mini PC")).toBeInTheDocument();
+    expect(screen.getByText("Check that it runs, then sync.")).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /Office mini PC/ })).toBeChecked();
+  });
+
+  it("says where a schedule was last known to run with team features off, and runs it here after typed confirmation", async () => {
+    const user = userEvent.setup();
+    let placements: Record<string, { targetId: string; label: string; organizationId: string; reason: "runs" }> = {
+      [agent.id]: { targetId: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", reason: "runs" },
+    };
+    const clearSchedulePlacement = vi.fn(async (agentId: string) => {
+      const { [agentId]: _cleared, ...rest } = placements;
+      placements = rest;
+      return placements;
+    });
+    const bridge = makeMockBridge({
+      getEnterpriseStatus: async (): Promise<EnterpriseStatus> => ({ active: false }),
+      getSchedulePlacements: async () => placements,
+      clearSchedulePlacement,
+    });
+    renderWithAppState(<AgentScheduleCard agent={createMockAgent({ id: agent.id, schedule: { organizationId: "org-contoso", enabled: false, intervalSeconds: 3600 } })} onChange={vi.fn()} />, { bridge });
+    expect(await screen.findByText("Last known to run on Office mini PC")).toBeInTheDocument();
+    expect(screen.getByText("Team features are off, so it does not run here until you bring it back or remove it there.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Run it here" }));
+    const dialog = await screen.findByRole("dialog");
+    const confirm = within(dialog).getByRole("button", { name: "Run it here" });
+    expect(confirm).toBeDisabled();
+    await user.type(within(dialog).getByLabelText("Type RUN IT HERE to confirm"), "RUN IT HERE");
+    await user.click(confirm);
+    await waitFor(() => expect(clearSchedulePlacement).toHaveBeenCalledWith(agent.id));
+    await waitFor(() => expect(screen.queryByText("Last known to run on Office mini PC")).toBeNull());
+  });
+
+  it("waits for the module without offering Run it here while team features are on", async () => {
+    const bridge = makeMockBridge({
+      getEnterpriseStatus: async (): Promise<EnterpriseStatus> => ({ active: true, label: "Team features on", settingsSections: [] }),
+      getSchedulePlacements: async () => ({ [agent.id]: { targetId: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", reason: "runs" as const } }),
+    });
+    renderWithAppState(<AgentScheduleCard agent={agent} onChange={vi.fn()} />, { bridge });
+    expect(await screen.findByText("Team features have not said where it runs yet, so it does not run here meanwhile.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Run it here" })).toBeNull();
   });
 
   it("shows a schedule running here and elsewhere as a danger state, and turns the one here off in place", async () => {
