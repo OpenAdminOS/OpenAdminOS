@@ -16,7 +16,7 @@ import { useToast } from "./Toast";
 import { alsoRunsOnFor, currentTargetFor, uncertainFor } from "@openadminos/enterprise/ui";
 import { EnterpriseNotice, invokeUiAction, ModuleUiBoundary } from "./EnterpriseUi";
 import { useEnterpriseStatus } from "./useEnterpriseStatus";
-import type { EnterpriseScheduleTargetView, EnterpriseUiNoticeView, SchedulePlacementView } from "@openadminos/agent-sdk";
+import type { EnterpriseScheduleTargetView, EnterpriseUiNoticeView, SchedulePlacementsView } from "@openadminos/agent-sdk";
 import { Modal, ModalHeader } from "./Modal";
 
 const PRESETS = [
@@ -102,7 +102,7 @@ export function AgentScheduleCard({
     <div className="space-y-4">
       <SchedulesPausedNotice />
       {schedule ? <ScheduleOrganizationRow agent={agent} /> : null}
-      {!where ? <LastKnownPlacement agent={agent} /> : null}
+      <LastKnownPlacement agent={agent} live={where !== undefined} />
       {where ? (
         <ModuleUiBoundary resetKey={JSON.stringify([where.targets, where.current])}>
           {/* The move and the schedule here change in the main process; this draws what they report. */}
@@ -405,6 +405,9 @@ export const SCHEDULE_TARGET_COPY = {
   alsoRunsOn: (label: string) => `The schedule here does not run while ${label}'s own configuration runs it. Remove it from ${label}'s own configuration to run it here or move it.`,
   notOffered: "Not offered for this agent.",
   lastKnown: (label: string) => `Last known to run on ${label}`,
+  lastKnownUnpaired: (label: string) => `Last known to run on ${label}, which is no longer paired here.`,
+  lastKnownUnpairedStep: "It does not run here until you choose Run it here, or remove it there.",
+  placementsProblemTitle: "Where schedules last ran cannot be read",
   lastKnownOff: "Team features are off, so it does not run here until you bring it back or remove it there.",
   lastKnownWaiting: "Team features have not said where it runs yet, so it does not run here meanwhile.",
   runItHere: "Run it here",
@@ -588,9 +591,9 @@ function ScheduleTargetRow({
  * With team features off, Run it here forgets the place after typed
  * confirmation.
  */
-function LastKnownPlacement({ agent }: { agent: AgentSummary }) {
+function LastKnownPlacement({ agent, live }: { agent: AgentSummary; live: boolean }) {
   const status = useEnterpriseStatus();
-  const [placements, setPlacements] = useState<Readonly<Record<string, SchedulePlacementView>>>({});
+  const [view, setView] = useState<SchedulePlacementsView>({ placements: {} });
   const [confirming, setConfirming] = useState(false);
   const [typed, setTyped] = useState("");
   const [error, setError] = useState<string | undefined>();
@@ -601,7 +604,7 @@ function LastKnownPlacement({ agent }: { agent: AgentSummary }) {
     let current = true;
     bridge.getSchedulePlacements().then(
       (next) => {
-        if (current) setPlacements(next);
+        if (current) setView(next);
       },
       () => undefined,
     );
@@ -609,24 +612,36 @@ function LastKnownPlacement({ agent }: { agent: AgentSummary }) {
       current = false;
     };
   }, [status]);
-  const placement = placements[agent.id];
-  if (!placement) return null;
+  const placement = view.placements[agent.id];
+  if (view.problem && !placement) {
+    return (
+      <div role="status" className="rounded-[10px] bg-[var(--color-danger-soft)] px-3 py-2.5 text-sm text-[var(--color-danger)]">
+        <p className="font-medium">{SCHEDULE_TARGET_COPY.placementsProblemTitle}</p>
+        <p className="mt-0.5 text-[var(--color-text-soft)]">{view.problem}</p>
+      </div>
+    );
+  }
+  // A live row already says where it runs, unless the kept place is no longer paired here.
+  if (!placement || (live && !placement.stale)) return null;
   const off = !status.active;
+  const canTakeBack = off || placement.stale === true;
   const clear = async () => {
     setConfirming(false);
     setTyped("");
     try {
       const next = await window.openAdminOS?.clearSchedulePlacement?.(agent.id);
-      if (next) setPlacements(next);
+      if (next) setView(next);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
   };
   return (
     <div role="status" className="rounded-[10px] bg-[var(--color-warning-soft)] px-3 py-2.5 text-sm text-[var(--color-warning)]">
-      <p className="font-medium">{SCHEDULE_TARGET_COPY.lastKnown(placement.label)}</p>
-      <p className="mt-0.5 text-[var(--color-text-soft)]">{off ? SCHEDULE_TARGET_COPY.lastKnownOff : SCHEDULE_TARGET_COPY.lastKnownWaiting}</p>
-      {off ? (
+      <p className="font-medium">{placement.stale ? SCHEDULE_TARGET_COPY.lastKnownUnpaired(placement.label) : SCHEDULE_TARGET_COPY.lastKnown(placement.label)}</p>
+      <p className="mt-0.5 text-[var(--color-text-soft)]">
+        {placement.stale ? SCHEDULE_TARGET_COPY.lastKnownUnpairedStep : off ? SCHEDULE_TARGET_COPY.lastKnownOff : SCHEDULE_TARGET_COPY.lastKnownWaiting}
+      </p>
+      {canTakeBack ? (
         <Button size="sm" variant="secondary" className="mt-2" onClick={() => setConfirming(true)}>
           {SCHEDULE_TARGET_COPY.runItHere}
         </Button>

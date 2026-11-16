@@ -545,11 +545,11 @@ describe("schedule card: where it runs", () => {
     const clearSchedulePlacement = vi.fn(async (agentId: string) => {
       const { [agentId]: _cleared, ...rest } = placements;
       placements = rest;
-      return placements;
+      return { placements };
     });
     const bridge = makeMockBridge({
       getEnterpriseStatus: async (): Promise<EnterpriseStatus> => ({ active: false }),
-      getSchedulePlacements: async () => placements,
+      getSchedulePlacements: async () => ({ placements }),
       clearSchedulePlacement,
     });
     renderWithAppState(<AgentScheduleCard agent={createMockAgent({ id: agent.id, schedule: { organizationId: "org-contoso", enabled: false, intervalSeconds: 3600 } })} onChange={vi.fn()} />, { bridge });
@@ -568,11 +568,31 @@ describe("schedule card: where it runs", () => {
   it("waits for the module without offering Run it here while team features are on", async () => {
     const bridge = makeMockBridge({
       getEnterpriseStatus: async (): Promise<EnterpriseStatus> => ({ active: true, label: "Team features on", settingsSections: [] }),
-      getSchedulePlacements: async () => ({ [agent.id]: { targetId: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", reason: "runs" as const } }),
+      getSchedulePlacements: async () => ({ placements: { [agent.id]: { targetId: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", reason: "runs" as const } } }),
     });
     renderWithAppState(<AgentScheduleCard agent={agent} onChange={vi.fn()} />, { bridge });
     expect(await screen.findByText("Team features have not said where it runs yet, so it does not run here meanwhile.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Run it here" })).toBeNull();
+  });
+
+  it("says a kept place is no longer paired here, even while the module reports other places, and offers Run it here", async () => {
+    const bridge = makeMockBridge({
+      getEnterpriseStatus: async () => statusWith(),
+      getSchedulePlacements: async () => ({ placements: { [agent.id]: { targetId: "old-pc", label: "Old mini PC", organizationId: "org-contoso", reason: "runs" as const, stale: true } } }),
+    });
+    renderWithAppState(<AgentScheduleCard agent={createMockAgent({ id: agent.id, schedule: { organizationId: "org-contoso", enabled: false, intervalSeconds: 3600 } })} onChange={vi.fn()} />, { bridge });
+    expect(await screen.findByText("Last known to run on Old mini PC, which is no longer paired here.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run it here" })).toBeInTheDocument();
+  });
+
+  it("says when the app cannot read where schedules last ran", async () => {
+    const bridge = makeMockBridge({
+      getEnterpriseStatus: async (): Promise<EnterpriseStatus> => ({ active: false }),
+      getSchedulePlacements: async () => ({ placements: {}, problem: "The app cannot read where schedules last ran, so none of them runs here until this is resolved." }),
+    });
+    renderWithAppState(<AgentScheduleCard agent={agent} onChange={vi.fn()} />, { bridge });
+    expect(await screen.findByText("Where schedules last ran cannot be read")).toBeInTheDocument();
+    expect(screen.getByText(/none of them runs here until this is resolved/)).toBeInTheDocument();
   });
 
   it("shows a schedule running here and elsewhere as a danger state, and turns the one here off in place", async () => {
