@@ -419,10 +419,11 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
 /** The notice a failed UI action answers with: the reason, and the step that fixes it. */
 function failedReply(error: unknown): EnterpriseUiReply {
   // The reason passes the same check as module text; one that does not is replaced.
+  // The reason is built once, checked as built, and used as the check returned it.
   let reason = "The team features module did not say why.";
+  const candidate = errorMessage(error).trim().slice(0, ENTERPRISE_UI_LIMITS.maxMessageLength);
   try {
-    checkUiNotice({ type: "notice", tone: "neutral", title: "x", message: errorMessage(error).slice(0, ENTERPRISE_UI_LIMITS.maxMessageLength) });
-    reason = errorMessage(error).trim().slice(0, ENTERPRISE_UI_LIMITS.maxMessageLength);
+    reason = checkUiNotice({ type: "notice", tone: "neutral", title: "x", message: candidate }).message;
   } catch {
     // Keep the generic reason.
   }

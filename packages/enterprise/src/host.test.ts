@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
+import { ENTERPRISE_UI_LIMITS } from "./ui.js";
 import {
   ENTERPRISE_LIMITS,
   EnterpriseHostError,
@@ -693,5 +694,23 @@ describe("createEnterpriseHost", () => {
     host.registerSettingsSection({ id: "sandboxes", title: "Sandboxes", description: "Machines you run.", body: { elements: [{ type: "button", id: "sync", label: "Sync now", kind: "primary", action: "sandboxes.sync" }] } });
     const reply = (await ipc.invoke("openadminos-enterprise-ui:sandboxes.sync", { kind: "button", sectionId: "sandboxes", buttonId: "sync", values: {} })) as { notice: { message: string } };
     assert.equal(reply.notice.message, "The team features module did not say why.");
+  });
+
+  it("checks a failure reason exactly as it is shown", async () => {
+    const { host, ipc } = setup();
+    let reason = "";
+    host.registerUiAction("sandboxes.sync", async () => {
+      throw new Error(reason);
+    });
+    host.registerSettingsSection({ id: "sandboxes", title: "Sandboxes", description: "Machines you run.", body: { elements: [{ type: "button", id: "sync", label: "Sync now", kind: "primary", action: "sandboxes.sync" }] } });
+    const press = async () => ((await ipc.invoke("openadminos-enterprise-ui:sandboxes.sync", { kind: "button", sectionId: "sandboxes", buttonId: "sync", values: {} })) as { notice: { message: string } }).notice.message;
+    // Leading spaces push the reserved phrase past the old slice; the trimmed reason the window would show contains it.
+    reason = `${" ".repeat(490)}No data leaves this device.`;
+    assert.equal(await press(), "The team features module did not say why.");
+    // Trailing text past the limit is cut before the check, and the checked text is what is shown.
+    reason = `  The sandbox did not answer.${"x".repeat(600)}`;
+    const shown = await press();
+    assert.ok(shown.startsWith("The sandbox did not answer."));
+    assert.equal(shown.length, ENTERPRISE_UI_LIMITS.maxMessageLength);
   });
 });
