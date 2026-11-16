@@ -121,6 +121,9 @@ export interface EnterpriseLocalSchedules {
   has(agentId: string): Promise<boolean>;
   /** Turns the agent's schedule on this computer off or back on, keeping its organization, interval and settings; false when it has none. */
   setEnabled(agentId: string, enabled: boolean): Promise<boolean>;
+  /** A move of the agent's schedule starts; the app refuses deleting its schedule here until `endMove`. */
+  beginMove?(agentId: string): void;
+  endMove?(agentId: string): void;
 }
 
 /** A section as the window gets it: with the revision of its body. */
@@ -248,47 +251,55 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
       const input = checkUiActionInput(checkJson(raw ?? null, ENTERPRISE_LIMITS.maxIpcInputBytes, `the request to ${name}`));
       checkUiActionAgainst(input, name, { body: (id) => sections.get(id)?.body, scheduleTargets });
       const revision = input.kind === "button" ? revisions.get(input.sectionId) : undefined;
-      // A schedule moves only once it exists here, either way: without one the module is not asked, and its place stays.
-      if (input.kind === "schedule" && capabilities.localSchedules) {
-        let exists: boolean;
+      // A schedule moves away only once it exists here: without one the module is not asked, and its place stays.
+      // Back here is allowed without one, since nothing can then run twice.
+      let noScheduleHere = false;
+      const local = input.kind === "schedule" ? capabilities.localSchedules : undefined;
+      if (input.kind === "schedule" && local) {
         try {
-          exists = await capabilities.localSchedules.has(input.agentId);
+          noScheduleHere = !(await local.has(input.agentId));
         } catch (error) {
           options.log("error", "enterprise: the schedule here could not be read before a move", { agentId: input.agentId, error: errorMessage(error) });
           return danger("The schedule here could not be read", "The app could not read the schedule here, so nothing moved.", "Try again. If it keeps failing, restart OpenAdminOS.");
         }
-        if (!exists) return NO_SCHEDULE_HERE;
+        if (noScheduleHere && input.targetId !== "this-computer") return NO_SCHEDULE_HERE;
       }
-      let reply: EnterpriseUiReply;
+      // While a move runs, the app does not delete the schedule here.
+      if (input.kind === "schedule") local?.beginMove?.(input.agentId);
       try {
-        reply = checkUiReply(await handler(input), new Set(uiChannels.keys()));
-      } catch (error) {
-        options.log("error", "enterprise: a UI action failed", { name, error: errorMessage(error) });
-        return checkJson(failedReply(error), ENTERPRISE_LIMITS.maxIpcOutputBytes, `the reply from ${name}`);
-      }
-      // A schedule choice answers with a notice; a body there has no section to go to.
-      if (input.kind === "schedule" && reply.body) {
-        options.log("error", "enterprise: a schedule action answered with a body", { name });
-        return danger("The schedule did not move", "The team features module answered a schedule choice with a section body, which the schedule card does not take. Nothing changed here.", "Update the team features module, then try again.");
-      }
-      // Too large to send is refused before it is stored, so a body is never kept and then reported as a failure.
-      try {
-        checkJson(reply, ENTERPRISE_LIMITS.maxIpcOutputBytes, `the reply from ${name}`);
-      } catch (error) {
-        options.log("error", "enterprise: a UI action reply was too large", { name, error: errorMessage(error) });
-        return danger("The team feature did not complete", `The reply from ${name} is larger than the app takes, so nothing was kept.`, "Update the team features module, then try again.");
-      }
-      if (input.kind === "button" && reply.body) {
-        const section = sections.get(input.sectionId);
-        if (!disposed && section && revisions.get(input.sectionId) === revision) {
-          setBody(section, reply.body);
-        } else {
-          // The section changed while the handler ran: the newer body stays.
-          reply = Object.freeze({ notice: reply.notice ?? SUPERSEDED_NOTICE });
+        let reply: EnterpriseUiReply;
+        try {
+          reply = checkUiReply(await handler(input), new Set(uiChannels.keys()));
+        } catch (error) {
+          options.log("error", "enterprise: a UI action failed", { name, error: errorMessage(error) });
+          return checkJson(failedReply(error), ENTERPRISE_LIMITS.maxIpcOutputBytes, `the reply from ${name}`);
         }
+        // A schedule choice answers with a notice; a body there has no section to go to.
+        if (input.kind === "schedule" && reply.body) {
+          options.log("error", "enterprise: a schedule action answered with a body", { name });
+          return danger("The schedule did not move", "The team features module answered a schedule choice with a section body, which the schedule card does not take. Nothing changed here.", "Update the team features module, then try again.");
+        }
+        // Too large to send is refused before it is stored, so a body is never kept and then reported as a failure.
+        try {
+          checkJson(reply, ENTERPRISE_LIMITS.maxIpcOutputBytes, `the reply from ${name}`);
+        } catch (error) {
+          options.log("error", "enterprise: a UI action reply was too large", { name, error: errorMessage(error) });
+          return danger("The team feature did not complete", `The reply from ${name} is larger than the app takes, so nothing was kept.`, "Update the team features module, then try again.");
+        }
+        if (input.kind === "button" && reply.body) {
+          const section = sections.get(input.sectionId);
+          if (!disposed && section && revisions.get(input.sectionId) === revision) {
+            setBody(section, reply.body);
+          } else {
+            // The section changed while the handler ran: the newer body stays.
+            reply = Object.freeze({ notice: reply.notice ?? SUPERSEDED_NOTICE });
+          }
+        }
+        if (input.kind === "schedule") reply = await handOff(input, reply, noScheduleHere);
+        return checkJson(reply, ENTERPRISE_LIMITS.maxIpcOutputBytes, `the reply from ${name}`);
+      } finally {
+        if (input.kind === "schedule") local?.endMove?.(input.agentId);
       }
-      if (input.kind === "schedule") reply = await handOff(input, reply);
-      return checkJson(reply, ENTERPRISE_LIMITS.maxIpcOutputBytes, `the reply from ${name}`);
     });
     uiChannels.set(name, channel);
   };
@@ -300,7 +311,7 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
    * another place, on again when it came back. Anything else changes
    * nothing here and says so.
    */
-  const handOff = async (input: Extract<EnterpriseUiActionInput, { kind: "schedule" }>, reply: EnterpriseUiReply): Promise<EnterpriseUiReply> => {
+  const handOff = async (input: Extract<EnterpriseUiActionInput, { kind: "schedule" }>, reply: EnterpriseUiReply, noScheduleHere: boolean): Promise<EnterpriseUiReply> => {
     if (reply.notice?.tone === "danger") return reply;
     // App copy says "here" for this computer: the reply passes the same text check as module text.
     const place = (targetId: string) => (targetId === "this-computer" ? "here" : `on ${scheduleTargets?.targets.find((target) => target.id === targetId)?.label ?? targetId}`);
@@ -311,6 +322,10 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
     const local = capabilities.localSchedules;
     if (local) {
       const here = input.targetId === "this-computer";
+      if (here && noScheduleHere) {
+        // Moved back with nothing here to turn on: nothing changes here, and the card says how to schedule it.
+        return Object.freeze({ notice: Object.freeze({ type: "notice" as const, tone: "neutral" as const, title: "Moved back", message: "Moved back. Turn on Automatic runs to schedule it here." }) });
+      }
       let found: boolean;
       try {
         found = await local.setEnabled(input.agentId, here);
@@ -322,6 +337,18 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
       }
       if (here && !found) {
         return danger("No schedule here", "The team features module moved the schedule back, but there is no schedule here to turn on.", "Turn on Automatic runs in the schedule card.");
+      }
+      if (!here && !found) {
+        // The schedule here went away while the module moved it.
+        return Object.freeze({
+          notice: Object.freeze({
+            type: "notice" as const,
+            tone: "warning" as const,
+            title: "Runs only there now",
+            message: `The schedule now runs ${place(input.targetId)} only; there is no schedule here any more.`,
+            recovery: "To run it here again, choose here, then turn on Automatic runs.",
+          }),
+        });
       }
     }
     return reply.notice ? reply : Object.freeze({ ...reply, notice: Object.freeze({ type: "notice" as const, tone: "success" as const, title: "Saved", message: `The schedule now runs ${place(input.targetId)}.` }) });

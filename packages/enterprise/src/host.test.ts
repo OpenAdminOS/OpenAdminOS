@@ -626,6 +626,8 @@ describe("createEnterpriseHost", () => {
     const local: Array<[string, boolean]> = [];
     let failLocal = false;
     let hasLocal = true;
+    let goneDuringMove = false;
+    const moves: string[] = [];
     const ipc = new FakeIpc();
     const controller = createEnterpriseHost({
       entitlement: () => ENTITLEMENT,
@@ -638,8 +640,10 @@ describe("createEnterpriseHost", () => {
           setEnabled: async (agentId, enabled) => {
             if (failLocal) throw new Error("state.json is read-only");
             local.push([agentId, enabled]);
-            return hasLocal;
+            return hasLocal && !goneDuringMove;
           },
+          beginMove: (agentId) => moves.push(`begin ${agentId}`),
+          endMove: (agentId) => moves.push(`end ${agentId}`),
         },
       },
     });
@@ -691,24 +695,37 @@ describe("createEnterpriseHost", () => {
     assert.match(both.notice.recovery ?? "", /Turn off here/);
     failLocal = false;
 
-    // No schedule here, either way: the module is not asked and its place stays.
+    // No schedule here: moving away is refused before the module is asked, and its place stays.
     hasLocal = false;
     const before = local.length;
-    for (const target of ["this-computer", "mini-pc"]) {
-      const none = await choose(target);
-      assert.equal(none.notice.title, "No schedule here");
-      assert.equal(none.notice.message, "Turn on Automatic runs first; a schedule can move only once it exists here.");
-    }
-    assert.equal(local.length, before);
+    const away = await choose("mini-pc");
+    assert.equal(away.notice.title, "No schedule here");
+    assert.equal(away.notice.message, "Turn on Automatic runs first; a schedule can move only once it exists here.");
     assert.equal(controller.snapshot().scheduleTargets?.current?.["find-inactive-devices"], "mini-pc");
+    // Moving back is allowed: nothing can run twice. Nothing changes here, and the notice says what to do.
+    const back = await choose("this-computer");
+    assert.equal(back.notice.tone, "neutral");
+    assert.equal(back.notice.message, "Moved back. Turn on Automatic runs to schedule it here.");
+    assert.equal(local.length, before);
+    assert.equal(controller.snapshot().scheduleTargets?.current?.["find-inactive-devices"], "this-computer");
     hasLocal = true;
+
+    // The schedule here went away during a move away: it runs only there now.
+    goneDuringMove = true;
+    const only = await choose("mini-pc");
+    assert.equal(only.notice.tone, "warning");
+    assert.match(only.notice.message, /runs on Office mini PC only/);
+    goneDuringMove = false;
+    // Every move is bracketed for the app, so it can refuse deleting the schedule meanwhile.
+    assert.ok(moves.length > 0 && moves.filter((entry) => entry.startsWith("begin")).length === moves.filter((entry) => entry.startsWith("end")).length);
 
     // A body in a schedule reply is refused, and nothing changes here.
     report = "body";
+    const beforeBody = local.length;
     const withBody = await choose("this-computer");
     assert.equal(withBody.notice.tone, "danger");
     assert.match(withBody.notice.message, /section body/);
-    assert.equal(local.length, before);
+    assert.equal(local.length, beforeBody);
 
     // Every notice the host wrote reaches the window as written: the renderer runs the same check.
     assert.ok(replies.length >= 6);

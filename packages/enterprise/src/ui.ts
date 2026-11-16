@@ -51,6 +51,10 @@ export const ENTERPRISE_UI_RESERVED_PHRASES = Object.freeze([
   "stays on this device",
   "verified against",
   "team features off",
+  "your device",
+  "leaves this device",
+  "never leaves",
+  "stays on your device",
 ]);
 
 const L = ENTERPRISE_UI_LIMITS;
@@ -194,8 +198,13 @@ function checkElement(value: unknown, ids: Set<string>, actions: ReadonlySet<str
       const placeholder = optionalText(fields.placeholder, L.maxValueLength, "field placeholder");
       let fieldValue: string | undefined;
       if (fields.value !== undefined) {
-        if (typeof fields.value !== "string" || fields.value.length > maxLength || CONTROL.test(fields.value) || /[\n\r]/.test(fields.value) || FORMAT.test(fields.value)) {
+        if (typeof fields.value !== "string" || fields.value.length > maxLength || CONTROL.test(fields.value) || /[\n\r]/.test(fields.value)) {
           invalid("A field value is one line of text within its maxLength.");
+        }
+        // A prefilled value is module text too; an empty one is allowed.
+        if (fields.value !== "") {
+          if (MARKUP.test(fields.value)) invalid("A field value looks like markup; module text is plain text.");
+          checkModuleText(fields.value, "field value");
         }
         fieldValue = fields.value;
       }

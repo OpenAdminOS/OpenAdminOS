@@ -188,4 +188,13 @@ describe("declarative module UI", () => {
       (error: unknown) => error instanceof EnterpriseHostError && /U\+200B/.test(error.message),
     );
   });
+
+  it("checks a prefilled field value as module text, and the added trust phrases", () => {
+    assert.equal(checkUiBody(body({ type: "field", id: "a", label: "A", kind: "text", value: "" })).elements.length, 1);
+    refused(() => checkUiBody(body({ type: "field", id: "a", label: "A", kind: "text", value: "<b>x</b>" })));
+    refused(() => checkUiBody(body({ type: "field", id: "a", label: "A", kind: "text", value: "Nothing leaves this device" })));
+    for (const text of ["Kept on your device", "Data never leaves the office", "It stays on your device", "Nothing leaves this device unencrypted"]) {
+      refused(() => checkUiBody(body({ type: "text", text })));
+    }
+  });
 });
