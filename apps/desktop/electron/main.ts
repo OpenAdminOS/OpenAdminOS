@@ -3295,7 +3295,10 @@ async function startEnterprise(userDataDir: string): Promise<void> {
         capabilities: {
           ...sandboxes.capabilities,
           // The host turns the schedule here off or on after a module moved it; the module never reaches this.
-          localSchedules: { setEnabled: (agentId, enabled) => store.setAgentScheduleEnabled(agentId, enabled) },
+          localSchedules: {
+            has: (agentId) => store.hasAgentSchedule(agentId),
+            setEnabled: (agentId, enabled) => store.setAgentScheduleEnabled(agentId, enabled),
+          },
         },
       }),
     notify,

@@ -62,9 +62,11 @@ async function fixture(activeTenantId: string) {
       activeTenantId,
     }),
   );
-  const store = new AppStateStore({ filePath, tokenStore, userDataPath: dir, statsApiUrl: "" });
+  const changes: string[] = [];
+  const store = new AppStateStore({ filePath, tokenStore, userDataPath: dir, statsApiUrl: "", onStateChanged: (info) => changes.push(info.reason) });
   return {
     store,
+    changes,
     async schedule() {
       return (await store.listAgents()).find((entry) => entry.id === agent.id)?.schedule;
     },
@@ -79,7 +81,10 @@ describe("schedule handoff on this computer", () => {
   it("turns the schedule off and back on in place, keeping its organization through a switch", async () => {
     const f = await fixture("contoso");
     try {
-      await f.store.setAgentScheduleEnabled(agent.id, false);
+      assert.equal(await f.store.hasAgentSchedule(agent.id), true);
+      assert.equal(await f.store.setAgentScheduleEnabled(agent.id, false), true);
+      // The window hears of it, so the switch shows the real state.
+      assert.ok(f.changes.includes("agent-schedule-changed"));
       const off = await f.schedule();
       assert.equal(off?.enabled, false, "turned off, not deleted");
       assert.equal(off?.organizationId, "org-contoso");
@@ -95,8 +100,13 @@ describe("schedule handoff on this computer", () => {
       assert.equal(on?.organizationId, "org-contoso", "Contoso's schedule stays Contoso's");
       assert.equal(on?.intervalSeconds, 7200);
       assert.equal(on?.notifyOnChangeOnly, true);
-      // An agent without a schedule here has nothing to change.
-      await f.store.setAgentScheduleEnabled("not-installed", true);
+      // An agent without a schedule here has nothing to change, and says so.
+      assert.equal(await f.store.setAgentScheduleEnabled("not-installed", true), false);
+      assert.equal(await f.store.hasAgentSchedule("not-installed"), false);
+      // The same state again writes nothing.
+      const before = f.changes.length;
+      assert.equal(await f.store.setAgentScheduleEnabled(agent.id, true), true);
+      assert.equal(f.changes.length, before, "nothing was written or announced");
     } finally {
       await f.close();
     }

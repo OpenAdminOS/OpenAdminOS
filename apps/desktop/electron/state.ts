@@ -5870,10 +5870,40 @@ export class AppStateStore {
    * team features module moved the schedule to another place and back. An
    * agent without a schedule here has nothing to change.
    */
-  async setAgentScheduleEnabled(agentId: string, enabled: boolean): Promise<void> {
-    const agent = (await this.listAgents()).find((entry) => entry.id === agentId || entry.slug === agentId);
-    if (!agent?.schedule || agent.schedule.enabled === enabled) return;
-    await this.updateAgentSchedule(agent.slug, { ...agent.schedule, enabled });
+  async setAgentScheduleEnabled(agentId: string, enabled: boolean): Promise<boolean> {
+    // Read and written in one turn of the write lock, so no edit lands between.
+    const outcome = await this.serialize(async () => {
+      const persisted = await this.read();
+      const index = persisted.installedAgents.findIndex((entry) => entry.id === agentId || entry.slug === agentId);
+      const existing = index < 0 ? undefined : persisted.installedAgents[index];
+      if (!existing?.schedule) return "none" as const;
+      if (existing.schedule.enabled === enabled) return "same" as const;
+      if (enabled) {
+        const manifestError = this.agentManifestError(existing);
+        if (manifestError) throw new Error(invalidAgentManifestCopy(existing.name, manifestError));
+      }
+      const next = [...persisted.installedAgents];
+      next[index] = {
+        ...existing,
+        schedule: {
+          ...existing.schedule,
+          enabled,
+          // Turned on again, it starts one full interval from now, as the switch does.
+          ...(enabled ? { lastScheduledRunAt: new Date().toISOString() } : {}),
+        },
+      };
+      await this.write({ ...persisted, installedAgents: next });
+      return "changed" as const;
+    });
+    // The window shows the real switch state at once.
+    if (outcome === "changed") this.emitStateChanged("agent-schedule-changed");
+    return outcome !== "none";
+  }
+
+  /** Whether an agent has a schedule on this computer, on or off. */
+  async hasAgentSchedule(agentId: string): Promise<boolean> {
+    const persisted = await this.read();
+    return persisted.installedAgents.some((entry) => (entry.id === agentId || entry.slug === agentId) && entry.schedule !== undefined);
   }
 
   /**
