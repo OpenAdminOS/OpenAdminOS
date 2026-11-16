@@ -143,9 +143,29 @@ function mergeValues(body: EnterpriseUiBodyView, previous: Record<string, string
  * newer revision closes an open confirmation and keeps the values the
  * admin typed where they still fit.
  */
-export function EnterpriseUiBody({ sectionId, body, revision = 0 }: { sectionId: string; body: EnterpriseUiBodyView; revision?: number }) {
-  const [values, setValues] = useState(() => mergeValues(body, {}, new Set()));
-  const dirty = useRef(new Set<string>());
+/** Values the admin typed, kept by the parent so they survive a body drawn anew. */
+export type EnterpriseUiMemory = Map<string, { values: Record<string, string>; dirty: Set<string> }>;
+
+export function EnterpriseUiBody({
+  sectionId,
+  body,
+  revision = 0,
+  memory,
+}: {
+  sectionId: string;
+  body: EnterpriseUiBodyView;
+  revision?: number;
+  memory?: EnterpriseUiMemory;
+}) {
+  const kept = memory?.get(sectionId);
+  const dirty = useRef(kept?.dirty ?? new Set<string>());
+  const [values, setValuesState] = useState(() => mergeValues(body, kept?.values ?? {}, dirty.current));
+  const setValues = (update: (previous: Record<string, string>) => Record<string, string>) =>
+    setValuesState((previous) => {
+      const next = update(previous);
+      memory?.set(sectionId, { values: next, dirty: dirty.current });
+      return next;
+    });
   const [notice, setNotice] = useState<EnterpriseUiNoticeView | undefined>();
   const [busy, setBusy] = useState<string | undefined>();
   const [confirming, setConfirming] = useState<Button | undefined>();
@@ -287,7 +307,7 @@ function EnterpriseUiElement({
         <ul className="divide-y divide-[var(--color-border-soft)] rounded-[10px] ring-1 ring-[var(--color-border-soft)]">
           {element.rows.map((row, index) => (
             <li key={`${row.label}-${index}`} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-              <span className="min-w-0 truncate text-[var(--color-text)]" title={row.label}>{row.label}</span>
+              <span className="min-w-0 break-words text-[var(--color-text)]">{row.label}</span>
               {row.status ? (
                 <Badge tone={row.status.tone}>
                   <StatusDot tone={row.status.tone} /> {row.status.value}

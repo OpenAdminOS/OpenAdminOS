@@ -239,7 +239,7 @@ describe("schedule card: where it runs", () => {
     expect(screen.queryByText("Where it runs")).toBeNull();
   });
 
-  it("moves an enabled schedule to a sandbox only after the module took it, turning the local one off", async () => {
+  it("claims a move only when the module reports it, and changes nothing here itself", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     let status = statusWith();
@@ -247,7 +247,7 @@ describe("schedule card: where it runs", () => {
     const invokeEnterpriseUi = vi.fn<Invoke>(async () => {
       status = statusWith({ [agent.id]: "mini-pc" });
       changed?.();
-      return { notice: { type: "notice", tone: "success", title: "Moved", message: "The schedule runs on Office mini PC." } };
+      return { notice: { type: "notice", tone: "success", title: "Saved", message: "The schedule now runs on Office mini PC." } };
     });
     const bridge = makeMockBridge({
       getEnterpriseStatus: async () => status,
@@ -257,23 +257,36 @@ describe("schedule card: where it runs", () => {
       },
       invokeEnterpriseUi,
     });
-    renderWithAppState(<AgentScheduleCard agent={createMockAgent({ id: agent.id, schedule: { enabled: true, intervalSeconds: 3600 } })} onChange={onChange} />, { bridge });
+    renderWithAppState(<AgentScheduleCard agent={agent} onChange={onChange} />, { bridge });
     expect(await screen.findByText("Where it runs")).toBeInTheDocument();
     expect(screen.getByText(/provided by the team features module/)).toBeInTheDocument();
+    expect(screen.getAllByText("Team features")).toHaveLength(2);
     expect(screen.getByRole("radio", { name: /This computer/ })).toBeChecked();
     expect(screen.getByRole("radio", { name: /Lab sandbox/ })).toBeDisabled();
     await user.click(screen.getByRole("radio", { name: /Office mini PC/ }));
     await waitFor(() => expect(invokeEnterpriseUi).toHaveBeenCalledWith("sandboxes.schedule", { kind: "schedule", agentId: agent.id, targetId: "mini-pc", intervalSeconds: 3600 }));
-    expect(await screen.findByText("The schedule runs on Office mini PC.")).toBeInTheDocument();
-    await waitFor(() => expect(onChange).toHaveBeenCalledWith(null));
+    expect(await screen.findByText("The schedule now runs on Office mini PC.")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("radio", { name: /Office mini PC/ })).toBeChecked());
-    // Here the switch and the interval are off, and the card says where the schedule runs.
+    // The main process turned the schedule here off; the card does not write it itself.
+    expect(onChange).not.toHaveBeenCalled();
     expect(screen.getByRole("switch", { name: /Automatic runs/ })).toBeDisabled();
     expect(screen.getByText("This schedule runs on Office mini PC. Its interval is set there.")).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "24h" })).toBeDisabled();
   });
 
-  it("brings the schedule back with This computer through the module, and keeps the place on a refusal", async () => {
+  it("shows a schedule running here and elsewhere as a danger state, and turns the one here off in place", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const scheduled = createMockAgent({ id: agent.id, schedule: { organizationId: "org-contoso", enabled: true, intervalSeconds: 7200, notifyOnChangeOnly: true } });
+    const bridge = makeMockBridge({ getEnterpriseStatus: async () => statusWith({ [agent.id]: "mini-pc" }) });
+    renderWithAppState(<AgentScheduleCard agent={scheduled} onChange={onChange} />, { bridge });
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Runs here and on Office mini PC");
+    await user.click(within(alert).getByRole("button", { name: "Turn off here" }));
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ organizationId: "org-contoso", enabled: false, intervalSeconds: 7200, notifyOnChangeOnly: true })));
+  });
+
+  it("keeps the reported place on a refusal or a reply that does not move it", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     const invokeEnterpriseUi = vi
@@ -287,12 +300,26 @@ describe("schedule card: where it runs", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("The sandbox did not answer.");
     expect(screen.getByRole("radio", { name: /Office mini PC/ })).toBeChecked();
-    expect(onChange).not.toHaveBeenCalled();
-
-    // A reply without a notice still says what happened, and the local schedule comes back.
+    // A reply that claims nothing changes nothing here: the place stays what the module reports.
     await user.click(screen.getByRole("radio", { name: /This computer/ }));
-    await waitFor(() => expect(invokeEnterpriseUi).toHaveBeenLastCalledWith("sandboxes.schedule", { kind: "schedule", agentId: agent.id, targetId: "this-computer", intervalSeconds: 3600 }));
-    expect(await screen.findByText("The schedule now runs on This computer.")).toBeInTheDocument();
-    await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ enabled: true, intervalSeconds: 3600 })));
+    await waitFor(() => expect(invokeEnterpriseUi).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("radio", { name: /Office mini PC/ })).toBeChecked();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("marks a look-alike place as the module's and never shows a foreign place as this computer", async () => {
+    const bridge = makeMockBridge({
+      getEnterpriseStatus: async () => ({
+        active: true,
+        label: "Team features on",
+        settingsSections: [],
+        scheduleTargets: { action: "sandboxes.schedule", targets: [{ id: "lookalike", label: "This c\u043emputer" }], current: { [agent.id]: "lookalike" } },
+      }),
+    });
+    renderWithAppState(<AgentScheduleCard agent={agent} onChange={vi.fn()} />, { bridge });
+    const lookalike = await screen.findByRole("radio", { name: /This c\u043emputer/ });
+    expect(lookalike).toBeChecked();
+    expect(lookalike.closest("label")).toHaveTextContent("Team features");
+    expect(screen.getByRole("radio", { name: /^This computer/ })).not.toBeChecked();
   });
 });

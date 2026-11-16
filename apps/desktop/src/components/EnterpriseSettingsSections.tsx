@@ -1,4 +1,6 @@
-import { EnterpriseUiBody, ModuleUiBoundary } from "./EnterpriseUi";
+import { useRef } from "react";
+
+import { EnterpriseUiBody, ModuleUiBoundary, type EnterpriseUiMemory } from "./EnterpriseUi";
 import { useEnterpriseStatus } from "./useEnterpriseStatus";
 
 /**
@@ -9,6 +11,8 @@ import { useEnterpriseStatus } from "./useEnterpriseStatus";
  */
 export function EnterpriseSettingsSections({ query }: { query: string }) {
   const status = useEnterpriseStatus();
+  // Typed values outlive a body drawn anew at each revision.
+  const memory = useRef<EnterpriseUiMemory>(new Map());
   if (!status.active) return null;
   const needle = query.trim().toLowerCase();
   const sections = status.settingsSections.filter(
@@ -35,8 +39,8 @@ export function EnterpriseSettingsSections({ query }: { query: string }) {
             <p className="mt-1 text-xs text-[var(--color-text-muted)]">Provided by the team features module.</p>
             {section.body ? (
               <div className="mt-3 border-t border-[var(--color-border-soft)] pt-3">
-                <ModuleUiBoundary>
-                  <EnterpriseUiBody sectionId={section.id} body={section.body} revision={section.revision ?? 0} />
+                <ModuleUiBoundary key={`${section.id}:${section.revision ?? 0}`}>
+                  <EnterpriseUiBody sectionId={section.id} body={section.body} revision={section.revision ?? 0} memory={memory.current} />
                 </ModuleUiBoundary>
               </div>
             ) : null}

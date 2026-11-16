@@ -13,6 +13,7 @@ import { useAppState } from "../state";
 import { SCHEDULE_ORGANIZATION_COPY, userFacingErrorReason } from "../copy";
 import { resolveOrganizations } from "../shared/openAdminOS";
 import { useToast } from "./Toast";
+import { currentTargetFor } from "@openadminos/enterprise/ui";
 import { EnterpriseNotice, invokeUiAction, ModuleUiBoundary } from "./EnterpriseUi";
 import { useEnterpriseStatus } from "./useEnterpriseStatus";
 import type { EnterpriseScheduleTargetView, EnterpriseUiNoticeView } from "@openadminos/agent-sdk";
@@ -99,23 +100,21 @@ export function AgentScheduleCard({
       {schedule ? <ScheduleOrganizationRow agent={agent} /> : null}
       {where ? (
         <ModuleUiBoundary>
-          <ScheduleTargetRow
-            agent={agent}
-            where={where}
-            intervalSeconds={draftSeconds}
-            onMoved={(targetId) => {
-              // One place per schedule: a sandbox takes it from this computer, and This computer takes it back.
-              if (targetId !== "this-computer") {
-                if (enabled) void apply(null);
-              } else if (draftSeconds >= 60) {
-                void apply(buildSchedule(draftSeconds));
-              }
-            }}
-          />
+          {/* The move and the schedule here change in the main process; this draws what they report. */}
+          <ScheduleTargetRow agent={agent} where={where} intervalSeconds={draftSeconds} />
         </ModuleUiBoundary>
       ) : null}
+      {elsewhere && enabled && schedule ? (
+        <div role="alert" className="rounded-[10px] bg-[var(--color-danger-soft)] px-3 py-2.5 text-sm text-[var(--color-danger)]">
+          <p className="font-medium">{SCHEDULE_TARGET_COPY.bothTitle(elsewhere)}</p>
+          <p className="mt-0.5 text-[var(--color-text-soft)]">{SCHEDULE_TARGET_COPY.bothMessage}</p>
+          <Button size="sm" variant="danger" className="mt-2" disabled={busy} onClick={() => void apply({ ...schedule, enabled: false })}>
+            {SCHEDULE_TARGET_COPY.turnOffHere}
+          </Button>
+        </div>
+      ) : null}
       <Switch
-        checked={enabled && !elsewhere}
+        checked={enabled}
         disabled={busy || elsewhere !== undefined || (!enabled && draftSeconds < 60)}
         label="Automatic runs"
         description={
@@ -385,8 +384,10 @@ export const SCHEDULE_TARGET_COPY = {
   thisComputerDetail: "Runs here while OpenAdminOS is open.",
   needsInterval: "Choose an interval of at least one minute first.",
   provenance: "Places other than this computer are provided by the team features module.",
-  moved: "Saved",
-  movedTo: (label: string) => `The schedule now runs on ${label}.`,
+  moduleBadge: "Team features",
+  bothTitle: (label: string) => `Runs here and on ${label}`,
+  bothMessage: "The team features module reports this schedule on another place, and the schedule on this computer is on too. It does not run here until this is resolved.",
+  turnOffHere: "Turn off here",
   working: "Working",
   runsElsewhere: (label: string) => `This schedule runs on ${label}. Its interval is set there.`,
 } as const;
@@ -399,16 +400,19 @@ interface ScheduleTargetChoice {
   currentLabel: string;
 }
 
-/** Where an agent's schedule runs, when a team features module offers places for it. */
+/** Where an agent's schedule runs, when a team features module offers places for it or reports one. */
 function useScheduleTarget(agent: AgentSummary): ScheduleTargetChoice | undefined {
   const status = useEnterpriseStatus();
   const contribution = status.active ? status.scheduleTargets : undefined;
   if (!contribution) return undefined;
-  const targets = contribution.targets.filter((target) => !target.agentIds || target.agentIds.includes(agent.id));
-  const reported = contribution.current?.[agent.id];
-  const current = reported && targets.some((target) => target.id === reported) ? reported : "this-computer";
+  // The shared resolution, against every place the module reports: a place elsewhere is never shown as this computer.
+  const current = currentTargetFor(contribution, agent.id);
+  const eligible = contribution.targets.filter((target) => !target.agentIds || target.agentIds.includes(agent.id));
+  const targets = current === "this-computer" || eligible.some((target) => target.id === current)
+    ? eligible
+    : [...eligible, ...contribution.targets.filter((target) => target.id === current)];
   if (targets.length === 0) return undefined;
-  const currentLabel = current === "this-computer" ? SCHEDULE_TARGET_COPY.thisComputer : targets.find((target) => target.id === current)!.label;
+  const currentLabel = current === "this-computer" ? SCHEDULE_TARGET_COPY.thisComputer : contribution.targets.find((target) => target.id === current)?.label ?? current;
   return { action: contribution.action, targets, current, currentLabel };
 }
 
@@ -422,12 +426,10 @@ function ScheduleTargetRow({
   agent,
   where,
   intervalSeconds,
-  onMoved,
 }: {
   agent: AgentSummary;
   where: ScheduleTargetChoice;
   intervalSeconds: number;
-  onMoved: (targetId: string) => void;
 }) {
   const [notice, setNotice] = useState<EnterpriseUiNoticeView | undefined>();
   const [busy, setBusy] = useState<string | undefined>();
@@ -439,14 +441,8 @@ function ScheduleTargetRow({
     setBusy(targetId);
     const reply = await invokeUiAction(where.action, { kind: "schedule", agentId: agent.id, targetId, intervalSeconds });
     setBusy(undefined);
-    if (reply.notice?.tone === "danger") {
-      setNotice(reply.notice);
-      return;
-    }
-    // A reply without a notice still says what happened.
-    const label = targetId === "this-computer" ? SCHEDULE_TARGET_COPY.thisComputer : where.targets.find((target) => target.id === targetId)?.label ?? targetId;
-    setNotice(reply.notice ?? { type: "notice", tone: "success", title: SCHEDULE_TARGET_COPY.moved, message: SCHEDULE_TARGET_COPY.movedTo(label) });
-    onMoved(targetId);
+    // The main process moved the schedule here or not, and says which; this shows what it says.
+    setNotice(reply.notice);
   };
 
   const options = [
@@ -470,6 +466,9 @@ function ScheduleTargetRow({
             />
             <span>
               <span className="text-[var(--color-text)]">{option.label}</span>
+              {option.id !== "this-computer" ? (
+                <Badge tone="neutral" className="ml-1.5 align-middle">{SCHEDULE_TARGET_COPY.moduleBadge}</Badge>
+              ) : null}
               {busy === option.id ? <span className="ml-1.5 text-xs text-[var(--color-text-muted)]">{SCHEDULE_TARGET_COPY.working}</span> : null}
               {option.detail ? <span className="block text-xs text-[var(--color-text-muted)]">{option.detail}</span> : null}
               {option.disabledReason ? <span className="block text-xs text-[var(--color-warning)]">{option.disabledReason}</span> : null}
