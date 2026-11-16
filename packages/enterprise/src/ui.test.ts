@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
 import { EnterpriseHostError } from "./errors.js";
-import { checkScheduleTargets, checkUiActionInput, checkUiBody, checkUiReply, ENTERPRISE_UI_LIMITS } from "./ui.js";
+import { checkScheduleTargets, checkUiActionAgainst, checkUiActionInput, checkUiBody, checkUiReply, currentTargetFor, ENTERPRISE_UI_LIMITS } from "./ui.js";
 
 function refused(action: () => unknown, code: "invalid-value" | "limit" = "invalid-value"): void {
   assert.throws(action, (error: unknown) => error instanceof EnterpriseHostError && error.code === code);
@@ -14,7 +14,7 @@ describe("declarative module UI", () => {
   it("takes each element type and returns a frozen copy", () => {
     const source = body(
       { type: "status", label: "Sandbox", value: "Paired", tone: "success" },
-      { type: "text", text: "Schedules keep running while this computer is off.\nThey are read-only." },
+      { type: "text", text: "Schedules keep running while the laptop is off.\nThey are read-only." },
       { type: "notice", tone: "warning", title: "Sync stopped", message: "A row is missing.", recovery: "Pair again." },
       { type: "field", id: "address", label: "Address", kind: "code", placeholder: "100.64.0.10:7443", maxLength: 64, value: "" },
       { type: "select", id: "organization", label: "Organization", options: [{ value: "org-1", label: "Contoso" }], value: "org-1" },
@@ -41,6 +41,7 @@ describe("declarative module UI", () => {
     refused(() => checkUiBody(body({ type: "status", label: "A\nB", value: "x", tone: "success" })));
     refused(() => checkUiBody(body({ type: "status", label: "A", value: "x", tone: "info" })));
     refused(() => checkUiBody(body({ type: "notice", tone: "danger", title: "T" })));
+    refused(() => checkUiBody(body({ type: "notice", tone: "danger", title: "T", message: "M" })), "invalid-value");
     refused(() => checkUiBody(body({ type: "field", id: "Bad Id", label: "A", kind: "text" })));
     refused(() => checkUiBody(body({ type: "field", id: "a", label: "A", kind: "secret" })));
     refused(() => checkUiBody(body({ type: "field", id: "a", label: "A", kind: "text", maxLength: ENTERPRISE_UI_LIMITS.maxFieldLength + 1 })));
@@ -81,5 +82,64 @@ describe("declarative module UI", () => {
     refused(() => checkScheduleTargets({ action: "x", targets: [{ id: "this-computer", label: "This computer" }] }));
     refused(() => checkScheduleTargets({ action: "x", targets: [{ id: "a", label: "A" }, { id: "a", label: "B" }] }));
     refused(() => checkScheduleTargets({ action: "x", targets: Array.from({ length: ENTERPRISE_UI_LIMITS.maxScheduleTargets + 1 }, (_, i) => ({ id: `t${i}`, label: "T" })) }));
+  });
+
+  it("refuses the app's trust phrases, This computer and invisible formatting characters", () => {
+    for (const text of ["Runs on This Computer", "Local-only, nothing to worry about", "No data leaves your network", "Tenant data stays on this device.", "Verified against the team chain"]) {
+      refused(() => checkUiBody(body({ type: "text", text })));
+    }
+    for (const character of ["\u202e", "\u2066", "\u200b", "\ufeff"]) {
+      refused(() => checkUiBody(body({ type: "status", label: `Sandbox${character}`, value: "Paired", tone: "success" })));
+      refused(() => checkUiBody(body({ type: "field", id: "a", label: "A", kind: "text", value: `x${character}` })));
+    }
+    refused(() => checkScheduleTargets({ action: "x", targets: [{ id: "laptop", label: "This computer" }] }));
+  });
+
+  it("asks before a danger button and names a registered action", () => {
+    refused(() => checkUiBody(body({ type: "button", id: "b", label: "Unpair", kind: "danger", action: "sandboxes.unpair" })));
+    const actions = new Set(["sandboxes.pair"]);
+    assert.equal(checkUiBody(body({ type: "button", id: "b", label: "Pair", kind: "primary", action: "sandboxes.pair" }), actions).elements.length, 1);
+    refused(() => checkUiBody(body({ type: "button", id: "b", label: "Sync", kind: "primary", action: "sandboxes.sync" }), actions));
+    refused(() => checkScheduleTargets({ action: "sandboxes.schedule", targets: [] }, actions));
+  });
+
+  it("reports the current target per agent and refuses one that is not offered", () => {
+    const targets = checkScheduleTargets({ action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC" }], current: { "find-inactive-devices": "mini-pc", "os-update-posture": "this-computer" } });
+    assert.equal(currentTargetFor(targets, "find-inactive-devices"), "mini-pc");
+    assert.equal(currentTargetFor(targets, "os-update-posture"), "this-computer");
+    assert.equal(currentTargetFor(targets, "compliance-overview"), "this-computer");
+    assert.equal(currentTargetFor(undefined, "compliance-overview"), "this-computer");
+    refused(() => checkScheduleTargets({ action: "x", targets: [], current: { "find-inactive-devices": "lab" } }));
+  });
+
+  it("checks an action input against the UI the window was given", () => {
+    const section = checkUiBody(body(
+      { type: "field", id: "address", label: "Address", kind: "code", maxLength: 10 },
+      { type: "select", id: "organization", label: "Organization", options: [{ value: "org-1", label: "Contoso" }] },
+      { type: "button", id: "pair", label: "Pair", kind: "primary", action: "sandboxes.pair" },
+      { type: "button", id: "unpair", label: "Unpair", kind: "danger", action: "sandboxes.unpair", confirm: { title: "Unpair", message: "Unpair it?", typedPhrase: "UNPAIR" } },
+    ));
+    const targets = checkScheduleTargets({ action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC", agentIds: ["find-inactive-devices"] }, { id: "lab", label: "Lab", disabledReason: "Sync is stopped." }] });
+    const ui = { body: (id: string) => (id === "sandboxes" ? section : undefined), scheduleTargets: targets };
+    const button = (buttonId: string, values: Record<string, string>, confirmedPhrase?: string) =>
+      checkUiActionInput({ kind: "button", sectionId: "sandboxes", buttonId, values, ...(confirmedPhrase ? { confirmedPhrase } : {}) });
+    checkUiActionAgainst(button("pair", { address: "10.0.0.1:1", organization: "org-1" }), "sandboxes.pair", ui);
+    refused(() => checkUiActionAgainst(button("pair", {}), "sandboxes.unpair", ui));
+    refused(() => checkUiActionAgainst(button("gone", {}), "sandboxes.pair", ui));
+    refused(() => checkUiActionAgainst(checkUiActionInput({ kind: "button", sectionId: "other", buttonId: "pair", values: {} }), "sandboxes.pair", ui));
+    refused(() => checkUiActionAgainst(button("pair", { address: "10.0.0.1:7443" }), "sandboxes.pair", ui));
+    refused(() => checkUiActionAgainst(button("pair", { organization: "org-9" }), "sandboxes.pair", ui));
+    refused(() => checkUiActionAgainst(button("pair", { secret: "x" }), "sandboxes.pair", ui));
+    refused(() => checkUiActionAgainst(button("unpair", {}), "sandboxes.unpair", ui));
+    refused(() => checkUiActionAgainst(button("unpair", {}, "unpair"), "sandboxes.unpair", ui));
+    checkUiActionAgainst(button("unpair", {}, "UNPAIR"), "sandboxes.unpair", ui);
+
+    const schedule = (agentId: string, targetId: string) => checkUiActionInput({ kind: "schedule", agentId, targetId, intervalSeconds: 3600 });
+    checkUiActionAgainst(schedule("find-inactive-devices", "mini-pc"), "sandboxes.schedule", ui);
+    checkUiActionAgainst(schedule("find-inactive-devices", "this-computer"), "sandboxes.schedule", ui);
+    refused(() => checkUiActionAgainst(schedule("os-update-posture", "mini-pc"), "sandboxes.schedule", ui));
+    refused(() => checkUiActionAgainst(schedule("os-update-posture", "lab"), "sandboxes.schedule", ui));
+    refused(() => checkUiActionAgainst(schedule("find-inactive-devices", "mini-pc"), "sandboxes.other", ui));
+    refused(() => checkUiActionInput({ kind: "schedule", agentId: "a", targetId: "mini-pc", intervalSeconds: 32 * 86_400 }));
   });
 });

@@ -7,6 +7,7 @@
 import {
   ENTERPRISE_INTERFACE_VERSION,
   ENTERPRISE_IPC_PREFIX,
+  ENTERPRISE_UI_IPC_PREFIX,
   type EnterpriseAgents,
   type EnterpriseEntitlement,
   type EnterpriseHost,
@@ -27,7 +28,7 @@ import {
   type EnterpriseStorage,
 } from "./interface.js";
 import { EnterpriseHostError } from "./errors.js";
-import { checkScheduleTargets, checkUiActionInput, checkUiBody, checkUiReply, ENTERPRISE_UI_LIMITS } from "./ui.js";
+import { checkScheduleTargets, checkUiActionAgainst, checkUiActionInput, checkUiBody, checkUiReply, ENTERPRISE_UI_LIMITS } from "./ui.js";
 
 export { EnterpriseHostError, type EnterpriseHostErrorCode } from "./errors.js";
 
@@ -98,9 +99,14 @@ export interface EnterpriseHostCapabilities {
   readonly sandboxes?: EnterpriseSandboxes;
 }
 
+/** A section as the window gets it: with the revision of its body. */
+export interface EnterpriseSettingsSectionSnapshot extends EnterpriseSettingsSection {
+  readonly revision: number;
+}
+
 export interface EnterpriseHostSnapshot {
   readonly status: EnterpriseStatusContribution | undefined;
-  readonly settingsSections: readonly EnterpriseSettingsSection[];
+  readonly settingsSections: readonly EnterpriseSettingsSectionSnapshot[];
   readonly scheduleTargets: EnterpriseScheduleTargets | undefined;
   readonly ipcChannels: readonly string[];
 }
@@ -116,9 +122,23 @@ export function enterpriseIpcChannel(name: string): string {
   return `${ENTERPRISE_IPC_PREFIX}${name}`;
 }
 
+export function enterpriseUiChannel(name: string): string {
+  return `${ENTERPRISE_UI_IPC_PREFIX}${name}`;
+}
+
+const SUPERSEDED_NOTICE = Object.freeze({
+  type: "notice" as const,
+  tone: "neutral" as const,
+  title: "The section changed",
+  message: "The section changed while this ran, so it shows the newest state.",
+});
+
 export function createEnterpriseHost(options: CreateEnterpriseHostOptions): EnterpriseHostController {
   const channels = new Map<string, string>();
+  const uiChannels = new Map<string, string>();
   const sections = new Map<string, EnterpriseSettingsSection>();
+  /** Moves on with every body, so the window draws the newest and drops replies to an older one. */
+  const revisions = new Map<string, number>();
   let status: EnterpriseStatusContribution | undefined;
   let scheduleTargets: EnterpriseScheduleTargets | undefined;
   let disposed = false;
@@ -179,22 +199,57 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
   };
 
   /**
-   * A UI action: the window's input is checked before the handler runs, and
-   * the handler's reply before the window draws it. A failure, or a reply
-   * the app does not draw, becomes a danger notice with the reason.
+   * A UI action, on its own channel under ENTERPRISE_UI_IPC_PREFIX and in
+   * its own registry. The window's input is checked against the UI it was
+   * given before the handler runs, and the reply before the window draws
+   * it. A reply body replaces the section's body in the host, unless the
+   * section changed while the handler ran. A failure, or a reply the app
+   * does not draw, becomes a danger notice with the reason.
    */
   const registerUiAction = (name: string, handler: EnterpriseUiActionHandler): void => {
-    register(name, handler, "UI action", async (request) => {
-      const input = checkUiActionInput(request);
+    assertLive();
+    assertName(name, "UI action name");
+    if (typeof handler !== "function") throw new EnterpriseHostError("invalid-value", `The UI action ${name} is not a function.`);
+    if (uiChannels.has(name)) throw new EnterpriseHostError("duplicate", `A UI action named ${name} is already registered.`);
+    if (uiChannels.size >= ENTERPRISE_UI_LIMITS.maxUiActions) {
+      throw new EnterpriseHostError("limit", `A module can register at most ${ENTERPRISE_UI_LIMITS.maxUiActions} UI actions.`);
+    }
+    const channel = enterpriseUiChannel(name);
+    options.ipc.handle(channel, async (raw: unknown) => {
+      if (disposed) throw new EnterpriseHostError("disposed", "Team features were turned off for this launch.");
+      if (options.entitlement().state === "expired") {
+        throw new EnterpriseHostError("expired", "The team features licence and its grace period ended. Install a renewed licence, then restart OpenAdminOS.");
+      }
+      const input = checkUiActionInput(checkJson(raw ?? null, ENTERPRISE_LIMITS.maxIpcInputBytes, `the request to ${name}`));
+      checkUiActionAgainst(input, name, { body: (id) => sections.get(id)?.body, scheduleTargets });
+      const revision = input.kind === "button" ? revisions.get(input.sectionId) : undefined;
       let reply: EnterpriseUiReply;
       try {
-        reply = checkUiReply(await handler(input));
+        reply = checkUiReply(await handler(input), new Set(uiChannels.keys()));
       } catch (error) {
         options.log("error", "enterprise: a UI action failed", { name, error: errorMessage(error) });
-        return failedReply(error) as unknown as EnterpriseJson;
+        return checkJson(failedReply(error), ENTERPRISE_LIMITS.maxIpcOutputBytes, `the reply from ${name}`);
       }
-      return reply as unknown as EnterpriseJson;
+      if (input.kind === "button" && reply.body) {
+        const section = sections.get(input.sectionId);
+        if (!disposed && section && revisions.get(input.sectionId) === revision) {
+          setBody(section, reply.body);
+        } else {
+          // The section changed while the handler ran: the newer body stays.
+          reply = Object.freeze({ notice: reply.notice ?? SUPERSEDED_NOTICE });
+        }
+      }
+      return checkJson(reply, ENTERPRISE_LIMITS.maxIpcOutputBytes, `the reply from ${name}`);
     });
+    uiChannels.set(name, channel);
+  };
+
+  /** Stores a checked body and moves the section's revision on. */
+  const setBody = (section: EnterpriseSettingsSection, body: EnterpriseUiBody | undefined): void => {
+    const { body: _previous, ...rest } = section;
+    sections.set(section.id, Object.freeze({ ...rest, ...(body ? { body } : {}) }));
+    revisions.set(section.id, (revisions.get(section.id) ?? 0) + 1);
+    changed();
   };
 
   const registerSettingsSection = (section: EnterpriseSettingsSection): void => {
@@ -209,7 +264,8 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
     if (sections.size >= ENTERPRISE_LIMITS.maxSettingsSections) {
       throw new EnterpriseHostError("limit", `A module can register at most ${ENTERPRISE_LIMITS.maxSettingsSections} settings sections.`);
     }
-    const body = section.body === undefined ? undefined : checkUiBody(section.body);
+    const body = section.body === undefined ? undefined : checkUiBody(section.body, new Set(uiChannels.keys()));
+    revisions.set(section.id, 1);
     sections.set(section.id, Object.freeze({
       id: section.id,
       title: checkText(section.title, ENTERPRISE_LIMITS.maxTitleLength, "settings section title"),
@@ -223,15 +279,12 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
     assertLive();
     const section = typeof id === "string" ? sections.get(id) : undefined;
     if (!section) throw new EnterpriseHostError("invalid-name", "No settings section with that id is registered.");
-    const checked = body === undefined ? undefined : checkUiBody(body);
-    const { body: _previous, ...rest } = section;
-    sections.set(id, Object.freeze({ ...rest, ...(checked ? { body: checked } : {}) }));
-    changed();
+    setBody(section, body === undefined ? undefined : checkUiBody(body, new Set(uiChannels.keys())));
   };
 
   const setScheduleTargets = (next: EnterpriseScheduleTargets | undefined): void => {
     assertLive();
-    scheduleTargets = next === undefined ? undefined : checkScheduleTargets(next);
+    scheduleTargets = next === undefined ? undefined : checkScheduleTargets(next, new Set(uiChannels.keys()));
     changed();
   };
 
@@ -269,14 +322,14 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
     host,
     snapshot: () => Object.freeze({
       status,
-      settingsSections: Object.freeze([...sections.values()]),
+      settingsSections: Object.freeze([...sections.values()].map((section) => Object.freeze({ ...section, revision: revisions.get(section.id) ?? 1 }))),
       scheduleTargets,
-      ipcChannels: Object.freeze([...channels.values()]),
+      ipcChannels: Object.freeze([...channels.values(), ...uiChannels.values()]),
     }),
     dispose: () => {
       if (disposed) return;
       disposed = true;
-      for (const channel of channels.values()) {
+      for (const channel of [...channels.values(), ...uiChannels.values()]) {
         try {
           options.ipc.removeHandler(channel);
         } catch (error) {
@@ -284,7 +337,9 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
         }
       }
       channels.clear();
+      uiChannels.clear();
       sections.clear();
+      revisions.clear();
       status = undefined;
       scheduleTargets = undefined;
       changed();

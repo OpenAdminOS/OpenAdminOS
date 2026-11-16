@@ -1,5 +1,6 @@
 export declare const ENTERPRISE_INTERFACE_VERSION: 1;
 export declare const ENTERPRISE_IPC_PREFIX: "openadminos-enterprise:";
+export declare const ENTERPRISE_UI_IPC_PREFIX: "openadminos-enterprise-ui:";
 export type EnterpriseJson = null | boolean | number | string | readonly EnterpriseJson[] | {
     readonly [key: string]: EnterpriseJson;
 };
@@ -92,6 +93,7 @@ export type EnterpriseUiActionInput = {
     readonly values: {
         readonly [id: string]: string;
     };
+    readonly confirmedPhrase?: string;
 } | {
     readonly kind: "schedule";
     readonly agentId: string;
@@ -113,6 +115,9 @@ export interface EnterpriseScheduleTarget {
 export interface EnterpriseScheduleTargets {
     readonly action: string;
     readonly targets: readonly EnterpriseScheduleTarget[];
+    readonly current?: {
+        readonly [agentId: string]: string;
+    };
 }
 export interface EnterpriseStatusContribution {
     readonly label: string;

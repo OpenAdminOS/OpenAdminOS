@@ -11,6 +11,8 @@ The package holds:
 
 ## Interface version 1
 
+Version 1 is still open: no release has loaded a module yet. It may change until the first release that loads one, with `api/interface-v1.d.ts` updated in the same commit; from then on a change that is not compatible needs version 2.
+
 A module's default export is an `EnterpriseModule`:
 
 ```ts
@@ -37,8 +39,8 @@ export default module;
 | `registerIpc(name, handler)` | Registers `openadminos-enterprise:<name>` for the renderer. The handler gets the validated input only, never the IPC event or window | Lower case names, up to four dot separated parts; 32 handlers; plain JSON input up to 64 KiB and 16 levels deep, replies up to 256 KiB |
 | `registerSettingsSection(section)` | A section for Settings while the module is active, with an optional declarative `body` | 8 sections; title up to 60 and description up to 300 characters; a body as below |
 | `updateSettingsSection(id, body)` | Replaces or clears the body of a registered section; the window draws it at once | A body as below |
-| `registerUiAction(name, handler)` | Registers `openadminos-enterprise:<name>` for buttons and schedule targets; the input is checked before the handler runs and the reply before the window draws it | Shares names and the 32 handler limit with `registerIpc` |
-| `setScheduleTargets(targets)` | Sets or clears where else an agent's schedule can run; the agent schedule card offers them next to This computer | 8 targets |
+| `registerUiAction(name, handler)` | Registers `openadminos-enterprise-ui:<name>` for buttons and schedule targets, in a registry of its own apart from `registerIpc`; the input is checked against the UI the window was given before the handler runs, and the reply before the window draws it | 32 UI actions; register an action before a body or targets name it |
+| `setScheduleTargets(targets)` | Sets or clears where else an agent's schedule can run, with `current`, where each agent's schedule runs now; the agent schedule card offers them next to This computer | 8 targets, 500 agents in `current` |
 | `setStatusContribution(status)` | What the status strip shows while team features are on. With no entry the strip says "Team features on" | Label up to 80 characters, one line |
 | `storage` | Key value storage of plain JSON, kept in its own file apart from app state | 256 keys, 64 KiB per value, 1 MiB in all |
 | `log` | Writes to the app log, prefixed with `enterprise module:` | 500 characters per message |
@@ -64,9 +66,11 @@ Module UI reaches the window as data, never as code: the app's own renderer draw
 | `button` | `id`, `label`, `kind` (primary, secondary, danger), `action`, optional `confirm` with `title`, `message` and a `typedPhrase` of upper case words and digits the admin types exactly |
 | `list` | up to 50 `rows` of `label` and an optional `status` of `value` and `tone` |
 
-Any other type or field is refused (`invalid-value`). Text is plain text: control characters and anything that looks like markup are refused, and nothing is drawn as a link. Labels are up to 80 characters, values up to 120, messages up to 500.
+Any other type or field is refused (`invalid-value`). Text is plain text: control characters, invisible formatting characters (bidirectional overrides and isolates, zero-width characters, the byte order mark) and anything that looks like markup are refused, and nothing is drawn as a link. Text that uses This computer or one of the app's own trust phrases (`ENTERPRISE_UI_RESERVED_PHRASES`) is refused, so a module cannot speak in the app's voice about where data goes. A danger button must have a `confirm`, and a danger notice must have a `recovery`. Labels are up to 80 characters, values up to 120, messages up to 500.
 
-A button calls its `action` with `{ kind: "button", sectionId, buttonId, values }`, where `values` holds the section's field and select values by id. A schedule target calls the targets' `action` with `{ kind: "schedule", agentId, targetId, intervalSeconds }`. The handler returns `{ body?, notice? }`: a new body replaces the section's, a notice is shown above it. A handler that throws, or a reply the app does not draw, is answered with a danger notice that gives the reason and the step that fixes it, and is logged. `checkUiBody`, `checkUiReply`, `checkUiActionInput` and `checkScheduleTargets` are the checks the host runs.
+A button calls its `action` with `{ kind: "button", sectionId, buttonId, values, confirmedPhrase? }`, where `values` holds the section's field and select values by id. Before the handler runs the host checks that the button is in the section's current body and calls this action, that each value belongs to a field or select there and fits it (one line within `maxLength`, or one of the options), and that a button with a typed phrase carries it as `confirmedPhrase`. A schedule choice calls the targets' `action` with `{ kind: "schedule", agentId, targetId, intervalSeconds }`, for a target or for `this-computer`; the target must be offered for the agent and not disabled, and the interval is 60 seconds to 31 days. The handler returns `{ body?, notice? }`: a new body becomes the section's body in the host and the window draws it from there, and a notice is shown above it. Each body has a revision; a reply to a body that changed while the handler ran keeps the newer body and says so.
+
+A schedule runs in one place. The card shows where each agent's schedule runs from `current`: choosing a target moves it there and the app turns the schedule on this computer off, and choosing This computer asks the module to withdraw it and turns the local schedule back on. While it runs elsewhere, the card's own switch and interval are off and it says where the schedule runs. A handler that throws, or a reply the app does not draw, is answered with a danger notice that gives the reason and the step that fixes it, and is logged. `checkUiBody`, `checkUiReply`, `checkUiActionInput` and `checkScheduleTargets` are the checks the host runs.
 
 The host object and every member are frozen. Nothing reachable from it exposes tenant tokens, provider credentials, the keychain or a secret store, and writes to a tenant still go through the app's diff confirmation. Graph calls and prompts stay on the admin's device.
 

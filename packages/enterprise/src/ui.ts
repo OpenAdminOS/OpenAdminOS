@@ -30,7 +30,28 @@ export const ENTERPRISE_UI_LIMITS = Object.freeze({
   maxScheduleTargets: 8,
   maxAgentIds: 100,
   maxPhraseLength: 80,
+  maxUiActions: 32,
+  maxCurrentTargets: 500,
+  /** The schedule bounds of the app: one minute to 31 days. */
+  minIntervalSeconds: 60,
+  maxIntervalSeconds: 31 * 86_400,
 });
+
+/**
+ * Phrases the app uses for its own trust messages and for this computer.
+ * Module text containing one, in any case, is refused, so a module cannot
+ * speak in the app's voice about where data goes.
+ */
+export const ENTERPRISE_UI_RESERVED_PHRASES = Object.freeze([
+  "this computer",
+  "local-only",
+  "local only",
+  "no data leaves",
+  "nothing leaves this device",
+  "stays on this device",
+  "verified against",
+  "team features off",
+]);
 
 const L = ENTERPRISE_UI_LIMITS;
 /** Element ids, the same rule as IPC names and section ids, one part. */
@@ -44,6 +65,8 @@ const TONES: ReadonlySet<string> = new Set(["neutral", "success", "warning", "da
 const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/;
 /** A tag or a comment: module text is plain text. */
 const MARKUP = /<\s*[a-z!/?]/i;
+/** Bidirectional overrides and isolates, zero-width characters and the byte order mark. */
+const FORMAT = /[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/;
 
 function invalid(message: string): never {
   throw new EnterpriseHostError("invalid-value", message);
@@ -68,7 +91,12 @@ function text(value: unknown, max: number, what: string, multiline = false): str
   const trimmed = value.trim();
   if (trimmed === "" || trimmed.length > max) invalid(`The ${what} must be 1 to ${max} characters.`);
   if (CONTROL.test(trimmed) || (!multiline && /[\n\r]/.test(trimmed))) invalid(`The ${what} has a control character or a line break.`);
+  // Checked before trimming: trim drops a byte order mark at the ends.
+  if (FORMAT.test(value)) invalid(`The ${what} has an invisible formatting character.`);
   if (MARKUP.test(trimmed)) invalid(`The ${what} looks like markup; module text is plain text.`);
+  const lower = trimmed.toLowerCase();
+  const reserved = ENTERPRISE_UI_RESERVED_PHRASES.find((phrase) => lower.includes(phrase));
+  if (reserved) invalid(`The ${what} uses "${reserved}", which the app keeps for its own messages.`);
   return trimmed;
 }
 
@@ -96,6 +124,7 @@ export function checkUiNotice(value: unknown): EnterpriseUiNotice {
   only(fields, ["type", "tone", "title", "message", "recovery"], "notice");
   if (fields.type !== "notice") invalid("A notice has the type notice.");
   const recovery = optionalText(fields.recovery, L.maxMessageLength, "notice recovery");
+  if (fields.tone === "danger" && !recovery) invalid("A danger notice names the step that fixes it in recovery.");
   return Object.freeze({
     type: "notice",
     tone: tone(fields.tone, "notice"),
@@ -105,7 +134,7 @@ export function checkUiNotice(value: unknown): EnterpriseUiNotice {
   });
 }
 
-function checkElement(value: unknown, ids: Set<string>): EnterpriseUiElement {
+function checkElement(value: unknown, ids: Set<string>, actions: ReadonlySet<string> | undefined): EnterpriseUiElement {
   const fields = object(value, "element");
   const unique = (elementId: string) => {
     if (ids.has(elementId)) invalid(`The element id ${elementId} is used twice in one body.`);
@@ -136,7 +165,9 @@ function checkElement(value: unknown, ids: Set<string>): EnterpriseUiElement {
       const placeholder = optionalText(fields.placeholder, L.maxValueLength, "field placeholder");
       let fieldValue: string | undefined;
       if (fields.value !== undefined) {
-        if (typeof fields.value !== "string" || fields.value.length > maxLength || CONTROL.test(fields.value)) invalid("A field value is text within its maxLength.");
+        if (typeof fields.value !== "string" || fields.value.length > maxLength || CONTROL.test(fields.value) || /[\n\r]/.test(fields.value) || FORMAT.test(fields.value)) {
+          invalid("A field value is one line of text within its maxLength.");
+        }
         fieldValue = fields.value;
       }
       return Object.freeze({
@@ -173,6 +204,9 @@ function checkElement(value: unknown, ids: Set<string>): EnterpriseUiElement {
     case "button": {
       only(fields, ["type", "id", "label", "kind", "action", "confirm"], "button");
       if (fields.kind !== "primary" && fields.kind !== "secondary" && fields.kind !== "danger") invalid("A button kind is primary, secondary or danger.");
+      if (fields.kind === "danger" && fields.confirm === undefined) invalid("A danger button asks before it acts: give it a confirm.");
+      const action = checkUiAction(fields.action, "button action");
+      if (actions && !actions.has(action)) invalid(`The button calls ${action}, which is not a registered UI action. Register it first.`);
       let confirm: EnterpriseUiConfirm | undefined;
       if (fields.confirm !== undefined) {
         const entry = object(fields.confirm, "button confirm");
@@ -195,7 +229,7 @@ function checkElement(value: unknown, ids: Set<string>): EnterpriseUiElement {
         id: unique(id(fields.id, "button")),
         label: text(fields.label, L.maxLabelLength, "button label"),
         kind: fields.kind,
-        action: checkUiAction(fields.action, "button action"),
+        action,
         ...(confirm ? { confirm } : {}),
       });
     }
@@ -220,7 +254,8 @@ function checkElement(value: unknown, ids: Set<string>): EnterpriseUiElement {
   }
 }
 
-export function checkUiBody(value: unknown): EnterpriseUiBody {
+/** `actions`, when given, are the registered UI actions a button may call. */
+export function checkUiBody(value: unknown, actions?: ReadonlySet<string>): EnterpriseUiBody {
   const fields = object(value, "body");
   only(fields, ["elements"], "body");
   if (!Array.isArray(fields.elements)) invalid("A body has a list of elements.");
@@ -228,15 +263,15 @@ export function checkUiBody(value: unknown): EnterpriseUiBody {
     throw new EnterpriseHostError("limit", `A body has at most ${L.maxElements} elements.`);
   }
   const ids = new Set<string>();
-  return Object.freeze({ elements: Object.freeze(fields.elements.map((element: unknown) => checkElement(element, ids))) });
+  return Object.freeze({ elements: Object.freeze(fields.elements.map((element: unknown) => checkElement(element, ids, actions))) });
 }
 
-export function checkUiReply(value: unknown): EnterpriseUiReply {
+export function checkUiReply(value: unknown, actions?: ReadonlySet<string>): EnterpriseUiReply {
   const fields = object(value, "reply");
   only(fields, ["body", "notice"], "reply");
   if (fields.body === undefined && fields.notice === undefined) invalid("A reply has a body, a notice or both.");
   return Object.freeze({
-    ...(fields.body !== undefined ? { body: checkUiBody(fields.body) } : {}),
+    ...(fields.body !== undefined ? { body: checkUiBody(fields.body, actions) } : {}),
     ...(fields.notice !== undefined ? { notice: checkUiNotice(fields.notice) } : {}),
   });
 }
@@ -245,7 +280,7 @@ export function checkUiReply(value: unknown): EnterpriseUiReply {
 export function checkUiActionInput(value: unknown): EnterpriseUiActionInput {
   const fields = object(value, "action input");
   if (fields.kind === "button") {
-    only(fields, ["kind", "sectionId", "buttonId", "values"], "action input");
+    only(fields, ["kind", "sectionId", "buttonId", "values", "confirmedPhrase"], "action input");
     const values = object(fields.values ?? {}, "values");
     const entries = Object.entries(values);
     if (entries.length > L.maxValues) invalid(`An action carries at most ${L.maxValues} values.`);
@@ -254,26 +289,33 @@ export function checkUiActionInput(value: unknown): EnterpriseUiActionInput {
       if (!ID.test(key) || typeof entry !== "string" || entry.length > L.maxFieldLength) invalid("Each value is text of an element id within the field limit.");
       Object.defineProperty(copy, key, { value: entry, enumerable: true });
     }
+    if (fields.confirmedPhrase !== undefined && (typeof fields.confirmedPhrase !== "string" || fields.confirmedPhrase.length > L.maxPhraseLength)) {
+      invalid("confirmedPhrase is the typed phrase.");
+    }
     return Object.freeze({
       kind: "button",
       sectionId: checkUiAction(fields.sectionId, "section id"),
       buttonId: id(fields.buttonId, "button"),
       values: Object.freeze(copy),
+      ...(typeof fields.confirmedPhrase === "string" ? { confirmedPhrase: fields.confirmedPhrase } : {}),
     });
   }
   if (fields.kind === "schedule") {
     only(fields, ["kind", "agentId", "targetId", "intervalSeconds"], "action input");
     if (typeof fields.agentId !== "string" || !AGENT_ID.test(fields.agentId)) invalid("The agent id is not an agent id.");
     const interval = fields.intervalSeconds;
-    if (typeof interval !== "number" || !Number.isSafeInteger(interval) || interval < 60) invalid("intervalSeconds is a whole number of at least 60.");
+    if (typeof interval !== "number" || !Number.isSafeInteger(interval) || interval < L.minIntervalSeconds || interval > L.maxIntervalSeconds) {
+      invalid("intervalSeconds is a whole number from 60 to 31 days.");
+    }
     return Object.freeze({ kind: "schedule", agentId: fields.agentId, targetId: id(fields.targetId, "schedule target"), intervalSeconds: interval });
   }
   return invalid("An action input is a button or a schedule choice.");
 }
 
-export function checkScheduleTargets(value: unknown): EnterpriseScheduleTargets {
+/** `actions`, when given, are the registered UI actions the targets may call. */
+export function checkScheduleTargets(value: unknown, actions?: ReadonlySet<string>): EnterpriseScheduleTargets {
   const fields = object(value, "schedule targets");
-  only(fields, ["action", "targets"], "schedule targets");
+  only(fields, ["action", "targets", "current"], "schedule targets");
   if (!Array.isArray(fields.targets) || fields.targets.length > L.maxScheduleTargets) invalid(`At most ${L.maxScheduleTargets} schedule targets.`);
   const ids = new Set<string>();
   const targets = fields.targets.map((target: unknown): EnterpriseScheduleTarget => {
@@ -299,5 +341,70 @@ export function checkScheduleTargets(value: unknown): EnterpriseScheduleTargets 
       ...(agentIds ? { agentIds } : {}),
     });
   });
-  return Object.freeze({ action: checkUiAction(fields.action, "schedule targets action"), targets: Object.freeze(targets) });
+  const action = checkUiAction(fields.action, "schedule targets action");
+  if (actions && !actions.has(action)) invalid(`The schedule targets call ${action}, which is not a registered UI action. Register it first.`);
+  let current: Record<string, string> | undefined;
+  if (fields.current !== undefined) {
+    const entries = Object.entries(object(fields.current, "current targets"));
+    if (entries.length > L.maxCurrentTargets) invalid(`current names at most ${L.maxCurrentTargets} agents.`);
+    current = {};
+    for (const [agentId, targetId] of entries) {
+      if (!AGENT_ID.test(agentId) || typeof targetId !== "string" || (targetId !== "this-computer" && !ids.has(targetId))) {
+        invalid("current maps agent ids to offered target ids or this-computer.");
+      }
+      Object.defineProperty(current, agentId, { value: targetId, enumerable: true });
+    }
+  }
+  return Object.freeze({
+    action,
+    targets: Object.freeze(targets),
+    ...(current ? { current: Object.freeze(current) } : {}),
+  });
+}
+
+/** The places the card may offer an agent: the targets it is eligible for. */
+export function targetsForAgent(targets: EnterpriseScheduleTargets, agentId: string): readonly EnterpriseScheduleTarget[] {
+  return targets.targets.filter((target) => !target.agentIds || target.agentIds.includes(agentId));
+}
+
+/** Where an agent's schedule runs now, as the module reports it. */
+export function currentTargetFor(targets: EnterpriseScheduleTargets | undefined, agentId: string): string {
+  const current = targets?.current?.[agentId];
+  return current && (current === "this-computer" || targets!.targets.some((target) => target.id === current)) ? current : "this-computer";
+}
+
+/**
+ * Checks an action input against the UI the window was given: the button
+ * is in the section's current body and calls this action, values belong
+ * to its fields and selects and fit them, a typed phrase was typed, and a
+ * schedule target is offered, enabled and eligible for the agent.
+ */
+export function checkUiActionAgainst(
+  input: EnterpriseUiActionInput,
+  action: string,
+  ui: { readonly body: (sectionId: string) => EnterpriseUiBody | undefined; readonly scheduleTargets: EnterpriseScheduleTargets | undefined },
+): void {
+  if (input.kind === "button") {
+    const body = ui.body(input.sectionId);
+    if (!body) invalid("The section of this button is not shown any more.");
+    const button = body.elements.find((element) => element.type === "button" && element.id === input.buttonId);
+    if (!button || button.type !== "button" || button.action !== action) invalid("This button is not in the section any more, or calls another action.");
+    if (button.confirm?.typedPhrase !== undefined && input.confirmedPhrase !== button.confirm.typedPhrase) invalid("The typed phrase was not confirmed.");
+    for (const [key, value] of Object.entries(input.values)) {
+      const element = body.elements.find((candidate) => (candidate.type === "field" || candidate.type === "select") && candidate.id === key);
+      if (!element) invalid(`${key} is not a field or select of the section.`);
+      if (element.type === "field") {
+        if (value.length > (element.maxLength ?? L.defaultFieldLength) || CONTROL.test(value) || /[\n\r]/.test(value) || FORMAT.test(value)) invalid(`The value of ${element.label} is too long or not one line.`);
+      } else if (element.type === "select" && !element.options.some((option) => option.value === value)) {
+        invalid(`The value of ${element.label} is not one of its options.`);
+      }
+    }
+    return;
+  }
+  const targets = ui.scheduleTargets;
+  if (!targets || targets.action !== action) invalid("Schedule targets are not offered by this action.");
+  if (input.targetId === "this-computer") return;
+  const target = targetsForAgent(targets, input.agentId).find((candidate) => candidate.id === input.targetId);
+  if (!target) invalid("That schedule target is not offered for this agent.");
+  if (target.disabledReason) invalid(target.disabledReason);
 }

@@ -1,6 +1,7 @@
 export {
   ENTERPRISE_INTERFACE_VERSION,
   ENTERPRISE_IPC_PREFIX,
+  ENTERPRISE_UI_IPC_PREFIX,
   type EnterpriseAgents,
   type EnterpriseEntitlement,
   type EnterpriseError,
@@ -56,11 +57,13 @@ export {
   checkJson,
   createEnterpriseHost,
   enterpriseIpcChannel,
+  enterpriseUiChannel,
   type CreateEnterpriseHostOptions,
   type EnterpriseHostCapabilities,
   type EnterpriseHostController,
   type EnterpriseHostErrorCode,
   type EnterpriseHostSnapshot,
+  type EnterpriseSettingsSectionSnapshot,
   type EnterpriseIpcRegistrar,
   type EnterpriseLogLevel,
   type EnterpriseLogSink,
@@ -77,4 +80,16 @@ export {
   type VerifyLicenceOptions,
 } from "./licence.js";
 export { EnterpriseInterfaceVersionError, defaultEnterpriseModule, isEnterpriseModule } from "./stub.js";
-export { checkScheduleTargets, checkUiAction, checkUiActionInput, checkUiBody, checkUiNotice, checkUiReply, ENTERPRISE_UI_LIMITS } from "./ui.js";
+export {
+  checkScheduleTargets,
+  checkUiAction,
+  checkUiActionAgainst,
+  checkUiActionInput,
+  checkUiBody,
+  checkUiNotice,
+  checkUiReply,
+  currentTargetFor,
+  ENTERPRISE_UI_LIMITS,
+  ENTERPRISE_UI_RESERVED_PHRASES,
+  targetsForAgent,
+} from "./ui.js";

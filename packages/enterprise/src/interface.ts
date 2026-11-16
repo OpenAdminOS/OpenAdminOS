@@ -4,6 +4,11 @@
 // reports the same version. `interface.test.ts` fails on any change to the
 // declarations below; an incompatible change needs a new version number.
 //
+// Version 1 is still open: no release has loaded a module yet. Until the
+// first release that loads one, version 1 may still change, and the
+// snapshot in `api/interface-v1.d.ts` changes with it in the same commit.
+// From that release on, the rule above holds.
+//
 // The host gives a module host APIs only. Nothing reachable from
 // `EnterpriseHost` exposes tenant tokens, provider credentials, the keychain
 // or any secret store, and writes to a tenant still go through the normal
@@ -14,6 +19,9 @@ export const ENTERPRISE_INTERFACE_VERSION = 1 as const;
 
 /** Every IPC channel a module registers is placed under this prefix. */
 export const ENTERPRISE_IPC_PREFIX = "openadminos-enterprise:" as const;
+
+/** UI actions have their own channels and registry, apart from IPC handlers. */
+export const ENTERPRISE_UI_IPC_PREFIX = "openadminos-enterprise-ui:" as const;
 
 /** The only values that cross the IPC and storage boundaries. */
 export type EnterpriseJson =
@@ -126,8 +134,9 @@ export interface EnterpriseUiButton {
   readonly id: string;
   readonly label: string;
   readonly kind: "primary" | "secondary" | "danger";
-  /** The action registered with `registerUiAction` that the button calls. */
+  /** The action registered with `registerUiAction` that the button calls; it must be registered before the body is set. */
   readonly action: string;
+  /** Required for a danger button. */
   readonly confirm?: EnterpriseUiConfirm;
 }
 
@@ -162,6 +171,8 @@ export type EnterpriseUiActionInput =
       readonly buttonId: string;
       /** Field and select values of the section, by element id. */
       readonly values: { readonly [id: string]: string };
+      /** The phrase the admin typed, for a button whose confirm has a typed phrase; it must equal it. */
+      readonly confirmedPhrase?: string;
     }
   | {
       readonly kind: "schedule";
@@ -190,9 +201,18 @@ export interface EnterpriseScheduleTarget {
 }
 
 export interface EnterpriseScheduleTargets {
-  /** The UI action called with `{ kind: "schedule", agentId, targetId, intervalSeconds }`. */
+  /**
+   * The UI action called with `{ kind: "schedule", agentId, targetId,
+   * intervalSeconds }`, for a target and for `this-computer`. It must be
+   * registered before the targets are set.
+   */
   readonly action: string;
   readonly targets: readonly EnterpriseScheduleTarget[];
+  /**
+   * Where each agent's schedule runs now, by agent id: a target id. An
+   * agent left out runs on this computer. The card shows only this.
+   */
+  readonly current?: { readonly [agentId: string]: string };
 }
 
 /**
