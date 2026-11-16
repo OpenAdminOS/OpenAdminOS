@@ -3428,8 +3428,10 @@ export interface SchedulePlacementView {
 
 export interface SchedulePlacementsView {
   readonly placements: Readonly<Record<string, SchedulePlacementView>>;
-  /** Why the kept placements cannot be read or saved, with the step. */
-  readonly problem?: string;
+  /** Why the kept placements cannot be read or saved. */
+  readonly problem?: { readonly kind: "unreadable" | "unwritable"; readonly message: string };
+  /** The kept file could not be read: every agent not released is held, wherever it last ran. */
+  readonly held?: { readonly released: readonly string[] };
 }
 
 export interface EnterpriseScheduleTargetsView {

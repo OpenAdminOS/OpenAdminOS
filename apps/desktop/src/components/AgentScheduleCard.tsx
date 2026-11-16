@@ -617,7 +617,7 @@ function LastKnownPlacement({ agent, live }: { agent: AgentSummary; live: boolea
     return (
       <div role="status" className="rounded-[10px] bg-[var(--color-danger-soft)] px-3 py-2.5 text-sm text-[var(--color-danger)]">
         <p className="font-medium">{SCHEDULE_TARGET_COPY.placementsProblemTitle}</p>
-        <p className="mt-0.5 text-[var(--color-text-soft)]">{view.problem}</p>
+        <p className="mt-0.5 text-[var(--color-text-soft)]">{view.problem.message}</p>
       </div>
     );
   }

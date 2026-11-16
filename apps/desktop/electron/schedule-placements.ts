@@ -3,7 +3,8 @@
 // the module reports never frees a schedule to run here as well. Until the
 // module reports in a session, and while team features are off, a schedule
 // that ran in another place does not run here. The admin can take one back
-// with Run it here.
+// with Run it here. When the kept file cannot be read, every schedule is
+// held until it is taken back one by one, and that hold is kept on disk.
 
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -17,8 +18,10 @@ export type SchedulePlacement = EnterprisePlacement & {
 
 export interface SchedulePlacementsView {
   readonly placements: Readonly<Record<string, EnterprisePlacement & { readonly stale: boolean }>>;
-  /** Why the kept placements cannot be trusted or saved, with the step; absent when they are fine. */
-  readonly problem?: string;
+  /** Why the kept placements cannot be read or saved; absent when they are fine. */
+  readonly problem?: { readonly kind: "unreadable" | "unwritable"; readonly message: string };
+  /** The kept file could not be read: every agent not released is held, wherever it last ran. */
+  readonly held?: { readonly released: readonly string[] };
 }
 
 const MAX_ENTRIES = 500;
@@ -29,16 +32,23 @@ interface FileShape {
   placements: Record<string, EnterprisePlacement>;
   /** The place ids the module offered when it last reported, to tell a place no longer paired here. */
   offered?: string[];
+  /** Present once a kept file could not be read: every agent not released stays held across launches. */
+  held?: { released: string[] };
 }
+
+const UNREADABLE = "The app cannot read where schedules last ran, so a schedule does not run here until it is taken back.";
+const UNWRITABLE = "The app could not save where schedules last ran, so after a restart they may not be held. Check free disk space and the permissions of the OpenAdminOS data folder.";
 
 export class SchedulePlacementMemory {
   private placements: Record<string, EnterprisePlacement> = {};
   private offered: string[] | undefined;
-  private problem: string | undefined;
-  /** The kept file existed but could not be read: every schedule is held until it is resolved. */
+  private unwritable = false;
+  /** The kept file existed but could not be read: every schedule is held until it is taken back. */
   private failClosed = false;
-  /** Agents the admin took back with Run it here while the file could not be read. */
+  /** Agents taken back while held: by Run it here, or reported here by the module in this session. */
   private readonly released = new Set<string>();
+  /** The damaged files, moved aside before the first write so they are never overwritten. */
+  private damaged: string[] = [];
 
   constructor(
     private readonly path: string,
@@ -47,18 +57,21 @@ export class SchedulePlacementMemory {
     this.load();
   }
 
-  /** Merges a report: set what it names; remove only agents it reports here for a place it still offers. */
+  /**
+   * Merges a report: set what it names; remove only agents it reports here for a place it still offers.
+   * While held, only an agent the report names here is released; a report never ends the hold as a whole.
+   */
   publish(update: { readonly placements: EnterprisePlacements; readonly offered: readonly string[]; readonly here: readonly string[] }): void {
     const next = { ...this.placements };
     for (const [agentId, placement] of Object.entries(update.placements)) next[agentId] = placement;
     for (const agentId of update.here) {
+      if (agentId in update.placements) continue;
       const kept = next[agentId];
-      if (kept && !(agentId in update.placements) && update.offered.includes(kept.targetId)) delete next[agentId];
+      if (kept && update.offered.includes(kept.targetId)) delete next[agentId];
+      if (this.failClosed) this.release(agentId);
     }
     this.placements = trim(next);
     this.offered = [...update.offered];
-    // A report from the module in this session stands in for a file that could not be read.
-    this.failClosed = false;
     this.write(false);
   }
 
@@ -81,7 +94,7 @@ export class SchedulePlacementMemory {
   /** Forgets one agent's placement, after the admin chose Run it here. */
   clear(agentId: string): void {
     if (!(agentId in this.placements) && !this.failClosed) return;
-    if (this.failClosed) this.released.add(agentId);
+    if (this.failClosed) this.release(agentId);
     const { [agentId]: _removed, ...rest } = this.placements;
     this.placements = rest;
     this.write(false);
@@ -96,12 +109,25 @@ export class SchedulePlacementMemory {
     for (const [agentId, placement] of Object.entries(this.placements)) {
       placements[agentId] = { ...placement, stale: this.offered !== undefined && !this.offered.includes(placement.targetId) };
     }
-    return { placements, ...(this.problem ? { problem: this.problem } : {}) };
+    const problem = this.unwritable
+      ? { kind: "unwritable" as const, message: UNWRITABLE }
+      : this.failClosed
+        ? { kind: "unreadable" as const, message: UNREADABLE }
+        : undefined;
+    return {
+      placements,
+      ...(problem ? { problem } : {}),
+      ...(this.failClosed ? { held: { released: [...this.released] } } : {}),
+    };
   }
 
   /** Where an agent's schedule runs instead of here, as far as the app knows; held for every agent when the file cannot be read. */
   placementFor(agentId: string): EnterprisePlacement | undefined {
     return this.placements[agentId] ?? (this.failClosed && !this.released.has(agentId) ? UNKNOWN_PLACE : undefined);
+  }
+
+  private release(agentId: string): void {
+    if (this.released.size < MAX_ENTRIES) this.released.add(agentId);
   }
 
   private load(): void {
@@ -118,7 +144,9 @@ export class SchedulePlacementMemory {
     }
     if (primary.kind === "damaged" || backup.kind === "damaged") {
       this.failClosed = true;
-      this.problem = "The app cannot read where schedules last ran, so none of them runs here until this is resolved. Open Where it runs on each schedule card, or choose Run it here to take a schedule back.";
+      this.damaged = [primary.kind === "damaged" ? this.path : undefined, backup.kind === "damaged" ? `${this.path}.bak` : undefined].filter(
+        (path): path is string => path !== undefined,
+      );
       this.log("the kept placements cannot be read; every schedule is held", primary.kind === "damaged" ? primary.detail : backup.kind === "damaged" ? backup.detail : "");
     }
   }
@@ -126,6 +154,10 @@ export class SchedulePlacementMemory {
   private apply(file: FileShape): void {
     this.placements = trim(file.placements);
     this.offered = file.offered;
+    if (file.held) {
+      this.failClosed = true;
+      for (const agentId of file.held.released) this.release(agentId);
+    }
   }
 
   private readFile(path: string): { kind: "missing" } | { kind: "damaged"; detail: string } | { kind: "ok"; file: FileShape } {
@@ -147,7 +179,14 @@ export class SchedulePlacementMemory {
         placements[agentId] = { targetId: entry.targetId, label: entry.label, organizationId: entry.organizationId, reason: entry.reason };
       }
       const offered = Array.isArray(parsed.offered) && parsed.offered.every((id) => typeof id === "string") ? parsed.offered : undefined;
-      return { kind: "ok", file: { version: 1, placements, ...(offered ? { offered } : {}) } };
+      let held: FileShape["held"];
+      if (parsed.held !== undefined) {
+        const released = (parsed.held as Partial<NonNullable<FileShape["held"]>> | null)?.released;
+        // A hold that cannot be read is a damaged file: it fails closed rather than freeing anything.
+        if (!Array.isArray(released) || !released.every((id) => typeof id === "string")) throw new Error("the hold is not readable");
+        held = { released: released.slice(0, MAX_ENTRIES) };
+      }
+      return { kind: "ok", file: { version: 1, placements, ...(offered ? { offered } : {}), ...(held ? { held } : {}) } };
     } catch (error) {
       return { kind: "damaged", detail: (error as Error).message };
     }
@@ -157,15 +196,24 @@ export class SchedulePlacementMemory {
   private write(strict: boolean): void {
     try {
       mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
-      const text = `${JSON.stringify({ version: 1, placements: this.placements, ...(this.offered ? { offered: this.offered } : {}) }, null, 2)}\n`;
+      // Kept aside for whoever looks into them; the hold written below stands in for them.
+      for (const path of this.damaged) if (existsSync(path)) renameSync(path, `${path}.damaged`);
+      this.damaged = [];
+      const file: FileShape = {
+        version: 1,
+        placements: this.placements,
+        ...(this.offered ? { offered: this.offered } : {}),
+        ...(this.failClosed ? { held: { released: [...this.released] } } : {}),
+      };
+      const text = `${JSON.stringify(file, null, 2)}\n`;
       for (const path of [this.path, `${this.path}.bak`]) {
         const temporary = `${path}.${process.pid}.tmp`;
         writeFileSync(temporary, text, { mode: 0o600 });
         renameSync(temporary, path);
       }
-      if (!this.failClosed) this.problem = undefined;
+      this.unwritable = false;
     } catch (error) {
-      this.problem = "The app could not save where schedules last ran, so after a restart they may not be held. Check free disk space and the permissions of the OpenAdminOS data folder.";
+      this.unwritable = true;
       this.log("the kept placements could not be written", (error as Error).message);
       if (strict) throw error;
     }
@@ -178,6 +226,5 @@ function trim(placements: Record<string, EnterprisePlacement>): Record<string, E
 
 /** Removes the kept files; for tests. */
 export function removePlacementFiles(path: string): void {
-  rmSync(path, { force: true });
-  rmSync(`${path}.bak`, { force: true });
+  for (const suffix of ["", ".bak", ".damaged", ".bak.damaged"]) rmSync(`${path}${suffix}`, { force: true });
 }

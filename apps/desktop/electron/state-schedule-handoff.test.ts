@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -290,11 +290,50 @@ describe("schedule handoff on this computer", () => {
       await writeFile(`${path}.bak`, "{ not json either");
       const held = new SchedulePlacementMemory(path, (message) => logs.push(message));
       assert.ok(held.placementFor("any-agent"), "fails closed for every agent");
-      assert.match(held.view().problem ?? "", /cannot read where schedules last ran/);
+      assert.equal(held.view().problem?.kind, "unreadable");
+      assert.match(held.view().problem?.message ?? "", /cannot read where schedules last ran/);
+      assert.deepEqual(held.view().held, { released: [] });
+
+      // No module report ends the hold, empty or not.
+      held.publish({ placements: {}, offered: [], here: [] });
+      held.publish({ placements: {}, offered: ["mini-pc"], here: [] });
+      assert.ok(held.placementFor("any-agent"), "an empty report keeps every agent held");
+      assert.ok(held.placementFor("another-agent"));
+      // The damaged files are kept aside, not overwritten.
+      assert.equal(await readFile(`${path}.damaged`, "utf8"), "{ not json");
+      assert.equal(await readFile(`${path}.bak.damaged`, "utf8"), "{ not json either");
+
       // Run it here releases that one agent only.
       held.clear("any-agent");
       assert.equal(held.placementFor("any-agent"), undefined);
       assert.ok(held.placementFor("another-agent"));
+      assert.deepEqual(held.view().held, { released: ["any-agent"] });
+
+      // A restart keeps every other agent held.
+      const restarted = new SchedulePlacementMemory(path, (message) => logs.push(message));
+      assert.equal(restarted.placementFor("any-agent"), undefined);
+      assert.ok(restarted.placementFor("another-agent"), "a restart keeps the others held");
+      assert.equal(restarted.view().problem?.kind, "unreadable");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("releases a held agent only when the module reports it here", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-placements-"));
+    try {
+      const path = join(dir, "placements.json");
+      await writeFile(path, "{ not json");
+      const held = new SchedulePlacementMemory(path, () => undefined);
+      // Left out of the report is not here: still held.
+      held.publish({ placements: {}, offered: ["mini-pc"], here: ["reported-here"] });
+      assert.equal(held.placementFor("reported-here"), undefined);
+      assert.ok(held.placementFor("left-out"));
+      // A place the module names is kept as that place, and stays after the module stops naming it.
+      held.publish({ placements: { named: contosoPc }, offered: ["mini-pc"], here: [] });
+      held.publish({ placements: {}, offered: ["mini-pc"], here: [] });
+      assert.equal(held.placementFor("named")?.targetId, "mini-pc");
+      assert.deepEqual(new SchedulePlacementMemory(path, () => undefined).view().held, { released: ["reported-here"] });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -308,7 +347,8 @@ describe("schedule handoff on this computer", () => {
       await writeFile(blocked, "x");
       const memory = new SchedulePlacementMemory(join(blocked, "placements.json"), () => undefined);
       assert.throws(() => memory.begin(agent.id, { ...contosoPc, reason: "uncertain" }));
-      assert.match(memory.view().problem ?? "", /could not save where schedules last ran/);
+      assert.equal(memory.view().problem?.kind, "unwritable");
+      assert.match(memory.view().problem?.message ?? "", /could not save where schedules last ran/);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

@@ -588,11 +588,11 @@ describe("schedule card: where it runs", () => {
   it("says when the app cannot read where schedules last ran", async () => {
     const bridge = makeMockBridge({
       getEnterpriseStatus: async (): Promise<EnterpriseStatus> => ({ active: false }),
-      getSchedulePlacements: async () => ({ placements: {}, problem: "The app cannot read where schedules last ran, so none of them runs here until this is resolved." }),
+      getSchedulePlacements: async () => ({ placements: {}, problem: { kind: "unreadable" as const, message: "The app cannot read where schedules last ran, so a schedule does not run here until it is taken back." }, held: { released: [] } }),
     });
     renderWithAppState(<AgentScheduleCard agent={agent} onChange={vi.fn()} />, { bridge });
     expect(await screen.findByText("Where schedules last ran cannot be read")).toBeInTheDocument();
-    expect(screen.getByText(/none of them runs here until this is resolved/)).toBeInTheDocument();
+    expect(screen.getByText(/a schedule does not run here until it is taken back/)).toBeInTheDocument();
   });
 
   it("shows a schedule running here and elsewhere as a danger state, and turns the one here off in place", async () => {
