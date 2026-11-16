@@ -879,9 +879,9 @@ describe("createEnterpriseHost", () => {
     const late = (await ipc.invoke("openadminos-enterprise-ui:sandboxes.flip", { kind: "schedule", agentId: "os-update-posture", targetId: "contoso-pc", intervalSeconds: 3600 })) as { notice: { tone: string; title: string; message: string; recovery: string } };
     assert.equal(late.notice.tone, "danger");
     // The module did move it: the notice says so, and how to bring it back.
-    assert.equal(late.notice.title, "The schedule may run in two places");
-    assert.match(late.notice.message, /moved the schedule to Contoso mini PC/);
-    assert.equal(late.notice.recovery, "Choose here to bring it back.");
+    assert.equal(late.notice.title, "The schedule is held here");
+    assert.match(late.notice.message, /moved the schedule to Contoso mini PC.*held so it does not run twice/);
+    assert.match(late.notice.recovery, /Turn off here/);
     assert.deepEqual(checkUiReply(late), late);
     assert.deepEqual(local, [["find-inactive-devices", false]]);
   });

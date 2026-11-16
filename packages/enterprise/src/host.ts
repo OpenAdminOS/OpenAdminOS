@@ -469,9 +469,9 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
     const nameOf = (id: string | undefined) => (id ? names.get(id) ?? id : "no organization");
     if (afterMove) {
       return danger(
-        "The schedule may run in two places",
-        `The team features module moved the schedule to ${target.label}, which is paired for ${nameOf(target.organizationId)}, but this schedule now belongs to ${nameOf(organizationId)}. The schedule here was left as it is, so it may run in two places.`,
-        "Choose here to bring it back.",
+        "The schedule is held here",
+        `The team features module moved the schedule to ${target.label}, which is paired for ${nameOf(target.organizationId)}, but this schedule now belongs to ${nameOf(organizationId)}. The schedule here is held so it does not run twice.`,
+        "Use Turn off here in the schedule card, or choose here to bring it back.",
       );
     }
     return danger(
