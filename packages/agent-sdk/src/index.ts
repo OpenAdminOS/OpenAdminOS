@@ -3409,6 +3409,8 @@ export interface EnterpriseUiReplyView {
 export interface EnterpriseScheduleTargetView {
   readonly id: string;
   readonly label: string;
+  /** The organization the place is paired for; the card offers it only for schedules of that organization. */
+  readonly organizationId: string;
   readonly detail?: string;
   readonly disabledReason?: string;
   readonly agentIds?: readonly string[];
@@ -3419,6 +3421,10 @@ export interface EnterpriseScheduleTargetsView {
   readonly targets: readonly EnterpriseScheduleTargetView[];
   /** Where each agent's schedule runs now, by agent id; an agent left out runs on this computer. */
   readonly current?: { readonly [agentId: string]: string };
+  /** Agents a place also runs from its own configuration, by agent id. */
+  readonly alsoRunsOn?: { readonly [agentId: string]: string };
+  /** Agents whose place is not certain; the app treats them as running there. */
+  readonly uncertain?: { readonly [agentId: string]: { readonly targetId: string; readonly message: string; readonly recovery: string } };
 }
 
 export type SupportIssueSource =

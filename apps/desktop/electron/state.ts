@@ -5917,6 +5917,12 @@ export class AppStateStore {
     return outcome !== "none";
   }
 
+  /** The organization an agent's schedule on this computer belongs to, if it has one. */
+  async agentScheduleOrganization(agentId: string): Promise<string | undefined> {
+    const persisted = await this.read();
+    return persisted.installedAgents.find((entry) => entry.id === agentId || entry.slug === agentId)?.schedule?.organizationId;
+  }
+
   /** Whether an agent has a schedule on this computer, on or off. */
   async hasAgentSchedule(agentId: string): Promise<boolean> {
     const persisted = await this.read();
@@ -8584,6 +8590,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   async assignAgentSchedule(slug: string, organizationId: string): Promise<AppState> {
+    // A schedule a module place runs keeps its organization: that place is paired for it.
+    const elsewhere = (await this.listAgents()).find((entry) => entry.slug === slug || entry.id === slug);
+    if (elsewhere && this.scheduleRunsElsewhere?.(elsewhere.id)) {
+      throw new Error(`The schedule of ${elsewhere.name} runs in another place, which is paired for its organization. Move it back here first, then assign it.`);
+    }
     await this.serialize(async () => {
       const persisted = await this.read();
       const organization = (persisted.organizations ?? []).find((entry) => entry.id === organizationId);

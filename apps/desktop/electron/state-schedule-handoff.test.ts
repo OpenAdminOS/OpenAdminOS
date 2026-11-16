@@ -143,6 +143,7 @@ describe("schedule handoff on this computer", () => {
       capabilities: {
         localSchedules: {
           has: (agentId) => f.store.hasAgentSchedule(agentId),
+          organizationOf: (agentId) => f.store.agentScheduleOrganization(agentId),
           setEnabled: (agentId, enabled) => f.store.setAgentScheduleEnabled(agentId, enabled),
           beginMove: (agentId) => f.store.beginScheduleMove(agentId),
           endMove: (agentId) => f.store.endScheduleMove(agentId),
@@ -150,7 +151,7 @@ describe("schedule handoff on this computer", () => {
       },
     });
     try {
-      const targets = [{ id: "mini-pc", label: "Office mini PC" }];
+      const targets = [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso" }];
       let release!: () => void;
       let reached!: () => void;
       const paused = new Promise<void>((resolve) => (release = resolve));
@@ -177,6 +178,19 @@ describe("schedule handoff on this computer", () => {
       assert.equal(await f.schedule(), undefined);
     } finally {
       controller.dispose();
+      await f.close();
+    }
+  });
+
+  it("reads the organization of a schedule here, and keeps it while a module place runs it", async () => {
+    const f = await fixture("contoso");
+    try {
+      assert.equal(await f.store.agentScheduleOrganization(agent.id), "org-contoso");
+      assert.equal(await f.store.agentScheduleOrganization("not-installed"), undefined);
+      f.store.setScheduleRunsElsewhere(() => true);
+      await assert.rejects(f.store.assignAgentSchedule(agent.slug, "org-fabrikam"), /runs in another place/);
+      assert.equal((await f.schedule())?.organizationId, "org-contoso");
+    } finally {
       await f.close();
     }
   });

@@ -3,7 +3,7 @@ import { saveAuditLogExport } from "./save-audit-log-export.js";
 import { NovaService } from "./nova.js";
 import { NOVA_SESSION_CONTEXT_ENDED_REASON, NOVA_SESSION_ENDED_REASON } from "../src/shared/nova-session.js";
 import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
-import { currentTargetFor } from "@openadminos/enterprise";
+import { alsoRunsOnFor, currentTargetFor } from "@openadminos/enterprise";
 import { createSandboxCapabilities } from "./sandboxes/capabilities.js";
 import { readOnlyCatalog } from "./sandboxes/catalog.js";
 import { SandboxService } from "./sandboxes/service.js";
@@ -3297,6 +3297,7 @@ async function startEnterprise(userDataDir: string): Promise<void> {
           // The host turns the schedule here off or on after a module moved it; the module never reaches this.
           localSchedules: {
             has: (agentId) => store.hasAgentSchedule(agentId),
+            organizationOf: (agentId) => store.agentScheduleOrganization(agentId),
             setEnabled: (agentId, enabled) => store.setAgentScheduleEnabled(agentId, enabled),
             beginMove: (agentId) => store.beginScheduleMove(agentId),
             endMove: (agentId) => store.endScheduleMove(agentId),
@@ -3310,7 +3311,7 @@ async function startEnterprise(userDataDir: string): Promise<void> {
   // A schedule a module reports running in another place does not run here as well.
   store.setScheduleRunsElsewhere((agentId) => {
     const status = service.status();
-    return status.active && currentTargetFor(status.scheduleTargets, agentId) !== "this-computer";
+    return status.active && (currentTargetFor(status.scheduleTargets, agentId) !== "this-computer" || alsoRunsOnFor(status.scheduleTargets, agentId) !== undefined);
   });
   // The service stores the final runtime and notifies the window for every outcome.
   const runtime = await service.start();
