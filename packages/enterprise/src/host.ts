@@ -31,6 +31,8 @@ import {
 import { EnterpriseHostError } from "./errors.js";
 import {
   alsoRunsOnFor,
+  placementSnapshot,
+  type EnterprisePlacements,
   checkModuleText,
   checkScheduleTargets,
   checkUiActionAgainst,
@@ -110,12 +112,19 @@ export interface EnterpriseHostCapabilities {
   readonly organizations?: EnterpriseOrganizations;
   readonly agents?: EnterpriseAgents;
   readonly sandboxes?: EnterpriseSandboxes;
+  /** Keeps the last accepted placements for the app, for the host alone. */
+  readonly placements?: EnterprisePlacementStore;
   /**
    * The app's own schedules, for the host alone: never reachable from the
    * module. The host turns an agent's schedule on this computer off or on
    * in place, without deleting it, after a module moved it.
    */
   readonly localSchedules?: EnterpriseLocalSchedules;
+}
+
+export interface EnterprisePlacementStore {
+  /** Replaces the kept placements with these, each time the module sets its targets. */
+  save(placements: EnterprisePlacements): void;
 }
 
 export interface EnterpriseLocalSchedules {
@@ -370,7 +379,7 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
   /**
    * What stops a schedule choice before the module is asked: a place that
    * is not certain, a place that also runs the agent from its own
-   * configuration when it would come back here, or a place paired for
+   * configuration (any move is refused then), or a place paired for
    * another organization than the schedule's.
    */
   const scheduleRefusal = async (input: Extract<EnterpriseUiActionInput, { kind: "schedule" }>): Promise<EnterpriseUiReply | undefined> => {
@@ -474,6 +483,15 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
   const setScheduleTargets = (next: EnterpriseScheduleTargets | undefined): void => {
     assertLive();
     scheduleTargets = next === undefined ? undefined : checkScheduleTargets(next, new Set(uiChannels.keys()));
+    // The app keeps the last accepted placements, so after a restart, or with team features off, a schedule
+    // that ran elsewhere does not run here before the module says where it runs.
+    if (scheduleTargets && capabilities.placements) {
+      try {
+        capabilities.placements.save(placementSnapshot(scheduleTargets));
+      } catch (error) {
+        options.log("error", "enterprise: the last known schedule placements could not be saved", { error: errorMessage(error) });
+      }
+    }
     changed();
   };
 

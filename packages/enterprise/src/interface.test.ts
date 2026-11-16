@@ -299,6 +299,7 @@ describe("enterprise interface", () => {
       "entitlementAt",
       "isEnterpriseModule",
       "normalizeForPhraseMatch",
+      "placementSnapshot",
       "targetsForAgent",
       "uncertainFor",
       "verifyLicence",

@@ -933,4 +933,32 @@ describe("createEnterpriseHost", () => {
     assert.equal(asked, 0);
     assert.deepEqual(local, []);
   });
+
+  it("keeps the last accepted placements for the app each time targets are set", () => {
+    const saved: unknown[] = [];
+    const controller = createEnterpriseHost({
+      entitlement: () => ENTITLEMENT,
+      ipc: new FakeIpc(),
+      storage: new MemoryStorage(),
+      log: () => undefined,
+      capabilities: { placements: { save: (placements) => saved.push(placements) } },
+    });
+    controller.host.registerUiAction("sandboxes.schedule", async () => ({ notice: { type: "notice", tone: "neutral", title: "x", message: "y" } }));
+    const targets = [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso" }];
+    controller.host.setScheduleTargets({
+      action: "sandboxes.schedule",
+      targets,
+      current: { "find-inactive-devices": "mini-pc", "compliance-overview": "this-computer" },
+      alsoRunsOn: { "os-update-posture": "mini-pc" },
+      uncertain: { "dormant-app-registrations": { targetId: "mini-pc", message: "No answer.", recovery: "Sync again." } },
+    });
+    assert.deepEqual(saved.at(-1), {
+      "dormant-app-registrations": { targetId: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", reason: "uncertain" },
+      "os-update-posture": { targetId: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", reason: "configuration" },
+      "find-inactive-devices": { targetId: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", reason: "runs" },
+    });
+    // Back here: the next save no longer names it.
+    controller.host.setScheduleTargets({ action: "sandboxes.schedule", targets, current: { "find-inactive-devices": "this-computer" } });
+    assert.deepEqual(saved.at(-1), {});
+  });
 });

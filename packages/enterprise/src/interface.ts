@@ -223,8 +223,9 @@ export interface EnterpriseScheduleTargets {
   readonly current?: { readonly [agentId: string]: string };
   /**
    * Agents a place also runs from its own configuration, by agent id: a
-   * target id. The card warns, and moving such an agent back here is
-   * refused until it is removed from that place's configuration.
+   * target id. The card warns, the schedule here does not run, and any
+   * move of such an agent is refused until it is removed from that
+   * place's configuration.
    */
   readonly alsoRunsOn?: { readonly [agentId: string]: string };
   /**

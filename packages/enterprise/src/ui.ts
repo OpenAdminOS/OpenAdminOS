@@ -503,3 +503,30 @@ export function checkUiActionAgainst(
   if (target.disabledReason) invalid(target.disabledReason);
   // The organization of the schedule here is checked by the host, which alone can read it.
 }
+
+/** Why a schedule does not run here: a place runs it, a place's own configuration runs it, or its place is not certain. */
+export type EnterprisePlacementReason = "runs" | "configuration" | "uncertain";
+
+export interface EnterprisePlacement {
+  readonly targetId: string;
+  readonly label: string;
+  readonly organizationId: string;
+  readonly reason: EnterprisePlacementReason;
+}
+
+/** By agent id: only agents whose schedule does not run here. */
+export type EnterprisePlacements = { readonly [agentId: string]: EnterprisePlacement };
+
+/** The placements a module reported, as the app keeps them between launches. */
+export function placementSnapshot(targets: EnterpriseScheduleTargets): EnterprisePlacements {
+  const out: Record<string, EnterprisePlacement> = {};
+  const put = (agentId: string, targetId: string, reason: EnterprisePlacementReason) => {
+    const target = targets.targets.find((candidate) => candidate.id === targetId);
+    if (!target || out[agentId]) return;
+    Object.defineProperty(out, agentId, { value: Object.freeze({ targetId, label: target.label, organizationId: target.organizationId, reason }), enumerable: true });
+  };
+  for (const [agentId, entry] of Object.entries(targets.uncertain ?? {})) put(agentId, entry.targetId, "uncertain");
+  for (const [agentId, targetId] of Object.entries(targets.alsoRunsOn ?? {})) put(agentId, targetId, "configuration");
+  for (const [agentId, targetId] of Object.entries(targets.current ?? {})) if (targetId !== "this-computer") put(agentId, targetId, "runs");
+  return Object.freeze(out);
+}

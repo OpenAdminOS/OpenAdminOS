@@ -62,6 +62,7 @@ export {
   type CreateEnterpriseHostOptions,
   type EnterpriseHostCapabilities,
   type EnterpriseLocalSchedules,
+  type EnterprisePlacementStore,
   type EnterpriseHostController,
   type EnterpriseHostErrorCode,
   type EnterpriseHostSnapshot,
@@ -96,6 +97,10 @@ export {
   ENTERPRISE_UI_LIMITS,
   ENTERPRISE_UI_RESERVED_PHRASES,
   normalizeForPhraseMatch,
+  placementSnapshot,
+  type EnterprisePlacement,
+  type EnterprisePlacementReason,
+  type EnterprisePlacements,
   targetsForAgent,
   uncertainFor,
 } from "./ui.js";
