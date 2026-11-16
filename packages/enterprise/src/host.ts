@@ -22,13 +22,24 @@ import {
   type EnterpriseScheduleTargets,
   type EnterpriseSettingsSection,
   type EnterpriseUiActionHandler,
+  type EnterpriseUiActionInput,
   type EnterpriseUiBody,
   type EnterpriseUiReply,
   type EnterpriseStatusContribution,
   type EnterpriseStorage,
 } from "./interface.js";
 import { EnterpriseHostError } from "./errors.js";
-import { checkScheduleTargets, checkUiActionAgainst, checkUiActionInput, checkUiBody, checkUiReply, ENTERPRISE_UI_LIMITS } from "./ui.js";
+import {
+  checkModuleText,
+  checkScheduleTargets,
+  checkUiActionAgainst,
+  checkUiActionInput,
+  checkUiBody,
+  checkUiNotice,
+  checkUiReply,
+  currentTargetFor,
+  ENTERPRISE_UI_LIMITS,
+} from "./ui.js";
 
 export { EnterpriseHostError, type EnterpriseHostErrorCode } from "./errors.js";
 
@@ -97,6 +108,17 @@ export interface EnterpriseHostCapabilities {
   readonly organizations?: EnterpriseOrganizations;
   readonly agents?: EnterpriseAgents;
   readonly sandboxes?: EnterpriseSandboxes;
+  /**
+   * The app's own schedules, for the host alone: never reachable from the
+   * module. The host turns an agent's schedule on this computer off or on
+   * in place, without deleting it, after a module moved it.
+   */
+  readonly localSchedules?: EnterpriseLocalSchedules;
+}
+
+export interface EnterpriseLocalSchedules {
+  /** Turns the agent's schedule on this computer off or back on, keeping its organization, interval and settings. */
+  setEnabled(agentId: string, enabled: boolean): Promise<void>;
 }
 
 /** A section as the window gets it: with the revision of its body. */
@@ -134,6 +156,7 @@ const SUPERSEDED_NOTICE = Object.freeze({
 });
 
 export function createEnterpriseHost(options: CreateEnterpriseHostOptions): EnterpriseHostController {
+  const capabilities = options.capabilities ?? {};
   const channels = new Map<string, string>();
   const uiChannels = new Map<string, string>();
   const sections = new Map<string, EnterpriseSettingsSection>();
@@ -239,9 +262,55 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
           reply = Object.freeze({ notice: reply.notice ?? SUPERSEDED_NOTICE });
         }
       }
+      if (input.kind === "schedule") reply = await handOff(input, reply);
       return checkJson(reply, ENTERPRISE_LIMITS.maxIpcOutputBytes, `the reply from ${name}`);
     });
     uiChannels.set(name, channel);
+  };
+
+  /**
+   * A schedule moves in one main process step. The module took the choice;
+   * only when it now reports the schedule at the chosen place does the app
+   * change the schedule on this computer, in place: off when it moved to
+   * another place, on again when it came back. Anything else changes
+   * nothing here and says so.
+   */
+  const handOff = async (input: Extract<EnterpriseUiActionInput, { kind: "schedule" }>, reply: EnterpriseUiReply): Promise<EnterpriseUiReply> => {
+    if (reply.notice?.tone === "danger") return reply;
+    const labelOf = (targetId: string) => (targetId === "this-computer" ? "this computer" : scheduleTargets?.targets.find((target) => target.id === targetId)?.label ?? targetId);
+    const now = currentTargetFor(scheduleTargets, input.agentId);
+    if (now !== input.targetId) {
+      return Object.freeze({
+        notice: Object.freeze({
+          type: "notice" as const,
+          tone: "danger" as const,
+          title: "The schedule did not move",
+          message: `The team features module did not report the schedule on ${labelOf(input.targetId)}; it reports ${labelOf(now)}. Nothing changed on this computer.`,
+          recovery: "Try again. If it keeps happening, check the team features module.",
+        }),
+      });
+    }
+    const local = capabilities.localSchedules;
+    if (local) {
+      const here = input.targetId === "this-computer";
+      try {
+        await local.setEnabled(input.agentId, here);
+      } catch (error) {
+        options.log("error", "enterprise: the schedule on this computer could not follow a move", { agentId: input.agentId, error: errorMessage(error) });
+        return Object.freeze({
+          notice: Object.freeze({
+            type: "notice" as const,
+            tone: "danger" as const,
+            title: here ? "The schedule is not on here" : "The schedule runs in two places",
+            message: here
+              ? "The team features module moved the schedule back, but it could not be turned on here."
+              : `The schedule now runs on ${labelOf(input.targetId)}, and the schedule on this computer could not be turned off, so it runs in both places.`,
+            recovery: here ? "Turn on Automatic runs in the schedule card." : "Use Turn off here in the schedule card.",
+          }),
+        });
+      }
+    }
+    return reply.notice ? reply : Object.freeze({ ...reply, notice: Object.freeze({ type: "notice" as const, tone: "success" as const, title: "Saved", message: `The schedule now runs on ${labelOf(input.targetId)}.` }) });
   };
 
   /** Stores a checked body and moves the section's revision on. */
@@ -268,8 +337,8 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
     revisions.set(section.id, 1);
     sections.set(section.id, Object.freeze({
       id: section.id,
-      title: checkText(section.title, ENTERPRISE_LIMITS.maxTitleLength, "settings section title"),
-      description: checkText(section.description, ENTERPRISE_LIMITS.maxDetailLength, "settings section description"),
+      title: checkText(section.title, ENTERPRISE_LIMITS.maxTitleLength, "settings section title", true),
+      description: checkText(section.description, ENTERPRISE_LIMITS.maxDetailLength, "settings section description", true),
       ...(body ? { body } : {}),
     }));
     changed();
@@ -349,7 +418,14 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
 
 /** The notice a failed UI action answers with: the reason, and the step that fixes it. */
 function failedReply(error: unknown): EnterpriseUiReply {
-  const reason = errorMessage(error).replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").replace(/<\s*[a-z!/?]/gi, " ").trim().slice(0, ENTERPRISE_UI_LIMITS.maxMessageLength - 1) || "No reason was given.";
+  // The reason passes the same check as module text; one that does not is replaced.
+  let reason = "The team features module did not say why.";
+  try {
+    checkUiNotice({ type: "notice", tone: "neutral", title: "x", message: errorMessage(error).slice(0, ENTERPRISE_UI_LIMITS.maxMessageLength) });
+    reason = errorMessage(error).trim().slice(0, ENTERPRISE_UI_LIMITS.maxMessageLength);
+  } catch {
+    // Keep the generic reason.
+  }
   return Object.freeze({
     notice: Object.freeze({
       type: "notice" as const,
@@ -673,12 +749,13 @@ function assertStorageKey(key: unknown): asserts key is string {
   }
 }
 
-function checkText(value: unknown, maxLength: number, what: string): string {
+function checkText(value: unknown, maxLength: number, what: string, phrases = false): string {
   if (typeof value !== "string") throw new EnterpriseHostError("invalid-value", `The ${what} must be text.`);
   const text = value.trim();
   if (text === "" || text.length > maxLength || CONTROL.test(text)) {
     throw new EnterpriseHostError("invalid-value", `The ${what} must be one line of 1 to ${maxLength} characters.`);
   }
+  if (phrases) checkModuleText(value, what);
   return text;
 }
 

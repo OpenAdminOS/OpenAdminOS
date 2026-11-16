@@ -278,6 +278,7 @@ describe("enterprise interface", () => {
       "LICENCE_PUBLIC_KEY_PEM",
       "LICENCE_SIGNING_CONTEXT",
       "checkJson",
+      "checkModuleText",
       "checkScheduleTargets",
       "checkUiAction",
       "checkUiActionAgainst",
@@ -292,6 +293,7 @@ describe("enterprise interface", () => {
       "enterpriseUiChannel",
       "entitlementAt",
       "isEnterpriseModule",
+      "normalizeForPhraseMatch",
       "targetsForAgent",
       "verifyLicence",
     ]);

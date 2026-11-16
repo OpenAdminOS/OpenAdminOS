@@ -60,6 +60,7 @@ export {
   enterpriseUiChannel,
   type CreateEnterpriseHostOptions,
   type EnterpriseHostCapabilities,
+  type EnterpriseLocalSchedules,
   type EnterpriseHostController,
   type EnterpriseHostErrorCode,
   type EnterpriseHostSnapshot,
@@ -82,6 +83,7 @@ export {
 export { EnterpriseInterfaceVersionError, defaultEnterpriseModule, isEnterpriseModule } from "./stub.js";
 export {
   checkScheduleTargets,
+  checkModuleText,
   checkUiAction,
   checkUiActionAgainst,
   checkUiActionInput,
@@ -91,5 +93,6 @@ export {
   currentTargetFor,
   ENTERPRISE_UI_LIMITS,
   ENTERPRISE_UI_RESERVED_PHRASES,
+  normalizeForPhraseMatch,
   targetsForAgent,
 } from "./ui.js";

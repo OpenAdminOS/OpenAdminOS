@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
 import { EnterpriseHostError } from "./errors.js";
-import { checkScheduleTargets, checkUiActionAgainst, checkUiActionInput, checkUiBody, checkUiReply, currentTargetFor, ENTERPRISE_UI_LIMITS } from "./ui.js";
+import { checkModuleText, checkScheduleTargets, checkUiActionAgainst, checkUiActionInput, checkUiBody, checkUiReply, currentTargetFor, ENTERPRISE_UI_LIMITS, normalizeForPhraseMatch } from "./ui.js";
 
 function refused(action: () => unknown, code: "invalid-value" | "limit" = "invalid-value"): void {
   assert.throws(action, (error: unknown) => error instanceof EnterpriseHostError && error.code === code);
@@ -141,5 +141,31 @@ describe("declarative module UI", () => {
     refused(() => checkUiActionAgainst(schedule("os-update-posture", "lab"), "sandboxes.schedule", ui));
     refused(() => checkUiActionAgainst(schedule("find-inactive-devices", "mini-pc"), "sandboxes.other", ui));
     refused(() => checkUiActionInput({ kind: "schedule", agentId: "a", targetId: "mini-pc", intervalSeconds: 32 * 86_400 }));
+  });
+
+  it("matches reserved phrases after normalizing, and refuses invisible characters outright", () => {
+    for (const text of [
+      "Runs on This\u00a0computer",
+      "Runs on This  computer",
+      "Runs on This\ncomputer",
+      "Runs on THIS COMPUTER",
+      "Ｌｏｃａｌ－ｏｎｌｙ",
+    ]) {
+      refused(() => checkUiBody(body({ type: "text", text })));
+    }
+    // Soft hyphen and word joiner are refused as characters, wherever they are.
+    refused(() => checkUiBody(body({ type: "text", text: "This com\u00adputer" })));
+    refused(() => checkUiBody(body({ type: "text", text: "Sandbox\u2060" })));
+    assert.equal(normalizeForPhraseMatch("This\u00a0 \n computer"), "this computer");
+    // A look-alike from another script is not caught here; the app marks module places as the module's.
+    assert.equal(checkUiBody(body({ type: "text", text: "This c\u043emputer" })).elements.length, 1);
+    refused(() => checkUiBody(body({ type: "button", id: "b", label: "Move", kind: "danger", action: "x", confirm: { title: "Move", message: "Move it?", typedPhrase: "THIS COMPUTER" } })));
+    refused(() => checkModuleText("Nothing leaves this device", "label"));
+  });
+
+  it("refuses a current place that is not offered for that agent", () => {
+    refused(() => checkScheduleTargets({ action: "x", targets: [{ id: "mini-pc", label: "Office mini PC", agentIds: ["os-update-posture"] }], current: { "find-inactive-devices": "mini-pc" } }));
+    const targets = checkScheduleTargets({ action: "x", targets: [{ id: "mini-pc", label: "Office mini PC", agentIds: ["os-update-posture"] }], current: { "os-update-posture": "mini-pc" } });
+    assert.equal(currentTargetFor(targets, "os-update-posture"), "mini-pc");
   });
 });

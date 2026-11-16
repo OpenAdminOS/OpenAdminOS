@@ -602,16 +602,15 @@ describe("createEnterpriseHost", () => {
     const chosen: unknown[] = [];
     host.registerUiAction("sandboxes.schedule", async (input) => {
       chosen.push(input);
-      return { notice: { type: "notice", tone: "success", title: "Moved", message: "The schedule runs on Office mini PC." } };
+      return { notice: { type: "notice", tone: "success", title: "Moved", message: "The schedule moved." } };
     });
     host.setScheduleTargets({ action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC" }, { id: "lab", label: "Lab", disabledReason: "Sync is stopped." }], current: { "find-inactive-devices": "mini-pc" } });
     assert.equal(controller.snapshot().scheduleTargets?.current?.["find-inactive-devices"], "mini-pc");
     const choose = (targetId: string, intervalSeconds = 3600) => ipc.invoke("openadminos-enterprise-ui:sandboxes.schedule", { kind: "schedule", agentId: "find-inactive-devices", targetId, intervalSeconds });
-    assert.equal(((await choose("this-computer")) as { notice: { title: string } }).notice.title, "Moved");
     await assertRejects(choose("lab") as Promise<unknown>, "invalid-value");
     await assertRejects(choose("nowhere") as Promise<unknown>, "invalid-value");
     await assertRejects(choose("mini-pc", 30) as Promise<unknown>, "invalid-value");
-    assert.equal(chosen.length, 1);
+    assert.equal(chosen.length, 0);
     assertError(() => host.setScheduleTargets({ action: "sandboxes.schedule", targets: [{ id: "this-computer", label: "Mine" }] }), "invalid-value");
     host.setScheduleTargets(undefined);
     assert.equal(controller.snapshot().scheduleTargets, undefined);
@@ -620,5 +619,79 @@ describe("createEnterpriseHost", () => {
     assert.equal(controller.snapshot().scheduleTargets, undefined);
     assert.equal(ipc.handlers.size, 0, "UI action channels are removed too");
     assertError(() => host.setScheduleTargets(undefined), "disposed");
+  });
+
+  it("hands a schedule off in the main process only when the module reports it at the chosen place", async () => {
+    const local: Array<[string, boolean]> = [];
+    let failLocal = false;
+    const ipc = new FakeIpc();
+    const controller = createEnterpriseHost({
+      entitlement: () => ENTITLEMENT,
+      ipc,
+      storage: new MemoryStorage(),
+      log: () => undefined,
+      capabilities: {
+        localSchedules: {
+          setEnabled: async (agentId, enabled) => {
+            if (failLocal) throw new Error("state.json is read-only");
+            local.push([agentId, enabled]);
+          },
+        },
+      },
+    });
+    const host = controller.host;
+    const targets = [{ id: "mini-pc", label: "Office mini PC" }];
+    let report: "move" | "stay" | "refuse" = "move";
+    host.registerUiAction("sandboxes.schedule", async (input) => {
+      if (input.kind !== "schedule") return { notice: { type: "notice", tone: "neutral", title: "x", message: "y" } };
+      if (report === "refuse") return { notice: { type: "notice", tone: "danger", title: "Not moved", message: "The sandbox did not answer.", recovery: "Check the sandbox, then try again." } };
+      if (report === "move") host.setScheduleTargets({ action: "sandboxes.schedule", targets, current: { [input.agentId]: input.targetId } });
+      return { body: { elements: [] } };
+    });
+    host.setScheduleTargets({ action: "sandboxes.schedule", targets });
+    const choose = async (targetId: string) =>
+      (await ipc.invoke("openadminos-enterprise-ui:sandboxes.schedule", { kind: "schedule", agentId: "find-inactive-devices", targetId, intervalSeconds: 3600 })) as { notice: { tone: string; title: string; message: string; recovery?: string } };
+
+    // Moved and reported: the schedule here is turned off, in place.
+    const moved = await choose("mini-pc");
+    assert.equal(moved.notice.tone, "success");
+    assert.match(moved.notice.message, /now runs on Office mini PC/);
+    assert.deepEqual(local, [["find-inactive-devices", false]]);
+
+    // Back here: turned on again.
+    await choose("this-computer");
+    assert.deepEqual(local.at(-1), ["find-inactive-devices", true]);
+
+    // A module that answers but does not report the move: nothing changes here.
+    report = "stay";
+    const stayed = await choose("mini-pc");
+    assert.equal(stayed.notice.tone, "danger");
+    assert.match(stayed.notice.message, /did not report the schedule on Office mini PC/);
+    assert.equal(local.length, 2);
+
+    // A refusal: nothing changes here either.
+    report = "refuse";
+    assert.equal((await choose("mini-pc")).notice.title, "Not moved");
+    assert.equal(local.length, 2);
+
+    // Moved, but this computer could not follow: it says the schedule runs in two places.
+    report = "move";
+    failLocal = true;
+    const both = await choose("mini-pc");
+    assert.equal(both.notice.tone, "danger");
+    assert.match(both.notice.message, /runs in both places/);
+    assert.match(both.notice.recovery ?? "", /Turn off here/);
+  });
+
+  it("refuses reserved phrases in section titles and replaces a failure reason that fails the text check", async () => {
+    const { host, ipc } = setup();
+    assertError(() => host.registerSettingsSection({ id: "x", title: "This\u00a0computer", description: "X" }), "invalid-value");
+    assertError(() => host.registerSettingsSection({ id: "y", title: "Sandboxes", description: "Nothing leaves this device." }), "invalid-value");
+    host.registerUiAction("sandboxes.sync", async () => {
+      throw new Error("No data leaves this device, trust me.");
+    });
+    host.registerSettingsSection({ id: "sandboxes", title: "Sandboxes", description: "Machines you run.", body: { elements: [{ type: "button", id: "sync", label: "Sync now", kind: "primary", action: "sandboxes.sync" }] } });
+    const reply = (await ipc.invoke("openadminos-enterprise-ui:sandboxes.sync", { kind: "button", sectionId: "sandboxes", buttonId: "sync", values: {} })) as { notice: { message: string } };
+    assert.equal(reply.notice.message, "The team features module did not say why.");
   });
 });

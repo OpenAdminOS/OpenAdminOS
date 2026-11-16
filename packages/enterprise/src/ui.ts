@@ -66,7 +66,26 @@ const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/;
 /** A tag or a comment: module text is plain text. */
 const MARKUP = /<\s*[a-z!/?]/i;
 /** Bidirectional overrides and isolates, zero-width characters and the byte order mark. */
-const FORMAT = /[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/;
+const FORMAT = /[\p{Cf}\p{Default_Ignorable_Code_Point}]/u;
+const FORMAT_ALL = /[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu;
+
+/**
+ * Text as the reserved phrase check compares it: NFKC, without format and
+ * ignorable characters, every whitespace run as one space, lower case.
+ * A look-alike from another script (a Cyrillic o) is not caught; the app
+ * marks module UI as the module's for that reason.
+ */
+export function normalizeForPhraseMatch(value: string): string {
+  return value.normalize("NFKC").replace(FORMAT_ALL, "").replace(/\s+/gu, " ").trim().toLowerCase();
+}
+
+/** Refuses invisible formatting characters and the app's reserved phrases in module text. */
+export function checkModuleText(value: string, what: string): void {
+  if (FORMAT.test(value)) invalid(`The ${what} has an invisible formatting character.`);
+  const normalized = normalizeForPhraseMatch(value);
+  const reserved = ENTERPRISE_UI_RESERVED_PHRASES.find((phrase) => normalized.includes(phrase));
+  if (reserved) invalid(`The ${what} uses "${reserved}", which the app keeps for its own messages.`);
+}
 
 function invalid(message: string): never {
   throw new EnterpriseHostError("invalid-value", message);
@@ -91,12 +110,9 @@ function text(value: unknown, max: number, what: string, multiline = false): str
   const trimmed = value.trim();
   if (trimmed === "" || trimmed.length > max) invalid(`The ${what} must be 1 to ${max} characters.`);
   if (CONTROL.test(trimmed) || (!multiline && /[\n\r]/.test(trimmed))) invalid(`The ${what} has a control character or a line break.`);
-  // Checked before trimming: trim drops a byte order mark at the ends.
-  if (FORMAT.test(value)) invalid(`The ${what} has an invisible formatting character.`);
   if (MARKUP.test(trimmed)) invalid(`The ${what} looks like markup; module text is plain text.`);
-  const lower = trimmed.toLowerCase();
-  const reserved = ENTERPRISE_UI_RESERVED_PHRASES.find((phrase) => lower.includes(phrase));
-  if (reserved) invalid(`The ${what} uses "${reserved}", which the app keeps for its own messages.`);
+  // Checked on the text as given: trim drops a byte order mark at the ends.
+  checkModuleText(value, what);
   return trimmed;
 }
 
@@ -216,6 +232,7 @@ function checkElement(value: unknown, ids: Set<string>, actions: ReadonlySet<str
           if (typeof entry.typedPhrase !== "string" || entry.typedPhrase.length > L.maxPhraseLength || !PHRASE.test(entry.typedPhrase)) {
             invalid(`A typed phrase is upper case words and digits, up to ${L.maxPhraseLength} characters.`);
           }
+          checkModuleText(entry.typedPhrase, "typed phrase");
           typedPhrase = entry.typedPhrase;
         }
         confirm = Object.freeze({
@@ -352,6 +369,8 @@ export function checkScheduleTargets(value: unknown, actions?: ReadonlySet<strin
       if (!AGENT_ID.test(agentId) || typeof targetId !== "string" || (targetId !== "this-computer" && !ids.has(targetId))) {
         invalid("current maps agent ids to offered target ids or this-computer.");
       }
+      const target = targets.find((candidate) => candidate.id === targetId);
+      if (target?.agentIds && !target.agentIds.includes(agentId)) invalid(`current puts ${agentId} on ${targetId}, which is not offered for it.`);
       Object.defineProperty(current, agentId, { value: targetId, enumerable: true });
     }
   }
