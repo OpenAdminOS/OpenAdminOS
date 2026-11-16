@@ -218,47 +218,97 @@ describe("schedule handoff on this computer", () => {
     }
   });
 
-  it("keeps a schedule moved away from running here after a restart, before the module reports and with team features off", async () => {
+  const contosoPc = { targetId: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", reason: "runs" as const };
+
+  it("holds a schedule after a crash between the start of a move and its outcome, with no module and the licence off", async () => {
     const f = await fixture("contoso");
     const dir = await mkdtemp(join(tmpdir(), "openadminos-placements-"));
     try {
       const path = join(dir, "placements.json");
-      // Last session: the module reported the schedule on the sandbox.
-      new SchedulePlacementMemory(path).save({ [agent.id]: { targetId: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", reason: "runs" } });
+      // The move away was recorded before the module was asked; then the app stopped.
+      new SchedulePlacementMemory(path).begin(agent.id, { ...contosoPc, reason: "uncertain" });
 
-      // This session: the app starts, the module has not reported yet.
+      // Restart: no module report, team features off.
       const memory = new SchedulePlacementMemory(path);
-      const live: { targets: Parameters<SchedulePlacementMemory["placementFor"]>[1] } = { targets: undefined };
-      f.store.setScheduleRunsElsewhere((agentId) => memory.placementFor(agentId, live.targets));
+      f.store.setScheduleRunsElsewhere((agentId) => {
+        const placement = memory.placementFor(agentId);
+        return placement ? { ...placement, teamFeaturesOff: true } : undefined;
+      });
       await f.store.fireDueSchedules();
-      assert.deepEqual((await f.store.getAppState()).runs, [], "nothing fired for the agent kept as running elsewhere");
-      assert.equal((await f.schedule())?.lastScheduledRunAt, "2026-01-01T00:00:00.000Z");
-
-      // Team features off for good: still kept, until Run it here clears it.
-      assert.equal(memory.placementFor(agent.id, undefined)?.label, "Office mini PC");
+      assert.deepEqual((await f.store.getAppState()).runs, [], "the agent is skipped");
+      assert.equal(memory.view().placements[agent.id]?.label, "Office mini PC", "the card can say where it was last known to run");
+      // With team features off, the step is Run it here.
+      await assert.rejects(f.store.assignAgentSchedule(agent.slug, "org-fabrikam"), /Choose Run it here on the schedule card first/);
       memory.clear(agent.id);
-      assert.equal(memory.placementFor(agent.id, undefined), undefined);
-      assert.equal(new SchedulePlacementMemory(path).placementFor(agent.id, undefined), undefined, "cleared on disk too");
-
-      // The module reports later in the session: its live placements win over the kept ones.
-      memory.save({ [agent.id]: { targetId: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", reason: "runs" } });
-      live.targets = { action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso" }], current: { [agent.id]: "this-computer" } };
-      assert.equal(memory.placementFor(agent.id, live.targets), undefined);
+      assert.equal(new SchedulePlacementMemory(path).placementFor(agent.id), undefined);
     } finally {
       await rm(dir, { recursive: true, force: true });
       await f.close();
     }
   });
 
-  it("reads a damaged placements file as empty and says so", async () => {
+  it("loosens a kept placement only when the module reports it here for a place it still offers", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-placements-"));
+    try {
+      const memory = new SchedulePlacementMemory(join(dir, "placements.json"));
+      memory.publish({ placements: { [agent.id]: contosoPc }, offered: ["mini-pc"], here: [] });
+      // A report that leaves the agent out is a gap: kept.
+      memory.publish({ placements: {}, offered: ["mini-pc"], here: [] });
+      assert.equal(memory.placementFor(agent.id)?.targetId, "mini-pc");
+      // The place is no longer offered (unpaired): kept, and shown as no longer paired here.
+      memory.publish({ placements: {}, offered: [], here: [agent.id] });
+      assert.equal(memory.placementFor(agent.id)?.targetId, "mini-pc");
+      assert.equal(memory.view().placements[agent.id]?.stale, true);
+      // Reported here for a place it still offers: removed.
+      memory.publish({ placements: {}, offered: ["mini-pc"], here: [agent.id] });
+      assert.equal(memory.placementFor(agent.id), undefined);
+      // Settled outcomes: a move away replaces the not certain one; unknown keeps it; here removes it.
+      memory.begin(agent.id, { ...contosoPc, reason: "uncertain" });
+      memory.settle(agent.id, "unknown");
+      assert.equal(memory.placementFor(agent.id)?.reason, "uncertain");
+      memory.settle(agent.id, contosoPc);
+      assert.equal(memory.placementFor(agent.id)?.reason, "runs");
+      memory.settle(agent.id, "here");
+      assert.equal(memory.placementFor(agent.id), undefined);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses the last good copy of a damaged file, and holds every schedule when neither can be read", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-placements-"));
     try {
       const path = join(dir, "placements.json");
+      new SchedulePlacementMemory(path).publish({ placements: { [agent.id]: contosoPc }, offered: ["mini-pc"], here: [] });
       await writeFile(path, "{ not json");
       const logs: string[] = [];
-      const memory = new SchedulePlacementMemory(path, (message) => logs.push(message));
-      assert.deepEqual(memory.list(), {});
-      assert.ok(logs.some((message) => message.includes("not readable")));
+      const fromBackup = new SchedulePlacementMemory(path, (message) => logs.push(message));
+      assert.equal(fromBackup.placementFor(agent.id)?.label, "Office mini PC");
+      assert.ok(logs.some((message) => message.includes("last good copy")));
+
+      await writeFile(path, "{ not json");
+      await writeFile(`${path}.bak`, "{ not json either");
+      const held = new SchedulePlacementMemory(path, (message) => logs.push(message));
+      assert.ok(held.placementFor("any-agent"), "fails closed for every agent");
+      assert.match(held.view().problem ?? "", /cannot read where schedules last ran/);
+      // Run it here releases that one agent only.
+      held.clear("any-agent");
+      assert.equal(held.placementFor("any-agent"), undefined);
+      assert.ok(held.placementFor("another-agent"));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to start a move it cannot keep on disk, and says so on the card", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-placements-"));
+    try {
+      // The data folder is a file, so nothing can be written under it.
+      const blocked = join(dir, "blocked");
+      await writeFile(blocked, "x");
+      const memory = new SchedulePlacementMemory(join(blocked, "placements.json"), () => undefined);
+      assert.throws(() => memory.begin(agent.id, { ...contosoPc, reason: "uncertain" }));
+      assert.match(memory.view().problem ?? "", /could not save where schedules last ran/);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

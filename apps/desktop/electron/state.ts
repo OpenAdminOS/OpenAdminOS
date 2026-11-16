@@ -1813,6 +1813,10 @@ function novaProviderEndpoint(providerId: ProviderId, persisted?: Pick<Persisted
 
 /** Why a placement stops a schedule change here, and the step for it. */
 function placementBlocksCopy(agentName: string, place: SchedulePlacement, action: string): string {
+  // With team features off nothing can bring it back through a place: the step is Run it here.
+  if (place.teamFeaturesOff) {
+    return `The schedule of ${agentName} was last known to run on ${place.label}, and team features are off. Choose Run it here on the schedule card first, then ${action}.`;
+  }
   switch (place.reason) {
     case "configuration":
       return `${place.label} also runs ${agentName} from its own configuration. Remove it there first, then ${action}.`;
