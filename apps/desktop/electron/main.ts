@@ -3,6 +3,7 @@ import { saveAuditLogExport } from "./save-audit-log-export.js";
 import { NovaService } from "./nova.js";
 import { NOVA_SESSION_CONTEXT_ENDED_REASON, NOVA_SESSION_ENDED_REASON } from "../src/shared/nova-session.js";
 import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
+import { currentTargetFor } from "@openadminos/enterprise";
 import { createSandboxCapabilities } from "./sandboxes/capabilities.js";
 import { readOnlyCatalog } from "./sandboxes/catalog.js";
 import { SandboxService } from "./sandboxes/service.js";
@@ -3291,12 +3292,21 @@ async function startEnterprise(userDataDir: string): Promise<void> {
         storage: files.storage,
         log,
         onChange: notify,
-        capabilities: sandboxes.capabilities,
+        capabilities: {
+          ...sandboxes.capabilities,
+          // The host turns the schedule here off or on after a module moved it; the module never reaches this.
+          localSchedules: { setEnabled: (agentId, enabled) => store.setAgentScheduleEnabled(agentId, enabled) },
+        },
       }),
     notify,
     log,
   });
   enterprise = service;
+  // A schedule a module reports running in another place does not run here as well.
+  store.setScheduleRunsElsewhere((agentId) => {
+    const status = service.status();
+    return status.active && currentTargetFor(status.scheduleTargets, agentId) !== "this-computer";
+  });
   // The service stores the final runtime and notifies the window for every outcome.
   const runtime = await service.start();
   if (runtime.outcome.kind !== "active") return;

@@ -1827,6 +1827,7 @@ export class AppStateStore {
    */
   private migrationAuditInFlight: Record<string, string | number | string[]> | undefined;
   private migrationAuditRecorded = false;
+  private scheduleRunsElsewhere: ((agentId: string) => boolean) | undefined;
   private writeChain: Promise<unknown> = Promise.resolve();
   private readonly filePath: string;
   private readonly tokenStore: TokenCacheStorage;
@@ -5863,6 +5864,27 @@ export class AppStateStore {
     return this.getAppState();
   }
 
+  /**
+   * Turns an agent's schedule on this computer off or back on, in place:
+   * its organization, interval and notification settings stay. Used when a
+   * team features module moved the schedule to another place and back. An
+   * agent without a schedule here has nothing to change.
+   */
+  async setAgentScheduleEnabled(agentId: string, enabled: boolean): Promise<void> {
+    const agent = (await this.listAgents()).find((entry) => entry.id === agentId || entry.slug === agentId);
+    if (!agent?.schedule || agent.schedule.enabled === enabled) return;
+    await this.updateAgentSchedule(agent.slug, { ...agent.schedule, enabled });
+  }
+
+  /**
+   * Whether a team features module reports an agent's schedule as running
+   * in another place. The scheduler does not run such an agent here, so a
+   * schedule never runs in two places, until the admin resolves it.
+   */
+  setScheduleRunsElsewhere(check: ((agentId: string) => boolean) | undefined): void {
+    this.scheduleRunsElsewhere = check;
+  }
+
   async updateAgentTeamsDelivery(
     slug: string,
     delivery: AgentTeamsDelivery | null,
@@ -5942,6 +5964,10 @@ export class AppStateStore {
       const schedule = agent.schedule;
       if (!schedule?.enabled) continue;
       if (nowMs < scheduleDueAtMs(agent, nowMs)) continue;
+      if (this.scheduleRunsElsewhere?.(agent.id)) {
+        console.info(`[scheduler] skipped "${agent.slug}" because a team features module reports its schedule running in another place`);
+        continue;
+      }
       if (!activeOrganization || schedule.organizationId !== activeOrganization.id) {
         waiting += 1;
         continue;
