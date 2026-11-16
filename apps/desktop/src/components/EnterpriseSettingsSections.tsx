@@ -1,4 +1,4 @@
-import { EnterpriseUiBody } from "./EnterpriseUi";
+import { EnterpriseUiBody, ModuleUiBoundary } from "./EnterpriseUi";
 import { useEnterpriseStatus } from "./useEnterpriseStatus";
 
 /**
@@ -35,7 +35,9 @@ export function EnterpriseSettingsSections({ query }: { query: string }) {
             <p className="mt-1 text-xs text-[var(--color-text-muted)]">Provided by the team features module.</p>
             {section.body ? (
               <div className="mt-3 border-t border-[var(--color-border-soft)] pt-3">
-                <EnterpriseUiBody sectionId={section.id} body={section.body} />
+                <ModuleUiBoundary>
+                  <EnterpriseUiBody sectionId={section.id} body={section.body} revision={section.revision ?? 0} />
+                </ModuleUiBoundary>
               </div>
             ) : null}
           </div>
