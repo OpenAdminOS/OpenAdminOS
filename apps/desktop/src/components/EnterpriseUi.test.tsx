@@ -161,6 +161,41 @@ describe("declarative team features UI", () => {
 });
 
 describe("team features bodies in Settings", () => {
+  it("keeps an action's notice when its reply body arrives as a new revision", async () => {
+    const user = userEvent.setup();
+    const section = (revision: number, body: EnterpriseUiBodyView) => ({ id: "sandboxes", title: "Sandboxes", description: "Machines you run.", revision, body });
+    let status: EnterpriseStatus = {
+      active: true,
+      label: "Team features on",
+      settingsSections: [section(1, { elements: [{ type: "button", id: "pair", label: "Pair", kind: "primary", action: "sandboxes.pair" }] })],
+    };
+    let changed: (() => void) | undefined;
+    const invokeEnterpriseUi = vi.fn<Invoke>(async () => {
+      // The host stores the reply body as the next revision and tells the window.
+      status = { ...status, settingsSections: [section(2, { elements: [{ type: "status", label: "Office mini PC", value: "Paired", tone: "success" }] })] };
+      changed?.();
+      return {
+        body: { elements: [{ type: "status", label: "Office mini PC", value: "Paired", tone: "success" }] },
+        notice: { type: "notice", tone: "success", title: "Paired", message: "The sandbox is paired with this desktop." },
+      };
+    });
+    renderRoute(<EnterpriseSettingsSections query="" />, {
+      path: "*",
+      route: "/settings",
+      bridge: makeMockBridge({
+        getEnterpriseStatus: async () => status,
+        onEnterpriseStatusChanged: (listener) => {
+          changed = listener;
+          return () => undefined;
+        },
+        invokeEnterpriseUi,
+      }),
+    });
+    await user.click(await screen.findByRole("button", { name: "Pair" }));
+    expect(await screen.findByText("Office mini PC")).toBeInTheDocument();
+    expect(await screen.findByText("The sandbox is paired with this desktop.")).toBeInTheDocument();
+  });
+
   it("draws the host's body by revision, keeps typed values that still fit, and closes a confirmation on a push", async () => {
     const user = userEvent.setup();
     const section = (revision: number, body: EnterpriseUiBodyView) => ({ id: "sandboxes", title: "Sandboxes", description: "Machines you run.", revision, body });
@@ -272,6 +307,21 @@ describe("schedule card: where it runs", () => {
     expect(screen.getByRole("switch", { name: /Automatic runs/ })).toBeDisabled();
     expect(screen.getByText("This schedule runs on Office mini PC. Its interval is set there.")).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "24h" })).toBeDisabled();
+    await user.click(screen.getByRole("radio", { name: "Custom" }));
+    expect(screen.queryByRole("spinbutton")).toBeNull();
+  });
+
+  it("shows no two place conflict once the main process turned the schedule here off", async () => {
+    const onChange = vi.fn();
+    const before = createMockAgent({ id: agent.id, schedule: { organizationId: "org-contoso", enabled: true, intervalSeconds: 3600 } });
+    const bridge = makeMockBridge({ getEnterpriseStatus: async () => statusWith({ [agent.id]: "mini-pc" }) });
+    const { rerender } = renderWithAppState(<AgentScheduleCard agent={before} onChange={onChange} />, { bridge });
+    expect(await screen.findByText("Turned on here and on Office mini PC")).toBeInTheDocument();
+    // The app state the main process announced after its write: the schedule here is off.
+    rerender(<AgentScheduleCard agent={{ ...before, schedule: { ...before.schedule!, enabled: false } }} onChange={onChange} />);
+    await waitFor(() => expect(screen.queryByText("Turned on here and on Office mini PC")).toBeNull());
+    expect(screen.getByRole("switch", { name: /Automatic runs/ })).not.toBeChecked();
+    expect(screen.getByText("This schedule runs on Office mini PC. Its interval is set there.")).toBeInTheDocument();
   });
 
   it("shows a schedule running here and elsewhere as a danger state, and turns the one here off in place", async () => {
@@ -281,7 +331,7 @@ describe("schedule card: where it runs", () => {
     const bridge = makeMockBridge({ getEnterpriseStatus: async () => statusWith({ [agent.id]: "mini-pc" }) });
     renderWithAppState(<AgentScheduleCard agent={scheduled} onChange={onChange} />, { bridge });
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Runs here and on Office mini PC");
+    expect(alert).toHaveTextContent("Turned on here and on Office mini PC");
     await user.click(within(alert).getByRole("button", { name: "Turn off here" }));
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ organizationId: "org-contoso", enabled: false, intervalSeconds: 7200, notifyOnChangeOnly: true })));
   });

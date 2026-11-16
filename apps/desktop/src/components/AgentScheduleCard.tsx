@@ -155,7 +155,7 @@ export function AgentScheduleCard({
               step={1}
               inputMode="numeric"
               value={customValue}
-              disabled={busy}
+              disabled={busy || elsewhere !== undefined}
               onChange={(event) => setCustomValue(event.target.value)}
               className="h-9 w-24 rounded-md bg-[var(--color-surface)] px-3 text-base tabular-nums text-[var(--color-text)] ring-1 ring-[var(--color-border)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
             />
@@ -165,7 +165,7 @@ export function AgentScheduleCard({
             <select
               name="schedule-interval-unit"
               value={customUnit}
-              disabled={busy}
+              disabled={busy || elsewhere !== undefined}
               onChange={(event) =>
                 setCustomUnit(event.target.value === "hours" ? "hours" : "minutes")
               }
@@ -201,7 +201,7 @@ export function AgentScheduleCard({
           <ScheduleNotificationSwitch
             label="Notify on success"
             checked={notificationPrefs.notifyOnSuccess}
-            disabled={busy}
+            disabled={busy || elsewhere !== undefined}
             onChange={(checked) =>
               void apply({
                 ...buildSchedule(currentSeconds),
@@ -212,7 +212,7 @@ export function AgentScheduleCard({
           <ScheduleNotificationSwitch
             label="Notify on failure"
             checked={notificationPrefs.notifyOnFailure}
-            disabled={busy}
+            disabled={busy || elsewhere !== undefined}
             onChange={(checked) =>
               void apply({
                 ...buildSchedule(currentSeconds),
@@ -223,7 +223,7 @@ export function AgentScheduleCard({
           <ScheduleNotificationSwitch
             label="Only when findings change"
             checked={notificationPrefs.notifyOnChangeOnly}
-            disabled={busy}
+            disabled={busy || elsewhere !== undefined}
             onChange={(checked) =>
               void apply({
                 ...buildSchedule(currentSeconds),
@@ -385,7 +385,7 @@ export const SCHEDULE_TARGET_COPY = {
   needsInterval: "Choose an interval of at least one minute first.",
   provenance: "Places other than this computer are provided by the team features module.",
   moduleBadge: "Team features",
-  bothTitle: (label: string) => `Runs here and on ${label}`,
+  bothTitle: (label: string) => `Turned on here and on ${label}`,
   bothMessage: "The team features module reports this schedule on another place, and the schedule on this computer is on too. It does not run here until this is resolved.",
   turnOffHere: "Turn off here",
   working: "Working",

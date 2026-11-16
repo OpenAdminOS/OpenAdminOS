@@ -91,9 +91,17 @@ export async function invokeUiAction(action: string, input: unknown): Promise<En
   }
 }
 
-/** Shows a designed notice instead of a broken section when module UI cannot be drawn. */
-export class ModuleUiBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+/**
+ * Shows a designed notice instead of a broken section when module UI
+ * cannot be drawn. A new `resetKey`, such as a new revision, tries again
+ * without remounting what it wraps.
+ */
+export class ModuleUiBoundary extends Component<{ children: ReactNode; resetKey?: string | number }, { failed: boolean }> {
   override state = { failed: false };
+
+  override componentDidUpdate(previous: { resetKey?: string | number }): void {
+    if (this.state.failed && previous.resetKey !== this.props.resetKey) this.setState({ failed: false });
+  }
 
   static getDerivedStateFromError(): { failed: boolean } {
     return { failed: true };
@@ -143,29 +151,10 @@ function mergeValues(body: EnterpriseUiBodyView, previous: Record<string, string
  * newer revision closes an open confirmation and keeps the values the
  * admin typed where they still fit.
  */
-/** Values the admin typed, kept by the parent so they survive a body drawn anew. */
-export type EnterpriseUiMemory = Map<string, { values: Record<string, string>; dirty: Set<string> }>;
-
-export function EnterpriseUiBody({
-  sectionId,
-  body,
-  revision = 0,
-  memory,
-}: {
-  sectionId: string;
-  body: EnterpriseUiBodyView;
-  revision?: number;
-  memory?: EnterpriseUiMemory;
-}) {
-  const kept = memory?.get(sectionId);
-  const dirty = useRef(kept?.dirty ?? new Set<string>());
-  const [values, setValuesState] = useState(() => mergeValues(body, kept?.values ?? {}, dirty.current));
-  const setValues = (update: (previous: Record<string, string>) => Record<string, string>) =>
-    setValuesState((previous) => {
-      const next = update(previous);
-      memory?.set(sectionId, { values: next, dirty: dirty.current });
-      return next;
-    });
+export function EnterpriseUiBody({ sectionId, body, revision = 0 }: { sectionId: string; body: EnterpriseUiBodyView; revision?: number }) {
+  // Kept across revisions: the body is drawn anew, its notice, busy button and typed values stay.
+  const dirty = useRef(new Set<string>());
+  const [values, setValues] = useState(() => mergeValues(body, {}, dirty.current));
   const [notice, setNotice] = useState<EnterpriseUiNoticeView | undefined>();
   const [busy, setBusy] = useState<string | undefined>();
   const [confirming, setConfirming] = useState<Button | undefined>();
