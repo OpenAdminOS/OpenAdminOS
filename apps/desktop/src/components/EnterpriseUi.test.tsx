@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -7,12 +7,14 @@ import type { EnterpriseStatus, EnterpriseUiBodyView } from "@openadminos/agent-
 import { createMockAgent, makeMockBridge, renderRoute, renderWithAppState } from "../test/test-utils";
 import { AgentScheduleCard } from "./AgentScheduleCard";
 import { EnterpriseSettingsSections } from "./EnterpriseSettingsSections";
-import { EnterpriseUiBody } from "./EnterpriseUi";
+import { EnterpriseUiBody, ModuleUiBoundary } from "./EnterpriseUi";
+
+type Invoke = (name: string, input?: unknown) => Promise<unknown>;
 
 const EVERY_ELEMENT: EnterpriseUiBodyView = {
   elements: [
     { type: "status", label: "Office mini PC", value: "Paired", tone: "success" },
-    { type: "text", text: "Schedules keep running while this computer is off." },
+    { type: "text", text: "Schedules keep running while the laptop is off." },
     { type: "notice", tone: "warning", title: "Sync stopped", message: "A row is missing from the audit chain.", recovery: "Pair the sandbox again." },
     { type: "field", id: "address", label: "Address", kind: "code", placeholder: "100.64.0.10:7443", maxLength: 64 },
     { type: "field", id: "name", label: "Name", kind: "text", value: "Lab" },
@@ -22,11 +24,11 @@ const EVERY_ELEMENT: EnterpriseUiBodyView = {
   ],
 };
 
-function renderBody(body: EnterpriseUiBodyView, invokeEnterprise?: (name: string, input?: unknown) => Promise<unknown>) {
-  return renderRoute(<EnterpriseUiBody sectionId="sandboxes" body={body} />, {
+function renderBody(body: EnterpriseUiBodyView, invokeEnterpriseUi?: Invoke) {
+  return renderRoute(<EnterpriseUiBody sectionId="sandboxes" body={body} revision={1} />, {
     path: "*",
     route: "/settings",
-    bridge: makeMockBridge(invokeEnterprise ? { invokeEnterprise } : {}),
+    bridge: makeMockBridge(invokeEnterpriseUi ? { invokeEnterpriseUi } : {}),
   });
 }
 
@@ -35,10 +37,10 @@ describe("declarative team features UI", () => {
     renderBody(EVERY_ELEMENT);
     expect(await screen.findByText("Office mini PC")).toBeInTheDocument();
     expect(screen.getByText("Paired")).toBeInTheDocument();
-    expect(screen.getByText("Schedules keep running while this computer is off.")).toBeInTheDocument();
-    const notice = screen.getByRole("alert");
-    expect(notice).toHaveTextContent("Sync stopped");
-    expect(notice).toHaveTextContent("Pair the sandbox again.");
+    expect(screen.getByText("Schedules keep running while the laptop is off.")).toBeInTheDocument();
+    // A notice that is part of a body is a status, not an alert.
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByText("Sync stopped").closest("[role='status']")).toHaveTextContent("Pair the sandbox again.");
     const address = screen.getByLabelText("Address");
     expect(address).toHaveAttribute("maxLength", "64");
     expect(address).toHaveAttribute("placeholder", "100.64.0.10:7443");
@@ -52,58 +54,68 @@ describe("declarative team features UI", () => {
     expect(document.querySelector("a")).toBeNull();
   });
 
-  it("draws nothing for an element type outside the closed set", async () => {
-    renderBody({ elements: [{ type: "html", html: "<b>x</b>" } as never, { type: "text", text: "Kept." }] });
+  it("draws nothing for an element type outside the closed set, and a plain line for an empty body or list", async () => {
+    const { unmount } = renderBody({ elements: [{ type: "html", html: "<b>x</b>" } as never, { type: "text", text: "Kept." }, { type: "list", rows: [] }] });
     expect(await screen.findByText("Kept.")).toBeInTheDocument();
     expect(document.querySelector("b")).toBeNull();
+    expect(screen.getByText("No entries.")).toBeInTheDocument();
+    unmount();
+    renderBody({ elements: [] });
+    expect(await screen.findByText("Nothing to show yet.")).toBeInTheDocument();
   });
 
-  it("sends the section's values with a button and swaps in the body it returns", async () => {
+  it("sends the section's values with a button, says Working while it runs, and shows the notice it returns", async () => {
     const user = userEvent.setup();
-    const invokeEnterprise = vi.fn(async () => ({
-      body: { elements: [{ type: "status", label: "Office mini PC", value: "Paired", tone: "success" }] },
-      notice: { type: "notice", tone: "success", title: "Paired", message: "The sandbox is paired with this desktop." },
-    }));
-    renderBody(EVERY_ELEMENT, invokeEnterprise);
+    let answer!: (value: unknown) => void;
+    const invokeEnterpriseUi = vi.fn<Invoke>(() => new Promise((resolve) => (answer = resolve)));
+    renderBody(EVERY_ELEMENT, invokeEnterpriseUi);
     await user.type(await screen.findByLabelText("Address"), "100.64.0.10:7443");
     await user.selectOptions(screen.getByLabelText("Organization"), "org-2");
     await user.click(screen.getByRole("button", { name: "Pair" }));
-    await waitFor(() =>
-      expect(invokeEnterprise).toHaveBeenCalledWith("sandboxes.pair", {
-        kind: "button",
-        sectionId: "sandboxes",
-        buttonId: "pair",
-        values: { address: "100.64.0.10:7443", name: "Lab", organization: "org-2" },
-      }),
-    );
-    expect(await screen.findByRole("status")).toHaveTextContent("The sandbox is paired with this desktop.");
-    expect(screen.queryByLabelText("Address")).toBeNull();
+    expect(await screen.findByRole("button", { name: "Working" })).toBeDisabled();
+    expect(invokeEnterpriseUi).toHaveBeenCalledWith("sandboxes.pair", {
+      kind: "button",
+      sectionId: "sandboxes",
+      buttonId: "pair",
+      values: { address: "100.64.0.10:7443", name: "Lab", organization: "org-2" },
+    });
+    await act(async () => {
+      answer({ notice: { type: "notice", tone: "success", title: "Paired", message: "The sandbox is paired with this desktop." } });
+    });
+    expect(await screen.findByText("The sandbox is paired with this desktop.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Pair" })).toBeEnabled();
   });
 
-  it("shows a failed or unreadable answer as a notice with the reason", async () => {
+  it("shows a failed or unreadable answer as a danger alert with the reason", async () => {
     const user = userEvent.setup();
-    const invokeEnterprise = vi
-      .fn<(name: string, input?: unknown) => Promise<unknown>>()
-      .mockRejectedValueOnce(new Error("Error invoking remote method 'openadminos-enterprise:sandboxes.pair': Error: The sandbox at 10.0.0.1:7443 did not answer."))
-      .mockResolvedValueOnce({ script: "x" });
-    renderBody(EVERY_ELEMENT, invokeEnterprise);
+    const invokeEnterpriseUi = vi
+      .fn<Invoke>()
+      .mockRejectedValueOnce(new Error("Error invoking remote method 'openadminos-enterprise-ui:sandboxes.pair': EnterpriseHostError: This button is not in the section any more, or calls another action."))
+      .mockResolvedValueOnce({ script: "x" })
+      .mockResolvedValueOnce({ body: { elements: [{ type: "iframe" }] } });
+    renderBody(EVERY_ELEMENT, invokeEnterpriseUi);
     await user.click(await screen.findByRole("button", { name: "Pair" }));
-    const failed = await screen.findByText("The sandbox at 10.0.0.1:7443 did not answer.");
-    expect(failed.closest("[data-tone]")).toHaveAttribute("data-tone", "danger");
-    expect(screen.getAllByText(/Try again/).length).toBeGreaterThan(0);
+    const failed = await screen.findByRole("alert");
+    expect(failed).toHaveTextContent("This button is not in the section any more, or calls another action.");
+    expect(failed).toHaveTextContent(/Try again/);
     await user.click(screen.getByRole("button", { name: "Pair" }));
+    expect(await screen.findByText(/answered in a form this app does not draw/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Pair" }));
+    await waitFor(() => expect(invokeEnterpriseUi).toHaveBeenCalledTimes(3));
     expect(await screen.findByText(/answered in a form this app does not draw/)).toBeInTheDocument();
   });
 
-  it("asks before a danger button and needs the typed phrase exactly", async () => {
+  it("asks before a danger button, names the team features module, and sends the typed phrase", async () => {
     const user = userEvent.setup();
-    const invokeEnterprise = vi.fn(async () => ({ notice: { type: "notice", tone: "success", title: "Unpaired", message: "The sandbox is unpaired." } }));
+    const invokeEnterpriseUi = vi.fn<Invoke>(async () => ({ notice: { type: "notice", tone: "success", title: "Unpaired", message: "The sandbox is unpaired." } }));
     renderBody(
       { elements: [{ type: "button", id: "unpair", label: "Unpair", kind: "danger", action: "sandboxes.unpair", confirm: { title: "Unpair Office mini PC", message: "Assigned schedules stop on the sandbox.", typedPhrase: "UNPAIR 1 SANDBOX" } }] },
-      invokeEnterprise,
+      invokeEnterpriseUi,
     );
     await user.click(await screen.findByRole("button", { name: "Unpair" }));
     const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("Provided by the team features module");
+    expect(dialog).toHaveTextContent("It does not approve a change to your tenant");
     expect(dialog).toHaveTextContent("Assigned schedules stop on the sandbox.");
     const confirm = within(dialog).getByRole("button", { name: "Unpair" });
     expect(confirm).toBeDisabled();
@@ -112,29 +124,53 @@ describe("declarative team features UI", () => {
     expect(confirm).toBeDisabled();
     await user.clear(phrase);
     await user.type(phrase, "UNPAIR 1 SANDBOX");
-    expect(invokeEnterprise).not.toHaveBeenCalled();
+    expect(invokeEnterpriseUi).not.toHaveBeenCalled();
     await user.click(confirm);
-    await waitFor(() => expect(invokeEnterprise).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(invokeEnterpriseUi).toHaveBeenCalledWith("sandboxes.unpair", { kind: "button", sectionId: "sandboxes", buttonId: "unpair", values: {}, confirmedPhrase: "UNPAIR 1 SANDBOX" }),
+    );
     expect(await screen.findByText("The sandbox is unpaired.")).toBeInTheDocument();
   });
 
   it("does nothing when a confirmation is cancelled", async () => {
     const user = userEvent.setup();
-    const invokeEnterprise = vi.fn();
-    renderBody({ elements: [{ type: "button", id: "sync", label: "Sync now", kind: "secondary", action: "sandboxes.sync", confirm: { title: "Sync now", message: "Read the sandbox's runs now." } }] }, invokeEnterprise);
+    const invokeEnterpriseUi = vi.fn<Invoke>();
+    renderBody({ elements: [{ type: "button", id: "sync", label: "Sync now", kind: "secondary", action: "sandboxes.sync", confirm: { title: "Sync now", message: "Read the sandbox's runs now." } }] }, invokeEnterpriseUi);
     await user.click(await screen.findByRole("button", { name: "Sync now" }));
     await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Cancel" }));
-    expect(invokeEnterprise).not.toHaveBeenCalled();
+    expect(invokeEnterpriseUi).not.toHaveBeenCalled();
+  });
+
+  it("shows a designed notice when module UI cannot be drawn", () => {
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const Broken = () => {
+      throw new Error("not drawable");
+    };
+    try {
+      render(
+        <ModuleUiBoundary>
+          <Broken />
+        </ModuleUiBoundary>,
+      );
+      expect(screen.getByText("This team features section could not be drawn")).toBeInTheDocument();
+      expect(screen.getByText(/Restart OpenAdminOS/)).toBeInTheDocument();
+    } finally {
+      quiet.mockRestore();
+    }
   });
 });
 
 describe("team features bodies in Settings", () => {
-  it("draws a section's body and follows a body the module pushes", async () => {
-    let status: EnterpriseStatus = {
-      active: true,
-      label: "Team features on",
-      settingsSections: [{ id: "sandboxes", title: "Sandboxes", description: "Machines you run.", body: { elements: [{ type: "text", text: "No sandbox is paired." }] } }],
+  it("draws the host's body by revision, keeps typed values that still fit, and closes a confirmation on a push", async () => {
+    const user = userEvent.setup();
+    const section = (revision: number, body: EnterpriseUiBodyView) => ({ id: "sandboxes", title: "Sandboxes", description: "Machines you run.", revision, body });
+    const form: EnterpriseUiBodyView = {
+      elements: [
+        { type: "field", id: "address", label: "Address", kind: "code", maxLength: 64 },
+        { type: "button", id: "unpair", label: "Unpair", kind: "danger", action: "sandboxes.unpair", confirm: { title: "Unpair", message: "Unpair it?" } },
+      ],
     };
+    let status: EnterpriseStatus = { active: true, label: "Team features on", settingsSections: [section(1, form)] };
     let changed: (() => void) | undefined;
     renderRoute(<EnterpriseSettingsSections query="" />, {
       path: "*",
@@ -147,18 +183,42 @@ describe("team features bodies in Settings", () => {
         },
       }),
     });
-    expect(await screen.findByText("No sandbox is paired.")).toBeInTheDocument();
-    status = { ...status, settingsSections: [{ id: "sandboxes", title: "Sandboxes", description: "Machines you run.", body: { elements: [{ type: "status", label: "Office mini PC", value: "Paired", tone: "success" }] } }] };
+    await user.type(await screen.findByLabelText("Address"), "100.64.0.10:7443");
+    await user.click(screen.getByRole("button", { name: "Unpair" }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+
+    status = { ...status, settingsSections: [section(2, { elements: [{ type: "status", label: "Office mini PC", value: "Paired", tone: "success" }, ...form.elements] })] };
     await act(async () => {
       changed?.();
     });
     expect(await screen.findByText("Office mini PC")).toBeInTheDocument();
-    expect(screen.queryByText("No sandbox is paired.")).toBeNull();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByLabelText("Address")).toHaveValue("100.64.0.10:7443");
+
+    status = { ...status, settingsSections: [section(3, { elements: [{ type: "text", text: "No sandbox is paired." }] })] };
+    await act(async () => {
+      changed?.();
+    });
+    expect(await screen.findByText("No sandbox is paired.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Address")).toBeNull();
   });
 });
 
-describe("schedule card targets", () => {
+describe("schedule card: where it runs", () => {
   const agent = createMockAgent();
+  const statusWith = (current?: Record<string, string>): EnterpriseStatus => ({
+    active: true,
+    label: "Team features on",
+    settingsSections: [],
+    scheduleTargets: {
+      action: "sandboxes.schedule",
+      targets: [
+        { id: "mini-pc", label: "Office mini PC", detail: "Local model llama3.1:8b" },
+        { id: "lab", label: "Lab sandbox", disabledReason: "Sync is stopped for this sandbox." },
+      ],
+      ...(current ? { current } : {}),
+    },
+  });
 
   it("is unchanged without a module", async () => {
     renderWithAppState(<AgentScheduleCard agent={agent} onChange={vi.fn()} />);
@@ -179,49 +239,60 @@ describe("schedule card targets", () => {
     expect(screen.queryByText("Where it runs")).toBeNull();
   });
 
-  it("offers This computer and the module's places, and shows the notice a choice returns", async () => {
+  it("moves an enabled schedule to a sandbox only after the module took it, turning the local one off", async () => {
     const user = userEvent.setup();
-    const invokeEnterprise = vi.fn(async () => ({ notice: { type: "notice", tone: "success", title: "Assigned", message: "The schedule runs on Office mini PC." } }));
-    const bridge = makeMockBridge({
-      getEnterpriseStatus: async () => ({
-        active: true,
-        label: "Team features on",
-        settingsSections: [],
-        scheduleTargets: {
-          action: "sandboxes.schedule",
-          targets: [
-            { id: "mini-pc", label: "Office mini PC", detail: "Local model llama3.1:8b" },
-            { id: "lab", label: "Lab sandbox", disabledReason: "Sync is stopped for this sandbox." },
-          ],
-        },
-      }),
-      invokeEnterprise,
+    const onChange = vi.fn();
+    let status = statusWith();
+    let changed: (() => void) | undefined;
+    const invokeEnterpriseUi = vi.fn<Invoke>(async () => {
+      status = statusWith({ [agent.id]: "mini-pc" });
+      changed?.();
+      return { notice: { type: "notice", tone: "success", title: "Moved", message: "The schedule runs on Office mini PC." } };
     });
-    renderWithAppState(<AgentScheduleCard agent={agent} onChange={vi.fn()} />, { bridge });
+    const bridge = makeMockBridge({
+      getEnterpriseStatus: async () => status,
+      onEnterpriseStatusChanged: (listener) => {
+        changed = listener;
+        return () => undefined;
+      },
+      invokeEnterpriseUi,
+    });
+    renderWithAppState(<AgentScheduleCard agent={createMockAgent({ id: agent.id, schedule: { enabled: true, intervalSeconds: 3600 } })} onChange={onChange} />, { bridge });
     expect(await screen.findByText("Where it runs")).toBeInTheDocument();
+    expect(screen.getByText(/provided by the team features module/)).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /This computer/ })).toBeChecked();
     expect(screen.getByRole("radio", { name: /Lab sandbox/ })).toBeDisabled();
-    expect(screen.getByText("Sync is stopped for this sandbox.")).toBeInTheDocument();
     await user.click(screen.getByRole("radio", { name: /Office mini PC/ }));
-    await waitFor(() => expect(invokeEnterprise).toHaveBeenCalledWith("sandboxes.schedule", { kind: "schedule", agentId: agent.id, targetId: "mini-pc", intervalSeconds: 3600 }));
+    await waitFor(() => expect(invokeEnterpriseUi).toHaveBeenCalledWith("sandboxes.schedule", { kind: "schedule", agentId: agent.id, targetId: "mini-pc", intervalSeconds: 3600 }));
     expect(await screen.findByText("The schedule runs on Office mini PC.")).toBeInTheDocument();
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(null));
+    await waitFor(() => expect(screen.getByRole("radio", { name: /Office mini PC/ })).toBeChecked());
+    // Here the switch and the interval are off, and the card says where the schedule runs.
+    expect(screen.getByRole("switch", { name: /Automatic runs/ })).toBeDisabled();
+    expect(screen.getByText("This schedule runs on Office mini PC. Its interval is set there.")).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "24h" })).toBeDisabled();
   });
 
-  it("shows a refused choice as a danger notice with the reason", async () => {
+  it("brings the schedule back with This computer through the module, and keeps the place on a refusal", async () => {
     const user = userEvent.setup();
-    const bridge = makeMockBridge({
-      getEnterpriseStatus: async () => ({
-        active: true,
-        label: "Team features on",
-        settingsSections: [],
-        scheduleTargets: { action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC" }] },
-      }),
-      invokeEnterprise: async () => ({ notice: { type: "notice", tone: "danger", title: "Not assigned", message: "find-inactive-devices is not a bundled read-only agent.", recovery: "Choose a read-only agent." } }),
-    });
-    renderWithAppState(<AgentScheduleCard agent={agent} onChange={vi.fn()} />, { bridge });
-    await user.click(await screen.findByRole("radio", { name: /Office mini PC/ }));
+    const onChange = vi.fn();
+    const invokeEnterpriseUi = vi
+      .fn<Invoke>()
+      .mockResolvedValueOnce({ notice: { type: "notice", tone: "danger", title: "Not moved", message: "The sandbox did not answer.", recovery: "Check that the sandbox runs, then try again." } })
+      .mockResolvedValueOnce({ body: { elements: [] } });
+    const bridge = makeMockBridge({ getEnterpriseStatus: async () => statusWith({ [agent.id]: "mini-pc" }), invokeEnterpriseUi });
+    renderWithAppState(<AgentScheduleCard agent={agent} onChange={onChange} />, { bridge });
+    expect(await screen.findByRole("radio", { name: /Office mini PC/ })).toBeChecked();
+    await user.click(screen.getByRole("radio", { name: /This computer/ }));
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("not a bundled read-only agent");
-    expect(alert).toHaveTextContent("Choose a read-only agent.");
+    expect(alert).toHaveTextContent("The sandbox did not answer.");
+    expect(screen.getByRole("radio", { name: /Office mini PC/ })).toBeChecked();
+    expect(onChange).not.toHaveBeenCalled();
+
+    // A reply without a notice still says what happened, and the local schedule comes back.
+    await user.click(screen.getByRole("radio", { name: /This computer/ }));
+    await waitFor(() => expect(invokeEnterpriseUi).toHaveBeenLastCalledWith("sandboxes.schedule", { kind: "schedule", agentId: agent.id, targetId: "this-computer", intervalSeconds: 3600 }));
+    expect(await screen.findByText("The schedule now runs on This computer.")).toBeInTheDocument();
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ enabled: true, intervalSeconds: 3600 })));
   });
 });
