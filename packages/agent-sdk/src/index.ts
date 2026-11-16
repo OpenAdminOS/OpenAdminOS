@@ -3416,6 +3416,14 @@ export interface EnterpriseScheduleTargetView {
   readonly agentIds?: readonly string[];
 }
 
+/** Where an agent's schedule was last known to run instead of here. */
+export interface SchedulePlacementView {
+  readonly targetId: string;
+  readonly label: string;
+  readonly organizationId: string;
+  readonly reason: "runs" | "configuration" | "uncertain";
+}
+
 export interface EnterpriseScheduleTargetsView {
   readonly action: string;
   readonly targets: readonly EnterpriseScheduleTargetView[];
@@ -3482,6 +3490,10 @@ export interface OpenAdminOSApi {
    * Rejects when no module registered that name.
    */
   invokeEnterprise?(name: string, input?: unknown): Promise<unknown>;
+  /** The last schedule placements a team features module reported, kept across launches, by agent id. */
+  getSchedulePlacements?(): Promise<Readonly<Record<string, SchedulePlacementView>>>;
+  /** Forgets one agent's kept placement, after the admin chose Run it here. */
+  clearSchedulePlacement?(agentId: string): Promise<Readonly<Record<string, SchedulePlacementView>>>;
   /** Calls a team features UI action, on its own channels apart from `invokeEnterprise`. */
   invokeEnterpriseUi?(name: string, input?: unknown): Promise<unknown>;
   getReleaseDiagnostics(): Promise<ReleaseDiagnostics>;

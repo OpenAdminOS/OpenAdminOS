@@ -3,7 +3,7 @@ import { saveAuditLogExport } from "./save-audit-log-export.js";
 import { NovaService } from "./nova.js";
 import { NOVA_SESSION_CONTEXT_ENDED_REASON, NOVA_SESSION_ENDED_REASON } from "../src/shared/nova-session.js";
 import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
-import { alsoRunsOnFor, currentTargetFor } from "@openadminos/enterprise";
+import { SchedulePlacementMemory } from "./schedule-placements.js";
 import { createSandboxCapabilities } from "./sandboxes/capabilities.js";
 import { readOnlyCatalog } from "./sandboxes/catalog.js";
 import { SandboxService } from "./sandboxes/service.js";
@@ -325,6 +325,8 @@ let menuBarTray: Tray | null = null;
 let store: AppStateStore;
 // Team features stay off until a valid licence is found; see enterprise.ts.
 let enterprise: EnterpriseService | undefined;
+/** The last schedule placements a team features module reported; set when the app starts. */
+let schedulePlacements: SchedulePlacementMemory | undefined;
 /** The Nova service, once IPC is registered: settings changes check its live voice session. */
 let novaService: NovaService | undefined;
 const activeNotifications = new Set<Notification>();
@@ -3257,12 +3259,16 @@ function isAllowedAppNavigation(url: string): boolean {
  * module. Without a valid licence this reads one file and does nothing else.
  */
 async function startEnterprise(userDataDir: string): Promise<void> {
+  const placements = new SchedulePlacementMemory(join(userDataDir, "enterprise", "placements.json"));
+  schedulePlacements = placements;
   const files = enterpriseFiles(userDataDir);
   const notify = () => mainWindow?.webContents.send("openadminos:enterprise-status-changed");
   const log = (level: "info" | "warn" | "error", message: string, fields?: Readonly<Record<string, string | number | boolean>>) =>
     console[level](`[enterprise] ${message}`, fields ?? {});
   // Lent to an active module only. The service holds the sandbox keys and
   // verification in this process and is created on the first sandbox call.
+  // Set before the module loads, so a schedule kept as running elsewhere never fires here at startup.
+  store.setScheduleRunsElsewhere((agentId) => placements.placementFor(agentId, undefined));
   const sandboxes = createSandboxCapabilities({
     organizations: () => store.listConnectedOrganizations(),
     catalog: async () => readOnlyCatalog(),
@@ -3294,6 +3300,7 @@ async function startEnterprise(userDataDir: string): Promise<void> {
         onChange: notify,
         capabilities: {
           ...sandboxes.capabilities,
+          placements: { save: (next) => placements.save(next) },
           // The host turns the schedule here off or on after a module moved it; the module never reaches this.
           localSchedules: {
             has: (agentId) => store.hasAgentSchedule(agentId),
@@ -3309,12 +3316,11 @@ async function startEnterprise(userDataDir: string): Promise<void> {
   });
   enterprise = service;
   // A schedule a module reports running in another place does not run here as well.
+  // The module's live placements once it reported them in this session; the ones kept from before until then,
+  // and while team features are off.
   store.setScheduleRunsElsewhere((agentId) => {
     const status = service.status();
-    if (!status.active || !status.scheduleTargets) return undefined;
-    const current = currentTargetFor(status.scheduleTargets, agentId);
-    const place = current !== "this-computer" ? current : alsoRunsOnFor(status.scheduleTargets, agentId);
-    return place ? status.scheduleTargets.targets.find((target) => target.id === place)?.organizationId ?? place : undefined;
+    return placements.placementFor(agentId, status.active ? status.scheduleTargets : undefined);
   });
   // The service stores the final runtime and notifies the window for every outcome.
   const runtime = await service.start();
@@ -5463,6 +5469,19 @@ function registerIpcHandlers() {
   ipcMain.handle(
     "openadminos:get-enterprise-status",
     handleTrusted(() => enterprise?.status() ?? { active: false }),
+  );
+  ipcMain.handle(
+    "openadminos:get-schedule-placements",
+    handleTrusted(() => schedulePlacements?.list() ?? {}),
+  );
+  ipcMain.handle(
+    "openadminos:clear-schedule-placement",
+    handleTrusted((_event: unknown, agentId: unknown) => {
+      if (typeof agentId !== "string" || !/^[a-z0-9][a-z0-9._-]{0,127}$/.test(agentId)) throw new Error("Run it here needs an agent id.");
+      schedulePlacements?.clear(agentId);
+      mainWindow?.webContents.send("openadminos:enterprise-status-changed");
+      return schedulePlacements?.list() ?? {};
+    }),
   );
   ipcMain.handle(
     "openadminos:get-release-diagnostics",

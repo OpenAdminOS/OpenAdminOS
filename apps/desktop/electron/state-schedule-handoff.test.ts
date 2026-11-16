@@ -9,6 +9,7 @@ import type { TokenCacheStorage } from "@openadminos/runtime";
 
 import { createEnterpriseHost, type EnterpriseIpcRegistrar } from "@openadminos/enterprise";
 
+import { SchedulePlacementMemory } from "./schedule-placements.js";
 import { AppStateStore, ScheduleMoveInProgressError } from "./state.js";
 
 const tokenStore: TokenCacheStorage = { read: async () => "", write: async () => undefined };
@@ -120,7 +121,7 @@ describe("schedule handoff on this computer", () => {
       const asked: string[] = [];
       f.store.setScheduleRunsElsewhere((agentId) => {
         asked.push(agentId);
-        return "org-contoso";
+        return { targetId: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", reason: "runs" };
       });
       await f.store.fireDueSchedules();
       assert.deepEqual(asked, [agent.id]);
@@ -187,8 +188,14 @@ describe("schedule handoff on this computer", () => {
     try {
       assert.equal(await f.store.agentScheduleOrganization(agent.id), "org-contoso");
       assert.equal(await f.store.agentScheduleOrganization("not-installed"), undefined);
-      f.store.setScheduleRunsElsewhere(() => "org-contoso");
-      await assert.rejects(f.store.assignAgentSchedule(agent.slug, "org-fabrikam"), /runs in another place/);
+      const runs = { targetId: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", reason: "runs" as const };
+      f.store.setScheduleRunsElsewhere(() => runs);
+      await assert.rejects(f.store.assignAgentSchedule(agent.slug, "org-fabrikam"), /runs on Office mini PC, which is paired for its organization\. Bring it back here first, then assign it\./);
+      // The reason and the step follow the kind of placement.
+      f.store.setScheduleRunsElsewhere(() => ({ ...runs, reason: "configuration" }));
+      await assert.rejects(f.store.assignAgentSchedule(agent.slug, "org-fabrikam"), /also runs Find inactive devices from its own configuration\. Remove it there first/);
+      f.store.setScheduleRunsElsewhere(() => ({ ...runs, reason: "uncertain" }));
+      await assert.rejects(f.store.assignAgentSchedule(agent.slug, "org-fabrikam"), /not certain whether Office mini PC runs/);
       assert.equal((await f.schedule())?.organizationId, "org-contoso");
       // While a move runs, assigning waits too.
       f.store.setScheduleRunsElsewhere(undefined);
@@ -199,8 +206,8 @@ describe("schedule handoff on this computer", () => {
       // No schedule here, a Contoso place runs it, Fabrikam active: a new schedule here is refused.
       await f.store.updateAgentSchedule(agent.slug, null);
       await f.store.setActiveTenant("fabrikam");
-      f.store.setScheduleRunsElsewhere(() => "org-contoso");
-      await assert.rejects(f.store.updateAgentSchedule(agent.slug, { enabled: true, intervalSeconds: 3600 }), /paired for another organization/);
+      f.store.setScheduleRunsElsewhere(() => runs);
+      await assert.rejects(f.store.updateAgentSchedule(agent.slug, { enabled: true, intervalSeconds: 3600 }), /Bring it back here first, then schedule it here under another organization/);
       assert.equal(await f.schedule(), undefined);
       // Under Contoso it can be made.
       await f.store.setActiveTenant("contoso");
@@ -208,6 +215,52 @@ describe("schedule handoff on this computer", () => {
       assert.equal((await f.schedule())?.organizationId, "org-contoso");
     } finally {
       await f.close();
+    }
+  });
+
+  it("keeps a schedule moved away from running here after a restart, before the module reports and with team features off", async () => {
+    const f = await fixture("contoso");
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-placements-"));
+    try {
+      const path = join(dir, "placements.json");
+      // Last session: the module reported the schedule on the sandbox.
+      new SchedulePlacementMemory(path).save({ [agent.id]: { targetId: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", reason: "runs" } });
+
+      // This session: the app starts, the module has not reported yet.
+      const memory = new SchedulePlacementMemory(path);
+      const live: { targets: Parameters<SchedulePlacementMemory["placementFor"]>[1] } = { targets: undefined };
+      f.store.setScheduleRunsElsewhere((agentId) => memory.placementFor(agentId, live.targets));
+      await f.store.fireDueSchedules();
+      assert.deepEqual((await f.store.getAppState()).runs, [], "nothing fired for the agent kept as running elsewhere");
+      assert.equal((await f.schedule())?.lastScheduledRunAt, "2026-01-01T00:00:00.000Z");
+
+      // Team features off for good: still kept, until Run it here clears it.
+      assert.equal(memory.placementFor(agent.id, undefined)?.label, "Office mini PC");
+      memory.clear(agent.id);
+      assert.equal(memory.placementFor(agent.id, undefined), undefined);
+      assert.equal(new SchedulePlacementMemory(path).placementFor(agent.id, undefined), undefined, "cleared on disk too");
+
+      // The module reports later in the session: its live placements win over the kept ones.
+      memory.save({ [agent.id]: { targetId: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", reason: "runs" } });
+      live.targets = { action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso" }], current: { [agent.id]: "this-computer" } };
+      assert.equal(memory.placementFor(agent.id, live.targets), undefined);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      await f.close();
+    }
+  });
+
+  it("reads a damaged placements file as empty and says so", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-placements-"));
+    try {
+      const path = join(dir, "placements.json");
+      await writeFile(path, "{ not json");
+      const logs: string[] = [];
+      const memory = new SchedulePlacementMemory(path, (message) => logs.push(message));
+      assert.deepEqual(memory.list(), {});
+      assert.ok(logs.some((message) => message.includes("not readable")));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
     }
   });
 });
