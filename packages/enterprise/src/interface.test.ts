@@ -72,7 +72,11 @@ const v1Module: EnterpriseModule = {
       },
     });
     host.updateSettingsSection("sandboxes", undefined);
-    host.registerUiAction("sandboxes.pair", async (input) => (input.kind === "button" ? { notice: { type: "notice", tone: "success", title: "Paired", message: input.values.address ?? "" } } : { body: { elements: [] } }));
+    // A button may answer with a body; a schedule choice answers with a notice only.
+    host.registerUiAction("sandboxes.pair", async (input) =>
+      input.kind === "button"
+        ? { body: { elements: [] }, notice: { type: "notice", tone: "success", title: "Paired", message: input.values.address ?? "" } }
+        : { notice: { type: "notice", tone: "success", title: "Moved", message: input.targetId } });
     host.setScheduleTargets({ action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC", detail: "Local model", disabledReason: "Sync is stopped.", agentIds: ["find-inactive-devices"] }] });
     host.setScheduleTargets(undefined);
     host.setStatusContribution({ label: "Team service", detail: "End-to-end encrypted." });

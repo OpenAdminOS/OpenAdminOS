@@ -86,9 +86,15 @@ export function normalizeForPhraseMatch(value: string): string {
     .toLowerCase();
 }
 
+/** A character as U+XXXX, for a message that names it. */
+function codePoint(character: string): string {
+  return `U+${character.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}`;
+}
+
 /** Refuses invisible formatting characters and the app's reserved phrases in module text. */
 export function checkModuleText(value: string, what: string): void {
-  if (FORMAT.test(value)) invalid(`The ${what} has an invisible formatting character.`);
+  const invisible = value.match(FORMAT)?.[0];
+  if (invisible) invalid(`The ${what} has an invisible formatting character (${codePoint(invisible)}).`);
   const normalized = ` ${normalizeForPhraseMatch(value)} `;
   const reserved = ENTERPRISE_UI_RESERVED_PHRASES.find((phrase) => normalized.includes(` ${normalizeForPhraseMatch(phrase)} `));
   if (reserved) invalid(`The ${what} uses "${reserved}", which the app keeps for its own messages.`);
@@ -420,7 +426,9 @@ export function checkUiActionAgainst(
       const element = body.elements.find((candidate) => (candidate.type === "field" || candidate.type === "select") && candidate.id === key);
       if (!element) invalid(`${key} is not a field or select of the section.`);
       if (element.type === "field") {
-        if (value.length > (element.maxLength ?? L.defaultFieldLength) || CONTROL.test(value) || /[\n\r]/.test(value) || FORMAT.test(value)) invalid(`The value of ${element.label} is too long or not one line.`);
+        const invisible = value.match(FORMAT)?.[0];
+        if (invisible) invalid(`The value of ${element.label} has an invisible character (${codePoint(invisible)}). Type it again without it.`);
+        if (value.length > (element.maxLength ?? L.defaultFieldLength) || CONTROL.test(value) || /[\n\r]/.test(value)) invalid(`The value of ${element.label} is too long or not one line.`);
       } else if (element.type === "select" && !element.options.some((option) => option.value === value)) {
         invalid(`The value of ${element.label} is not one of its options.`);
       }

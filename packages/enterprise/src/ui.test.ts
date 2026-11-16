@@ -176,4 +176,16 @@ describe("declarative module UI", () => {
     // A word that merely contains a phrase's letters is not refused.
     assert.equal(checkUiBody(body({ type: "text", text: "Thisco mputer lab" })).elements.length, 1);
   });
+
+  it("names an invisible character in a pasted value", () => {
+    const section = checkUiBody(body(
+      { type: "field", id: "address", label: "Address", kind: "code", maxLength: 64 },
+      { type: "button", id: "pair", label: "Pair", kind: "primary", action: "sandboxes.pair" },
+    ));
+    const ui = { body: () => section, scheduleTargets: undefined };
+    assert.throws(
+      () => checkUiActionAgainst(checkUiActionInput({ kind: "button", sectionId: "sandboxes", buttonId: "pair", values: { address: "100.64.0.10\u200b:7443" } }), "sandboxes.pair", ui),
+      (error: unknown) => error instanceof EnterpriseHostError && /U\+200B/.test(error.message),
+    );
+  });
 });

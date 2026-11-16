@@ -193,10 +193,10 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
       throw new EnterpriseHostError("invalid-value", `The ${what} for ${name} is not a function.`);
     }
     if (channels.has(name)) {
-      throw new EnterpriseHostError("duplicate", `An IPC handler or UI action named ${name} is already registered.`);
+      throw new EnterpriseHostError("duplicate", `An IPC handler named ${name} is already registered.`);
     }
     if (channels.size >= ENTERPRISE_LIMITS.maxIpcHandlers) {
-      throw new EnterpriseHostError("limit", `A module can register at most ${ENTERPRISE_LIMITS.maxIpcHandlers} IPC handlers and UI actions.`);
+      throw new EnterpriseHostError("limit", `A module can register at most ${ENTERPRISE_LIMITS.maxIpcHandlers} IPC handlers.`);
     }
     const channel = enterpriseIpcChannel(name);
     options.ipc.handle(channel, async (input: unknown) => {
@@ -248,9 +248,16 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
       const input = checkUiActionInput(checkJson(raw ?? null, ENTERPRISE_LIMITS.maxIpcInputBytes, `the request to ${name}`));
       checkUiActionAgainst(input, name, { body: (id) => sections.get(id)?.body, scheduleTargets });
       const revision = input.kind === "button" ? revisions.get(input.sectionId) : undefined;
-      // Moving back needs a schedule here to turn on: without one the module is not asked, and its place stays.
-      if (input.kind === "schedule" && input.targetId === "this-computer" && capabilities.localSchedules && !(await capabilities.localSchedules.has(input.agentId))) {
-        return checkJson(danger("No schedule here", "There is no schedule here to take this agent back, so it keeps running where it runs now.", "Turn on Automatic runs in the schedule card first, then choose here."), ENTERPRISE_LIMITS.maxIpcOutputBytes, `the reply from ${name}`);
+      // A schedule moves only once it exists here, either way: without one the module is not asked, and its place stays.
+      if (input.kind === "schedule" && capabilities.localSchedules) {
+        let exists: boolean;
+        try {
+          exists = await capabilities.localSchedules.has(input.agentId);
+        } catch (error) {
+          options.log("error", "enterprise: the schedule here could not be read before a move", { agentId: input.agentId, error: errorMessage(error) });
+          return danger("The schedule here could not be read", "The app could not read the schedule here, so nothing moved.", "Try again. If it keeps failing, restart OpenAdminOS.");
+        }
+        if (!exists) return NO_SCHEDULE_HERE;
       }
       let reply: EnterpriseUiReply;
       try {
@@ -258,6 +265,18 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
       } catch (error) {
         options.log("error", "enterprise: a UI action failed", { name, error: errorMessage(error) });
         return checkJson(failedReply(error), ENTERPRISE_LIMITS.maxIpcOutputBytes, `the reply from ${name}`);
+      }
+      // A schedule choice answers with a notice; a body there has no section to go to.
+      if (input.kind === "schedule" && reply.body) {
+        options.log("error", "enterprise: a schedule action answered with a body", { name });
+        return danger("The schedule did not move", "The team features module answered a schedule choice with a section body, which the schedule card does not take. Nothing changed here.", "Update the team features module, then try again.");
+      }
+      // Too large to send is refused before it is stored, so a body is never kept and then reported as a failure.
+      try {
+        checkJson(reply, ENTERPRISE_LIMITS.maxIpcOutputBytes, `the reply from ${name}`);
+      } catch (error) {
+        options.log("error", "enterprise: a UI action reply was too large", { name, error: errorMessage(error) });
+        return danger("The team feature did not complete", `The reply from ${name} is larger than the app takes, so nothing was kept.`, "Update the team features module, then try again.");
       }
       if (input.kind === "button" && reply.body) {
         const section = sections.get(input.sectionId);
@@ -411,6 +430,16 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
     },
   });
 }
+
+const NO_SCHEDULE_HERE = Object.freeze({
+  notice: Object.freeze({
+    type: "notice" as const,
+    tone: "danger" as const,
+    title: "No schedule here",
+    message: "Turn on Automatic runs first; a schedule can move only once it exists here.",
+    recovery: "Turn on Automatic runs in the schedule card, then choose again.",
+  }),
+});
 
 /** A danger notice in the app's own words. */
 function danger(title: string, message: string, recovery: string): EnterpriseUiReply {

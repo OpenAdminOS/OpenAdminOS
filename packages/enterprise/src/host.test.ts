@@ -645,12 +645,13 @@ describe("createEnterpriseHost", () => {
     });
     const host = controller.host;
     const targets = [{ id: "mini-pc", label: "Office mini PC" }];
-    let report: "move" | "stay" | "refuse" = "move";
+    let report: "move" | "stay" | "refuse" | "body" | "lost" = "move";
     host.registerUiAction("sandboxes.schedule", async (input) => {
       if (input.kind !== "schedule") return { notice: { type: "notice", tone: "neutral", title: "x", message: "y" } };
       if (report === "refuse") return { notice: { type: "notice", tone: "danger", title: "Not moved", message: "The sandbox did not answer.", recovery: "Check the sandbox, then try again." } };
       if (report === "move") host.setScheduleTargets({ action: "sandboxes.schedule", targets, current: { [input.agentId]: input.targetId } });
-      return { body: { elements: [] } };
+      if (report === "body") return { body: { elements: [] } };
+      return { notice: { type: "notice", tone: "neutral", title: "Taken", message: "The module took the choice." } };
     });
     host.setScheduleTargets({ action: "sandboxes.schedule", targets });
     const replies: unknown[] = [];
@@ -662,8 +663,7 @@ describe("createEnterpriseHost", () => {
 
     // Moved and reported: the schedule here is turned off, in place.
     const moved = await choose("mini-pc");
-    assert.equal(moved.notice.tone, "success");
-    assert.match(moved.notice.message, /now runs on Office mini PC/);
+    assert.equal(moved.notice.title, "Taken", "the module's own notice reaches the window");
     assert.deepEqual(local, [["find-inactive-devices", false]]);
 
     // Back here: turned on again.
@@ -691,14 +691,24 @@ describe("createEnterpriseHost", () => {
     assert.match(both.notice.recovery ?? "", /Turn off here/);
     failLocal = false;
 
-    // Back here with no schedule here: the module is not asked and its place stays.
+    // No schedule here, either way: the module is not asked and its place stays.
     hasLocal = false;
     const before = local.length;
-    const none = await choose("this-computer");
-    assert.equal(none.notice.title, "No schedule here");
-    assert.match(none.notice.recovery ?? "", /Turn on Automatic runs/);
+    for (const target of ["this-computer", "mini-pc"]) {
+      const none = await choose(target);
+      assert.equal(none.notice.title, "No schedule here");
+      assert.equal(none.notice.message, "Turn on Automatic runs first; a schedule can move only once it exists here.");
+    }
     assert.equal(local.length, before);
     assert.equal(controller.snapshot().scheduleTargets?.current?.["find-inactive-devices"], "mini-pc");
+    hasLocal = true;
+
+    // A body in a schedule reply is refused, and nothing changes here.
+    report = "body";
+    const withBody = await choose("this-computer");
+    assert.equal(withBody.notice.tone, "danger");
+    assert.match(withBody.notice.message, /section body/);
+    assert.equal(local.length, before);
 
     // Every notice the host wrote reaches the window as written: the renderer runs the same check.
     assert.ok(replies.length >= 6);
@@ -742,5 +752,53 @@ describe("createEnterpriseHost", () => {
     assertError(() => host.setStatusContribution({ label: "Local-only · No data leaves this device" }), "invalid-value");
     assertError(() => host.setStatusContribution({ label: "Team service", detail: "Payloads \u202eare ciphertext." }), "invalid-value");
     host.setStatusContribution({ label: "Team service · Frankfurt · end-to-end encrypted" });
+  });
+
+  it("reports a schedule here that cannot be read as a designed notice", async () => {
+    const logs: string[] = [];
+    const ipc = new FakeIpc();
+    const controller = createEnterpriseHost({
+      entitlement: () => ENTITLEMENT,
+      ipc,
+      storage: new MemoryStorage(),
+      log: (_level, message) => logs.push(message),
+      capabilities: { localSchedules: { has: async () => { throw new Error("state.json is locked"); }, setEnabled: async () => true } },
+    });
+    let asked = 0;
+    controller.host.registerUiAction("sandboxes.schedule", async () => {
+      asked += 1;
+      return { notice: { type: "notice", tone: "neutral", title: "x", message: "y" } };
+    });
+    controller.host.setScheduleTargets({ action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC" }] });
+    const reply = (await ipc.invoke("openadminos-enterprise-ui:sandboxes.schedule", { kind: "schedule", agentId: "find-inactive-devices", targetId: "mini-pc", intervalSeconds: 3600 })) as { notice: { tone: string; title: string } };
+    assert.equal(reply.notice.tone, "danger");
+    assert.equal(reply.notice.title, "The schedule here could not be read");
+    assert.equal(asked, 0);
+    assert.ok(logs.some((message) => message.includes("could not be read before a move")));
+    assert.deepEqual(checkUiReply(reply), reply);
+  });
+
+  it("does not store a reply body too large to send, and says so", async () => {
+    const { host, ipc, controller } = setup();
+    // Valid by its own bounds (40 elements of 1000 characters, each under the limits) but past the reply limit when many repeat.
+    const big = {
+      elements: Array.from({ length: 40 }, (_, i) => ({
+        type: "list" as const,
+        rows: Array.from({ length: 50 }, (_, j) => ({ label: `row ${i} ${j} ${"x".repeat(100)}`, status: { value: "y".repeat(110), tone: "neutral" as const } })),
+      })),
+    };
+    host.registerUiAction("sandboxes.pair", async () => ({ body: big }));
+    host.registerSettingsSection({ id: "sandboxes", title: "Sandboxes", description: "Machines you run.", body: { elements: [{ type: "button", id: "pair", label: "Pair", kind: "primary", action: "sandboxes.pair" }] } });
+    const reply = (await ipc.invoke("openadminos-enterprise-ui:sandboxes.pair", { kind: "button", sectionId: "sandboxes", buttonId: "pair", values: {} })) as { notice: { tone: string; message: string } };
+    assert.equal(reply.notice.tone, "danger");
+    assert.match(reply.notice.message, /larger than the app takes/);
+    assert.equal(controller.snapshot().settingsSections[0]?.revision, 1, "the large body was not stored");
+    assert.equal(controller.snapshot().settingsSections[0]?.body?.elements[0]?.type, "button");
+  });
+
+  it("keeps IPC handler messages about IPC handlers", () => {
+    const { host } = setup();
+    host.registerIpc("team.status", () => null);
+    assert.throws(() => host.registerIpc("team.status", () => null), (error: unknown) => error instanceof Error && error.message === "An IPC handler named team.status is already registered.");
   });
 });
