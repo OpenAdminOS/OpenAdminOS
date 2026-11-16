@@ -234,7 +234,7 @@ describe("enterprise interface", () => {
         maxFieldLength: 2000,
         defaultFieldLength: 200,
         maxValues: 40,
-        maxScheduleTargets: 8,
+        maxScheduleTargets: 32,
         maxAgentIds: 100,
         maxPhraseLength: 80,
         maxUiActions: 32,

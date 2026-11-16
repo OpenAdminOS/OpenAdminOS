@@ -27,7 +27,7 @@ export const ENTERPRISE_UI_LIMITS = Object.freeze({
   maxFieldLength: 2000,
   defaultFieldLength: 200,
   maxValues: 40,
-  maxScheduleTargets: 8,
+  maxScheduleTargets: 32,
   maxAgentIds: 100,
   maxPhraseLength: 80,
   maxUiActions: 32,
@@ -474,12 +474,7 @@ export function currentTargetFor(targets: EnterpriseScheduleTargets | undefined,
 export function checkUiActionAgainst(
   input: EnterpriseUiActionInput,
   action: string,
-  ui: {
-    readonly body: (sectionId: string) => EnterpriseUiBody | undefined;
-    readonly scheduleTargets: EnterpriseScheduleTargets | undefined;
-    /** The organization of the agent's schedule here, when known; a place paired for another one is refused. */
-    readonly scheduleOrganization?: string;
-  },
+  ui: { readonly body: (sectionId: string) => EnterpriseUiBody | undefined; readonly scheduleTargets: EnterpriseScheduleTargets | undefined },
 ): void {
   if (input.kind === "button") {
     const body = ui.body(input.sectionId);
@@ -506,7 +501,5 @@ export function checkUiActionAgainst(
   const target = targetsForAgent(targets, input.agentId).find((candidate) => candidate.id === input.targetId);
   if (!target) invalid("That schedule target is not offered for this agent.");
   if (target.disabledReason) invalid(target.disabledReason);
-  if ("scheduleOrganization" in ui && target.organizationId !== ui.scheduleOrganization) {
-    invalid(`${target.label} is paired for another organization than this schedule's.`);
-  }
+  // The organization of the schedule here is checked by the host, which alone can read it.
 }

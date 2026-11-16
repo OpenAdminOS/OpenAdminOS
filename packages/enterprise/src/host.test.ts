@@ -876,8 +876,13 @@ describe("createEnterpriseHost", () => {
     });
     controller.host.setScheduleTargets({ action: "sandboxes.flip", targets });
     organizationOfSchedule["os-update-posture"] = "org-contoso";
-    const late = (await ipc.invoke("openadminos-enterprise-ui:sandboxes.flip", { kind: "schedule", agentId: "os-update-posture", targetId: "contoso-pc", intervalSeconds: 3600 })) as { notice: { tone: string } };
+    const late = (await ipc.invoke("openadminos-enterprise-ui:sandboxes.flip", { kind: "schedule", agentId: "os-update-posture", targetId: "contoso-pc", intervalSeconds: 3600 })) as { notice: { tone: string; title: string; message: string; recovery: string } };
     assert.equal(late.notice.tone, "danger");
+    // The module did move it: the notice says so, and how to bring it back.
+    assert.equal(late.notice.title, "The schedule may run in two places");
+    assert.match(late.notice.message, /moved the schedule to Contoso mini PC/);
+    assert.equal(late.notice.recovery, "Choose here to bring it back.");
+    assert.deepEqual(checkUiReply(late), late);
     assert.deepEqual(local, [["find-inactive-devices", false]]);
   });
 
@@ -896,7 +901,7 @@ describe("createEnterpriseHost", () => {
       asked += 1;
       return { notice: { type: "notice", tone: "success", title: "Moved", message: "Moved." } };
     });
-    const targets = [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso" }];
+    const targets = [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso" }, { id: "lab-pc", label: "Lab PC", organizationId: "org-contoso" }];
     controller.host.setScheduleTargets({
       action: "sandboxes.schedule",
       targets,
@@ -911,6 +916,10 @@ describe("createEnterpriseHost", () => {
     assert.equal(twice.notice.tone, "danger");
     assert.match(twice.notice.message, /own configuration/);
     assert.match(twice.notice.recovery, /Remove the agent from Office mini PC's own configuration first/);
+    // Moving to another module place is refused too: that place would run it alongside the configuration.
+    const elsewhere = await choose("find-inactive-devices", "lab-pc");
+    assert.equal(elsewhere.notice.tone, "danger");
+    assert.match(elsewhere.notice.message, /own configuration/);
 
     // Not certain: treated as running there, and nothing moves either way.
     assert.equal(currentTargetFor(controller.snapshot().scheduleTargets, "os-update-posture"), "mini-pc");

@@ -327,9 +327,9 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
     if (now !== input.targetId) {
       return danger("The schedule did not move", `The team features module did not report the schedule ${place(input.targetId)}; it reports it ${place(now)}. Nothing changed here.`, "Try again. If it keeps happening, check the team features module.");
     }
-    // The schedule's organization may have changed while the module ran.
+    // The schedule's organization may have changed while the module ran: the module moved it, nothing changes here.
     if (input.targetId !== "this-computer") {
-      const refused = await organizationRefusal(input);
+      const refused = await organizationRefusal(input, true);
       if (refused) return refused;
     }
     const local = capabilities.localSchedules;
@@ -388,18 +388,19 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
       });
     }
     const also = alsoRunsOnFor(scheduleTargets, input.agentId);
-    if (input.targetId === "this-computer" && also) {
+    // While a place runs the agent from its own configuration, no move is safe: any second place runs it twice.
+    if (also) {
       return danger(
         `Also scheduled on ${labelOf(also)}`.slice(0, ENTERPRISE_UI_LIMITS.maxLabelLength),
-        `${labelOf(also)} also runs this agent from its own configuration, so bringing the schedule here would run it twice.`,
-        `Remove the agent from ${labelOf(also)}'s own configuration first, then choose here.`,
+        `${labelOf(also)} also runs this agent from its own configuration, so moving the schedule anywhere would run it twice.`,
+        `Remove the agent from ${labelOf(also)}'s own configuration first, then choose again.`,
       );
     }
     return input.targetId === "this-computer" ? undefined : organizationRefusal(input);
   };
 
   /** A place is offered only for a schedule of the organization it is paired for. */
-  const organizationRefusal = async (input: Extract<EnterpriseUiActionInput, { kind: "schedule" }>): Promise<EnterpriseUiReply | undefined> => {
+  const organizationRefusal = async (input: Extract<EnterpriseUiActionInput, { kind: "schedule" }>, afterMove = false): Promise<EnterpriseUiReply | undefined> => {
     const local = capabilities.localSchedules;
     const target = scheduleTargets?.targets.find((candidate) => candidate.id === input.targetId);
     if (!local || !target) return undefined;
@@ -418,6 +419,13 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
       // Ids stand in for names.
     }
     const nameOf = (id: string | undefined) => (id ? names.get(id) ?? id : "no organization");
+    if (afterMove) {
+      return danger(
+        "The schedule may run in two places",
+        `The team features module moved the schedule to ${target.label}, which is paired for ${nameOf(target.organizationId)}, but this schedule now belongs to ${nameOf(organizationId)}. The schedule here was left as it is, so it may run in two places.`,
+        "Choose here to bring it back.",
+      );
+    }
     return danger(
       "Another organization",
       `${target.label} is paired for ${nameOf(target.organizationId)}; this schedule belongs to ${nameOf(organizationId)}.`,

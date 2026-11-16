@@ -213,8 +213,5 @@ describe("declarative module UI", () => {
     refused(() => checkScheduleTargets({ action: "x", targets: [{ id: "mini-pc", label: "M", organizationId: "org-1" }], uncertain: { a: { targetId: "mini-pc", message: "x" } } }));
     refused(() => checkScheduleTargets({ action: "x", targets: [{ id: "mini-pc", label: "M", organizationId: "org-1" }], uncertain: { a: { targetId: "mini-pc", message: "Runs on this computer", recovery: "y" } } }));
     refused(() => checkScheduleTargets({ action: "x", targets: [{ id: "mini-pc", label: "M", organizationId: "org-1" }], alsoRunsOn: Object.fromEntries(Array.from({ length: 501 }, (_, i) => [`a${i}`, "mini-pc"])) }));
-    // The pure check refuses a place of another organization when the schedule's is given.
-    const ui = { body: () => undefined, scheduleTargets: targets, scheduleOrganization: "org-fabrikam" };
-    refused(() => checkUiActionAgainst(checkUiActionInput({ kind: "schedule", agentId: "compliance-overview", targetId: "mini-pc", intervalSeconds: 3600 }), "x", ui));
   });
 });
