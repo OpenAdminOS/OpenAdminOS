@@ -9,7 +9,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
-import type { EnterprisePlacement, EnterprisePlacements } from "@openadminos/enterprise";
+import { EnterprisePlacementsFullError, type EnterprisePlacement, type EnterprisePlacements } from "@openadminos/enterprise";
 
 export type SchedulePlacement = EnterprisePlacement & {
   /** Team features are off, so the step is Run it here on the schedule card. */
@@ -19,12 +19,21 @@ export type SchedulePlacement = EnterprisePlacement & {
 export interface SchedulePlacementsView {
   readonly placements: Readonly<Record<string, EnterprisePlacement & { readonly stale: boolean }>>;
   /** Why the kept placements cannot be read or saved; absent when they are fine. */
-  readonly problem?: { readonly kind: "unreadable" | "unwritable"; readonly message: string };
+  readonly problem?: { readonly kind: "unreadable" | "full" | "unwritable"; readonly message: string };
   /** The kept file could not be read: every agent not released is held, wherever it last ran. */
-  readonly held?: { readonly released: readonly string[] };
+  readonly held?: { readonly released: readonly string[]; readonly reason: HoldReason };
 }
 
-const MAX_ENTRIES = 500;
+/** Why every schedule is held: the kept file could not be read, or more places were reported than the app keeps. */
+export type HoldReason = "unreadable" | "full";
+
+/**
+ * Above what one report can name (current, alsoRunsOn and uncertain, 500 each), so a report always fits.
+ * Past it, the oldest kept places go and every schedule is held, so none of them runs here as well.
+ */
+export const MAX_PLACEMENTS = 2000;
+/** How many schedules can be taken back while held. */
+export const MAX_RELEASED = 2000;
 const UNKNOWN_PLACE: EnterprisePlacement = { targetId: "unknown", label: "a place the app cannot read back", organizationId: "unknown", reason: "uncertain" };
 
 interface FileShape {
@@ -33,9 +42,10 @@ interface FileShape {
   /** The place ids the module offered when it last reported, to tell a place no longer paired here. */
   offered?: string[];
   /** Present once a kept file could not be read: every agent not released stays held across launches. */
-  held?: { released: string[] };
+  held?: { released: string[]; reason?: HoldReason };
 }
 
+const FULL = `The app keeps where at most ${MAX_PLACEMENTS} schedules last ran and was given more, so a schedule does not run here until it is taken back.`;
 const UNREADABLE = "The app cannot read where schedules last ran, so a schedule does not run here until it is taken back.";
 const UNWRITABLE = "The app could not save where schedules last ran, so after a restart they may not be held. Check free disk space and the permissions of the OpenAdminOS data folder.";
 
@@ -45,6 +55,7 @@ export class SchedulePlacementMemory {
   private unwritable = false;
   /** The kept file existed but could not be read: every schedule is held until it is taken back. */
   private failClosed = false;
+  private holdReason: HoldReason = "unreadable";
   /** Agents taken back while held: by Run it here, or reported here by the module in this session. */
   private readonly released = new Set<string>();
   /** The damaged files, moved aside before the first write so they are never overwritten. */
@@ -68,16 +79,20 @@ export class SchedulePlacementMemory {
       if (agentId in update.placements) continue;
       const kept = next[agentId];
       if (kept && update.offered.includes(kept.targetId)) delete next[agentId];
-      if (this.failClosed) this.release(agentId);
+      if (this.failClosed && !this.release(agentId)) this.log("a schedule reported here stays held: too many were taken back", agentId);
     }
-    this.placements = trim(next);
+    this.placements = this.fit(next, Object.keys(update.placements));
     this.offered = [...update.offered];
     this.write(false);
   }
 
   /** A move away starts: kept as not certain on disk before the module is asked. Throws when it cannot be kept. */
   begin(agentId: string, placement: EnterprisePlacement): void {
-    this.placements = trim({ ...this.placements, [agentId]: placement });
+    if (!(agentId in this.placements) && Object.keys(this.placements).length >= MAX_PLACEMENTS) {
+      this.log("a move was refused: the kept placements are full", agentId);
+      throw new EnterprisePlacementsFullError(`The app keeps where at most ${MAX_PLACEMENTS} schedules run and cannot keep another, so the move was not started.`);
+    }
+    this.placements = { ...this.placements, [agentId]: placement };
     this.write(true);
   }
 
@@ -94,7 +109,10 @@ export class SchedulePlacementMemory {
   /** Forgets one agent's placement, after the admin chose Run it here. */
   clear(agentId: string): void {
     if (!(agentId in this.placements) && !this.failClosed) return;
-    if (this.failClosed) this.release(agentId);
+    if (this.failClosed && !this.release(agentId)) {
+      this.log("Run it here was refused: too many schedules were taken back", agentId);
+      throw new Error(`The app can take back at most ${MAX_RELEASED} schedules while they are held, so this one still does not run here.`);
+    }
     const { [agentId]: _removed, ...rest } = this.placements;
     this.placements = rest;
     this.write(false);
@@ -112,12 +130,14 @@ export class SchedulePlacementMemory {
     const problem = this.unwritable
       ? { kind: "unwritable" as const, message: UNWRITABLE }
       : this.failClosed
-        ? { kind: "unreadable" as const, message: UNREADABLE }
+        ? this.holdReason === "full"
+          ? { kind: "full" as const, message: FULL }
+          : { kind: "unreadable" as const, message: UNREADABLE }
         : undefined;
     return {
       placements,
       ...(problem ? { problem } : {}),
-      ...(this.failClosed ? { held: { released: [...this.released] } } : {}),
+      ...(this.failClosed ? { held: { released: [...this.released], reason: this.holdReason } } : {}),
     };
   }
 
@@ -126,8 +146,33 @@ export class SchedulePlacementMemory {
     return this.placements[agentId] ?? (this.failClosed && !this.released.has(agentId) ? UNKNOWN_PLACE : undefined);
   }
 
-  private release(agentId: string): void {
-    if (this.released.size < MAX_ENTRIES) this.released.add(agentId);
+  /** Takes one agent out of the hold; false when no more can be taken back, so it stays held. */
+  private release(agentId: string): boolean {
+    if (this.released.has(agentId)) return true;
+    if (this.released.size >= MAX_RELEASED) return false;
+    this.released.add(agentId);
+    return true;
+  }
+
+  /**
+   * Keeps every place when they fit. Otherwise the places just reported are kept, then the most recent
+   * of the rest, and every schedule is held, so one whose place was not kept never runs here as well.
+   */
+  private fit(next: Record<string, EnterprisePlacement>, reported: readonly string[]): Record<string, EnterprisePlacement> {
+    const ids = Object.keys(next);
+    if (ids.length <= MAX_PLACEMENTS) return next;
+    const first = new Set(reported);
+    const order = [...reported.filter((id) => id in next), ...ids.filter((id) => !first.has(id)).reverse()];
+    const kept = Object.fromEntries(order.slice(0, MAX_PLACEMENTS).map((id) => [id, next[id]!]));
+    const dropped = order.slice(MAX_PLACEMENTS);
+    for (const id of dropped) this.released.delete(id);
+    if (!this.failClosed) {
+      this.failClosed = true;
+      this.holdReason = "full";
+      this.released.clear();
+    }
+    this.log("more placements were reported than the app keeps; every schedule is held", `${dropped.length} not kept`);
+    return kept;
   }
 
   private load(): void {
@@ -152,10 +197,11 @@ export class SchedulePlacementMemory {
   }
 
   private apply(file: FileShape): void {
-    this.placements = trim(file.placements);
+    this.placements = file.placements;
     this.offered = file.offered;
     if (file.held) {
       this.failClosed = true;
+      this.holdReason = file.held.reason ?? "unreadable";
       for (const agentId of file.held.released) this.release(agentId);
     }
   }
@@ -166,7 +212,10 @@ export class SchedulePlacementMemory {
       const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<FileShape>;
       if (parsed.version !== 1 || typeof parsed.placements !== "object" || parsed.placements === null) throw new Error("unknown format");
       const placements: Record<string, EnterprisePlacement> = {};
-      for (const [agentId, value] of Object.entries(parsed.placements).slice(0, MAX_ENTRIES)) {
+      const entries = Object.entries(parsed.placements);
+      // Never cut short: a file with more than the app writes is damaged, and holds every schedule.
+      if (entries.length > MAX_PLACEMENTS) throw new Error("too many placements");
+      for (const [agentId, value] of entries) {
         const entry = value as Partial<EnterprisePlacement>;
         if (
           typeof entry.targetId !== "string" ||
@@ -183,8 +232,11 @@ export class SchedulePlacementMemory {
       if (parsed.held !== undefined) {
         const released = (parsed.held as Partial<NonNullable<FileShape["held"]>> | null)?.released;
         // A hold that cannot be read is a damaged file: it fails closed rather than freeing anything.
-        if (!Array.isArray(released) || !released.every((id) => typeof id === "string")) throw new Error("the hold is not readable");
-        held = { released: released.slice(0, MAX_ENTRIES) };
+        const reason = (parsed.held as { reason?: unknown }).reason;
+        if (!Array.isArray(released) || released.length > MAX_RELEASED || !released.every((id) => typeof id === "string") || (reason !== undefined && reason !== "unreadable" && reason !== "full")) {
+          throw new Error("the hold is not readable");
+        }
+        held = { released, ...(reason ? { reason } : {}) };
       }
       return { kind: "ok", file: { version: 1, placements, ...(offered ? { offered } : {}), ...(held ? { held } : {}) } };
     } catch (error) {
@@ -203,7 +255,7 @@ export class SchedulePlacementMemory {
         version: 1,
         placements: this.placements,
         ...(this.offered ? { offered: this.offered } : {}),
-        ...(this.failClosed ? { held: { released: [...this.released] } } : {}),
+        ...(this.failClosed ? { held: { released: [...this.released], reason: this.holdReason } } : {}),
       };
       const text = `${JSON.stringify(file, null, 2)}\n`;
       for (const path of [this.path, `${this.path}.bak`]) {
@@ -218,10 +270,6 @@ export class SchedulePlacementMemory {
       if (strict) throw error;
     }
   }
-}
-
-function trim(placements: Record<string, EnterprisePlacement>): Record<string, EnterprisePlacement> {
-  return Object.fromEntries(Object.entries(placements).slice(0, MAX_ENTRIES));
 }
 
 /** Removes the kept files; for tests. */

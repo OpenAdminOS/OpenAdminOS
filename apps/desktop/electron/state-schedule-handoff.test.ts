@@ -7,9 +7,9 @@ import { describe, it } from "node:test";
 import type { AgentSummary, TenantRecord } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 
-import { createEnterpriseHost, type EnterpriseIpcRegistrar } from "@openadminos/enterprise";
+import { EnterprisePlacementsFullError, checkScheduleTargets, createEnterpriseHost, placementSnapshot, type EnterpriseIpcRegistrar } from "@openadminos/enterprise";
 
-import { SchedulePlacementMemory } from "./schedule-placements.js";
+import { MAX_PLACEMENTS, MAX_RELEASED, SchedulePlacementMemory } from "./schedule-placements.js";
 import { AppStateStore, ScheduleMoveInProgressError } from "./state.js";
 
 const tokenStore: TokenCacheStorage = { read: async () => "", write: async () => undefined };
@@ -292,7 +292,7 @@ describe("schedule handoff on this computer", () => {
       assert.ok(held.placementFor("any-agent"), "fails closed for every agent");
       assert.equal(held.view().problem?.kind, "unreadable");
       assert.match(held.view().problem?.message ?? "", /cannot read where schedules last ran/);
-      assert.deepEqual(held.view().held, { released: [] });
+      assert.deepEqual(held.view().held, { released: [], reason: "unreadable" });
 
       // No module report ends the hold, empty or not.
       held.publish({ placements: {}, offered: [], here: [] });
@@ -307,13 +307,70 @@ describe("schedule handoff on this computer", () => {
       held.clear("any-agent");
       assert.equal(held.placementFor("any-agent"), undefined);
       assert.ok(held.placementFor("another-agent"));
-      assert.deepEqual(held.view().held, { released: ["any-agent"] });
+      assert.deepEqual(held.view().held, { released: ["any-agent"], reason: "unreadable" });
 
       // A restart keeps every other agent held.
       const restarted = new SchedulePlacementMemory(path, (message) => logs.push(message));
       assert.equal(restarted.placementFor("any-agent"), undefined);
       assert.ok(restarted.placementFor("another-agent"), "a restart keeps the others held");
       assert.equal(restarted.view().problem?.kind, "unreadable");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps every placement a report can name, across current and alsoRunsOn together", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-placements-"));
+    try {
+      const path = join(dir, "placements.json");
+      // Six places, 300 assigned agents and 201 run from a place's own configuration: all accepted.
+      const targets = Array.from({ length: 6 }, (_, index) => ({ id: `box-${index}`, label: `Box ${index}`, organizationId: "org-contoso" }));
+      const current = Object.fromEntries(Array.from({ length: 300 }, (_, index) => [`assigned-${index}`, `box-${index % 6}`]));
+      const alsoRunsOn = Object.fromEntries(Array.from({ length: 201 }, (_, index) => [`configured-${index}`, `box-${index % 6}`]));
+      const report = checkScheduleTargets({ action: "sandboxes.schedule", targets, current, alsoRunsOn }, new Set(["sandboxes.schedule"]));
+      const memory = new SchedulePlacementMemory(path, () => undefined);
+      memory.publish({ placements: placementSnapshot(report), offered: targets.map((target) => target.id), here: [] });
+      const restarted = new SchedulePlacementMemory(path, () => undefined);
+      for (const agentId of [...Object.keys(current), ...Object.keys(alsoRunsOn)]) assert.ok(restarted.placementFor(agentId), `${agentId} is kept`);
+      assert.equal(restarted.view().held, undefined);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("holds every schedule rather than drop a place, and refuses a move or a take back it cannot keep", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-placements-"));
+    try {
+      const path = join(dir, "placements.json");
+      const logs: string[] = [];
+      const memory = new SchedulePlacementMemory(path, (message) => logs.push(message));
+      const batch = (from: number, count: number) => Object.fromEntries(Array.from({ length: count }, (_, index) => [`agent-${from + index}`, contosoPc]));
+      memory.publish({ placements: batch(0, 1500), offered: ["mini-pc"], here: [] });
+      memory.publish({ placements: batch(1500, MAX_PLACEMENTS - 1500), offered: ["mini-pc"], here: [] });
+      assert.equal(memory.view().held, undefined, "up to the bound everything is kept");
+
+      // Full: a move away is refused before the module is asked.
+      assert.throws(() => memory.begin("one-more", { ...contosoPc, reason: "uncertain" }), EnterprisePlacementsFullError);
+      assert.equal(memory.placementFor("one-more"), undefined);
+      assert.ok(logs.some((message) => message.includes("move was refused")));
+
+      // A report past the bound keeps what it names and holds every schedule, so a dropped one stays held.
+      memory.publish({ placements: batch(MAX_PLACEMENTS, 10), offered: ["mini-pc"], here: [] });
+      for (let index = MAX_PLACEMENTS; index < MAX_PLACEMENTS + 10; index += 1) assert.equal(memory.placementFor(`agent-${index}`)?.targetId, "mini-pc");
+      for (let index = 0; index < MAX_PLACEMENTS + 10; index += 1) assert.ok(memory.placementFor(`agent-${index}`), `agent-${index} does not run here`);
+      assert.equal(memory.view().held?.reason, "full");
+      assert.equal(memory.view().problem?.kind, "full");
+      assert.ok(logs.some((message) => message.includes("more placements were reported")));
+      assert.equal(new SchedulePlacementMemory(path, () => undefined).view().held?.reason, "full");
+
+      // Run it here past the bound of taken back schedules says so instead of doing nothing.
+      const releasedPath = join(dir, "released.json");
+      const released = Array.from({ length: MAX_RELEASED }, (_, index) => `free-${index}`);
+      await writeFile(releasedPath, JSON.stringify({ version: 1, placements: {}, held: { released, reason: "unreadable" } }));
+      const takenBack = new SchedulePlacementMemory(releasedPath, () => undefined);
+      assert.equal(takenBack.placementFor("free-0"), undefined);
+      assert.throws(() => takenBack.clear("free-last"), /can take back at most/);
+      assert.ok(takenBack.placementFor("free-last"), "still held");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -333,7 +390,7 @@ describe("schedule handoff on this computer", () => {
       held.publish({ placements: { named: contosoPc }, offered: ["mini-pc"], here: [] });
       held.publish({ placements: {}, offered: ["mini-pc"], here: [] });
       assert.equal(held.placementFor("named")?.targetId, "mini-pc");
-      assert.deepEqual(new SchedulePlacementMemory(path, () => undefined).view().held, { released: ["reported-here"] });
+      assert.deepEqual(new SchedulePlacementMemory(path, () => undefined).view().held, { released: ["reported-here"], reason: "unreadable" });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
