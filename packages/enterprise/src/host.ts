@@ -306,6 +306,7 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
         }
       }
       let outcome: EnterprisePlacement | "here" | "unknown" = "unknown";
+      let settled = false;
       // While a move runs, the app does not delete the schedule here.
       if (input.kind === "schedule") local?.beginMove?.(input.agentId);
       try {
@@ -344,13 +345,29 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
         if (input.kind === "schedule") {
           reply = await handOff(input, reply, noScheduleHere);
           // A move back loosens the kept placement only once the handoff confirmed it.
-          if (input.targetId === "this-computer" && reply.notice?.tone !== "danger" && currentTargetFor(scheduleTargets, input.agentId) === "this-computer") outcome = "here";
+          if (input.targetId === "this-computer" && reply.notice?.tone !== "danger" && currentTargetFor(scheduleTargets, input.agentId) === "this-computer") {
+            outcome = "here";
+            // Kept before the reply, so a move back the app could not record is never reported as done.
+            if (placements) {
+              settled = true;
+              try {
+                placements.settle(input.agentId, "here");
+              } catch (error) {
+                options.log("error", "enterprise: a move back could not be kept", { agentId: input.agentId, error: errorMessage(error) });
+                reply = danger(
+                  "The schedule does not run here yet",
+                  `The team features module moved it back, but the app could not record that, so it stays held. ${errorMessage(error)}`.slice(0, ENTERPRISE_UI_LIMITS.maxMessageLength),
+                  "Try the move again in a moment, or choose Run it here on the schedule card.",
+                );
+              }
+            }
+          }
         }
         return checkJson(reply, ENTERPRISE_LIMITS.maxIpcOutputBytes, `the reply from ${name}`);
       } finally {
         if (input.kind === "schedule") {
           local?.endMove?.(input.agentId);
-          if (placements && (input.targetId !== "this-computer" || outcome === "here")) {
+          if (placements && !settled && (input.targetId !== "this-computer" || outcome === "here")) {
             try {
               placements.settle(input.agentId, outcome);
             } catch (error) {

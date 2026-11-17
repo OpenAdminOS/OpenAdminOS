@@ -1071,4 +1071,40 @@ describe("createEnterpriseHost", () => {
     assert.match(checked.notice?.recovery ?? "", /back here in Where it runs/);
     assert.equal(asked, 0);
   });
+
+  it("does not report a move back as done when the app cannot release the hold", async () => {
+    const ipc = new FakeIpc();
+    const settled: string[] = [];
+    const controller = createEnterpriseHost({
+      entitlement: () => ENTITLEMENT,
+      ipc,
+      storage: new MemoryStorage(),
+      log: () => undefined,
+      capabilities: {
+        placements: {
+          publish: () => undefined,
+          begin: () => undefined,
+          settle: (agentId, outcome) => {
+            settled.push(`${agentId} ${typeof outcome === "string" ? outcome : outcome.targetId}`);
+            if (outcome === "here") throw new Error("The app has not finished reading its installed agents, so this schedule still does not run here. Try again in a moment.");
+          },
+        },
+        localSchedules: { has: async () => true, organizationOf: async () => "org-contoso", setEnabled: async () => true },
+      },
+    });
+    const targets = [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso" }];
+    controller.host.registerUiAction("sandboxes.schedule", async (input) => {
+      if (input.kind === "schedule") controller.host.setScheduleTargets({ action: "sandboxes.schedule", targets, current: { [input.agentId]: input.targetId } });
+      return { notice: { type: "notice", tone: "neutral", title: "Taken", message: "The module took the choice." } };
+    });
+    controller.host.setScheduleTargets({ action: "sandboxes.schedule", targets, current: { "find-inactive-devices": "mini-pc" } });
+    const reply = await ipc.invoke("openadminos-enterprise-ui:sandboxes.schedule", { kind: "schedule", agentId: "find-inactive-devices", targetId: "this-computer", intervalSeconds: 3600 });
+    const checked = checkUiReply(reply);
+    assert.equal(checked.notice?.tone, "danger");
+    assert.equal(checked.notice?.title, "The schedule does not run here yet");
+    assert.match(checked.notice?.message ?? "", /Try again in a moment/);
+    assert.match(checked.notice?.recovery ?? "", /Run it here/);
+    // Settled once, before the reply, not again afterwards.
+    assert.deepEqual(settled, ["find-inactive-devices here"]);
+  });
 });
