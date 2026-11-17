@@ -1,5 +1,6 @@
 import { OfficeService } from "./office.js";
 import { ranOnThisDesktop, sandboxRunBinding, storedSandboxRun, storedSandboxRunDigest } from "./sandbox-runs.js";
+import type { SchedulePlacement } from "./schedule-placements.js";
 import type { SandboxRunAttestation, SandboxRunWrite, SandboxRunAttestResult } from "./sandboxes/service.js";
 import { describeNetworkFailure, timeoutWhenAborted, type ProxyResolver } from "./network-failure.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -1810,6 +1811,30 @@ function novaProviderEndpoint(providerId: ProviderId, persisted?: Pick<Persisted
   return undefined;
 }
 
+/** Why a placement stops a schedule change here, and the step for it. */
+function placementBlocksCopy(agentName: string, place: SchedulePlacement, action: string): string {
+  // With team features off nothing can bring it back through a place: the step is Run it here.
+  if (place.teamFeaturesOff) {
+    return `The schedule of ${agentName} was last known to run on ${place.label}, and team features are off. Choose Run it here on the schedule card first, then ${action}.`;
+  }
+  switch (place.reason) {
+    case "configuration":
+      return `${place.label} also runs ${agentName} from its own configuration. Remove it there first, then ${action}.`;
+    case "uncertain":
+      return `It is not certain whether ${place.label} runs ${agentName}. Sync that sandbox, or wait until team features know where it runs, then ${action}.`;
+    default:
+      return `The schedule of ${agentName} runs on ${place.label}, which is paired for its organization. Bring it back here first, then ${action}.`;
+  }
+}
+
+/** A schedule cannot be deleted while a team features module moves it. */
+export class ScheduleMoveInProgressError extends Error {
+  constructor(agentName: string) {
+    super(`The schedule of ${agentName} is moving to another place right now. Wait for the move to finish, then try again.`);
+    this.name = "ScheduleMoveInProgressError";
+  }
+}
+
 export class AppStateStore {
   /**
    * The lifecycle of each tenant (open, closing, removed) and the one place
@@ -1827,6 +1852,10 @@ export class AppStateStore {
    */
   private migrationAuditInFlight: Record<string, string | number | string[]> | undefined;
   private migrationAuditRecorded = false;
+  /** The organization of the module place running an agent's schedule, when one does. */
+  private scheduleRunsElsewhere: ((agentId: string) => SchedulePlacement | undefined) | undefined;
+  /** Agents whose schedule a team features module is moving right now, counted. */
+  private readonly movingSchedules = new Map<string, number>();
   private writeChain: Promise<unknown> = Promise.resolve();
   private readonly filePath: string;
   private readonly tokenStore: TokenCacheStorage;
@@ -5781,6 +5810,13 @@ export class AppStateStore {
     schedule: AgentSchedule | null,
   ): Promise<AppState> {
     const updatedAt = new Date().toISOString();
+    // A schedule that is moving to or from another place is not deleted midway.
+    if (schedule === null && this.movingSchedules.size > 0) {
+      const agent = (await this.listAgents()).find((entry) => entry.slug === slug || entry.id === slug);
+      if (agent && (this.movingSchedules.has(agent.id) || this.movingSchedules.has(agent.slug))) {
+        throw new ScheduleMoveInProgressError(agent.name);
+      }
+    }
     if (schedule !== null) {
       if (typeof schedule !== "object") {
         throw new Error("updateAgentSchedule: schedule must be an object or null.");
@@ -5837,6 +5873,11 @@ export class AppStateStore {
           : activeTenant
             ? organizationForTenant(persisted.organizations ?? [], activeTenant.id)?.id
             : undefined;
+        // A new schedule here for an agent a module place runs belongs to that place's organization, or it is not made.
+        const place = existing.schedule ? undefined : this.scheduleRunsElsewhere?.(existing.id);
+        if (place && place.organizationId !== organizationId) {
+          throw new Error(placementBlocksCopy(existing.name, place, "schedule it here under another organization"));
+        }
         next[idx] = {
           ...existing,
           schedule: {
@@ -5861,6 +5902,80 @@ export class AppStateStore {
     });
 
     return this.getAppState();
+  }
+
+  /**
+   * Turns an agent's schedule on this computer off or back on, in place:
+   * its organization, interval and notification settings stay. Used when a
+   * team features module moved the schedule to another place and back. An
+   * agent without a schedule here has nothing to change.
+   */
+  async setAgentScheduleEnabled(agentId: string, enabled: boolean): Promise<boolean> {
+    // Read and written in one turn of the write lock, so no edit lands between.
+    const outcome = await this.serialize(async () => {
+      const persisted = await this.read();
+      const index = persisted.installedAgents.findIndex((entry) => entry.id === agentId || entry.slug === agentId);
+      const existing = index < 0 ? undefined : persisted.installedAgents[index];
+      if (!existing?.schedule) return "none" as const;
+      if (existing.schedule.enabled === enabled) return "same" as const;
+      if (enabled) {
+        const manifestError = this.agentManifestError(existing);
+        if (manifestError) throw new Error(invalidAgentManifestCopy(existing.name, manifestError));
+      }
+      const next = [...persisted.installedAgents];
+      next[index] = {
+        ...existing,
+        schedule: {
+          ...existing.schedule,
+          enabled,
+          // Turned on again, it starts one full interval from now, as the switch does.
+          ...(enabled ? { lastScheduledRunAt: new Date().toISOString() } : {}),
+        },
+      };
+      await this.write({ ...persisted, installedAgents: next });
+      return "changed" as const;
+    });
+    // The window shows the real switch state at once.
+    if (outcome === "changed") this.emitStateChanged("agent-schedule-changed");
+    return outcome !== "none";
+  }
+
+  /** The organization an agent's schedule on this computer belongs to, if it has one. */
+  async agentScheduleOrganization(agentId: string): Promise<string | undefined> {
+    const persisted = await this.read();
+    return persisted.installedAgents.find((entry) => entry.id === agentId || entry.slug === agentId)?.schedule?.organizationId;
+  }
+
+  /** Whether an agent has a schedule on this computer, on or off. */
+  async hasAgentSchedule(agentId: string): Promise<boolean> {
+    const persisted = await this.read();
+    return persisted.installedAgents.some((entry) => (entry.id === agentId || entry.slug === agentId) && entry.schedule !== undefined);
+  }
+
+  /**
+   * Whether a team features module reports an agent's schedule as running
+   * in another place. The scheduler does not run such an agent here, so a
+   * schedule never runs in two places, until the admin resolves it.
+   */
+  /** The installed agent ids as last read or written; undefined before the state was first read. */
+  installedAgentIdsNow(): ReadonlySet<string> | undefined {
+    const snapshot = this.lastReadSnapshot;
+    return snapshot ? new Set(snapshot.installedAgents.map((agent) => agent.id)) : undefined;
+  }
+
+  setScheduleRunsElsewhere(check: ((agentId: string) => SchedulePlacement | undefined) | undefined): void {
+    this.scheduleRunsElsewhere = check;
+  }
+
+  /** A team features module is moving this agent's schedule; deleting it here is refused until it ends. */
+  beginScheduleMove(agentId: string): void {
+    this.movingSchedules.set(agentId, (this.movingSchedules.get(agentId) ?? 0) + 1);
+  }
+
+  endScheduleMove(agentId: string): void {
+    const count = (this.movingSchedules.get(agentId) ?? 1) - 1;
+    if (count > 0) this.movingSchedules.set(agentId, count);
+    else this.movingSchedules.delete(agentId);
   }
 
   async updateAgentTeamsDelivery(
@@ -5942,6 +6057,14 @@ export class AppStateStore {
       const schedule = agent.schedule;
       if (!schedule?.enabled) continue;
       if (nowMs < scheduleDueAtMs(agent, nowMs)) continue;
+      // A placement the module reported, or the last one kept when the module
+      // has not reported in this session or team features are off: the card
+      // then says where it was last known to run and offers Run it here.
+      const place = this.scheduleRunsElsewhere?.(agent.id);
+      if (place) {
+        console.info(`[scheduler] skipped "${agent.slug}" because its schedule ${place.reason === "runs" ? "runs" : place.reason === "configuration" ? "is configured" : "may run"} on ${place.label}`);
+        continue;
+      }
       if (!activeOrganization || schedule.organizationId !== activeOrganization.id) {
         waiting += 1;
         continue;
@@ -8499,6 +8622,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   async assignAgentSchedule(slug: string, organizationId: string): Promise<AppState> {
     await this.serialize(async () => {
       const persisted = await this.read();
+      // A schedule that is moving, or that a module place runs, keeps its organization: that place is paired for it.
+      const held = persisted.installedAgents.find((entry) => entry.slug === slug || entry.id === slug);
+      if (held && (this.movingSchedules.has(held.id) || this.movingSchedules.has(held.slug))) throw new ScheduleMoveInProgressError(held.name);
+      const place = held ? this.scheduleRunsElsewhere?.(held.id) : undefined;
+      if (held && place) throw new Error(placementBlocksCopy(held.name, place, "assign it"));
       const organization = (persisted.organizations ?? []).find((entry) => entry.id === organizationId);
       if (!organization) {
         throw new Error("That organization is no longer on this device. Choose another one for this schedule.");

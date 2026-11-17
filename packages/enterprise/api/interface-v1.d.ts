@@ -1,5 +1,6 @@
 export declare const ENTERPRISE_INTERFACE_VERSION: 1;
 export declare const ENTERPRISE_IPC_PREFIX: "openadminos-enterprise:";
+export declare const ENTERPRISE_UI_IPC_PREFIX: "openadminos-enterprise-ui:";
 export type EnterpriseJson = null | boolean | number | string | readonly EnterpriseJson[] | {
     readonly [key: string]: EnterpriseJson;
 };
@@ -17,6 +18,118 @@ export interface EnterpriseSettingsSection {
     readonly id: string;
     readonly title: string;
     readonly description: string;
+    readonly body?: EnterpriseUiBody;
+}
+export type EnterpriseUiTone = "neutral" | "success" | "warning" | "danger";
+export interface EnterpriseUiStatus {
+    readonly type: "status";
+    readonly label: string;
+    readonly value: string;
+    readonly tone: EnterpriseUiTone;
+}
+export interface EnterpriseUiText {
+    readonly type: "text";
+    readonly text: string;
+}
+export interface EnterpriseUiNotice {
+    readonly type: "notice";
+    readonly tone: EnterpriseUiTone;
+    readonly title: string;
+    readonly message: string;
+    readonly recovery?: string;
+}
+export interface EnterpriseUiField {
+    readonly type: "field";
+    readonly id: string;
+    readonly label: string;
+    readonly kind: "text" | "code";
+    readonly placeholder?: string;
+    readonly maxLength?: number;
+    readonly value?: string;
+}
+export interface EnterpriseUiSelectOption {
+    readonly value: string;
+    readonly label: string;
+}
+export interface EnterpriseUiSelect {
+    readonly type: "select";
+    readonly id: string;
+    readonly label: string;
+    readonly options: readonly EnterpriseUiSelectOption[];
+    readonly value?: string;
+}
+export interface EnterpriseUiConfirm {
+    readonly title: string;
+    readonly message: string;
+    readonly typedPhrase?: string;
+}
+export interface EnterpriseUiButton {
+    readonly type: "button";
+    readonly id: string;
+    readonly label: string;
+    readonly kind: "primary" | "secondary" | "danger";
+    readonly action: string;
+    readonly confirm?: EnterpriseUiConfirm;
+}
+export interface EnterpriseUiListRow {
+    readonly label: string;
+    readonly status?: {
+        readonly value: string;
+        readonly tone: EnterpriseUiTone;
+    };
+}
+export interface EnterpriseUiList {
+    readonly type: "list";
+    readonly rows: readonly EnterpriseUiListRow[];
+}
+export type EnterpriseUiElement = EnterpriseUiStatus | EnterpriseUiText | EnterpriseUiNotice | EnterpriseUiField | EnterpriseUiSelect | EnterpriseUiButton | EnterpriseUiList;
+export interface EnterpriseUiBody {
+    readonly elements: readonly EnterpriseUiElement[];
+}
+export type EnterpriseUiActionInput = {
+    readonly kind: "button";
+    readonly sectionId: string;
+    readonly buttonId: string;
+    readonly values: {
+        readonly [id: string]: string;
+    };
+    readonly confirmedPhrase?: string;
+} | {
+    readonly kind: "schedule";
+    readonly agentId: string;
+    readonly targetId: string;
+    readonly intervalSeconds: number;
+};
+export interface EnterpriseUiReply {
+    readonly body?: EnterpriseUiBody;
+    readonly notice?: EnterpriseUiNotice;
+}
+export type EnterpriseUiActionHandler = (input: EnterpriseUiActionInput) => EnterpriseUiReply | Promise<EnterpriseUiReply>;
+export interface EnterpriseScheduleTarget {
+    readonly id: string;
+    readonly label: string;
+    readonly organizationId: string;
+    readonly detail?: string;
+    readonly disabledReason?: string;
+    readonly agentIds?: readonly string[];
+}
+export interface EnterpriseScheduleUncertainty {
+    readonly targetId: string;
+    readonly message: string;
+    readonly recovery: string;
+}
+export interface EnterpriseScheduleTargets {
+    readonly action: string;
+    readonly targets: readonly EnterpriseScheduleTarget[];
+    readonly current?: {
+        readonly [agentId: string]: string;
+    };
+    readonly alsoRunsOn?: {
+        readonly [agentId: string]: string;
+    };
+    readonly uncertain?: {
+        readonly [agentId: string]: EnterpriseScheduleUncertainty;
+    };
 }
 export interface EnterpriseStatusContribution {
     readonly label: string;
@@ -151,6 +264,9 @@ export interface EnterpriseHost {
     entitlement(): EnterpriseEntitlement;
     registerIpc(name: string, handler: EnterpriseIpcHandler): void;
     registerSettingsSection(section: EnterpriseSettingsSection): void;
+    updateSettingsSection(id: string, body: EnterpriseUiBody | undefined): void;
+    registerUiAction(name: string, handler: EnterpriseUiActionHandler): void;
+    setScheduleTargets(targets: EnterpriseScheduleTargets | undefined): void;
     setStatusContribution(status: EnterpriseStatusContribution | undefined): void;
     readonly storage: EnterpriseStorage;
     readonly log: EnterpriseLog;

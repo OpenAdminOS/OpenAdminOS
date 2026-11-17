@@ -1,3 +1,4 @@
+import { EnterpriseUiBody, ModuleUiBoundary } from "./EnterpriseUi";
 import { useEnterpriseStatus } from "./useEnterpriseStatus";
 
 /**
@@ -32,6 +33,13 @@ export function EnterpriseSettingsSections({ query }: { query: string }) {
           <div className="rounded-[10px] bg-[var(--color-surface)] px-4 py-3 text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border)]">
             <p>{section.description}</p>
             <p className="mt-1 text-xs text-[var(--color-text-muted)]">Provided by the team features module.</p>
+            {section.body ? (
+              <div className="mt-3 border-t border-[var(--color-border-soft)] pt-3">
+                <ModuleUiBoundary key={section.id} resetKey={section.revision ?? 0}>
+                  <EnterpriseUiBody sectionId={section.id} body={section.body} revision={section.revision ?? 0} />
+                </ModuleUiBoundary>
+              </div>
+            ) : null}
           </div>
         </section>
       ))}

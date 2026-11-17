@@ -7,6 +7,7 @@
 import {
   ENTERPRISE_INTERFACE_VERSION,
   ENTERPRISE_IPC_PREFIX,
+  ENTERPRISE_UI_IPC_PREFIX,
   type EnterpriseAgents,
   type EnterpriseEntitlement,
   type EnterpriseHost,
@@ -18,10 +19,33 @@ import {
   type EnterpriseResult,
   type EnterpriseSandboxAssignmentEntry,
   type EnterpriseSandboxes,
+  type EnterpriseScheduleTargets,
   type EnterpriseSettingsSection,
+  type EnterpriseUiActionHandler,
+  type EnterpriseUiActionInput,
+  type EnterpriseUiBody,
+  type EnterpriseUiReply,
   type EnterpriseStatusContribution,
   type EnterpriseStorage,
 } from "./interface.js";
+import { EnterpriseHostError, EnterprisePlacementsFullError } from "./errors.js";
+import {
+  alsoRunsOnFor,
+  placementSnapshot,
+  type EnterprisePlacement,
+  type EnterprisePlacements,
+  checkModuleText,
+  checkScheduleTargets,
+  checkUiActionAgainst,
+  checkUiActionInput,
+  checkUiBody,
+  checkUiNotice,
+  checkUiReply,
+  ENTERPRISE_UI_LIMITS,
+  uncertainFor,
+} from "./ui.js";
+
+export { EnterpriseHostError, EnterprisePlacementsFullError, type EnterpriseHostErrorCode } from "./errors.js";
 
 export const ENTERPRISE_LIMITS = Object.freeze({
   maxIpcHandlers: 32,
@@ -53,23 +77,6 @@ const STORAGE_KEY = ENTERPRISE_STORAGE_KEY_PATTERN;
 // C0 and C1 control characters, which have no place in a single line label.
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
-
-export type EnterpriseHostErrorCode =
-  | "invalid-name"
-  | "duplicate"
-  | "limit"
-  | "invalid-value"
-  | "disposed"
-  | "expired";
-
-export class EnterpriseHostError extends Error {
-  readonly code: EnterpriseHostErrorCode;
-  constructor(code: EnterpriseHostErrorCode, message: string) {
-    super(message);
-    this.name = "EnterpriseHostError";
-    this.code = code;
-  }
-}
 
 /** Registers and removes IPC handlers; the desktop passes an `ipcMain` adapter. */
 export interface EnterpriseIpcRegistrar {
@@ -105,11 +112,50 @@ export interface EnterpriseHostCapabilities {
   readonly organizations?: EnterpriseOrganizations;
   readonly agents?: EnterpriseAgents;
   readonly sandboxes?: EnterpriseSandboxes;
+  /** Keeps the last accepted placements for the app, for the host alone. */
+  readonly placements?: EnterprisePlacementStore;
+  /**
+   * The app's own schedules, for the host alone: never reachable from the
+   * module. The host turns an agent's schedule on this computer off or on
+   * in place, without deleting it, after a module moved it.
+   */
+  readonly localSchedules?: EnterpriseLocalSchedules;
+}
+
+export interface EnterprisePlacementStore {
+  /**
+   * Merges what the module set: `placements` are set; a kept placement is
+   * removed only when the module reports the agent at this computer
+   * (`here`) and still offers the kept place (`offered`). Gaps keep it.
+   */
+  publish(update: { readonly placements: EnterprisePlacements; readonly offered: readonly string[]; readonly here: readonly string[] }): void;
+  /** Records a move away as not certain before the module is asked; throws when it cannot be kept. */
+  begin(agentId: string, placement: EnterprisePlacement): void;
+  /** After a move: where it is now, back here, or not known (the not certain placement stays). */
+  settle(agentId: string, outcome: EnterprisePlacement | "here" | "unknown"): void;
+}
+
+export interface EnterpriseLocalSchedules {
+  /** Whether the agent has a schedule on this computer, on or off. */
+  has(agentId: string): Promise<boolean>;
+  /** The organization the agent's schedule on this computer belongs to, for the host alone. */
+  organizationOf(agentId: string): Promise<string | undefined>;
+  /** Turns the agent's schedule on this computer off or back on, keeping its organization, interval and settings; false when it has none. */
+  setEnabled(agentId: string, enabled: boolean): Promise<boolean>;
+  /** A move of the agent's schedule starts; the app refuses deleting its schedule here until `endMove`. */
+  beginMove?(agentId: string): void;
+  endMove?(agentId: string): void;
+}
+
+/** A section as the window gets it: with the revision of its body. */
+export interface EnterpriseSettingsSectionSnapshot extends EnterpriseSettingsSection {
+  readonly revision: number;
 }
 
 export interface EnterpriseHostSnapshot {
   readonly status: EnterpriseStatusContribution | undefined;
-  readonly settingsSections: readonly EnterpriseSettingsSection[];
+  readonly settingsSections: readonly EnterpriseSettingsSectionSnapshot[];
+  readonly scheduleTargets: EnterpriseScheduleTargets | undefined;
   readonly ipcChannels: readonly string[];
 }
 
@@ -124,10 +170,26 @@ export function enterpriseIpcChannel(name: string): string {
   return `${ENTERPRISE_IPC_PREFIX}${name}`;
 }
 
+export function enterpriseUiChannel(name: string): string {
+  return `${ENTERPRISE_UI_IPC_PREFIX}${name}`;
+}
+
+const SUPERSEDED_NOTICE = Object.freeze({
+  type: "notice" as const,
+  tone: "neutral" as const,
+  title: "The section changed",
+  message: "The section changed while this ran, so it shows the newest state.",
+});
+
 export function createEnterpriseHost(options: CreateEnterpriseHostOptions): EnterpriseHostController {
+  const capabilities = options.capabilities ?? {};
   const channels = new Map<string, string>();
+  const uiChannels = new Map<string, string>();
   const sections = new Map<string, EnterpriseSettingsSection>();
+  /** Moves on with every body, so the window draws the newest and drops replies to an older one. */
+  const revisions = new Map<string, number>();
   let status: EnterpriseStatusContribution | undefined;
+  let scheduleTargets: EnterpriseScheduleTargets | undefined;
   let disposed = false;
 
   const assertLive = () => {
@@ -147,11 +209,12 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
     error: freezeFn((message: string, fields?: EnterpriseLogFields) => writeLog(options.log, "error", message, fields)),
   });
 
-  const registerIpc = (name: string, handler: EnterpriseIpcHandler): void => {
+  /** Registers one IPC handler channel under ENTERPRISE_IPC_PREFIX; UI actions have their own prefix and registry. */
+  const register = (name: string, handler: unknown, what: string, listener: (request: EnterpriseJson) => Promise<EnterpriseJson>): void => {
     assertLive();
-    assertName(name, "IPC handler name");
+    assertName(name, `${what} name`);
     if (typeof handler !== "function") {
-      throw new EnterpriseHostError("invalid-value", `The IPC handler for ${name} is not a function.`);
+      throw new EnterpriseHostError("invalid-value", `The ${what} for ${name} is not a function.`);
     }
     if (channels.has(name)) {
       throw new EnterpriseHostError("duplicate", `An IPC handler named ${name} is already registered.`);
@@ -166,6 +229,13 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
         throw new EnterpriseHostError("expired", "The team features licence and its grace period ended. Install a renewed licence, then restart OpenAdminOS.");
       }
       const request = checkJson(input ?? null, ENTERPRISE_LIMITS.maxIpcInputBytes, `the request to ${name}`);
+      return checkJson(await listener(request), ENTERPRISE_LIMITS.maxIpcOutputBytes, `the reply from ${name}`);
+    });
+    channels.set(name, channel);
+  };
+
+  const registerIpc = (name: string, handler: EnterpriseIpcHandler): void => {
+    register(name, handler, "IPC handler", async (request) => {
       let result: EnterpriseJson | void;
       try {
         result = await handler(request);
@@ -173,9 +243,297 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
         options.log("error", "enterprise: an IPC handler failed", { name, error: errorMessage(error) });
         throw new Error(`The team feature request ${name} failed: ${errorMessage(error)}`);
       }
-      return checkJson(result ?? null, ENTERPRISE_LIMITS.maxIpcOutputBytes, `the reply from ${name}`);
+      return result ?? null;
     });
-    channels.set(name, channel);
+  };
+
+  /**
+   * A UI action, on its own channel under ENTERPRISE_UI_IPC_PREFIX and in
+   * its own registry. The window's input is checked against the UI it was
+   * given before the handler runs, and the reply before the window draws
+   * it. A reply body replaces the section's body in the host, unless the
+   * section changed while the handler ran. A failure, or a reply the app
+   * does not draw, becomes a danger notice with the reason.
+   */
+  const registerUiAction = (name: string, handler: EnterpriseUiActionHandler): void => {
+    assertLive();
+    assertName(name, "UI action name");
+    if (typeof handler !== "function") throw new EnterpriseHostError("invalid-value", `The UI action ${name} is not a function.`);
+    if (uiChannels.has(name)) throw new EnterpriseHostError("duplicate", `A UI action named ${name} is already registered.`);
+    if (uiChannels.size >= ENTERPRISE_UI_LIMITS.maxUiActions) {
+      throw new EnterpriseHostError("limit", `A module can register at most ${ENTERPRISE_UI_LIMITS.maxUiActions} UI actions.`);
+    }
+    const channel = enterpriseUiChannel(name);
+    options.ipc.handle(channel, async (raw: unknown) => {
+      if (disposed) throw new EnterpriseHostError("disposed", "Team features were turned off for this launch.");
+      if (options.entitlement().state === "expired") {
+        throw new EnterpriseHostError("expired", "The team features licence and its grace period ended. Install a renewed licence, then restart OpenAdminOS.");
+      }
+      const input = checkUiActionInput(checkJson(raw ?? null, ENTERPRISE_LIMITS.maxIpcInputBytes, `the request to ${name}`));
+      checkUiActionAgainst(input, name, { body: (id) => sections.get(id)?.body, scheduleTargets });
+      const revision = input.kind === "button" ? revisions.get(input.sectionId) : undefined;
+      // A schedule moves away only once it exists here: without one the module is not asked, and its place stays.
+      // Back here is allowed without one, since nothing can then run twice.
+      let noScheduleHere = false;
+      const local = input.kind === "schedule" ? capabilities.localSchedules : undefined;
+      if (input.kind === "schedule" && local) {
+        try {
+          noScheduleHere = !(await local.has(input.agentId));
+        } catch (error) {
+          options.log("error", "enterprise: the schedule here could not be read before a move", { agentId: input.agentId, error: errorMessage(error) });
+          return danger("The schedule here could not be read", "The app could not read the schedule here, so nothing moved.", "Try again. If it keeps failing, restart OpenAdminOS.");
+        }
+        if (noScheduleHere && input.targetId !== "this-computer") return NO_SCHEDULE_HERE;
+      }
+      if (input.kind === "schedule") {
+        const refused = await scheduleRefusal(input);
+        if (refused) return refused;
+      }
+      // A move away is recorded as not certain before the module is asked, so a crash meanwhile leaves the
+      // schedule held, not free to run here as well.
+      const placements = input.kind === "schedule" ? capabilities.placements : undefined;
+      if (input.kind === "schedule" && placements && input.targetId !== "this-computer") {
+        const target = scheduleTargets?.targets.find((candidate) => candidate.id === input.targetId);
+        try {
+          if (target) placements.begin(input.agentId, { targetId: target.id, label: target.label, organizationId: target.organizationId, reason: "uncertain" });
+        } catch (error) {
+          options.log("error", "enterprise: a move could not be recorded before it started", { agentId: input.agentId, error: errorMessage(error) });
+          if (error instanceof EnterprisePlacementsFullError) {
+            return danger("The schedule did not move", error.message, "Move a schedule that runs elsewhere back here in Where it runs, then try again.");
+          }
+          return danger("The schedule did not move", "The app could not record the move before it started, so it was not started.", "Check free disk space and the permissions of the OpenAdminOS data folder, then try again.");
+        }
+      }
+      let outcome: EnterprisePlacement | "here" | "unknown" = "unknown";
+      let settled = false;
+      // While a move runs, the app does not delete the schedule here.
+      if (input.kind === "schedule") local?.beginMove?.(input.agentId);
+      try {
+        let reply: EnterpriseUiReply;
+        try {
+          reply = checkUiReply(await handler(input), new Set(uiChannels.keys()));
+        } catch (error) {
+          options.log("error", "enterprise: a UI action failed", { name, error: errorMessage(error) });
+          return checkJson(failedReply(error), ENTERPRISE_LIMITS.maxIpcOutputBytes, `the reply from ${name}`);
+        }
+        // The module answered: what it reports now is where a move away stands.
+        if (input.kind === "schedule" && input.targetId !== "this-computer") {
+          // Only an explicit report of this computer is here; an agent left out stays not certain, and held.
+          outcome = placementSnapshot(scheduleTargets ?? { action: name, targets: [] })[input.agentId] ?? (reportedTargetFor(input.agentId) === "this-computer" ? "here" : "unknown");
+        }
+        // A schedule choice answers with a notice; a body there has no section to go to.
+        if (input.kind === "schedule" && reply.body) {
+          options.log("error", "enterprise: a schedule action answered with a body", { name });
+          return danger("The schedule did not move", "The team features module answered a schedule choice with a section body, which the schedule card does not take. Nothing changed here.", "Update the team features module, then try again.");
+        }
+        // Too large to send is refused before it is stored, so a body is never kept and then reported as a failure.
+        try {
+          checkJson(reply, ENTERPRISE_LIMITS.maxIpcOutputBytes, `the reply from ${name}`);
+        } catch (error) {
+          options.log("error", "enterprise: a UI action reply was too large", { name, error: errorMessage(error) });
+          return danger("The team feature did not complete", `The reply from ${name} is larger than the app takes, so nothing was kept.`, "Update the team features module, then try again.");
+        }
+        if (input.kind === "button" && reply.body) {
+          const section = sections.get(input.sectionId);
+          if (!disposed && section && revisions.get(input.sectionId) === revision) {
+            setBody(section, reply.body);
+          } else {
+            // The section changed while the handler ran: the newer body stays.
+            reply = Object.freeze({ notice: reply.notice ?? SUPERSEDED_NOTICE });
+          }
+        }
+        if (input.kind === "schedule") {
+          reply = await handOff(input, reply, noScheduleHere);
+          // A move back loosens the kept placement only once the handoff confirmed it.
+          if (input.targetId === "this-computer" && reply.notice?.tone !== "danger" && reportedTargetFor(input.agentId) === "this-computer") {
+            outcome = "here";
+            // Kept before the reply, so a move back the app could not record is never reported as done.
+            if (placements) {
+              settled = true;
+              try {
+                placements.settle(input.agentId, "here");
+              } catch (error) {
+                options.log("error", "enterprise: a move back could not be kept", { agentId: input.agentId, error: errorMessage(error) });
+                reply = danger(
+                  "The schedule does not run here yet",
+                  `The team features module moved it back, but the app could not record that, so it stays held. ${errorMessage(error)}`.slice(0, ENTERPRISE_UI_LIMITS.maxMessageLength),
+                  "Try the move again in a moment, or choose Run it here on the schedule card.",
+                );
+              }
+            }
+          }
+        }
+        return checkJson(reply, ENTERPRISE_LIMITS.maxIpcOutputBytes, `the reply from ${name}`);
+      } finally {
+        if (input.kind === "schedule") {
+          local?.endMove?.(input.agentId);
+          if (placements && !settled && (input.targetId !== "this-computer" || outcome === "here")) {
+            try {
+              placements.settle(input.agentId, outcome);
+            } catch (error) {
+              options.log("error", "enterprise: the outcome of a move could not be kept", { agentId: input.agentId, error: errorMessage(error) });
+            }
+          }
+        }
+      }
+    });
+    uiChannels.set(name, channel);
+  };
+
+  /**
+   * A schedule moves in one main process step. The module took the choice;
+   * only when it now reports the schedule at the chosen place does the app
+   * change the schedule on this computer, in place: off when it moved to
+   * another place, on again when it came back. Anything else changes
+   * nothing here and says so.
+   */
+  const handOff = async (input: Extract<EnterpriseUiActionInput, { kind: "schedule" }>, reply: EnterpriseUiReply, noScheduleHere: boolean): Promise<EnterpriseUiReply> => {
+    if (reply.notice?.tone === "danger") return reply;
+    // App copy says "here" for this computer: the reply passes the same text check as module text.
+    const place = (targetId: string) => (targetId === "this-computer" ? "here" : `on ${scheduleTargets?.targets.find((target) => target.id === targetId)?.label ?? targetId}`);
+    const now = reportedTargetFor(input.agentId);
+    if (now === undefined) {
+      // Left out of what the module reports: not a report of here, so nothing follows here.
+      return input.targetId === "this-computer"
+        ? danger(
+            "The schedule did not move back",
+            "The team features module did not report the schedule here after the move, so nothing changed here and it stays held.",
+            "Try again. If it keeps happening, check the team features module.",
+          )
+        : danger(
+            "Not certain where it runs",
+            `The team features module did not report where the schedule runs after the move, so it may run ${place(input.targetId)}. The schedule here is held so it does not run twice.`.slice(0, ENTERPRISE_UI_LIMITS.maxMessageLength),
+            "Open Settings, Sandboxes and use the step shown for that sandbox, then choose again.",
+          );
+    }
+    if (now !== input.targetId) {
+      return danger("The schedule did not move", `The team features module did not report the schedule ${place(input.targetId)}; it reports it ${place(now)}. Nothing changed here.`, "Try again. If it keeps happening, check the team features module.");
+    }
+    // The schedule's organization may have changed while the module ran: the module moved it, nothing changes here.
+    if (input.targetId !== "this-computer") {
+      const refused = await organizationRefusal(input, true);
+      if (refused) return refused;
+    }
+    const local = capabilities.localSchedules;
+    if (local) {
+      const here = input.targetId === "this-computer";
+      if (here && noScheduleHere) {
+        // Moved back with nothing here to turn on: nothing changes here, and the card says how to schedule it.
+        return Object.freeze({ notice: Object.freeze({ type: "notice" as const, tone: "neutral" as const, title: "Moved back", message: "Moved back. Turn on Automatic runs to schedule it here." }) });
+      }
+      let found: boolean;
+      try {
+        found = await local.setEnabled(input.agentId, here);
+      } catch (error) {
+        options.log("error", "enterprise: the schedule here could not follow a move", { agentId: input.agentId, error: errorMessage(error) });
+        return here
+          ? danger("The schedule is not on here", "The team features module moved the schedule back, but it could not be turned on here.", "Turn on Automatic runs in the schedule card.")
+          : danger("The schedule runs in two places", `The schedule now runs ${place(input.targetId)}, and it could not be turned off here, so it runs in both places.`, "Use Turn off here in the schedule card.");
+      }
+      if (here && !found) {
+        return danger("No schedule here", "The team features module moved the schedule back, but there is no schedule here to turn on.", "Turn on Automatic runs in the schedule card.");
+      }
+      if (!here && !found) {
+        // The schedule here went away while the module moved it.
+        return Object.freeze({
+          notice: Object.freeze({
+            type: "notice" as const,
+            tone: "warning" as const,
+            title: "Runs only there now",
+            message: `The schedule now runs ${place(input.targetId)} only; there is no schedule here any more.`,
+            recovery: "To run it here again, choose here, then turn on Automatic runs.",
+          }),
+        });
+      }
+    }
+    return reply.notice ? reply : Object.freeze({ ...reply, notice: Object.freeze({ type: "notice" as const, tone: "success" as const, title: "Saved", message: `The schedule now runs ${place(input.targetId)}.` }) });
+  };
+
+  /**
+   * Where the module reports an agent's schedule, only when it says so: a place it is not certain about,
+   * or the agent's own entry in `current`. An agent left out is shown at this computer on the card, but
+   * the host never reads that as here: absence clears no hold and turns nothing on.
+   */
+  const reportedTargetFor = (agentId: string): string | undefined => {
+    const uncertain = uncertainFor(scheduleTargets, agentId);
+    if (uncertain) return uncertain.targetId;
+    const current = scheduleTargets?.current?.[agentId];
+    return current !== undefined && (current === "this-computer" || scheduleTargets!.targets.some((target) => target.id === current)) ? current : undefined;
+  };
+
+  /**
+   * What stops a schedule choice before the module is asked: a place that
+   * is not certain, a place that also runs the agent from its own
+   * configuration (any move is refused then), or a place paired for
+   * another organization than the schedule's.
+   */
+  const scheduleRefusal = async (input: Extract<EnterpriseUiActionInput, { kind: "schedule" }>): Promise<EnterpriseUiReply | undefined> => {
+    const labelOf = (targetId: string) => scheduleTargets?.targets.find((target) => target.id === targetId)?.label ?? targetId;
+    const uncertain = uncertainFor(scheduleTargets, input.agentId);
+    if (uncertain) {
+      return Object.freeze({
+        notice: Object.freeze({
+          type: "notice" as const,
+          tone: "warning" as const,
+          title: `Not certain where it runs`,
+          message: `The team features module is not certain about ${labelOf(uncertain.targetId)}, so the schedule stays where it is and nothing moves. ${uncertain.message}`.slice(0, ENTERPRISE_UI_LIMITS.maxMessageLength),
+          recovery: uncertain.recovery,
+        }),
+      });
+    }
+    const also = alsoRunsOnFor(scheduleTargets, input.agentId);
+    // While a place runs the agent from its own configuration, no move is safe: any second place runs it twice.
+    if (also) {
+      return danger(
+        `Also scheduled on ${labelOf(also)}`.slice(0, ENTERPRISE_UI_LIMITS.maxLabelLength),
+        `${labelOf(also)} also runs this agent from its own configuration, so moving the schedule anywhere would run it twice.`,
+        `Remove the agent from ${labelOf(also)}'s own configuration first, then choose again.`,
+      );
+    }
+    return input.targetId === "this-computer" ? undefined : organizationRefusal(input);
+  };
+
+  /** A place is offered only for a schedule of the organization it is paired for. */
+  const organizationRefusal = async (input: Extract<EnterpriseUiActionInput, { kind: "schedule" }>, afterMove = false): Promise<EnterpriseUiReply | undefined> => {
+    const local = capabilities.localSchedules;
+    const target = scheduleTargets?.targets.find((candidate) => candidate.id === input.targetId);
+    if (!local || !target) return undefined;
+    let organizationId: string | undefined;
+    try {
+      organizationId = await local.organizationOf(input.agentId);
+    } catch (error) {
+      options.log("error", "enterprise: the organization of the schedule here could not be read", { agentId: input.agentId, error: errorMessage(error) });
+      return danger("The schedule here could not be read", "The app could not read which organization the schedule here belongs to, so nothing moved.", "Try again. If it keeps failing, restart OpenAdminOS.");
+    }
+    if (organizationId === target.organizationId) return undefined;
+    const names = new Map<string, string>();
+    try {
+      for (const organization of capabilities.organizations ? await capabilities.organizations.list() : []) names.set(organization.id, organization.name);
+    } catch {
+      // Ids stand in for names.
+    }
+    const nameOf = (id: string | undefined) => (id ? names.get(id) ?? id : "no organization");
+    if (afterMove) {
+      return danger(
+        "The schedule is held here",
+        `The team features module moved the schedule to ${target.label}, which is paired for ${nameOf(target.organizationId)}, but this schedule now belongs to ${nameOf(organizationId)}. The schedule here is held so it does not run twice.`,
+        // The renderer checks every notice against the reserved phrases, so the step names the row without them.
+        "Use Turn off here in the schedule card, or move it back here in Where it runs.",
+      );
+    }
+    return danger(
+      "Another organization",
+      `${target.label} is paired for ${nameOf(target.organizationId)}; this schedule belongs to ${nameOf(organizationId)}.`,
+      `Choose a place paired for ${nameOf(organizationId)}, or keep the schedule here.`,
+    );
+  };
+
+  /** Stores a checked body and moves the section's revision on. */
+  const setBody = (section: EnterpriseSettingsSection, body: EnterpriseUiBody | undefined): void => {
+    const { body: _previous, ...rest } = section;
+    sections.set(section.id, Object.freeze({ ...rest, ...(body ? { body } : {}) }));
+    revisions.set(section.id, (revisions.get(section.id) ?? 0) + 1);
+    changed();
   };
 
   const registerSettingsSection = (section: EnterpriseSettingsSection): void => {
@@ -190,11 +548,41 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
     if (sections.size >= ENTERPRISE_LIMITS.maxSettingsSections) {
       throw new EnterpriseHostError("limit", `A module can register at most ${ENTERPRISE_LIMITS.maxSettingsSections} settings sections.`);
     }
+    const body = section.body === undefined ? undefined : checkUiBody(section.body, new Set(uiChannels.keys()));
+    revisions.set(section.id, 1);
     sections.set(section.id, Object.freeze({
       id: section.id,
-      title: checkText(section.title, ENTERPRISE_LIMITS.maxTitleLength, "settings section title"),
-      description: checkText(section.description, ENTERPRISE_LIMITS.maxDetailLength, "settings section description"),
+      title: checkText(section.title, ENTERPRISE_LIMITS.maxTitleLength, "settings section title", true),
+      description: checkText(section.description, ENTERPRISE_LIMITS.maxDetailLength, "settings section description", true),
+      ...(body ? { body } : {}),
     }));
+    changed();
+  };
+
+  const updateSettingsSection = (id: string, body: EnterpriseUiBody | undefined): void => {
+    assertLive();
+    const section = typeof id === "string" ? sections.get(id) : undefined;
+    if (!section) throw new EnterpriseHostError("invalid-name", "No settings section with that id is registered.");
+    setBody(section, body === undefined ? undefined : checkUiBody(body, new Set(uiChannels.keys())));
+  };
+
+  const setScheduleTargets = (next: EnterpriseScheduleTargets | undefined): void => {
+    assertLive();
+    scheduleTargets = next === undefined ? undefined : checkScheduleTargets(next, new Set(uiChannels.keys()));
+    // The app keeps the last accepted placements, so after a restart, or with team features off, a schedule
+    // that ran elsewhere does not run here before the module says where it runs.
+    if (scheduleTargets && capabilities.placements) {
+      try {
+        const published = scheduleTargets;
+        capabilities.placements.publish({
+          placements: placementSnapshot(published),
+          offered: published.targets.map((target) => target.id),
+          here: Object.entries(published.current ?? {}).filter(([, targetId]) => targetId === "this-computer").map(([agentId]) => agentId),
+        });
+      } catch (error) {
+        options.log("error", "enterprise: the last known schedule placements could not be saved", { error: errorMessage(error) });
+      }
+    }
     changed();
   };
 
@@ -206,10 +594,11 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
       if (typeof next !== "object" || next === null) {
         throw new EnterpriseHostError("invalid-value", "A status contribution must be an object.");
       }
-      const label = checkText(next.label, ENTERPRISE_LIMITS.maxLabelLength, "status label");
+      // The status strip is where the app speaks about where data goes: module text there passes the same phrase check.
+      const label = checkText(next.label, ENTERPRISE_LIMITS.maxLabelLength, "status label", true);
       status = next.detail === undefined
         ? Object.freeze({ label })
-        : Object.freeze({ label, detail: checkText(next.detail, ENTERPRISE_LIMITS.maxDetailLength, "status detail") });
+        : Object.freeze({ label, detail: checkText(next.detail, ENTERPRISE_LIMITS.maxDetailLength, "status detail", true) });
     }
     changed();
   };
@@ -219,6 +608,9 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
     entitlement: freezeFn(() => options.entitlement()),
     registerIpc: freezeFn(registerIpc),
     registerSettingsSection: freezeFn(registerSettingsSection),
+    updateSettingsSection: freezeFn(updateSettingsSection),
+    registerUiAction: freezeFn(registerUiAction),
+    setScheduleTargets: freezeFn(setScheduleTargets),
     setStatusContribution: freezeFn(setStatusContribution),
     storage: createStorage(options.storage, assertLive),
     log,
@@ -229,13 +621,14 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
     host,
     snapshot: () => Object.freeze({
       status,
-      settingsSections: Object.freeze([...sections.values()]),
-      ipcChannels: Object.freeze([...channels.values()]),
+      settingsSections: Object.freeze([...sections.values()].map((section) => Object.freeze({ ...section, revision: revisions.get(section.id) ?? 1 }))),
+      scheduleTargets,
+      ipcChannels: Object.freeze([...channels.values(), ...uiChannels.values()]),
     }),
     dispose: () => {
       if (disposed) return;
       disposed = true;
-      for (const channel of channels.values()) {
+      for (const channel of [...channels.values(), ...uiChannels.values()]) {
         try {
           options.ipc.removeHandler(channel);
         } catch (error) {
@@ -243,10 +636,50 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
         }
       }
       channels.clear();
+      uiChannels.clear();
       sections.clear();
+      revisions.clear();
       status = undefined;
+      scheduleTargets = undefined;
       changed();
     },
+  });
+}
+
+const NO_SCHEDULE_HERE = Object.freeze({
+  notice: Object.freeze({
+    type: "notice" as const,
+    tone: "danger" as const,
+    title: "No schedule here",
+    message: "Turn on Automatic runs first; a schedule can move only once it exists here.",
+    recovery: "Turn on Automatic runs in the schedule card, then choose again.",
+  }),
+});
+
+/** A danger notice in the app's own words. */
+function danger(title: string, message: string, recovery: string): EnterpriseUiReply {
+  return Object.freeze({ notice: Object.freeze({ type: "notice" as const, tone: "danger" as const, title, message, recovery }) });
+}
+
+/** The notice a failed UI action answers with: the reason, and the step that fixes it. */
+function failedReply(error: unknown): EnterpriseUiReply {
+  // The reason passes the same check as module text; one that does not is replaced.
+  // The reason is built once, checked as built, and used as the check returned it.
+  let reason = "The team features module did not say why.";
+  const candidate = errorMessage(error).trim().slice(0, ENTERPRISE_UI_LIMITS.maxMessageLength);
+  try {
+    reason = checkUiNotice({ type: "notice", tone: "neutral", title: "x", message: candidate }).message;
+  } catch {
+    // Keep the generic reason.
+  }
+  return Object.freeze({
+    notice: Object.freeze({
+      type: "notice" as const,
+      tone: "danger" as const,
+      title: "The team feature did not complete",
+      message: reason,
+      recovery: "Try again. If it keeps failing, the app log names the cause.",
+    }),
   });
 }
 
@@ -562,12 +995,13 @@ function assertStorageKey(key: unknown): asserts key is string {
   }
 }
 
-function checkText(value: unknown, maxLength: number, what: string): string {
+function checkText(value: unknown, maxLength: number, what: string, phrases = false): string {
   if (typeof value !== "string") throw new EnterpriseHostError("invalid-value", `The ${what} must be text.`);
   const text = value.trim();
   if (text === "" || text.length > maxLength || CONTROL.test(text)) {
     throw new EnterpriseHostError("invalid-value", `The ${what} must be one line of 1 to ${maxLength} characters.`);
   }
+  if (phrases) checkModuleText(value, what);
   return text;
 }
 

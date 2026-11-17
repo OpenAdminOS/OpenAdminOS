@@ -417,6 +417,7 @@ export async function loadEnterprise(options: LoadEnterpriseOptions): Promise<En
         label: snapshot.status?.label ?? DEFAULT_TEAM_STATUS_LABEL,
         ...(snapshot.status?.detail === undefined ? {} : { detail: snapshot.status.detail }),
         settingsSections: snapshot.settingsSections,
+        ...(snapshot.scheduleTargets ? { scheduleTargets: snapshot.scheduleTargets } : {}),
       });
     },
     recheck,

@@ -55,6 +55,30 @@ const v1Module: EnterpriseModule = {
     host.registerIpc("team.status", (input) => ({ input, version, state, count: fields.length }));
     host.registerIpc("team.ping", async () => undefined);
     host.registerSettingsSection({ id: "team", title: "Team", description: "Approvals and audit." });
+    host.registerSettingsSection({
+      id: "sandboxes",
+      title: "Sandboxes",
+      description: "Machines you run.",
+      body: {
+        elements: [
+          { type: "status", label: "Office mini PC", value: "Paired", tone: "success" },
+          { type: "text", text: "Read-only schedules." },
+          { type: "notice", tone: "warning", title: "Sync stopped", message: "A row is missing.", recovery: "Pair again." },
+          { type: "field", id: "address", label: "Address", kind: "code", placeholder: "100.64.0.10:7443", maxLength: 64 },
+          { type: "select", id: "organization", label: "Organization", options: [{ value: "org-1", label: "Contoso" }] },
+          { type: "button", id: "pair", label: "Pair", kind: "danger", action: "sandboxes.pair", confirm: { title: "Pair", message: "Pair it?", typedPhrase: "PAIR" } },
+          { type: "list", rows: [{ label: "find-inactive-devices", status: { value: "Assigned", tone: "neutral" } }] },
+        ],
+      },
+    });
+    host.updateSettingsSection("sandboxes", undefined);
+    // A button may answer with a body; a schedule choice answers with a notice only.
+    host.registerUiAction("sandboxes.pair", async (input) =>
+      input.kind === "button"
+        ? { body: { elements: [] }, notice: { type: "notice", tone: "success", title: "Paired", message: input.values.address ?? "" } }
+        : { notice: { type: "notice", tone: "success", title: "Moved", message: input.targetId } });
+    host.setScheduleTargets({ action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", detail: "Local model", disabledReason: "Sync is stopped.", agentIds: ["find-inactive-devices"] }] });
+    host.setScheduleTargets(undefined);
     host.setStatusContribution({ label: "Team service", detail: "End-to-end encrypted." });
     host.setStatusContribution({ label: "Team service" });
     host.setStatusContribution(undefined);
@@ -98,6 +122,9 @@ const v1Host: EnterpriseHost = {
   entitlement: () => ({ state: "active", licenseeId: "x", features: [], notBefore: 0, expiresAt: 1, graceEndsAt: 2 }),
   registerIpc: () => undefined,
   registerSettingsSection: () => undefined,
+  updateSettingsSection: () => undefined,
+  registerUiAction: () => undefined,
+  setScheduleTargets: () => undefined,
   setStatusContribution: () => undefined,
   storage: {
     get: async () => undefined,
@@ -193,6 +220,32 @@ describe("enterprise interface", () => {
     assert.ok(Object.isFrozen(enterprise.ENTERPRISE_LIMITS));
   });
 
+  it("keeps the version 1 UI limits", () => {
+    assert.deepEqual(
+      { ...enterprise.ENTERPRISE_UI_LIMITS },
+      {
+        maxElements: 40,
+        maxLabelLength: 80,
+        maxValueLength: 120,
+        maxTextLength: 1000,
+        maxMessageLength: 500,
+        maxOptions: 50,
+        maxListRows: 50,
+        maxFieldLength: 2000,
+        defaultFieldLength: 200,
+        maxValues: 40,
+        maxScheduleTargets: 32,
+        maxAgentIds: 100,
+        maxPhraseLength: 80,
+        maxUiActions: 32,
+        maxCurrentTargets: 500,
+        minIntervalSeconds: 60,
+        maxIntervalSeconds: 2678400,
+      },
+    );
+    assert.ok(Object.isFrozen(enterprise.ENTERPRISE_UI_LIMITS));
+  });
+
   it("keeps the version 1 licence limits", () => {
     // Licences issued by the team service must fit these. Tightening one
     // can refuse licences already issued.
@@ -220,17 +273,36 @@ describe("enterprise interface", () => {
       "ENTERPRISE_LIMITS",
       "ENTERPRISE_NAME_PATTERN",
       "ENTERPRISE_STORAGE_KEY_PATTERN",
+      "ENTERPRISE_UI_IPC_PREFIX",
+      "ENTERPRISE_UI_LIMITS",
+      "ENTERPRISE_UI_RESERVED_PHRASES",
       "EnterpriseHostError",
       "EnterpriseInterfaceVersionError",
+      "EnterprisePlacementsFullError",
       "LICENCE_LIMITS",
       "LICENCE_PUBLIC_KEY_PEM",
       "LICENCE_SIGNING_CONTEXT",
+      "alsoRunsOnFor",
       "checkJson",
+      "checkModuleText",
+      "checkScheduleTargets",
+      "checkUiAction",
+      "checkUiActionAgainst",
+      "checkUiActionInput",
+      "checkUiBody",
+      "checkUiNotice",
+      "checkUiReply",
       "createEnterpriseHost",
+      "currentTargetFor",
       "defaultEnterpriseModule",
       "enterpriseIpcChannel",
+      "enterpriseUiChannel",
       "entitlementAt",
       "isEnterpriseModule",
+      "normalizeForPhraseMatch",
+      "placementSnapshot",
+      "targetsForAgent",
+      "uncertainFor",
       "verifyLicence",
     ]);
   });

@@ -4,6 +4,11 @@
 // reports the same version. `interface.test.ts` fails on any change to the
 // declarations below; an incompatible change needs a new version number.
 //
+// Version 1 is still open: no release has loaded a module yet. Until the
+// first release that loads one, version 1 may still change, and the
+// snapshot in `api/interface-v1.d.ts` changes with it in the same commit.
+// From that release on, the rule above holds.
+//
 // The host gives a module host APIs only. Nothing reachable from
 // `EnterpriseHost` exposes tenant tokens, provider credentials, the keychain
 // or any secret store, and writes to a tenant still go through the normal
@@ -14,6 +19,9 @@ export const ENTERPRISE_INTERFACE_VERSION = 1 as const;
 
 /** Every IPC channel a module registers is placed under this prefix. */
 export const ENTERPRISE_IPC_PREFIX = "openadminos-enterprise:" as const;
+
+/** UI actions have their own channels and registry, apart from IPC handlers. */
+export const ENTERPRISE_UI_IPC_PREFIX = "openadminos-enterprise-ui:" as const;
 
 /** The only values that cross the IPC and storage boundaries. */
 export type EnterpriseJson =
@@ -58,6 +66,177 @@ export interface EnterpriseSettingsSection {
   readonly id: string;
   readonly title: string;
   readonly description: string;
+  /** What the section shows, drawn by the app. No module code runs in the window. */
+  readonly body?: EnterpriseUiBody;
+}
+
+/**
+ * Module UI is declarative: an ordered list of elements from a closed set,
+ * drawn by the app's own renderer with its design system. Text is shown as
+ * text, never as HTML, and nothing is drawn as a link.
+ */
+export type EnterpriseUiTone = "neutral" | "success" | "warning" | "danger";
+
+export interface EnterpriseUiStatus {
+  readonly type: "status";
+  readonly label: string;
+  readonly value: string;
+  readonly tone: EnterpriseUiTone;
+}
+
+export interface EnterpriseUiText {
+  readonly type: "text";
+  readonly text: string;
+}
+
+export interface EnterpriseUiNotice {
+  readonly type: "notice";
+  readonly tone: EnterpriseUiTone;
+  readonly title: string;
+  readonly message: string;
+  /** The step that fixes it. */
+  readonly recovery?: string;
+}
+
+export interface EnterpriseUiField {
+  readonly type: "field";
+  readonly id: string;
+  readonly label: string;
+  /** `code` is drawn in a monospace face, for an address or a pairing code. Fields never hold secrets. */
+  readonly kind: "text" | "code";
+  readonly placeholder?: string;
+  readonly maxLength?: number;
+  readonly value?: string;
+}
+
+export interface EnterpriseUiSelectOption {
+  readonly value: string;
+  readonly label: string;
+}
+
+export interface EnterpriseUiSelect {
+  readonly type: "select";
+  readonly id: string;
+  readonly label: string;
+  readonly options: readonly EnterpriseUiSelectOption[];
+  readonly value?: string;
+}
+
+export interface EnterpriseUiConfirm {
+  readonly title: string;
+  readonly message: string;
+  /** When set, the admin types it exactly before the button acts. */
+  readonly typedPhrase?: string;
+}
+
+export interface EnterpriseUiButton {
+  readonly type: "button";
+  readonly id: string;
+  readonly label: string;
+  readonly kind: "primary" | "secondary" | "danger";
+  /** The action registered with `registerUiAction` that the button calls; it must be registered before the body is set. */
+  readonly action: string;
+  /** Required for a danger button. */
+  readonly confirm?: EnterpriseUiConfirm;
+}
+
+export interface EnterpriseUiListRow {
+  readonly label: string;
+  readonly status?: { readonly value: string; readonly tone: EnterpriseUiTone };
+}
+
+export interface EnterpriseUiList {
+  readonly type: "list";
+  readonly rows: readonly EnterpriseUiListRow[];
+}
+
+export type EnterpriseUiElement =
+  | EnterpriseUiStatus
+  | EnterpriseUiText
+  | EnterpriseUiNotice
+  | EnterpriseUiField
+  | EnterpriseUiSelect
+  | EnterpriseUiButton
+  | EnterpriseUiList;
+
+export interface EnterpriseUiBody {
+  readonly elements: readonly EnterpriseUiElement[];
+}
+
+/** What a UI action receives: the button and the section's current values, or a schedule target choice. */
+export type EnterpriseUiActionInput =
+  | {
+      readonly kind: "button";
+      readonly sectionId: string;
+      readonly buttonId: string;
+      /** Field and select values of the section, by element id. */
+      readonly values: { readonly [id: string]: string };
+      /** The phrase the admin typed, for a button whose confirm has a typed phrase; it must equal it. */
+      readonly confirmedPhrase?: string;
+    }
+  | {
+      readonly kind: "schedule";
+      readonly agentId: string;
+      readonly targetId: string;
+      readonly intervalSeconds: number;
+    };
+
+/** A new body for the section, a notice, or both. */
+export interface EnterpriseUiReply {
+  readonly body?: EnterpriseUiBody;
+  readonly notice?: EnterpriseUiNotice;
+}
+
+export type EnterpriseUiActionHandler = (input: EnterpriseUiActionInput) => EnterpriseUiReply | Promise<EnterpriseUiReply>;
+
+/** A place besides this computer where an agent's schedule can run. */
+export interface EnterpriseScheduleTarget {
+  readonly id: string;
+  readonly label: string;
+  /** The organization the place is paired for; it is offered only for schedules of that organization. */
+  readonly organizationId: string;
+  readonly detail?: string;
+  /** Shown, and the target cannot be chosen, when set. */
+  readonly disabledReason?: string;
+  /** The agents it is offered for; every agent when left out. */
+  readonly agentIds?: readonly string[];
+}
+
+export interface EnterpriseScheduleUncertainty {
+  readonly targetId: string;
+  readonly message: string;
+  readonly recovery: string;
+}
+
+export interface EnterpriseScheduleTargets {
+  /**
+   * The UI action called with `{ kind: "schedule", agentId, targetId,
+   * intervalSeconds }`, for a target and for `this-computer`. It must be
+   * registered before the targets are set.
+   */
+  readonly action: string;
+  readonly targets: readonly EnterpriseScheduleTarget[];
+  /**
+   * Where each agent's schedule runs now, by agent id: a target id, or
+   * "this-computer". The card shows an agent left out at this computer,
+   * but only an explicit "this-computer" counts as here: after a move, an
+   * agent left out stays held as not certain, and nothing changes here.
+   */
+  readonly current?: { readonly [agentId: string]: string };
+  /**
+   * Agents a place also runs from its own configuration, by agent id: a
+   * target id. The card warns, the schedule here does not run, and any
+   * move of such an agent is refused until it is removed from that
+   * place's configuration.
+   */
+  readonly alsoRunsOn?: { readonly [agentId: string]: string };
+  /**
+   * Agents whose place is not certain, for example while a sandbox does
+   * not answer. The app treats the schedule as running there: the one
+   * here stays off and it does not move. The card shows the message and
+   * the recovery.
+   */
+  readonly uncertain?: { readonly [agentId: string]: EnterpriseScheduleUncertainty };
 }
 
 /**
@@ -244,6 +423,18 @@ export interface EnterpriseHost {
   /** Registers `openadminos-enterprise:<name>` for the renderer. */
   registerIpc(name: string, handler: EnterpriseIpcHandler): void;
   registerSettingsSection(section: EnterpriseSettingsSection): void;
+  /** Replaces the body of a registered section; the window draws it at once. */
+  updateSettingsSection(id: string, body: EnterpriseUiBody | undefined): void;
+  /**
+   * Registers `openadminos-enterprise-ui:<name>` for buttons and schedule
+   * targets, in a registry of its own apart from `registerIpc`. The input
+   * is checked against the UI the window was given before the handler
+   * runs, and the reply before the window draws it; a failure becomes a
+   * notice.
+   */
+  registerUiAction(name: string, handler: EnterpriseUiActionHandler): void;
+  /** Sets or clears the schedule targets the agent schedule card offers. */
+  setScheduleTargets(targets: EnterpriseScheduleTargets | undefined): void;
   /** Sets or clears the status strip entry. */
   setStatusContribution(status: EnterpriseStatusContribution | undefined): void;
   readonly storage: EnterpriseStorage;

@@ -3,6 +3,7 @@ import { saveAuditLogExport } from "./save-audit-log-export.js";
 import { NovaService } from "./nova.js";
 import { NOVA_SESSION_CONTEXT_ENDED_REASON, NOVA_SESSION_ENDED_REASON } from "../src/shared/nova-session.js";
 import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
+import { SchedulePlacementMemory } from "./schedule-placements.js";
 import { createSandboxCapabilities } from "./sandboxes/capabilities.js";
 import { readOnlyCatalog } from "./sandboxes/catalog.js";
 import { SandboxService } from "./sandboxes/service.js";
@@ -324,6 +325,8 @@ let menuBarTray: Tray | null = null;
 let store: AppStateStore;
 // Team features stay off until a valid licence is found; see enterprise.ts.
 let enterprise: EnterpriseService | undefined;
+/** The last schedule placements a team features module reported; set when the app starts. */
+let schedulePlacements: SchedulePlacementMemory | undefined;
 /** The Nova service, once IPC is registered: settings changes check its live voice session. */
 let novaService: NovaService | undefined;
 const activeNotifications = new Set<Notification>();
@@ -3252,10 +3255,27 @@ function isAllowedAppNavigation(url: string): boolean {
 }
 
 /**
+ * Loads the kept schedule placements and installs the store's check: a
+ * schedule a team features place runs, or ran when last known, does not
+ * run here as well.
+ */
+function installSchedulePlacements(userDataDir: string): SchedulePlacementMemory {
+  const placements = new SchedulePlacementMemory(join(userDataDir, "enterprise", "placements.json"), undefined, () => store.installedAgentIdsNow());
+  schedulePlacements = placements;
+  store.setScheduleRunsElsewhere((agentId) => {
+    const placement = placements.placementFor(agentId);
+    if (!placement) return undefined;
+    return { ...placement, teamFeaturesOff: enterprise?.status().active !== true };
+  });
+  return placements;
+}
+
+/**
  * Checks the licence and, only when it is valid, loads the team features
  * module. Without a valid licence this reads one file and does nothing else.
  */
 async function startEnterprise(userDataDir: string): Promise<void> {
+  const placements = schedulePlacements ?? installSchedulePlacements(userDataDir);
   const files = enterpriseFiles(userDataDir);
   const notify = () => mainWindow?.webContents.send("openadminos:enterprise-status-changed");
   const log = (level: "info" | "warn" | "error", message: string, fields?: Readonly<Record<string, string | number | boolean>>) =>
@@ -3291,7 +3311,22 @@ async function startEnterprise(userDataDir: string): Promise<void> {
         storage: files.storage,
         log,
         onChange: notify,
-        capabilities: sandboxes.capabilities,
+        capabilities: {
+          ...sandboxes.capabilities,
+          placements: {
+            publish: (update) => placements.publish(update),
+            begin: (agentId, placement) => placements.begin(agentId, placement),
+            settle: (agentId, outcome) => placements.settle(agentId, outcome),
+          },
+          // The host turns the schedule here off or on after a module moved it; the module never reaches this.
+          localSchedules: {
+            has: (agentId) => store.hasAgentSchedule(agentId),
+            organizationOf: (agentId) => store.agentScheduleOrganization(agentId),
+            setEnabled: (agentId, enabled) => store.setAgentScheduleEnabled(agentId, enabled),
+            beginMove: (agentId) => store.beginScheduleMove(agentId),
+            endMove: (agentId) => store.endScheduleMove(agentId),
+          },
+        },
       }),
     notify,
     log,
@@ -5446,6 +5481,25 @@ function registerIpcHandlers() {
     handleTrusted(() => enterprise?.status() ?? { active: false }),
   );
   ipcMain.handle(
+    "openadminos:get-schedule-placements",
+    handleTrusted(() => schedulePlacements?.view() ?? { placements: {} }),
+  );
+  ipcMain.handle(
+    "openadminos:clear-schedule-placement",
+    handleTrusted((_event: unknown, agentId: unknown) => {
+      if (typeof agentId !== "string" || !/^[a-z0-9][a-z0-9._-]{0,127}$/.test(agentId)) throw new Error("Run it here needs an agent id.");
+      // While a module is on and still offers that place, the move back goes through Where it runs.
+      const kept = schedulePlacements?.get(agentId);
+      const status = enterprise?.status();
+      if (kept && status?.active && status.scheduleTargets?.targets.some((target) => target.id === kept.targetId)) {
+        throw new Error(`${kept.label} is still offered by team features. Choose This computer in Where it runs instead.`);
+      }
+      schedulePlacements?.clear(agentId);
+      mainWindow?.webContents.send("openadminos:enterprise-status-changed");
+      return schedulePlacements?.view() ?? { placements: {} };
+    }),
+  );
+  ipcMain.handle(
     "openadminos:get-release-diagnostics",
     handleTrusted(() => getReleaseDiagnostics()),
   );
@@ -7119,6 +7173,8 @@ if (!gotLock) {
           }
         : {}),
     });
+    // Installed before any await, so no scheduler signal can fire a schedule kept as running elsewhere.
+    installSchedulePlacements(userDataDir);
     // The policy's provider, model and registration are in state before the window reads it.
     await store.applyManagedPolicy().catch((error) =>
       console.error("[policy] applying the IT policy file failed", error),

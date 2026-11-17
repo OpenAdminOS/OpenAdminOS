@@ -295,10 +295,18 @@ describe("loadEnterprise with a valid licence", () => {
       active: true,
       label: "Team service · Frankfurt · end-to-end encrypted",
       detail: "Payloads are ciphertext.",
-      settingsSections: [{ id: "team", title: "Team", description: "Approvals and audit." }],
+      settingsSections: [{ id: "team", title: "Team", description: "Approvals and audit.", revision: 1 }],
     });
     assert.equal(changes.length, 2);
     assert.equal(seen.host?.entitlement().state, "active");
+    // Declarative UI reaches the window in the status, checked.
+    seen.host?.updateSettingsSection("team", { elements: [{ type: "status", label: "Team", value: "Joined", tone: "success" }] });
+    seen.host?.registerUiAction("team.schedule", async () => ({ notice: { type: "notice", tone: "success", title: "Moved", message: "Moved." } }));
+    seen.host?.setScheduleTargets({ action: "team.schedule", targets: [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso" }] });
+    const status = runtime.status();
+    assert.ok(status.active);
+    assert.deepEqual(status.active ? status.settingsSections[0]?.body : undefined, { elements: [{ type: "status", label: "Team", value: "Joined", tone: "success" }] });
+    assert.deepEqual(status.active ? status.scheduleTargets : undefined, { action: "team.schedule", targets: [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso" }] });
 
     await runtime.deactivate();
     await runtime.deactivate();

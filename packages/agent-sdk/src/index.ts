@@ -3318,6 +3318,8 @@ export type EnterpriseStatus =
       readonly label: string;
       readonly detail?: string;
       readonly settingsSections: readonly EnterpriseSettingsSectionView[];
+      /** Where else an agent's schedule can run; absent unless the module offers places. */
+      readonly scheduleTargets?: EnterpriseScheduleTargetsView;
     };
 
 export type EnterpriseProblemReason =
@@ -3341,6 +3343,106 @@ export interface EnterpriseSettingsSectionView {
   readonly id: string;
   readonly title: string;
   readonly description: string;
+  /** Checked by the main process; the renderer draws it with its own components. */
+  readonly body?: EnterpriseUiBodyView;
+  /** Moves on with every body the host stores; the renderer draws the newest. */
+  readonly revision?: number;
+}
+
+/**
+ * Declarative module UI as the renderer receives it: the closed element
+ * set of `@openadminos/enterprise`, already checked in the main process.
+ */
+export type EnterpriseUiToneView = "neutral" | "success" | "warning" | "danger";
+
+export interface EnterpriseUiNoticeView {
+  readonly type: "notice";
+  readonly tone: EnterpriseUiToneView;
+  readonly title: string;
+  readonly message: string;
+  readonly recovery?: string;
+}
+
+export type EnterpriseUiElementView =
+  | { readonly type: "status"; readonly label: string; readonly value: string; readonly tone: EnterpriseUiToneView }
+  | { readonly type: "text"; readonly text: string }
+  | EnterpriseUiNoticeView
+  | {
+      readonly type: "field";
+      readonly id: string;
+      readonly label: string;
+      readonly kind: "text" | "code";
+      readonly placeholder?: string;
+      readonly maxLength?: number;
+      readonly value?: string;
+    }
+  | {
+      readonly type: "select";
+      readonly id: string;
+      readonly label: string;
+      readonly options: readonly { readonly value: string; readonly label: string }[];
+      readonly value?: string;
+    }
+  | {
+      readonly type: "button";
+      readonly id: string;
+      readonly label: string;
+      readonly kind: "primary" | "secondary" | "danger";
+      readonly action: string;
+      readonly confirm?: { readonly title: string; readonly message: string; readonly typedPhrase?: string };
+    }
+  | {
+      readonly type: "list";
+      readonly rows: readonly { readonly label: string; readonly status?: { readonly value: string; readonly tone: EnterpriseUiToneView } }[];
+    };
+
+export interface EnterpriseUiBodyView {
+  readonly elements: readonly EnterpriseUiElementView[];
+}
+
+/** What a module's UI action answers: a new body, a notice, or both. */
+export interface EnterpriseUiReplyView {
+  readonly body?: EnterpriseUiBodyView;
+  readonly notice?: EnterpriseUiNoticeView;
+}
+
+export interface EnterpriseScheduleTargetView {
+  readonly id: string;
+  readonly label: string;
+  /** The organization the place is paired for; the card offers it only for schedules of that organization. */
+  readonly organizationId: string;
+  readonly detail?: string;
+  readonly disabledReason?: string;
+  readonly agentIds?: readonly string[];
+}
+
+/** Where an agent's schedule was last known to run instead of here. */
+export interface SchedulePlacementView {
+  readonly targetId: string;
+  readonly label: string;
+  readonly organizationId: string;
+  readonly reason: "runs" | "configuration" | "uncertain";
+  /** The module no longer offers that place (for example after unpairing). */
+  readonly stale?: boolean;
+}
+
+export interface SchedulePlacementsView {
+  readonly placements: Readonly<Record<string, SchedulePlacementView>>;
+  /** Why the kept placements cannot be read, kept in full, or saved. */
+  readonly problem?: { readonly kind: "unreadable" | "full" | "unwritable"; readonly message: string };
+  /** The kept file could not be read, or held more than the app keeps: every agent not released is held. */
+  readonly held?: { readonly released: readonly string[]; readonly reason: "unreadable" | "full" };
+}
+
+export interface EnterpriseScheduleTargetsView {
+  readonly action: string;
+  readonly targets: readonly EnterpriseScheduleTargetView[];
+  /** Where each agent's schedule runs now, by agent id; an agent left out runs on this computer. */
+  readonly current?: { readonly [agentId: string]: string };
+  /** Agents a place also runs from its own configuration, by agent id. */
+  readonly alsoRunsOn?: { readonly [agentId: string]: string };
+  /** Agents whose place is not certain; the app treats them as running there. */
+  readonly uncertain?: { readonly [agentId: string]: { readonly targetId: string; readonly message: string; readonly recovery: string } };
 }
 
 export type SupportIssueSource =
@@ -3398,6 +3500,12 @@ export interface OpenAdminOSApi {
    * Rejects when no module registered that name.
    */
   invokeEnterprise?(name: string, input?: unknown): Promise<unknown>;
+  /** The last schedule placements a team features module reported, kept across launches, by agent id. */
+  getSchedulePlacements?(): Promise<SchedulePlacementsView>;
+  /** Forgets one agent's kept placement, after the admin chose Run it here; refused while a module still offers that place. */
+  clearSchedulePlacement?(agentId: string): Promise<SchedulePlacementsView>;
+  /** Calls a team features UI action, on its own channels apart from `invokeEnterprise`. */
+  invokeEnterpriseUi?(name: string, input?: unknown): Promise<unknown>;
   getReleaseDiagnostics(): Promise<ReleaseDiagnostics>;
   /**
    * Export a reviewed, sanitized diagnostics JSON file for manual
