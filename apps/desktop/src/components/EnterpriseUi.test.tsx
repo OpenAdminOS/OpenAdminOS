@@ -572,7 +572,7 @@ describe("schedule card: where it runs", () => {
     });
     renderWithAppState(<AgentScheduleCard agent={agent} onChange={vi.fn()} />, { bridge });
     expect(
-      await screen.findByText("Team features have not said where it runs yet, so it does not run here meanwhile. Use Sync now in Settings, Sandboxes, or wait until the sandbox answers."),
+      await screen.findByText("Team features have not said where it runs yet, so it does not run here meanwhile. Open Settings, Sandboxes and use the step shown for that sandbox, or wait until it answers."),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Run it here" })).toBeNull();
   });
@@ -593,11 +593,11 @@ describe("schedule card: where it runs", () => {
     let released: string[] = [];
     const clearSchedulePlacement = vi.fn(async (agentId: string) => {
       released = [...released, agentId];
-      return { placements: {}, problem, held: { released } };
+      return { placements: {}, problem, held: { released, reason: "unreadable" as const } };
     });
     const bridge = makeMockBridge({
       getEnterpriseStatus: async (): Promise<EnterpriseStatus> => ({ active: false }),
-      getSchedulePlacements: async () => ({ placements: {}, problem, held: { released } }),
+      getSchedulePlacements: async () => ({ placements: {}, problem, held: { released, reason: "unreadable" as const } }),
       clearSchedulePlacement,
     });
     renderWithAppState(<AgentScheduleCard agent={agent} onChange={vi.fn()} />, { bridge });
@@ -637,7 +637,45 @@ describe("schedule card: where it runs", () => {
     });
     renderWithAppState(<AgentScheduleCard agent={agent} onChange={vi.fn()} />, { bridge });
     expect(await screen.findByText("Last known to run on Office mini PC")).toBeInTheDocument();
-    expect(screen.getByText(/Use Sync now in Settings, Sandboxes/)).toBeInTheDocument();
+    expect(screen.getByText(/Open Settings, Sandboxes and use the step shown for that sandbox/)).toBeInTheDocument();
+  });
+
+  it("offers waiting for team features on a held schedule only when a place it offers lists the agent", async () => {
+    const held = { placements: {}, problem: { kind: "unreadable" as const, message: "x" }, held: { released: [], reason: "unreadable" as const } };
+    const listed = makeMockBridge({
+      getEnterpriseStatus: async () => withTargets({ targets: [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", agentIds: [agent.id] }] }),
+      getSchedulePlacements: async () => held,
+    });
+    const first = renderWithAppState(<AgentScheduleCard agent={agent} onChange={vi.fn()} />, { bridge: listed });
+    expect(await screen.findByText(/or wait until team features report that it runs here/)).toBeInTheDocument();
+    first.unmount();
+
+    const unnamed = makeMockBridge({
+      getEnterpriseStatus: async () => withTargets({ targets: [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", agentIds: ["another-agent"] }] }),
+      getSchedulePlacements: async () => held,
+    });
+    renderWithAppState(<AgentScheduleCard agent={agent} onChange={vi.fn()} />, { bridge: unnamed });
+    const step = await screen.findByText(/cannot read where this schedule last ran/);
+    expect(step).toHaveTextContent("Choose Run it here once it no longer runs in another place.");
+    expect(step).not.toHaveTextContent(/team features report/);
+  });
+
+  it("titles a hold past the kept places apart, and shows why Run it here was refused", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge({
+      getEnterpriseStatus: async (): Promise<EnterpriseStatus> => ({ active: false }),
+      getSchedulePlacements: async () => ({ placements: {}, problem: { kind: "full" as const, message: "x" }, held: { released: [], reason: "full" as const } }),
+      clearSchedulePlacement: async () => {
+        throw new Error("Error invoking remote method 'openadminos:clear-schedule-placement': Error: The app can take back at most 2000 schedules while they are held, so this one still does not run here.");
+      },
+    });
+    renderWithAppState(<AgentScheduleCard agent={agent} onChange={vi.fn()} />, { bridge });
+    expect(await screen.findByText("Where some schedules last ran could not be kept")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Run it here" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Type RUN IT HERE to confirm"), "RUN IT HERE");
+    await user.click(within(dialog).getByRole("button", { name: "Run it here" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/^The app can take back at most 2000 schedules while they are held, so this one still does not run here\.$/);
   });
 
   it("shows a schedule running here and elsewhere as a danger state, and turns the one here off in place", async () => {

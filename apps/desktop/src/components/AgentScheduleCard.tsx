@@ -413,13 +413,15 @@ export const SCHEDULE_TARGET_COPY = {
   lastKnownUnpairedStep: "It does not run here until you choose Run it here, or remove it there.",
   placementsProblemTitle: "Where schedules last ran cannot be read",
   placementsUnsavedTitle: "Where schedules last ran could not be saved",
+  placementsFullTitle: "Where some schedules last ran could not be kept",
   heldUnknown: "The app cannot read where this schedule last ran, so it does not run here until you take it back.",
+  heldFull: "The app was given more places than it keeps, so this schedule does not run here until you take it back.",
   heldUnknownOff: "Choose Run it here once it no longer runs in another place.",
   heldUnknownOn: "Choose Run it here once it no longer runs in another place, or wait until team features report that it runs here.",
   runItHereUnknownTitle: "Run it here",
   runItHereUnknownMessage: "The app cannot tell where this schedule last ran. It can run here again. If it still runs in another place, remove it there too, or it may run in both places.",
   lastKnownOff: "Team features are off, so it does not run here until you bring it back or remove it there.",
-  lastKnownWaiting: "Team features have not said where it runs yet, so it does not run here meanwhile. Use Sync now in Settings, Sandboxes, or wait until the sandbox answers.",
+  lastKnownWaiting: "Team features have not said where it runs yet, so it does not run here meanwhile. Open Settings, Sandboxes and use the step shown for that sandbox, or wait until it answers.",
   runItHere: "Run it here",
   runItHerePhrase: "RUN IT HERE",
   runItHereTitle: (label: string) => `Run it here instead of ${label}`,
@@ -620,11 +622,14 @@ function LastKnownPlacement({ agent, live }: { agent: AgentSummary; live: boolea
     };
   }, [status]);
   const clear = async () => {
+    setError(undefined);
     try {
       const next = await window.openAdminOS?.clearSchedulePlacement?.(agent.id);
       if (next) setView(next);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      // Electron wraps the main process error; the card shows only its message.
+      const raw = caught instanceof Error ? caught.message : String(caught);
+      setError(raw.replace(/^Error invoking remote method '[^']*':\s*(?:\w*Error:\s*)?/, "").trim() || raw);
     }
   };
   const placement = view.placements[agent.id];
@@ -638,15 +643,18 @@ function LastKnownPlacement({ agent, live }: { agent: AgentSummary; live: boolea
     ) : null;
   const errorLine = error ? <p role="alert" className="mt-1 text-[var(--color-danger)]">{error}</p> : null;
 
-  // Held because the kept file cannot be read: the place is not known, so the step is Run it here.
+  // Held because the kept places cannot be read or were not all kept: the place is not known, so the step is Run it here.
   if (!placement && view.held && !view.held.released.includes(agent.id)) {
+    const full = view.held.reason === "full";
+    // Waiting for the module helps only when a place it offers lists this agent, so it can report it here.
+    const moduleCanReport = status.active && status.scheduleTargets?.targets.some((target) => target.agentIds?.includes(agent.id)) === true;
     return (
       <>
         {unsaved}
         <div role="status" className="rounded-[10px] bg-[var(--color-danger-soft)] px-3 py-2.5 text-sm text-[var(--color-danger)]">
-          <p className="font-medium">{SCHEDULE_TARGET_COPY.placementsProblemTitle}</p>
+          <p className="font-medium">{full ? SCHEDULE_TARGET_COPY.placementsFullTitle : SCHEDULE_TARGET_COPY.placementsProblemTitle}</p>
           <p className="mt-0.5 text-[var(--color-text-soft)]">
-            {SCHEDULE_TARGET_COPY.heldUnknown} {off ? SCHEDULE_TARGET_COPY.heldUnknownOff : SCHEDULE_TARGET_COPY.heldUnknownOn}
+            {full ? SCHEDULE_TARGET_COPY.heldFull : SCHEDULE_TARGET_COPY.heldUnknown} {moduleCanReport ? SCHEDULE_TARGET_COPY.heldUnknownOn : SCHEDULE_TARGET_COPY.heldUnknownOff}
           </p>
           <RunItHere
             title={SCHEDULE_TARGET_COPY.runItHereUnknownTitle}
