@@ -3260,7 +3260,7 @@ function isAllowedAppNavigation(url: string): boolean {
  * run here as well.
  */
 function installSchedulePlacements(userDataDir: string): SchedulePlacementMemory {
-  const placements = new SchedulePlacementMemory(join(userDataDir, "enterprise", "placements.json"));
+  const placements = new SchedulePlacementMemory(join(userDataDir, "enterprise", "placements.json"), undefined, () => store.installedAgentIdsNow());
   schedulePlacements = placements;
   store.setScheduleRunsElsewhere((agentId) => {
     const placement = placements.placementFor(agentId);

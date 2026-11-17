@@ -32,7 +32,10 @@ export type HoldReason = "unreadable" | "full";
  * Past it, the oldest kept places go and every schedule is held, so none of them runs here as well.
  */
 export const MAX_PLACEMENTS = 2000;
-/** How many schedules can be taken back while held. */
+/**
+ * Past this many taken back schedules, ids of agents no longer installed are pruned: only an installed
+ * agent runs here, so the list never outgrows the installed agents, and a hold is never lost to it.
+ */
 export const MAX_RELEASED = 2000;
 const UNKNOWN_PLACE: EnterprisePlacement = { targetId: "unknown", label: "a place the app cannot read back", organizationId: "unknown", reason: "uncertain" };
 
@@ -64,6 +67,8 @@ export class SchedulePlacementMemory {
   constructor(
     private readonly path: string,
     private readonly log: (message: string, detail: string) => void = (message, detail) => console.warn(`[placements] ${message}`, { detail }),
+    /** The installed agent ids, or undefined while they are not read yet. */
+    private readonly installed: () => ReadonlySet<string> | undefined = () => undefined,
   ) {
     this.load();
   }
@@ -71,19 +76,28 @@ export class SchedulePlacementMemory {
   /**
    * Merges a report: set what it names; remove only agents it reports here for a place it still offers.
    * While held, only an agent the report names here is released; a report never ends the hold as a whole.
+   * Throws, after keeping the rest of the report, when an agent reported here could not be released.
    */
   publish(update: { readonly placements: EnterprisePlacements; readonly offered: readonly string[]; readonly here: readonly string[] }): void {
     const next = { ...this.placements };
+    let failure: unknown;
     for (const [agentId, placement] of Object.entries(update.placements)) next[agentId] = placement;
     for (const agentId of update.here) {
       if (agentId in update.placements) continue;
       const kept = next[agentId];
       if (kept && update.offered.includes(kept.targetId)) delete next[agentId];
-      if (this.failClosed && !this.release(agentId)) this.log("a schedule reported here stays held: too many were taken back", agentId);
+      if (this.failClosed) {
+        try {
+          this.release(agentId);
+        } catch (error) {
+          failure ??= error;
+        }
+      }
     }
     this.placements = this.fit(next, Object.keys(update.placements));
     this.offered = [...update.offered];
     this.write(false);
+    if (failure !== undefined) throw failure;
   }
 
   /** A move away starts: kept as not certain on disk before the module is asked. Throws when it cannot be kept. */
@@ -96,23 +110,33 @@ export class SchedulePlacementMemory {
     this.write(true);
   }
 
-  /** After a move: where it is now, back here, or not known (kept as it is). */
+  /**
+   * After a move: where it is now, back here, or not known (kept as it is). A confirmed move back also
+   * releases a held agent; throws when it cannot, so the move is not reported as done while it stays held.
+   */
   settle(agentId: string, outcome: EnterprisePlacement | "here" | "unknown"): void {
     if (outcome === "unknown") return;
     const next = { ...this.placements };
-    if (outcome === "here") delete next[agentId];
-    else next[agentId] = outcome;
+    let failure: unknown;
+    if (outcome === "here") {
+      delete next[agentId];
+      if (this.failClosed) {
+        try {
+          this.release(agentId);
+        } catch (error) {
+          failure = error;
+        }
+      }
+    } else next[agentId] = outcome;
     this.placements = next;
     this.write(false);
+    if (failure !== undefined) throw failure;
   }
 
   /** Forgets one agent's placement, after the admin chose Run it here. */
   clear(agentId: string): void {
     if (!(agentId in this.placements) && !this.failClosed) return;
-    if (this.failClosed && !this.release(agentId)) {
-      this.log("Run it here was refused: too many schedules were taken back", agentId);
-      throw new Error(`The app can take back at most ${MAX_RELEASED} schedules while they are held, so this one still does not run here.`);
-    }
+    if (this.failClosed) this.release(agentId);
     const { [agentId]: _removed, ...rest } = this.placements;
     this.placements = rest;
     this.write(false);
@@ -146,12 +170,23 @@ export class SchedulePlacementMemory {
     return this.placements[agentId] ?? (this.failClosed && !this.released.has(agentId) ? UNKNOWN_PLACE : undefined);
   }
 
-  /** Takes one agent out of the hold; false when no more can be taken back, so it stays held. */
-  private release(agentId: string): boolean {
-    if (this.released.has(agentId)) return true;
-    if (this.released.size >= MAX_RELEASED) return false;
+  /**
+   * Takes one agent out of the hold. Past MAX_RELEASED, ids of agents no longer installed are pruned
+   * (one installed again is held again, which is safe). Throws only while the installed agents are not read.
+   */
+  private release(agentId: string): void {
+    if (this.released.has(agentId)) return;
+    if (this.released.size >= MAX_RELEASED) {
+      const installed = this.installed();
+      if (!installed) {
+        this.log("a schedule stays held: the installed agents are not read yet", agentId);
+        throw new Error("The app has not finished reading its installed agents, so this schedule still does not run here. Try again in a moment.");
+      }
+      for (const id of this.released) if (!installed.has(id)) this.released.delete(id);
+      // An agent that is not installed does not run here, so it needs no release.
+      if (!installed.has(agentId)) return;
+    }
     this.released.add(agentId);
-    return true;
   }
 
   /**
@@ -202,7 +237,7 @@ export class SchedulePlacementMemory {
     if (file.held) {
       this.failClosed = true;
       this.holdReason = file.held.reason ?? "unreadable";
-      for (const agentId of file.held.released) this.release(agentId);
+      for (const agentId of file.held.released) this.released.add(agentId);
     }
   }
 
@@ -233,7 +268,7 @@ export class SchedulePlacementMemory {
         const released = (parsed.held as Partial<NonNullable<FileShape["held"]>> | null)?.released;
         // A hold that cannot be read is a damaged file: it fails closed rather than freeing anything.
         const reason = (parsed.held as { reason?: unknown }).reason;
-        if (!Array.isArray(released) || released.length > MAX_RELEASED || !released.every((id) => typeof id === "string") || (reason !== undefined && reason !== "unreadable" && reason !== "full")) {
+        if (!Array.isArray(released) || !released.every((id) => typeof id === "string") || (reason !== undefined && reason !== "unreadable" && reason !== "full")) {
           throw new Error("the hold is not readable");
         }
         held = { released, ...(reason ? { reason } : {}) };

@@ -5957,6 +5957,12 @@ export class AppStateStore {
    * in another place. The scheduler does not run such an agent here, so a
    * schedule never runs in two places, until the admin resolves it.
    */
+  /** The installed agent ids as last read or written; undefined before the state was first read. */
+  installedAgentIdsNow(): ReadonlySet<string> | undefined {
+    const snapshot = this.lastReadSnapshot;
+    return snapshot ? new Set(snapshot.installedAgents.map((agent) => agent.id)) : undefined;
+  }
+
   setScheduleRunsElsewhere(check: ((agentId: string) => SchedulePlacement | undefined) | undefined): void {
     this.scheduleRunsElsewhere = check;
   }

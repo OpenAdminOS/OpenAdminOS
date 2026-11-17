@@ -363,14 +363,53 @@ describe("schedule handoff on this computer", () => {
       assert.ok(logs.some((message) => message.includes("more placements were reported")));
       assert.equal(new SchedulePlacementMemory(path, () => undefined).view().held?.reason, "full");
 
-      // Run it here past the bound of taken back schedules says so instead of doing nothing.
-      const releasedPath = join(dir, "released.json");
-      const released = Array.from({ length: MAX_RELEASED }, (_, index) => `free-${index}`);
-      await writeFile(releasedPath, JSON.stringify({ version: 1, placements: {}, held: { released, reason: "unreadable" } }));
-      const takenBack = new SchedulePlacementMemory(releasedPath, () => undefined);
-      assert.equal(takenBack.placementFor("free-0"), undefined);
-      assert.throws(() => takenBack.clear("free-last"), /can take back at most/);
-      assert.ok(takenBack.placementFor("free-last"), "still held");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps releasing held schedules past the bound by pruning agents no longer installed, across a restart", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-placements-"));
+    try {
+      const path = join(dir, "placements.json");
+      // A hold that already took back MAX_RELEASED agents, none of them installed any more.
+      const released = Array.from({ length: MAX_RELEASED }, (_, index) => `gone-${index}`);
+      await writeFile(path, JSON.stringify({ version: 1, placements: { "came-back": contosoPc }, offered: ["mini-pc"], held: { released, reason: "unreadable" } }));
+      const installed = new Set(["came-back", "taken-back", "still-held"]);
+      const memory = new SchedulePlacementMemory(path, () => undefined, () => installed);
+
+      // A confirmed move back to here at the limit releases it.
+      memory.settle("came-back", "here");
+      assert.equal(memory.placementFor("came-back"), undefined);
+      // Run it here at the limit releases it too.
+      memory.clear("taken-back");
+      assert.equal(memory.placementFor("taken-back"), undefined);
+      assert.ok(memory.placementFor("still-held"), "the other holds stay");
+
+      const restarted = new SchedulePlacementMemory(path, () => undefined, () => installed);
+      assert.equal(restarted.placementFor("came-back"), undefined);
+      assert.equal(restarted.placementFor("taken-back"), undefined);
+      assert.ok(restarted.placementFor("still-held"), "a restart keeps the others held");
+      // An agent no longer installed lost its release, so it is held again if it comes back.
+      assert.ok(restarted.placementFor("gone-0"));
+      assert.deepEqual([...(restarted.view().held?.released ?? [])].sort(), ["came-back", "taken-back"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a release at the bound with a step while the installed agents are not read, and keeps the hold", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-placements-"));
+    try {
+      const path = join(dir, "placements.json");
+      const released = Array.from({ length: MAX_RELEASED }, (_, index) => `gone-${index}`);
+      await writeFile(path, JSON.stringify({ version: 1, placements: { "came-back": contosoPc }, offered: ["mini-pc"], held: { released, reason: "unreadable" } }));
+      const memory = new SchedulePlacementMemory(path, () => undefined, () => undefined);
+      assert.throws(() => memory.clear("taken-back"), /Try again in a moment/);
+      assert.throws(() => memory.settle("came-back", "here"), /Try again in a moment/);
+      assert.throws(() => memory.publish({ placements: {}, offered: ["mini-pc"], here: ["reported-here"] }), /Try again in a moment/);
+      for (const agentId of ["taken-back", "came-back", "reported-here"]) assert.ok(memory.placementFor(agentId), `${agentId} stays held`);
+      assert.ok(new SchedulePlacementMemory(path, () => undefined, () => undefined).placementFor("came-back"), "still held after a restart");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
