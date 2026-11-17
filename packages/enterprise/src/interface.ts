@@ -217,8 +217,10 @@ export interface EnterpriseScheduleTargets {
   readonly action: string;
   readonly targets: readonly EnterpriseScheduleTarget[];
   /**
-   * Where each agent's schedule runs now, by agent id: a target id. An
-   * agent left out runs on this computer. The card shows only this.
+   * Where each agent's schedule runs now, by agent id: a target id, or
+   * "this-computer". The card shows an agent left out at this computer,
+   * but only an explicit "this-computer" counts as here: after a move, an
+   * agent left out stays held as not certain, and nothing changes here.
    */
   readonly current?: { readonly [agentId: string]: string };
   /**

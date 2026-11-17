@@ -1072,6 +1072,78 @@ describe("createEnterpriseHost", () => {
     assert.equal(asked, 0);
   });
 
+  it("reads only an explicit report of this computer as here, never an agent left out", async () => {
+    const ipc = new FakeIpc();
+    const kept = new Map<string, string>();
+    const local: Array<[string, boolean]> = [];
+    const controller = createEnterpriseHost({
+      entitlement: () => ENTITLEMENT,
+      ipc,
+      storage: new MemoryStorage(),
+      log: () => undefined,
+      capabilities: {
+        placements: {
+          publish: () => undefined,
+          begin: (agentId, placement) => void kept.set(agentId, `${placement.targetId} ${placement.reason}`),
+          settle: (agentId, outcome) => {
+            if (outcome === "here") kept.delete(agentId);
+            else if (outcome !== "unknown") kept.set(agentId, `${outcome.targetId} ${outcome.reason}`);
+          },
+        },
+        localSchedules: {
+          has: async () => true,
+          organizationOf: async () => "org-contoso",
+          setEnabled: async (agentId, enabled) => {
+            local.push([agentId, enabled]);
+            return true;
+          },
+        },
+      },
+    });
+    const host = controller.host;
+    const agentId = "find-inactive-devices";
+    const targets = [
+      { id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso" },
+      { id: "lab", label: "Lab sandbox", organizationId: "org-contoso" },
+    ];
+    let next: Record<string, string> = {};
+    host.registerUiAction("sandboxes.schedule", async () => {
+      host.setScheduleTargets({ action: "sandboxes.schedule", targets, current: next });
+      return { notice: { type: "notice", tone: "neutral", title: "Taken", message: "The module took the choice." } };
+    });
+    host.setScheduleTargets({ action: "sandboxes.schedule", targets, current: { [agentId]: "lab" } });
+    const choose = async (targetId: string) =>
+      checkUiReply(await ipc.invoke("openadminos-enterprise-ui:sandboxes.schedule", { kind: "schedule", agentId, targetId, intervalSeconds: 3600 }));
+
+    // Moved away, but the module leaves the agent out (for example a full `current`): still held, nothing changes here.
+    next = {};
+    const omitted = await choose("mini-pc");
+    assert.equal(omitted.notice?.title, "Not certain where it runs");
+    assert.match(omitted.notice?.message ?? "", /may run on Office mini PC.*held so it does not run twice/);
+    assert.match(omitted.notice?.recovery ?? "", /Settings, Sandboxes/);
+    assert.equal(kept.get(agentId), "mini-pc uncertain", "the hold stays");
+    assert.deepEqual(local, []);
+
+    // Moving back with the agent still left out turns nothing on and keeps the hold.
+    const back = await choose("this-computer");
+    assert.equal(back.notice?.title, "The schedule did not move back");
+    assert.equal(kept.get(agentId), "mini-pc uncertain");
+    assert.deepEqual(local, []);
+
+    // An explicit report of this computer settles it here and turns the schedule on.
+    next = { [agentId]: "this-computer" };
+    const explicit = await choose("this-computer");
+    assert.notEqual(explicit.notice?.tone, "danger");
+    assert.equal(kept.has(agentId), false);
+    assert.deepEqual(local, [[agentId, true]]);
+
+    // An away move the module confirms is kept as running there.
+    next = { [agentId]: "mini-pc" };
+    await choose("mini-pc");
+    assert.equal(kept.get(agentId), "mini-pc runs");
+    assert.deepEqual(local.at(-1), [agentId, false]);
+  });
+
   it("does not report a move back as done when the app cannot release the hold", async () => {
     const ipc = new FakeIpc();
     const settled: string[] = [];

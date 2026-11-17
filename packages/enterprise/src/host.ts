@@ -41,7 +41,6 @@ import {
   checkUiBody,
   checkUiNotice,
   checkUiReply,
-  currentTargetFor,
   ENTERPRISE_UI_LIMITS,
   uncertainFor,
 } from "./ui.js";
@@ -319,7 +318,8 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
         }
         // The module answered: what it reports now is where a move away stands.
         if (input.kind === "schedule" && input.targetId !== "this-computer") {
-          outcome = placementSnapshot(scheduleTargets ?? { action: name, targets: [] })[input.agentId] ?? (currentTargetFor(scheduleTargets, input.agentId) === "this-computer" ? "here" : "unknown");
+          // Only an explicit report of this computer is here; an agent left out stays not certain, and held.
+          outcome = placementSnapshot(scheduleTargets ?? { action: name, targets: [] })[input.agentId] ?? (reportedTargetFor(input.agentId) === "this-computer" ? "here" : "unknown");
         }
         // A schedule choice answers with a notice; a body there has no section to go to.
         if (input.kind === "schedule" && reply.body) {
@@ -345,7 +345,7 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
         if (input.kind === "schedule") {
           reply = await handOff(input, reply, noScheduleHere);
           // A move back loosens the kept placement only once the handoff confirmed it.
-          if (input.targetId === "this-computer" && reply.notice?.tone !== "danger" && currentTargetFor(scheduleTargets, input.agentId) === "this-computer") {
+          if (input.targetId === "this-computer" && reply.notice?.tone !== "danger" && reportedTargetFor(input.agentId) === "this-computer") {
             outcome = "here";
             // Kept before the reply, so a move back the app could not record is never reported as done.
             if (placements) {
@@ -391,7 +391,21 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
     if (reply.notice?.tone === "danger") return reply;
     // App copy says "here" for this computer: the reply passes the same text check as module text.
     const place = (targetId: string) => (targetId === "this-computer" ? "here" : `on ${scheduleTargets?.targets.find((target) => target.id === targetId)?.label ?? targetId}`);
-    const now = currentTargetFor(scheduleTargets, input.agentId);
+    const now = reportedTargetFor(input.agentId);
+    if (now === undefined) {
+      // Left out of what the module reports: not a report of here, so nothing follows here.
+      return input.targetId === "this-computer"
+        ? danger(
+            "The schedule did not move back",
+            "The team features module did not report the schedule here after the move, so nothing changed here and it stays held.",
+            "Try again. If it keeps happening, check the team features module.",
+          )
+        : danger(
+            "Not certain where it runs",
+            `The team features module did not report where the schedule runs after the move, so it may run ${place(input.targetId)}. The schedule here is held so it does not run twice.`.slice(0, ENTERPRISE_UI_LIMITS.maxMessageLength),
+            "Open Settings, Sandboxes and use the step shown for that sandbox, then choose again.",
+          );
+    }
     if (now !== input.targetId) {
       return danger("The schedule did not move", `The team features module did not report the schedule ${place(input.targetId)}; it reports it ${place(now)}. Nothing changed here.`, "Try again. If it keeps happening, check the team features module.");
     }
@@ -433,6 +447,18 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
       }
     }
     return reply.notice ? reply : Object.freeze({ ...reply, notice: Object.freeze({ type: "notice" as const, tone: "success" as const, title: "Saved", message: `The schedule now runs ${place(input.targetId)}.` }) });
+  };
+
+  /**
+   * Where the module reports an agent's schedule, only when it says so: a place it is not certain about,
+   * or the agent's own entry in `current`. An agent left out is shown at this computer on the card, but
+   * the host never reads that as here: absence clears no hold and turns nothing on.
+   */
+  const reportedTargetFor = (agentId: string): string | undefined => {
+    const uncertain = uncertainFor(scheduleTargets, agentId);
+    if (uncertain) return uncertain.targetId;
+    const current = scheduleTargets?.current?.[agentId];
+    return current !== undefined && (current === "this-computer" || scheduleTargets!.targets.some((target) => target.id === current)) ? current : undefined;
   };
 
   /**
