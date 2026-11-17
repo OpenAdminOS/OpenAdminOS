@@ -28,7 +28,7 @@ import {
   type EnterpriseStatusContribution,
   type EnterpriseStorage,
 } from "./interface.js";
-import { EnterpriseHostError } from "./errors.js";
+import { EnterpriseHostError, EnterprisePlacementsFullError } from "./errors.js";
 import {
   alsoRunsOnFor,
   placementSnapshot,
@@ -46,7 +46,7 @@ import {
   uncertainFor,
 } from "./ui.js";
 
-export { EnterpriseHostError, type EnterpriseHostErrorCode } from "./errors.js";
+export { EnterpriseHostError, EnterprisePlacementsFullError, type EnterpriseHostErrorCode } from "./errors.js";
 
 export const ENTERPRISE_LIMITS = Object.freeze({
   maxIpcHandlers: 32,
@@ -299,6 +299,9 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
           if (target) placements.begin(input.agentId, { targetId: target.id, label: target.label, organizationId: target.organizationId, reason: "uncertain" });
         } catch (error) {
           options.log("error", "enterprise: a move could not be recorded before it started", { agentId: input.agentId, error: errorMessage(error) });
+          if (error instanceof EnterprisePlacementsFullError) {
+            return danger("The schedule did not move", error.message, "Move a schedule that runs elsewhere back here in Where it runs, then try again.");
+          }
           return danger("The schedule did not move", "The app could not record the move before it started, so it was not started.", "Check free disk space and the permissions of the OpenAdminOS data folder, then try again.");
         }
       }
@@ -471,7 +474,8 @@ export function createEnterpriseHost(options: CreateEnterpriseHostOptions): Ente
       return danger(
         "The schedule is held here",
         `The team features module moved the schedule to ${target.label}, which is paired for ${nameOf(target.organizationId)}, but this schedule now belongs to ${nameOf(organizationId)}. The schedule here is held so it does not run twice.`,
-        "Use Turn off here in the schedule card, or choose here to bring it back.",
+        // The renderer checks every notice against the reserved phrases, so the step names the row without them.
+        "Use Turn off here in the schedule card, or move it back here in Where it runs.",
       );
     }
     return danger(

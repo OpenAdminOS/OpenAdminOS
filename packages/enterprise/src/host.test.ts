@@ -5,6 +5,7 @@ import { checkUiReply, currentTargetFor, ENTERPRISE_UI_LIMITS } from "./ui.js";
 import {
   ENTERPRISE_LIMITS,
   EnterpriseHostError,
+  EnterprisePlacementsFullError,
   checkJson,
   createEnterpriseHost,
   type CreateEnterpriseHostOptions,
@@ -1035,6 +1036,39 @@ describe("createEnterpriseHost", () => {
     const reply = (await ipc.invoke("openadminos-enterprise-ui:sandboxes.schedule", { kind: "schedule", agentId: "find-inactive-devices", targetId: "mini-pc", intervalSeconds: 3600 })) as { notice: { tone: string; message: string } };
     assert.equal(reply.notice.tone, "danger");
     assert.match(reply.notice.message, /could not record the move/);
+    assert.equal(asked, 0);
+  });
+
+  it("does not start a move when the kept placements are full, and says why", async () => {
+    const ipc = new FakeIpc();
+    let asked = 0;
+    const controller = createEnterpriseHost({
+      entitlement: () => ENTITLEMENT,
+      ipc,
+      storage: new MemoryStorage(),
+      log: () => undefined,
+      capabilities: {
+        placements: {
+          publish: () => undefined,
+          begin: () => {
+            throw new EnterprisePlacementsFullError("The app keeps where at most 2000 schedules run and cannot keep another, so the move was not started.");
+          },
+          settle: () => undefined,
+        },
+        localSchedules: { has: async () => true, organizationOf: async () => "org-contoso", setEnabled: async () => true },
+      },
+    });
+    controller.host.registerUiAction("sandboxes.schedule", async () => {
+      asked += 1;
+      return { notice: { type: "notice", tone: "neutral", title: "x", message: "y" } };
+    });
+    controller.host.setScheduleTargets({ action: "sandboxes.schedule", targets: [{ id: "mini-pc", label: "Office mini PC", organizationId: "org-contoso" }] });
+    const reply = await ipc.invoke("openadminos-enterprise-ui:sandboxes.schedule", { kind: "schedule", agentId: "find-inactive-devices", targetId: "mini-pc", intervalSeconds: 3600 });
+    // The renderer reads it with the same check.
+    const checked = checkUiReply(reply);
+    assert.equal(checked.notice?.tone, "danger");
+    assert.match(checked.notice?.message ?? "", /at most 2000 schedules/);
+    assert.match(checked.notice?.recovery ?? "", /back here in Where it runs/);
     assert.equal(asked, 0);
   });
 });

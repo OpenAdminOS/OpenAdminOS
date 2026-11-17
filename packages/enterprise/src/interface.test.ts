@@ -278,6 +278,7 @@ describe("enterprise interface", () => {
       "ENTERPRISE_UI_RESERVED_PHRASES",
       "EnterpriseHostError",
       "EnterpriseInterfaceVersionError",
+      "EnterprisePlacementsFullError",
       "LICENCE_LIMITS",
       "LICENCE_PUBLIC_KEY_PEM",
       "LICENCE_SIGNING_CONTEXT",

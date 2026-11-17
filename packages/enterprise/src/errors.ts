@@ -16,3 +16,11 @@ export class EnterpriseHostError extends Error {
     this.code = code;
   }
 }
+
+/** The app keeps no more schedule placements, so a move away is refused before the module is asked. */
+export class EnterprisePlacementsFullError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "EnterprisePlacementsFullError";
+  }
+}

@@ -55,6 +55,7 @@ export {
   ENTERPRISE_NAME_PATTERN,
   ENTERPRISE_STORAGE_KEY_PATTERN,
   EnterpriseHostError,
+  EnterprisePlacementsFullError,
   checkJson,
   createEnterpriseHost,
   enterpriseIpcChannel,
