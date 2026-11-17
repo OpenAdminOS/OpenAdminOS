@@ -640,6 +640,29 @@ describe("schedule card: where it runs", () => {
     expect(screen.getByText(/Open Settings, Sandboxes and use the step shown for that sandbox/)).toBeInTheDocument();
   });
 
+  it("shows a kept place the module leaves out as current, so This computer can be chosen to move it back", async () => {
+    const user = userEvent.setup();
+    const invokeEnterpriseUi = vi.fn<Invoke>(async () => ({ notice: { type: "notice", tone: "success", title: "Saved", message: "The schedule now runs here." } }));
+    const bridge = makeMockBridge({
+      getEnterpriseStatus: async () => statusWith(),
+      getSchedulePlacements: async () => ({ placements: { [agent.id]: { targetId: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", reason: "runs" as const } } }),
+      invokeEnterpriseUi,
+    });
+    renderWithAppState(<AgentScheduleCard agent={agent} onChange={vi.fn()} />, { bridge });
+    // The hold and its notice stay.
+    expect(await screen.findByText("Last known to run on Office mini PC")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("radio", { name: /Office mini PC/ })).toBeChecked());
+    const here = screen.getByRole("radio", { name: /This computer/ });
+    expect(here).not.toBeChecked();
+    expect(here).toBeEnabled();
+    // Not shown as running in two places: the module did not report it there.
+    expect(screen.queryByText(/Turned on here and on/)).toBeNull();
+    await user.click(here);
+    await waitFor(() =>
+      expect(invokeEnterpriseUi).toHaveBeenCalledWith("sandboxes.schedule", { kind: "schedule", agentId: agent.id, targetId: "this-computer", intervalSeconds: expect.any(Number) }),
+    );
+  });
+
   it("offers waiting for team features on a held schedule only when a place it offers lists the agent", async () => {
     const held = { placements: {}, problem: { kind: "unreadable" as const, message: "x" }, held: { released: [], reason: "unreadable" as const } };
     const listed = makeMockBridge({

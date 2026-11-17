@@ -16,7 +16,7 @@ import { useToast } from "./Toast";
 import { alsoRunsOnFor, currentTargetFor, uncertainFor } from "@openadminos/enterprise/ui";
 import { EnterpriseNotice, invokeUiAction, ModuleUiBoundary } from "./EnterpriseUi";
 import { useEnterpriseStatus } from "./useEnterpriseStatus";
-import type { EnterpriseScheduleTargetView, EnterpriseUiNoticeView, SchedulePlacementsView } from "@openadminos/agent-sdk";
+import type { EnterpriseScheduleTargetView, EnterpriseUiNoticeView, SchedulePlacementView, SchedulePlacementsView } from "@openadminos/agent-sdk";
 import { Modal, ModalHeader } from "./Modal";
 
 const PRESETS = [
@@ -34,9 +34,10 @@ export function AgentScheduleCard({
   onChange: (next: AgentSchedule | null) => Promise<void> | void;
 }) {
   const schedule = agent.schedule;
-  const where = useScheduleTarget(agent);
-  // While the schedule runs elsewhere, this card does not run or change it here.
-  const elsewhere = where && where.current !== "this-computer" ? where.currentLabel : undefined;
+  const [placements, setPlacements] = useSchedulePlacements();
+  const where = useScheduleTarget(agent, placements.placements[agent.id]);
+  // While the module reports the schedule elsewhere, this card does not run or change it here.
+  const elsewhere = where && where.current !== "this-computer" && !where.kept ? where.currentLabel : undefined;
   // While a move runs, nothing here changes the schedule: the main process is moving it.
   const [moving, setMoving] = useState(false);
   const locked = elsewhere !== undefined || moving;
@@ -105,7 +106,9 @@ export function AgentScheduleCard({
       {/* Live only when the module names this agent; a kept place it no longer names keeps its recovery. */}
       <LastKnownPlacement
         agent={agent}
-        live={where !== undefined && (where.current !== "this-computer" || where.alsoRunsOnLabel !== undefined || where.uncertain !== undefined)}
+        view={placements}
+        onView={setPlacements}
+        live={where !== undefined && !where.kept && (where.current !== "this-computer" || where.alsoRunsOnLabel !== undefined || where.uncertain !== undefined)}
       />
       {where ? (
         <ModuleUiBoundary resetKey={JSON.stringify([where.targets, where.current])}>
@@ -447,23 +450,37 @@ interface ScheduleTargetChoice {
   alsoRunsOnLabel?: string;
   /** The module is not certain where it runs: shown with its recovery, and nothing moves. */
   uncertain?: { label: string; message: string; recovery: string };
+  /**
+   * The module does not name this agent, but the app keeps it as running on an offered place: that place
+   * is shown as current, so choosing This computer asks the module to move it back.
+   */
+  kept?: boolean;
 }
 
 /** Where an agent's schedule runs, when a team features module offers places for it or reports one. */
-function useScheduleTarget(agent: AgentSummary): ScheduleTargetChoice | undefined {
+function useScheduleTarget(agent: AgentSummary, keptPlacement?: SchedulePlacementView): ScheduleTargetChoice | undefined {
   const status = useEnterpriseStatus();
   const contribution = status.active ? status.scheduleTargets : undefined;
   if (!contribution) return undefined;
   // The shared resolution, against every place the module reports: a place elsewhere is never shown as this computer.
-  const current = currentTargetFor(contribution, agent.id);
+  const reported = currentTargetFor(contribution, agent.id);
+  const also = alsoRunsOnFor(contribution, agent.id);
+  const unsure = uncertainFor(contribution, agent.id);
+  // An agent the module leaves out is not here while the app keeps it on a place the module still offers.
+  const kept =
+    reported === "this-computer" &&
+    contribution.current?.[agent.id] === undefined &&
+    also === undefined &&
+    unsure === undefined &&
+    keptPlacement !== undefined &&
+    contribution.targets.some((target) => target.id === keptPlacement.targetId);
+  const current = kept && keptPlacement ? keptPlacement.targetId : reported;
   const labelOf = (targetId: string) => contribution.targets.find((target) => target.id === targetId)?.label ?? targetId;
   // A place is offered only for a schedule of the organization it is paired for.
   const organizationId = agent.schedule?.organizationId;
   const eligible = contribution.targets.filter(
     (target) => (!target.agentIds || target.agentIds.includes(agent.id)) && (organizationId === undefined || target.organizationId === organizationId),
   );
-  const also = alsoRunsOnFor(contribution, agent.id);
-  const unsure = uncertainFor(contribution, agent.id);
   // Every place the module names for this agent is shown, offered or not: the current one, one whose own
   // configuration runs it, and one it is not certain about.
   const named = [current, also, unsure?.targetId].filter((id): id is string => id !== undefined && id !== "this-computer");
@@ -484,6 +501,7 @@ function useScheduleTarget(agent: AgentSummary): ScheduleTargetChoice | undefine
     ...(agent.schedule && organizationId === undefined ? { blockedReason: SCHEDULE_TARGET_COPY.needsOrganization } : {}),
     ...(also ? { alsoRunsOnLabel: labelOf(also) } : {}),
     ...(unsure ? { uncertain: { label: labelOf(unsure.targetId), message: unsure.message, recovery: unsure.recovery } } : {}),
+    ...(kept ? { kept: true } : {}),
   };
 }
 
@@ -603,10 +621,10 @@ function ScheduleTargetRow({
  * the kept file cannot be read, every schedule is held, wherever it ran. Run
  * it here takes one back after typed confirmation.
  */
-function LastKnownPlacement({ agent, live }: { agent: AgentSummary; live: boolean }) {
+/** The placements the app keeps, read again whenever the team features status changes. */
+function useSchedulePlacements(): [SchedulePlacementsView, (next: SchedulePlacementsView) => void] {
   const status = useEnterpriseStatus();
   const [view, setView] = useState<SchedulePlacementsView>({ placements: {} });
-  const [error, setError] = useState<string | undefined>();
   useEffect(() => {
     const bridge = window.openAdminOS;
     if (!bridge?.getSchedulePlacements) return;
@@ -621,6 +639,22 @@ function LastKnownPlacement({ agent, live }: { agent: AgentSummary; live: boolea
       current = false;
     };
   }, [status]);
+  return [view, setView];
+}
+
+function LastKnownPlacement({
+  agent,
+  live,
+  view,
+  onView: setView,
+}: {
+  agent: AgentSummary;
+  live: boolean;
+  view: SchedulePlacementsView;
+  onView: (next: SchedulePlacementsView) => void;
+}) {
+  const status = useEnterpriseStatus();
+  const [error, setError] = useState<string | undefined>();
   const clear = async () => {
     setError(undefined);
     try {
