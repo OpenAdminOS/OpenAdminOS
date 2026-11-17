@@ -102,7 +102,11 @@ export function AgentScheduleCard({
     <div className="space-y-4">
       <SchedulesPausedNotice />
       {schedule ? <ScheduleOrganizationRow agent={agent} /> : null}
-      <LastKnownPlacement agent={agent} live={where !== undefined} />
+      {/* Live only when the module names this agent; a kept place it no longer names keeps its recovery. */}
+      <LastKnownPlacement
+        agent={agent}
+        live={where !== undefined && (where.current !== "this-computer" || where.alsoRunsOnLabel !== undefined || where.uncertain !== undefined)}
+      />
       {where ? (
         <ModuleUiBoundary resetKey={JSON.stringify([where.targets, where.current])}>
           {/* The move and the schedule here change in the main process; this draws what they report. */}
@@ -408,8 +412,14 @@ export const SCHEDULE_TARGET_COPY = {
   lastKnownUnpaired: (label: string) => `Last known to run on ${label}, which is no longer paired here.`,
   lastKnownUnpairedStep: "It does not run here until you choose Run it here, or remove it there.",
   placementsProblemTitle: "Where schedules last ran cannot be read",
+  placementsUnsavedTitle: "Where schedules last ran could not be saved",
+  heldUnknown: "The app cannot read where this schedule last ran, so it does not run here until you take it back.",
+  heldUnknownOff: "Choose Run it here once it no longer runs in another place.",
+  heldUnknownOn: "Choose Run it here once it no longer runs in another place, or wait until team features report that it runs here.",
+  runItHereUnknownTitle: "Run it here",
+  runItHereUnknownMessage: "The app cannot tell where this schedule last ran. It can run here again. If it still runs in another place, remove it there too, or it may run in both places.",
   lastKnownOff: "Team features are off, so it does not run here until you bring it back or remove it there.",
-  lastKnownWaiting: "Team features have not said where it runs yet, so it does not run here meanwhile.",
+  lastKnownWaiting: "Team features have not said where it runs yet, so it does not run here meanwhile. Use Sync now in Settings, Sandboxes, or wait until the sandbox answers.",
   runItHere: "Run it here",
   runItHerePhrase: "RUN IT HERE",
   runItHereTitle: (label: string) => `Run it here instead of ${label}`,
@@ -586,18 +596,15 @@ function ScheduleTargetRow({
 }
 
 /**
- * Where a schedule was last known to run, when no module reports places in
- * this session: kept by the app, so the schedule does not run here as well.
- * With team features off, Run it here forgets the place after typed
- * confirmation.
+ * Where a schedule was last known to run, when no module names it in this
+ * session: kept by the app, so the schedule does not run here as well. When
+ * the kept file cannot be read, every schedule is held, wherever it ran. Run
+ * it here takes one back after typed confirmation.
  */
 function LastKnownPlacement({ agent, live }: { agent: AgentSummary; live: boolean }) {
   const status = useEnterpriseStatus();
   const [view, setView] = useState<SchedulePlacementsView>({ placements: {} });
-  const [confirming, setConfirming] = useState(false);
-  const [typed, setTyped] = useState("");
   const [error, setError] = useState<string | undefined>();
-  const inputId = useId();
   useEffect(() => {
     const bridge = window.openAdminOS;
     if (!bridge?.getSchedulePlacements) return;
@@ -612,22 +619,7 @@ function LastKnownPlacement({ agent, live }: { agent: AgentSummary; live: boolea
       current = false;
     };
   }, [status]);
-  const placement = view.placements[agent.id];
-  if (view.problem && !placement) {
-    return (
-      <div role="status" className="rounded-[10px] bg-[var(--color-danger-soft)] px-3 py-2.5 text-sm text-[var(--color-danger)]">
-        <p className="font-medium">{SCHEDULE_TARGET_COPY.placementsProblemTitle}</p>
-        <p className="mt-0.5 text-[var(--color-text-soft)]">{view.problem.message}</p>
-      </div>
-    );
-  }
-  // A live row already says where it runs, unless the kept place is no longer paired here.
-  if (!placement || (live && !placement.stale)) return null;
-  const off = !status.active;
-  const canTakeBack = off || placement.stale === true;
   const clear = async () => {
-    setConfirming(false);
-    setTyped("");
     try {
       const next = await window.openAdminOS?.clearSchedulePlacement?.(agent.id);
       if (next) setView(next);
@@ -635,23 +627,80 @@ function LastKnownPlacement({ agent, live }: { agent: AgentSummary; live: boolea
       setError(caught instanceof Error ? caught.message : String(caught));
     }
   };
+  const placement = view.placements[agent.id];
+  const off = !status.active;
+  const unsaved =
+    view.problem?.kind === "unwritable" ? (
+      <div role="status" className="rounded-[10px] bg-[var(--color-danger-soft)] px-3 py-2.5 text-sm text-[var(--color-danger)]">
+        <p className="font-medium">{SCHEDULE_TARGET_COPY.placementsUnsavedTitle}</p>
+        <p className="mt-0.5 text-[var(--color-text-soft)]">{view.problem.message}</p>
+      </div>
+    ) : null;
+  const errorLine = error ? <p role="alert" className="mt-1 text-[var(--color-danger)]">{error}</p> : null;
+
+  // Held because the kept file cannot be read: the place is not known, so the step is Run it here.
+  if (!placement && view.held && !view.held.released.includes(agent.id)) {
+    return (
+      <>
+        {unsaved}
+        <div role="status" className="rounded-[10px] bg-[var(--color-danger-soft)] px-3 py-2.5 text-sm text-[var(--color-danger)]">
+          <p className="font-medium">{SCHEDULE_TARGET_COPY.placementsProblemTitle}</p>
+          <p className="mt-0.5 text-[var(--color-text-soft)]">
+            {SCHEDULE_TARGET_COPY.heldUnknown} {off ? SCHEDULE_TARGET_COPY.heldUnknownOff : SCHEDULE_TARGET_COPY.heldUnknownOn}
+          </p>
+          <RunItHere
+            title={SCHEDULE_TARGET_COPY.runItHereUnknownTitle}
+            message={SCHEDULE_TARGET_COPY.runItHereUnknownMessage}
+            onConfirm={clear}
+          />
+          {errorLine}
+        </div>
+      </>
+    );
+  }
+  // A live row already says where it runs, unless the kept place is no longer paired here.
+  if (!placement || (live && !placement.stale)) return unsaved;
+  const canTakeBack = off || placement.stale === true;
   return (
-    <div role="status" className="rounded-[10px] bg-[var(--color-warning-soft)] px-3 py-2.5 text-sm text-[var(--color-warning)]">
-      <p className="font-medium">{placement.stale ? SCHEDULE_TARGET_COPY.lastKnownUnpaired(placement.label) : SCHEDULE_TARGET_COPY.lastKnown(placement.label)}</p>
-      <p className="mt-0.5 text-[var(--color-text-soft)]">
-        {placement.stale ? SCHEDULE_TARGET_COPY.lastKnownUnpairedStep : off ? SCHEDULE_TARGET_COPY.lastKnownOff : SCHEDULE_TARGET_COPY.lastKnownWaiting}
-      </p>
-      {canTakeBack ? (
-        <Button size="sm" variant="secondary" className="mt-2" onClick={() => setConfirming(true)}>
-          {SCHEDULE_TARGET_COPY.runItHere}
-        </Button>
-      ) : null}
-      {error ? <p role="alert" className="mt-1 text-[var(--color-danger)]">{error}</p> : null}
+    <>
+      {unsaved}
+      <div role="status" className="rounded-[10px] bg-[var(--color-warning-soft)] px-3 py-2.5 text-sm text-[var(--color-warning)]">
+        <p className="font-medium">{placement.stale ? SCHEDULE_TARGET_COPY.lastKnownUnpaired(placement.label) : SCHEDULE_TARGET_COPY.lastKnown(placement.label)}</p>
+        <p className="mt-0.5 text-[var(--color-text-soft)]">
+          {placement.stale ? SCHEDULE_TARGET_COPY.lastKnownUnpairedStep : off ? SCHEDULE_TARGET_COPY.lastKnownOff : SCHEDULE_TARGET_COPY.lastKnownWaiting}
+        </p>
+        {canTakeBack ? (
+          <RunItHere
+            title={SCHEDULE_TARGET_COPY.runItHereTitle(placement.label)}
+            message={SCHEDULE_TARGET_COPY.runItHereMessage(placement.label)}
+            onConfirm={clear}
+          />
+        ) : null}
+        {errorLine}
+      </div>
+    </>
+  );
+}
+
+/** Run it here, after typing RUN IT HERE. */
+function RunItHere({ title, message, onConfirm }: { title: string; message: string; onConfirm: () => Promise<void> }) {
+  const [confirming, setConfirming] = useState(false);
+  const [typed, setTyped] = useState("");
+  const inputId = useId();
+  const close = () => {
+    setConfirming(false);
+    setTyped("");
+  };
+  return (
+    <>
+      <Button size="sm" variant="secondary" className="mt-2" onClick={() => setConfirming(true)}>
+        {SCHEDULE_TARGET_COPY.runItHere}
+      </Button>
       {confirming ? (
-        <Modal open onClose={() => setConfirming(false)} size="md">
-          <ModalHeader title={SCHEDULE_TARGET_COPY.runItHereTitle(placement.label)} onClose={() => setConfirming(false)} />
+        <Modal open onClose={close} size="md">
+          <ModalHeader title={title} onClose={close} />
           <div className="space-y-4 p-6">
-            <p className="text-sm leading-relaxed text-[var(--color-text-soft)]">{SCHEDULE_TARGET_COPY.runItHereMessage(placement.label)}</p>
+            <p className="text-sm leading-relaxed text-[var(--color-text-soft)]">{message}</p>
             <div className="grid gap-1">
               <label htmlFor={inputId} className="text-sm text-[var(--color-text-muted)]">{SCHEDULE_TARGET_COPY.typeToConfirm(SCHEDULE_TARGET_COPY.runItHerePhrase)}</label>
               <input
@@ -666,14 +715,21 @@ function LastKnownPlacement({ agent, live }: { agent: AgentSummary; live: boolea
               />
             </div>
             <div className="flex flex-wrap justify-end gap-2">
-              <Button variant="ghost" onClick={() => setConfirming(false)}>{SCHEDULE_TARGET_COPY.cancel}</Button>
-              <Button variant="primary" disabled={typed !== SCHEDULE_TARGET_COPY.runItHerePhrase} onClick={() => void clear()}>
+              <Button variant="ghost" onClick={close}>{SCHEDULE_TARGET_COPY.cancel}</Button>
+              <Button
+                variant="primary"
+                disabled={typed !== SCHEDULE_TARGET_COPY.runItHerePhrase}
+                onClick={() => {
+                  close();
+                  void onConfirm();
+                }}
+              >
                 {SCHEDULE_TARGET_COPY.runItHere}
               </Button>
             </div>
           </div>
         </Modal>
       ) : null}
-    </div>
+    </>
   );
 }

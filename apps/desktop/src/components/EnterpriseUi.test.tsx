@@ -571,7 +571,9 @@ describe("schedule card: where it runs", () => {
       getSchedulePlacements: async () => ({ placements: { [agent.id]: { targetId: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", reason: "runs" as const } } }),
     });
     renderWithAppState(<AgentScheduleCard agent={agent} onChange={vi.fn()} />, { bridge });
-    expect(await screen.findByText("Team features have not said where it runs yet, so it does not run here meanwhile.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Team features have not said where it runs yet, so it does not run here meanwhile. Use Sync now in Settings, Sandboxes, or wait until the sandbox answers."),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Run it here" })).toBeNull();
   });
 
@@ -585,14 +587,57 @@ describe("schedule card: where it runs", () => {
     expect(screen.getByRole("button", { name: "Run it here" })).toBeInTheDocument();
   });
 
-  it("says when the app cannot read where schedules last ran", async () => {
+  it("holds a schedule when the app cannot read where it last ran, and takes it back with Run it here", async () => {
+    const user = userEvent.setup();
+    const problem = { kind: "unreadable" as const, message: "The app cannot read where schedules last ran, so a schedule does not run here until it is taken back." };
+    let released: string[] = [];
+    const clearSchedulePlacement = vi.fn(async (agentId: string) => {
+      released = [...released, agentId];
+      return { placements: {}, problem, held: { released } };
+    });
     const bridge = makeMockBridge({
       getEnterpriseStatus: async (): Promise<EnterpriseStatus> => ({ active: false }),
-      getSchedulePlacements: async () => ({ placements: {}, problem: { kind: "unreadable" as const, message: "The app cannot read where schedules last ran, so a schedule does not run here until it is taken back." }, held: { released: [] } }),
+      getSchedulePlacements: async () => ({ placements: {}, problem, held: { released } }),
+      clearSchedulePlacement,
     });
     renderWithAppState(<AgentScheduleCard agent={agent} onChange={vi.fn()} />, { bridge });
     expect(await screen.findByText("Where schedules last ran cannot be read")).toBeInTheDocument();
-    expect(screen.getByText(/a schedule does not run here until it is taken back/)).toBeInTheDocument();
+    // With team features off, the only step named is Run it here.
+    const step = screen.getByText(/cannot read where this schedule last ran/);
+    expect(step).toHaveTextContent("Choose Run it here once it no longer runs in another place.");
+    expect(step).not.toHaveTextContent(/Where it runs|team features report/);
+    await user.click(screen.getByRole("button", { name: "Run it here" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/cannot tell where this schedule last ran/)).toBeInTheDocument();
+    const confirm = within(dialog).getByRole("button", { name: "Run it here" });
+    expect(confirm).toBeDisabled();
+    await user.type(within(dialog).getByLabelText("Type RUN IT HERE to confirm"), "RUN IT HERE");
+    await user.click(confirm);
+    await waitFor(() => expect(clearSchedulePlacement).toHaveBeenCalledWith(agent.id));
+    await waitFor(() => expect(screen.queryByText("Where schedules last ran cannot be read")).toBeNull());
+  });
+
+  it("says when the app could not save where schedules last ran", async () => {
+    const bridge = makeMockBridge({
+      getEnterpriseStatus: async (): Promise<EnterpriseStatus> => ({ active: false }),
+      getSchedulePlacements: async () => ({
+        placements: {},
+        problem: { kind: "unwritable" as const, message: "The app could not save where schedules last ran, so after a restart they may not be held." },
+      }),
+    });
+    renderWithAppState(<AgentScheduleCard agent={agent} onChange={vi.fn()} />, { bridge });
+    expect(await screen.findByText("Where schedules last ran could not be saved")).toBeInTheDocument();
+    expect(screen.queryByText("Where schedules last ran cannot be read")).toBeNull();
+  });
+
+  it("shows a kept place with its recovery when the module reports places but does not name this agent", async () => {
+    const bridge = makeMockBridge({
+      getEnterpriseStatus: async () => statusWith(),
+      getSchedulePlacements: async () => ({ placements: { [agent.id]: { targetId: "mini-pc", label: "Office mini PC", organizationId: "org-contoso", reason: "runs" as const } } }),
+    });
+    renderWithAppState(<AgentScheduleCard agent={agent} onChange={vi.fn()} />, { bridge });
+    expect(await screen.findByText("Last known to run on Office mini PC")).toBeInTheDocument();
+    expect(screen.getByText(/Use Sync now in Settings, Sandboxes/)).toBeInTheDocument();
   });
 
   it("shows a schedule running here and elsewhere as a danger state, and turns the one here off in place", async () => {
