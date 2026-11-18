@@ -960,6 +960,36 @@ describe("an Ollama whose capability read redirects, and Start against a redirec
     }
   });
 
+  it("keeps the redirect reason when another model's capabilities were verified (Muse round 5)", async () => {
+    const pair = await servers((request, response, target) => {
+      if (request.url === "/api/tags") {
+        response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ models: [{ name: "good-model:1" }, { name: "redirected-model:1" }] }));
+        return;
+      }
+      let body = "";
+      request.on("data", (chunk) => (body += chunk));
+      request.on("end", () => {
+        if (body.includes("good-model")) response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ capabilities: ["completion"] }));
+        else response.writeHead(307, { location: `${target}/api/show` }).end();
+      });
+    });
+    const original = { ollama: process.env.OPENAGENTS_OLLAMA_URL, host: process.env.OLLAMA_HOST };
+    process.env.OPENAGENTS_OLLAMA_URL = pair.url;
+    delete process.env.OLLAMA_HOST;
+    try {
+      const summary = await checkOllama(providerCatalog.find((provider) => provider.id === "ollama")!, { localOnly: true });
+      assert.deepEqual(summary.models, ["good-model:1"]);
+      assert.match(summary.detail ?? "", /answered with a redirect to another address/);
+      assert.equal(pair.hits(), 0);
+    } finally {
+      for (const [key, value] of [["OPENAGENTS_OLLAMA_URL", original.ollama], ["OLLAMA_HOST", original.host]] as const) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      await pair.close();
+    }
+  });
+
   it("does not start or accept a runtime whose address answers with a redirect, and says why", async () => {
     const pair = await servers((request, response, target) => response.writeHead(307, { location: `${target}${request.url ?? "/"}` }).end());
     const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));

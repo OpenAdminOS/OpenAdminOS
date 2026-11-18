@@ -187,7 +187,7 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
       detail: ollamaEndpointDetail(
         endpointTrust,
         models.length > 0
-          ? `Running on ${endpoint}${unverified ? ". Some model capabilities could not be verified; refresh to retry" : ""}`
+          ? `Running on ${endpoint}${unverified ? `. Some model capabilities could not be verified; ${redirectedShow ? `${redirectedShow} ` : ""}refresh to retry` : ""}`
           : unverified
             ? redirectedShow ?? "Ollama is running, but text-generation capabilities could not be verified. Check the server's /api/show support and refresh providers."
             : "Ollama has no text-generation models available. Install a text-generation model, then refresh providers.",

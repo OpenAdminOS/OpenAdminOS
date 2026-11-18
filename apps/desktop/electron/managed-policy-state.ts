@@ -134,7 +134,8 @@ export function applyManagedPolicyToProviders(
       const model = managedLockedModel(status, provider.id);
       // Not checked yet (the first-run scan is pending), or the check failed: nothing is
       // known about its models, and the check's own reason is the one to show.
-      if (!model || provider.status === "not-checked" || provider.checkFailed) return provider;
+      // A failed check is the scan's rule: `checkFailed`, or a CLI whose status request failed.
+      if (!model || provider.status === "not-checked" || provider.checkFailed || provider.cli?.state === "request-failed") return provider;
       // An empty list means the CLI picks the model, so the policy model is passed to it.
       // Not for Lemonade: its list holds only the local chat models it may use, so an
       // unlisted model would be downloaded or sent to a cloud API.

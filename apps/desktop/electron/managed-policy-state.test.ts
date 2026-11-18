@@ -246,6 +246,25 @@ describe("managed policy: providers", () => {
     }
   });
 
+  it("keeps a failed Gemini request's reason with a locked model, the CLI failed-check shape (round 7)", async () => {
+    const fixture = await makeFixture({
+      policy: await policyOf({ defaultProvider: "gemini", defaultModel: "gemini-2.5-pro" }),
+      providers: () =>
+        readyProviders().map((provider) =>
+          provider.id === "gemini"
+            ? { ...provider, status: "error" as const, models: ["gemini-default"], defaultModel: "gemini-default", detail: "Gemini CLI request failed: quota exceeded.", cli: { version: "0.60.1", state: "request-failed" as const } }
+            : provider,
+        ),
+    });
+    try {
+      const provider = (await fixture.store.getAppState()).providers.find((entry) => entry.id === "gemini");
+      assert.equal(provider!.detail, "Gemini CLI request failed: quota exceeded.");
+      assert.equal(provider!.cli?.state, "request-failed");
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("applies an unlocked default until the admin picks another provider", async () => {
     const policy = await policyOf({ defaultProvider: "lm-studio", defaultModel: "lm-studio-other", lock: [] });
     const fixture = await makeFixture({ policy });
