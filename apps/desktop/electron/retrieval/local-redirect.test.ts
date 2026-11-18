@@ -7,7 +7,7 @@ import { describe, it } from "node:test";
 
 import { AppStateStore } from "../state.js";
 import { embeddingModelState, pullEmbeddingModel } from "./embedding-model.js";
-import { EMBEDDING_QUERY_TIMEOUT_MS, assertLoopback, loopbackEmbedQuery, ollamaEmbedQuery } from "./retrieval.js";
+import { EMBEDDING_QUERY_TIMEOUT_MS, loopbackEmbedQuery, loopbackEndpoint, ollamaEmbedQuery } from "./retrieval.js";
 
 /** An embedding server on this device that redirects every request to a second one, which counts what reaches it. */
 async function redirectingPair(): Promise<{ origin: string; hits: () => number; close: () => Promise<void> }> {
@@ -151,13 +151,25 @@ describe("local documentation retrieval never follows a redirect from this devic
     assert.match(state.error ?? "", /^Could not read Ollama's model list \(UND_ERR_SOCKET\)\./);
   });
 
-  it("accepts every loopback endpoint the endpoint rule picks and nothing else (PR #206 review round 2)", () => {
-    for (const endpoint of ["http://127.0.0.1:11434", "http://localhost:11434", "http://[::1]:11434", "http://127.0.0.2:11434"]) {
-      assert.doesNotThrow(() => assertLoopback(endpoint), endpoint);
+  it("connects only to a loopback IP address, so no resolver can send the question elsewhere (PR #206 review rounds 2 and 3)", async (t) => {
+    // A localhost name is resolved by the operating system: it becomes 127.0.0.1 before any connection.
+    assert.equal(loopbackEndpoint("http://localhost:11434"), "http://127.0.0.1:11434");
+    assert.equal(loopbackEndpoint("http://LOCALHOST.:11434/"), "http://127.0.0.1:11434");
+    for (const endpoint of ["http://127.0.0.1:11434", "http://[::1]:11434", "http://127.0.0.2:11434"]) {
+      assert.equal(loopbackEndpoint(endpoint), endpoint);
     }
-    for (const endpoint of ["http://10.0.0.5:11434", "https://models.example.com", "unix:///var/run/ollama.sock"]) {
-      assert.throws(() => assertLoopback(endpoint), /Retrieval must stay local/, endpoint);
+    for (const endpoint of ["http://10.0.0.5:11434", "https://models.example.com", "http://localhost.example.com:11434", "http://ollama.local:11434", "http://user:pass@127.0.0.1:11434", "unix:///var/run/ollama.sock", "not a url"]) {
+      assert.throws(() => loopbackEndpoint(endpoint), /Retrieval must stay local/, endpoint);
     }
+    const urls: string[] = [];
+    t.mock.method(globalThis, "fetch", async (url: Parameters<typeof fetch>[0]) => {
+      urls.push(String(url));
+      return Response.json({ embeddings: [[0.1]], data: [{ embedding: [0.1] }], models: [] });
+    });
+    await ollamaEmbedQuery("http://localhost.:11434")("test");
+    await loopbackEmbedQuery("http://localhost:8081")("test");
+    await embeddingModelState("http://localhost.:11434");
+    assert.deepEqual(urls, ["http://127.0.0.1:11434/api/embed", "http://127.0.0.1:8081/v1/embeddings", "http://127.0.0.1:11434/api/tags"]);
   });
 
   it("treats a reset as a failed request, not a stopped server, and refuses a vector or model list it cannot use (PR #206 review round 2)", async (t) => {

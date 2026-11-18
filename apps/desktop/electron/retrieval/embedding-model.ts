@@ -1,5 +1,5 @@
 import { classifyOllamaEndpoint, isConnectionRefused, isRefusedRedirect, modelServerRedirect, ollamaHostEndpoint, redirectRefusedDetail } from "@openadminos/runtime";
-import { DEFAULT_INDEX_EMBEDDING_MODEL, assertLoopback } from "./retrieval.js";
+import { DEFAULT_INDEX_EMBEDDING_MODEL, loopbackEndpoint } from "./retrieval.js";
 
 /**
  * The documentation index is only half of grounding. Retrieval also
@@ -42,8 +42,7 @@ export async function embeddingModelState(
   model: string = DEFAULT_INDEX_EMBEDDING_MODEL,
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ ollamaReachable?: boolean; installed: boolean; error?: string }> {
-  assertLoopback(endpoint);
-  const url = `${endpoint.replace(/\/$/, "")}/api/tags`;
+  const url = `${loopbackEndpoint(endpoint)}/api/tags`;
   const recovery = "Check Ollama's local endpoint, then refresh the documentation index status.";
   let answered = false;
   try {
@@ -90,8 +89,7 @@ export async function pullEmbeddingModel(
   model: string = DEFAULT_INDEX_EMBEDDING_MODEL,
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
-  assertLoopback(endpoint);
-  const url = `${endpoint.replace(/\/$/, "")}/api/pull`;
+  const url = `${loopbackEndpoint(endpoint)}/api/pull`;
   const response = await fetchImpl(url, {
     method: "POST",
     headers: { "content-type": "application/json" },

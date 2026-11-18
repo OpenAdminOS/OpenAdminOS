@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { RetrievalStatus } from "@openadminos/agent-sdk";
-import { classifyOllamaEndpoint, isConnectionRefused, isRefusedRedirect, modelServerRedirect, redirectRefusedDetail } from "@openadminos/runtime";
+import { isConnectionRefused, isRefusedRedirect, modelServerRedirect, redirectRefusedDetail } from "@openadminos/runtime";
 
 export type { RetrievalStatus } from "@openadminos/agent-sdk";
 
@@ -321,8 +321,7 @@ async function queryEmbedding<T>(url: string, server: string, body: unknown, rea
  */
 export function loopbackEmbedQuery(endpoint: string): EmbedQuery {
   return async (text: string) => {
-    assertLoopback(endpoint);
-    const url = `${endpoint.replace(/\/$/, "")}/v1/embeddings`;
+    const url = `${loopbackEndpoint(endpoint)}/v1/embeddings`;
     return queryEmbedding(url, "The embedding server", { input: [`search_query: ${text}`] }, async (response) => {
       if (!response.ok) {
         throw new EmbeddingQueryError(`Embedding server responded with HTTP ${response.status}.`);
@@ -354,8 +353,7 @@ export function ollamaEmbedQuery(
   model = DEFAULT_INDEX_EMBEDDING_MODEL,
 ): EmbedQuery {
   return async (text: string) => {
-    assertLoopback(endpoint);
-    const url = `${endpoint.replace(/\/$/, "")}/api/embed`;
+    const url = `${loopbackEndpoint(endpoint)}/api/embed`;
     return queryEmbedding(url, "Ollama", { model, input: `search_query: ${text}` }, async (response) => {
       if (!response.ok) {
         const details = response.status === 404
@@ -378,15 +376,27 @@ export function ollamaEmbedQuery(
   };
 }
 
-export function assertLoopback(endpoint: string): void {
-  const url = new URL(endpoint);
-  // The same loopback rule that picks the endpoint (an OLLAMA_HOST of [::1] included), over HTTP only.
-  if (!/^https?:$/.test(url.protocol) || !classifyOllamaEndpoint(endpoint).isLocal) {
-    throw new Error(
-      "Refusing to embed a query against a non-loopback endpoint. Retrieval must stay local.",
-    );
+/**
+ * The endpoint to connect to, with a loopback IP literal as its host. A
+ * localhost name goes through the operating system's resolver, which could
+ * answer with another machine, so it becomes 127.0.0.1 before any connection.
+ * Anything else that is not 127.0.0.0/8 or ::1 over HTTP is refused.
+ */
+export function loopbackEndpoint(endpoint: string): string {
+  const refused = () => new Error("Refusing to embed a query against a non-loopback endpoint. Retrieval must stay local.");
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    throw refused();
   }
+  if (!/^https?:$/.test(url.protocol) || url.username || url.password) throw refused();
+  const host = url.hostname.toLowerCase();
+  if (host === "localhost" || host === "localhost.") url.hostname = "127.0.0.1";
+  else if (!/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) && host !== "[::1]") throw refused();
+  return url.toString().replace(/\/$/, "");
 }
+
 
 /** Render retrieved passages for a prompt, keeping provenance attached. */
 export function formatRetrievedContext(chunks: readonly RetrievedChunk[]): string {
