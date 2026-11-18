@@ -45,6 +45,8 @@ export const MODEL_CHOICE_COPY = {
   configured: "Configured",
   couldNotCheck: "Could not check",
   couldNotCheckLine: (name: string) => `${name} did not answer. Retry to check it again.`,
+  notChecked: "Not checked",
+  notCheckedLine: (name: string) => `${name} is set to an endpoint outside this device, so it was not checked here. Check it in Settings, Providers.`,
   localReady: (model: string | undefined) => (model ? `On this device. Answers with ${model}.` : "On this device."),
   localStart: (id: string) =>
     id === "lm-studio" ? "On this device. OpenAdminOS starts its server." : "On this device. OpenAdminOS starts it for you.",

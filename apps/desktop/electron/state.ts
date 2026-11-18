@@ -1758,6 +1758,8 @@ function scanResultsFor(found: ReadonlyMap<ProviderId, ProviderSummary>, probes:
     if (!entry) continue;
     results.set(probe.providerId, {
       ...entry,
+      // An endpoint outside this device that the scan refused stays off the device, and not contacted.
+      ...(probe.notContacted ? { isLocal: false, notContacted: true as const } : {}),
       status: "error",
       checkFailed: true,
       detail: probe.facts[0] ?? `${probe.name} could not be checked. Retry or refresh providers.`,

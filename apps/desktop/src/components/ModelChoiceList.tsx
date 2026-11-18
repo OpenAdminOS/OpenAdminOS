@@ -73,19 +73,24 @@ export function ModelChoiceList({
                 </span>
                 {option.providerId === lockedProvider ? <SetByItBadge className="mt-1" /> : null}
               </span>
-              {option.unavailable && onRetry ? (
-                <button
-                  type="button"
-                  disabled={disabled || retrying !== null}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    onRetry(option.providerId);
-                  }}
-                  aria-label={MODEL_SCAN_COPY.retryLabel(option.name)}
-                  className="rounded-sm px-1.5 text-xs font-medium text-[var(--color-text-soft)] underline underline-offset-2 hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] disabled:opacity-60"
-                >
-                  {retrying === option.providerId ? MODEL_SCAN_COPY.checking : MODEL_SCAN_COPY.retry}
-                </button>
+              {/* A failed check keeps its state in view next to Retry; an endpoint that was not contacted gets no Retry. */}
+              {option.unavailable && onRetry && !option.notContacted ? (
+                <span className="flex items-center gap-1.5">
+                  <span className="pt-px text-xs leading-5 text-[var(--color-text-muted)]">{option.state}</span>
+                  <button
+                    type="button"
+                    data-retry={option.providerId}
+                    disabled={disabled || retrying !== null}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      onRetry(option.providerId);
+                    }}
+                    aria-label={MODEL_SCAN_COPY.retryLabel(option.name)}
+                    className="rounded-sm px-1.5 text-xs font-medium text-[var(--color-text-soft)] underline underline-offset-2 hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] disabled:opacity-60"
+                  >
+                    {retrying === option.providerId ? MODEL_SCAN_COPY.checking : MODEL_SCAN_COPY.retry}
+                  </button>
+                </span>
               ) : (
                 <span className="pt-px text-xs leading-5 text-[var(--color-text-muted)]">{option.state}</span>
               )}

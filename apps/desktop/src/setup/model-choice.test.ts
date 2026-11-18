@@ -149,6 +149,31 @@ describe("a provider whose check failed in Chat's choice (PR #191 follow-up)", (
     expect(preselect(options)).toBe("lm-studio");
   });
 
+  it("shows a hosted CLI whose status request failed as could not check, from the summary the CLI check builds (Muse round 1, P1)", () => {
+    // checkClaudeCode: installed, not ready, probe.failure "request-failed"; no checkFailed.
+    const claude: ProviderSummary = {
+      id: "anthropic", name: "Claude Code", description: "", isLocal: false, status: "error",
+      detail: "claude auth status failed: getaddrinfo ENOTFOUND api.anthropic.com", models: [],
+      cli: { binaryPath: "/usr/local/bin/claude", version: "2.1.0", state: "request-failed" },
+    };
+    expect(optionsFromProviders([claude])).toEqual([
+      expect.objectContaining({ providerId: "anthropic", where: "hosted", state: "Could not check", unavailable: true, whereLine: "claude auth status failed: getaddrinfo ENOTFOUND api.anthropic.com" }),
+    ]);
+  });
+
+  it("shows an endpoint the scan did not contact as not checked, off the device and without Retry (review round 1)", () => {
+    // What the scan serves for an LM Studio set outside this device.
+    const served: ProviderSummary = {
+      id: "lm-studio", name: "LM Studio", description: "", isLocal: false, status: "error", checkFailed: true, notContacted: true, models: [],
+      detail: "LM Studio is set to http://10.0.0.5:1234/v1. The scan only checks this device. Check it in Settings, Providers.",
+    };
+    const [row] = optionsFromProviders([served]);
+    expect(row).toMatchObject({ where: "hosted", state: "Not checked", unavailable: true, notContacted: true, whereLine: served.detail });
+    expect(optionsFromProviders([{ ...served, detail: undefined }])[0]!.whereLine).toBe(
+      "LM Studio is set to an endpoint outside this device, so it was not checked here. Check it in Settings, Providers.",
+    );
+  });
+
   it("leaves a completed check's row as it was", () => {
     // No text model is a completed check: the scan's recovery, not could not check.
     expect(optionsFromProviders([local("ollama", "Ollama", { checkFailed: undefined })])[0]).toMatchObject({ state: "No model yet", action: "get-model" });

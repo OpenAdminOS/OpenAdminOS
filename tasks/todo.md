@@ -9,6 +9,8 @@
   4. Rows for providers whose check completed are unchanged (ready, not running, no model, signed in).
   5. SPEC.md and CHANGELOG describe it; the renderer suite and typecheck pass on Node 22.
 
+  PR #204 review round 1 (2026-11-18). Claude evaluator, GPT-6.1-Sol and Muse Wonder Full on f7b26c28. Fixed, each with a test: a hosted CLI whose status request failed (`cli.state` "request-failed", no `checkFailed`) had no row (Muse P1; `providerCheckFailed` applies the scan's rule); an off-device endpoint the scan did not contact was served as a local failed check whose Retry contacted it (all three; served with `notContacted` and off the device, shown as Not checked without Retry); the words Could not check were replaced by Retry (Sol, Muse; now shown next to it); a failed app state read during Retry or Scan again was lost in the app error (Sol, evaluator; `refresh({ rethrow: true })`, written under the row); a finished Retry was not announced and focus dropped (Muse, evaluator; polite status and focus back to the row). Typecheck, renderer 786, electron 1509 and docs check pass on Node 22.
+
 - [x] Lemonade Server as a local provider (branch `providers/lemonade`, 2026-11-12). Request: analyze https://lemonade-server.ai/#embed and add support if applicable. Maintainer decisions: an external provider like LM Studio, not the embeddable `lemond` bundled into the installer; LM Studio's adapter becomes one shared OpenAI-compatible adapter.
 
   Acceptance criteria:

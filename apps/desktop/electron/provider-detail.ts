@@ -93,7 +93,7 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
   const endpoint = resolveOllamaEndpoint().replace(/\/$/, "");
   const endpointTrust = classifyOllamaEndpoint(endpoint);
   if (options.localOnly && !endpointTrust.isLocal) {
-    return { ...provider, isLocal: false, status: "error", checkFailed: true, detail: `Ollama is set to ${endpoint}, outside this device, so it is not checked here.`, models: [] };
+    return { ...provider, isLocal: false, status: "error", checkFailed: true, notContacted: true, detail: `Ollama is set to ${endpoint}, outside this device, so it is not checked here.`, models: [] };
   }
   const controller = new AbortController();
   // With a budget (a scan check), the tags request and the capability reads share it.
@@ -308,7 +308,7 @@ async function checkLocalOpenAiServer(
   const endpoint = server.resolveEndpoint().replace(/\/$/, "");
   const endpointTrust = server.classifyEndpoint(endpoint);
   if (options.localOnly && !endpointTrust.isLocal) {
-    return { ...provider, isLocal: false, status: "error", checkFailed: true, detail: `${server.name} is set to ${endpoint}, outside this device, so it is not checked here.`, models: [] };
+    return { ...provider, isLocal: false, status: "error", checkFailed: true, notContacted: true, detail: `${server.name} is set to ${endpoint}, outside this device, so it is not checked here.`, models: [] };
   }
   const trustedProvider = endpointTrust.isLocal
     ? provider

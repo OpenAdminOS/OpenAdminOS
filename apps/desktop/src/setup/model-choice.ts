@@ -1,6 +1,6 @@
 import { MODEL_CHOICE_COPY, PROVIDER_TOOL_NAMES, promptsGoTo } from "../copy";
 import type { ModelScanOutcome, ModelScanProbe, ProviderId, ProviderSummary } from "../shared/openAdminOS";
-import { isProviderReady } from "../shared/provider-detection";
+import { isProviderReady, providerCheckFailed } from "../shared/provider-detection";
 
 /**
  * The one choice of what answers in Chat (mockup 32, section B), shared by
@@ -35,6 +35,8 @@ export interface ChoiceOption {
   model?: string;
   /** The row's check did not finish: it cannot be chosen until a Retry succeeds. */
   unavailable?: boolean;
+  /** Its endpoint is outside this device and was not contacted: no Retry, the reason points to Settings. */
+  notContacted?: true;
 }
 
 const LOCAL_ORDER: readonly ProviderId[] = ["ollama", "lm-studio", "lemonade", "apple-foundation"];
@@ -132,8 +134,22 @@ export function optionsFromProviders(providers: readonly ProviderSummary[]): Cho
     const name = toolName(provider.id, provider.name);
     // The same readiness the send path uses: a runtime without a model it can answer with is not ready.
     const ready = isProviderReady(provider);
+    // An endpoint the scan refused to contact stays not contacted: Retry would contact it.
+    if (!ready && provider.notContacted) {
+      options.push({
+        providerId: provider.id,
+        name,
+        where: "hosted",
+        whereLine: provider.detail ?? MODEL_CHOICE_COPY.notCheckedLine(name),
+        state: MODEL_CHOICE_COPY.notChecked,
+        action: "use",
+        unavailable: true,
+        notContacted: true,
+      });
+      continue;
+    }
     // A check that failed is could not check with its reason, for every provider, as in the scan.
-    if (!ready && provider.checkFailed) {
+    if (!ready && providerCheckFailed(provider)) {
       options.push({
         providerId: provider.id,
         name,

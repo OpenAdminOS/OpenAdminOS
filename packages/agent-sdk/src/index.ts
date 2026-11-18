@@ -34,6 +34,11 @@ export interface ProviderSummary {
    */
   checkFailed?: boolean;
   /**
+   * The endpoint is set outside this device, so this check did not contact
+   * it (the model scan only checks this device). Set with `checkFailed`.
+   */
+  notContacted?: true;
+  /**
    * Ollama and LM Studio: installed on this device (from local files) while
    * its server does not answer. Settings and the model scan both read it.
    */

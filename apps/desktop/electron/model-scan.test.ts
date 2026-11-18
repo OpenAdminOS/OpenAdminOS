@@ -839,6 +839,42 @@ describe("a check that times out is served as could not check (Muse round 5, B)"
   });
 });
 
+describe("an endpoint the scan did not contact is served as not contacted (PR #204 review round 1)", () => {
+  it("lists an off-device LM Studio as off the device and not contacted, and contacts nothing there", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
+    await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [], firstRunScan: "pending" }));
+    const original = process.env.OPENADMINOS_LM_STUDIO_URL;
+    process.env.OPENADMINOS_LM_STUDIO_URL = "http://10.255.255.1:1234/v1";
+    const realFetch = globalThis.fetch;
+    const contacted: string[] = [];
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.includes("10.255.255.1")) contacted.push(url);
+      return realFetch(input, init);
+    }) as typeof fetch;
+    const store = new AppStateStore({
+      filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
+      tokenStore: { read: async () => "", write: async () => undefined },
+      providerListFactory: async () => providerCatalog.map((provider) => ({ ...provider, status: "not-installed" as const, models: [] })),
+    });
+    try {
+      const result = await store.scanModels();
+      assert.equal(result.probes.find((probe) => probe.providerId === "lm-studio")!.notContacted, true);
+      const listed = (await store.listProviders()).find((provider) => provider.id === "lm-studio")!;
+      assert.equal(listed.notContacted, true);
+      assert.equal(listed.isLocal, false);
+      assert.equal(listed.checkFailed, true);
+      assert.deepEqual(contacted, []);
+    } finally {
+      globalThis.fetch = realFetch;
+      if (original === undefined) delete process.env.OPENADMINOS_LM_STUDIO_URL;
+      else process.env.OPENADMINOS_LM_STUDIO_URL = original;
+      store.close();
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+});
+
 describe("reads that overlap a manual scan (review round 5, item 1)", () => {
   it("contacts no off-device endpoint while Scan again runs in a completed profile", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));

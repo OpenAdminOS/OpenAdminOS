@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 
 import { FIRST_RUN_CHAT_COPY, MODEL_SCAN_COPY, NOT_CONNECTED_COPY } from "../../copy";
@@ -57,16 +57,41 @@ export function ModelChoice({
   const chosen = options.find((option) => option.providerId === picked);
   const note = actionNote(chosen);
   const busy = working !== null || retrying !== null;
+  const [announcement, setAnnouncement] = useState("");
+  const section = useRef<HTMLElement>(null);
+  // The provider a finished Retry checked again, announced once the new rows are in.
+  const retried = useRef<ProviderId | null>(null);
+
+  useEffect(() => {
+    const providerId = retried.current;
+    if (!providerId || retrying !== null) return;
+    retried.current = null;
+    const option = options.find((entry) => entry.providerId === providerId);
+    if (!option) return;
+    setAnnouncement(MODEL_SCAN_COPY.announce(option.name, option.state));
+    // The pressed Retry was disabled while checking: focus goes back to its row.
+    const target = section.current?.querySelector<HTMLElement>(option.unavailable ? `[data-retry="${providerId}"]` : `input[value="${providerId}"]`);
+    target?.focus();
+  }, [options, retrying]);
+
+  // Checks the providers again; a failed check is written under the row it was asked from.
+  const checkAgain = async (providerId: ProviderId) => {
+    setErrors(({ [providerId]: _cleared, ...rest }) => rest);
+    try {
+      await window.openAdminOS?.refreshProviders?.();
+      await refresh({ rethrow: true });
+      return true;
+    } catch (caught) {
+      setErrors((all) => ({ ...all, [providerId]: caught instanceof Error ? caught.message : String(caught) }));
+      return false;
+    }
+  };
 
   const retry = async (providerId: ProviderId) => {
     if (busy) return;
     setRetrying(providerId);
-    setErrors(({ [providerId]: _cleared, ...rest }) => rest);
     try {
-      await window.openAdminOS?.refreshProviders?.();
-      await refresh();
-    } catch (caught) {
-      setErrors((all) => ({ ...all, [providerId]: caught instanceof Error ? caught.message : String(caught) }));
+      if (await checkAgain(providerId)) retried.current = providerId;
     } finally {
       setRetrying(null);
     }
@@ -82,8 +107,7 @@ export function ModelChoice({
       // LM Studio runs without a loaded model: check the providers again once one is loaded.
       setWorking(option.providerId);
       try {
-        await window.openAdminOS?.refreshProviders?.();
-        await refresh();
+        await checkAgain(option.providerId);
       } finally {
         setWorking(null);
       }
@@ -107,7 +131,7 @@ export function ModelChoice({
     }
   };
   return (
-    <section aria-labelledby="model-choice-heading">
+    <section ref={section} aria-labelledby="model-choice-heading">
       <h2 id="model-choice-heading" className="text-md font-medium text-[var(--color-text)]">
         {FIRST_RUN_CHAT_COPY.modelChoiceTitle}
       </h2>
@@ -133,6 +157,9 @@ export function ModelChoice({
         </button>
       </div>
       {note ? <p className="mt-2 text-xs text-[var(--color-text-muted)]">{note}</p> : null}
+      <p role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </p>
     </section>
   );
 }
