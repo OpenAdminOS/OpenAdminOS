@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-11-17T14:00:47.374Z",
+  "updatedAt": "2026-11-18T11:00:47.412Z",
   "agents": {
     "find-inactive-devices": {
       "installs": 36,
@@ -14,12 +14,12 @@
       "installs7d": 0
     },
     "compliance-overview": {
-      "installs": 56,
+      "installs": 57,
       "installs7d": 3
     },
     "os-update-posture": {
       "installs": 26,
-      "installs7d": 1
+      "installs7d": 0
     },
     "tenant-health-report": {
       "installs": 37,
@@ -27,7 +27,7 @@
     },
     "user-license-overview": {
       "installs": 38,
-      "installs7d": 3
+      "installs7d": 2
     },
     "conditional-access-explainer": {
       "installs": 60,
@@ -59,7 +59,7 @@
     },
     "team-evidence-review": {
       "installs": 17,
-      "installs7d": 2
+      "installs7d": 1
     },
     "team-script-draft": {
       "installs": 14,
