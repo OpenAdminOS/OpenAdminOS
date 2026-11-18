@@ -6,7 +6,7 @@ import { createServer, type Server } from "node:http";
 import { describe, it } from "node:test";
 
 import { AppStateStore } from "../state.js";
-import { pullEmbeddingModel } from "./embedding-model.js";
+import { embeddingModelState, pullEmbeddingModel } from "./embedding-model.js";
 import { EMBEDDING_QUERY_TIMEOUT_MS, loopbackEmbedQuery, ollamaEmbedQuery } from "./retrieval.js";
 
 /** An embedding server on this device that redirects every request to a second one, which counts what reaches it. */
@@ -127,6 +127,28 @@ describe("local documentation retrieval never follows a redirect from this devic
         return true;
       });
     }
+  });
+
+  it("names a dropped connection and a body that fails mid-read, never undici's bare message (PR #206 review round 1, Muse)", async (t) => {
+    const dropped = () => {
+      throw new TypeError("fetch failed", { cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }) });
+    };
+    const request = t.mock.method(globalThis, "fetch", async () => dropped());
+    for (const [query, name] of [[ollamaEmbedQuery("http://127.0.0.1:11434"), "Ollama"], [loopbackEmbedQuery("http://127.0.0.1:11434"), "The embedding server"]] as const) {
+      await assert.rejects(query("test"), (error: Error) =>
+        error.message === `${name} did not complete the embedding request (UND_ERR_SOCKET). Check the local server, then ask again.`);
+    }
+    request.mock.mockImplementation(async () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("{"));
+        controller.error(new TypeError("terminated"));
+      },
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    await assert.rejects(ollamaEmbedQuery("http://127.0.0.1:11434")("test"), (error: Error) =>
+      /^Ollama did not complete the embedding request\b.*Check the local server, then ask again\.$/.test(error.message) && !/^terminated$/.test(error.message));
+    request.mock.mockImplementation(async () => dropped());
+    const state = await embeddingModelState("http://127.0.0.1:11434");
+    assert.match(state.error ?? "", /^Could not read Ollama's model list \(UND_ERR_SOCKET\)\./);
   });
 
   it("searches the documentation at the same endpoint Settings checks, also when OLLAMA_HOST moved Ollama (PR #206 review round 1)", async (t) => {

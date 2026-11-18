@@ -25,6 +25,13 @@ export function embeddingEndpoint(): string {
   return moved && classifyOllamaEndpoint(moved).isLocal ? moved : DEFAULT_EMBEDDING_ENDPOINT;
 }
 
+/** A network failure's code, such as UND_ERR_SOCKET, rather than undici's bare "fetch failed". */
+function failureCode(error: unknown): string {
+  const cause = error instanceof Error ? error.cause : undefined;
+  if (cause && typeof cause === "object" && "code" in cause && typeof cause.code === "string") return cause.code;
+  return error instanceof Error ? error.message : String(error);
+}
+
 function normalizeModelName(name: string): string {
   return name.includes(":") ? name : `${name}:latest`;
 }
@@ -64,7 +71,7 @@ export async function embeddingModelState(
       ? "Ollama returned an invalid model list."
       : error instanceof Error && error.name === "TimeoutError"
         ? "Ollama's model list request timed out."
-        : `Could not read Ollama's model list (${error instanceof Error ? error.message : String(error)}).`;
+        : `Could not read Ollama's model list (${failureCode(error)}).`;
     return { ...(answered ? { ollamaReachable: true } : {}), installed: false, error: `${reason} ${recovery}` };
   }
 }
