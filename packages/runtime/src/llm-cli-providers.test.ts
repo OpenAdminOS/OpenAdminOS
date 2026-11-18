@@ -49,7 +49,7 @@ if (${JSON.stringify(provider)} === 'gemini') {
       const reply=result=>emit({jsonrpc:'2.0',id:request.id,result});
       if(request.method==='ping')reply({protocolVersion:2});
       else if(request.method==='auth.getStatus')reply({isAuthenticated:scenario!=='auth'});
-      else if(request.method==='models.list') { if(scenario==='denied')emit({jsonrpc:'2.0',id:request.id,error:{code:403,message:'policy denied SECRET_SHOULD_NOT_LEAK'}});else if(scenario==='empty')reply({models:[]});else if(scenario.startsWith('fusion'))reply({models:scenario==='fusion-paid'?[{id:'copilot-test-model'}]:[],auto:{defaultTier:'balance',tiers:[{id:'balance',displayName:'Standard',type:'auto',fusionTier:'standard',status:scenario==='fusion-none'?{enabled:false,reason:'policy_disabled'}:{enabled:true,pickerVisible:true}},{id:'hydrafusion',displayName:'High',type:'fusion',fusionTier:'high',status:scenario==='fusion-paid'?{enabled:true}:{enabled:false,pickerVisible:true,reason:'user_not_eligible',message:'This tier is not available for the user SECRET_SHOULD_NOT_LEAK'}},{id:'hydrafusion-max',displayName:'Max',type:'fusion',fusionTier:'max',status:{enabled:false,reason:'policy_disabled'}},{id:'fast',displayName:'Fast',type:'auto',status:{enabled:true,pickerVisible:false}}]}});else reply({models:[{id:'copilot-test-model'}]}); }
+      else if(request.method==='models.list') { if(scenario==='denied')emit({jsonrpc:'2.0',id:request.id,error:{code:403,message:'policy denied SECRET_SHOULD_NOT_LEAK'}});else if(scenario==='empty')reply({models:[]});else if(scenario.startsWith('fusion'))reply({models:scenario==='fusion-paid'?[{id:'copilot-test-model'},{id:'mai-code-2',name:'MAI Code 2'},{id:'mai-code-2-flash',name:'MAI Code 2 Flash',policy:{state:'disabled'}}]:[],auto:{defaultTier:'balance',tiers:[{id:'balance',displayName:'Standard',type:'auto',fusionTier:'standard',status:scenario==='fusion-none'?{enabled:false,reason:'policy_disabled'}:{enabled:true,pickerVisible:true}},{id:'hydrafusion',displayName:'High',type:'fusion',fusionTier:'high',status:scenario==='fusion-paid'?{enabled:true}:{enabled:false,pickerVisible:true,reason:'user_not_eligible',message:'This tier is not available for the user SECRET_SHOULD_NOT_LEAK'}},{id:'hydrafusion-max',displayName:'Max',type:'fusion',fusionTier:'max',status:{enabled:false,reason:'policy_disabled'}},{id:'fast',displayName:'Fast',type:'auto',status:{enabled:true,pickerVisible:false}}]}});else reply({models:[{id:'copilot-test-model'}]}); }
       else if(request.method==='session.create'){sessionId=request.params.sessionId;fs.writeFileSync(capture,JSON.stringify({...request.params,pid:process.pid}));const tier=request.params.capi&&request.params.capi.fusionTier;reply(tier?{sessionId,modelState:{modelId:'auto',fusionTier:scenario==='fusion-wrong-tier'?'standard':tier}}:{sessionId});}
       else if(request.method==='session.send'){
         reply({messageId:'user-1'});
@@ -117,8 +117,13 @@ it("offers the Copilot Fusion tiers the account can use and lists the rest as un
   try {
     const probe = await probeCopilotLlm({ binaryPath: paid.binaryPath });
     // Regular models stay first, so the CLI's default remains the first choice.
-    assert.deepEqual(probe.models, ["copilot-test-model", "fusion-standard", "fusion-high"]);
-    assert.deepEqual(probe.unavailableModels?.map((m) => m.id), ["fusion-max"]);
+    assert.deepEqual(probe.models, ["copilot-test-model", "mai-code-2", "fusion-standard", "fusion-high"]);
+    // Catalog names label the models; a model the organization turned off is unavailable with the reason.
+    assert.equal(probe.modelLabels?.["mai-code-2"], "MAI Code 2"); assert.equal(probe.modelLabels?.["copilot-test-model"], undefined);
+    assert.deepEqual(probe.unavailableModels, [
+      { id: "mai-code-2-flash", reason: "Turned off by your organization's Copilot policy. Ask your GitHub admin to enable it, then refresh providers." },
+      { id: "fusion-max", reason: "Not available for this account. Check your Copilot plan and organization policy, then refresh providers." },
+    ]);
   } finally { await paid.cleanup(); }
   const plain = await fixture("copilot");
   try {

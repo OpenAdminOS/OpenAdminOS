@@ -24,6 +24,24 @@ export function copilotFusionTier(model: string | undefined): "standard" | "high
   return model && Object.hasOwn(FUSION_TIERS, model) ? FUSION_TIERS[model as FusionModel].tier : undefined;
 }
 
+/**
+ * The regular models a `models.list` result lists, named as the catalog
+ * names them (MAI Code 2 rather than mai-code-2). A model the organization's
+ * Copilot policy turns off is listed as unavailable, never as a model.
+ */
+export function copilotModelsFromCatalog(catalog: Record<string, unknown>): { models: string[]; modelLabels: Record<string, string>; unavailableModels: { id: string; reason: string }[] } {
+  const models: string[] = [], modelLabels: Record<string, string> = {}, unavailableModels: { id: string; reason: string }[] = [];
+  for (const entry of (Array.isArray(catalog.models) ? catalog.models : []).map(rpcObject)) {
+    const id = entry.id;
+    if (typeof id !== "string" || !id || id.length >= 150 || models.includes(id)) continue;
+    const name = typeof entry.name === "string" ? entry.name.trim() : "";
+    if (name && name !== id && name.length <= 80) modelLabels[id] = name;
+    if (rpcObject(entry.policy).state === "disabled") unavailableModels.push({ id, reason: "Turned off by your organization's Copilot policy. Ask your GitHub admin to enable it, then refresh providers." });
+    else models.push(id);
+  }
+  return { models, modelLabels, unavailableModels };
+}
+
 /** The Fusion tiers a `models.list` result advertises: enabled ones as models, the rest as unavailable with a reason. */
 export function fusionModelsFromCatalog(catalog: Record<string, unknown>, regularModels: readonly string[] = []): Pick<CliProbe, "models" | "modelLabels" | "unavailableModels"> {
   const tiers = rpcObject(catalog.auto).tiers;
@@ -74,13 +92,15 @@ export async function probeCopilotLlm(options: CopilotProviderOptions = {}): Pro
     const auth = await rpc.request("auth.getStatus");
     if (auth.isAuthenticated !== true) throw new CliProviderError("signed-out", "Sign in with `copilot login`, then refresh providers.");
     const catalog = await rpc.request("models.list");
-    const regular = (Array.isArray(catalog.models) ? catalog.models : []).map((m) => rpcObject(m).id).filter((id): id is string => typeof id === "string" && id.length < 150);
+    const listed = copilotModelsFromCatalog(catalog);
     // Fusion tiers follow the regular models, so a CLI default stays the first choice. Copilot Free lists only Fusion.
-    const fusion = fusionModelsFromCatalog(catalog, regular);
-    const models = [...regular, ...fusion.models];
+    const fusion = fusionModelsFromCatalog(catalog, [...listed.models, ...listed.unavailableModels.map((m) => m.id)]);
+    const models = [...listed.models, ...fusion.models];
+    const modelLabels = { ...listed.modelLabels, ...fusion.modelLabels };
+    const unavailableModels = [...listed.unavailableModels, ...(fusion.unavailableModels ?? [])];
     const fusionFacts = {
-      ...(Object.keys(fusion.modelLabels ?? {}).length ? { modelLabels: fusion.modelLabels } : {}),
-      ...(fusion.unavailableModels?.length ? { unavailableModels: fusion.unavailableModels } : {}),
+      ...(Object.keys(modelLabels).length ? { modelLabels } : {}),
+      ...(unavailableModels.length ? { unavailableModels } : {}),
     };
     // With nothing selectable, the tiers the plan lacks still say why.
     if (!models.length) return { installed: true, ready: false, ...detected, failure: "access-denied", models: [], detail: "Copilot sign-in was detected but no models are available. Check your Copilot access and organization policy.", ...fusionFacts };
