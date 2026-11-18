@@ -6,6 +6,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- GitHub Copilot Fusion: the Copilot provider offers Copilot Fusion Standard, High and Max from the CLI's catalog, shows tiers your plan does not include greyed out with the reason, says that several models may see each prompt, and makes Copilot Free accounts usable (they list only Fusion Standard).
 - Lemonade Server as a local provider: the model scan, Settings and the model choice find it on its loopback port (13305), offer its downloaded chat models (never embedding, speech, image or cloud-routed ones) and keep prompts on this device; LM Studio and Lemonade share one OpenAI-compatible adapter.
 - Website: a Book a demo button in the header, hero and closing section, and a new /book page and homepage band for a free 60-minute call where we build an agent for one of your tasks, both booked on Cal.com.
 - The homepage shows a Member of row under the quote, with the NVIDIA Inception Program badge and the KI Bundesverband logo, each linking to its owner's home page.

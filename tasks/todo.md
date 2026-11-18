@@ -1,5 +1,18 @@
 # Current active plan
 
+- [ ] GitHub Copilot Fusion in the Copilot CLI provider (branch `provider/copilot-fusion`, 2026-11-18). Request: add support for https://docs.github.com/en/copilot/concepts/models/copilot-fusion. Maintainer decisions: three model entries (Fusion Standard, High, Max); tiers the account's plan does not include are shown greyed out with the reason, not hidden.
+
+  Verified live before building (Copilot CLI 1.0.114, Copilot Free account): `models.list` returns no regular models and an `auto.tiers` list where Standard is enabled and High and Max are `enabled: false` with `reason: "user_not_eligible"`; `session.create` with `model: "fusion"` and `capi: { fusionTier: "standard" }` answered through MAI Code 2 Flash with every tool disabled, and reported `modelState.fusionTier: "standard"`. Today OpenAdminOS calls this account "no models available".
+
+  Acceptance criteria:
+  1. The Copilot check reads the Fusion tiers from the catalog. Each enabled, picker-visible tier becomes a model (`fusion-standard`, `fusion-high`, `fusion-max`) after the regular models, labelled "Copilot Fusion Standard/High/Max". A tier that is not enabled is listed as unavailable with its reason and is never in `models`, so no setter, run or test can select it. A catalog without Fusion tiers changes nothing.
+  2. An account with only Fusion Standard (Copilot Free) reads as connected; an account with neither models nor an enabled tier keeps the existing access-denied state.
+  3. A Fusion model sends `model: "fusion"` and `capi: { fusionTier }` to `session.create`; a session that reports a different tier stops with a designed error naming the tier and the recovery.
+  4. A Fusion answer may arrive as several root messages (draft, then revision): the stream shows the newest one and the final text is the last authoritative message, instead of the "unexpected additional answer" error. Other Copilot models keep that error. The tool guard is unchanged.
+  5. Chat's model menu, Settings' model chips, Run with, and the Office persona model show the label; the first three also show unavailable tiers greyed out with the reason and do not select them. The Fusion entries state that several models may see each prompt.
+  6. The hosted providers page, provider matrix, SPEC.md and CHANGELOG describe Fusion.
+  7. Typecheck and the runtime, electron and renderer suites pass on Node 22; a live Fusion Standard answer in the built app through the new code path.
+
 - [x] Lemonade Server as a local provider (branch `providers/lemonade`, 2026-11-12). Request: analyze https://lemonade-server.ai/#embed and add support if applicable. Maintainer decisions: an external provider like LM Studio, not the embeddable `lemond` bundled into the installer; LM Studio's adapter becomes one shared OpenAI-compatible adapter.
 
   Acceptance criteria:
