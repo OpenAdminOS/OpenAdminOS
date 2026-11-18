@@ -8,7 +8,7 @@ import {
   type SetStateAction,
 } from "react";
 
-import { NOTHING_LEAVES_COPY, deriveToolHostsCopy, deriveTrustCopy, promptsGoTo, providerDataLocation, providerDataLocationDetail } from "../copy";
+import { NOTHING_LEAVES_COPY, deriveToolHostsCopy, modelTrustNote, deriveTrustCopy, promptsGoTo, providerDataLocation, providerDataLocationDetail } from "../copy";
 
 /** Voice runs on OpenAI's own service, not Codex; the same line as PR #175. */
 const VOICE_LOCATION_DETAIL = "Processing follows your OpenAI workspace's data residency setting.";
@@ -40,6 +40,8 @@ export type DataBoundary =
       kind: "hosted";
       label: string;
       model?: string;
+      /** Who sees the prompt with this model, for a Copilot Fusion tier. */
+      modelNote?: string;
       toolHosts?: string;
       toolHostsNote?: string;
       tooltip: string;
@@ -90,6 +92,7 @@ export function deriveDataBoundary(state: AppState, voiceHosted = false): DataBo
   ).model;
   // Shown as admins know it ("Copilot Fusion High"), not as its id.
   const model = resolved ? providerModelLabel(provider, resolved) : undefined;
+  const modelNote = provider && resolved ? modelTrustNote(provider.id, resolved) : undefined;
 
   if (voiceHosted) {
     // Hosted voice names its own destination, says whether tenant data is
@@ -147,9 +150,10 @@ export function deriveDataBoundary(state: AppState, voiceHosted = false): DataBo
     kind: "hosted",
     label: `Hosted · ${providerDataLocation(provider)}`,
     ...(model ? { model } : {}),
+    ...(modelNote ? { modelNote } : {}),
     ...toolHosts,
     // The tooltip adds what the location depends on (the account, the workspace, the deployment type).
-    tooltip: `${trust.boundary ?? trust.strip}${providerDataLocationDetail(provider) ? ` ${providerDataLocationDetail(provider)}` : ""}${toolDetail}`,
+    tooltip: `${trust.boundary ?? trust.strip}${providerDataLocationDetail(provider) ? ` ${providerDataLocationDetail(provider)}` : ""}${modelNote ? ` ${modelNote}.` : ""}${toolDetail}`,
     isVoiceHosted: false,
   };
 }
