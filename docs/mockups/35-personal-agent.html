@@ -1,0 +1,891 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>35 Personal agent, OpenAdminOS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="_design.css">
+  <!--
+    Mockup 35 (2026-11-18): the personal agent, Track B of
+    tasks/data-policy-and-personal-agent.md.
+
+    Design plan
+      Palette   Same tokens as mockup 34: the production palette, with the
+                dark values taken from the legacy tokens in _design.css. No
+                new colors. Amber still means "leaves this device"; it marks
+                hosts in grants and nothing else.
+      Type      Geist for the interface, Newsreader for headings and for the
+                agent's name, Geist Mono for SKILL.md source, keys and tools.
+      Layout    The doc frame from mockups 32 to 34. Settings pages sit in
+                real app windows; cards appear where they appear in Chat.
+      Memorable The nameplate. The agent's name is set large in the serif
+                and is an input. Typing a new name rewrites every mention in
+                the document: sidebar, greeting, cards, wake phrase, errors.
+                It shows the rule from Phase B1 that one label feeds
+                everything, and it makes the agent feel like the admin's own.
+
+    The doc bar at the top is not part of the app.
+  -->
+  <style>
+    /* Production token names. Dark maps onto the legacy tokens in _design.css. */
+    :root {
+      --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      --font-serif: "Newsreader", "Iowan Old Style", Charter, Georgia, serif;
+      --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      --text-xs: 12px; --lh-xs: 18px;
+      --text-sm: 13px; --lh-sm: 19.5px;
+      --text-base: 14px; --lh-base: 21px;
+      --text-md: 16px; --lh-md: 24px;
+      --text-lg: 24px; --lh-lg: 32px;
+      --text-display: 34px; --lh-display: 42px;
+      --radius-sm: 8px; --radius-md: 10px; --radius-lg: 14px; --radius-xl: 18px;
+      --color-svc-intune: #4e6e9e; --color-svc-entra: #3d7c83; --color-svc-defender: #6a5c90;
+      --dur-fast: 140ms;
+    }
+    :root, [data-theme="light"] {
+      --color-bg: #faf9f6; --color-bg-elevated: #ffffff; --color-bg-raised: #eeebe5;
+      --color-sidebar-solid: #f2f0eb; --color-surface: #ffffff;
+      --color-hover: rgba(31, 29, 26, 0.05); --color-active: rgba(31, 29, 26, 0.085);
+      --color-border: rgba(31, 29, 26, 0.12); --color-border-strong: rgba(31, 29, 26, 0.22); --color-border-soft: rgba(31, 29, 26, 0.065);
+      --color-text: #1f1d1a; --color-text-soft: #5c5852; --color-text-muted: #6f6a63; --color-text-faint: #938d84;
+      --color-accent: #1f1d1a; --color-accent-hover: #37342f; --color-on-accent: #faf9f6; --color-focus: #2f6feb;
+      --color-success: #3a7246; --color-success-soft: #3a72460c;
+      --color-warning: #895a05; --color-warning-soft: #8a5b0514;
+      --color-danger: #a8382b; --color-danger-soft: #a8382b12;
+      --color-code-bg: rgba(31, 29, 26, 0.045); --color-scrim: rgba(28, 25, 22, 0.26);
+      --hatch: rgba(31, 29, 26, 0.16);
+      --shadow-pop: 0 0 0 1px rgba(31, 29, 26, 0.07), 0 10px 32px rgba(31, 29, 26, 0.14);
+      color-scheme: light;
+    }
+    [data-theme="dark"] {
+      --color-bg: var(--bg-0); --color-bg-elevated: #22262c; --color-bg-raised: var(--bg-3);
+      --color-sidebar-solid: var(--bg-1); --color-surface: var(--bg-2);
+      --color-hover: rgba(255, 255, 255, 0.05); --color-active: rgba(255, 255, 255, 0.085);
+      --color-border: rgba(255, 255, 255, 0.12); --color-border-strong: rgba(255, 255, 255, 0.24); --color-border-soft: rgba(255, 255, 255, 0.065);
+      --color-text: var(--text-0); --color-text-soft: var(--text-1); --color-text-muted: #98a0ab; --color-text-faint: var(--text-3);
+      --color-accent: var(--accent); --color-accent-hover: #ffffff; --color-on-accent: var(--bg-0); --color-focus: #8fb4ff;
+      --color-success: var(--success); --color-success-soft: #9cc88f1a;
+      --color-warning: var(--warning); --color-warning-soft: #e5c6781a;
+      --color-danger: var(--danger); --color-danger-soft: #f1a0a01a;
+      --color-code-bg: rgba(255, 255, 255, 0.055); --color-scrim: rgba(0, 0, 0, 0.55);
+      --hatch: rgba(255, 255, 255, 0.16);
+      --shadow-pop: 0 0 0 1px rgba(255, 255, 255, 0.09), 0 12px 36px rgba(0, 0, 0, 0.45);
+      color-scheme: dark;
+    }
+
+    /* Undo the app-shell rules of _design.css for a scrolling document. */
+    * { box-sizing: border-box; }
+    html, body { height: auto; overflow: visible; margin: 0; }
+    body {
+      background: var(--color-bg-raised);
+      color: var(--color-text);
+      font: 400 var(--text-base)/var(--lh-base) var(--font-sans);
+      letter-spacing: 0;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+    button, input, select { font: inherit; color: inherit; }
+    :focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+    code, .mono { font-family: var(--font-mono); font-size: var(--text-xs); }
+    p { margin: 0; }
+
+    /* ---------- Doc chrome (not the app) ---------- */
+    .docbar { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--color-bg-raised); border-bottom: 1px solid var(--color-border-soft); font-size: var(--text-sm); flex-wrap: wrap; }
+    .docbar b { font-weight: 500; }
+    .docbar nav { display: flex; gap: 2px; margin-left: auto; flex-wrap: wrap; }
+    .docbar nav a { color: var(--color-text-soft); text-decoration: none; padding: 2px 6px; border-radius: 6px; }
+    .docbar nav a:hover { background: var(--color-hover); color: var(--color-text); }
+    .seg { display: inline-flex; padding: 2px; border-radius: 8px; background: var(--color-hover); }
+    .seg button { border: 0; background: none; padding: 2px 10px; border-radius: 6px; cursor: pointer; color: var(--color-text-soft); }
+    .seg button[aria-pressed="true"] { background: var(--color-surface); color: var(--color-text); box-shadow: 0 0 0 1px var(--color-border-soft); }
+    .doc { max-width: 1320px; margin: 0 auto; padding: 32px 16px 80px; }
+    .doc > header { max-width: 74ch; margin-bottom: 40px; }
+    .doc h1 { font: 500 var(--text-display)/var(--lh-display) var(--font-serif); margin: 0 0 10px; text-wrap: balance; }
+    .doc > header p { color: var(--color-text-soft); }
+    .sect { margin: 0 0 64px; scroll-margin-top: 56px; }
+    .sect > h2 { font: 500 var(--text-lg)/var(--lh-lg) var(--font-serif); margin: 0 0 4px; }
+    .sect > p { color: var(--color-text-soft); margin: 0 0 16px; max-width: 78ch; }
+    .notes { margin: 16px 0 0; padding-left: 18px; color: var(--color-text-soft); font-size: var(--text-sm); line-height: var(--lh-sm); max-width: 92ch; }
+    .notes li + li { margin-top: 4px; }
+
+    /* ---------- App window ---------- */
+    .win { container-type: inline-size; position: relative; display: flex; flex-direction: column; overflow: hidden; border-radius: 12px; background: var(--color-bg); box-shadow: 0 0 0 1px var(--color-border), 0 20px 50px -20px rgba(0,0,0,.25); }
+    .shell { display: grid; grid-template-columns: 248px minmax(0, 1fr); min-height: 560px; }
+    .side { background: var(--color-sidebar-solid); display: flex; flex-direction: column; padding: 0 8px 8px; min-height: 0; }
+    .side-top { height: 52px; flex: none; }
+    .lights { position: absolute; left: 18px; top: 20px; display: flex; gap: 8px; }
+    .lights i { width: 12px; height: 12px; border-radius: 50%; background: var(--color-border-strong); }
+    .brandrow { display: flex; align-items: center; gap: 8px; padding: 6px 8px 10px; font-weight: 600; }
+    .snav a { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border-radius: var(--radius-sm); color: var(--color-text-soft); text-decoration: none; }
+    .snav a[aria-current] { background: var(--color-active); color: var(--color-text); }
+    .snav svg { width: 15px; height: 15px; opacity: .75; }
+    .side-foot { margin-top: auto; display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: var(--radius-md); }
+    .side-foot[data-current] { background: var(--color-active); }
+    .side-foot .who { min-width: 0; font-size: var(--text-sm); line-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .side-foot .who span { display: block; color: var(--color-text-muted); font-size: var(--text-xs); }
+    .appmain { position: relative; display: flex; flex-direction: column; min-width: 0; }
+    .topbar { height: 52px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 16px; border-bottom: 1px solid var(--color-border-soft); min-width: 0; }
+    .orgchip { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px 0 6px; border-radius: var(--radius-sm); border: 0; background: none; cursor: pointer; font-weight: 500; white-space: nowrap; }
+    .orgchip:hover { background: var(--color-hover); }
+    .orgchip .chev { width: 12px; height: 12px; color: var(--color-text-muted); }
+    .page { flex: 1; min-height: 0; container-type: inline-size; }
+    .page-in { max-width: 940px; margin: 0 auto; padding: 24px 32px 40px; }
+    .page-in.narrow { max-width: 780px; }
+    .page-head { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+    .page-head h1 { font: 500 var(--text-lg)/var(--lh-lg) var(--font-serif); margin: 0; }
+    .page-head p { margin: 2px 0 0; color: var(--color-text-soft); font-size: var(--text-sm); max-width: 66ch; }
+    .page-head .act { margin-left: auto; display: flex; gap: 8px; }
+
+    /* ---------- The status strip ---------- */
+    .boundary { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 10px; border-radius: 999px; font-size: var(--text-xs); color: var(--color-text-soft); box-shadow: inset 0 0 0 1px var(--color-border); white-space: nowrap; max-width: 72%; overflow: hidden; border: 0; background: none; cursor: pointer; }
+    .boundary .bs { display: none; }
+    .boundary[data-where="hosted"] { color: var(--color-warning); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-warning) 35%, transparent); background: var(--color-warning-soft); }
+    .boundary[data-where="local"] { color: var(--color-success); }
+    .boundary .mask { display: inline-flex; align-items: center; gap: 6px; color: var(--color-text-soft); }
+    .boundary .blk { color: var(--color-danger); }
+    @container (max-width: 1000px) { .boundary .bw { display: none; } .boundary .bs { display: inline; } }
+    .pip { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+    .hx { display: inline-block; width: 12px; height: 12px; border-radius: 3px; flex: none; background: repeating-linear-gradient(135deg, var(--hatch) 0 1.5px, transparent 1.5px 4px); box-shadow: inset 0 0 0 1px var(--color-border-strong); }
+
+    /* ---------- Primitives ---------- */
+    .bt { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: var(--radius-sm); border: 0; cursor: pointer; font-size: var(--text-base); font-weight: 500; white-space: nowrap; background: none; color: var(--color-text); transition: background-color var(--dur-fast) ease; }
+    .bt.sm { height: 28px; padding: 0 10px; font-size: var(--text-sm); }
+    .bt.primary { background: var(--color-accent); color: var(--color-on-accent); }
+    .bt.primary:hover { background: var(--color-accent-hover); }
+    .bt.secondary { background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-border); }
+    .bt.secondary:hover { background: var(--color-hover); }
+    .bt.ghost { color: var(--color-text-soft); }
+    .bt.ghost:hover { background: var(--color-hover); color: var(--color-text); }
+    .bt[disabled] { opacity: .45; cursor: not-allowed; }
+    .muted { color: var(--color-text-muted); }
+    .soft { color: var(--color-text-soft); }
+    .leaves { color: var(--color-warning); }
+    .sm { font-size: var(--text-sm); line-height: var(--lh-sm); }
+    .xs { font-size: var(--text-xs); line-height: var(--lh-xs); }
+    .rows { list-style: none; margin: 0; padding: 0; }
+    .rows > li + li { border-top: 1px solid var(--color-border-soft); }
+    .sec-h { display: flex; align-items: baseline; gap: 12px; margin: 28px 0 4px; flex-wrap: wrap; }
+    .sec-h h2 { font-size: var(--text-md); line-height: var(--lh-md); font-weight: 500; margin: 0; }
+    .sec-h .r { margin-left: auto; }
+    .sec-sub { margin: 0 0 10px; color: var(--color-text-muted); font-size: var(--text-sm); max-width: 72ch; }
+    .av { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; font-size: 10px; font-weight: 600; background: var(--color-bg-raised); color: var(--color-text-soft); box-shadow: inset 0 0 0 1px var(--color-border-soft); flex: none; }
+    .mk { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 6px; font-size: 10px; font-weight: 600; color: #fff; }
+    .mk[data-s="intune"] { background: var(--color-svc-intune); }
+    .mk[data-s="entra"] { background: var(--color-svc-entra); }
+    .lockline { display: inline-flex; align-items: flex-start; gap: 6px; font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text-muted); }
+    .lockline svg { width: 12px; height: 12px; flex: none; margin-top: 3px; }
+    .lockline code { color: var(--color-text-soft); overflow-wrap: anywhere; }
+    .block { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 14px; padding: 16px 18px; border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-border); }
+    .block h3 { margin: 2px 0 4px; font-size: var(--text-base); font-weight: 500; }
+    .block p { color: var(--color-text-soft); font-size: var(--text-sm); line-height: var(--lh-sm); max-width: 72ch; }
+    .block .acts { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
+    .block[data-t="blocked"] { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-danger) 35%, transparent); }
+    .glyph { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: var(--color-bg-raised); color: var(--color-text-soft); }
+    .glyph svg { width: 18px; height: 18px; }
+    .glyph[data-t="blocked"] { background: var(--color-danger-soft); color: var(--color-danger); }
+    .glyph[data-t="mask"] { background: repeating-linear-gradient(135deg, var(--hatch) 0 2px, transparent 2px 6px), var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-border-strong); color: var(--color-text); }
+
+    /* ---------- Open questions ---------- */
+    .qs { margin: 0; padding-left: 20px; max-width: 88ch; }
+    .qs li { padding: 7px 0; }
+    .qs li + li { border-top: 1px solid var(--color-border-soft); }
+    .qs b { font-weight: 500; }
+    .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+    @media (max-width: 980px) { .two { grid-template-columns: 1fr; } }
+
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; } }
+    @media (max-width: 720px) { .shell { grid-template-columns: 1fr; } .side { display: none; } .page-in, .chat { padding: 20px 18px 32px; } }
+
+    /* ---------- Settings layout ---------- */
+    .settings { display: grid; grid-template-columns: 176px minmax(0, 1fr); gap: 28px; }
+    .setnav { display: flex; flex-direction: column; gap: 1px; font-size: var(--text-sm); align-self: start; }
+    .setnav a { padding: 6px 10px; border-radius: var(--radius-sm); color: var(--color-text-soft); text-decoration: none; }
+    .setnav a[aria-current] { background: var(--color-active); color: var(--color-text); font-weight: 500; }
+    @container (max-width: 760px) { .settings { grid-template-columns: 1fr; gap: 0; } .setnav { display: none; } }
+
+    /* ---------- Nameplate ---------- */
+    .plate { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 20px; align-items: center; padding: 22px 22px 20px; border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-border-soft); }
+    .mono-tile { width: 76px; height: 76px; border-radius: 22px; display: grid; place-items: center; background: var(--color-accent); color: var(--color-on-accent); font: 500 38px/1 var(--font-serif); box-shadow: 0 12px 28px -14px rgba(0,0,0,.4); }
+    .plate label.nm { display: block; }
+    .plate .nmin { width: 100%; border: 0; background: none; padding: 0 0 2px; font: 500 40px/48px var(--font-serif); color: var(--color-text); border-bottom: 1.5px dashed var(--color-border-strong); outline: none; }
+    .plate .nmin:focus { border-bottom: 1.5px solid var(--color-text); }
+    .plate .sub { margin-top: 8px; font-size: var(--text-sm); color: var(--color-text-soft); }
+    .plate .sub b { font-weight: 500; color: var(--color-text); }
+    .mentions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; padding-top: 16px; margin-top: 2px; border-top: 1px solid var(--color-border-soft); }
+    .mention { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border-radius: var(--radius-sm); background: var(--color-code-bg); font-size: var(--text-sm); color: var(--color-text-soft); white-space: nowrap; }
+    .mention .w { color: var(--color-text-muted); font-size: var(--text-xs); }
+    .mini { width: 18px; height: 18px; border-radius: 6px; display: grid; place-items: center; background: var(--color-accent); color: var(--color-on-accent); font: 500 11px/1 var(--font-serif); flex: none; }
+    @container (max-width: 560px) { .plate { grid-template-columns: 56px minmax(0, 1fr); padding: 16px; } .mono-tile { width: 56px; height: 56px; border-radius: 16px; font-size: 28px; } .plate .nmin { font-size: 30px; line-height: 38px; } }
+
+    .field { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 8px 20px; padding: 14px 0; border-top: 1px solid var(--color-border-soft); align-items: start; }
+    .field .lb { font-size: var(--text-sm); font-weight: 500; padding-top: 4px; }
+    .field .lb span { display: block; font-weight: 400; color: var(--color-text-muted); font-size: var(--text-xs); line-height: var(--lh-xs); }
+    @container (max-width: 600px) { .field { grid-template-columns: 1fr; } }
+    .opts { display: inline-flex; flex-wrap: wrap; padding: 2px; border-radius: 9px; background: var(--color-hover); gap: 2px; }
+    .opts button { border: 0; background: none; height: 28px; padding: 0 12px; border-radius: 7px; cursor: pointer; color: var(--color-text-soft); font-size: var(--text-sm); }
+    .opts button[aria-pressed="true"] { background: var(--color-surface); color: var(--color-text); box-shadow: 0 0 0 1px var(--color-border-soft); font-weight: 500; }
+    .opts[data-locked] button { cursor: not-allowed; }
+    .opts[data-locked] button:not([aria-pressed="true"]) { opacity: .5; }
+    .field .hint { display: block; margin-top: 6px; font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text-muted); }
+    .sample { margin-top: 16px; padding: 14px 16px; border-radius: var(--radius-md); background: var(--color-code-bg); }
+    .sample .h { font-size: var(--text-xs); color: var(--color-text-muted); margin-bottom: 6px; display: flex; gap: 8px; align-items: center; }
+    .sample .t { font: 400 15px/24px var(--font-serif); }
+
+    /* ---------- Grants ---------- */
+    .grp { margin-top: 22px; }
+    .grp > h3 { margin: 0 0 2px; font-size: var(--text-sm); font-weight: 500; display: flex; align-items: baseline; gap: 10px; }
+    .grp > h3 span { font-weight: 400; color: var(--color-text-muted); font-size: var(--text-xs); }
+    .grant { display: grid; grid-template-columns: 28px minmax(0, 1fr) 76px 76px; gap: 2px 14px; align-items: center; padding: 11px 0; border-top: 1px solid var(--color-border-soft); }
+    .grant.one { grid-template-columns: 28px minmax(0, 1fr) 76px; }
+    .grant .ic { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--color-bg-raised); color: var(--color-text-soft); font-size: 10px; font-weight: 600; }
+    .grant .ic[data-s="intune"] { background: var(--color-svc-intune); color: #fff; }
+    .grant .ic svg { width: 14px; height: 14px; }
+    .grant .nm { font-weight: 500; font-size: var(--text-sm); }
+    .grant .ds { font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text-muted); }
+    .grant .ds .host { color: var(--color-warning); }
+    .grant .lockline { grid-column: 2 / -1; }
+    .colh { display: grid; grid-template-columns: 28px minmax(0, 1fr) 76px 76px; gap: 14px; font-size: var(--text-xs); color: var(--color-text-muted); padding: 0 0 6px; }
+    .colh span:nth-child(n+3) { text-align: center; }
+    .tg { justify-self: center; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+    .tg .lab { display: none; font-size: 11px; color: var(--color-text-muted); }
+    .sw { position: relative; width: 34px; height: 20px; border-radius: 999px; border: 0; padding: 0; cursor: pointer; background: var(--color-border-strong); transition: background-color var(--dur-fast) ease; }
+    .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--color-bg-elevated); box-shadow: 0 1px 2px rgba(0,0,0,.2); transition: transform var(--dur-fast) ease; }
+    .sw[aria-checked="true"] { background: var(--color-accent); }
+    .sw[aria-checked="true"]::after { transform: translateX(14px); background: var(--color-on-accent); }
+    .sw[disabled] { opacity: .5; cursor: not-allowed; }
+    .na { font-size: var(--text-xs); color: var(--color-text-faint); justify-self: center; text-align: center; line-height: 15px; }
+    @container (max-width: 600px) {
+      .colh { display: none; }
+      .grant, .grant.one { grid-template-columns: 28px minmax(0, 1fr) auto auto; }
+      .tg .lab { display: block; }
+    }
+    .rule { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 10px; margin-top: 20px; padding: 12px 14px; border-radius: var(--radius-md); background: var(--color-code-bg); font-size: var(--text-sm); line-height: var(--lh-sm); }
+    .rule svg { width: 14px; height: 14px; margin-top: 3px; color: var(--color-text-soft); }
+
+    /* ---------- Skills library ---------- */
+    .lib { display: grid; grid-template-columns: 250px minmax(0, 1fr); min-height: 560px; }
+    .lib .list { border-right: 1px solid var(--color-border-soft); padding: 16px 10px; }
+    .lib .list .hd { display: flex; align-items: center; gap: 6px; padding: 0 6px 10px; }
+    .lib .list .hd h2 { font: 500 20px/28px var(--font-serif); margin: 0; margin-right: auto; }
+    .sk { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 9px 10px; border-radius: var(--radius-sm); cursor: pointer; }
+    .sk:hover { background: var(--color-hover); }
+    .sk[aria-current] { background: var(--color-active); }
+    .sk .n { font-size: var(--text-sm); font-weight: 500; display: flex; gap: 6px; align-items: baseline; }
+    .sk .n .v { margin-left: auto; font-weight: 400; font-size: var(--text-xs); color: var(--color-text-muted); }
+    .sk .d { display: block; font-size: var(--text-xs); line-height: 16px; color: var(--color-text-muted); }
+    .scope { display: inline-block; margin-top: 3px; font-size: 11px; color: var(--color-text-soft); padding: 0 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--color-border); }
+    .lib .detail { padding: 20px 24px 24px; min-width: 0; }
+    .det-hd { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+    .det-hd h3 { margin: 0; font: 500 var(--text-lg)/var(--lh-lg) var(--font-serif); }
+    .det-hd p { font-size: var(--text-sm); color: var(--color-text-soft); max-width: 60ch; }
+    .det-hd .act { margin-left: auto; display: flex; gap: 6px; }
+    .tabs { display: flex; gap: 4px; margin: 16px 0 12px; }
+    .tabs button { border: 0; background: none; height: 28px; padding: 0 10px; border-radius: var(--radius-sm); font-size: var(--text-sm); color: var(--color-text-soft); cursor: pointer; }
+    .tabs button[aria-selected="true"] { background: var(--color-active); color: var(--color-text); font-weight: 500; }
+    .src { margin: 0; padding: 14px 16px; border-radius: var(--radius-md); background: var(--color-code-bg); font: 400 12px/20px var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--color-text); }
+    .src .fm { color: var(--color-text-muted); }
+    .src .k { color: var(--color-text-soft); }
+    .src .h { font-weight: 500; }
+    .tools { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0; margin-top: 14px; font-size: var(--text-sm); }
+    .tools > :nth-child(even) { padding-left: 12px; }
+    .tools > * { padding: 7px 0; border-top: 1px solid var(--color-border-soft); }
+    .tools code { overflow-wrap: anywhere; }
+    .tools .ok { color: var(--color-text-soft); font-size: var(--text-xs); text-align: right; }
+    .tools .no { color: var(--color-danger); font-size: var(--text-xs); text-align: right; }
+    .tools .off { color: var(--color-text-muted); font-size: var(--text-xs); text-align: right; }
+    .hist { list-style: none; margin: 0; padding: 0; }
+    .hist li { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 2px 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--color-border-soft); font-size: var(--text-sm); }
+    .hist .vn { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-soft); }
+    .hist .wh { font-size: var(--text-xs); color: var(--color-text-muted); }
+    .hist .cur { font-size: var(--text-xs); color: var(--color-text-muted); }
+    @container (max-width: 720px) { .lib { grid-template-columns: 1fr; } .lib .list { border-right: 0; border-bottom: 1px solid var(--color-border-soft); } }
+    .tabpane[hidden] { display: none; }
+
+    /* ---------- Cards in Chat ---------- */
+    .chat { max-width: 760px; margin: 0 auto; padding: 24px 32px 28px; }
+    .q { margin-left: auto; width: fit-content; max-width: 80%; padding: 9px 14px; border-radius: 16px 16px 4px 16px; background: var(--color-active); }
+    .q + .q, .ans + .q { margin-top: 16px; }
+    .ans { margin-top: 16px; }
+    .ans .who { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); color: var(--color-text-muted); margin-bottom: 4px; }
+    .ans .body { font: 400 16px/26px var(--font-serif); }
+    .ans .body ol { margin: 6px 0 0; padding-left: 20px; }
+    .pcard { margin-top: 16px; border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-border); overflow: hidden; }
+    .pcard .top { display: flex; align-items: center; gap: 10px; padding: 12px 16px 0; font-size: var(--text-xs); color: var(--color-text-muted); }
+    .pcard .top .kind { color: var(--color-text-soft); font-weight: 500; }
+    .pcard .in { padding: 6px 16px 14px; }
+    .pcard h3 { margin: 0 0 4px; font-size: var(--text-base); font-weight: 500; }
+    .pcard p { font-size: var(--text-sm); line-height: var(--lh-sm); color: var(--color-text-soft); max-width: 70ch; }
+    .pcard .why { margin-top: 8px; font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text-muted); }
+    .pcard .acts { display: flex; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--color-border-soft); background: var(--color-code-bg); flex-wrap: wrap; align-items: center; }
+    .pcard .acts .r { margin-left: auto; font-size: var(--text-xs); color: var(--color-text-muted); }
+    .kv { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 0 12px; margin-top: 10px; font-size: var(--text-sm); }
+    .kv dt, .kv dd { margin: 0; padding: 6px 0; border-top: 1px solid var(--color-border-soft); }
+    .kv dt { color: var(--color-text-muted); }
+    @container (max-width: 520px) { .kv { grid-template-columns: 1fr; } .kv dd { border-top: 0; padding-top: 0; } }
+    .diff { margin-top: 10px; border-radius: var(--radius-md); background: var(--color-code-bg); font: 400 12.5px/21px var(--font-mono); padding: 8px 0; overflow-wrap: anywhere; }
+    .diff div { padding: 0 12px 0 28px; position: relative; }
+    .diff div::before { position: absolute; left: 12px; color: var(--color-text-muted); }
+    .diff .del { color: var(--color-text-muted); text-decoration: line-through; text-decoration-color: var(--color-text-faint); }
+    .diff .del::before { content: "\2212"; text-decoration: none; }
+    .diff .add { background: var(--color-success-soft); color: var(--color-text); }
+    .diff .add::before { content: "+"; color: var(--color-success); }
+    .diff .ctx::before { content: ""; }
+    .deck { display: grid; gap: 14px; max-width: 760px; }
+
+    /* ---------- Checks and brief ---------- */
+    .cap-meter { display: inline-flex; gap: 3px; vertical-align: middle; margin-left: 6px; }
+    .cap-meter i { width: 14px; height: 6px; border-radius: 2px; background: var(--color-border); }
+    .cap-meter i.on { background: var(--color-text-soft); }
+    .chk { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 16px; align-items: center; padding: 12px 0; border-top: 1px solid var(--color-border-soft); }
+    .chk .nm { font-weight: 500; font-size: var(--text-sm); }
+    .chk .ds { font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text-muted); }
+    .chk .ds.warn { color: var(--color-text); }
+    .chk .a { grid-column: 2; grid-row: 1 / span 2; display: flex; gap: 6px; align-items: center; }
+    .ro { margin-left: 6px; padding: 0 6px; border-radius: 5px; font-size: 11px; font-weight: 400; color: var(--color-text-soft); box-shadow: inset 0 0 0 1px var(--color-border); white-space: nowrap; }
+    @container (max-width: 560px) { .chk { grid-template-columns: 1fr; } .chk .a { grid-column: 1; grid-row: auto; margin-top: 6px; } }
+    .orgh { display: flex; align-items: center; gap: 10px; margin: 24px 0 2px; }
+    .orgh h3 { margin: 0; font-size: var(--text-md); font-weight: 500; }
+    .orgh .r { margin-left: auto; font-size: var(--text-xs); color: var(--color-text-muted); white-space: nowrap; }
+    .brief { border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-border); padding: 16px 18px; }
+    .brief .hd { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    .brief h3 { margin: 0; font: 500 20px/28px var(--font-serif); }
+    .brief .hd span { font-size: var(--text-xs); color: var(--color-text-muted); }
+    .brief ol { margin: 10px 0 0; padding: 0; list-style: none; }
+    .brief li { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; padding: 9px 0; border-top: 1px solid var(--color-border-soft); font-size: var(--text-sm); align-items: start; }
+    .brief li .n { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; box-shadow: inset 0 0 0 1px var(--color-border-strong); color: var(--color-text-soft); }
+    .brief li .d { color: var(--color-text-muted); font-size: var(--text-xs); display: block; }
+    .brief .ft { margin-top: 10px; font-size: var(--text-xs); color: var(--color-text-muted); }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="oa" viewBox="0 0 64 64"><g fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"><circle cx="17" cy="32" r="11.5"/><circle cx="46" cy="32" r="11.5"/><path d="M57.5 20.5v23"/></g></symbol>
+    <symbol id="i-chat" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></symbol>
+    <symbol id="i-agents" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="2" fill="currentColor"/></symbol>
+    <symbol id="i-market" viewBox="0 0 16 16"><path d="M2.5 6.5h11v7h-11zM2 6.5l1.5-3.5h9L14 6.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></symbol>
+    <symbol id="i-conn" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="5" height="5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M1.5 4.5h3M1.5 11.5h3M11.5 8h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></symbol>
+    <symbol id="i-runs" viewBox="0 0 16 16"><path d="M1.5 8.5h3l2-5 3 9 2-4h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round"/></symbol>
+    <symbol id="i-changes" viewBox="0 0 16 16"><circle cx="4.5" cy="4" r="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="4.5" cy="12" r="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="11.5" cy="6" r="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 5.6v4.8M11.5 7.6c0 2-2 2.4-5.4 3.4" fill="none" stroke="currentColor" stroke-width="1.3"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 12 12"><path d="M3 4.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M3.6 12.4L5 11M11 5l1.4-1.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 16 16"><rect x="3.5" y="7" width="9" height="6.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="currentColor" stroke-width="1.3"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 16 16"><path d="M6 2.5v3M10 2.5v3M4.5 5.5h7v2.5a3.5 3.5 0 0 1-7 0zM8 11.5v2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-book" viewBox="0 0 16 16"><path d="M3 3h4a1.5 1.5 0 0 1 1.5 1.5V13a1 1 0 0 0-1-1H3zM13 3H9.5A1.5 1.5 0 0 0 8 4.5V13a1 1 0 0 1 1-1H13z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.8" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M2.2 8h11.6M8 2.2c1.8 2 1.8 9.6 0 11.6M8 2.2c-1.8 2-1.8 9.6 0 11.6" fill="none" stroke="currentColor" stroke-width="1.2"/></symbol>
+    <symbol id="i-teams" viewBox="0 0 16 16"><rect x="2.5" y="4" width="8" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5 6.5h3M6.5 6.5v3.5M11.5 6h2v4a1.5 1.5 0 0 1-1.5 1.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></symbol>
+    <symbol id="i-ticket" viewBox="0 0 16 16"><path d="M2.5 5V3.5h11V5a1.5 1.5 0 0 0 0 3v4.5h-11V8a1.5 1.5 0 0 0 0-3z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></symbol>
+    <symbol id="i-skill" viewBox="0 0 16 16"><path d="M4 2.5h6l2.5 2.5v8.5H4z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M6 8h4.5M6 10.5h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></symbol>
+    <symbol id="i-pen" viewBox="0 0 16 16"><path d="M3 13l1-3.5L10.5 3 13 5.5 6.5 12z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.8" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 4.8V8l2.2 1.4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></symbol>
+    <symbol id="i-up" viewBox="0 0 16 16"><path d="M8 12V4M4.5 7.5L8 4l3.5 3.5M3 13.5h10" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-down" viewBox="0 0 16 16"><path d="M8 3v8M4.5 7.5L8 11l3.5-3.5M3 13.5h10" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  </svg>
+
+  <div class="docbar">
+    <b>Mockup 35</b>
+    <span class="seg" role="group" aria-label="Theme">
+      <button type="button" data-theme-set="light" aria-pressed="true">Light</button>
+      <button type="button" data-theme-set="dark" aria-pressed="false">Dark</button>
+    </span>
+    <nav aria-label="Sections">
+      <a href="#a">A Name and persona</a><a href="#b">B Access</a><a href="#c">C Skills</a><a href="#d">D Save as skill</a><a href="#e">E Learning</a><a href="#f">F Checks and brief</a><a href="#q">Questions</a>
+    </nav>
+  </div>
+
+  <main class="doc">
+    <header>
+      <h1>An agent of your own: a name, a way of answering, and only the access you give it.</h1>
+      <p>The personal agent is the one agent that answers in Chat and voice. The admin names it, sets how it answers, grants what it may reach, keeps a library of skills for it and approves everything it learns. Nothing here can grant a change to a tenant: changes still go through agents and diff confirmation. Type a name in A; every mention on this page follows. Check the frames at 1280 and 900 px, in both themes.</p>
+    </header>
+
+    <!-- A -->
+    <section class="sect" id="a">
+      <h2>A. Name and persona</h2>
+      <p>The Settings section carries the agent's name. The nameplate on top is the name field itself, and the strip of mentions under it shows where the name appears, so a rename is understood before it is saved.</p>
+      <div class="win">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="shell">
+          <aside class="side" data-side="settings"></aside>
+          <div class="appmain">
+            <div class="topbar" data-top="local"></div>
+            <div class="page"><div class="page-in">
+              <div class="settings">
+                <nav class="setnav" aria-label="Settings">
+                  <a href="#">Providers</a><a href="#">Data</a><a href="#">Data policy</a><a href="#">Chat</a><a href="#" aria-current="page" data-name>Nova</a><a href="#">Gateway</a><a href="#">General</a><a href="#">Appearance</a><a href="#">Privacy</a><a href="#">About</a>
+                </nav>
+                <div>
+                  <div class="plate">
+                    <span class="mono-tile" data-initial aria-hidden="true">N</span>
+                    <div>
+                      <label class="nm"><span class="sr" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Display name</span><input class="nmin" id="agentname" value="Nova" maxlength="24" autocomplete="off" spellcheck="false"></label>
+                      <p class="sub">Your agent in Chat and voice, for all 3 organizations. Wake phrase: <b>Hey <span data-name>Nova</span></b>.</p>
+                    </div>
+                    <div class="mentions" aria-label="Where the name appears">
+                      <span class="mention"><span class="mini" data-initial>N</span><span><span data-name>Nova</span></span><span class="w">sidebar</span></span>
+                      <span class="mention"><span>Ask <span data-name>Nova</span></span><span class="w">composer</span></span>
+                      <span class="mention"><span><span data-name>Nova</span> suggests a note</span><span class="w">cards</span></span>
+                      <span class="mention"><span><span data-name>Nova</span> could not reach Intune</span><span class="w">errors</span></span>
+                    </div>
+                  </div>
+
+                  <div class="sec-h"><h2>How <span data-name>Nova</span> answers</h2><span class="r xs muted">Applies to typed Chat and voice</span></div>
+                  <div class="field">
+                    <div class="lb">Tone<span>How plain or warm the wording is</span></div>
+                    <div><div class="opts" data-opt="tone"><button type="button" data-v="plain" aria-pressed="true">Plain</button><button type="button" data-v="warm" aria-pressed="false">Warm</button><button type="button" data-v="terse" aria-pressed="false">Terse</button></div></div>
+                  </div>
+                  <div class="field">
+                    <div class="lb">Answer length<span>Lists and tables are never cut</span></div>
+                    <div><div class="opts" data-opt="len"><button type="button" data-v="short" aria-pressed="false">Short</button><button type="button" data-v="medium" aria-pressed="true">Medium</button><button type="button" data-v="full" aria-pressed="false">Full</button></div></div>
+                  </div>
+                  <div class="field">
+                    <div class="lb">Language</div>
+                    <div><div class="opts" data-locked><button type="button" aria-pressed="false" aria-disabled="true">Follow my language</button><button type="button" aria-pressed="true" aria-disabled="true">English</button><button type="button" aria-pressed="false" aria-disabled="true">Deutsch</button></div>
+                      <span class="hint"><span class="lockline"><svg><use href="#i-lock"/></svg><span>Set by your IT department in policy.json, <code>novaPersona.language</code></span></span></span></div>
+                  </div>
+                  <div class="field">
+                    <div class="lb">Standing instructions<span>Version 6 of 6</span></div>
+                    <div class="sm soft">Name the organization in every answer. Give device names as they appear in Intune. Say when data is older than an hour. <button class="bt ghost sm" type="button" style="height:22px;padding:0 6px">Edit</button></div>
+                  </div>
+                  <div class="sample" aria-live="polite">
+                    <div class="h"><span class="mini" data-initial>N</span>A sample answer with these settings</div>
+                    <div class="t" id="sampletext"></div>
+                  </div>
+                </div>
+              </div>
+            </div></div>
+          </div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>The name is 1 to 24 characters. Clearing the field puts Nova back. Internal ids, the audit types <code>nova.*</code> and the policy keys keep the old name; the admin never sees them.</li>
+        <li>A rename is a configuration audit event. When IT locks the name, the nameplate shows the name without the dashed underline and a lock line under it, like Language here.</li>
+        <li>The persona feeds typed Chat as well as voice (Phase B2), so the sample is a Chat answer, not a voice line.</li>
+      </ul>
+    </section>
+
+    <!-- B -->
+    <section class="sect" id="b">
+      <h2>B. What <span data-name>Nova</span> may reach</h2>
+      <p>Grants are a list of switches grouped by kind: servers, connectors, agents, skills and the web. Connectors split read from send. A server or connector without a grant is neither offered to the model nor callable. Hosts that receive data are amber, as everywhere.</p>
+      <div class="win">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="shell">
+          <aside class="side" data-side="settings"></aside>
+          <div class="appmain">
+            <div class="topbar" data-top="tools"></div>
+            <div class="page"><div class="page-in narrow">
+              <div class="page-head"><div><h1>Access</h1><p><span data-name>Nova</span> can only use what is switched on here. Every grant is checked when tools are offered and again when one is called.</p></div></div>
+
+              <div class="grp">
+                <h3>MCP servers <span>3 of 4 on</span></h3>
+                <div class="colh"><span></span><span></span><span>Use</span><span></span></div>
+                <div class="grant one"><span class="ic"><svg><use href="#i-book"/></svg></span><div><div class="nm">Microsoft Learn</div><div class="ds">Public reference. Words from questions go to <span class="host">learn.microsoft.com</span></div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="true" aria-label="Use Microsoft Learn"></button></span></div>
+                <div class="grant one"><span class="ic"><svg><use href="#i-book"/></svg></span><div><div class="nm">Splashtop Docs</div><div class="ds">Public reference. Words from questions go to <span class="host">support-splashtopbusiness.splashtop.com</span></div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="false" aria-label="Use Splashtop Docs"></button></span></div>
+                <div class="grant one"><span class="ic"><svg><use href="#i-plug"/></svg></span><div><div class="nm">Assignment checker</div><div class="ds">Added by you on 12 November. Remote server at <span class="host">tools.contoso.example</span>, 6 tools reviewed, read-only. Tenant data from answers can reach it.</div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="true" aria-label="Use Assignment checker"></button></span></div>
+                <div class="grant one"><span class="ic"><svg><use href="#i-plug"/></svg></span><div><div class="nm">KQL reference</div><div class="ds">Public reference. Words from questions go to <span class="host">kql.contoso.example</span></div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="true" aria-label="Use KQL reference"></button></span></div>
+                <div style="padding:10px 0 0;border-top:1px solid var(--color-border-soft)"><button class="bt secondary sm" type="button">Add a server by URL</button> <span class="xs muted" style="margin-left:8px">Only servers your IT department lists can be added.</span></div>
+              </div>
+
+              <div class="grp">
+                <h3>Connectors <span>Woodgrove Bank</span></h3>
+                <div class="colh"><span></span><span></span><span>Read</span><span>Send</span></div>
+                <div class="grant"><span class="ic" data-s="intune">M</span><div><div class="nm">Microsoft 365</div><div class="ds">Intune, Entra and Defender with your sign-in</div></div><span class="tg"><span class="lab">Read</span><button class="sw" role="switch" aria-checked="true" aria-label="Read Microsoft 365"></button></span><span class="na">Changes go through agents</span></div>
+                <div class="grant"><span class="ic"><svg><use href="#i-teams"/></svg></span><div><div class="nm">Teams</div><div class="ds">Reads channels you added. Sends post to those channels after you confirm each message.</div></div><span class="tg"><span class="lab">Read</span><button class="sw" role="switch" aria-checked="true" aria-label="Read Teams"></button></span><span class="tg"><span class="lab">Send</span><button class="sw" role="switch" aria-checked="true" aria-label="Send to Teams"></button></span></div>
+                <div class="grant"><span class="ic"><svg><use href="#i-ticket"/></svg></span><div><div class="nm">ServiceNow</div><div class="ds">Reads incidents assigned to the endpoint team</div></div><span class="tg"><span class="lab">Read</span><button class="sw" role="switch" aria-checked="true" aria-label="Read ServiceNow"></button></span><span class="tg"><span class="lab">Send</span><button class="sw" role="switch" aria-checked="false" disabled aria-label="Send to ServiceNow, set by IT"></button></span>
+                  <span class="lockline"><svg><use href="#i-lock"/></svg><span>Send set by your IT department in policy.json, <code>novaCapabilities.connectorSends</code></span></span></div>
+                <div class="grant"><span class="ic">ST</span><div><div class="nm">Splashtop</div><div class="ds">Not granted. <span data-name>Nova</span> does not see Splashtop tools.</div></div><span class="tg"><span class="lab">Read</span><button class="sw" role="switch" aria-checked="false" aria-label="Read Splashtop"></button></span><span class="tg"><span class="lab">Send</span><button class="sw" role="switch" aria-checked="false" aria-label="Send to Splashtop"></button></span></div>
+              </div>
+
+              <div class="grp">
+                <h3>Installed agents <span><span data-name>Nova</span> may start these</span></h3>
+                <div class="grant one"><span class="ic"><svg><use href="#i-agents"/></svg></span><div><div class="nm">Find inactive devices <span class="ro">Reads only</span></div><div class="ds">Starts when you ask, with the active organization</div></div><span class="tg"><span class="lab">Start</span><button class="sw" role="switch" aria-checked="true" aria-label="Start Find inactive devices"></button></span></div>
+                <div class="grant one"><span class="ic"><svg><use href="#i-agents"/></svg></span><div><div class="nm">Retire stale devices <span class="ro">Changes tenant</span></div><div class="ds">Can prepare the plan. The diff waits for you and the typed confirmation.</div></div><span class="tg"><span class="lab">Start</span><button class="sw" role="switch" aria-checked="true" aria-label="Start Retire stale devices"></button></span></div>
+              </div>
+
+              <div class="grp">
+                <h3>Skills and the web</h3>
+                <div class="grant one"><span class="ic"><svg><use href="#i-skill"/></svg></span><div><div class="nm">Skills</div><div class="ds">5 of 6 skills in the library. A skill uses only tools granted on this page.</div></div><button class="bt ghost sm" type="button" style="justify-self:center">Choose</button></div>
+                <div class="grant one"><span class="ic"><svg><use href="#i-globe"/></svg></span><div><div class="nm">Web search</div><div class="ds">Off. Search words would go to the search provider.</div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="false" disabled aria-label="Web search, set by IT"></button></span>
+                  <span class="lockline"><svg><use href="#i-lock"/></svg><span>Set by your IT department in policy.json, <code>novaCapabilities.webSearch</code></span></span></div>
+              </div>
+
+              <div class="rule"><svg><use href="#i-lock"/></svg><span>No grant on this page lets <span data-name>Nova</span> change a tenant. To change one, it prepares a plan with an agent that changes the tenant, and you confirm the diff.</span></div>
+            </div></div>
+          </div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>The strip names the hosts of granted servers while their tools are offered, and drops a host the moment its switch goes off.</li>
+        <li>Microsoft 365 has no Send switch: changes to a tenant are never a connector send. The cell says so in words instead of showing a disabled switch.</li>
+        <li>Locked switches keep their state visible and name the key. The keys are today's <code>novaCapabilities</code> keys in policy.json.</li>
+        <li>Below 600 px of content width the column heads go and each switch carries its own label.</li>
+      </ul>
+    </section>
+
+    <!-- C -->
+    <section class="sect" id="c">
+      <h2>C. The skills library</h2>
+      <p>A skill is a named procedure <span data-name>Nova</span> loads when a question matches its description. Each one is a SKILL.md file in the open format, so it can be imported from and exported to any tool that reads that format. The library lists skills with their version and scope, and the detail shows the procedure, the source and the history.</p>
+      <div class="win">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="shell">
+          <aside class="side" data-side="settings"></aside>
+          <div class="appmain">
+            <div class="topbar" data-top="local"></div>
+            <div class="page">
+              <div class="lib">
+                <div class="list">
+                  <div class="hd"><h2>Skills</h2><button class="bt ghost sm" type="button" title="Import"><svg width="14" height="14"><use href="#i-down"/></svg>Import</button></div>
+                  <button class="sk" type="button" aria-current="true"><span class="n">Stale device triage<span class="v">v3</span></span><span class="d">Sorts devices that stopped checking in into replaced, lost and asleep</span><span class="scope">This device</span></button>
+                  <button class="sk" type="button"><span class="n">Morning compliance check<span class="v">v4</span></span><span class="d">Non-compliant devices since yesterday, grouped by policy</span><span class="scope">This device</span></button>
+                  <button class="sk" type="button"><span class="n">Autopilot failure triage<span class="v">v2</span></span><span class="d">Reads ESP and Autopilot events for one device</span><span class="scope">Imported</span></button>
+                  <button class="sk" type="button"><span class="n">Licence reclaim shortlist<span class="v">v2</span></span><span class="d">Users with a licence and no sign-in for 60 days</span><span class="scope">Woodgrove Bank</span></button>
+                  <button class="sk" type="button"><span class="n">Conditional Access gaps<span class="v">v1</span></span><span class="d">Policies in report-only for more than 30 days</span><span class="scope">This device</span></button>
+                  <button class="sk" type="button" style="opacity:.6"><span class="n">Teams summary style<span class="v">v1</span></span><span class="d">Not granted in Access</span><span class="scope">This device</span></button>
+                </div>
+                <div class="detail">
+                  <div class="det-hd">
+                    <div><h3>Stale device triage</h3><p>Sorts devices that stopped checking in into replaced, lost and asleep, before anyone suggests retiring them.</p></div>
+                    <div class="act"><button class="bt ghost sm" type="button"><svg width="14" height="14"><use href="#i-up"/></svg>Export</button><button class="bt secondary sm" type="button"><svg width="14" height="14"><use href="#i-pen"/></svg>Edit</button></div>
+                  </div>
+                  <div class="tabs" role="tablist">
+                    <button type="button" role="tab" aria-selected="true" data-tab="proc">Procedure</button>
+                    <button type="button" role="tab" aria-selected="false" data-tab="md">SKILL.md</button>
+                    <button type="button" role="tab" aria-selected="false" data-tab="hist">History</button>
+                  </div>
+                  <div class="tabpane" data-pane="proc">
+                    <ol class="sm" style="margin:0;padding-left:20px;max-width:64ch">
+                      <li style="padding:3px 0">List devices with no check-in for the number of days asked, 30 if none.</li>
+                      <li style="padding:3px 0">For each primary user, look for a sign-in from another device in the same period. If there is one, call the device replaced.</li>
+                      <li style="padding:3px 0">Check the Autopilot profile before calling a device lost; kiosks have no primary user.</li>
+                      <li style="padding:3px 0">Return three groups with counts. Never suggest retiring a device in the asleep group.</li>
+                    </ol>
+                    <div class="tools">
+                      <span class="xs muted" style="border-top:0">Tools it may use</span><span class="xs muted" style="border-top:0;text-align:right">With <span data-name>Nova</span>'s access</span>
+                      <code>graph.read managedDevices</code><span class="ok">Granted</span>
+                      <code>graph.read signIns</code><span class="ok">Granted</span>
+                      <code>graph.read windowsAutopilotDeviceIdentities</code><span class="ok">Granted</span>
+                      <code>teams.send</code><span class="off">Not granted, not used</span>
+                    </div>
+                    <p class="xs muted" style="margin-top:12px">Skills cannot change a tenant. A skill that names a change, such as <code>devices.retire</code>, is refused on import and on save.</p>
+                  </div>
+                  <div class="tabpane" data-pane="md" hidden>
+<pre class="src"><span class="fm">---</span>
+<span class="k">name:</span> stale-device-triage
+<span class="k">description:</span> Sorts Intune devices that stopped checking in into
+  replaced, lost and asleep. Use when asked about inactive, stale or
+  missing devices, or before any retire or wipe is discussed.
+<span class="k">allowed-tools:</span> graph.read managedDevices, graph.read signIns,
+  graph.read windowsAutopilotDeviceIdentities, teams.send
+<span class="k">metadata:</span>
+  <span class="k">version:</span> "3"
+  <span class="k">scope:</span> device
+<span class="fm">---</span>
+
+<span class="h"># Stale device triage</span>
+
+1. List devices with no check-in for the number of days asked, 30 if none.
+2. For each primary user, look for a sign-in from another device in the
+   same period. If there is one, call the device replaced.
+3. Check the Autopilot profile before calling a device lost; kiosks have
+   no primary user.
+4. Return three groups with counts. Never suggest retiring a device in
+   the asleep group.</pre>
+                  </div>
+                  <div class="tabpane" data-pane="hist" hidden>
+                    <ul class="hist">
+                      <li><span class="vn">v3</span><div>Added the Autopilot check in step 3<span class="wh" style="display:block">From a learning proposal you accepted, 16 November</span></div><span class="cur">Current</span></li>
+                      <li><span class="vn">v2</span><div>Default of 30 days when none is asked<span class="wh" style="display:block">Edited by you, 9 November</span></div><button class="bt ghost sm" type="button">Restore</button></li>
+                      <li><span class="vn">v1</span><div>Saved from a conversation<span class="wh" style="display:block">Fabrikam, 4 November</span></div><button class="bt ghost sm" type="button">Restore</button></li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="two" style="margin-top:16px">
+        <div class="pcard" style="margin-top:0">
+          <div class="top"><svg width="14" height="14"><use href="#i-down"/></svg><span class="kind">Import review</span><span>intune-app-triage/SKILL.md</span></div>
+          <div class="in">
+            <h3>Import App install triage</h3>
+            <p>The file is valid SKILL.md. Two of its tools need attention before it is saved.</p>
+            <div class="tools">
+              <code>graph.read mobileAppInstallStatuses</code><span class="ok">Granted</span>
+              <code>servicenow.send</code><span class="off">Not granted, stays unused</span>
+              <code>apps.assign</code><span class="no">A change, removed</span>
+            </div>
+          </div>
+          <div class="acts"><button class="bt primary sm" type="button">Import without apps.assign</button><button class="bt ghost sm" type="button">Cancel</button><span class="r">Saved for this device</span></div>
+        </div>
+        <ul class="notes" style="margin-top:0">
+          <li>Imports accept a SKILL.md file or a folder that holds one. Export writes the same format, with the version in <code>metadata</code>.</li>
+          <li>A tool outside the grants in B is kept in the file but never offered. A tool that changes a tenant is removed on import, and the card says which.</li>
+          <li>Scope is This device or one organization. An organization skill only loads while that organization is active.</li>
+          <li>A skill that is not granted in Access stays in the library, dimmed, so it is not lost.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- D -->
+    <section class="sect" id="d">
+      <h2>D. Save as skill, from a conversation</h2>
+      <p>When a conversation has turned into a procedure (several reads, a correction, a result the admin kept), the agent offers to keep it. The card shows the draft in plain steps and the tools it used, and saves nothing until the admin clicks.</p>
+      <div class="win">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="shell">
+          <aside class="side" data-side="chat"></aside>
+          <div class="appmain">
+            <div class="topbar" data-top="local" data-org="fabrikam"></div>
+            <div class="page"><div class="chat">
+              <div class="q">Same check for Fabrikam, but skip the kiosks, they never have a user.</div>
+              <div class="ans">
+                <div class="who"><span class="mini" data-initial>N</span><span><span data-name>Nova</span> with Ollama, Fabrikam</span></div>
+                <div class="body">Fabrikam has 22 devices without a check-in for 30 days, after leaving out 9 kiosks. 14 look replaced, 5 look lost, 3 are asleep laptops whose users are on leave.</div>
+              </div>
+              <div class="pcard">
+                <div class="top"><svg width="14" height="14"><use href="#i-skill"/></svg><span class="kind">Save as skill</span><span>Draft from this conversation</span></div>
+                <div class="in">
+                  <h3>Keep this as a skill?</h3>
+                  <p>You have asked for this triage in two organizations and corrected it once. As a skill, <span data-name>Nova</span> uses it whenever stale devices come up.</p>
+                  <dl class="kv">
+                    <dt>Name</dt><dd>Stale device triage</dd>
+                    <dt>Steps</dt><dd>List devices without a check-in. Leave out kiosks. Look for a sign-in from another device. Group as replaced, lost, asleep.</dd>
+                    <dt>Tools</dt><dd><code>graph.read managedDevices</code>, <code>graph.read signIns</code></dd>
+                    <dt>Scope</dt><dd>This device, all organizations</dd>
+                  </dl>
+                </div>
+                <div class="acts"><button class="bt primary sm" type="button">Save skill</button><button class="bt secondary sm" type="button">Edit first</button><button class="bt ghost sm" type="button">Not now</button><span class="r">Read-only tools only</span></div>
+              </div>
+            </div></div>
+          </div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>The card appears once per conversation, after the answer, never in the middle of one. Not now hides it for this conversation.</li>
+        <li>When a later answer uses the skill, the answer line says so: "<span data-name>Nova</span> with Ollama, using Stale device triage v3".</li>
+      </ul>
+    </section>
+
+    <!-- E -->
+    <section class="sect" id="e">
+      <h2>E. Learning proposals</h2>
+      <p>The agent notices corrections (an edited answer, the same correction twice, a suggestion rejected) and turns them into a proposal: a note, a change to the standing instructions or a skill update. Each shows its evidence and the exact change. Nothing is learned without a click.</p>
+      <div class="deck">
+        <div class="pcard" style="margin-top:0">
+          <div class="top"><svg width="14" height="14"><use href="#i-pen"/></svg><span class="kind">Note</span><span>Woodgrove Bank</span></div>
+          <div class="in">
+            <h3><span data-name>Nova</span> suggests a note</h3>
+            <p>Devices named WGB-KSK are kiosks. Leave them out of inactive device lists.</p>
+            <p class="why">Because you removed kiosk devices from two answers this week, on 13 and 17 November.</p>
+          </div>
+          <div class="acts"><button class="bt primary sm" type="button">Save note</button><button class="bt secondary sm" type="button">Edit</button><button class="bt ghost sm" type="button">Dismiss</button><span class="r">Category: naming</span></div>
+        </div>
+        <div class="pcard" style="margin-top:0">
+          <div class="top"><svg width="14" height="14"><use href="#i-pen"/></svg><span class="kind">Instruction change</span><span>Standing instructions, version 6 to 7</span></div>
+          <div class="in">
+            <h3>Answer in German when you write in German</h3>
+            <div class="diff">
+              <div class="ctx">Name the organization in every answer.</div>
+              <div class="del">Answer in English.</div>
+              <div class="add">Answer in German when I write in German, otherwise in English.</div>
+            </div>
+            <p class="why">Because you asked for German twice after a German question, on 11 and 15 November.</p>
+          </div>
+          <div class="acts"><button class="bt primary sm" type="button">Apply change</button><button class="bt secondary sm" type="button">Edit</button><button class="bt ghost sm" type="button">Dismiss</button><span class="r">Version 6 stays restorable</span></div>
+        </div>
+        <div class="pcard" style="margin-top:0">
+          <div class="top"><svg width="14" height="14"><use href="#i-skill"/></svg><span class="kind">Skill update</span><span>Stale device triage, v2 to v3</span></div>
+          <div class="in">
+            <h3>Check the Autopilot profile before calling a device lost</h3>
+            <div class="diff">
+              <div class="ctx">2. For each primary user, look for a sign-in from another device.</div>
+              <div class="add">3. Check the Autopilot profile before calling a device lost; kiosks have no primary user.</div>
+              <div class="ctx">4. Return three groups with counts.</div>
+            </div>
+            <p class="why">Because you rejected "5 lost devices" on 16 November and pointed at the Autopilot profile.</p>
+          </div>
+          <div class="acts"><button class="bt primary sm" type="button">Update skill</button><button class="bt secondary sm" type="button">Edit</button><button class="bt ghost sm" type="button">Dismiss</button><span class="r">Tools unchanged</span></div>
+        </div>
+        <div class="win" style="min-height:0"><div class="page"><div class="page-in" style="padding:18px 20px 20px">
+          <div class="sec-h" style="margin-top:0"><h2>Notes, Woodgrove Bank</h2><span class="r xs muted">14 notes</span></div>
+          <ul class="rows sm">
+            <li class="chk" style="border-top:0"><div class="nm">4 notes not used in 60 days</div><div class="ds">Notes that no answer has used since September. Keep or forget each.</div><div class="a"><button class="bt secondary sm" type="button">Review</button></div></li>
+            <li class="chk"><div class="nm">Devices named WGB-KSK are kiosks <span class="ro">naming</span></div><div class="ds">Confirmed today. Last used today.</div><div class="a"><button class="bt ghost sm" type="button">Forget</button></div></li>
+            <li class="chk"><div class="nm">Finance laptops are replaced every 36 months <span class="ro">fleet</span></div><div class="ds">Confirmed 2 October. Last used 12 November.</div><div class="a"><button class="bt ghost sm" type="button">Forget</button></div></li>
+          </ul>
+        </div></div></div>
+      </div>
+      <ul class="notes">
+        <li>The same correction given twice makes one proposal, not two; its evidence line lists both dates. A dismissed proposal is not offered again for that correction.</li>
+        <li>Proposals wait in the Needs you list until handled; they never apply when the card scrolls away.</li>
+        <li>Notes gain a category and a last-used date, and stale notes are reviewed in one place instead of expiring silently.</li>
+      </ul>
+    </section>
+
+    <!-- F -->
+    <section class="sect" id="f">
+      <h2>F. Recurring checks and the daily brief</h2>
+      <p>The admin can ask for a read-only check to repeat, and for one brief per organization each morning. Each is confirmed on a card, counted against a cap that is visible, listed per organization, and stopped when the organization is disconnected.</p>
+      <div class="two">
+        <div class="win">
+          <div class="page"><div class="page-in" style="padding:22px 24px 26px">
+            <div class="page-head" style="margin-bottom:6px"><div><h1>Checks and brief</h1><p>Read-only questions <span data-name>Nova</span> asks again on a schedule, while this computer is on.</p></div></div>
+            <div class="orgh"><span class="av">WB</span><h3>Woodgrove Bank</h3><span class="r">4 of 5 checks<span class="cap-meter" aria-hidden="true"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span></span></div>
+            <div class="chk"><div class="nm">Daily brief <span class="ro">Read-only</span></div><div class="ds">Weekdays at 08:00, in Chat. Last brief today, 5 items.</div><div class="a"><button class="bt ghost sm" type="button">Pause</button></div></div>
+            <div class="chk"><div class="nm">Devices out of compliance for 7 days <span class="ro">Read-only</span></div><div class="ds">Mondays at 07:00. Last run found 12.</div><div class="a"><button class="bt ghost sm" type="button">Stop</button></div></div>
+            <div class="chk"><div class="nm">Expiring app secrets <span class="ro">Read-only</span></div><div class="ds">Daily at 06:30. Last run found 0.</div><div class="a"><button class="bt ghost sm" type="button">Stop</button></div></div>
+            <div class="chk"><div class="nm">New global administrators <span class="ro">Read-only</span></div><div class="ds">Daily at 06:30. Last run found 0.</div><div class="a"><button class="bt ghost sm" type="button">Stop</button></div></div>
+            <div class="orgh"><span class="av">FA</span><h3>Fabrikam</h3><span class="r">Stopped</span></div>
+            <div class="chk"><div class="nm">2 checks and the daily brief stopped</div><div class="ds warn">Fabrikam was disconnected on 14 November, so its checks stopped and nothing has run since. Connect Fabrikam again to restart them.</div><div class="a"><button class="bt secondary sm" type="button">Connect</button></div></div>
+            <div class="orgh"><span class="av">CO</span><h3>Contoso</h3><span class="r">1 of 5 checks</span></div>
+            <div class="chk"><div class="nm">Stale devices <span class="ro">Read-only</span></div><div class="ds warn">Did not start today at 07:00: the sign-in for Contoso expired yesterday. Sign in again and it runs at the next time.</div><div class="a"><button class="bt secondary sm" type="button">Sign in</button></div></div>
+          </div></div>
+        </div>
+        <div style="display:grid;gap:16px;align-content:start">
+          <div class="pcard" style="margin-top:0">
+            <div class="top"><svg width="14" height="14"><use href="#i-clock"/></svg><span class="kind">Recurring check</span><span>Woodgrove Bank</span></div>
+            <div class="in">
+              <h3>Ask this every Friday at 16:00?</h3>
+              <p>Apps that failed to install this week, grouped by app. <span data-name>Nova</span> answers in Chat and says what changed since the last run.</p>
+              <dl class="kv">
+                <dt>Reads</dt><dd>Intune app install status. Nothing is changed.</dd>
+                <dt>Runs</dt><dd>While this computer is on and Woodgrove Bank is connected</dd>
+                <dt>Cap</dt><dd>5 of 5 checks for Woodgrove Bank after this one. Stop a check to add another later.</dd>
+              </dl>
+            </div>
+            <div class="acts"><button class="bt primary sm" type="button">Start check</button><button class="bt ghost sm" type="button">Not now</button></div>
+          </div>
+          <div class="brief">
+            <div class="hd"><h3>Wednesday brief, Woodgrove Bank</h3><span>08:00, from the cache refreshed 07:52</span></div>
+            <ol>
+              <li><span class="n">1</span><span>12 devices out of compliance for 7 days<span class="d">3 more than Monday, all on the Windows baseline 24H2</span></span><button class="bt ghost sm" type="button">Open</button></li>
+              <li><span class="n">2</span><span>A client secret expires in 9 days<span class="d">Payroll export app</span></span><button class="bt ghost sm" type="button">Open</button></li>
+              <li><span class="n">3</span><span>2 learning proposals wait for you</span><button class="bt ghost sm" type="button">Review</button></li>
+              <li><span class="n">4</span><span>Retire stale devices is ready to plan<span class="d">Plans on this device; you confirm the diff</span></span><button class="bt ghost sm" type="button">Plan</button></li>
+            </ol>
+            <p class="ft">One brief per organization per day. Read-only. Stop it in Settings, Checks and brief.</p>
+          </div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>A check never runs a write step. A finding that calls for a change becomes a Plan button, which starts the normal write flow on this device.</li>
+        <li>The cap is shown as a small meter beside each organization and on the card that adds a check, so nobody learns about it from an error.</li>
+        <li>Disconnect stops every check for that organization at once and says so on the list. An expired sign-in skips the run and says why.</li>
+      </ul>
+    </section>
+
+    <!-- Questions -->
+    <section class="sect" id="q">
+      <h2>Open questions</h2>
+      <p>Decisions this mockup assumes but does not make. Each one changes copy or a screen above.</p>
+      <ol class="qs">
+        <!-- TODO(ugur): name rules -->
+        <li><b>Name rules.</b> A assumes 1 to 24 characters and that clearing the field restores Nova. Are some names refused (OpenAdminOS, Copilot, an admin's own name), and does the wake phrase need a minimum length for voice?</li>
+        <!-- TODO(ugur): policy key names for persona and name -->
+        <li><b>Policy keys.</b> A uses <code>novaPersona.language</code>, which does not exist yet. Should new keys keep the <code>nova</code> prefix like today's <code>novaCapabilities</code>, or move to a neutral <code>personalAgent</code> prefix?</li>
+        <!-- TODO(ugur): cap numbers -->
+        <li><b>Caps.</b> F assumes 5 recurring checks per organization and one brief per organization per day. Are those the numbers, and does the brief count against the 5?</li>
+        <!-- TODO(ugur): skill scope and sync -->
+        <li><b>Skill scope.</b> C offers This device or one organization. Should a skill also be shareable with a team later, and should Import accept a URL as well as a file?</li>
+        <!-- TODO(ugur): tool naming in allowed-tools -->
+        <li><b>Tool names in SKILL.md.</b> C writes tools as <code>graph.read managedDevices</code>. The open format leaves <code>allowed-tools</code> free text. Which names should skills use so they stay portable?</li>
+        <!-- TODO(ugur): Teams send confirmation -->
+        <li><b>Sends.</b> B says a Teams send is confirmed message by message. Is a per-message confirmation the rule for every connector send, or only for the first send to a channel?</li>
+        <!-- TODO(ugur): checks while the computer is off -->
+        <li><b>Computer off.</b> F runs checks only while this computer is on. Should they use the OS scheduler like agent schedules, or the hosted runs from mockup 33 when that exists?</li>
+      </ol>
+    </section>
+  </main>
+
+  <script>
+    // Theme
+    const setTheme = (t) => {
+      document.documentElement.dataset.theme = t;
+      document.querySelectorAll("[data-theme-set]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.themeSet === t)));
+    };
+    document.querySelectorAll("[data-theme-set]").forEach((b) => b.addEventListener("click", () => setTheme(b.dataset.themeSet)));
+    if (matchMedia("(prefers-color-scheme: dark)").matches) setTheme("dark");
+
+    // Shell pieces. The sidebar carries the agent's name like every other mention.
+    const navItems = [
+      ["chat", "New chat", "i-chat"], ["agents", "Agents", "i-agents"], ["market", "Marketplace", "i-market"],
+      ["conn", "Connections", "i-conn"], ["runs", "Runs", "i-runs"], ["changes", "Changes", "i-changes"],
+    ];
+    document.querySelectorAll("[data-side]").forEach((el) => {
+      const current = el.dataset.side;
+      el.innerHTML = `<div class="side-top"></div><div class="brandrow"><svg width="20" height="20"><use href="#oa"/></svg>OpenAdminOS</div><nav class="snav">${navItems
+        .map(([k, l, i]) => `<a href="#" ${k === current ? 'aria-current="page"' : ""}><svg><use href="#${i}"/></svg>${l}</a>`).join("")}
+        <a href="#"><span class="mini" data-initial>N</span><span data-name>Nova</span></a></nav>
+        <div class="side-foot" ${current === "settings" ? "data-current" : ""}><span class="av">A</span><div class="who">admin@woodgrove.example<span>3 organizations</span></div><svg width="14" height="14" style="margin-left:auto;flex:none;color:var(--color-text-muted)"><use href="#i-gear"/></svg></div>`;
+    });
+    const strips = {
+      local: '<span class="boundary" data-where="local"><span class="pip"></span>Local · Ollama · No data leaves this device</span>',
+      tools: '<span class="boundary" data-where="local"><span class="pip"></span>Local · Ollama<span class="leaves"><span class="bw">· tools reach learn.microsoft.com, tools.contoso.example, kql.contoso.example</span><span class="bs">· 3 tool hosts</span></span></span>',
+    };
+    document.querySelectorAll("[data-top]").forEach((el) => {
+      const [ini, org] = el.dataset.org === "fabrikam" ? ["FA", "Fabrikam"] : ["WB", "Woodgrove Bank"];
+      el.innerHTML = `<button class="orgchip" type="button"><span class="av">${ini}</span>${org}<svg class="chev"><use href="#i-chev"/></svg></button>` + (strips[el.dataset.top] || strips.local);
+    });
+    document.querySelectorAll(".snav a, .setnav a").forEach((a) => a.addEventListener("click", (e) => e.preventDefault()));
+
+    // Rename: one label feeds every mention.
+    const nameInput = document.getElementById("agentname");
+    const applyName = () => {
+      const n = nameInput.value.trim() || "Nova";
+      document.querySelectorAll("[data-name]").forEach((el) => { el.textContent = n; });
+      document.querySelectorAll("[data-initial]").forEach((el) => { el.textContent = n[0].toUpperCase(); });
+      renderSample();
+    };
+    nameInput.addEventListener("input", applyName);
+    nameInput.addEventListener("blur", () => { if (!nameInput.value.trim()) { nameInput.value = "Nova"; applyName(); } });
+
+    // Persona sample
+    const persona = { tone: "plain", len: "medium" };
+    const SAMPLES = {
+      plain: {
+        short: "Woodgrove Bank: 38 devices have not checked in for 30 days. 31 look replaced.",
+        medium: "Woodgrove Bank has 38 devices that have not checked in for 30 days. 31 of their users signed in elsewhere this week, so those look replaced. The other 7 need a look; the list is below.",
+        full: "Woodgrove Bank has 38 devices that have not checked in for 30 days: 27 Windows, 9 iOS and 2 macOS. 31 of their users signed in from another device this week, so those look replaced. The other 7 have no recent sign-in at all and may be lost or stored. The cache is from 08:10, so check-ins after that are not counted.",
+      },
+      warm: {
+        short: "Good news first for Woodgrove Bank: of 38 quiet devices, 31 look simply replaced.",
+        medium: "For Woodgrove Bank, 38 devices have gone quiet for 30 days. Most of it is harmless: 31 users have moved on to another device. That leaves 7 worth a closer look, listed below.",
+        full: "For Woodgrove Bank, 38 devices have gone quiet for 30 days: 27 Windows, 9 iOS and 2 macOS. Most of this is harmless, since 31 users signed in from another device this week. The 7 left have no recent sign-in and are worth a closer look. These numbers come from the 08:10 cache.",
+      },
+      terse: {
+        short: "Woodgrove Bank. 38 stale. 31 replaced. 7 open.",
+        medium: "Woodgrove Bank. 38 devices, no check-in 30 days. 31 users active elsewhere. 7 open, listed below.",
+        full: "Woodgrove Bank. 38 devices, no check-in 30 days: 27 Windows, 9 iOS, 2 macOS. 31 users active elsewhere. 7 with no sign-in. Cache 08:10.",
+      },
+    };
+    function renderSample() { document.getElementById("sampletext").textContent = SAMPLES[persona.tone][persona.len]; }
+    document.querySelectorAll(".opts[data-opt]").forEach((g) => g.addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      persona[g.dataset.opt] = b.dataset.v;
+      g.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      renderSample();
+    }));
+
+    // Switches
+    document.querySelectorAll(".sw").forEach((s) => s.addEventListener("click", () => {
+      if (s.disabled) return;
+      s.setAttribute("aria-checked", String(s.getAttribute("aria-checked") !== "true"));
+    }));
+
+    // Skill detail tabs
+    document.querySelectorAll(".tabs").forEach((t) => t.addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      t.querySelectorAll("button").forEach((x) => x.setAttribute("aria-selected", String(x === b)));
+      const root = t.parentElement;
+      root.querySelectorAll(".tabpane").forEach((p) => { p.hidden = p.dataset.pane !== b.dataset.tab; });
+    }));
+
+    applyName();
+  </script>
+</body>
+</html>
