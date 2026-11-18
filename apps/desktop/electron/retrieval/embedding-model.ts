@@ -1,5 +1,5 @@
-import { classifyOllamaEndpoint, isConnectionRefused, isRefusedRedirect, modelServerRedirect, ollamaHostEndpoint, redirectRefusedDetail } from "@openadminos/runtime";
-import { DEFAULT_INDEX_EMBEDDING_MODEL, loopbackEndpoint } from "./retrieval.js";
+import { classifyOllamaEndpoint, isConnectionRefused, isRefusedRedirect, ollamaHostEndpoint, redirectRefusedDetail } from "@openadminos/runtime";
+import { DEFAULT_INDEX_EMBEDDING_MODEL, connectionCode, fetchLoopback, loopbackLabel } from "./retrieval.js";
 
 /**
  * The documentation index is only half of grounding. Retrieval also
@@ -42,14 +42,12 @@ export async function embeddingModelState(
   model: string = DEFAULT_INDEX_EMBEDDING_MODEL,
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ ollamaReachable?: boolean; installed: boolean; error?: string }> {
-  const url = `${loopbackEndpoint(endpoint)}/api/tags`;
+  // Refuses a non-loopback endpoint before any connection.
+  loopbackLabel(endpoint, "/api/tags");
   const recovery = "Check Ollama's local endpoint, then refresh the documentation index status.";
   let answered = false;
   try {
-    const response = await fetchImpl(url, {
-      signal: AbortSignal.timeout(3000),
-      redirect: modelServerRedirect(url),
-    });
+    const { response, url } = await fetchLoopback(endpoint, "/api/tags", { signal: AbortSignal.timeout(3000) }, fetchImpl);
     answered = true;
     if (isRefusedRedirect(response, url)) {
       return { ollamaReachable: true, installed: false, error: `${redirectRefusedDetail("Ollama", url)} ${recovery}` };
@@ -68,7 +66,7 @@ export async function embeddingModelState(
     return { ollamaReachable: true, installed };
   } catch (error) {
     // A reset means something answered and then closed the connection: not a stopped Ollama.
-    if (!answered && failureCode(error) !== "ECONNRESET" && isConnectionRefused(error)) return { ollamaReachable: false, installed: false };
+    if (!answered && connectionCode(error) !== "ECONNRESET" && isConnectionRefused(error)) return { ollamaReachable: false, installed: false };
     const reason = error instanceof SyntaxError
       ? "Ollama returned an invalid model list."
       : error instanceof Error && error.name === "TimeoutError"
@@ -89,13 +87,11 @@ export async function pullEmbeddingModel(
   model: string = DEFAULT_INDEX_EMBEDDING_MODEL,
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
-  const url = `${loopbackEndpoint(endpoint)}/api/pull`;
-  const response = await fetchImpl(url, {
+  const { response, url } = await fetchLoopback(endpoint, "/api/pull", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ model, stream: false }),
-    redirect: modelServerRedirect(url),
-  });
+  }, fetchImpl);
   if (isRefusedRedirect(response, url)) throw new Error(redirectRefusedDetail("Ollama", url));
   // Ollama reports a failed download in the body, often with HTTP 500:
   // read it first, so the reason (an unreachable registry, a proxy) is kept.

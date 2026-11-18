@@ -7,7 +7,7 @@ import { describe, it } from "node:test";
 
 import { AppStateStore } from "../state.js";
 import { embeddingModelState, pullEmbeddingModel } from "./embedding-model.js";
-import { EMBEDDING_QUERY_TIMEOUT_MS, loopbackEmbedQuery, loopbackEndpoint, ollamaEmbedQuery } from "./retrieval.js";
+import { EMBEDDING_QUERY_TIMEOUT_MS, loopbackEmbedQuery, loopbackEndpoints, ollamaEmbedQuery } from "./retrieval.js";
 
 /** An embedding server on this device that redirects every request to a second one, which counts what reaches it. */
 async function redirectingPair(): Promise<{ origin: string; hits: () => number; close: () => Promise<void> }> {
@@ -153,13 +153,13 @@ describe("local documentation retrieval never follows a redirect from this devic
 
   it("connects only to a loopback IP address, so no resolver can send the question elsewhere (PR #206 review rounds 2 and 3)", async (t) => {
     // A localhost name is resolved by the operating system: it becomes 127.0.0.1 before any connection.
-    assert.equal(loopbackEndpoint("http://localhost:11434"), "http://127.0.0.1:11434");
-    assert.equal(loopbackEndpoint("http://LOCALHOST.:11434/"), "http://127.0.0.1:11434");
+    assert.deepEqual(loopbackEndpoints("http://localhost:11434"), ["http://127.0.0.1:11434", "http://[::1]:11434"]);
+    assert.deepEqual(loopbackEndpoints("http://LOCALHOST.:11434/"), ["http://127.0.0.1:11434", "http://[::1]:11434"]);
     for (const endpoint of ["http://127.0.0.1:11434", "http://[::1]:11434", "http://127.0.0.2:11434"]) {
-      assert.equal(loopbackEndpoint(endpoint), endpoint);
+      assert.deepEqual(loopbackEndpoints(endpoint), [endpoint]);
     }
     for (const endpoint of ["http://10.0.0.5:11434", "https://models.example.com", "http://localhost.example.com:11434", "http://ollama.local:11434", "http://user:pass@127.0.0.1:11434", "unix:///var/run/ollama.sock", "not a url"]) {
-      assert.throws(() => loopbackEndpoint(endpoint), /Retrieval must stay local/, endpoint);
+      assert.throws(() => loopbackEndpoints(endpoint), /Retrieval must stay local/, endpoint);
     }
     const urls: string[] = [];
     t.mock.method(globalThis, "fetch", async (url: Parameters<typeof fetch>[0]) => {
@@ -170,6 +170,26 @@ describe("local documentation retrieval never follows a redirect from this devic
     await loopbackEmbedQuery("http://localhost:8081")("test");
     await embeddingModelState("http://localhost.:11434");
     assert.deepEqual(urls, ["http://127.0.0.1:11434/api/embed", "http://127.0.0.1:8081/v1/embeddings", "http://127.0.0.1:11434/api/tags"]);
+  });
+
+  it("reaches an Ollama on IPv6 only through localhost, by address, and names both addresses when neither answers (PR #206 review round 4)", async (t) => {
+    const refused = () => {
+      throw new TypeError("fetch failed", { cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }) });
+    };
+    const urls: string[] = [];
+    const request = t.mock.method(globalThis, "fetch", async (url: Parameters<typeof fetch>[0]) => {
+      urls.push(String(url));
+      if (String(url).startsWith("http://127.0.0.1")) refused();
+      return Response.json({ embeddings: [[0.1]], models: [{ name: "nomic-embed-text:latest" }] });
+    });
+    assert.deepEqual(await ollamaEmbedQuery("http://localhost:11434")("test"), [0.1]);
+    assert.deepEqual(await embeddingModelState("http://localhost:11434"), { ollamaReachable: true, installed: true });
+    assert.deepEqual(urls, ["http://127.0.0.1:11434/api/embed", "http://[::1]:11434/api/embed", "http://127.0.0.1:11434/api/tags", "http://[::1]:11434/api/tags"]);
+
+    request.mock.mockImplementation(async () => refused());
+    await assert.rejects(ollamaEmbedQuery("http://localhost:11434")("test"), (error: Error) =>
+      error.message === "Ollama is not reachable at http://127.0.0.1:11434/api/embed or http://[::1]:11434/api/embed. Start the local server, then ask again.");
+    assert.equal((await embeddingModelState("http://localhost:11434")).ollamaReachable, false);
   });
 
   it("treats a reset as a failed request, not a stopped server, and refuses a vector or model list it cannot use (PR #206 review round 2)", async (t) => {

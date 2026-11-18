@@ -94,12 +94,17 @@ export class RetrievalIndex {
       return [];
     }
     const k = Math.max(1, Math.min(options.k ?? 12, 50));
-    const q = await embedQuery(query);
-    if (q.length !== index.meta.dim) {
+    const raw = await embedQuery(query);
+    if (raw.length !== index.meta.dim) {
       throw new Error(
-        `Query embedding has ${q.length} dimensions but the index expects ${index.meta.dim}. The embedding model does not match the index.`,
+        `Query embedding has ${raw.length} dimensions but the index expects ${index.meta.dim}. The embedding model does not match the index.`,
       );
     }
+    // Cosine similarity does not depend on scale: dividing by the largest entry keeps a huge
+    // but finite vector from overflowing its norm and scoring every passage as 0.
+    let largest = 0;
+    for (const value of raw) largest = Math.max(largest, Math.abs(value));
+    const q = largest > 0 ? raw.map((value) => value / largest) : raw;
     let qNorm = 0;
     for (const value of q) qNorm += value * value;
     qNorm = Math.sqrt(qNorm) || 1;
@@ -281,7 +286,7 @@ function embeddingFailure(server: string, url: string, error: unknown): Error {
   if (error instanceof Error && error.name === "TimeoutError") {
     return new EmbeddingQueryError(`${server} did not finish embedding the question within ${EMBEDDING_QUERY_TIMEOUT_MS / 1000} seconds. Check that it is running, then ask again.`);
   }
-  const code = error instanceof Error && error.cause && typeof error.cause === "object" && "code" in error.cause && typeof error.cause.code === "string" ? error.cause.code : undefined;
+  const code = connectionCode(error);
   // A reset means something answered and then closed the connection: not a stopped server.
   if (code !== "ECONNRESET" && isConnectionRefused(error)) {
     return new EmbeddingQueryError(`${server} is not reachable at ${url}. Start the local server, then ask again.`);
@@ -296,21 +301,21 @@ function embeddingFailure(server: string, url: string, error: unknown): Error {
  * Posts one question for embedding and reads the answer inside the same
  * time budget, so a body that stalls after its headers times out too.
  */
-async function queryEmbedding<T>(url: string, server: string, body: unknown, read: (response: Response) => Promise<T>): Promise<T> {
+async function queryEmbedding<T>(endpoint: string, path: string, server: string, body: unknown, read: (response: Response) => Promise<T>): Promise<T> {
+  const label = loopbackLabel(endpoint, path);
   try {
-    const response = await fetch(url, {
+    // The question is in the body. Refuse any redirect from the local service.
+    const { response, url } = await fetchLoopback(endpoint, path, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(EMBEDDING_QUERY_TIMEOUT_MS),
-      // The question is in the body. Refuse any redirect from the local service.
-      redirect: modelServerRedirect(url),
     });
     if (isRefusedRedirect(response, url)) throw new EmbeddingQueryError(redirectRefusedDetail(server, url));
     return await read(response);
   } catch (error) {
     if (error instanceof EmbeddingQueryError) throw error;
-    throw embeddingFailure(server, url, error);
+    throw embeddingFailure(server, label, error);
   }
 }
 
@@ -321,8 +326,7 @@ async function queryEmbedding<T>(url: string, server: string, body: unknown, rea
  */
 export function loopbackEmbedQuery(endpoint: string): EmbedQuery {
   return async (text: string) => {
-    const url = `${loopbackEndpoint(endpoint)}/v1/embeddings`;
-    return queryEmbedding(url, "The embedding server", { input: [`search_query: ${text}`] }, async (response) => {
+    return queryEmbedding(endpoint, "/v1/embeddings", "The embedding server", { input: [`search_query: ${text}`] }, async (response) => {
       if (!response.ok) {
         throw new EmbeddingQueryError(`Embedding server responded with HTTP ${response.status}.`);
       }
@@ -353,8 +357,7 @@ export function ollamaEmbedQuery(
   model = DEFAULT_INDEX_EMBEDDING_MODEL,
 ): EmbedQuery {
   return async (text: string) => {
-    const url = `${loopbackEndpoint(endpoint)}/api/embed`;
-    return queryEmbedding(url, "Ollama", { model, input: `search_query: ${text}` }, async (response) => {
+    return queryEmbedding(endpoint, "/api/embed", "Ollama", { model, input: `search_query: ${text}` }, async (response) => {
       if (!response.ok) {
         const details = response.status === 404
           ? await response.json().catch((error: unknown) => {
@@ -377,12 +380,15 @@ export function ollamaEmbedQuery(
 }
 
 /**
- * The endpoint to connect to, with a loopback IP literal as its host. A
- * localhost name goes through the operating system's resolver, which could
- * answer with another machine, so it becomes 127.0.0.1 before any connection.
- * Anything else that is not 127.0.0.0/8 or ::1 over HTTP is refused.
+ * The addresses to connect to for an endpoint, each with a loopback IP
+ * literal as its host. A localhost name goes through the operating system's
+ * resolver, which could answer with another machine, so it is never resolved:
+ * it is tried as 127.0.0.1, then as [::1] (an Ollama listening on IPv6 only).
+ * Anything else that is not 127.0.0.0/8 or ::1 over HTTP is refused. An HTTPS
+ * endpoint named localhost is reached by address, so its certificate must
+ * cover the address.
  */
-export function loopbackEndpoint(endpoint: string): string {
+export function loopbackEndpoints(endpoint: string): string[] {
   const refused = () => new Error("Refusing to embed a query against a non-loopback endpoint. Retrieval must stay local.");
   let url: URL;
   try {
@@ -392,11 +398,52 @@ export function loopbackEndpoint(endpoint: string): string {
   }
   if (!/^https?:$/.test(url.protocol) || url.username || url.password) throw refused();
   const host = url.hostname.toLowerCase();
-  if (host === "localhost" || host === "localhost.") url.hostname = "127.0.0.1";
-  else if (!/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) && host !== "[::1]") throw refused();
-  return url.toString().replace(/\/$/, "");
+  const text = (candidate: URL) => candidate.toString().replace(/\/$/, "");
+  if (host === "localhost" || host === "localhost.") {
+    return ["127.0.0.1", "[::1]"].map((literal) => {
+      const candidate = new URL(url.toString());
+      candidate.hostname = literal;
+      return text(candidate);
+    });
+  }
+  if (!/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) && host !== "[::1]") throw refused();
+  return [text(url)];
 }
 
+/** The addresses tried for an endpoint and path, for a message: "A" or "A or B". */
+export function loopbackLabel(endpoint: string, path: string): string {
+  return loopbackEndpoints(endpoint).map((base) => `${base}${path}`).join(" or ");
+}
+
+/** A network failure's code, such as ECONNREFUSED or UND_ERR_SOCKET, when fetch gave one. */
+export function connectionCode(error: unknown): string | undefined {
+  const cause = error instanceof Error ? error.cause : undefined;
+  return cause && typeof cause === "object" && "code" in cause && typeof cause.code === "string" ? cause.code : undefined;
+}
+
+/**
+ * Fetches a path from a loopback endpoint, trying each of its addresses in
+ * turn while the connection is refused. A redirect is never followed, and an
+ * answer of any kind, or any other failure, ends the attempts.
+ */
+export async function fetchLoopback(
+  endpoint: string,
+  path: string,
+  init: RequestInit,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ response: Response; url: string }> {
+  const candidates = loopbackEndpoints(endpoint);
+  for (const [index, base] of candidates.entries()) {
+    const url = `${base}${path}`;
+    try {
+      return { response: await fetchImpl(url, { ...init, redirect: modelServerRedirect(url) }), url };
+    } catch (error) {
+      const refused = connectionCode(error) !== "ECONNRESET" && isConnectionRefused(error);
+      if (!refused || index === candidates.length - 1) throw error;
+    }
+  }
+  throw new Error("No loopback address to try.");
+}
 
 /** Render retrieved passages for a prompt, keeping provenance attached. */
 export function formatRetrievedContext(chunks: readonly RetrievedChunk[]): string {
