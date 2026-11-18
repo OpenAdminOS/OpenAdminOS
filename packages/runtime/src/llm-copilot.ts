@@ -15,8 +15,8 @@ export interface CopilotProviderOptions { binaryPath?: string; defaultModel?: st
  */
 const FUSION_TIERS = {
   "fusion-standard": { tier: "standard", label: "Copilot Fusion Standard", needs: "" },
-  "fusion-high": { tier: "high", label: "Copilot Fusion High", needs: " Fusion High needs Copilot Pro+, Max, Business or Enterprise." },
-  "fusion-max": { tier: "max", label: "Copilot Fusion Max", needs: " Fusion Max needs Copilot Max, Business or Enterprise." },
+  "fusion-high": { tier: "high", label: "Copilot Fusion High", needs: " Fusion High needs a Copilot Pro+, Max, Business or Enterprise plan." },
+  "fusion-max": { tier: "max", label: "Copilot Fusion Max", needs: " Fusion Max needs a Copilot Max, Business or Enterprise plan." },
 } as const;
 type FusionModel = keyof typeof FUSION_TIERS;
 
@@ -78,12 +78,13 @@ export async function probeCopilotLlm(options: CopilotProviderOptions = {}): Pro
     // Fusion tiers follow the regular models, so a CLI default stays the first choice. Copilot Free lists only Fusion.
     const fusion = fusionModelsFromCatalog(catalog, regular);
     const models = [...regular, ...fusion.models];
-    if (!models.length) throw new CliProviderError("access-denied", "Copilot sign-in was detected but no models are available. Check your Copilot access and organization policy.");
-    return {
-      installed: true, ready: true, ...detected, models, detail: "Signed in through GitHub Copilot CLI. Use Test to verify a completion.",
+    const fusionFacts = {
       ...(Object.keys(fusion.modelLabels ?? {}).length ? { modelLabels: fusion.modelLabels } : {}),
       ...(fusion.unavailableModels?.length ? { unavailableModels: fusion.unavailableModels } : {}),
     };
+    // With nothing selectable, the tiers the plan lacks still say why.
+    if (!models.length) return { installed: true, ready: false, ...detected, failure: "access-denied", models: [], detail: "Copilot sign-in was detected but no models are available. Check your Copilot access and organization policy.", ...fusionFacts };
+    return { installed: true, ready: true, ...detected, models, detail: "Signed in through GitHub Copilot CLI. Use Test to verify a completion.", ...fusionFacts };
   } catch (error) {
     const failure = error instanceof CliProviderError ? error.failure : "request-failed";
     return { installed: failure !== "not-installed", ready: false, ...detected, failure, models: [], detail: error instanceof Error ? error.message : "Copilot could not be checked. Refresh providers to retry." };
@@ -111,7 +112,9 @@ export function createCopilotLlm(options: CopilotProviderOptions = {}): RunLlmAp
       const model = input.model ?? options.defaultModel;
       const fusionTier = copilotFusionTier(model);
       // Fusion can answer in several root messages (a draft, then a revision): the newest replaces the text,
-      // and the message GitHub marks as the selected output is final.
+      // and the message GitHub marks as the selected output is final. High and Max can draft and revise,
+      // and GitHub shows only the final response, so their text is held until the session is idle.
+      const holdDrafts = fusionTier === "high" || fusionTier === "max";
       let accumulated = "", messageId: string | undefined, done = false, committed = false;
       const stop = (error: Error) => { events.fail(error); rpc.close(error); };
       const abort = () => stop(new Error("Copilot request cancelled."));
@@ -132,18 +135,22 @@ export function createCopilotLlm(options: CopilotProviderOptions = {}): RunLlmAp
           messageId = typeof data.messageId === "string" ? data.messageId : undefined;
           accumulated += data.deltaContent;
           if (accumulated.length > 200_000) { stop(new Error("Copilot answer exceeded the output limit. Narrow the question.")); return; }
-          events.push({ delta: data.deltaContent, accumulated, done: false, model: model ?? "copilot-default" });
+          if (!holdDrafts) events.push({ delta: data.deltaContent, accumulated, done: false, model: model ?? "copilot-default" });
         }
         if (event.type === "assistant.message" && typeof data.content === "string") {
           if (data.content.length > 200_000) { stop(new Error("Copilot answer exceeded the output limit. Narrow the question.")); return; }
           if (fusionTier) {
             if (committed) return;
-            committed = rpcObject(data.fusion).commitId !== undefined;
+            const commitId = rpcObject(data.fusion).commitId;
+            committed = typeof commitId === "string" && commitId.length > 0;
             messageId = typeof data.messageId === "string" ? data.messageId : undefined;
-            if (data.content !== accumulated) { accumulated = data.content; events.push({ delta: "", accumulated, done: false, model: model ?? "copilot-default" }); }
+            if (data.content !== accumulated) { accumulated = data.content; if (!holdDrafts) events.push({ delta: "", accumulated, done: false, model: model ?? "copilot-default" }); }
           } else if (!accumulated) { accumulated = data.content; events.push({ delta: accumulated, accumulated, done: false, model: model ?? "copilot-default" }); }
         }
-        if (event.type === "session.idle") { done = true; events.finish(); }
+        if (event.type === "session.idle") {
+          if (holdDrafts && accumulated) events.push({ delta: accumulated, accumulated, done: false, model: model ?? "copilot-default" });
+          done = true; events.finish();
+        }
       };
       try {
         input.signal?.throwIfAborted();
