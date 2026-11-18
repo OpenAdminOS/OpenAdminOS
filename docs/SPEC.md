@@ -457,7 +457,11 @@ Chat searches at the same embedding endpoint Settings checks (an
 `OLLAMA_HOST`, else the default port). The query embedding has a 30-second
 timeout that covers reading the answer too. Its error names the server and the
 kind of failure only, never response text, because a local server can echo the
-question in it. If an embedding request fails, Chat records
+question in it. Any loopback HTTP endpoint the rule picks is used, `[::1]` and
+`127.0.0.2` included. A connection reset reads as a failed request with its
+code, not as a stopped Ollama. A vector with an entry that is not a finite
+number, or a model list with an entry without a name, is refused as invalid
+rather than scored or read as a missing model. If an embedding request fails, Chat records
 a failed local docs index step with the reason and recovery and can still
 answer without those passages. A successful search with zero matches says
 "No passages matched". This covers typed Chat; a Nova voice turn has no step
