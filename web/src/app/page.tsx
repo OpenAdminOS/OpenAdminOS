@@ -741,7 +741,7 @@ export default async function HomePage() {
                 Tell us the task. We build the agent for you.
               </h2>
               <p className="mt-6 max-w-xl text-lg leading-8 text-brand-muted">
-                Book a call with the maintainer and bring one job you want off
+                Book a call with us and bring one job you want off
                 your plate. You share your screen, we build the agent together,
                 and you leave with it running against your own tenant.
               </p>
