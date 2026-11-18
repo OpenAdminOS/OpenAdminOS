@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "./Button";
 import { IconChevronDown, IconCloud, IconHardDrive, IconPlay } from "./icons";
 import { isProviderImplemented } from "../shared/providers";
-import type { ProviderId, ProviderSummary } from "../shared/openAdminOS";
+import { providerModelLabel, type ProviderId, type ProviderSummary } from "../shared/openAdminOS";
 import { Badge } from "./ui";
 
 interface RunWithChoice {
@@ -182,7 +182,7 @@ export function RunWithMenu({
                               }`}
                             />
                             <span title={model} className="min-w-0 flex-1 truncate font-mono text-sm text-[var(--color-text-soft)]">
-                              {model}
+                              {providerModelLabel(provider, model)}
                             </span>
                             {isPinned && (
                               <Badge tone="info">Default</Badge>
@@ -190,6 +190,19 @@ export function RunWithMenu({
                           </button>
                         );
                       })}
+                      {(provider.unavailableModels ?? []).map((unavailable) => (
+                        <div
+                          key={`${unavailable.id}:unavailable`}
+                          aria-disabled="true"
+                          className="flex w-full cursor-not-allowed items-start gap-3 px-3 py-1.5 text-left opacity-50"
+                        >
+                          <span className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-text-muted)]/40" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate font-mono text-sm text-[var(--color-text-soft)]">{providerModelLabel(provider, unavailable.id)}</span>
+                            <span className="block text-xs text-[var(--color-text-muted)]">{unavailable.reason}</span>
+                          </span>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>

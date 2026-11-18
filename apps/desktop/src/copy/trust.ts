@@ -96,6 +96,18 @@ export function promptsGoTo(provider: Pick<ProviderSummary, "name"> & Partial<Pi
   return `${what} go to ${providerDataLocation(provider)}`;
 }
 
+/**
+ * Copilot Fusion picks the models per prompt and can have one draft and
+ * others review, so a Fusion entry says that more than one model may see it.
+ */
+export function modelTrustNote(providerId: string, model: string): string | undefined {
+  return providerId === "copilot" && model.startsWith("fusion-") ? "Several models may see each prompt" : undefined;
+}
+
+/** Settings' Copilot details, under the models, when Fusion is offered. */
+export const COPILOT_FUSION_DETAIL =
+  "Copilot Fusion chooses the models for each prompt. For harder prompts one model drafts and others review, so several models can see the prompt, and each one is billed at its own rate.";
+
 /** A CLI that decides its own channel: name the tool, not a company, as where prompts go. */
 export function sendsThroughTool(provider: Partial<Pick<ProviderSummary, "id">>): boolean {
   return Boolean(provider.id && HOSTED_DATA_LOCATIONS[provider.id]?.through);

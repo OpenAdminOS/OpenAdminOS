@@ -5,6 +5,7 @@ import type {
   OfficePersonaInput,
   RegistryAgentSummary,
 } from "../../shared/openAdminOS";
+import { providerModelLabel } from "../../shared/openAdminOS";
 import { useAppState } from "../../state";
 import { useSetupFlow } from "../../setup/SetupFlowContext";
 import { Button } from "../Button";
@@ -468,7 +469,7 @@ export function PersonaEditor({
                       )}
                       {provider?.models.map((model) => (
                         <option key={model} value={model}>
-                          {model}
+                          {providerModelLabel(provider, model)}
                         </option>
                       ))}
                     </select>
