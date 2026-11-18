@@ -449,8 +449,15 @@ If another model still makes Ollama ready after a refused capability read,
 the scan's What ran and Settings, Providers show the warning with the reason.
 Settings, Privacy shows the reason when the embedding model check fails,
 including a refused redirect, and reports Ollama as unreachable only for a
-connection failure. A failed check skips automatic installation. The query
-embedding has a 30-second timeout. If an embedding request fails, Chat records
+connection failure. A failed check skips automatic installation. Every reply
+Settings gets about the index, an install or a cancelled folder pick included,
+carries the embedding model's state, so a warning stays until it is resolved.
+Chat searches at the same embedding endpoint Settings checks (an
+`OPENADMINOS_EMBEDDING_ENDPOINT` override, else an Ollama moved with a loopback
+`OLLAMA_HOST`, else the default port). The query embedding has a 30-second
+timeout that covers reading the answer too. Its error names the server and the
+kind of failure only, never response text, because a local server can echo the
+question in it. If an embedding request fails, Chat records
 a failed local docs index step with the reason and recovery and can still
 answer without those passages. A successful search with zero matches says
 "No passages matched". Endpoints outside this device keep following redirects,
