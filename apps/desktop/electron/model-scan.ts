@@ -229,6 +229,7 @@ export function scanProbeFromProvider(
           ...provider.models.slice(0, 4),
         ],
         ...(provider.id === "ollama" ? { hasOpenAdmin8B: openAdmin } : {}),
+        ...(provider.capabilityWarning ? { warning: provider.capabilityWarning } : {}),
       };
     }
     if (provider.status === "connected" && provider.id === "lemonade") {

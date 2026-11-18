@@ -434,6 +434,21 @@ describe("first-launch model scan screen", () => {
     expect(screen.getAllByText("Runs on this device. Your references get tool queries to learn.microsoft.com.").length).toBeGreaterThan(0);
   });
 
+  it("shows a ready model's capability warning in What ran", async () => {
+    const warning = "Some model capabilities could not be verified. Ollama answered with a redirect to another address.";
+    const probes = [probe("ollama", "Ollama", "local", "localhost:11434", {
+      summary: "Running, 1 model", models: ["llama3.1:8b"], warning,
+    })];
+    const { bridge, finish } = scanBridge({ kind: "local-ready", providerId: "ollama", model: "llama3.1:8b" }, probes);
+    renderGate(bridge);
+    await finish();
+    const ledger = await screen.findByText(MODEL_SCAN_COPY.whatRan, { selector: "summary" });
+    await userEvent.click(ledger);
+    expect(within(ledger.closest("details")!).getByText(warning)).toBeVisible();
+    expect(radio("Ollama")).toBeEnabled();
+    expect(radio("Ollama").closest("label")).toHaveTextContent("Ready");
+  });
+
   it("can be left before it settles, completing the first run without selecting anything (round 2, item N)", async () => {
     const user = userEvent.setup();
     const { bridge } = scanBridge({ kind: "nothing" });

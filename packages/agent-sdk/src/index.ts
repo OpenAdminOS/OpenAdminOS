@@ -27,6 +27,8 @@ export interface ProviderSummary {
   isLocal: boolean;
   status: ProviderStatus;
   detail?: string;
+  /** Ollama can answer, but a capability check for another model was refused. */
+  capabilityWarning?: string;
   /**
    * The check itself failed (an HTTP error, an unreachable or refused
    * endpoint, a CLI that errored), as opposed to completing with a
@@ -83,6 +85,8 @@ export interface ModelScanProbe {
   summary: string;
   /** Further plain lines: models, versions, what to do next. */
   facts: string[];
+  /** A partial check failure on an otherwise ready provider. */
+  warning?: string;
   /** It can answer now: running with a model, or signed in. */
   ready: boolean;
   models: string[];

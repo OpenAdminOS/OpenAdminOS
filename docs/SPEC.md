@@ -445,6 +445,8 @@ pull). A 3xx answer fails with the reason ("answered with a redirect to
 another address"), so neither a model-list read, a prompt nor a question
 goes to the address it points to; the check reads as could not check, and
 Start does not start or accept a runtime whose address answers that way.
+If another model still makes Ollama ready after a refused capability read,
+the scan's What ran and Settings, Providers show the warning with the reason.
 The embedding model's state read is the one exception to the reason: a
 redirect there reads as Ollama not reachable, so nothing is pulled through
 it (carrying the reason to Settings is a follow-up). Endpoints outside this

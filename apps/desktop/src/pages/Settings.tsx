@@ -729,6 +729,9 @@ function ProviderRow({
           {expanded ? "Hide details" : "Details"}
         </UiButton>
       </div>
+      {provider.status === "connected" && provider.capabilityWarning ? (
+        <p className="px-5 pb-4 text-sm text-[var(--color-warning)]">{provider.capabilityWarning}</p>
+      ) : null}
       {expanded ? (
         <div className="border-t border-[var(--color-border-soft)] bg-[var(--color-bg-raised)]/30 px-5 py-4">
           <p className="max-w-[720px] text-sm leading-5 text-[var(--color-text-soft)]">{provider.description}</p>

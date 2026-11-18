@@ -625,6 +625,7 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
                         ))}
                       </ul>
                       <p>{MODEL_SCAN_COPY.ledger(targets, notContacted)}</p>
+                      {rows.map((probe) => probe.warning ? <p key={probe.providerId}>{probe.warning}</p> : null)}
                       {/* Where each signed-in tool would send prompts depends on its account or deployment. */}
                       {rows
                         .filter((probe) => probe.where === "hosted" && probe.state === "found" && providerDataLocationDetail({ id: probe.providerId }))

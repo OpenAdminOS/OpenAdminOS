@@ -80,6 +80,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- The scan's What ran and Settings, Providers show when OpenAdminOS refused a redirect during a capability check for one model while another model remains ready.
 - Chat announces when Retry makes the active model ready and returns keyboard focus to the composer.
 
 - First launch shows signed-in tools with unusable IT-locked models as Unavailable and explains the policy restriction.

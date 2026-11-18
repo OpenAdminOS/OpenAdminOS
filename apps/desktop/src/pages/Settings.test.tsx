@@ -64,6 +64,18 @@ describe("Settings provider section", () => {
     }
   });
 
+  it("shows a ready Ollama's capability warning in the provider row", async () => {
+    const capabilityWarning = "Some model capabilities could not be verified. Ollama answered with a redirect to another address.";
+    const ollama = { ...provider("ollama"), status: "connected" as const, capabilityWarning };
+    renderRoute(<Settings />, {
+      path: "/settings/:section?",
+      route: "/settings/providers",
+      bridge: makeMockBridge({}, createMockAppState({ providers: [ollama] })),
+    });
+    expect(await screen.findByText(capabilityWarning)).toBeVisible();
+    expect(screen.getByText("Connected")).toBeInTheDocument();
+  });
+
   it("stores the Chat answer font as a device-local General preference", async () => {
     const user = userEvent.setup();
     setAnswerFont("serif");
