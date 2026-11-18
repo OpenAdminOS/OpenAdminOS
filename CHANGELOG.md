@@ -6,6 +6,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Design for data policy and the personal agent: data classes masked or blocked per provider tier with the counts shown under answers, and an agent the admin names, grants access to, teaches skills in SKILL.md format and approves learning for (`docs/mockups/34-data-policy.html`, `docs/mockups/35-personal-agent.html`, plan in `tasks/data-policy-and-personal-agent.md`). Not built yet.
 - GitHub Copilot Fusion: the Copilot provider offers Copilot Fusion Standard, High and Max from the CLI's catalog, shows tiers your plan does not include greyed out with the reason, says when several models may see a prompt, and makes Copilot Free accounts usable (they list only Fusion Standard). Copilot models now show their catalog names, such as MAI Code 2 for Microsoft's MAI models, and models your organization's Copilot policy turns off are greyed out with the reason.
 - Lemonade Server as a local provider: the model scan, Settings and the model choice find it on its loopback port (13305), offer its downloaded chat models (never embedding, speech, image or cloud-routed ones) and keep prompts on this device; LM Studio and Lemonade share one OpenAI-compatible adapter.
 - Website: a Book a demo button in the header, hero and closing section, and a new /book page and homepage band for a free 60-minute call where we build an agent for one of your tasks, both booked on Cal.com.
