@@ -1,6 +1,6 @@
 # Data policy, personal agent and confidential inference (planned 2026-11-18)
 
-Three free features that share one idea: the admin decides what the assistant is,
+Three features that share one idea: the admin decides what the assistant is,
 what it may reach, and where each piece of tenant data may go. Team features
 built on top of them are planned separately.
 
@@ -10,7 +10,6 @@ built on top of them are planned separately.
 - Names: **data classes** for the tags, **Data policy** for the feature and its
   settings page, **Masking** for replacing identities with tokens before a hosted
   call.
-- Free: the engine, classification, routing, masking and the local audit trail.
 - Personal agent: the admin's own named agent that takes instructions, learns,
   and is configured with access to MCP servers, skills and connectors.
 - Scope: all of it, each phase with user docs, a SPEC section and a CHANGELOG line.
@@ -21,12 +20,41 @@ built on top of them are planned separately.
 - Proactive work: recurring read-only checks and a daily brief per organization,
   each confirmed on a card and capped.
 
+**Decisions (Ugur, 2026-11-18, design review of mockups 34 and 35)**
+- Field reclassification in Settings only moves a field to a stricter class (or
+  one of the same sensitivity, as identity and device). A less sensitive class
+  comes only from the IT policy file. Value detectors still raise the class of a
+  value that looks more sensitive, and a setting on the device never loosens an
+  IT-locked rule.
+- Loosening any rule waits for a confirmation dialog; tightening applies at once.
+- Remote MCP servers receive public queries only, written by the query writer
+  without tenant data. Tenant data and answer context never go into their
+  requests, and the status strip names their hosts whenever their tools are
+  offered.
+- Skills never use send tools. A send tool named in a skill is kept in the file
+  and marked unavailable to skills, whatever the grants.
+- Every connector send is proposed by the agent on a card and confirmed message
+  by message.
+- The daily brief does not count against the 5 recurring checks.
+- Checks run only for the active, connected organization while the app is open.
+  Skipped and missed runs are listed with the reason, never caught up silently.
+  Turning on the brief and restarting checks after a reconnect each need a
+  confirmation card.
+- Placeholders are typed, numbered brackets (`[USER_1]`, `[DEVICE_1]`,
+  `[CREDENTIAL]`). Masking counts are values, labelled as values. The
+  Confidential column shows "No provider qualifies yet" until attestation
+  exists. Block stays available on Local.
+- Agent names are 1 to 24 characters of letters, digits, spaces and hyphens;
+  names that read as OpenAdminOS or Microsoft are refused. New policy keys keep
+  the `nova` prefix. In SKILL.md `allowed-tools`, MCP tools are
+  `mcp__<server>__<tool>` and agents their slug.
+
 ## Why
 
 Today the choice is binary. A local model keeps tenant data on the device, a
 hosted model is stronger but sees everything. Data policy adds a middle path:
 hosted quality without the model seeing who or what the data is about, with
-credentials never leaving the device. Purview cannot do this for us because it
+credentials never reaching a hosted model in clear text. Purview cannot do this for us because it
 sees opaque text after the fact; we know the shape of every response at the
 moment it arrives.
 
@@ -84,7 +112,10 @@ Default rules (decided 2026-11-18):
 | `public` | allow | allow | allow |
 
 Actions are allow, mask and block. The admin and IT may tighten any rule and
-loosen all but one: `credential` is never sent to a hosted model in clear text.
+loosen all but one: `credential` never reaches a hosted model in clear text.
+Loosening from Settings asks for confirmation first, and never applies to a rule
+IT locked. Fields move only to the same or a stricter class in Settings; a less
+sensitive class comes from the IT policy file.
 
 ## Track A: Data policy
 
@@ -229,19 +260,23 @@ loosen all but one: `credential` is never sent to a hosted model in clear text.
       format, stored per device and
       optionally per organization, with version history, import and export.
 - [ ] A "Save as skill" card turns a conversation into a draft skill.
-- [ ] A skill can never grant write access. Writes still go through agents and
-      diff confirmation.
+- [ ] A skill can never grant write access and never uses a send tool. Writes
+      still go through agents and diff confirmation; sends are proposed by the
+      agent and confirmed message by message.
 
 **Acceptance criteria:**
 1. A skill created from a conversation is used in a later conversation when its
    description matches, and the answer says which skill it used.
 2. A skill that names a tool outside the agent's grants cannot use it.
+3. A skill that names a send tool keeps it in the file but cannot use it, even
+   with the send granted.
 
 ### Phase B5: Your own MCP servers
 
 - [ ] Add a remote MCP server by URL, with headers or sign-in secrets in the
       keychain, a tool review at add time, the existing egress checks and
-      query-writer boundary, and an IT allowlist key.
+      query-writer boundary, and an IT allowlist key. The server receives public
+      queries only; tenant data and answer context never go into its requests.
 - [ ] Local stdio servers are out of scope for the first version
       (`TODO(ugur)`: they run code on the device).
 
@@ -263,12 +298,15 @@ loosen all but one: `credential` is never sent to a hosted model in clear text.
 ### Phase B7: Proactive checks
 
 - [ ] Recurring read-only follow-ups and a daily brief per organization, each
-      confirmed on a card, capped, listed in Settings and stopped on Disconnect.
+      confirmed on a card, capped at 5 checks per organization (the brief is
+      not counted), listed in Settings and stopped on Disconnect. Restarting
+      after a reconnect is confirmed on a card. Checks run while the app is
+      open; missed runs are listed as missed, never caught up silently.
 
 **Acceptance criteria:**
 1. A recurring check never runs a write step, and a test proves it.
-2. A check for an organization that is disconnected or expired does not start
-   and says why.
+2. A check for an organization that is not active, disconnected or expired does
+   not start and says why in the list.
 
 ## Track C: Confidential inference
 
@@ -318,4 +356,6 @@ loosen all but one: `credential` is never sent to a hosted model in clear text.
 4. One personal agent now, several profiles later (proposal).
 5. Local stdio MCP servers (proposal: not in the first version).
 6. ~~Recurring follow-ups and a daily brief~~ yes, read-only (2026-11-18).
-7. Whether the confidential adapter and its setup docs are free (proposal: free).
+7. Per-organization data policy rules, for example stricter ones for a customer
+   tenant (mockup 34).
+8. Whether skill import accepts a URL as well as a file (mockup 35).
