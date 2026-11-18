@@ -41,13 +41,18 @@ const secondaryLink =
 export function DownloadCta({
   urls,
   className = "",
+  centered = false,
   children,
 }: {
   urls: Record<Platform, string>;
   className?: string;
+  /** Center the buttons and the desktop-only note, for centered sections. */
+  centered?: boolean;
   /** Further actions shown right after the download button. */
   children?: ReactNode;
 }) {
+  const row = `flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center${centered ? " sm:justify-center" : ""}`;
+
   const [platform, setPlatform] = useState<Detected>(null);
 
   useEffect(() => {
@@ -56,12 +61,12 @@ export function DownloadCta({
 
   if (platform === "unsupported") {
     return (
-      <div className={`flex flex-col gap-3 ${className}`}>
+      <div className={`flex flex-col gap-3 ${centered ? "items-center text-center" : ""} ${className}`}>
         <p className="max-w-md text-[15px] leading-7 text-brand-muted">
           OpenAdminOS is a desktop app for Windows, macOS, and Linux. Open this
           page on your computer to install it.
         </p>
-        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <div className={row}>
           <Link href="/download" className={`${buttonPrimary} h-12 px-5 text-[15px]`}>
             See the desktop downloads
           </Link>
@@ -72,7 +77,7 @@ export function DownloadCta({
   }
 
   return (
-    <div className={`flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center ${className}`}>
+    <div className={`${row} ${className}`}>
       {platform ? (
         <a href={urls[platform]} className={`${buttonPrimary} h-12 px-5 text-[15px]`}>
           <PlatformIcon platform={platform} />

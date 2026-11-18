@@ -389,6 +389,7 @@ export default async function HomePage() {
                 className={`${buttonSecondary} h-12 px-5 text-[15px]`}
               >
                 Book a demo
+                <span aria-hidden>↗</span>
               </a>
             </DownloadCta>
             <ul className="mt-6 flex flex-wrap gap-x-5 gap-y-2 text-sm text-brand-faint">
@@ -1002,7 +1003,7 @@ export default async function HomePage() {
             Read-only agents run once consent is granted. Changes wait for
             you.
           </p>
-          <DownloadCta urls={downloadUrls} className="mt-10 justify-center">
+          <DownloadCta urls={downloadUrls} className="mt-10" centered>
             <a
               href={DEMO_BOOKING_URL}
               target="_blank"
@@ -1010,6 +1011,7 @@ export default async function HomePage() {
               className={`${buttonSecondary} h-12 px-5 text-[15px]`}
             >
               Book a demo
+              <span aria-hidden>↗</span>
             </a>
           </DownloadCta>
           <p className="mt-6 text-[15px] text-brand-muted">
