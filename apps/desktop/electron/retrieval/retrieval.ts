@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { RetrievalStatus } from "@openadminos/agent-sdk";
-import { isConnectionRefused, isRefusedRedirect, modelServerRedirect, redirectRefusedDetail } from "@openadminos/runtime";
+import { classifyOllamaEndpoint, isConnectionRefused, isRefusedRedirect, modelServerRedirect, redirectRefusedDetail } from "@openadminos/runtime";
 
 export type { RetrievalStatus } from "@openadminos/agent-sdk";
 
@@ -264,6 +264,11 @@ function loadIndexFrom(dir: string): LoadedIndex {
 /** How long one question's embedding may take, body included: enough for a local model that starts cold. */
 export const EMBEDDING_QUERY_TIMEOUT_MS = 30_000;
 
+/** A vector of finite numbers: anything else would score as NaN and look like a match. */
+function isVector(value: unknown): value is number[] {
+  return Array.isArray(value) && value.length > 0 && value.every((entry) => typeof entry === "number" && Number.isFinite(entry));
+}
+
 /** A failure this module named itself: its message quotes no response text. */
 class EmbeddingQueryError extends Error {}
 
@@ -276,13 +281,14 @@ function embeddingFailure(server: string, url: string, error: unknown): Error {
   if (error instanceof Error && error.name === "TimeoutError") {
     return new EmbeddingQueryError(`${server} did not finish embedding the question within ${EMBEDDING_QUERY_TIMEOUT_MS / 1000} seconds. Check that it is running, then ask again.`);
   }
-  if (isConnectionRefused(error)) {
+  const code = error instanceof Error && error.cause && typeof error.cause === "object" && "code" in error.cause && typeof error.cause.code === "string" ? error.cause.code : undefined;
+  // A reset means something answered and then closed the connection: not a stopped server.
+  if (code !== "ECONNRESET" && isConnectionRefused(error)) {
     return new EmbeddingQueryError(`${server} is not reachable at ${url}. Start the local server, then ask again.`);
   }
   if (error instanceof SyntaxError) {
     return new EmbeddingQueryError(`${server} answered the embedding request with something other than JSON. Check the local server, then ask again.`);
   }
-  const code = error instanceof Error && error.cause && typeof error.cause === "object" && "code" in error.cause && typeof error.cause.code === "string" ? error.cause.code : undefined;
   return new EmbeddingQueryError(`${server} did not complete the embedding request${code ? ` (${code})` : ""}. Check the local server, then ask again.`);
 }
 
@@ -325,7 +331,7 @@ export function loopbackEmbedQuery(endpoint: string): EmbedQuery {
         data?: Array<{ embedding?: number[] }>;
       };
       const embedding = payload?.data?.[0]?.embedding;
-      if (!Array.isArray(embedding)) {
+      if (!isVector(embedding)) {
         throw new EmbeddingQueryError("Embedding server returned no embedding vector.");
       }
       return embedding;
@@ -364,7 +370,7 @@ export function ollamaEmbedQuery(
       }
       const payload = (await response.json()) as { embeddings?: number[][] };
       const embedding = payload?.embeddings?.[0];
-      if (!Array.isArray(embedding)) {
+      if (!isVector(embedding)) {
         throw new EmbeddingQueryError("The embedding service returned no vector.");
       }
       return embedding;
@@ -374,7 +380,8 @@ export function ollamaEmbedQuery(
 
 export function assertLoopback(endpoint: string): void {
   const url = new URL(endpoint);
-  if (url.hostname !== "127.0.0.1" && url.hostname !== "localhost") {
+  // The same loopback rule that picks the endpoint (an OLLAMA_HOST of [::1] included), over HTTP only.
+  if (!/^https?:$/.test(url.protocol) || !classifyOllamaEndpoint(endpoint).isLocal) {
     throw new Error(
       "Refusing to embed a query against a non-loopback endpoint. Retrieval must stay local.",
     );

@@ -7,7 +7,7 @@ import { describe, it } from "node:test";
 
 import { AppStateStore } from "../state.js";
 import { embeddingModelState, pullEmbeddingModel } from "./embedding-model.js";
-import { EMBEDDING_QUERY_TIMEOUT_MS, loopbackEmbedQuery, ollamaEmbedQuery } from "./retrieval.js";
+import { EMBEDDING_QUERY_TIMEOUT_MS, assertLoopback, loopbackEmbedQuery, ollamaEmbedQuery } from "./retrieval.js";
 
 /** An embedding server on this device that redirects every request to a second one, which counts what reaches it. */
 async function redirectingPair(): Promise<{ origin: string; hits: () => number; close: () => Promise<void> }> {
@@ -149,6 +149,34 @@ describe("local documentation retrieval never follows a redirect from this devic
     request.mock.mockImplementation(async () => dropped());
     const state = await embeddingModelState("http://127.0.0.1:11434");
     assert.match(state.error ?? "", /^Could not read Ollama's model list \(UND_ERR_SOCKET\)\./);
+  });
+
+  it("accepts every loopback endpoint the endpoint rule picks and nothing else (PR #206 review round 2)", () => {
+    for (const endpoint of ["http://127.0.0.1:11434", "http://localhost:11434", "http://[::1]:11434", "http://127.0.0.2:11434"]) {
+      assert.doesNotThrow(() => assertLoopback(endpoint), endpoint);
+    }
+    for (const endpoint of ["http://10.0.0.5:11434", "https://models.example.com", "unix:///var/run/ollama.sock"]) {
+      assert.throws(() => assertLoopback(endpoint), /Retrieval must stay local/, endpoint);
+    }
+  });
+
+  it("treats a reset as a failed request, not a stopped server, and refuses a vector or model list it cannot use (PR #206 review round 2)", async (t) => {
+    const reset = () => {
+      throw new TypeError("fetch failed", { cause: Object.assign(new Error("socket hang up"), { code: "ECONNRESET" }) });
+    };
+    const request = t.mock.method(globalThis, "fetch", async () => reset());
+    await assert.rejects(ollamaEmbedQuery("http://127.0.0.1:11434")("test"), (error: Error) =>
+      error.message === "Ollama did not complete the embedding request (ECONNRESET). Check the local server, then ask again.");
+    const state = await embeddingModelState("http://127.0.0.1:11434");
+    assert.notEqual(state.ollamaReachable, false);
+    assert.match(state.error ?? "", /\(ECONNRESET\)/);
+
+    request.mock.mockImplementation(async () => Response.json({ embeddings: [[0.1, "0.2"]] }));
+    await assert.rejects(ollamaEmbedQuery("http://127.0.0.1:11434")("test"), /returned no vector/);
+    request.mock.mockImplementation(async () => Response.json({ data: [{ embedding: [Number.NaN] }] }));
+    await assert.rejects(loopbackEmbedQuery("http://127.0.0.1:11434")("test"), /returned no embedding vector/);
+    request.mock.mockImplementation(async () => Response.json({ models: [null] }));
+    assert.match((await embeddingModelState("http://127.0.0.1:11434")).error ?? "", /^Ollama returned an invalid model list\./);
   });
 
   it("searches the documentation at the same endpoint Settings checks, also when OLLAMA_HOST moved Ollama (PR #206 review round 1)", async (t) => {

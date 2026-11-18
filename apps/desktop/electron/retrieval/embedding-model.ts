@@ -59,14 +59,17 @@ export async function embeddingModelState(
       return { ollamaReachable: true, installed: false, error: `Ollama's model list returned HTTP ${response.status}. ${recovery}` };
     }
     const payload = (await response.json()) as { models?: Array<{ name?: string }> };
-    if (!Array.isArray(payload?.models)) throw new SyntaxError("Ollama returned an invalid model list");
+    if (!Array.isArray(payload?.models) || !payload.models.every((entry) => typeof entry?.name === "string")) {
+      throw new SyntaxError("Ollama returned an invalid model list");
+    }
     const wanted = normalizeModelName(model);
     const installed = payload.models.some(
       (entry) => typeof entry?.name === "string" && normalizeModelName(entry.name) === wanted,
     );
     return { ollamaReachable: true, installed };
   } catch (error) {
-    if (!answered && isConnectionRefused(error)) return { ollamaReachable: false, installed: false };
+    // A reset means something answered and then closed the connection: not a stopped Ollama.
+    if (!answered && failureCode(error) !== "ECONNRESET" && isConnectionRefused(error)) return { ollamaReachable: false, installed: false };
     const reason = error instanceof SyntaxError
       ? "Ollama returned an invalid model list."
       : error instanceof Error && error.name === "TimeoutError"
