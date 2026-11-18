@@ -1738,6 +1738,11 @@ function IntuneChatContent() {
     displayedMessages.length === 0 &&
     !shownProgress;
 
+  // A model that stops being ready clears the line, so a later plain refresh does not announce it again.
+  useEffect(() => {
+    if (!modelReady) setModelReadyAnnouncement("");
+  }, [modelReady]);
+
   // The model choice can unmount as soon as the refreshed provider is ready.
   // The Chat home keeps the live region and composer available across that change.
   useEffect(() => {
@@ -1745,7 +1750,9 @@ function IntuneChatContent() {
     setRetriedProviderId(null);
     if (homeOpen && !activeTenant && modelReady && provider?.id === retriedProviderId) {
       setModelReadyAnnouncement(FIRST_RUN_CHAT_COPY.modelReadyAfterRetry(provider.name));
-      composerRef.current?.focus();
+      // Only when focus went down with the closed choice: an admin who moved on keeps their place.
+      const active = document.activeElement;
+      if (!active || active === document.body) composerRef.current?.focus();
     }
   }, [retriedProviderId, homeOpen, activeTenant, modelReady, provider]);
 

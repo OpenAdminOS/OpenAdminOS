@@ -278,6 +278,32 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
     expect(screen.getByText("Ollama is ready. You can send a message.")).toHaveAttribute("role", "status");
   });
 
+  it("keeps focus where the admin moved it while Retry ran, and still announces readiness (PR #206 review round 1)", async () => {
+    const activeProvider = mockProviders.find((provider) => provider.id === "ollama")!;
+    const providers = mockProviders.map((provider) => provider.id === "ollama"
+      ? { ...provider, status: "error" as const, models: [], checkFailed: true, detail: "Ollama timed out." }
+      : provider);
+    let state = guestState({ providers, activeProviderId: "ollama" });
+    let finish: () => void = () => undefined;
+    const recheckProvider = vi.fn(() => new Promise<void>((resolve) => {
+      finish = () => {
+        state = { ...state, providers: providers.map((provider) => provider.id === "ollama" ? activeProvider : provider) };
+        resolve();
+      };
+    }));
+    const bridge = makeMockBridge({ getAppState: vi.fn(async () => state), recheckProvider }, state);
+    renderRoute(<><IntuneChat /><button type="button">Elsewhere</button></>, { path: "/chat/:conversationId?", route: "/chat", bridge });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Check Ollama again" }));
+    await waitFor(() => expect(recheckProvider).toHaveBeenCalledWith("ollama"));
+    const elsewhere = screen.getByRole("button", { name: "Elsewhere" });
+    elsewhere.focus();
+    finish();
+    await waitFor(() => expect(screen.queryByRole("heading", { name: FIRST_RUN_CHAT_COPY.modelChoiceTitle })).toBeNull());
+    expect(await screen.findByText("Ollama is ready. You can send a message.")).toHaveAttribute("role", "status");
+    expect(elsewhere).toHaveFocus();
+  });
+
   it("offers starters for what was connected, one line per service (mockup 32, section B)", async () => {
     const user = userEvent.setup();
     const base = createMockAppState();
