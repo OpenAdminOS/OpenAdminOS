@@ -37,9 +37,23 @@ describe("embedding model presence and pull", () => {
     const state = await embeddingModelState(
       "http://127.0.0.1:11434",
       "nomic-embed-text",
-      fetchStub(() => new TypeError("fetch failed")),
+      fetchStub(() => new TypeError("fetch failed", { cause: { code: "ECONNREFUSED" } })),
     );
     assert.deepEqual(state, { ollamaReachable: false, installed: false });
+  });
+
+  it("distinguishes an HTTP error, a timeout and an invalid model list from a refused connection", async () => {
+    const endpoint = "http://127.0.0.1:11434";
+    const http = await embeddingModelState(endpoint, undefined, fetchStub(() => new Response("", { status: 503 })));
+    assert.equal(http.ollamaReachable, true);
+    assert.equal(http.installed, false);
+    assert.match(http.error ?? "", /HTTP 503/);
+    const timeout = await embeddingModelState(endpoint, undefined, fetchStub(() => new DOMException("Timed out", "TimeoutError")));
+    assert.notEqual(timeout.ollamaReachable, false);
+    assert.match(timeout.error ?? "", /timed out/i);
+    const invalid = await embeddingModelState(endpoint, undefined, fetchStub(() => new Response("not JSON")));
+    assert.equal(invalid.ollamaReachable, true);
+    assert.match(invalid.error ?? "", /invalid model list/i);
   });
 
   it("refuses non-loopback endpoints so a question can never leave the device", async () => {

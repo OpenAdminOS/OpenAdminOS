@@ -2858,22 +2858,31 @@ export class AppStateStore {
     return this.retrievalIndexInstance;
   }
 
+  private async getRetrievalStatusWithEmbedding(): Promise<RetrievalStatus> {
+    const status = await this.getRetrievalStatus();
+    const embedding = await embeddingModelState().catch((error: unknown) => ({
+      ollamaReachable: undefined,
+      installed: false,
+      error: `Could not check the embedding endpoint (${error instanceof Error ? error.message : String(error)}). Check the local Ollama address, then refresh.`,
+    }));
+    const pullError = (await this.read()).embeddingModelPullError;
+    const error = embedding.error ?? (embedding.ollamaReachable && !embedding.installed ? pullError : undefined);
+    return {
+      ...status,
+      ...(embedding.ollamaReachable === undefined ? {} : { ollamaReachable: embedding.ollamaReachable }),
+      embeddingModelInstalled: embedding.installed,
+      ...(error ? { embeddingModelError: error } : {}),
+    };
+  }
+
   /** Status plus, when known, a newer published index version. */
   async getRetrievalStatusWithUpdates(): Promise<RetrievalStatus> {
-    const status = await this.getRetrievalStatus();
-    const embedding = await embeddingModelState();
-    const pullError = (await this.read()).embeddingModelPullError;
-    const withEmbedding: RetrievalStatus = {
-      ...status,
-      ollamaReachable: embedding.ollamaReachable,
-      embeddingModelInstalled: embedding.installed,
-      ...(pullError && !embedding.installed ? { embeddingModelError: pullError } : {}),
-    };
-    if (!withEmbedding.available) return withEmbedding;
+    const status = await this.getRetrievalStatusWithEmbedding();
+    if (!status.available) return status;
     const manifest = await fetchIndexManifest();
-    return manifest && manifest.version !== withEmbedding.version
-      ? { ...withEmbedding, updateAvailable: manifest.version }
-      : withEmbedding;
+    return manifest && manifest.version !== status.version
+      ? { ...status, updateAvailable: manifest.version }
+      : status;
   }
 
   async getRetrievalStatus(): Promise<RetrievalStatus> {
@@ -2971,9 +2980,10 @@ export class AppStateStore {
       // fetches the index and the model together. Not counted as an
       // attempt, so no daily backoff applies to this case.
       const embedding = await embeddingModelState();
-      if (!embedding.ollamaReachable) {
+      if (!embedding.ollamaReachable || embedding.error) {
         console.info(
-          "[retrieval] automatic index install skipped: Ollama is not reachable, so grounding could not use the index yet.",
+          "[retrieval] automatic index install skipped:",
+          embedding.error ?? "Ollama is not reachable, so grounding could not use the index yet.",
         );
         return;
       }
@@ -3030,6 +3040,7 @@ export class AppStateStore {
       if (persisted.retrievalAutoInstall === false) return;
       const endpoint = embeddingEndpoint();
       const state = await embeddingModelState(endpoint);
+      if (state.error) throw new Error(state.error);
       if (!state.ollamaReachable || state.installed) return;
 
       const lastAttempt = persisted.embeddingModelPullAttemptedAt;
@@ -3075,7 +3086,7 @@ export class AppStateStore {
     // Rebuilding/downloading the index is host infrastructure; here we
     // drop the cache so a freshly installed index is picked up.
     this.retrievalIndexInstance?.reset();
-    return this.getRetrievalStatus();
+    return this.getRetrievalStatusWithEmbedding();
   }
 
   private emptyAzureOpenAIConfig(): AzureOpenAIProviderConfig {

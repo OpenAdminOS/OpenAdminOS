@@ -4234,15 +4234,6 @@ function PrivacySection({
                       mono
                     />
                   </dl>
-                  {retrievalStatus.embeddingModelInstalled === false ? (
-                    <p role={retrievalStatus.embeddingModelError ? "alert" : undefined} className="mt-2 text-sm text-[var(--color-warning)]">
-                      {retrievalStatus.embeddingModelError
-                        ? retrievalStatus.embeddingModelError
-                        : retrievalStatus.ollamaReachable
-                        ? "The embedding model is not installed yet. It downloads automatically in the background through Ollama; answers stay ungrounded until it arrives."
-                        : "Ollama isn't running, so the embedding model can't be fetched and questions can't be matched against the index. Start Ollama and it installs automatically."}
-                    </p>
-                  ) : null}
                   <p className="mt-3 text-xs leading-relaxed text-[var(--color-text-muted)]">
                     Built from Microsoft's published documentation for Intune,
                     Entra, and Defender, used under{" "}
@@ -4263,13 +4254,18 @@ function PrivacySection({
                     <StatusDot tone="muted" /> Not documentation-grounded yet
                   </div>
                   <p className="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
-                    {retrievalStatus?.ollamaReachable === false
-                      ? "Documentation grounding needs the local Ollama runtime, which isn't running. Once Ollama is available, the index and embedding model install automatically in the background."
-                      : (retrievalStatus?.reason ??
-                        "No local documentation index is available yet.")}
+                    {retrievalStatus?.reason ?? "No local documentation index is available yet."}
                   </p>
                 </div>
               )}
+              {!retrievalLoading && retrievalStatus?.embeddingModelInstalled === false ? (
+                <p role={retrievalStatus.embeddingModelError ? "alert" : undefined} className="mt-2 text-sm text-[var(--color-warning)]">
+                  {retrievalStatus.embeddingModelError
+                    ?? (retrievalStatus.ollamaReachable === false
+                      ? "Ollama not reachable. Start Ollama on this device, then refresh the documentation index status."
+                      : "The embedding model is not installed yet. Install it through Ollama to ground answers in the local index. Automatic downloads follow the setting above.")}
+                </p>
+              ) : null}
             </div>
             {retrievalError && (
               <div

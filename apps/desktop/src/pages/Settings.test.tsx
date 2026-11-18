@@ -939,6 +939,24 @@ describe("Settings provider section", () => {
     expect(await screen.findByRole("alert", { name: "" })).toHaveTextContent(message);
   });
 
+  it("shows an embedding check failure without an index and says when Ollama is unreachable", async () => {
+    const message = "Ollama answered with a redirect to another address. Check Ollama's local endpoint, then refresh.";
+    const bridge = makeMockBridge({
+      getRetrievalStatus: vi.fn(async () => ({
+        available: false, ollamaReachable: true, embeddingModelInstalled: false, embeddingModelError: message,
+      })),
+      refreshRetrievalIndex: vi.fn(async () => ({
+        available: false, ollamaReachable: false, embeddingModelInstalled: false,
+      })),
+    });
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/privacy", bridge });
+    expect(await screen.findByText(message)).toBeVisible();
+    expect(screen.queryByText(/Ollama not reachable/)).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Check for index" }));
+    expect(await screen.findByText(/Ollama not reachable/)).toBeVisible();
+    expect(screen.queryByText(message)).toBeNull();
+  });
+
   it("shows an unavailable retrieval reason and checks for a refreshed index", async () => {
     const user = userEvent.setup();
     const reason = "The local Microsoft documentation index is not installed.";

@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { RetrievalStatus } from "@openadminos/agent-sdk";
-import { isRefusedRedirect, modelServerRedirect, redirectRefusedDetail } from "@openadminos/runtime";
+import { isConnectionRefused, isRefusedRedirect, modelServerRedirect, redirectRefusedDetail } from "@openadminos/runtime";
 
 export type { RetrievalStatus } from "@openadminos/agent-sdk";
 
@@ -261,6 +261,33 @@ function loadIndexFrom(dir: string): LoadedIndex {
   return { meta, chunks, matrix, norms };
 }
 
+const EMBEDDING_QUERY_TIMEOUT_MS = 30_000;
+
+async function postQueryEmbedding(url: string, server: string, body: unknown): Promise<Response> {
+  const signal = AbortSignal.timeout(EMBEDDING_QUERY_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+      // The question is in the body. Refuse any redirect from the local service.
+      redirect: modelServerRedirect(url),
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "TimeoutError") {
+      throw new Error(`${server} timed out while embedding the question.`, { cause: error });
+    }
+    if (isConnectionRefused(error)) {
+      throw new Error(`${server} is not reachable at ${url}. Start the local server, then ask again.`, { cause: error });
+    }
+    throw error;
+  }
+  if (isRefusedRedirect(response, url)) throw new Error(redirectRefusedDetail(server, url));
+  return response;
+}
+
 /**
  * Query embedding against a loopback OpenAI-compatible embedding server
  * (the app's local model runtime on its embedding port). The
@@ -270,21 +297,14 @@ export function loopbackEmbedQuery(endpoint: string): EmbedQuery {
   return async (text: string) => {
     assertLoopback(endpoint);
     const url = `${endpoint.replace(/\/$/, "")}/v1/embeddings`;
-    // The question is in the body: a redirect from this device is never followed.
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ input: [`search_query: ${text}`] }),
-      redirect: modelServerRedirect(url),
-    });
-    if (isRefusedRedirect(response, url)) throw new Error(redirectRefusedDetail("The embedding server", url));
+    const response = await postQueryEmbedding(url, "The embedding server", { input: [`search_query: ${text}`] });
     if (!response.ok) {
       throw new Error(`Embedding server responded with HTTP ${response.status}.`);
     }
     const payload = (await response.json()) as {
       data?: Array<{ embedding?: number[] }>;
     };
-    const embedding = payload.data?.[0]?.embedding;
+    const embedding = payload?.data?.[0]?.embedding;
     if (!Array.isArray(embedding)) {
       throw new Error("Embedding server returned no embedding vector.");
     }
@@ -304,26 +324,25 @@ export function loopbackEmbedQuery(endpoint: string): EmbedQuery {
  */
 export function ollamaEmbedQuery(
   endpoint: string,
-  model = "nomic-embed-text",
+  model = DEFAULT_INDEX_EMBEDDING_MODEL,
 ): EmbedQuery {
   return async (text: string) => {
     assertLoopback(endpoint);
     const url = `${endpoint.replace(/\/$/, "")}/api/embed`;
-    // The question is in the body: a redirect from this device is never followed.
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model, input: `search_query: ${text}` }),
-      redirect: modelServerRedirect(url),
-    });
-    if (isRefusedRedirect(response, url)) throw new Error(redirectRefusedDetail("Ollama", url));
+    const response = await postQueryEmbedding(url, "Ollama", { model, input: `search_query: ${text}` });
     if (!response.ok) {
-      throw new Error(
-        `Embedding request failed with HTTP ${response.status}. Pull the model with \`ollama pull ${model}\`.`,
-      );
+      const details = response.status === 404
+        ? await response.json().catch((error: unknown) => {
+          if (error instanceof SyntaxError) return undefined;
+          throw error;
+        }) as { error?: unknown } | undefined
+        : undefined;
+      const missing = typeof details?.error === "string" && /model.*not found/i.test(details.error);
+      const recovery = missing ? ` The embedding model ${model} is missing. Run \`ollama pull ${model}\`.` : "";
+      throw new Error(`Ollama's embedding request returned HTTP ${response.status}.${recovery}`);
     }
     const payload = (await response.json()) as { embeddings?: number[][] };
-    const embedding = payload.embeddings?.[0];
+    const embedding = payload?.embeddings?.[0];
     if (!Array.isArray(embedding)) {
       throw new Error("The embedding service returned no vector.");
     }

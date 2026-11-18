@@ -447,10 +447,14 @@ goes to the address it points to; the check reads as could not check, and
 Start does not start or accept a runtime whose address answers that way.
 If another model still makes Ollama ready after a refused capability read,
 the scan's What ran and Settings, Providers show the warning with the reason.
-The embedding model's state read is the one exception to the reason: a
-redirect there reads as Ollama not reachable, so nothing is pulled through
-it (carrying the reason to Settings is a follow-up). Endpoints outside this
-device keep following redirects, because their prompts already leave it.
+Settings, Privacy shows the reason when the embedding model check fails,
+including a refused redirect, and reports Ollama as unreachable only for a
+connection failure. A failed check skips automatic installation. The query
+embedding has a 30-second timeout. If an embedding request fails, Chat records
+a failed local docs index step with the reason and recovery and can still
+answer without those passages. A successful search with zero matches says
+"No passages matched". Endpoints outside this device keep following redirects,
+because their prompts already leave it.
 
 Apple Foundation support uses Apple's on-device Foundation Models framework
 through a small signed macOS helper binary bundled with the Electron app. The

@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import { describe, it } from "node:test";
 
-import { embeddingModelState, pullEmbeddingModel } from "./embedding-model.js";
+import { AppStateStore } from "../state.js";
+import { pullEmbeddingModel } from "./embedding-model.js";
 import { loopbackEmbedQuery, ollamaEmbedQuery } from "./retrieval.js";
 
 /** An embedding server on this device that redirects every request to a second one, which counts what reaches it. */
@@ -39,14 +43,46 @@ describe("local documentation retrieval never follows a redirect from this devic
     }
   });
 
-  it("reads a redirecting Ollama as unreachable and refuses a pull through it", async () => {
+  it("reports a refused redirect in the Settings status and refuses a pull through it", async (t) => {
     const pair = await redirectingPair();
-    try {
-      assert.deepEqual(await embeddingModelState(pair.origin), { ollamaReachable: false, installed: false });
-      await assert.rejects(pullEmbeddingModel(pair.origin), /answered with a redirect to another address/);
-      assert.equal(pair.hits(), 0);
-    } finally {
-      await pair.close();
+    t.after(() => pair.close());
+    const previousEndpoint = process.env.OPENADMINOS_EMBEDDING_ENDPOINT;
+    process.env.OPENADMINOS_EMBEDDING_ENDPOINT = pair.origin;
+    t.after(() => {
+      if (previousEndpoint === undefined) delete process.env.OPENADMINOS_EMBEDDING_ENDPOINT;
+      else process.env.OPENADMINOS_EMBEDDING_ENDPOINT = previousEndpoint;
+    });
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-embedding-redirect-"));
+    t.after(() => rm(dir, { recursive: true, force: true }));
+    const store = new AppStateStore({
+      filePath: join(dir, "state.json"),
+      statsApiUrl: "",
+      tokenStore: { read: async () => "", write: async () => undefined },
+    });
+    t.after(() => store.close());
+    for (const status of [await store.getRetrievalStatusWithUpdates(), await store.refreshRetrievalIndex()]) {
+      assert.equal(status.ollamaReachable, true);
+      assert.equal(status.embeddingModelInstalled, false);
+      assert.match(status.embeddingModelError ?? "", /answered with a redirect to another address/);
     }
+    await assert.rejects(pullEmbeddingModel(pair.origin), /answered with a redirect to another address/);
+    assert.equal(pair.hits(), 0);
+  });
+
+  it("keeps missing model and HTTP failures distinct and bounds both query requests", async (t) => {
+    const endpoint = "http://127.0.0.1:11434";
+    const request = t.mock.method(globalThis, "fetch", async (_url: Parameters<typeof fetch>[0], _options?: RequestInit) =>
+      Response.json({ error: "model 'nomic-embed-text' not found" }, { status: 404 }),
+    );
+    await assert.rejects(ollamaEmbedQuery(endpoint)("test"), /HTTP 404.*ollama pull nomic-embed-text/i);
+    request.mock.mockImplementation(async () => new Response("", { status: 503 }));
+    await assert.rejects(ollamaEmbedQuery(endpoint)("test"), (error: Error) =>
+      /HTTP 503/.test(error.message) && !error.message.includes("ollama pull"));
+    request.mock.mockImplementation(async (_url, options) => {
+      assert.ok(options?.signal instanceof AbortSignal);
+      throw new DOMException("Timed out", "TimeoutError");
+    });
+    await assert.rejects(ollamaEmbedQuery(endpoint)("test"), /Ollama.*timed out/i);
+    await assert.rejects(loopbackEmbedQuery(endpoint)("test"), /embedding server.*timed out/i);
   });
 });
