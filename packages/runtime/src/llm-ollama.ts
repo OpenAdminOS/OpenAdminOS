@@ -5,6 +5,7 @@ import type {
   LlmTokenUsage,
   RunLlmApi,
 } from "@openadminos/agent-sdk";
+import { isRefusedRedirect, modelServerRedirect, redirectRefusedDetail } from "./llm-openai-compatible.js";
 
 export interface OllamaProviderOptions {
   endpoint?: string;
@@ -122,6 +123,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           headers: { "content-type": "application/json" },
           body: JSON.stringify(body),
           signal: controller.signal,
+          redirect: modelServerRedirect(url),
         });
       } catch (error) {
         clearTimeout(timer);
@@ -138,6 +140,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       if (!response.ok) {
         clearTimeout(timer);
         opts.signal?.removeEventListener("abort", abortFromCaller);
+        if (isRefusedRedirect(response, url)) throw new Error(redirectRefusedDetail("Ollama", url));
         const detail = await response.text().catch(() => "");
         if (response.status === 404 && detail.toLowerCase().includes("model")) {
           throw new Error(
