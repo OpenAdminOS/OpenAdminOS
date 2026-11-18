@@ -261,31 +261,51 @@ function loadIndexFrom(dir: string): LoadedIndex {
   return { meta, chunks, matrix, norms };
 }
 
-const EMBEDDING_QUERY_TIMEOUT_MS = 30_000;
+/** How long one question's embedding may take, body included: enough for a local model that starts cold. */
+export const EMBEDDING_QUERY_TIMEOUT_MS = 30_000;
 
-async function postQueryEmbedding(url: string, server: string, body: unknown): Promise<Response> {
-  const signal = AbortSignal.timeout(EMBEDDING_QUERY_TIMEOUT_MS);
-  let response: Response;
+/** A failure this module named itself: its message quotes no response text. */
+class EmbeddingQueryError extends Error {}
+
+/**
+ * Why a query embedding failed, named by the server and the kind of failure
+ * only. A parse error can quote the response body, and a local server can
+ * echo the question in it, so no response text reaches the message or its cause.
+ */
+function embeddingFailure(server: string, url: string, error: unknown): Error {
+  if (error instanceof Error && error.name === "TimeoutError") {
+    return new EmbeddingQueryError(`${server} did not finish embedding the question within ${EMBEDDING_QUERY_TIMEOUT_MS / 1000} seconds. Check that it is running, then ask again.`);
+  }
+  if (isConnectionRefused(error)) {
+    return new EmbeddingQueryError(`${server} is not reachable at ${url}. Start the local server, then ask again.`);
+  }
+  if (error instanceof SyntaxError) {
+    return new EmbeddingQueryError(`${server} answered the embedding request with something other than JSON. Check the local server, then ask again.`);
+  }
+  const code = error instanceof Error && error.cause && typeof error.cause === "object" && "code" in error.cause && typeof error.cause.code === "string" ? error.cause.code : undefined;
+  return new EmbeddingQueryError(`${server} did not complete the embedding request${code ? ` (${code})` : ""}. Check the local server, then ask again.`);
+}
+
+/**
+ * Posts one question for embedding and reads the answer inside the same
+ * time budget, so a body that stalls after its headers times out too.
+ */
+async function queryEmbedding<T>(url: string, server: string, body: unknown, read: (response: Response) => Promise<T>): Promise<T> {
   try {
-    response = await fetch(url, {
+    const response = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
-      signal,
+      signal: AbortSignal.timeout(EMBEDDING_QUERY_TIMEOUT_MS),
       // The question is in the body. Refuse any redirect from the local service.
       redirect: modelServerRedirect(url),
     });
+    if (isRefusedRedirect(response, url)) throw new EmbeddingQueryError(redirectRefusedDetail(server, url));
+    return await read(response);
   } catch (error) {
-    if (error instanceof Error && error.name === "TimeoutError") {
-      throw new Error(`${server} timed out while embedding the question.`, { cause: error });
-    }
-    if (isConnectionRefused(error)) {
-      throw new Error(`${server} is not reachable at ${url}. Start the local server, then ask again.`, { cause: error });
-    }
-    throw error;
+    if (error instanceof EmbeddingQueryError) throw error;
+    throw embeddingFailure(server, url, error);
   }
-  if (isRefusedRedirect(response, url)) throw new Error(redirectRefusedDetail(server, url));
-  return response;
 }
 
 /**
@@ -297,18 +317,19 @@ export function loopbackEmbedQuery(endpoint: string): EmbedQuery {
   return async (text: string) => {
     assertLoopback(endpoint);
     const url = `${endpoint.replace(/\/$/, "")}/v1/embeddings`;
-    const response = await postQueryEmbedding(url, "The embedding server", { input: [`search_query: ${text}`] });
-    if (!response.ok) {
-      throw new Error(`Embedding server responded with HTTP ${response.status}.`);
-    }
-    const payload = (await response.json()) as {
-      data?: Array<{ embedding?: number[] }>;
-    };
-    const embedding = payload?.data?.[0]?.embedding;
-    if (!Array.isArray(embedding)) {
-      throw new Error("Embedding server returned no embedding vector.");
-    }
-    return embedding;
+    return queryEmbedding(url, "The embedding server", { input: [`search_query: ${text}`] }, async (response) => {
+      if (!response.ok) {
+        throw new EmbeddingQueryError(`Embedding server responded with HTTP ${response.status}.`);
+      }
+      const payload = (await response.json()) as {
+        data?: Array<{ embedding?: number[] }>;
+      };
+      const embedding = payload?.data?.[0]?.embedding;
+      if (!Array.isArray(embedding)) {
+        throw new EmbeddingQueryError("Embedding server returned no embedding vector.");
+      }
+      return embedding;
+    });
   };
 }
 
@@ -329,24 +350,25 @@ export function ollamaEmbedQuery(
   return async (text: string) => {
     assertLoopback(endpoint);
     const url = `${endpoint.replace(/\/$/, "")}/api/embed`;
-    const response = await postQueryEmbedding(url, "Ollama", { model, input: `search_query: ${text}` });
-    if (!response.ok) {
-      const details = response.status === 404
-        ? await response.json().catch((error: unknown) => {
-          if (error instanceof SyntaxError) return undefined;
-          throw error;
-        }) as { error?: unknown } | undefined
-        : undefined;
-      const missing = typeof details?.error === "string" && /model.*not found/i.test(details.error);
-      const recovery = missing ? ` The embedding model ${model} is missing. Run \`ollama pull ${model}\`.` : "";
-      throw new Error(`Ollama's embedding request returned HTTP ${response.status}.${recovery}`);
-    }
-    const payload = (await response.json()) as { embeddings?: number[][] };
-    const embedding = payload?.embeddings?.[0];
-    if (!Array.isArray(embedding)) {
-      throw new Error("The embedding service returned no vector.");
-    }
-    return embedding;
+    return queryEmbedding(url, "Ollama", { model, input: `search_query: ${text}` }, async (response) => {
+      if (!response.ok) {
+        const details = response.status === 404
+          ? await response.json().catch((error: unknown) => {
+            if (error instanceof SyntaxError) return undefined;
+            throw error;
+          }) as { error?: unknown } | undefined
+          : undefined;
+        const missing = typeof details?.error === "string" && /model.*not found/i.test(details.error);
+        const recovery = missing ? ` The embedding model ${model} is missing. Run \`ollama pull ${model}\`.` : "";
+        throw new EmbeddingQueryError(`Ollama's embedding request returned HTTP ${response.status}.${recovery}`);
+      }
+      const payload = (await response.json()) as { embeddings?: number[][] };
+      const embedding = payload?.embeddings?.[0];
+      if (!Array.isArray(embedding)) {
+        throw new EmbeddingQueryError("The embedding service returned no vector.");
+      }
+      return embedding;
+    });
   };
 }
 

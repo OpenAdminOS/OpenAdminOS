@@ -2858,7 +2858,8 @@ export class AppStateStore {
     return this.retrievalIndexInstance;
   }
 
-  private async getRetrievalStatusWithEmbedding(): Promise<RetrievalStatus> {
+  /** Index status plus the embedding model's state: what Settings shows, so no reply drops a warning. */
+  async getRetrievalStatusWithEmbedding(): Promise<RetrievalStatus> {
     const status = await this.getRetrievalStatus();
     const embedding = await embeddingModelState().catch((error: unknown) => ({
       ollamaReachable: undefined,
@@ -2912,9 +2913,8 @@ export class AppStateStore {
   ): Promise<Array<{ file: string; title?: string; text: string; score: number }>> {
     const index = this.retrievalIndex();
     if (!index || !index.status().available) return [];
-    const endpoint =
-      process.env.OPENADMINOS_EMBEDDING_ENDPOINT ?? "http://127.0.0.1:11434";
-    return index.retrieve(query, ollamaEmbedQuery(endpoint), { k: 12 });
+    // The same endpoint Settings checks, so its state and Chat's searches agree.
+    return index.retrieve(query, ollamaEmbedQuery(embeddingEndpoint()), { k: 12 });
   }
 
   /** Install an index from a local folder or a URL, then reload it. */
