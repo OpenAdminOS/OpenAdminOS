@@ -14,6 +14,15 @@ export const LOCAL_AUTO_SELECT_ORDER: readonly ProviderId[] = [
 ];
 
 /**
+ * The provider's check itself failed, the scan's rule: an HTTP error, an
+ * unreadable answer or a check that threw (`checkFailed`), or a hosted CLI
+ * whose sign-in status request failed.
+ */
+export function providerCheckFailed(provider: ProviderSummary): boolean {
+  return Boolean(provider.checkFailed) || provider.cli?.state === "request-failed";
+}
+
+/**
  * Whether a provider can answer right now, for detection purposes. Follows
  * the host's run gate ("connected", or a configured Azure OpenAI deployment
  * at "available") and is stricter about models, so an embedding-only

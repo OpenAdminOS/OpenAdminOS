@@ -80,6 +80,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Chat's model choice shows a provider whose check failed as Could not check with its reason and Retry, as the model scan does, instead of leaving LM Studio, Lemonade, Apple Intelligence or a hosted CLI out and showing Ollama as having no model; an endpoint outside this device that the scan did not contact shows as Not checked, without Retry; a signed-in tool that cannot answer, such as a Copilot model set by IT that the account cannot use, shows as Unavailable with the reason instead of Signed in.
 - Sign-in logs, directory audit logs and Intune audit events sync in large tenants: every refresh collects the last 7 days, newest first, up to 10,000 entries, instead of every retained entry, which failed on throttling or the memory limit. A window at the limit shows as capped, not as an error, and Settings, Data and Chat say which window the data covers.
 
 - Chat and the data boundary text show the organization's name instead of the tenant domain (Chat heading, composer, scope, answer headers, status strip tooltip), and follow a rename at once.
@@ -107,6 +108,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Security
 
+- Ollama, LM Studio and Lemonade on this device never have a redirect followed: a check, a chat request, Start or a local documentation lookup that gets one fails with the reason, so no model-list read, prompt or question goes to the address it points to.
 - The audit log is an append-only SQLite table written when each event happens, hash chained on insert, with triggers that refuse changes and early deletes; every Microsoft Graph write, Outlook and Teams sends included, is recorded in the audit log before it leaves the device and refused if the audit log cannot record it, the Graph adapter refuses writes without an audit sink, run retention and Disconnect no longer remove audit history, runs record who started them, the export verifies the stored chain and can be limited to runs no person started, and CSV cells that a spreadsheet would run as a formula are prefixed with a quote.
 - While the audit log is behind, a prune or Disconnect that would remove events it has not recorded is refused, and Settings shows the last failed append.
 - An anchor file next to the database lets the audit log export detect rows removed from either end of the log, or a dropped table; a missing anchor beside a non-empty log is reported as an integrity error instead of being created again.

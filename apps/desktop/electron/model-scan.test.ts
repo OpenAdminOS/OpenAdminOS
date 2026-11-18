@@ -839,6 +839,281 @@ describe("a check that times out is served as could not check (Muse round 5, B)"
   });
 });
 
+describe("an endpoint the scan did not contact is served as not contacted (PR #204 review round 1)", () => {
+  it("lists an off-device LM Studio as off the device and not contacted, and contacts nothing there, also after a Retry", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
+    await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [], firstRunScan: "pending" }));
+    const original = process.env.OPENADMINOS_LM_STUDIO_URL;
+    process.env.OPENADMINOS_LM_STUDIO_URL = "http://10.255.255.1:1234/v1";
+    const realFetch = globalThis.fetch;
+    const contacted: string[] = [];
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.includes("10.255.255.1")) contacted.push(url);
+      return realFetch(input, init);
+    }) as typeof fetch;
+    const store = new AppStateStore({
+      filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
+      tokenStore: { read: async () => "", write: async () => undefined },
+      providerListFactory: async () => providerCatalog.map((provider) => ({ ...provider, status: "not-installed" as const, models: [] })),
+    });
+    try {
+      const result = await store.scanModels();
+      assert.equal(result.probes.find((probe) => probe.providerId === "lm-studio")!.notContacted, true);
+      const listed = (await store.listProviders()).find((provider) => provider.id === "lm-studio")!;
+      assert.equal(listed.notContacted, true);
+      assert.equal(listed.isLocal, false);
+      assert.equal(listed.checkFailed, true);
+      // Settings reads the same summary: its description does not say prompts stay here (Sol round 4, P3).
+      assert.match(listed.description, /outside this device\. Tenant prompts leave this device/);
+      // Chat's Retry on another provider checks only that one: still nothing off the device (Sol rounds 2 and 3).
+      await store.completeFirstRunScan({ microsoftStepPending: false });
+      await store.recheckProvider("ollama");
+      assert.equal((await store.listProviders()).find((provider) => provider.id === "lm-studio")!.notContacted, true);
+      // A recheck of the refused endpoint itself is refused, not contacted.
+      await assert.rejects(store.recheckProvider("lm-studio"), /outside this device|only checks this device/);
+      assert.deepEqual(contacted, []);
+    } finally {
+      globalThis.fetch = realFetch;
+      if (original === undefined) delete process.env.OPENADMINOS_LM_STUDIO_URL;
+      else process.env.OPENADMINOS_LM_STUDIO_URL = original;
+      store.close();
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+});
+
+describe("an Ollama on this device that redirects its model list (PR #204 review round 5)", () => {
+  it("is a failed check with the reason, and nothing reaches the redirect target", async () => {
+    const { createServer } = await import("node:http");
+    let hits = 0;
+    const target = createServer((_request, response) => {
+      hits += 1;
+      response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ models: [{ name: "llama3" }] }));
+    });
+    await new Promise<void>((resolve) => target.listen(0, "127.0.0.1", resolve));
+    const targetPort = (target.address() as { port: number }).port;
+    const origin = createServer((request, response) => {
+      response.writeHead(307, { location: `http://127.0.0.1:${targetPort}${request.url ?? "/"}` }).end();
+    });
+    await new Promise<void>((resolve) => origin.listen(0, "127.0.0.1", resolve));
+    const original = { ollama: process.env.OPENAGENTS_OLLAMA_URL, host: process.env.OLLAMA_HOST };
+    process.env.OPENAGENTS_OLLAMA_URL = `http://127.0.0.1:${(origin.address() as { port: number }).port}`;
+    delete process.env.OLLAMA_HOST;
+    try {
+      const summary = await checkOllama(providerCatalog.find((provider) => provider.id === "ollama")!, { localOnly: true });
+      assert.equal(summary.checkFailed, true);
+      assert.deepEqual(summary.models, []);
+      assert.match(summary.detail ?? "", /answered with a redirect to another address/);
+      assert.equal(hits, 0);
+    } finally {
+      for (const [key, value] of [["OPENAGENTS_OLLAMA_URL", original.ollama], ["OLLAMA_HOST", original.host]] as const) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      await Promise.all([new Promise((resolve) => origin.close(resolve)), new Promise((resolve) => target.close(resolve))]);
+    }
+  });
+});
+
+describe("an Ollama whose capability read redirects, and Start against a redirecting runtime (PR #204 review round 6)", () => {
+  async function servers(origin: (request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse, target: string) => void) {
+    const { createServer } = await import("node:http");
+    let hits = 0;
+    const target = createServer((_request, response) => {
+      hits += 1;
+      response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ capabilities: ["completion"], data: [] }));
+    });
+    await new Promise<void>((resolve) => target.listen(0, "127.0.0.1", resolve));
+    const targetUrl = `http://127.0.0.1:${(target.address() as { port: number }).port}`;
+    const front = createServer((request, response) => origin(request, response, targetUrl));
+    await new Promise<void>((resolve) => front.listen(0, "127.0.0.1", resolve));
+    return {
+      url: `http://127.0.0.1:${(front.address() as { port: number }).port}`,
+      hits: () => hits,
+      close: () => Promise.all([new Promise((resolve) => front.close(resolve)), new Promise((resolve) => target.close(resolve))]),
+    };
+  }
+
+  it("shows the redirect as the reason when the only model's capability read redirects", async () => {
+    const pair = await servers((request, response, target) => {
+      if (request.url === "/api/tags") {
+        response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ models: [{ name: "redirected-model:1" }] }));
+        return;
+      }
+      response.writeHead(307, { location: `${target}${request.url ?? "/"}` }).end();
+    });
+    const original = { ollama: process.env.OPENAGENTS_OLLAMA_URL, host: process.env.OLLAMA_HOST };
+    process.env.OPENAGENTS_OLLAMA_URL = pair.url;
+    delete process.env.OLLAMA_HOST;
+    try {
+      const summary = await checkOllama(providerCatalog.find((provider) => provider.id === "ollama")!, { localOnly: true });
+      assert.equal(summary.checkFailed, true);
+      assert.match(summary.detail ?? "", /answered with a redirect to another address/);
+      assert.equal(pair.hits(), 0);
+    } finally {
+      for (const [key, value] of [["OPENAGENTS_OLLAMA_URL", original.ollama], ["OLLAMA_HOST", original.host]] as const) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      await pair.close();
+    }
+  });
+
+  it("keeps the redirect reason when another model's capabilities were verified (Muse round 5)", async () => {
+    const pair = await servers((request, response, target) => {
+      if (request.url === "/api/tags") {
+        response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ models: [{ name: "good-model:1" }, { name: "redirected-model:1" }] }));
+        return;
+      }
+      let body = "";
+      request.on("data", (chunk) => (body += chunk));
+      request.on("end", () => {
+        if (body.includes("good-model")) response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ capabilities: ["completion"] }));
+        else response.writeHead(307, { location: `${target}/api/show` }).end();
+      });
+    });
+    const original = { ollama: process.env.OPENAGENTS_OLLAMA_URL, host: process.env.OLLAMA_HOST };
+    process.env.OPENAGENTS_OLLAMA_URL = pair.url;
+    delete process.env.OLLAMA_HOST;
+    try {
+      const summary = await checkOllama(providerCatalog.find((provider) => provider.id === "ollama")!, { localOnly: true });
+      assert.deepEqual(summary.models, ["good-model:1"]);
+      assert.match(summary.detail ?? "", /answered with a redirect to another address/);
+      assert.equal(pair.hits(), 0);
+    } finally {
+      for (const [key, value] of [["OPENAGENTS_OLLAMA_URL", original.ollama], ["OLLAMA_HOST", original.host]] as const) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      await pair.close();
+    }
+  });
+
+  it("does not start or accept a runtime whose address answers with a redirect, and says why", async () => {
+    const pair = await servers((request, response, target) => response.writeHead(307, { location: `${target}${request.url ?? "/"}` }).end());
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
+    await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [] }));
+    const original = process.env.OPENADMINOS_LM_STUDIO_URL;
+    process.env.OPENADMINOS_LM_STUDIO_URL = `${pair.url}/v1`;
+    const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
+    try {
+      const result = await store.startLocalRuntime("lm-studio");
+      assert.equal(result.started, false);
+      assert.match(result.message ?? "", /LM Studio at .* answered with a redirect to another address/);
+      assert.equal(pair.hits(), 0);
+    } finally {
+      if (original === undefined) delete process.env.OPENADMINOS_LM_STUDIO_URL;
+      else process.env.OPENADMINOS_LM_STUDIO_URL = original;
+      store.close();
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+      await pair.close();
+    }
+  });
+});
+
+describe("checking one provider again from Chat (PR #204 review round 3)", () => {
+  it("checks a local runtime local only, so an endpoint set outside this device after the scan is not contacted (round 4, P1)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
+    await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [], firstRunScan: "pending" }));
+    const original = process.env.OPENADMINOS_LM_STUDIO_URL;
+    // On this device at scan time, and nothing listens there.
+    process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:9/v1";
+    const realFetch = globalThis.fetch;
+    const contacted: string[] = [];
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.includes("10.255.255.1")) {
+        contacted.push(url);
+        throw Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }) });
+      }
+      return realFetch(input, init);
+    }) as typeof fetch;
+    const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
+    try {
+      await store.scanModels();
+      await store.completeFirstRunScan({ microsoftStepPending: false });
+      process.env.OPENADMINOS_LM_STUDIO_URL = "http://10.255.255.1:1234/v1";
+      await store.recheckProvider("lm-studio");
+      const listed = (await store.listProviders()).find((provider) => provider.id === "lm-studio")!;
+      assert.equal(listed.notContacted, true);
+      assert.equal(listed.isLocal, false);
+      // Settings reads the same summary: it says prompts would leave this device (Muse round 4, P3-2).
+      assert.match(listed.description, /outside this device\. Tenant prompts leave this device/);
+      assert.deepEqual(contacted, []);
+    } finally {
+      globalThis.fetch = realFetch;
+      if (original === undefined) delete process.env.OPENADMINOS_LM_STUDIO_URL;
+      else process.env.OPENADMINOS_LM_STUDIO_URL = original;
+      store.close();
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+
+  it("keeps the other providers' results, such as a signed-in Copilot, and leaves the active provider alone", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
+    await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [], activeProviderId: "anthropic", providerChosenByUser: true }));
+    const checked: ProviderId[] = [];
+    const store = new AppStateStore({
+      filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
+      tokenStore: { read: async () => "", write: async () => undefined },
+      providerListFactory: async () => {
+        const list = providerCatalog.map((provider) => ({ ...provider, status: "not-installed" as const, models: [] as string[] }));
+        checked.push(...list.map((provider) => provider.id));
+        return list;
+      },
+    });
+    try {
+      await store.scanModels();
+      // Copilot's sign-in was confirmed after the scan, when the admin selected or tested it.
+      const served = (store as unknown as { modelScanProviders: Map<ProviderId, ProviderSummary> }).modelScanProviders;
+      const copilot: ProviderSummary = { ...providerCatalog.find((provider) => provider.id === "copilot")!, status: "connected", models: ["gpt-5"], cli: { state: "ready" } };
+      served.set("copilot", copilot);
+      await store.recheckProvider("lm-studio");
+      const listed = await store.listProviders();
+      assert.deepEqual(listed.find((provider) => provider.id === "copilot"), copilot);
+      assert.equal(listed.find((provider) => provider.id === "lm-studio")!.status, "not-installed");
+      assert.equal((await store.getAppState()).activeProviderId, "anthropic");
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+
+  it("checks nothing itself outside served scan results, because the app state read that follows checks every provider (round 5)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
+    await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [] }));
+    let listings = 0;
+    const store = new AppStateStore({
+      filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
+      tokenStore: { read: async () => "", write: async () => undefined },
+      providerListFactory: async () => {
+        listings += 1;
+        return providerCatalog.map((provider) => ({ ...provider, status: "not-installed" as const, models: [] }));
+      },
+    });
+    try {
+      await store.recheckProvider("lm-studio");
+      assert.equal(listings, 0);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+
+  it("refuses while the first-launch scan is pending, so nothing but the scan checks", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
+    await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [], firstRunScan: "pending" }));
+    const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
+    try {
+      await assert.rejects(store.recheckProvider("ollama"), /first-launch scan is still checking/);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+});
+
 describe("reads that overlap a manual scan (review round 5, item 1)", () => {
   it("contacts no off-device endpoint while Scan again runs in a completed profile", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));

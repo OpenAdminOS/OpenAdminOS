@@ -242,7 +242,8 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
           : { ...provider, status: "not-installed" as const },
     );
     const refreshProviders = vi.fn(async () => undefined);
-    const bridge = makeMockBridge({ refreshProviders }, guestState({ providers, activeProviderId: "lm-studio" }));
+    const recheckProvider = vi.fn(async (_id: string) => undefined);
+    const bridge = makeMockBridge({ refreshProviders, recheckProvider }, guestState({ providers, activeProviderId: "lm-studio" }));
     renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
 
     const row = await screen.findByRole("radio", { name: /^LM Studio/ });
@@ -250,7 +251,9 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
     expect(row.closest("label")).toHaveTextContent("Load a model in LM Studio, then scan again.");
     await user.click(row);
     await user.click(screen.getByRole("button", { name: "Scan again" }));
-    await waitFor(() => expect(refreshProviders).toHaveBeenCalledOnce());
+    // Only this provider, never the full refresh that contacts endpoints outside this device (PR #204 review rounds 2 and 3).
+    await waitFor(() => expect(recheckProvider).toHaveBeenCalledWith("lm-studio"));
+    expect(refreshProviders).not.toHaveBeenCalled();
   });
 
   it("offers starters for what was connected, one line per service (mockup 32, section B)", async () => {

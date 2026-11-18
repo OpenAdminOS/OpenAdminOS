@@ -41,7 +41,8 @@ interface AppStateContextValue {
   registryAgents: RegistryAgentSummary[];
   loading: boolean;
   error: Error | null;
-  refresh: () => Promise<void>;
+  /** Reads app state again. With `rethrow`, a failed read also rejects, so the caller can show it where it was asked for. */
+  refresh: (options?: { rethrow?: boolean }) => Promise<void>;
   refreshRegistry: () => Promise<void>;
   setRegistrySource: (
     url: string,
@@ -230,7 +231,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     [],
   );
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options?: { rethrow?: boolean }) => {
     const api = getOpenAdminOSApi();
 
     if (!api) {
@@ -248,7 +249,9 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       setState(nextState);
       setRegistryAgents(nextState.registryAgents);
     } catch (caughtError) {
-      setError(toError(caughtError));
+      const failure = toError(caughtError);
+      setError(failure);
+      if (options?.rethrow) throw failure;
     } finally {
       setLoading(false);
     }

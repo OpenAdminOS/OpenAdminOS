@@ -34,6 +34,11 @@ export interface ProviderSummary {
    */
   checkFailed?: boolean;
   /**
+   * The endpoint is set outside this device, so this check did not contact
+   * it (the model scan only checks this device). Set with `checkFailed`.
+   */
+  notContacted?: true;
+  /**
    * Ollama and LM Studio: installed on this device (from local files) while
    * its server does not answer. Settings and the model scan both read it.
    */
@@ -3359,6 +3364,12 @@ export interface OpenAdminOSApi {
   startLocalRuntime?(providerId: ProviderId): Promise<{ started: boolean; message?: string; scan?: ModelScanResult }>;
   /** Runs one check of the scan again, with a longer timeout. */
   retryModelScanProbe?(providerId: ProviderId): Promise<ModelScanResult>;
+  /**
+   * Checks one provider again because the admin asked from its row, the
+   * way selecting it does; the other providers' results are kept, and an
+   * endpoint the scan did not contact is refused.
+   */
+  recheckProvider?(providerId: ProviderId): Promise<void>;
   /** `scanId` is the id the window passed to `startModelScan`; results of another run are ignored. */
   onModelScanProgress?(listener: (probe: ModelScanProbe, scanId?: string) => void): () => void;
   /** Selects a provider and its model in one validated write. */

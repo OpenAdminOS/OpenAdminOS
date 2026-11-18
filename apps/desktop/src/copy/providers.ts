@@ -45,6 +45,14 @@ export const MODEL_CHOICE_COPY = {
   configured: "Configured",
   couldNotCheck: "Could not check",
   couldNotCheckLine: (name: string) => `${name} did not answer. Retry to check it again.`,
+  notChecked: "Not checked",
+  unavailable: "Unavailable",
+  unavailableLine: (name: string) => `${name} cannot answer with its current settings. Settings, Providers shows why.`,
+  checkedAgainNotOffered: (name: string) => `${name} was checked again and is not offered here. All providers shows its state.`,
+  /** Gemini's sign-in is known only from a request, so only Test clears a failed one. */
+  geminiTestHint: "A failed Gemini request clears only after a Test in Settings, Providers.",
+  checkAgainUnavailable: "Checking again is not available in this build. Use Refresh providers in Settings, Providers.",
+  notCheckedLine: (name: string) => `${name} is set to an endpoint outside this device, so it was not checked here. Check it in Settings, Providers.`,
   localReady: (model: string | undefined) => (model ? `On this device. Answers with ${model}.` : "On this device."),
   localStart: (id: string) =>
     id === "lm-studio" ? "On this device. OpenAdminOS starts its server." : "On this device. OpenAdminOS starts it for you.",

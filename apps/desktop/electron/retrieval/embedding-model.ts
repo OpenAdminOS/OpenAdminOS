@@ -1,4 +1,4 @@
-import { classifyOllamaEndpoint, ollamaHostEndpoint } from "@openadminos/runtime";
+import { classifyOllamaEndpoint, isRefusedRedirect, modelServerRedirect, ollamaHostEndpoint, redirectRefusedDetail } from "@openadminos/runtime";
 import { DEFAULT_INDEX_EMBEDDING_MODEL, assertLoopback } from "./retrieval.js";
 
 /**
@@ -37,9 +37,12 @@ export async function embeddingModelState(
 ): Promise<{ ollamaReachable: boolean; installed: boolean }> {
   assertLoopback(endpoint);
   try {
-    const response = await fetchImpl(`${endpoint.replace(/\/$/, "")}/api/tags`, {
+    const url = `${endpoint.replace(/\/$/, "")}/api/tags`;
+    const response = await fetchImpl(url, {
       signal: AbortSignal.timeout(3000),
+      redirect: modelServerRedirect(url),
     });
+    // A redirect is not followed, so it is not Ollama answering.
     if (!response.ok) return { ollamaReachable: false, installed: false };
     const payload = (await response.json()) as {
       models?: Array<{ name?: string }>;
@@ -66,11 +69,14 @@ export async function pullEmbeddingModel(
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
   assertLoopback(endpoint);
-  const response = await fetchImpl(`${endpoint.replace(/\/$/, "")}/api/pull`, {
+  const url = `${endpoint.replace(/\/$/, "")}/api/pull`;
+  const response = await fetchImpl(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ model, stream: false }),
+    redirect: modelServerRedirect(url),
   });
+  if (isRefusedRedirect(response, url)) throw new Error(redirectRefusedDetail("Ollama", url));
   // Ollama reports a failed download in the body, often with HTTP 500:
   // read it first, so the reason (an unreachable registry, a proxy) is kept.
   const payload = (await response.json().catch(() => undefined)) as

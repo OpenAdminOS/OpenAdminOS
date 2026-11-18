@@ -95,6 +95,9 @@ import {
   cliSpawn,
   resolveLmStudioEndpoint,
   resolveOllamaEndpoint,
+  isRefusedRedirect,
+  modelServerRedirect,
+  redirectRefusedDetail,
 } from "@openadminos/runtime";
 import type {
   AgentDraft,
@@ -1758,6 +1761,14 @@ function scanResultsFor(found: ReadonlyMap<ProviderId, ProviderSummary>, probes:
     if (!entry) continue;
     results.set(probe.providerId, {
       ...entry,
+      // An endpoint outside this device that the scan refused stays off the device, and not contacted.
+      ...(probe.notContacted
+        ? {
+            isLocal: false,
+            notContacted: true as const,
+            description: `Use an ${probe.name}-compatible endpoint outside this device. Tenant prompts leave this device when active.`,
+          }
+        : {}),
       status: "error",
       checkFailed: true,
       detail: probe.facts[0] ?? `${probe.name} could not be checked. Retry or refresh providers.`,
@@ -3983,6 +3994,32 @@ export class AppStateStore {
     return new Error(network ?? humanizeMsalError(error, registration));
   }
 
+  /**
+   * Checks one provider again because the admin asked from its row (Retry
+   * and Scan again in Chat's model choice), the same full check selecting
+   * it runs. The other providers' results are kept, the active provider is
+   * not changed, and an endpoint outside this device that the scan did not
+   * contact is refused rather than contacted.
+   */
+  async recheckProvider(providerId: ProviderId): Promise<void> {
+    if (!isProviderId(providerId)) throw new Error(`Unknown provider: ${String(providerId)}`);
+    this.requireProviderAllowed(providerId);
+    if ((await this.read()).firstRunScan === "pending") {
+      throw new Error("The first-launch scan is still checking this device. Finish or skip it, then try again.");
+    }
+    const served = this.scanResultsServed ? this.modelScanProviders.get(providerId) : undefined;
+    if (served?.notContacted) {
+      throw new Error(served.detail ?? "This provider is set to an endpoint outside this device, so it is not checked here. Check it in Settings, Providers.");
+    }
+    // Without served results every app state read checks all providers in
+    // full already, so the read that follows is the check; nothing runs twice.
+    if (!this.scanResultsServed) return;
+    // While scan results are served, a local runtime is checked like the scan
+    // checks it: an endpoint now set outside this device is served as not
+    // contacted instead of being contacted.
+    await this.detectProvider(providerId, { localOnly: true });
+  }
+
   /** Set when a scan, Retry or Start is asked for and when the first-run scan completes; cleared by `refreshProviders`. */
   private scanResultsServed = false;
 
@@ -3991,7 +4028,7 @@ export class AppStateStore {
    * first run, while the scan results are served, the result replaces that
    * provider's entry and no other provider is checked.
    */
-  private async detectProvider(id: ProviderId): Promise<ProviderSummary | undefined> {
+  private async detectProvider(id: ProviderId, options: { localOnly?: boolean } = {}): Promise<ProviderSummary | undefined> {
     // While the scan is pending nothing but the scan detects, and without
     // served results listing already checks every provider in full.
     if (!this.scanResultsServed) {
@@ -4011,7 +4048,7 @@ export class AppStateStore {
           configError = error instanceof Error ? error.message : String(error);
         }
       }
-      summary = await this.checkProviderEntry(entry, config, configError);
+      summary = await this.checkProviderEntry(entry, config, configError, options);
     }
     if (summary) this.modelScanProviders.set(id, summary);
     // The same policy view every listing gets: a provider it does not allow is not found.
@@ -4032,12 +4069,15 @@ export class AppStateStore {
     provider: ProviderSummary,
     azureOpenAIConfig: AzureOpenAIProviderConfig | undefined,
     azureOpenAIConfigError: string | undefined,
+    options: { localOnly?: boolean } = {},
   ): Promise<ProviderSummary> {
+    // `localOnly`: a local runtime set to an endpoint outside this device is not contacted.
+    const local = options.localOnly ? { localOnly: true } : {};
     try {
-      if (provider.id === "ollama") return await checkOllama(provider);
+      if (provider.id === "ollama") return await checkOllama(provider, local);
       if (provider.id === "apple-foundation") return await checkAppleFoundation(provider);
-      if (provider.id === "lm-studio") return await checkLmStudio(provider);
-      if (provider.id === "lemonade") return await checkLemonade(provider);
+      if (provider.id === "lm-studio") return await checkLmStudio(provider, local);
+      if (provider.id === "lemonade") return await checkLemonade(provider, local);
       if (provider.id === "anthropic") return await checkClaudeCode(provider);
       if (provider.id === "openai") return await checkCodex(provider);
       if (provider.id === "copilot" || provider.id === "gemini") return await checkAdditionalCli(provider);
@@ -4247,9 +4287,16 @@ export class AppStateStore {
     if (!local) {
       return { started: false, message: `${name} is set to ${endpoint}, outside this device. The scan only starts runtimes on this device.` };
     }
+    const readyUrl = runtimeReadyUrl(providerId, endpoint);
+    // A redirect from the runtime's address is never followed, so it is never proof the runtime is up.
+    let redirected = false;
     const isUp = async () => {
       try {
-        const response = await fetch(runtimeReadyUrl(providerId, endpoint), { signal: AbortSignal.timeout(1_000) });
+        const response = await fetch(readyUrl, { signal: AbortSignal.timeout(1_000), redirect: modelServerRedirect(readyUrl) });
+        if (isRefusedRedirect(response, readyUrl)) {
+          redirected = true;
+          return false;
+        }
         return response.ok;
       } catch {
         return false;
@@ -4257,6 +4304,8 @@ export class AppStateStore {
     };
     // Already answering, for example started by an earlier Start from another window: nothing is spawned.
     if (!(await isUp())) {
+      // Something already answers there, with a redirect: nothing is started, and the reason is shown.
+      if (redirected) return { started: false, message: redirectRefusedDetail(name, readyUrl) };
       const launch = await runtimeLaunch(providerId);
       const result = await startLocalRuntime({
         name,
@@ -4281,7 +4330,7 @@ export class AppStateStore {
         isUp,
       });
       // A failed start returns its failure as it is; only a started runtime is scanned again.
-      if (!result.started) return { started: false, message: result.message };
+      if (!result.started) return { started: false, message: redirected ? redirectRefusedDetail(name, readyUrl) : result.message };
     }
     return { started: true, scan: await this.runModelScanOnce() };
   }

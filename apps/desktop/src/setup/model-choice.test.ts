@@ -117,3 +117,88 @@ describe("Lemonade in the choice", () => {
     expect(optionsFromProviders([{ ...lemonade, status: "not-installed", models: [], defaultModel: undefined }])).toEqual([]);
   });
 });
+
+describe("a provider whose check failed in Chat's choice (PR #191 follow-up)", () => {
+  const local = (id: ProviderId, name: string, rest: Partial<ProviderSummary> = {}): ProviderSummary => ({ id, name, description: "", isLocal: true, status: "error", checkFailed: true, models: [], ...rest });
+
+  it("shows every local runtime whose check failed as could not check with its reason, never as missing or without a model", () => {
+    const options = optionsFromProviders([
+      local("ollama", "Ollama", { detail: "Ollama on http://127.0.0.1:11434 did not answer in time." }),
+      local("lm-studio", "LM Studio", { detail: "LM Studio answered HTTP 500." }),
+      local("lemonade", "Lemonade", { detail: "Lemonade asks for an API key." }),
+      local("apple-foundation", "Apple Intelligence"),
+    ]);
+    expect(options.map((option) => [option.providerId, option.state, option.unavailable, option.whereLine])).toEqual([
+      ["ollama", "Could not check", true, "Ollama on http://127.0.0.1:11434 did not answer in time."],
+      ["lm-studio", "Could not check", true, "LM Studio answered HTTP 500."],
+      ["lemonade", "Could not check", true, "Lemonade asks for an API key."],
+      ["apple-foundation", "Could not check", true, "Apple Intelligence did not answer. Retry to check it again."],
+    ]);
+    expect(preselect(options)).toBeNull();
+  });
+
+  it("shows a hosted tool whose check failed the same way, and never preselects a failed row over a working one", () => {
+    const hosted: ProviderSummary = { id: "anthropic", name: "Claude Code", description: "", isLocal: false, status: "error", checkFailed: true, detail: "spawn EINVAL", models: [] };
+    const ready = local("lm-studio", "LM Studio", { status: "connected", checkFailed: undefined, models: ["qwen3-8b"] });
+    const options = optionsFromProviders([hosted, local("ollama", "Ollama"), ready]);
+    expect(options.map((option) => [option.providerId, option.where, option.state, option.unavailable ?? false])).toEqual([
+      ["ollama", "local", "Could not check", true],
+      ["lm-studio", "local", "Ready", false],
+      ["anthropic", "hosted", "Could not check", true],
+    ]);
+    expect(preselect(options)).toBe("lm-studio");
+  });
+
+  it("shows a hosted CLI whose status request failed as could not check, from the summary the CLI check builds (Muse round 1, P1)", () => {
+    // checkClaudeCode: installed, not ready, probe.failure "request-failed"; no checkFailed.
+    const claude: ProviderSummary = {
+      id: "anthropic", name: "Claude Code", description: "", isLocal: false, status: "error",
+      detail: "claude auth status failed: getaddrinfo ENOTFOUND api.anthropic.com", models: [],
+      cli: { binaryPath: "/usr/local/bin/claude", version: "2.1.0", state: "request-failed" },
+    };
+    expect(optionsFromProviders([claude])).toEqual([
+      expect.objectContaining({ providerId: "anthropic", where: "hosted", state: "Could not check", unavailable: true, whereLine: "claude auth status failed: getaddrinfo ENOTFOUND api.anthropic.com" }),
+    ]);
+  });
+
+  it("shows an endpoint the scan did not contact as not checked, off the device and without Retry (review round 1)", () => {
+    // What the scan serves for an LM Studio set outside this device.
+    const served: ProviderSummary = {
+      id: "lm-studio", name: "LM Studio", description: "", isLocal: false, status: "error", checkFailed: true, notContacted: true, models: [],
+      detail: "LM Studio is set to http://10.0.0.5:1234/v1. The scan only checks this device. Check it in Settings, Providers.",
+    };
+    const [row] = optionsFromProviders([served]);
+    expect(row).toMatchObject({ where: "hosted", state: "Not checked", unavailable: true, notContacted: true, whereLine: served.detail });
+    expect(optionsFromProviders([{ ...served, detail: undefined }])[0]!.whereLine).toBe(
+      "LM Studio is set to an endpoint outside this device, so it was not checked here. Check it in Settings, Providers.",
+    );
+  });
+
+  it("tells the admin that only a Test clears an earlier failed Gemini request (round 4)", () => {
+    // probeGeminiLlm's cached failed request: the CLI started and lists its model.
+    const gemini: ProviderSummary = { id: "gemini", name: "Gemini CLI", description: "", isLocal: false, status: "error", detail: "Gemini CLI request failed.", models: ["gemini-default"], cli: { version: "0.60.1", state: "request-failed" } };
+    // A CLI that was found but did not start or answer its version check lists no model: Retry can fix it (Muse round 4).
+    expect(optionsFromProviders([{ ...gemini, detail: "gemini --version failed.", models: [] }])[0]!.whereLine).toBe("gemini --version failed.");
+    expect(optionsFromProviders([gemini])[0]!.whereLine).toBe("Gemini CLI request failed. A failed Gemini request clears only after a Test in Settings, Providers.");
+  });
+
+  it("shows a signed-in tool a finished check ruled out as unavailable with its reason and no Retry (review round 9)", () => {
+    // managed-policy-state: IT set a Copilot model this account cannot use.
+    const copilot: ProviderSummary = {
+      id: "copilot", name: "GitHub Copilot CLI", description: "", isLocal: false, status: "error", models: [],
+      detail: "Your IT department set the model Fusion High, which this account cannot use.", cli: { version: "1.0.114", state: "ready" },
+    };
+    const [row] = optionsFromProviders([copilot]);
+    expect(row).toMatchObject({ providerId: "copilot", where: "hosted", state: "Unavailable", unavailable: true, noRetry: true, whereLine: copilot.detail });
+    expect(optionsFromProviders([{ ...copilot, detail: undefined }])[0]!.whereLine).toMatch(/cannot answer with its current settings\. Settings, Providers shows why\.$/);
+    // Signed in and connected stays the normal row.
+    expect(optionsFromProviders([{ ...copilot, status: "connected", detail: undefined }])[0]).toMatchObject({ state: "Signed in" });
+    expect(optionsFromProviders([{ ...copilot, status: "connected", detail: undefined }])[0]!.unavailable).toBeUndefined();
+  });
+
+  it("leaves a completed check's row as it was", () => {
+    // No text model is a completed check: the scan's recovery, not could not check.
+    expect(optionsFromProviders([local("ollama", "Ollama", { checkFailed: undefined })])[0]).toMatchObject({ state: "No model yet", action: "get-model" });
+    expect(optionsFromProviders([local("ollama", "Ollama", { checkFailed: undefined })])[0]!.unavailable).toBeUndefined();
+  });
+});

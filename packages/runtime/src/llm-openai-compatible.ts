@@ -138,6 +138,7 @@ export function createOpenAiCompatibleLlm(
     } catch (error) {
       throw requestError(error, modelsUrl, callerSignal);
     }
+    if (isRefusedRedirect(response, modelsUrl)) throw new Error(redirectRefusedDetail(name, modelsUrl));
     if (!response.ok) {
       throw new Error(
         server.httpStatusDetail?.(response.status) ??
@@ -186,6 +187,7 @@ export function createOpenAiCompatibleLlm(
             headers: { "content-type": "application/json" },
             body: JSON.stringify(createChatRequestBody({ ...opts, model, stream: false })),
             signal: controller.signal,
+            redirect: modelServerRedirect(url),
           });
         } catch (error) {
           throw requestError(error, url, opts.signal);
@@ -195,6 +197,7 @@ export function createOpenAiCompatibleLlm(
         opts.signal?.removeEventListener("abort", abortFromCaller);
       }
 
+      if (isRefusedRedirect(response, url)) throw new Error(redirectRefusedDetail(name, url));
       if (!response.ok) {
         const detail = await response.text().catch(() => "");
         throw new Error(`${name} responded with HTTP ${response.status}: ${truncate(detail, 200)}`);
@@ -238,6 +241,7 @@ export function createOpenAiCompatibleLlm(
             headers: { "content-type": "application/json" },
             body: JSON.stringify(createChatRequestBody({ ...opts, model, stream: true })),
             signal: controller.signal,
+            redirect: modelServerRedirect(url),
           });
         } catch (error) {
           throw requestError(error, url, opts.signal);
@@ -251,6 +255,7 @@ export function createOpenAiCompatibleLlm(
       if (!response.ok) {
         clearTimeout(timer);
         opts.signal?.removeEventListener("abort", abortFromCaller);
+        if (isRefusedRedirect(response, url)) throw new Error(redirectRefusedDetail(name, url));
         const detail = await response.text().catch(() => "");
         throw new Error(`${name} responded with HTTP ${response.status}: ${truncate(detail, 200)}`);
       }
@@ -349,6 +354,9 @@ export async function probeOpenAiCompatibleLlm(
 
   try {
     const response = await fetchLocal(url, { signal: controller.signal });
+    if (isRefusedRedirect(response, url)) {
+      return { ready: false, endpoint, isLocal: endpointTrust.isLocal, models: [], status: "error", detail: redirectRefusedDetail(name, url) };
+    }
     if (!response.ok) {
       return {
         ready: false,
@@ -569,13 +577,32 @@ function truncate(value: string, max: number): string {
  * retry opens a new connection, which is refused when the server is gone.
  */
 export async function fetchLocal(url: string, init: { signal?: AbortSignal } = {}): Promise<Response> {
+  const request = { ...init, redirect: modelServerRedirect(url) };
   try {
-    return await fetch(url, init);
+    return await fetch(url, request);
   } catch (error) {
     const code = (error as { cause?: { code?: unknown } } | undefined)?.cause?.code;
     if (code !== "UND_ERR_SOCKET" || init.signal?.aborted) throw error;
-    return fetch(url, init);
+    return fetch(url, request);
   }
+}
+
+/**
+ * A request to a model server on this device never follows a redirect: a
+ * loopback server that answers 3xx could otherwise send a model-list read
+ * or a prompt to another host. The 3xx answer is returned as it is.
+ */
+export function modelServerRedirect(url: string): "manual" | "follow" {
+  return classifyOpenAiCompatibleEndpoint("Model server", url).isLocal ? "manual" : "follow";
+}
+
+/** A model server on this device answered with a redirect, which was not followed. */
+export function isRefusedRedirect(response: Response, url: string): boolean {
+  return response.status >= 300 && response.status < 400 && modelServerRedirect(url) === "manual";
+}
+
+export function redirectRefusedDetail(name: string, url: string): string {
+  return `${name} at ${url} answered with a redirect to another address. OpenAdminOS does not follow redirects from a model server on this device, so nothing was sent there.`;
 }
 
 const NOT_RUNNING_CODES = new Set(["ECONNREFUSED", "ECONNRESET", "EHOSTUNREACH", "ENOTFOUND", "EADDRNOTAVAIL"]);

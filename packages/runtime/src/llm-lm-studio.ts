@@ -11,7 +11,7 @@ import {
   type OpenAiCompatibleServer,
 } from "./llm-openai-compatible.js";
 
-export { fetchLocal, isConnectionRefused } from "./llm-openai-compatible.js";
+export { fetchLocal, isConnectionRefused, isRefusedRedirect, modelServerRedirect, redirectRefusedDetail } from "./llm-openai-compatible.js";
 
 export type LmStudioProviderOptions = OpenAiCompatibleProviderOptions;
 export type LmStudioEndpointTrust = OpenAiCompatibleEndpointTrust;

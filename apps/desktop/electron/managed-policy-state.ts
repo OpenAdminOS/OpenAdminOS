@@ -132,8 +132,10 @@ export function applyManagedPolicyToProviders(
     .filter((provider) => managedProviderAllowed(status, provider.id))
     .map((provider) => {
       const model = managedLockedModel(status, provider.id);
-      // Not checked yet (the first-run scan is pending): nothing is known about its models.
-      if (!model || provider.status === "not-checked") return provider;
+      // Not checked yet (the first-run scan is pending), or the check failed: nothing is
+      // known about its models, and the check's own reason is the one to show.
+      // A failed check is the scan's rule: `checkFailed`, or a CLI whose status request failed.
+      if (!model || provider.status === "not-checked" || provider.checkFailed || provider.cli?.state === "request-failed") return provider;
       // A model the provider offers but this account cannot use (a Copilot Fusion tier the plan lacks):
       // say why, rather than suggesting an install.
       const unavailable = provider.unavailableModels?.find((entry) => entry.id === model);

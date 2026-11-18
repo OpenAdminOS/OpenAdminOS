@@ -5480,6 +5480,10 @@ function registerIpcHandlers() {
   ipcMain.handle("openadminos:dismiss-sample-data-removed-notice", handleTrusted(() => store.dismissSampleDataRemovedNotice()));
   ipcMain.handle("openadminos:refresh-providers", handleTrusted(() => store.refreshProviders()));
   ipcMain.handle(
+    "openadminos:recheck-provider",
+    handleTrusted((_event, providerId: unknown) => store.recheckProvider(validateProviderId(providerId, "providerId"))),
+  );
+  ipcMain.handle(
     "openadminos:set-active-provider-and-model",
     handleTrusted(async (_event, providerId: unknown, model: unknown) =>
       afterNovaContextChange(await store.setActiveProviderAndModel(validateProviderId(providerId, "providerId"), requireBoundedString(model, "model", 256)), { tellPanel: true }),

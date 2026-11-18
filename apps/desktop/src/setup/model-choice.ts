@@ -1,6 +1,6 @@
 import { MODEL_CHOICE_COPY, PROVIDER_TOOL_NAMES, promptsGoTo } from "../copy";
 import type { ModelScanOutcome, ModelScanProbe, ProviderId, ProviderSummary } from "../shared/openAdminOS";
-import { isProviderReady } from "../shared/provider-detection";
+import { isProviderReady, providerCheckFailed } from "../shared/provider-detection";
 
 /**
  * The one choice of what answers in Chat (mockup 32, section B), shared by
@@ -35,6 +35,10 @@ export interface ChoiceOption {
   model?: string;
   /** The row's check did not finish: it cannot be chosen until a Retry succeeds. */
   unavailable?: boolean;
+  /** Its endpoint is outside this device and was not contacted: no Retry, the reason points to Settings. */
+  notContacted?: true;
+  /** A finished check found it cannot answer (IT set a model this account cannot use): no Retry, the reason says what to do. */
+  noRetry?: true;
 }
 
 const LOCAL_ORDER: readonly ProviderId[] = ["ollama", "lm-studio", "lemonade", "apple-foundation"];
@@ -123,7 +127,8 @@ export function optionsFromProbes(
 
 /**
  * The same choices from the provider list, for Chat's model choice. A
- * runtime that is not installed is offered as OpenAdmin 8B on Ollama.
+ * runtime that is not installed is offered as OpenAdmin 8B on Ollama; a
+ * provider whose check failed is a could not check row with Retry.
  */
 export function optionsFromProviders(providers: readonly ProviderSummary[]): ChoiceOption[] {
   const options: ChoiceOption[] = [];
@@ -131,6 +136,36 @@ export function optionsFromProviders(providers: readonly ProviderSummary[]): Cho
     const name = toolName(provider.id, provider.name);
     // The same readiness the send path uses: a runtime without a model it can answer with is not ready.
     const ready = isProviderReady(provider);
+    // An endpoint the scan refused to contact stays not contacted: Retry would contact it.
+    if (!ready && provider.notContacted) {
+      options.push({
+        providerId: provider.id,
+        name,
+        where: "hosted",
+        whereLine: provider.detail ?? MODEL_CHOICE_COPY.notCheckedLine(name),
+        state: MODEL_CHOICE_COPY.notChecked,
+        action: "use",
+        unavailable: true,
+        notContacted: true,
+      });
+      continue;
+    }
+    // A check that failed is could not check with its reason, for every provider, as in the scan.
+    if (!ready && providerCheckFailed(provider)) {
+      const reason = provider.detail ?? MODEL_CHOICE_COPY.couldNotCheckLine(name);
+      options.push({
+        providerId: provider.id,
+        name,
+        where: provider.isLocal ? "local" : "hosted",
+        // Retry reads Gemini's install again; an earlier failed request (the CLI started and
+        // lists its model) stays until a Test. A CLI that did not start lists none: Retry fixes that.
+        whereLine: provider.id === "gemini" && provider.models.length > 0 ? `${reason} ${MODEL_CHOICE_COPY.geminiTestHint}` : reason,
+        state: MODEL_CHOICE_COPY.couldNotCheck,
+        action: provider.isLocal ? "start" : "use",
+        unavailable: true,
+      });
+      continue;
+    }
     if (provider.isLocal) {
       if (ready) {
         const model = provider.defaultModel ?? provider.models[0];
@@ -154,6 +189,21 @@ export function optionsFromProviders(providers: readonly ProviderSummary[]): Cho
     }
     const signedIn = provider.status === "connected" || provider.cli?.state === "ready";
     if (!signedIn && !(provider.id === "azure-openai" && ready)) continue;
+    // Signed in, but a finished check says it cannot answer, such as a model IT set that this
+    // account cannot use. The send path refuses it, so the row says why instead of offering it.
+    if (!ready && provider.status === "error") {
+      options.push({
+        providerId: provider.id,
+        name,
+        where: "hosted",
+        whereLine: provider.detail ?? MODEL_CHOICE_COPY.unavailableLine(name),
+        state: MODEL_CHOICE_COPY.unavailable,
+        action: "use",
+        unavailable: true,
+        noRetry: true,
+      });
+      continue;
+    }
     options.push({
       providerId: provider.id,
       name,
