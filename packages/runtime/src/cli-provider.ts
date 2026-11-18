@@ -14,6 +14,8 @@ export interface CliProbe {
   failure?: CliFailure;
   models: string[];
   defaultModel?: string;
+  modelLabels?: Record<string, string>;
+  unavailableModels?: { id: string; reason: string }[];
 }
 
 /** Retain OS authentication plumbing, never arbitrary shell hooks or provider overrides. */

@@ -136,6 +136,19 @@ export function applyManagedPolicyToProviders(
       // known about its models, and the check's own reason is the one to show.
       // A failed check is the scan's rule: `checkFailed`, or a CLI whose status request failed.
       if (!model || provider.status === "not-checked" || provider.checkFailed || provider.cli?.state === "request-failed") return provider;
+      // A model the provider offers but this account cannot use (a Copilot Fusion tier the plan lacks):
+      // say why, rather than suggesting an install.
+      const unavailable = provider.unavailableModels?.find((entry) => entry.id === model);
+      if (unavailable) {
+        const { defaultModel: _unusable, ...kept } = provider;
+        const name = provider.modelLabels?.[model] ?? model;
+        return {
+          ...kept,
+          status: "error",
+          models: [],
+          detail: `Your IT department set the model ${name}, which this account cannot use. ${unavailable.reason} Ask IT to choose another model, then refresh providers.`,
+        };
+      }
       // An empty list means the CLI picks the model, so the policy model is passed to it.
       // Not for Lemonade: its list holds only the local chat models it may use, so an
       // unlisted model would be downloaded or sent to a cloud API.

@@ -100,3 +100,18 @@ test("passes on whether an adapter yields text as the model writes it", async ()
   const once: RunLlmApi = { available: true, complete: async () => ({ text: "", model: "m" }), async *stream() {} };
   assert.equal(withTenantDataOutputFilter(once).streamsIncrementally, undefined);
 });
+
+test("sends the whole text as the delta when a provider replaces its answer, such as a Fusion revision", async () => {
+  const base: RunLlmApi = {
+    available: true, defaultModel: "test",
+    complete: async () => ({ text: "Final", model: "test" }),
+    async *stream() {
+      yield { delta: "Draft", accumulated: "Draft", done: false, model: "test" };
+      yield { delta: "", accumulated: "Final answer", done: false, model: "test" };
+      yield { delta: "", accumulated: "Final answer", done: true, model: "test" };
+    },
+  };
+  const deltas: string[] = [];
+  for await (const chunk of withTenantDataOutputFilter(base).stream({ prompt: "Answer" })) deltas.push(chunk.delta);
+  assert.deepEqual(deltas, ["Draft", "Final answer", ""]);
+});

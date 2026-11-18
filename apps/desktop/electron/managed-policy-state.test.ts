@@ -524,3 +524,21 @@ describe("managed policy: audit and notice", () => {
     }
   });
 });
+
+describe("a locked Copilot Fusion tier the account cannot use", () => {
+  it("names the tier and the plan reason instead of suggesting an install", async () => {
+    const { applyManagedPolicyToProviders } = await import("./managed-policy-state.js");
+    const status: ManagedPolicyStatus = { files: [], values: { defaultProvider: "copilot", defaultModel: "fusion-high" }, sources: {}, locked: ["defaultProvider", "defaultModel"], issues: [] };
+    const copilot: ProviderSummary = {
+      id: "copilot", name: "GitHub Copilot CLI", description: "", isLocal: false, status: "connected",
+      models: ["fusion-standard"], defaultModel: "fusion-standard",
+      modelLabels: { "fusion-standard": "Copilot Fusion Standard", "fusion-high": "Copilot Fusion High" },
+      unavailableModels: [{ id: "fusion-high", reason: "Not included in your Copilot plan." }],
+    };
+    const [result] = applyManagedPolicyToProviders([copilot], status);
+    assert.equal(result?.status, "error");
+    assert.deepEqual(result?.models, []);
+    assert.equal(result?.defaultModel, undefined);
+    assert.equal(result?.detail, "Your IT department set the model Copilot Fusion High, which this account cannot use. Not included in your Copilot plan. Ask IT to choose another model, then refresh providers.");
+  });
+});
