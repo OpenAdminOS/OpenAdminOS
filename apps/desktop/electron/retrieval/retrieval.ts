@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { RetrievalStatus } from "@openadminos/agent-sdk";
+import { isRefusedRedirect, modelServerRedirect, redirectRefusedDetail } from "@openadminos/runtime";
 
 export type { RetrievalStatus } from "@openadminos/agent-sdk";
 
@@ -268,11 +269,15 @@ function loadIndexFrom(dir: string): LoadedIndex {
 export function loopbackEmbedQuery(endpoint: string): EmbedQuery {
   return async (text: string) => {
     assertLoopback(endpoint);
-    const response = await fetch(`${endpoint.replace(/\/$/, "")}/v1/embeddings`, {
+    const url = `${endpoint.replace(/\/$/, "")}/v1/embeddings`;
+    // The question is in the body: a redirect from this device is never followed.
+    const response = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ input: [`search_query: ${text}`] }),
+      redirect: modelServerRedirect(url),
     });
+    if (isRefusedRedirect(response, url)) throw new Error(redirectRefusedDetail("The embedding server", url));
     if (!response.ok) {
       throw new Error(`Embedding server responded with HTTP ${response.status}.`);
     }
@@ -303,11 +308,15 @@ export function ollamaEmbedQuery(
 ): EmbedQuery {
   return async (text: string) => {
     assertLoopback(endpoint);
-    const response = await fetch(`${endpoint.replace(/\/$/, "")}/api/embed`, {
+    const url = `${endpoint.replace(/\/$/, "")}/api/embed`;
+    // The question is in the body: a redirect from this device is never followed.
+    const response = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ model, input: `search_query: ${text}` }),
+      redirect: modelServerRedirect(url),
     });
+    if (isRefusedRedirect(response, url)) throw new Error(redirectRefusedDetail("Ollama", url));
     if (!response.ok) {
       throw new Error(
         `Embedding request failed with HTTP ${response.status}. Pull the model with \`ollama pull ${model}\`.`,
