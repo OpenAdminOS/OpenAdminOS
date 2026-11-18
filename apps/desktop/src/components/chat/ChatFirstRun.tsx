@@ -80,16 +80,17 @@ export function ModelChoice({
     target?.focus();
   }, [options, retrying]);
 
-  // Checks again with the scan's bounded checks, which never contact an
-  // endpoint outside this device (a full refresh would); a failed check is
-  // written under the row it was asked from.
+  // Checks only this provider again, the way selecting it does: the other
+  // rows keep their results, and an endpoint outside this device that the
+  // scan did not contact is never contacted (a full refresh would). A
+  // failed check is written under the row it was asked from.
   const checkAgain = async (providerId: ProviderId) => {
     setErrors(({ [providerId]: _cleared, ...rest }) => rest);
     try {
       const api = window.openAdminOS;
       if (api) {
-        if (!api.retryModelScanProbe) throw new Error(MODEL_CHOICE_COPY.checkAgainUnavailable);
-        await api.retryModelScanProbe(providerId);
+        if (!api.recheckProvider) throw new Error(MODEL_CHOICE_COPY.checkAgainUnavailable);
+        await api.recheckProvider(providerId);
       }
       await refresh({ rethrow: true });
       return true;

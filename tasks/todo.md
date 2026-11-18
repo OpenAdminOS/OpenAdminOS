@@ -13,6 +13,8 @@
 
   PR #204 review round 2 (2026-11-18). Claude evaluator, GPT-6.1-Sol and Muse Wonder Full on 774008e9, no blocking findings. Fixed, each with a test: Retry on any row ran `refreshProviders`, so the full checks contacted the off-device endpoint anyway (Sol P2; Retry and Scan again now use the scan's bounded `retryModelScanProbe`, which also closes the same gap in the existing Scan again); a Retry whose provider is no longer offered was silent and dropped focus (Muse P2, evaluator; announced, focus to the heading); a repeated identical outcome was not announced (Sol P3, Muse P3; cleared when Retry starts); the readiness doc comment sat above the new helper (Muse P3). The IntuneChat Scan again test now expects the bounded check. Typecheck, renderer 788, electron 1509 and docs check pass on Node 22.
 
+  PR #204 review round 3 (2026-11-18). GPT-6.1-Sol on f1e26e5c, no blocking findings. Fixed, with tests: the scan's Retry replaced every provider's result with the bounded scan's, so a signed-in Copilot (whose scan check reads only its installation) dropped out of Chat (Sol P2). Retry and Scan again now call a new `recheckProvider` IPC: one provider, the full check selecting it runs (`detectProvider`), other results and the active provider kept, refused while the first-run scan is pending and for an endpoint the scan did not contact.
+
 - [x] Lemonade Server as a local provider (branch `providers/lemonade`, 2026-11-12). Request: analyze https://lemonade-server.ai/#embed and add support if applicable. Maintainer decisions: an external provider like LM Studio, not the embeddable `lemond` bundled into the installer; LM Studio's adapter becomes one shared OpenAI-compatible adapter.
 
   Acceptance criteria:

@@ -73,6 +73,7 @@ const api: OpenAdminOSApi = {
   listProviders: () => ipcRenderer.invoke("openadminos:list-providers"),
   startModelScan: (scanId?: string) => ipcRenderer.invoke("openadminos:model-scan", scanId),
   retryModelScanProbe: (providerId: ProviderId) => ipcRenderer.invoke("openadminos:model-scan-retry", providerId),
+  recheckProvider: (providerId: ProviderId) => ipcRenderer.invoke("openadminos:recheck-provider", providerId),
   startLocalRuntime: (providerId: ProviderId) => ipcRenderer.invoke("openadminos:start-local-runtime", providerId),
   completeFirstRunScan: (options?: { microsoftStepPending?: boolean }) =>
     ipcRenderer.invoke("openadminos:complete-first-run-scan", options ? { microsoftStepPending: options.microsoftStepPending === true } : undefined),

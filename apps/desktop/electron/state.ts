@@ -3985,6 +3985,26 @@ export class AppStateStore {
     return new Error(network ?? humanizeMsalError(error, registration));
   }
 
+  /**
+   * Checks one provider again because the admin asked from its row (Retry
+   * and Scan again in Chat's model choice), the same full check selecting
+   * it runs. The other providers' results are kept, the active provider is
+   * not changed, and an endpoint outside this device that the scan did not
+   * contact is refused rather than contacted.
+   */
+  async recheckProvider(providerId: ProviderId): Promise<void> {
+    if (!isProviderId(providerId)) throw new Error(`Unknown provider: ${String(providerId)}`);
+    this.requireProviderAllowed(providerId);
+    if ((await this.read()).firstRunScan === "pending") {
+      throw new Error("The first-launch scan is still checking this device. Finish or skip it, then try again.");
+    }
+    const served = this.scanResultsServed ? this.modelScanProviders.get(providerId) : undefined;
+    if (served?.notContacted) {
+      throw new Error(served.detail ?? "This provider is set to an endpoint outside this device, so it is not checked here. Check it in Settings, Providers.");
+    }
+    await this.detectProvider(providerId);
+  }
+
   /** Set when a scan, Retry or Start is asked for and when the first-run scan completes; cleared by `refreshProviders`. */
   private scanResultsServed = false;
 

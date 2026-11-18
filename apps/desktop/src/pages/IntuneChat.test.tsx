@@ -27,7 +27,7 @@ import type {
   SendIntuneChatMessageResult,
   WorkspaceDetail,
 } from "../shared/openAdminOS";
-import { partIdsFor, requestedScopes, type ModelScanResult } from "../shared/openAdminOS";
+import { partIdsFor, requestedScopes } from "../shared/openAdminOS";
 import { CHAT_COPY, FIRST_RUN_CHAT_COPY, NOT_CONNECTED_COPY, PROVIDER_DETECTION_COPY } from "../copy";
 
 const LOCAL_NO_TENANT = "Local model. No organization. Nothing leaves this device.";
@@ -241,8 +241,8 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
           : { ...provider, status: "not-installed" as const },
     );
     const refreshProviders = vi.fn(async () => undefined);
-    const retryModelScanProbe = vi.fn(async (): Promise<ModelScanResult> => ({ probes: [], outcome: { kind: "nothing" }, startedAt: "", finishedAt: "" }));
-    const bridge = makeMockBridge({ refreshProviders, retryModelScanProbe }, guestState({ providers, activeProviderId: "lm-studio" }));
+    const recheckProvider = vi.fn(async (_id: string) => undefined);
+    const bridge = makeMockBridge({ refreshProviders, recheckProvider }, guestState({ providers, activeProviderId: "lm-studio" }));
     renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
 
     const row = await screen.findByRole("radio", { name: /^LM Studio/ });
@@ -250,8 +250,8 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
     expect(row.closest("label")).toHaveTextContent("Load a model in LM Studio, then scan again.");
     await user.click(row);
     await user.click(screen.getByRole("button", { name: "Scan again" }));
-    // The scan's bounded check, never the full refresh that contacts endpoints outside this device (PR #204 review round 2).
-    await waitFor(() => expect(retryModelScanProbe).toHaveBeenCalledWith("lm-studio"));
+    // Only this provider, never the full refresh that contacts endpoints outside this device (PR #204 review rounds 2 and 3).
+    await waitFor(() => expect(recheckProvider).toHaveBeenCalledWith("lm-studio"));
     expect(refreshProviders).not.toHaveBeenCalled();
   });
 

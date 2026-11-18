@@ -864,14 +864,61 @@ describe("an endpoint the scan did not contact is served as not contacted (PR #2
       assert.equal(listed.notContacted, true);
       assert.equal(listed.isLocal, false);
       assert.equal(listed.checkFailed, true);
-      // Chat's Retry on another provider uses the scan's bounded Retry: still nothing off the device (Sol round 2).
-      await store.retryModelScanProbe("ollama");
+      // Chat's Retry on another provider checks only that one: still nothing off the device (Sol rounds 2 and 3).
+      await store.completeFirstRunScan({ microsoftStepPending: false });
+      await store.recheckProvider("ollama");
       assert.equal((await store.listProviders()).find((provider) => provider.id === "lm-studio")!.notContacted, true);
+      // A recheck of the refused endpoint itself is refused, not contacted.
+      await assert.rejects(store.recheckProvider("lm-studio"), /outside this device|only checks this device/);
       assert.deepEqual(contacted, []);
     } finally {
       globalThis.fetch = realFetch;
       if (original === undefined) delete process.env.OPENADMINOS_LM_STUDIO_URL;
       else process.env.OPENADMINOS_LM_STUDIO_URL = original;
+      store.close();
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+});
+
+describe("checking one provider again from Chat (PR #204 review round 3)", () => {
+  it("keeps the other providers' results, such as a signed-in Copilot, and leaves the active provider alone", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
+    await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [], activeProviderId: "anthropic", providerChosenByUser: true }));
+    const checked: ProviderId[] = [];
+    const store = new AppStateStore({
+      filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
+      tokenStore: { read: async () => "", write: async () => undefined },
+      providerListFactory: async () => {
+        const list = providerCatalog.map((provider) => ({ ...provider, status: "not-installed" as const, models: [] as string[] }));
+        checked.push(...list.map((provider) => provider.id));
+        return list;
+      },
+    });
+    try {
+      await store.scanModels();
+      // Copilot's sign-in was confirmed after the scan, when the admin selected or tested it.
+      const served = (store as unknown as { modelScanProviders: Map<ProviderId, ProviderSummary> }).modelScanProviders;
+      const copilot: ProviderSummary = { ...providerCatalog.find((provider) => provider.id === "copilot")!, status: "connected", models: ["gpt-5"], cli: { state: "ready" } };
+      served.set("copilot", copilot);
+      await store.recheckProvider("lm-studio");
+      const listed = await store.listProviders();
+      assert.deepEqual(listed.find((provider) => provider.id === "copilot"), copilot);
+      assert.equal(listed.find((provider) => provider.id === "lm-studio")!.status, "not-installed");
+      assert.equal((await store.getAppState()).activeProviderId, "anthropic");
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+
+  it("refuses while the first-launch scan is pending, so nothing but the scan checks", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
+    await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [], firstRunScan: "pending" }));
+    const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
+    try {
+      await assert.rejects(store.recheckProvider("ollama"), /first-launch scan is still checking/);
+    } finally {
       store.close();
       await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     }
