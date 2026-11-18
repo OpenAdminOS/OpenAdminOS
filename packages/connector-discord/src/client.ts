@@ -18,6 +18,8 @@ export interface CreateDiscordWebhookClientOptions {
   webhookUrl: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  /** Sends message flag 4 (SUPPRESS_EMBEDS), so links in the text get no preview. */
+  suppressEmbeds?: boolean;
 }
 
 export function createDiscordWebhookClient(
@@ -51,6 +53,7 @@ export function createDiscordWebhookClient(
           content: input?.text ?? "",
           allowed_mentions: { parse: [] },
         };
+        if (options.suppressEmbeds) body.flags = 4;
         if (input?.username) body.username = input.username;
         requestInit.body = JSON.stringify(body);
       }

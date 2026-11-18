@@ -233,7 +233,7 @@ export const REGISTER = [
   },
   {
     id: "audit-log-allows-update",
-    path: "apps/desktop/electron/audit-log.ts",
+    path: "packages/runtime/src/audit-log.ts",
     find: "CREATE TRIGGER audit_log_refuse_update BEFORE UPDATE ON audit_log\n",
     replace: "CREATE TRIGGER audit_log_refuse_update BEFORE UPDATE ON audit_log WHEN 0\n",
     tests: ["apps/desktop/electron/audit-log.test.ts"],
@@ -241,7 +241,7 @@ export const REGISTER = [
   },
   {
     id: "audit-log-skips-hash-check",
-    path: "apps/desktop/electron/audit-log.ts",
+    path: "packages/runtime/src/audit-log.ts",
     find: "if (chainHash(previous, row.event_json) !== row.sha256) {",
     replace: "if (false) {",
     tests: ["apps/desktop/electron/audit-log.test.ts"],

@@ -43,3 +43,23 @@ Format:
 **Why:** The first marketplace mockup (`docs/mockups/25-marketplace.html`, 2026-11-03) was a plain card grid with dropdowns and a placement toggle. The user rejected it as bad UI and asked for something eye-catching. They also wanted Marketplace as its own sidebar item, not a tab inside Agents.
 
 **How to apply:** Before building, load the `frontend-design` skill and write a short design plan (palette, type, layout, the one memorable element). Keep the restrained brand for the app chrome, and let the content carry the visual weight (cover art, large serif headings). Check the result in a browser at desktop and narrow widths before showing it. Treat open product questions as questions for the user, not as toggles inside the mockup.
+
+---
+
+## Quote a project rule instead of citing it by number
+
+**Pattern:** When a recommendation depends on a project rule, quote the rule and say where it lives. Do not write "hard constraint 1" or "§8b" as if the reader has the numbering in their head.
+
+**Why:** On 2026-11-13, while assessing hosted runs, I told the maintainer the idea needed "a second exception to hard constraint 1". They replied that they did not understand and asked which constraint I meant, which cost a round trip on a decision that was theirs to make.
+
+**How to apply:** In any summary, question or decision list for the maintainer, state the rule in one sentence with a file link the first time it appears, then refer to it by what it says.
+
+---
+
+## Social images: product UI first, few words, no "concept" or "mockup" labels
+
+**Pattern:** For a LinkedIn or other social image, lead with large product UI, keep copy to a headline and one line, and never label it a concept or a mockup. Keep the examples about agents doing work in general, not one vendor or one admin task.
+
+**Why:** On 2026-11-13 the first hosted-runs image was a diagram with a log and three fact columns, tagged "Concept, in design". The maintainer asked for less text, more UI, no concept or mockup wording, and an image that builds anticipation by itself. The second version used a retire-devices example and Intune wording; they asked to drop that example and not to focus on Intune or Microsoft.
+
+**How to apply:** Build social images as layered UI fragments at a type size readable in a feed, under one headline. Use a status such as "Coming soon" for unreleased work so nothing claims it has shipped. Check every claim on the image against decisions actually made.

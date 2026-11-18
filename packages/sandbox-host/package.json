@@ -1,0 +1,42 @@
+{
+  "name": "@openadminos/sandbox-host",
+  "version": "0.7.2",
+  "private": true,
+  "description": "Headless host that runs read-only OpenAdminOS agents on a schedule on infrastructure the customer runs, with an app-only identity and a local model.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "openadminos-sandbox": "./dist/bin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "npm run build -w @openadminos/runtime && tsc -p tsconfig.json",
+    "typecheck": "npm run build -w @openadminos/runtime && tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@openadminos/agent-sdk": "0.7.2",
+    "@openadminos/connector-discord": "0.7.2",
+    "@openadminos/connector-slack": "0.7.2",
+    "@openadminos/runtime": "0.7.2"
+  },
+  "devDependencies": {
+    "@types/node": "^25.8.0",
+    "tsx": "^4.22.3",
+    "typescript": "~6.0.3"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}

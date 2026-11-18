@@ -1043,7 +1043,27 @@ export interface RunRecord {
   tokens?: LlmTokenUsage;
   /** Per-call totals for local forecasts; missing metrics stay unknown. Older runs have null usage. */
   usage?: RunModelUsage | null;
+  /** Where the run executed. Absent means this desktop. */
+  executedOn?: RunExecutedOn;
 }
+
+/**
+ * Where a run executed: this desktop, or a sandbox the customer runs on
+ * their own infrastructure with a local model there.
+ */
+export type RunExecutedOn =
+  | { kind: "desktop" }
+  | {
+      kind: "sandbox";
+      sandboxId: string;
+      name: string;
+      /** The organization the sandbox is configured for; opaque to the runtime. */
+      organizationId: string;
+      /** Model name as the local model server reports it. */
+      model: string;
+      /** Model digest, when the local model server reports one. */
+      modelDigest?: string;
+    };
 
 /**
  * Who started a run: a person in the app, a schedule, an Agent Team

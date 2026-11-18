@@ -6,12 +6,16 @@ import type {
   RunLlmApi,
 } from "@openadminos/agent-sdk";
 
+import { LlmCancelledError, LlmTimeoutError, readTextUntilAborted } from "./llm-errors.js";
+
 export interface LmStudioProviderOptions {
   endpoint?: string;
   /** Stops the request, for the first-launch scan timeout. */
   signal?: AbortSignal;
   defaultModel?: string;
   timeoutMs?: number;
+  /** Transport for the chat requests; defaults to the global fetch. */
+  fetchImpl?: typeof fetch;
 }
 
 export interface LmStudioEndpointTrust {
@@ -96,7 +100,7 @@ export function createLmStudioLlm(
       const url = `${endpoint.replace(/\/$/, "")}/chat/completions`;
       let response: Response;
       try {
-        response = await fetch(url, {
+        response = await (options.fetchImpl ?? fetch)(url, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(createChatRequestBody({ ...opts, model, stream: false })),
@@ -105,9 +109,9 @@ export function createLmStudioLlm(
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
           if (opts.signal?.aborted) {
-            throw new Error("LM Studio request stopped by user.");
+            throw new LlmCancelledError("LM Studio request stopped by user.");
           }
-          throw new Error(`LM Studio timed out after ${timeoutMs}ms at ${url}.`);
+          throw new LlmTimeoutError(`LM Studio timed out after ${timeoutMs}ms at ${url}.`);
         }
         throw new Error(`LM Studio not reachable at ${url}: ${describe(error)}`);
       } finally {
@@ -156,7 +160,7 @@ export function createLmStudioLlm(
       const url = `${endpoint.replace(/\/$/, "")}/chat/completions`;
       let response: Response;
       try {
-        response = await fetch(url, {
+        response = await (options.fetchImpl ?? fetch)(url, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(createChatRequestBody({ ...opts, model, stream: true })),
@@ -167,17 +171,26 @@ export function createLmStudioLlm(
         opts.signal?.removeEventListener("abort", abortFromCaller);
         if (error instanceof Error && error.name === "AbortError") {
           if (opts.signal?.aborted) {
-            throw new Error("LM Studio request stopped by user.");
+            throw new LlmCancelledError("LM Studio request stopped by user.");
           }
-          throw new Error(`LM Studio timed out after ${timeoutMs}ms at ${url}.`);
+          throw new LlmTimeoutError(`LM Studio timed out after ${timeoutMs}ms at ${url}.`);
         }
         throw new Error(`LM Studio not reachable at ${url}: ${describe(error)}`);
       }
 
       if (!response.ok) {
-        clearTimeout(timer);
-        opts.signal?.removeEventListener("abort", abortFromCaller);
-        const detail = await response.text().catch(() => "");
+        // The error body is read under the same timeout and caller signal,
+        // so a server that leaves it open cannot hold the request forever.
+        let detail = "";
+        try {
+          detail = await readTextUntilAborted(response, controller.signal);
+        } catch {
+          if (opts.signal?.aborted) throw new LlmCancelledError("LM Studio request stopped by user.");
+          if (controller.signal.aborted) throw new LlmTimeoutError(`LM Studio timed out after ${timeoutMs}ms at ${url}.`);
+        } finally {
+          clearTimeout(timer);
+          opts.signal?.removeEventListener("abort", abortFromCaller);
+        }
         throw new Error(`LM Studio responded with HTTP ${response.status}: ${truncate(detail, 200)}`);
       }
 
@@ -250,6 +263,12 @@ export function createLmStudioLlm(
           model: actualModel,
           ...(finalTokenUsage ? { tokenUsage: finalTokenUsage } : {}),
         };
+      } catch (error) {
+        // A stream cut by the timeout or by the caller surfaces as a bare
+        // AbortError; name which one it was.
+        if (opts.signal?.aborted) throw new LlmCancelledError("LM Studio request stopped by user.");
+        if (controller.signal.aborted) throw new LlmTimeoutError(`LM Studio timed out after ${timeoutMs}ms at ${url}.`);
+        throw error;
       } finally {
         clearTimeout(timer);
         opts.signal?.removeEventListener("abort", abortFromCaller);

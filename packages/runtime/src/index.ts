@@ -76,6 +76,7 @@ export {
   type OllamaEndpointTrust,
 } from "./llm-ollama.js";
 export { createCodexLlm, probeCodexLlm } from "./llm-codex.js";
+export { LlmCancelledError, LlmTimeoutError, llmErrorCode } from "./llm-errors.js";
 export {
   createClaudeCodeLlm,
   createClaudeCodeProcessEnv,
@@ -119,6 +120,7 @@ export {
   runAgentTemplatePlan,
   runAgentTemplateApply,
   agentTemplateToModule,
+  agentTemplateToRegistrySummary,
 } from "./agent-template.js";
 export {
   scriptAgentTemplateToModule,
@@ -189,6 +191,46 @@ export {
   type SandboxBrokerInput,
 } from "./sandbox-broker.js";
 export { createTenantSession } from "./msal.js";
+export {
+  AUDIT_CHAIN_START_HASH,
+  AUDIT_LOG_RETENTION_DAYS,
+  AuditLogBehindError,
+  AuditLogIntegrityError,
+  AuditLogResultKeptError,
+  AuditLogStore,
+  appendSandboxEvent,
+  canonicalJson,
+  chainHash,
+  graphRequestAuditSink,
+  graphWriteAuditSink,
+  trackedAuditSink,
+  type AuditLogActor,
+  type AuditLogChainSummary,
+  type AuditLogEvent,
+  type AuditLogEventSeed,
+  type AuditLogEventSource,
+  type AuditLogUnrecordedResults,
+  type GraphRequestAuditAttempt,
+  type GraphRequestAuditResult,
+  type GraphRequestAuditSink,
+  type SandboxAuditContext,
+} from "./audit-log.js";
+export {
+  APPLICATION_SECRET_BEARING_ROLE_PATTERNS,
+  ApplicationTokenError,
+  GRAPH_APPLICATION_SCOPE,
+  classifyApplicationRoles,
+  createApplicationTokenProvider,
+  createPemAssertionSigner,
+  decodeAccessTokenClaims,
+  isSecretBearingRole,
+  rolesFromAccessToken,
+  type ApplicationRoleClassification,
+  type ApplicationToken,
+  type ApplicationTokenProvider,
+  type ApplicationTokenProviderOptions,
+  type AssertionSigner,
+} from "./graph-application.js";
 export { awaitWithSignal } from "./cancellation.js";
 export {
   disposeBuiltConnectors,
@@ -580,6 +622,15 @@ export interface ExecuteRunInput {
   onProgress(run: RunRecord): void | Promise<void>;
 }
 
+/** Input of `executeRun`, the read path. */
+export interface ExecuteReadRunInput extends ExecuteRunInput {
+  /**
+   * A module the host already built from manifest text it checked, used
+   * instead of loading the manifest from disk again.
+   */
+  module?: AgentModule;
+}
+
 export interface ExecuteApplyInput extends ExecuteRunInput {
   plan: WritePlan;
 }
@@ -946,7 +997,7 @@ async function failPhase(
   return failed;
 }
 
-export async function executeRun(input: ExecuteRunInput): Promise<RunRecord> {
+export async function executeRun(input: ExecuteReadRunInput): Promise<RunRecord> {
   if (input.run.dryRun) throw new Error("Dry run is only available for write agents. Run this read agent normally.");
   const handle = await createPhaseHandle(
     input,
@@ -959,7 +1010,7 @@ export async function executeRun(input: ExecuteRunInput): Promise<RunRecord> {
   );
 
   try {
-    const module = await loadAgentModule(input.agent);
+    const module = input.module ?? await loadAgentModule(input.agent);
     if (module.mode !== "read" || typeof (module as ReadAgentModule).run !== "function") {
       throw new Error(
         `Agent "${input.agent.slug}" is not a read agent. Use executePlan/executeApply for write agents.`,
@@ -1309,7 +1360,21 @@ function isAbsolutePath(value: string): boolean {
   return /^[/\\]/.test(value) || /^[A-Za-z]:[/\\]/.test(value);
 }
 
+/**
+ * Optional fixed folder of the bundled agents. A headless host sets it to
+ * the `agents` folder of its own release checkout, so the current
+ * directory never decides which agents run. Defaults to undefined: the
+ * folder is searched from the current directory and the runtime's
+ * location, as before.
+ */
+let builtInAgentsRoot: string | undefined;
+
+export function setBuiltInAgentsRoot(dir: string | undefined): void {
+  builtInAgentsRoot = dir;
+}
+
 function findAgentsRoot(): string {
+  if (builtInAgentsRoot !== undefined) return builtInAgentsRoot;
   for (const startPath of getSearchStartPaths()) {
     let currentPath = resolve(startPath);
 

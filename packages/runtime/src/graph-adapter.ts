@@ -609,7 +609,7 @@ async function sendGraphRequest<T>(input: GraphRequestInput, exchange: GraphExch
             },
           );
         }
-        await sleep(backoffMs(input.retryBackoffMs, attempt));
+        await sleep(backoffMs(input.retryBackoffMs, attempt), input.signal);
         continue;
       }
       if (input.log) {
@@ -633,8 +633,24 @@ async function sendGraphRequest<T>(input: GraphRequestInput, exchange: GraphExch
       }
       throw new Error(message);
     }
-    clearTimeout(timer);
-    releaseSignal();
+    // The body is read while the timeout and the caller's signal still
+    // apply, so a response that stalls after its headers still settles.
+    let bodyText: string;
+    try {
+      bodyText = await response.text();
+    } catch (error) {
+      if (input.signal?.aborted) throw new Error(GRAPH_REQUEST_CANCELLED);
+      if (controller.signal.aborted) {
+        throw new Error(`Graph request timed out after ${input.timeoutMs}ms while reading the response: ${input.url}`);
+      }
+      // Any other read failure keeps its earlier meaning: a JSON success
+      // fails with the read error, everything else goes on with no body.
+      if (response.ok && expectJson) throw error;
+      bodyText = "";
+    } finally {
+      clearTimeout(timer);
+      releaseSignal();
+    }
     exchange.status = response.status;
     const requestId = response.headers?.get("request-id") ?? response.headers?.get("client-request-id");
     if (requestId) exchange.requestId = requestId;
@@ -644,10 +660,9 @@ async function sendGraphRequest<T>(input: GraphRequestInput, exchange: GraphExch
       let parsed: unknown = undefined;
       let bytes = 0;
       if (!expectJson) {
-        const text = await response.text().catch(() => "");
-        bytes = text.length;
+        bytes = bodyText.length;
       } else {
-        const text = await response.text();
+        const text = bodyText;
         bytes = text.length;
         if (text.length > 0) {
           try {
@@ -725,11 +740,11 @@ async function sendGraphRequest<T>(input: GraphRequestInput, exchange: GraphExch
       (response.status >= 500 && idempotent);
     if (retryable && attempt < input.maxRetries) {
       const retryAfter = parseRetryAfter(response.headers.get("retry-after")) ?? 2;
-      await sleep(retryAfter * 1000);
+      await sleep(retryAfter * 1000, input.signal);
       continue;
     }
 
-    const body = await response.text().catch(() => "");
+    const body = bodyText;
     const durationMs = Date.now() - startMs;
     if (input.log) {
       input.log(
@@ -944,8 +959,20 @@ function backoffMs(base: number, attempt: number): number {
   return Math.min(base * 8, base * 2 ** (attempt - 1));
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
+/** Waits between retries; a caller abort ends the wait as a cancellation. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new Error(GRAPH_REQUEST_CANCELLED));
+  return new Promise((resolvePromise, rejectPromise) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      rejectPromise(new Error(GRAPH_REQUEST_CANCELLED));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolvePromise();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function describe(error: unknown): string {

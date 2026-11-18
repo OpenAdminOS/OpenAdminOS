@@ -25,3 +25,16 @@ test("Discord client executes webhook with wait=true and mentions disabled", asy
     }),
   );
 });
+
+test("discord client sends flag 4 only when embeds are suppressed", async () => {
+  const bodies: Array<Record<string, unknown>> = [];
+  const fetchImpl = (async (_input: string | URL | Request, init?: RequestInit) => {
+    bodies.push(JSON.parse(String(init?.body)));
+    return Response.json({ id: "m1" });
+  }) as typeof fetch;
+  const webhookUrl = "https://discord.com/api/webhooks/123/token";
+  await createDiscordWebhookClient({ webhookUrl, fetchImpl }).sendMessage({ text: "a" });
+  await createDiscordWebhookClient({ webhookUrl, fetchImpl, suppressEmbeds: true }).sendMessage({ text: "b" });
+  assert.equal(bodies[0]?.flags, undefined);
+  assert.equal(bodies[1]?.flags, 4);
+});

@@ -6,10 +6,14 @@ import type {
   RunLlmApi,
 } from "@openadminos/agent-sdk";
 
+import { LlmCancelledError, LlmTimeoutError, readTextUntilAborted } from "./llm-errors.js";
+
 export interface OllamaProviderOptions {
   endpoint?: string;
   defaultModel?: string;
   timeoutMs?: number;
+  /** Transport for the chat requests; defaults to the global fetch. */
+  fetchImpl?: typeof fetch;
 }
 
 interface OllamaChatChunk {
@@ -117,7 +121,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
 
       let response: Response;
       try {
-        response = await fetch(url, {
+        response = await (options.fetchImpl ?? fetch)(url, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(body),
@@ -128,17 +132,26 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         opts.signal?.removeEventListener("abort", abortFromCaller);
         if (error instanceof Error && error.name === "AbortError") {
           if (opts.signal?.aborted) {
-            throw new Error("Ollama request stopped by user.");
+            throw new LlmCancelledError("Ollama request stopped by user.");
           }
-          throw new Error(`Ollama timed out after ${timeoutMs}ms at ${url}.`);
+          throw new LlmTimeoutError(`Ollama timed out after ${timeoutMs}ms at ${url}.`);
         }
         throw new Error(`Ollama not reachable at ${url}: ${describe(error)}`);
       }
 
       if (!response.ok) {
-        clearTimeout(timer);
-        opts.signal?.removeEventListener("abort", abortFromCaller);
-        const detail = await response.text().catch(() => "");
+        // The error body is read under the same timeout and caller signal,
+        // so a server that leaves it open cannot hold the request forever.
+        let detail = "";
+        try {
+          detail = await readTextUntilAborted(response, controller.signal);
+        } catch {
+          if (opts.signal?.aborted) throw new LlmCancelledError("Ollama request stopped by user.");
+          if (controller.signal.aborted) throw new LlmTimeoutError(`Ollama timed out after ${timeoutMs}ms at ${url}.`);
+        } finally {
+          clearTimeout(timer);
+          opts.signal?.removeEventListener("abort", abortFromCaller);
+        }
         if (response.status === 404 && detail.toLowerCase().includes("model")) {
           throw new Error(
             `Ollama model "${model}" is not pulled. Run \`ollama pull ${model}\`.`,
@@ -233,6 +246,12 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
             }
           }
         }
+      } catch (error) {
+        // A stream cut by the timeout or by the caller surfaces as a bare
+        // AbortError; name which one it was.
+        if (opts.signal?.aborted) throw new LlmCancelledError("Ollama request stopped by user.");
+        if (controller.signal.aborted) throw new LlmTimeoutError(`Ollama timed out after ${timeoutMs}ms at ${url}.`);
+        throw error;
       } finally {
         clearTimeout(timer);
         opts.signal?.removeEventListener("abort", abortFromCaller);
