@@ -1,5 +1,14 @@
 # Current active plan
 
+- [ ] Could not check row in Chat's model choice (branch `setup/could-not-check-row`, 2026-11-18). Request: the PR #191 follow-up. When a provider's check fails, Chat's model choice shows no row for LM Studio, Lemonade or Apple Intelligence, and Ollama shows "No model yet" instead of the failure.
+
+  Acceptance criteria:
+  1. In Chat's model choice, every provider whose check failed (`checkFailed`) and that is not ready shows one row with the state Could not check, the check's reason (or "X did not answer. Retry to check it again.") and a Retry button, for local and hosted providers alike, the same rule as the first-launch scan.
+  2. That row cannot be selected or preselected, and the primary button never acts on it, also when it was the selected row before a refresh.
+  3. Retry checks the providers again; a check that now succeeds replaces the row with its normal one, and a Retry that throws shows its message under the row.
+  4. Rows for providers whose check completed are unchanged (ready, not running, no model, signed in).
+  5. SPEC.md and CHANGELOG describe it; the renderer suite and typecheck pass on Node 22.
+
 - [x] Lemonade Server as a local provider (branch `providers/lemonade`, 2026-11-12). Request: analyze https://lemonade-server.ai/#embed and add support if applicable. Maintainer decisions: an external provider like LM Studio, not the embeddable `lemond` bundled into the installer; LM Studio's adapter becomes one shared OpenAI-compatible adapter.
 
   Acceptance criteria:

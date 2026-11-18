@@ -1,10 +1,11 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { FIRST_RUN_CHAT_COPY } from "../../copy/chat";
 import { createMockAppState, createMockMcpServers, makeMockBridge, mockTenant, renderWithAppState } from "../../test/test-utils";
-import { qualifyScope, requestedScopes, type TenantRecord } from "../../shared/openAdminOS";
-import { NoTenantChatHome, NotConnectedCard } from "./ChatFirstRun";
+import { qualifyScope, requestedScopes, type ProviderSummary, type TenantRecord } from "../../shared/openAdminOS";
+import { ModelChoice, NoTenantChatHome, NotConnectedCard } from "./ChatFirstRun";
 
 const grants = (partIds: string[]) => requestedScopes(partIds).map((scope) => qualifyScope(scope.name));
 const notConnected = { reason: "service-missing" as const, partIds: ["entra.signins", "defender.incidents"], tenantId: mockTenant.id };
@@ -83,5 +84,52 @@ describe("NoTenantChatHome reference suggestions", () => {
     const row = (name: string) => within(suggestions).getByText(name).closest("li")!;
     expect(row("Microsoft Learn").querySelector('.svc-mark [data-reference-logo="microsoft"][data-kind="logo"] img')).not.toBeNull();
     expect(row("KQL Search").querySelector('.svc-mark [data-reference-logo="kqlsearch"][data-kind="logo"] img')).not.toBeNull();
+  });
+});
+
+describe("ModelChoice with a provider whose check failed (PR #191 follow-up)", () => {
+  const failed: ProviderSummary = { id: "lm-studio", name: "LM Studio", description: "", isLocal: true, status: "error", checkFailed: true, detail: "LM Studio answered HTTP 500.", models: [] };
+  const working: ProviderSummary = { ...failed, status: "connected", checkFailed: undefined, detail: undefined, models: ["qwen3-8b"], defaultModel: "qwen3-8b" };
+
+  it("shows the reason and Retry, cannot be chosen, and checks again on Retry", async () => {
+    const refreshProviders = vi.fn(async () => undefined);
+    const onSelectProvider = vi.fn(async () => undefined);
+    const view = renderWithAppState(<ModelChoice providers={[failed]} activeProviderId="ollama" onSelectProvider={onSelectProvider} />, {
+      bridge: makeMockBridge({ refreshProviders }),
+    });
+    const row = await screen.findByText("LM Studio answered HTTP 500.");
+    expect(within(row.closest("[data-provider]") as HTMLElement).getByRole("radio")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Choose a model" })).toBeDisabled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Check LM Studio again" }));
+    await waitFor(() => expect(refreshProviders).toHaveBeenCalledTimes(1));
+
+    // The check now succeeds: the row is the normal one and the button uses it.
+    view.rerender(<ModelChoice providers={[working]} activeProviderId="ollama" onSelectProvider={onSelectProvider} />);
+    expect(screen.queryByRole("button", { name: "Check LM Studio again" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Use qwen3-8b" }));
+    expect(onSelectProvider).toHaveBeenCalledWith("lm-studio");
+  });
+
+  it("never acts on a chosen row whose check then failed, and shows a failed Retry under the row", async () => {
+    const refreshProviders = vi.fn(async () => {
+      throw new Error("Provider checks could not run. Restart OpenAdminOS.");
+    });
+    const onSelectProvider = vi.fn(async () => undefined);
+    const ollama: ProviderSummary = { id: "ollama", name: "Ollama", description: "", isLocal: true, status: "connected", models: ["llama3"], defaultModel: "llama3" };
+    const view = renderWithAppState(<ModelChoice providers={[ollama, working]} activeProviderId="anthropic" onSelectProvider={onSelectProvider} />, {
+      bridge: makeMockBridge({ refreshProviders }),
+    });
+    await userEvent.click(await screen.findByRole("radio", { name: /LM Studio/ }));
+    expect(screen.getByRole("button", { name: "Use qwen3-8b" })).toBeEnabled();
+
+    // LM Studio's check fails on the next refresh: the choice falls back to a row that works.
+    view.rerender(<ModelChoice providers={[ollama, failed]} activeProviderId="anthropic" onSelectProvider={onSelectProvider} />);
+    await userEvent.click(screen.getByRole("button", { name: "Use llama3" }));
+    expect(onSelectProvider).toHaveBeenCalledWith("ollama");
+    expect(onSelectProvider).not.toHaveBeenCalledWith("lm-studio");
+
+    await userEvent.click(screen.getByRole("button", { name: "Check LM Studio again" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Provider checks could not run. Restart OpenAdminOS.");
   });
 });

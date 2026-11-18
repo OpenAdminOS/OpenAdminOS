@@ -117,3 +117,41 @@ describe("Lemonade in the choice", () => {
     expect(optionsFromProviders([{ ...lemonade, status: "not-installed", models: [], defaultModel: undefined }])).toEqual([]);
   });
 });
+
+describe("a provider whose check failed in Chat's choice (PR #191 follow-up)", () => {
+  const local = (id: ProviderId, name: string, rest: Partial<ProviderSummary> = {}): ProviderSummary => ({ id, name, description: "", isLocal: true, status: "error", checkFailed: true, models: [], ...rest });
+
+  it("shows every local runtime whose check failed as could not check with its reason, never as missing or without a model", () => {
+    const options = optionsFromProviders([
+      local("ollama", "Ollama", { detail: "Ollama on http://127.0.0.1:11434 did not answer in time." }),
+      local("lm-studio", "LM Studio", { detail: "LM Studio answered HTTP 500." }),
+      local("lemonade", "Lemonade", { detail: "Lemonade asks for an API key." }),
+      local("apple-foundation", "Apple Intelligence"),
+    ]);
+    expect(options.map((option) => [option.providerId, option.state, option.unavailable, option.whereLine])).toEqual([
+      ["ollama", "Could not check", true, "Ollama on http://127.0.0.1:11434 did not answer in time."],
+      ["lm-studio", "Could not check", true, "LM Studio answered HTTP 500."],
+      ["lemonade", "Could not check", true, "Lemonade asks for an API key."],
+      ["apple-foundation", "Could not check", true, "Apple Intelligence did not answer. Retry to check it again."],
+    ]);
+    expect(preselect(options)).toBeNull();
+  });
+
+  it("shows a hosted tool whose check failed the same way, and never preselects a failed row over a working one", () => {
+    const hosted: ProviderSummary = { id: "anthropic", name: "Claude Code", description: "", isLocal: false, status: "error", checkFailed: true, detail: "spawn EINVAL", models: [] };
+    const ready = local("lm-studio", "LM Studio", { status: "connected", checkFailed: undefined, models: ["qwen3-8b"] });
+    const options = optionsFromProviders([hosted, local("ollama", "Ollama"), ready]);
+    expect(options.map((option) => [option.providerId, option.where, option.state, option.unavailable ?? false])).toEqual([
+      ["ollama", "local", "Could not check", true],
+      ["lm-studio", "local", "Ready", false],
+      ["anthropic", "hosted", "Could not check", true],
+    ]);
+    expect(preselect(options)).toBe("lm-studio");
+  });
+
+  it("leaves a completed check's row as it was", () => {
+    // No text model is a completed check: the scan's recovery, not could not check.
+    expect(optionsFromProviders([local("ollama", "Ollama", { checkFailed: undefined })])[0]).toMatchObject({ state: "No model yet", action: "get-model" });
+    expect(optionsFromProviders([local("ollama", "Ollama", { checkFailed: undefined })])[0]!.unavailable).toBeUndefined();
+  });
+});

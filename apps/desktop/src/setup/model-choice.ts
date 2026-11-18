@@ -123,7 +123,8 @@ export function optionsFromProbes(
 
 /**
  * The same choices from the provider list, for Chat's model choice. A
- * runtime that is not installed is offered as OpenAdmin 8B on Ollama.
+ * runtime that is not installed is offered as OpenAdmin 8B on Ollama; a
+ * provider whose check failed is a could not check row with Retry.
  */
 export function optionsFromProviders(providers: readonly ProviderSummary[]): ChoiceOption[] {
   const options: ChoiceOption[] = [];
@@ -131,6 +132,19 @@ export function optionsFromProviders(providers: readonly ProviderSummary[]): Cho
     const name = toolName(provider.id, provider.name);
     // The same readiness the send path uses: a runtime without a model it can answer with is not ready.
     const ready = isProviderReady(provider);
+    // A check that failed is could not check with its reason, for every provider, as in the scan.
+    if (!ready && provider.checkFailed) {
+      options.push({
+        providerId: provider.id,
+        name,
+        where: provider.isLocal ? "local" : "hosted",
+        whereLine: provider.detail ?? MODEL_CHOICE_COPY.couldNotCheckLine(name),
+        state: MODEL_CHOICE_COPY.couldNotCheck,
+        action: provider.isLocal ? "start" : "use",
+        unavailable: true,
+      });
+      continue;
+    }
     if (provider.isLocal) {
       if (ready) {
         const model = provider.defaultModel ?? provider.models[0];

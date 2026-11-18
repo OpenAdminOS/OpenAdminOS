@@ -50,13 +50,30 @@ export function ModelChoice({
   const options = optionsFromProviders(providers);
   const [selected, setSelected] = useState<ProviderId | null>(null);
   const [working, setWorking] = useState<ProviderId | null>(null);
+  const [retrying, setRetrying] = useState<ProviderId | null>(null);
   const [errors, setErrors] = useState<Partial<Record<ProviderId, string>>>({});
-  const picked = selected && options.some((option) => option.providerId === selected) ? selected : preselect(options);
+  // A row whose check failed cannot be chosen, also when it was chosen before the check ran again.
+  const picked = selected && options.some((option) => option.providerId === selected && !option.unavailable) ? selected : preselect(options);
   const chosen = options.find((option) => option.providerId === picked);
   const note = actionNote(chosen);
+  const busy = working !== null || retrying !== null;
+
+  const retry = async (providerId: ProviderId) => {
+    if (busy) return;
+    setRetrying(providerId);
+    setErrors(({ [providerId]: _cleared, ...rest }) => rest);
+    try {
+      await window.openAdminOS?.refreshProviders?.();
+      await refresh();
+    } catch (caught) {
+      setErrors((all) => ({ ...all, [providerId]: caught instanceof Error ? caught.message : String(caught) }));
+    } finally {
+      setRetrying(null);
+    }
+  };
 
   const act = async (option: ChoiceOption) => {
-    if (working) return;
+    if (busy || option.unavailable) return;
     if (option.action === "get-model") {
       navigate("/settings/providers");
       return;
@@ -96,10 +113,19 @@ export function ModelChoice({
       </h2>
       <p className="mt-1 text-sm text-[var(--color-text-soft)]">{MODEL_SCAN_COPY.chooseBody}</p>
       <div className="mt-4">
-        <ModelChoiceList options={options} selected={picked} onSelect={setSelected} disabled={working !== null} errors={errors} label={FIRST_RUN_CHAT_COPY.modelChoiceTitle} />
+        <ModelChoiceList
+          options={options}
+          selected={picked}
+          onSelect={setSelected}
+          disabled={busy}
+          errors={errors}
+          retrying={retrying}
+          onRetry={(id) => void retry(id)}
+          label={FIRST_RUN_CHAT_COPY.modelChoiceTitle}
+        />
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
-        <Button variant="primary" size="lg" disabled={!chosen || working !== null} onClick={() => chosen && void act(chosen)}>
+        <Button variant="primary" size="lg" disabled={!chosen || chosen.unavailable || busy} onClick={() => chosen && void act(chosen)}>
           {actionLabel(chosen, activeProviderId, "chat")}
         </Button>
         <button type="button" onClick={() => navigate("/settings/providers")} className={quietLink}>
