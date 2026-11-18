@@ -76,11 +76,12 @@ import {
   MANAGED_POLICY_SET_BY,
   isManagedSettingLocked,
   managedLockedModel,
+  providerModelLabel,
   tenantsNamedByOrganization,
 } from "../shared/openAdminOS";
 import { csvCell } from "../shared/csv";
 import { copyTextToClipboard } from "../shared/clipboard";
-import { CHAT_COPY, FIRST_RUN_CHAT_COPY, HOSTED_CONFIRM_COPY, LOCAL_BOUNDARY_COPY, PROVIDER_COMPANIES, PROVIDER_DETECTION_COPY, PROVIDER_TOOL_NAMES, chatErrorCopy, deriveTrustCopy, promptsGoTo, providerDataLocation, providerDataLocationDetail, sendsThroughTool } from "../copy";
+import { CHAT_COPY, FIRST_RUN_CHAT_COPY, HOSTED_CONFIRM_COPY, LOCAL_BOUNDARY_COPY, PROVIDER_COMPANIES, PROVIDER_DETECTION_COPY, PROVIDER_TOOL_NAMES, chatErrorCopy, deriveTrustCopy, modelTrustNote, promptsGoTo, providerDataLocation, providerDataLocationDetail, sendsThroughTool } from "../copy";
 import { ModelChoice, NoTenantChatHome, NotConnectedCard } from "../components/chat/ChatFirstRun";
 import { isProviderReady } from "../shared/provider-detection";
 import {
@@ -2623,10 +2624,42 @@ function ComposerModelPopover({
   disabled: boolean;
 }) {
   const detailsRef = useRef<HTMLDetailsElement | null>(null);
+  // The menu opens on the side of the chip with more room and scrolls inside it, so no row is ever cut off.
+  const [placement, setPlacement] = useState<{ above: boolean; maxHeight: number }>({ above: true, maxHeight: 480 });
+  const placeMenu = (scrollToSelected = true) => {
+    const details = detailsRef.current;
+    const chip = details?.querySelector("summary")?.getBoundingClientRect();
+    if (!details?.open || !chip) return;
+    // Measure against the nearest ancestor that clips (the page below the app header), not the whole window.
+    let top = 0, bottom = window.innerHeight;
+    for (let node = details.parentElement; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (style.overflowY !== "visible" || style.overflowX !== "visible") {
+        const box = node.getBoundingClientRect();
+        top = Math.max(top, box.top); bottom = Math.min(bottom, box.bottom);
+        break;
+      }
+    }
+    const gap = 16;
+    const above = chip.top - top - gap, below = bottom - chip.bottom - gap;
+    setPlacement({ above: above >= below, maxHeight: Math.max(160, Math.floor(Math.max(above, below)) - 8) });
+    if (!scrollToSelected) return;
+    // Scroll only the menu's own list, so the page behind it never moves.
+    requestAnimationFrame(() => {
+      const list = details.querySelector<HTMLElement>("[data-model-list]");
+      const row = list?.querySelector<HTMLElement>('[role="menuitemradio"][aria-checked="true"]');
+      if (list && row) list.scrollTop = Math.max(0, row.offsetTop - (list.clientHeight - row.offsetHeight) / 2);
+    });
+  };
+  // A provider whose every model is unavailable (all Copilot Fusion tiers outside the plan) stays listed,
+  // so the reasons are visible here too; it offers nothing to select.
   const availableProviders = providers.filter(
-    (provider) => ["connected", "available"].includes(provider.status) && provider.models.length > 0,
+    (provider) =>
+      (["connected", "available"].includes(provider.status) && provider.models.length > 0) ||
+      (provider.unavailableModels?.length ?? 0) > 0,
   );
   const activeProvider = providers.find((provider) => provider.id === activeProviderId);
+  const activeLabel = activeModel ? providerModelLabel(activeProvider, activeModel) : undefined;
   // The host lists only what the IT policy file allows; this says who decided.
   const { state: appState } = useAppState();
   const setByPolicy =
@@ -2646,18 +2679,22 @@ function ComposerModelPopover({
       details.open = false;
       details.querySelector<HTMLElement>("summary")?.focus();
     };
+    // A window that changes size while the menu is open keeps every row reachable.
+    const replace = () => placeMenu(false);
     window.addEventListener("mousedown", closeFromOutside);
     window.addEventListener("keydown", closeFromEscape);
+    window.addEventListener("resize", replace);
     return () => {
       window.removeEventListener("mousedown", closeFromOutside);
       window.removeEventListener("keydown", closeFromEscape);
+      window.removeEventListener("resize", replace);
     };
   }, []);
 
   return (
-    <details ref={detailsRef} className="group relative">
+    <details ref={detailsRef} className="group relative" onToggle={() => placeMenu()}>
       <summary
-        aria-label={`Model: ${activeModel ?? activeProvider?.name ?? "No model"}`}
+        aria-label={`Model: ${activeLabel ?? activeProvider?.name ?? "No model"}`}
         aria-disabled={disabled}
         onClick={(event) => {
           if (disabled) event.preventDefault();
@@ -2665,10 +2702,16 @@ function ComposerModelPopover({
         className={`flex h-8 max-w-[240px] cursor-pointer list-none items-center gap-1.5 rounded-[9px] px-2.5 text-sm text-[var(--color-text-soft)] transition-colors hover:bg-[var(--color-hover)] hover:text-[var(--color-text)] [&::-webkit-details-marker]:hidden ${focusRingClass} ${disabled ? "pointer-events-none opacity-50" : ""}`}
       >
         {activeProvider?.isLocal === false ? <IconCloud size={12} /> : <IconLock size={12} />}
-        <span className="truncate">{activeModel ?? activeProvider?.name ?? "Choose model"}</span>
+        <span className="truncate">{activeLabel ?? activeProvider?.name ?? "Choose model"}</span>
         <IconChevronDown size={11} className="text-[var(--color-text-muted)]" />
       </summary>
-      <div role="menu" aria-label="Models" className="absolute bottom-[calc(100%+8px)] right-0 z-[90] w-[min(360px,calc(100vw-48px))] overflow-hidden rounded-[14px] bg-[var(--color-raised)] p-1.5 shadow-[var(--shadow-pop)]">
+      <div
+        role="menu"
+        aria-label="Models"
+        style={{ maxHeight: placement.maxHeight }}
+        className={`absolute right-0 z-[90] flex w-[min(360px,calc(100vw-48px))] flex-col overflow-hidden rounded-[14px] bg-[var(--color-raised)] p-1.5 shadow-[var(--shadow-pop)] ${placement.above ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)]"}`}
+      >
+        <div data-model-list className="relative min-h-0 flex-1 overflow-y-auto">
         {setByPolicy ? (
           <div className="flex items-center gap-1.5 px-2 pb-1 pt-1 text-xs text-[var(--color-text-muted)]">
             <IconLock size={11} />
@@ -2683,9 +2726,11 @@ function ComposerModelPopover({
               <div className="px-2 pb-1 pt-1 text-xs text-[var(--color-text-muted)]">
                 {local ? "On this device" : "Hosted"}
               </div>
-              {group.flatMap((provider) =>
-                provider.models.map((model) => {
+              {group.flatMap((provider) => [
+                ...provider.models.map((model) => {
                   const selected = provider.id === activeProviderId && model === activeModel;
+                  const note = modelTrustNote(provider.id, model);
+                  const subtitle = note ? `${provider.name} · ${note}` : provider.name;
                   return (
                     <button
                       key={`${provider.id}:${model}`}
@@ -2696,22 +2741,42 @@ function ComposerModelPopover({
                         detailsRef.current?.removeAttribute("open");
                         onSelect(provider.id, model);
                       }}
-                      className="flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-2 text-left hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-focus)]"
+                      className="flex w-full items-start gap-2.5 rounded-[9px] px-2.5 py-2 text-left hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-focus)]"
                     >
-                      {local ? <IconLock size={13} /> : <IconCloud size={13} />}
+                      <span className="mt-[5px] shrink-0">{local ? <IconLock size={13} /> : <IconCloud size={13} />}</span>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-base text-[var(--color-text)]">{model}</span>
-                        <span className="block truncate text-sm text-[var(--color-text-muted)]">{provider.name}</span>
+                        <span className="block truncate text-base text-[var(--color-text)]">{providerModelLabel(provider, model)}</span>
+                        <span className="block text-sm text-[var(--color-text-muted)]">{subtitle}</span>
                       </span>
-                      {selected ? <IconCheck size={13} /> : null}
+                      {selected ? <span className="mt-[5px] shrink-0"><IconCheck size={13} /></span> : null}
                     </button>
                   );
                 }),
-              )}
+                // Offered by the provider but not to this account: focusable and announced as unavailable
+                // with the reason, never selectable. Only the name is dimmed, so the reason stays legible.
+                ...(provider.unavailableModels ?? []).map((unavailable) => (
+                  <button
+                    key={`${provider.id}:${unavailable.id}:unavailable`}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={false}
+                    aria-disabled="true"
+                    onClick={(event) => event.preventDefault()}
+                    className="flex w-full cursor-not-allowed items-start gap-2.5 rounded-[9px] px-2.5 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-focus)]"
+                  >
+                    <span className="mt-[5px] shrink-0 opacity-50">{local ? <IconLock size={13} /> : <IconCloud size={13} />}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-base text-[var(--color-text-muted)]">{providerModelLabel(provider, unavailable.id)}</span>
+                      <span className="block text-sm text-[var(--color-text-muted)]">{unavailable.reason}</span>
+                    </span>
+                  </button>
+                )),
+              ])}
             </div>
           );
         })}
-        <div className="mt-1 border-t border-[var(--color-border-soft)] pt-1">
+        </div>
+        <div className="mt-1 shrink-0 border-t border-[var(--color-border-soft)] pt-1">
           <button
             type="button"
             role="menuitem"
@@ -3931,14 +3996,18 @@ function HostedChatConsentPanel({
   const workspace = prompt.workspaceContextSummary
     ? `${prompt.workspaceContextSummary.workspaceTitle} (${prompt.workspaceContextSummary.evidenceCount} evidence, ${prompt.workspaceContextSummary.noteCount} notes)`
     : undefined;
-  const locationDetail = providerDataLocationDetail({ id: prompt.providerId });
+  const { state: appState } = useAppState();
+  const modelName = prompt.model ? providerModelLabel(appState.providers.find((entry) => entry.id === prompt.providerId), prompt.model) : undefined;
+  // Copilot Fusion can show the prompt to more than one model; say so where the destination is named.
+  const fusionNote = prompt.model ? modelTrustNote(prompt.providerId, prompt.model) : undefined;
+  const locationDetail = [providerDataLocationDetail({ id: prompt.providerId }), fusionNote && `${fusionNote}.`].filter(Boolean).join(" ") || undefined;
   const through = sendsThroughTool({ id: prompt.providerId });
   // An API named like its product answers through that API, not through itself.
   const apiName = company === tool ? `the ${company} API` : company;
   const facts: Array<[string, string, boolean]> = [
     [HOSTED_CONFIRM_COPY.goesTo, providerDataLocation({ id: prompt.providerId, name: prompt.providerName }), true],
     // The acknowledgement is bound to the model, with or without a tenant.
-    ...(prompt.model ? [[HOSTED_CONFIRM_COPY.model, prompt.model, false] as [string, string, boolean]] : []),
+    ...(modelName ? [[HOSTED_CONFIRM_COPY.model, modelName, false] as [string, string, boolean]] : []),
     [HOSTED_CONFIRM_COPY.whatIsSent, noTenant ? HOSTED_CONFIRM_COPY.sentNoTenant(Boolean(prompt.toolHosts?.length)) : HOSTED_CONFIRM_COPY.sentTenant(tenant, workspace), false],
     [HOSTED_CONFIRM_COPY.staysHere, noTenant ? HOSTED_CONFIRM_COPY.staysNoTenant : HOSTED_CONFIRM_COPY.staysTenant, false],
   ];
@@ -3992,7 +4061,7 @@ function HostedChatConsentPanel({
           className="mt-[3px] h-3.5 w-3.5 accent-[var(--color-accent)]"
         />
         <span>
-          {noTenant ? HOSTED_CONFIRM_COPY.rememberNoTenant(prompt.model ?? tool) : HOSTED_CONFIRM_COPY.rememberTenant(tenant, tool, prompt.model)}
+          {noTenant ? HOSTED_CONFIRM_COPY.rememberNoTenant(modelName ?? tool) : HOSTED_CONFIRM_COPY.rememberTenant(tenant, tool, modelName)}
         </span>
       </label>
       <div className="mt-4 flex flex-wrap items-center gap-2">

@@ -512,10 +512,14 @@ export async function checkAdditionalCli(provider: ProviderSummary, options: Sca
   const probe: CliProbe = provider.id === "copilot"
     ? options.scan ? await probeCopilotInstallation(cliOptions) : await probeCopilotLlm(cliOptions)
     : await probeGeminiLlm(cliOptions);
+  // Labels and unavailable models come from this check only, never from an earlier one.
+  const { modelLabels: _labels, unavailableModels: _unavailable, ...base } = provider;
   return {
-    ...provider,
+    ...base,
     status: !probe.installed ? "not-installed" : probe.ready ? "connected" : probe.failure ? "error" : "available",
     detail: probe.detail, models: probe.models, defaultModel: probe.defaultModel,
+    ...(probe.modelLabels ? { modelLabels: probe.modelLabels } : {}),
+    ...(probe.unavailableModels?.length ? { unavailableModels: probe.unavailableModels } : {}),
     cli: { binaryPath: probe.binaryPath, version: probe.version, state: probe.ready ? "ready" : probe.failure ?? "check-required" },
   };
 }

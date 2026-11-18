@@ -127,7 +127,7 @@ export function buildReachModel(state: AppState, connectors?: readonly Connector
     ? { kind: "none", name: CONNECTIONS_COPY.map.modelNone }
     : boundary.kind === "local"
       ? { kind: "local", name: CONNECTIONS_COPY.map.modelLocal(modelName), modelName, providerId: provider.id, providerName: provider.name }
-      : { kind: "hosted", name: CONNECTIONS_COPY.map.modelHosted(modelName), modelName, providerId: provider.id, providerName: provider.name, channel: hostedChannel(provider), promptsSentence: promptsGoTo(provider, Boolean(organization)), location: providerDataLocation(provider), ...(providerDataLocationDetail(provider) ? { locationDetail: providerDataLocationDetail(provider)! } : {}) };
+      : { kind: "hosted", name: CONNECTIONS_COPY.map.modelHosted(modelName), modelName, providerId: provider.id, providerName: provider.name, channel: hostedChannel(provider), promptsSentence: promptsGoTo(provider, Boolean(organization)), location: providerDataLocation(provider), ...(hostedDetail(provider, boundary.kind === "hosted" ? boundary.modelNote : undefined)) };
   return {
     ...(organization ? { organizationName: organization.name } : {}),
     services,
@@ -162,6 +162,12 @@ function listText(values: readonly string[]): string {
 }
 
 /** The map's text alternative: the same facts as one paragraph. */
+/** Where a hosted model's location depends on, plus who sees the prompt for a Copilot Fusion tier. */
+function hostedDetail(provider: Parameters<typeof providerDataLocationDetail>[0], modelNote: string | undefined): { locationDetail?: string } {
+  const detail = [providerDataLocationDetail(provider), modelNote ? `${modelNote}.` : undefined].filter(Boolean).join(" ");
+  return detail ? { locationDetail: detail } : {};
+}
+
 export function reachDescription(model: ReachModel): string {
   const who = model.organizationName ?? "No organization";
   const services = model.services.length > 0

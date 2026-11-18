@@ -5,6 +5,8 @@ import type {
   OfficePersonaInput,
   RegistryAgentSummary,
 } from "../../shared/openAdminOS";
+import { providerModelLabel } from "../../shared/openAdminOS";
+import { modelTrustNote } from "../../copy";
 import { useAppState } from "../../state";
 import { useSetupFlow } from "../../setup/SetupFlowContext";
 import { Button } from "../Button";
@@ -167,7 +169,7 @@ export function PersonaEditor({
       ready: readyProvider && readyModel,
       detail:
         readyProvider && readyModel
-          ? `${provider?.name} · ${form.model ?? "Provider default"}`
+          ? `${provider?.name} · ${form.model ? providerModelLabel(provider, form.model) : "Provider default"}`
           : "Choose an available provider and model",
     },
     {
@@ -468,7 +470,7 @@ export function PersonaEditor({
                       )}
                       {provider?.models.map((model) => (
                         <option key={model} value={model}>
-                          {model}
+                          {providerModelLabel(provider, model)}
                         </option>
                       ))}
                     </select>
@@ -776,7 +778,10 @@ export function PersonaEditor({
                         </div>
                         <div>
                           <dt>Model</dt>
-                          <dd>{form.model ?? "Provider default"}</dd>
+                          <dd>
+                            {form.model ? providerModelLabel(provider, form.model) : "Provider default"}
+                            {form.model && provider && modelTrustNote(provider.id, form.model) ? <span className="block">{modelTrustNote(provider.id, form.model)}.</span> : null}
+                          </dd>
                         </div>
                         <div>
                           <dt>Schedule</dt>

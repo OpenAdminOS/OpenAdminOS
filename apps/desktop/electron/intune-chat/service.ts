@@ -78,6 +78,7 @@ import {
   GRAPH_CACHE_LOG_ROW_LIMIT,
   GRAPH_CACHE_LOG_WINDOW_DAYS,
   isGraphCacheLogResource,
+  providerModelLabel,
 } from "@openadminos/agent-sdk";
 
 import { assertAgentCompatible, withAgentCompatibility } from "../agent-draft-helpers.js";
@@ -2178,7 +2179,7 @@ export class IntuneChatService {
     };
     store.insertMessage(userMessage);
     const steps = new ChatStepRecorder();
-    const answerModel: AnswerModel = { ...(selectedModel ? { name: selectedModel } : {}), hosted: provider?.isLocal === false, providerName: provider.name };
+    const answerModel: AnswerModel = { ...(selectedModel ? { name: providerModelLabel(provider, selectedModel) } : {}), hosted: provider?.isLocal === false, providerName: provider.name };
     const toolsOffered = resolveAgenticCapability({
       mode: store.getChatInvestigationSettings().mode,
       provider,
@@ -2673,7 +2674,7 @@ export class IntuneChatService {
       cacheStatus: initialCacheStatus,
     });
     const steps = new ChatStepRecorder((list) => onEvent({ type: "steps", conversationId: conversation.id, assistantMessageId: assistantId, steps: list }));
-    const answerModel: AnswerModel = { ...(selectedModel ? { name: selectedModel } : {}), hosted: provider?.isLocal === false, providerName: provider.name };
+    const answerModel: AnswerModel = { ...(selectedModel ? { name: providerModelLabel(provider, selectedModel) } : {}), hosted: provider?.isLocal === false, providerName: provider.name };
     const toolsOffered = !options.voice && resolveAgenticCapability({
       mode: store.getChatInvestigationSettings().mode,
       provider,

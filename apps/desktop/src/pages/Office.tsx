@@ -6,6 +6,7 @@ import type {
   OfficePersona,
   RunRecord,
 } from "../shared/openAdminOS";
+import { providerModelLabel } from "../shared/openAdminOS";
 import { useAppState } from "../state";
 import { Button } from "../components/Button";
 import { PageHeader } from "../components/AppShell";
@@ -470,7 +471,7 @@ export default function Office() {
                 </div>
                 <div>
                   <dt>Model</dt>
-                  <dd>{selected.model ?? "Provider default"}</dd>
+                  <dd>{selected.model ? providerModelLabel(selectedProvider, selected.model) : "Provider default"}</dd>
                 </div>
                 <div>
                   <dt>Schedule</dt>

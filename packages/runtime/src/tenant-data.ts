@@ -50,7 +50,8 @@ export function withTenantDataOutputFilter(base: RunLlmApi): RunLlmApi {
       let previous = "";
       for await (const chunk of base.stream(options)) {
         const accumulated = stripTenantDataFences(chunk.accumulated, !chunk.done);
-        const delta = accumulated.slice(previous.length);
+        // A provider may replace its text (Copilot Fusion swapping a draft for the revision): then the delta is all of it.
+        const delta = accumulated.startsWith(previous) ? accumulated.slice(previous.length) : accumulated;
         previous = accumulated;
         yield { ...chunk, accumulated, delta };
       }

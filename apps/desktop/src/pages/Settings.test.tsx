@@ -155,6 +155,27 @@ describe("Settings provider section", () => {
     expect(notice).toHaveTextContent("Keep a copy of it for review, then remove it and restart OpenAdminOS.");
   });
 
+  it("names Copilot Fusion tiers, greys out tiers the plan lacks with the reason, and says how Fusion uses models", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge({}, createMockAppState({
+      activeProviderId: "ollama",
+      providers: [...mockProviders, { ...provider("openai"), id: "copilot", name: "GitHub Copilot CLI", models: ["fusion-standard"], defaultModel: undefined,
+        modelLabels: { "fusion-standard": "Copilot Fusion Standard", "fusion-max": "Copilot Fusion Max" },
+        unavailableModels: [{ id: "fusion-max", reason: "Not included in your Copilot plan." }],
+        cli: { state: "ready", version: "1.0.114", binaryPath: "/example/bin/copilot" } }],
+    }));
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/providers", bridge });
+    await user.click(await screen.findByRole("button", { name: "Show details for GitHub Copilot CLI" }));
+    const max = screen.getByRole("button", { name: "Copilot Fusion Max" });
+    expect(max).toHaveAttribute("aria-disabled", "true");
+    await user.click(max);
+    expect(bridge.setActiveModel).not.toHaveBeenCalled();
+    expect(max).toHaveAccessibleDescription("Copilot Fusion Max: Not included in your Copilot plan.");
+    expect(screen.getByText(/Standard uses one model per task\. High and Max can have one model draft and others review/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Copilot Fusion Standard" }));
+    await waitFor(() => expect(bridge.setActiveModel).toHaveBeenCalledWith("copilot", "fusion-standard"));
+  });
+
   it("requires a real Gemini test and shows CLI diagnostics before activation", async () => {
     const user = userEvent.setup();
     const bridge = makeMockBridge({

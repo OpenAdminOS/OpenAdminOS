@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "./Button";
 import { IconChevronDown, IconCloud, IconHardDrive, IconPlay } from "./icons";
 import { isProviderImplemented } from "../shared/providers";
-import type { ProviderId, ProviderSummary } from "../shared/openAdminOS";
+import { providerModelLabel, type ProviderId, type ProviderSummary } from "../shared/openAdminOS";
+import { modelTrustNote } from "../copy";
 import { Badge } from "./ui";
 
 interface RunWithChoice {
@@ -51,8 +52,9 @@ export function RunWithMenu({
     0,
   );
 
-  // No menu when there's nothing meaningful to pick.
-  if (totalChoices <= 1) {
+  // No menu when there's nothing meaningful to pick, unless a model the account cannot use needs its reason shown.
+  const hasUnavailable = implemented.some((provider) => (provider.unavailableModels?.length ?? 0) > 0);
+  if (totalChoices <= 1 && !hasUnavailable) {
     return (
       <Button
         variant="primary"
@@ -157,7 +159,7 @@ export function RunWithMenu({
                     <div className="px-3 pb-2 text-xs text-[var(--color-text-muted)]">
                       Coming soon
                     </div>
-                  ) : models.length === 0 ? (
+                  ) : models.length === 0 && !(provider.unavailableModels?.length) ? (
                     <div className="px-3 pb-2 text-xs text-[var(--color-text-muted)]">
                       No models installed
                     </div>
@@ -181,8 +183,11 @@ export function RunWithMenu({
                                   : "bg-[var(--color-text-muted)]/40"
                               }`}
                             />
-                            <span title={model} className="min-w-0 flex-1 truncate font-mono text-sm text-[var(--color-text-soft)]">
-                              {model}
+                            <span title={model} className="min-w-0 flex-1">
+                              <span className="block truncate font-mono text-sm text-[var(--color-text-soft)]">{providerModelLabel(provider, model)}</span>
+                              {modelTrustNote(provider.id, model) ? (
+                                <span className="block text-xs text-[var(--color-text-muted)]">{modelTrustNote(provider.id, model)}</span>
+                              ) : null}
                             </span>
                             {isPinned && (
                               <Badge tone="info">Default</Badge>
@@ -190,6 +195,21 @@ export function RunWithMenu({
                           </button>
                         );
                       })}
+                      {(provider.unavailableModels ?? []).map((unavailable) => (
+                        <button
+                          key={`${unavailable.id}:unavailable`}
+                          type="button"
+                          aria-disabled="true"
+                          onClick={(event) => event.preventDefault()}
+                          className="flex w-full cursor-not-allowed items-start gap-3 px-3 py-1.5 text-left"
+                        >
+                          <span className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-text-muted)]/40" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate font-mono text-sm text-[var(--color-text-muted)]">{providerModelLabel(provider, unavailable.id)}</span>
+                            <span className="block text-xs text-[var(--color-text-muted)]">{unavailable.reason}</span>
+                          </span>
+                        </button>
+                      ))}
                     </div>
                   )}
                 </div>

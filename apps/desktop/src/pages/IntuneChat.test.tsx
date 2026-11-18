@@ -24,6 +24,7 @@ import type {
   IntuneChatConversation,
   IntuneChatMessage,
   OpenAdminOSApi,
+  ProviderSummary,
   SendIntuneChatMessageResult,
   WorkspaceDetail,
 } from "../shared/openAdminOS";
@@ -1164,6 +1165,53 @@ describe("IntuneChat trust presentation", () => {
       expect(bridge.setActiveProvider).toHaveBeenCalledWith("openai");
       expect(bridge.setActiveModel).toHaveBeenCalledWith("openai", "gpt-5");
     });
+  });
+
+  it("lists Copilot Fusion tiers by name, says who picks the model, and greys out tiers the plan lacks", async () => {
+    const user = userEvent.setup();
+    const copilot: ProviderSummary = {
+      id: "copilot",
+      name: "GitHub Copilot CLI",
+      description: "Use models through the GitHub Copilot CLI.",
+      isLocal: false,
+      status: "connected",
+      models: ["fusion-standard"],
+      modelLabels: { "fusion-standard": "Copilot Fusion Standard", "fusion-high": "Copilot Fusion High" },
+      unavailableModels: [{ id: "fusion-high", reason: "Not included in your Copilot plan." }],
+    };
+    const bridge = makeMockBridge({}, createMockAppState({ providers: [...mockProviders, copilot] }));
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+
+    await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
+    await user.click(screen.getByLabelText(/Model:/));
+    const standard = await screen.findByRole("menuitemradio", { name: /Copilot Fusion Standard/ });
+    expect(standard).toHaveTextContent("GitHub Copilot CLI · GitHub picks the model for each prompt");
+    const high = screen.getByRole("menuitemradio", { name: /Copilot Fusion High/ });
+    expect(high).toHaveAttribute("aria-disabled", "true");
+    expect(high).toHaveTextContent("Not included in your Copilot plan.");
+    await user.click(high);
+    expect(bridge.setActiveModel).not.toHaveBeenCalled();
+
+    await user.click(standard);
+    await waitFor(() => expect(bridge.setActiveModel).toHaveBeenCalledWith("copilot", "fusion-standard"));
+  });
+
+  it("keeps a provider whose every Copilot Fusion tier is outside the plan in the menu, with the reasons", async () => {
+    const user = userEvent.setup();
+    const copilot: ProviderSummary = {
+      id: "copilot", name: "GitHub Copilot CLI", description: "", isLocal: false, status: "error", models: [],
+      modelLabels: { "fusion-standard": "Copilot Fusion Standard" },
+      unavailableModels: [{ id: "fusion-standard", reason: "Turned off by your organization's policy." }],
+    };
+    const bridge = makeMockBridge({}, createMockAppState({ providers: [...mockProviders, copilot] }));
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+    await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
+    await user.click(screen.getByLabelText(/Model:/));
+    const standard = await screen.findByRole("menuitemradio", { name: /Copilot Fusion Standard/ });
+    expect(standard).toHaveAttribute("aria-disabled", "true");
+    expect(standard).toHaveTextContent("Turned off by your organization's policy.");
+    await user.click(standard);
+    expect(bridge.setActiveModel).not.toHaveBeenCalled();
   });
 
   it("re-persists the provider when picking the displayed provider's model", async () => {

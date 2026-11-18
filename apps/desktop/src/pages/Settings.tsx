@@ -33,6 +33,7 @@ import {
   DEFAULT_DRIFT_RETENTION_DAYS,
   DEFAULT_RUN_HISTORY_RETENTION_KEEP_DAYS,
   DEFAULT_RUN_HISTORY_RETENTION_KEEP_LAST_RUNS,
+  providerModelLabel,
   resolveProviderDefaultModel,
   DEFAULT_AZURE_OPENAI_API_VERSION,
   type AuditLogExportFormat,
@@ -79,6 +80,8 @@ import { useAppState, useUpdateStateOptional } from "../state";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import {
+  COPILOT_FUSION_DETAIL,
+  modelTrustNote,
   promptsGoTo,
   providerDataLocationDetail,
   SETTINGS_SECTIONS,
@@ -736,11 +739,11 @@ function ProviderRow({
           {provider.cli && implemented ? (
             <dl className="mt-3 grid gap-3 sm:grid-cols-3">
               <ProviderFact label="CLI version" value={provider.cli.version ?? "Not detected"} />
-              <ProviderFact label="Default model" value={effectiveModel ?? "CLI default"} />
+              <ProviderFact label="Default model" value={effectiveModel ? providerModelLabel(provider, effectiveModel) : "CLI default"} />
               <ProviderFact label="Executable" value={provider.cli.binaryPath ?? "Not detected"} />
             </dl>
           ) : null}
-          {implemented && installedModels.length > 0 ? (
+          {implemented && (installedModels.length > 0 || (provider.unavailableModels?.length ?? 0) > 0) ? (
             <div className="mt-4">
               <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-text)]">
                 Models
@@ -762,11 +765,24 @@ function ProviderRow({
                         await onSetActiveModel(provider.id, selected && isActive ? null : model);
                       })()}
                     >
-                      <span className="min-w-0 truncate">{model}</span>
+                      <span className="min-w-0 truncate">{providerModelLabel(provider, model)}</span>
                     </UiButton>
                   );
                 })}
+                {(provider.unavailableModels ?? []).map((unavailable) => (
+                  <UiButton key={`${unavailable.id}:unavailable`} size="sm" variant="ghost" className="max-w-full cursor-not-allowed font-mono text-[var(--color-text-muted)]" aria-disabled="true" aria-describedby={`${provider.id}-${unavailable.id}-reason`} onClick={(event) => event.preventDefault()}>
+                    <span className="min-w-0 truncate">{providerModelLabel(provider, unavailable.id)}</span>
+                  </UiButton>
+                ))}
               </div>
+              {(provider.unavailableModels ?? []).map((unavailable) => (
+                <p key={`${unavailable.id}:reason`} id={`${provider.id}-${unavailable.id}-reason`} className="mt-2 max-w-[720px] text-sm leading-5 text-[var(--color-text-muted)]">
+                  {providerModelLabel(provider, unavailable.id)}: {unavailable.reason}
+                </p>
+              ))}
+              {[...provider.models, ...(provider.unavailableModels ?? []).map((entry) => entry.id)].some((model) => modelTrustNote(provider.id, model)) ? (
+                <p className="mt-2 max-w-[720px] text-sm leading-5 text-[var(--color-text-soft)]">{COPILOT_FUSION_DETAIL}</p>
+              ) : null}
             </div>
           ) : null}
           {implemented && ((provider.status === "not-installed" && !provider.installed) || provider.cli?.state === "unsupported-version" || provider.cli?.state === "signed-out" || provider.cli?.state === "access-denied") && providerInstallGuideUrl(provider.id) ? (
@@ -785,7 +801,7 @@ function ProviderRow({
           {testResult ? (
             <div role={testResult.ok ? "status" : "alert"} className={`mt-4 text-sm ${testResult.ok ? "text-[var(--color-success)]" : "text-[var(--color-danger)]"}`}>
               {testResult.message}
-              {testResult.model ? <> Model: <span className="font-mono">{testResult.model}</span>.</> : null}
+              {testResult.model ? <> Model: <span className="font-mono">{providerModelLabel(provider, testResult.model)}</span>.</> : null}
             </div>
           ) : null}
           {provider.id === "azure-openai" ? (
