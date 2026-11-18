@@ -3813,6 +3813,13 @@ function PrivacySection({
   const [telemetryError, setTelemetryError] = useState<string | null>(null);
   const [telemetryTestResult, setTelemetryTestResult] = useState<string | null>(null);
   const [retrievalStatus, setRetrievalStatus] = useState<RetrievalStatus | null>(null);
+  // Each status read takes a number; a reply from an older read (a slow Refresh beside an install) is dropped.
+  const retrievalStatusRead = useRef(0);
+  const applyRetrievalStatus = useCallback(async (read: () => Promise<RetrievalStatus>) => {
+    const request = ++retrievalStatusRead.current;
+    const next = await read();
+    if (request === retrievalStatusRead.current) setRetrievalStatus(next);
+  }, []);
   const [retrievalLoading, setRetrievalLoading] = useState(true);
   const [retrievalRefreshing, setRetrievalRefreshing] = useState(false);
   const [retrievalInstalling, setRetrievalInstalling] = useState(false);
@@ -3860,7 +3867,7 @@ function PrivacySection({
     }
 
     try {
-      setRetrievalStatus(await getStatus());
+      await applyRetrievalStatus(getStatus);
     } catch (error) {
       setRetrievalStatus(null);
       setRetrievalError(
@@ -3871,7 +3878,7 @@ function PrivacySection({
     } finally {
       setRetrievalLoading(false);
     }
-  }, []);
+  }, [applyRetrievalStatus]);
 
   useEffect(() => {
     void loadTelemetryPreview();
@@ -3926,7 +3933,7 @@ function PrivacySection({
     setRetrievalRefreshing(true);
     setRetrievalError(null);
     try {
-      setRetrievalStatus(await refreshIndex());
+      await applyRetrievalStatus(refreshIndex);
     } catch (error) {
       setRetrievalError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -3945,7 +3952,7 @@ function PrivacySection({
       // only option some tenants allow.
       // "download" fetches the published release asset; "folder" opens a
       // picker in the host so an air-gapped machine can install a copy.
-      setRetrievalStatus(await install(source === "download" ? { source } : {}));
+      await applyRetrievalStatus(() => install(source === "download" ? { source } : {}));
     } catch (caught) {
       setRetrievalError(
         caught instanceof Error ? caught.message : String(caught),

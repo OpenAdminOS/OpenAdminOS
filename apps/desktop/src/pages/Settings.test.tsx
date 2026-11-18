@@ -13,6 +13,7 @@ import {
 } from "../test/test-utils";
 import {
   DEFAULT_AZURE_OPENAI_API_VERSION,
+  type RetrievalStatus,
   type SetAzureOpenAIProviderConfigInput,
 } from "../shared/openAdminOS";
 import { PROVIDER_DETECTION_COPY } from "../copy";
@@ -964,6 +965,25 @@ describe("Settings provider section", () => {
     renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/privacy", bridge });
     expect(await screen.findByText("The embedding model is not installed yet. OpenAdminOS downloads it through Ollama in the background when it starts with Ollama running; answers stay ungrounded until it arrives.")).toBeVisible();
     expect(screen.queryByText(/setting above/)).toBeNull();
+  });
+
+  it("keeps an index install's status when an older Refresh answers after it (PR #206 review round 3)", async () => {
+    let answerRefresh: (status: RetrievalStatus) => void = () => undefined;
+    const bridge = makeMockBridge({
+      getRetrievalStatus: vi.fn(async () => ({ available: false, reason: "The documentation index is not installed.", ollamaReachable: true, embeddingModelInstalled: true })),
+      refreshRetrievalIndex: vi.fn(() => new Promise<RetrievalStatus>((resolve) => {
+        answerRefresh = resolve;
+      })),
+      installRetrievalIndex: vi.fn(async () => ({ available: true, version: "2026-11-01", chunkCount: 12, ollamaReachable: true, embeddingModelInstalled: true })),
+    });
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/privacy", bridge });
+    await screen.findByText("The documentation index is not installed.");
+    await userEvent.click(screen.getByRole("button", { name: "Check for index" }));
+    await waitFor(() => expect(bridge.refreshRetrievalIndex).toHaveBeenCalled());
+    await userEvent.click(screen.getByRole("button", { name: /^Install from folder/ }));
+    await waitFor(() => expect(screen.queryByText("The documentation index is not installed.")).toBeNull());
+    await act(async () => answerRefresh({ available: false, reason: "The documentation index is not installed.", ollamaReachable: true, embeddingModelInstalled: true }));
+    expect(screen.queryByText("The documentation index is not installed.")).toBeNull();
   });
 
   it("shows an unavailable retrieval reason and checks for a refreshed index", async () => {
