@@ -37,6 +37,8 @@ export interface ChoiceOption {
   unavailable?: boolean;
   /** Its endpoint is outside this device and was not contacted: no Retry, the reason points to Settings. */
   notContacted?: true;
+  /** A finished check found it cannot answer (IT set a model this account cannot use): no Retry, the reason says what to do. */
+  noRetry?: true;
 }
 
 const LOCAL_ORDER: readonly ProviderId[] = ["ollama", "lm-studio", "lemonade", "apple-foundation"];
@@ -187,6 +189,21 @@ export function optionsFromProviders(providers: readonly ProviderSummary[]): Cho
     }
     const signedIn = provider.status === "connected" || provider.cli?.state === "ready";
     if (!signedIn && !(provider.id === "azure-openai" && ready)) continue;
+    // Signed in, but a finished check says it cannot answer, such as a model IT set that this
+    // account cannot use. The send path refuses it, so the row says why instead of offering it.
+    if (!ready && provider.status === "error") {
+      options.push({
+        providerId: provider.id,
+        name,
+        where: "hosted",
+        whereLine: provider.detail ?? MODEL_CHOICE_COPY.unavailableLine(name),
+        state: MODEL_CHOICE_COPY.unavailable,
+        action: "use",
+        unavailable: true,
+        noRetry: true,
+      });
+      continue;
+    }
     options.push({
       providerId: provider.id,
       name,

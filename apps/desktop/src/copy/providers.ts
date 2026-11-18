@@ -46,6 +46,8 @@ export const MODEL_CHOICE_COPY = {
   couldNotCheck: "Could not check",
   couldNotCheckLine: (name: string) => `${name} did not answer. Retry to check it again.`,
   notChecked: "Not checked",
+  unavailable: "Unavailable",
+  unavailableLine: (name: string) => `${name} cannot answer with its current settings. Settings, Providers shows why.`,
   checkedAgainNotOffered: (name: string) => `${name} was checked again and is not offered here. All providers shows its state.`,
   /** Gemini's sign-in is known only from a request, so only Test clears a failed one. */
   geminiTestHint: "A failed Gemini request clears only after a Test in Settings, Providers.",

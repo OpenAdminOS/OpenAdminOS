@@ -73,8 +73,8 @@ export function ModelChoiceList({
                 </span>
                 {option.providerId === lockedProvider ? <SetByItBadge className="mt-1" /> : null}
               </span>
-              {/* A failed check keeps its state in view next to Retry; an endpoint that was not contacted gets no Retry. */}
-              {option.unavailable && onRetry && !option.notContacted ? (
+              {/* A failed check keeps its state in view next to Retry; an endpoint that was not contacted, or a row a finished check ruled out, gets no Retry. */}
+              {option.unavailable && onRetry && !option.notContacted && !option.noRetry ? (
                 <span className="flex items-center gap-1.5">
                   <span className="pt-px text-xs leading-5 text-[var(--color-text-muted)]">{option.state}</span>
                   <button

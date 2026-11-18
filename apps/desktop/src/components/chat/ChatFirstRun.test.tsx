@@ -220,6 +220,39 @@ describe("ModelChoice when checking again fails (PR #204 review round 1)", () =>
     expect(await screen.findByRole("alert")).toHaveTextContent("The app state could not be read. Restart OpenAdminOS.");
   });
 
+  it("shows a Copilot whose Retry finds IT's model unusable as unavailable with IT's reason, never as signed in (review round 9)", async () => {
+    const onSelectProvider = vi.fn(async () => undefined);
+    function FromAppState() {
+      const { state } = useAppState();
+      return <ModelChoice providers={state.providers} activeProviderId="ollama" onSelectProvider={onSelectProvider} />;
+    }
+    const failedCatalog: ProviderSummary = {
+      id: "copilot", name: "GitHub Copilot CLI", description: "", isLocal: false, status: "error", checkFailed: true, models: [],
+      detail: "Copilot CLI did not list its models.", cli: { version: "1.0.114", state: "request-failed" },
+    };
+    // What applyManagedPolicyToProviders serves once the catalog check finishes and IT set Fusion High on a Free account.
+    const lockedUnusable: ProviderSummary = {
+      id: "copilot", name: "GitHub Copilot CLI", description: "", isLocal: false, status: "error", models: [],
+      detail: "Your IT department set the model Fusion High, which this account cannot use. Your plan includes Fusion Standard only. Ask IT to choose another model, then refresh providers.",
+      cli: { version: "1.0.114", state: "ready" },
+    };
+    const bridge = makeMockBridge({ recheckProvider: recheck() }, createMockAppState({ providers: [failedCatalog] }));
+    renderWithAppState(<FromAppState />, { bridge });
+    await screen.findByText(failedCatalog.detail!);
+    vi.mocked(bridge.getAppState).mockResolvedValueOnce(createMockAppState({ providers: [lockedUnusable] }));
+    await userEvent.click(screen.getByRole("button", { name: /^Check .*Copilot.* again$/ }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/Copilot.*: Unavailable\./));
+    const row = (await screen.findByText(lockedUnusable.detail!)).closest("[data-provider]") as HTMLElement;
+    expect(within(row).getByText("Unavailable")).toBeInTheDocument();
+    expect(within(row).queryByText("Signed in")).not.toBeInTheDocument();
+    expect(within(row).getByRole("radio")).toBeDisabled();
+    // A finished check ruled it out: another Retry would read the same answer.
+    expect(within(row).queryByRole("button", { name: /again$/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Choose a model" })).toBeDisabled();
+    expect(screen.getByRole("heading", { level: 2 })).toHaveFocus();
+    expect(onSelectProvider).not.toHaveBeenCalled();
+  });
+
   it("offers no Retry for an endpoint outside this device that was not contacted", async () => {
     const served: ProviderSummary = {
       id: "lm-studio", name: "LM Studio", description: "", isLocal: false, status: "error", checkFailed: true, notContacted: true, models: [],

@@ -182,6 +182,20 @@ describe("a provider whose check failed in Chat's choice (PR #191 follow-up)", (
     expect(optionsFromProviders([gemini])[0]!.whereLine).toBe("Gemini CLI request failed. A failed Gemini request clears only after a Test in Settings, Providers.");
   });
 
+  it("shows a signed-in tool a finished check ruled out as unavailable with its reason and no Retry (review round 9)", () => {
+    // managed-policy-state: IT set a Copilot model this account cannot use.
+    const copilot: ProviderSummary = {
+      id: "copilot", name: "GitHub Copilot CLI", description: "", isLocal: false, status: "error", models: [],
+      detail: "Your IT department set the model Fusion High, which this account cannot use.", cli: { version: "1.0.114", state: "ready" },
+    };
+    const [row] = optionsFromProviders([copilot]);
+    expect(row).toMatchObject({ providerId: "copilot", where: "hosted", state: "Unavailable", unavailable: true, noRetry: true, whereLine: copilot.detail });
+    expect(optionsFromProviders([{ ...copilot, detail: undefined }])[0]!.whereLine).toMatch(/cannot answer with its current settings\. Settings, Providers shows why\.$/);
+    // Signed in and connected stays the normal row.
+    expect(optionsFromProviders([{ ...copilot, status: "connected", detail: undefined }])[0]).toMatchObject({ state: "Signed in" });
+    expect(optionsFromProviders([{ ...copilot, status: "connected", detail: undefined }])[0]!.unavailable).toBeUndefined();
+  });
+
   it("leaves a completed check's row as it was", () => {
     // No text model is a completed check: the scan's recovery, not could not check.
     expect(optionsFromProviders([local("ollama", "Ollama", { checkFailed: undefined })])[0]).toMatchObject({ state: "No model yet", action: "get-model" });
