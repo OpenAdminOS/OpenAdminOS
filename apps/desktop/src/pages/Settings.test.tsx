@@ -42,6 +42,28 @@ describe("Settings provider section", () => {
     expect(view.queryByRole("button", { name: "Install guide" })).toBeNull();
   });
 
+  it("names how to start a stopped Lemonade in its details, and no detail for a connected provider", async () => {
+    const user = userEvent.setup();
+    const hint = "Start it with sudo launchctl kickstart -k system/ai.lemonadeserver.server, then scan again.";
+    const providers = [
+      ...mockProviders,
+      { id: "lemonade" as const, name: "Lemonade", description: "Use Lemonade Server's local OpenAI-compatible API.", isLocal: true, status: "not-installed" as const, installed: true, detail: hint, models: [] },
+    ];
+    renderRoute(<Settings />, {
+      path: "/settings/:section?",
+      route: "/settings/providers",
+      bridge: makeMockBridge({}, createMockAppState({ providers })),
+    });
+    await user.click(await screen.findByRole("button", { name: "Show details for Lemonade" }));
+    expect(screen.getByText(hint)).toBeInTheDocument();
+
+    const connected = mockProviders.find((entry) => entry.status === "connected" && entry.detail);
+    if (connected) {
+      await user.click(screen.getByRole("button", { name: `Show details for ${connected.name}` }));
+      expect(screen.queryByText(connected.detail!)).toBeNull();
+    }
+  });
+
   it("stores the Chat answer font as a device-local General preference", async () => {
     const user = userEvent.setup();
     setAnswerFont("serif");

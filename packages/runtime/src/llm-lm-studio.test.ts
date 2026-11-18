@@ -55,6 +55,16 @@ describe("probeLmStudioLlm", () => {
   });
 });
 
+describe("probeLmStudioLlm reads an unexpected list as a failed check", () => {
+  it("does not read a non-array data field as an empty server", async () => {
+    await withFetch(async () => jsonResponse({ data: { id: "x" } }), async () => {
+      const probe = await probeLmStudioLlm();
+      assert.equal(probe.status, "error");
+      assert.equal(probe.detail, "LM Studio answered with a response OpenAdminOS could not read.");
+    });
+  });
+});
+
 describe("createLmStudioLlm", () => {
   it("posts chat completions with system and user messages", async () => {
     let capturedBody: Record<string, unknown> | undefined;

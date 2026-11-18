@@ -10,6 +10,7 @@ const PROVIDERS: Record<ProviderId, true> = {
   ollama: true,
   "apple-foundation": true,
   "lm-studio": true,
+  lemonade: true,
   anthropic: true,
   openai: true,
   "azure-openai": true,

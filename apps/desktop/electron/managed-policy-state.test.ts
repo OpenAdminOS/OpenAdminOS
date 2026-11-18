@@ -210,6 +210,22 @@ describe("managed policy: providers", () => {
     }
   });
 
+  it("never passes a locked model to a Lemonade that lists no usable chat model", async () => {
+    // Lemonade's list is filtered to local chat models: an empty list is not "the CLI picks".
+    const fixture = await makeFixture({
+      policy: await policyOf({ defaultProvider: "lemonade", defaultModel: "openai.gpt-5" }),
+      providers: () => readyProviders().map((provider) => (provider.id === "lemonade" ? { ...provider, models: [], defaultModel: undefined } : provider)),
+    });
+    try {
+      const provider = (await fixture.store.getAppState()).providers.find((entry) => entry.id === "lemonade");
+      assert.equal(provider!.status, "error");
+      assert.deepEqual(provider!.models, []);
+      assert.match(provider!.detail ?? "", /set the model openai\.gpt-5, which Lemonade does not list/);
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("applies an unlocked default until the admin picks another provider", async () => {
     const policy = await policyOf({ defaultProvider: "lm-studio", defaultModel: "lm-studio-other", lock: [] });
     const fixture = await makeFixture({ policy });

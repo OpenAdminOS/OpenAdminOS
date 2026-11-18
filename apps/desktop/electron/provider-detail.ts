@@ -4,6 +4,7 @@ import { delimiter, join } from "node:path";
 
 import {
   classifyOllamaEndpoint,
+  classifyLemonadeEndpoint,
   classifyLmStudioEndpoint,
   fetchLocal,
   isConnectionRefused,
@@ -14,9 +15,14 @@ import {
   probeCopilotLlm,
   probeGeminiLlm,
   type CliProbe,
+  probeLemonadeLlm,
   probeLmStudioLlm,
+  resolveLemonadeEndpoint,
   resolveLmStudioEndpoint,
   resolveOllamaEndpoint,
+  type LmStudioEndpointTrust,
+  type LmStudioProbeResult,
+  type LmStudioProviderOptions,
 } from "@openadminos/runtime";
 import {
   type AzureOpenAIProviderConfig,
@@ -242,21 +248,77 @@ export async function checkAppleFoundation(provider: ProviderSummary, options: S
 
 
 
-export async function checkLmStudio(provider: ProviderSummary, options: ScanCheckOptions = {}): Promise<ProviderSummary> {
-  const endpoint = resolveLmStudioEndpoint().replace(/\/$/, "");
-  const endpointTrust = classifyLmStudioEndpoint(endpoint);
+/** A local OpenAI-compatible server: LM Studio or Lemonade. */
+interface LocalOpenAiServerCheck {
+  id: "lm-studio" | "lemonade";
+  name: string;
+  resolveEndpoint(): string;
+  classifyEndpoint(endpoint: string): LmStudioEndpointTrust;
+  probe(options: LmStudioProviderOptions): Promise<LmStudioProbeResult>;
+  notRunningDetail: string;
+  /** Replaces the probe's detail when the server refuses the connection. */
+  notRunningHint?: () => string;
+}
+
+const LM_STUDIO_CHECK: LocalOpenAiServerCheck = {
+  id: "lm-studio",
+  name: "LM Studio",
+  resolveEndpoint: resolveLmStudioEndpoint,
+  classifyEndpoint: classifyLmStudioEndpoint,
+  probe: probeLmStudioLlm,
+  notRunningDetail:
+    "LM Studio isn't running or the local server is off. Start the server from LM Studio's Developer tab, then try again.",
+};
+
+const LEMONADE_CHECK: LocalOpenAiServerCheck = {
+  id: "lemonade",
+  name: "Lemonade",
+  resolveEndpoint: resolveLemonadeEndpoint,
+  classifyEndpoint: classifyLemonadeEndpoint,
+  probe: probeLemonadeLlm,
+  notRunningDetail: "Lemonade isn't running. Start Lemonade Server, then try again.",
+  notRunningHint: () => lemonadeStartHint(),
+};
+
+/**
+ * How to start Lemonade by hand, as plain text (the model choice shows it
+ * as written). It installs as a system service on macOS (a launch daemon)
+ * and Linux (systemd), which an app cannot start without admin rights, and
+ * as a tray app on Windows.
+ */
+export function lemonadeStartHint(platform: NodeJS.Platform = process.platform): string {
+  if (platform === "win32") return "Start Lemonade Server from the Start menu, then scan again.";
+  if (platform === "darwin") return "Start it with sudo launchctl kickstart -k system/ai.lemonadeserver.server, then scan again.";
+  return "Start it with sudo systemctl start lemond, then scan again.";
+}
+
+export function checkLmStudio(provider: ProviderSummary, options: ScanCheckOptions = {}): Promise<ProviderSummary> {
+  return checkLocalOpenAiServer(LM_STUDIO_CHECK, provider, options);
+}
+
+export function checkLemonade(provider: ProviderSummary, options: ScanCheckOptions = {}): Promise<ProviderSummary> {
+  return checkLocalOpenAiServer(LEMONADE_CHECK, provider, options);
+}
+
+async function checkLocalOpenAiServer(
+  server: LocalOpenAiServerCheck,
+  provider: ProviderSummary,
+  options: ScanCheckOptions,
+): Promise<ProviderSummary> {
+  const endpoint = server.resolveEndpoint().replace(/\/$/, "");
+  const endpointTrust = server.classifyEndpoint(endpoint);
   if (options.localOnly && !endpointTrust.isLocal) {
-    return { ...provider, isLocal: false, status: "error", checkFailed: true, detail: `LM Studio is set to ${endpoint}, outside this device, so it is not checked here.`, models: [] };
+    return { ...provider, isLocal: false, status: "error", checkFailed: true, detail: `${server.name} is set to ${endpoint}, outside this device, so it is not checked here.`, models: [] };
   }
   const trustedProvider = endpointTrust.isLocal
     ? provider
     : {
         ...provider,
         description:
-          "Use an LM Studio-compatible endpoint outside this device. Tenant prompts leave this device when active.",
+          `Use an ${server.name}-compatible endpoint outside this device. Tenant prompts leave this device when active.`,
         isLocal: false,
       };
-  const probe = await probeLmStudioLlm({
+  const probe = await server.probe({
     endpoint,
     ...(options.signal ? { signal: options.signal } : {}),
     ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
@@ -267,11 +329,10 @@ export async function checkLmStudio(provider: ProviderSummary, options: ScanChec
       ...trustedProvider,
       status: probe.status === "error" ? "error" : "not-installed",
       ...(probe.status === "error" ? { checkFailed: true } : {}),
-      ...(probe.status !== "error" && endpointTrust.isLocal && (await installedOnDisk("lm-studio")) ? { installed: true } : {}),
+      ...(probe.status !== "error" && endpointTrust.isLocal && (await installedOnDisk(server.id)) ? { installed: true } : {}),
       detail: lmStudioEndpointDetail(
         endpointTrust,
-        probe.detail ??
-          "LM Studio isn't running or the local server is off. Start the server from LM Studio's Developer tab, then try again.",
+        (probe.status === "not-running" ? server.notRunningHint?.() : undefined) ?? probe.detail ?? server.notRunningDetail,
       ),
       models: probe.models,
       defaultModel: probe.defaultModel,
@@ -283,7 +344,7 @@ export async function checkLmStudio(provider: ProviderSummary, options: ScanChec
     status: "connected",
     detail: lmStudioEndpointDetail(
       endpointTrust,
-      probe.detail ?? `LM Studio server is running on ${endpoint}.`,
+      probe.detail ?? `${server.name} server is running on ${endpoint}.`,
     ),
     models: probe.models,
     defaultModel: probe.defaultModel,
@@ -460,23 +521,36 @@ export async function checkAdditionalCli(provider: ProviderSummary, options: Sca
 }
 
 /** Whether a runtime is installed, from local files only: a binary on PATH or a known app location. */
-export async function installedOnDisk(providerId: "ollama" | "lm-studio", env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): Promise<boolean> {
-  const binary = providerId === "ollama" ? "ollama" : "lms";
-  const names = platform === "win32" ? [`${binary}.exe`, `${binary}.cmd`] : [binary];
+export async function installedOnDisk(providerId: "ollama" | "lm-studio" | "lemonade", env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): Promise<boolean> {
+  const binaries = providerId === "ollama" ? ["ollama"] : providerId === "lm-studio" ? ["lms"] : ["lemond", "lemonade"];
+  const names = binaries.flatMap((binary) => (platform === "win32" ? [`${binary}.exe`, `${binary}.cmd`] : [binary]));
   const pathDirs = (env.PATH ?? "").split(delimiter).filter(Boolean);
   const home = env.HOME ?? env.USERPROFILE ?? homedir();
+  const localAppData = env.LOCALAPPDATA ?? join(home, "AppData", "Local");
   const known =
     providerId === "ollama"
       ? platform === "darwin"
         ? ["/Applications/Ollama.app", "/usr/local/bin/ollama", "/opt/homebrew/bin/ollama"]
         : platform === "win32"
-          ? [join(env.LOCALAPPDATA ?? join(home, "AppData", "Local"), "Programs", "Ollama", "ollama.exe")]
+          ? [join(localAppData, "Programs", "Ollama", "ollama.exe")]
           : ["/usr/local/bin/ollama", "/usr/bin/ollama"]
-      : platform === "darwin"
-        ? ["/Applications/LM Studio.app", join(home, ".lmstudio", "bin", "lms")]
-        : platform === "win32"
-          ? [join(env.LOCALAPPDATA ?? join(home, "AppData", "Local"), "Programs", "LM Studio", "LM Studio.exe"), join(home, ".lmstudio", "bin", "lms.exe")]
-          : [join(home, ".lmstudio", "bin", "lms")];
+      : providerId === "lm-studio"
+        ? platform === "darwin"
+          ? ["/Applications/LM Studio.app", join(home, ".lmstudio", "bin", "lms")]
+          : platform === "win32"
+            ? [join(localAppData, "Programs", "LM Studio", "LM Studio.exe"), join(home, ".lmstudio", "bin", "lms.exe")]
+            : [join(home, ".lmstudio", "bin", "lms")]
+        : // Lemonade: the macOS package's server and launch daemon, the
+          // Windows installer's per-user and all-users locations, and the
+          // Linux deb, rpm and snap layouts.
+          platform === "darwin"
+          ? ["/usr/local/bin/lemond", "/Library/LaunchDaemons/ai.lemonadeserver.server.plist"]
+          : platform === "win32"
+            ? [
+                join(localAppData, "lemonade_server", "bin", "LemonadeServer.exe"),
+                join(env.ProgramFiles ?? "C:\\Program Files", "Lemonade Server", "bin", "LemonadeServer.exe"),
+              ]
+            : ["/usr/bin/lemond", "/opt/bin/lemond", "/snap/bin/lemonade-server"];
   const candidates = [...known, ...pathDirs.flatMap((dir) => names.map((name) => join(dir, name)))];
   for (const candidate of candidates) {
     try {

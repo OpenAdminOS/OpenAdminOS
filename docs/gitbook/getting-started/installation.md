@@ -95,5 +95,5 @@ version from Settings > About.
 ## Requirements
 
 - A Microsoft 365 tenant where you can approve the required Graph permissions.
-- An LLM provider: a local option (Ollama, LM Studio, or Apple Foundation on compatible Macs) or a hosted option (OpenAI through the Codex CLI, Anthropic through the Claude Code CLI, GitHub Copilot CLI, Gemini CLI, or Azure OpenAI). See the LLM provider matrix for data-flow details.
+- An LLM provider: a local option (Ollama, LM Studio, Lemonade, or Apple Foundation on compatible Macs) or a hosted option (OpenAI through the Codex CLI, Anthropic through the Claude Code CLI, GitHub Copilot CLI, Gemini CLI, or Azure OpenAI). See the LLM provider matrix for data-flow details.
 - Network access to Microsoft Graph and the GitHub-hosted agent registry.

@@ -91,9 +91,10 @@ test("removes fences from completions and every chunk, including split tag prefi
 test("passes on whether an adapter yields text as the model writes it", async () => {
   const { createOllamaLlm } = await import("./llm-ollama.js");
   const { createLmStudioLlm } = await import("./llm-lm-studio.js");
+  const { createLemonadeLlm } = await import("./llm-lemonade.js");
   const { createCopilotLlm } = await import("./llm-copilot.js");
   const { createGeminiLlm } = await import("./llm-gemini.js");
-  for (const llm of [createOllamaLlm(), createLmStudioLlm(), createCopilotLlm(), createGeminiLlm()]) {
+  for (const llm of [createOllamaLlm(), createLmStudioLlm(), createLemonadeLlm(), createCopilotLlm(), createGeminiLlm()]) {
     assert.equal(withTenantDataOutputFilter(llm).streamsIncrementally, true);
   }
   const once: RunLlmApi = { available: true, complete: async () => ({ text: "", model: "m" }), async *stream() {} };
