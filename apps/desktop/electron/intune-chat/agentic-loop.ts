@@ -1,4 +1,6 @@
 import { assertVoicePromptBudget, clipVoiceText, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
+import { NOVA_PROFILE_BLOCK_END } from "../nova-profile.js";
+import { MAX_PROMISE_NUDGES, looksLikeUnkeptPromise } from "./unkept-promise.js";
 import type {
   GraphCacheResourceKind,
   IntuneChatAgentSuggestion,
@@ -145,6 +147,8 @@ const DOCS_TOOL_PROTOCOL = [
 
 export interface RunAgenticChatInput {
   voice?: boolean;
+  /** Nova's profile data block, voice only: after the voice rules, before the fixed tool rules. */
+  voiceProfile?: string;
   /** The first answer of a new chat: the final JSON may carry a short `title`. */
   askTitle?: boolean;
   promptByteLimit?: number;
@@ -306,6 +310,7 @@ export async function runAgenticChat(
   const toolTrace: IntuneChatToolTraceEntry[] = [];
   let malformedCount = 0;
   let unfinishedCount = 0;
+  let promiseNudges = 0;
   let noEvidenceCount = 0;
   let evidenceToolCalls = 0;
   let webSearchAttempts = 0;
@@ -359,7 +364,7 @@ export async function runAgenticChat(
   let iteration = 0;
   let attempts = 0;
   // The source guard gets as many retries as the evidence guard.
-  const maxAttempts = MAX_AGENTIC_ITERATIONS + MAX_MALFORMED_RETRIES + MAX_UNFINISHED_RETRIES + MAX_NO_EVIDENCE_RETRIES * 2 + 3;
+  const maxAttempts = MAX_AGENTIC_ITERATIONS + MAX_MALFORMED_RETRIES + MAX_UNFINISHED_RETRIES + MAX_PROMISE_NUDGES + 1 + MAX_NO_EVIDENCE_RETRIES * 2 + 3;
   // Streamed final text the loop did not accept is withdrawn as soon as
   // that is known, before any slow work (a refresh, a tool, a fallback).
   let answerShown = false;
@@ -521,9 +526,12 @@ export async function runAgenticChat(
       turns.push({ role: "repair", content: 'That final answer was empty. Write the answer in "answer" now, or call a tool if you still need evidence.' });
       continue;
     }
-    if (input.voice && action.kind === "final" && (/\b(?:let me (?:check|look|query|search|investigate|find|retrieve)|i(?:'ll| will) (?:check|look|query|search|investigate|find|retrieve)|i(?:'m| am) (?:currently )?(?:checking|querying|searching|investigating|retrieving))\b/i.test(action.answer))) {
+    // A final answer that only promises work gets up to two repair turns, in
+    // Chat and in voice. After that voice falls back to deterministic
+    // retrieval, as before; Chat keeps the answer it has.
+    if (action.kind === "final" && promiseNudges < MAX_PROMISE_NUDGES + (input.voice ? 1 : 0) && looksLikeUnkeptPromise(finalAnswer)) {
       await settleModelStep({ kind: "repair", reason: "unfinished" });
-      if (++unfinishedCount > MAX_UNFINISHED_RETRIES) return {
+      if (++promiseNudges > MAX_PROMISE_NUDGES) return {
         ok: false, reason: "unfinished-answer", fallbackNotice: "The model returned progress instead of a completed answer.",
         toolTrace, iterations: iteration, model: responseModel,
       };
@@ -870,6 +878,8 @@ function buildAgenticSystemPrompt(input: RunAgenticChatInput, questionKind: Intu
   const servers = input.tools.mcp?.servers ?? [];
   const missing = servers.filter((server) => missingSourceIds.includes(server.id)).map((server) => server.name);
   return [
+    // Nova's profile comes first and is closed before every fixed rule, so the fixed rules follow and override it.
+    ...(input.voice && input.voiceProfile ? [input.voiceProfile, NOVA_PROFILE_BLOCK_END] : []),
     buildIntuneChatSystemPrompt(input.providerIsLocal, Boolean(input.tools.webSearch), Boolean(input.voice)),
     input.voice ? VOICE_ANSWER_INSTRUCTIONS : "",
     "",

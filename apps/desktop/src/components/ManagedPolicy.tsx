@@ -97,6 +97,29 @@ function valueText(policy: ManagedPolicyStatus, key: ManagedPolicySettingKey, re
     }
     case "skipFirstRunScan":
       return values.skipFirstRunScan ? POLICY_COPY.yes : POLICY_COPY.no;
+    case "novaVoiceModes":
+      return values.novaVoiceModes?.length ? values.novaVoiceModes.map(POLICY_COPY.novaVoiceMode).join(", ") : POLICY_COPY.none;
+    case "novaInstructions":
+      return values.novaInstructions ? POLICY_COPY.novaInstructionsLength(values.novaInstructions.length) : "";
+    case "novaCapabilities": {
+      const capabilities = values.novaCapabilities ?? {};
+      return (["webSearch", "connectorSends", "startAgents", "navigation"] as const)
+        .filter((name) => capabilities[name] !== undefined)
+        .map((name) => {
+          const value = capabilities[name];
+          const state = Array.isArray(value)
+            ? value.length
+              ? POLICY_COPY.novaConnectorsOnly(value.join(", "))
+              : POLICY_COPY.novaCapabilityOff
+            : value
+              ? POLICY_COPY.novaCapabilityOn
+              : POLICY_COPY.novaCapabilityOff;
+          return `${POLICY_COPY.novaCapability(name)} ${state}`;
+        })
+        .join(", ");
+    }
+    case "novaMemory":
+      return POLICY_COPY.novaMemoryOff;
   }
 }
 

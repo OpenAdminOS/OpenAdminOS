@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { collectTenantValues, TenantValueIndex } from "./tenant-values.js";
+import { GRAPH_CACHE_LOG_RESOURCES } from "@openadminos/agent-sdk";
 
 /** Cached resources whose rows describe people, groups, devices or their activity. */
 const TENANT_IDENTITY_RESOURCES = [
@@ -3835,7 +3836,43 @@ export class IntelligenceSqliteStore {
     ensureColumn(this.db, "chat_conversations", "multi_tenant_job_id", "TEXT");
     ensureColumn(this.db, "chat_messages", "engine_notice", "TEXT");
     ensureColumn(this.db, "chat_messages", "answer_meta_json", "TEXT");
+    this.dropLegacyLogSnapshots();
     this.ensureDefaultSavedQueries(new Date().toISOString());
+  }
+
+  /**
+   * Log snapshots cached before log resources became a recent window
+   * (GRAPH_CACHE_LOG_WINDOW_DAYS) may hold weeks of entries or a partial
+   * read, and nothing marks which. They are removed once, so every log
+   * snapshot the app labels as a window really is one; the next refresh
+   * collects them again. Log data goes stale within minutes anyway.
+   */
+  private dropLegacyLogSnapshots(): void {
+    const applied = this.db
+      .prepare(`SELECT 1 FROM schema_migrations WHERE id = 3`)
+      .get();
+    if (applied) return;
+    const resources = [...GRAPH_CACHE_LOG_RESOURCES];
+    const placeholders = resources.map(() => "?").join(", ");
+    this.db.exec("BEGIN");
+    try {
+      this.db
+        .prepare(`DELETE FROM graph_resources WHERE resource IN (${placeholders})`)
+        .run(...resources);
+      this.db
+        .prepare(`DELETE FROM graph_cache_status WHERE resource IN (${placeholders})`)
+        .run(...resources);
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO schema_migrations (id, name, applied_at)
+           VALUES (3, 'log-window-snapshots', ?)`,
+        )
+        .run(new Date().toISOString());
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   private ensureDefaultSavedQueries(now: string): void {

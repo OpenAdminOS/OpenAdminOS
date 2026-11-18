@@ -4,9 +4,11 @@
  *
  *   node scripts/nightly-release-notes.mjs <tag> <sha> <assets dir>
  *
- * The notes list what changed on main since the previous release of either
- * channel, the current [Unreleased] section of CHANGELOG.md, and the
- * installers in the assets directory. Install-stats commits are left out.
+ * The notes cover this build only: the pull requests and commits on main
+ * since the previous release of either channel, the CHANGELOG.md
+ * [Unreleased] entries added since that release, and the installers in the
+ * assets directory. Entries an earlier nightly already listed are left out,
+ * and so are install-stats commits.
  * Needs a full clone (fetch-depth 0) with tags, and GITHUB_REPOSITORY.
  */
 
@@ -72,6 +74,65 @@ export function unreleasedSection(changelog) {
     .join("\n\n");
 }
 
+/**
+ * The `## [Unreleased]` section of `current` reduced to the entries that are
+ * not in the `## [Unreleased]` section of `previous` (the CHANGELOG.md of the
+ * previous release). An entry is a "- " line with its indented continuation
+ * lines, up to the next entry or heading (blank lines inside it are kept);
+ * an entry whose text was edited
+ * counts as new, one moved to another heading does not, and CRLF files read
+ * like LF files. Headings with no new
+ * entries are dropped, as in `unreleasedSection`.
+ */
+export function newUnreleasedEntries(previous, current) {
+  const entries = (section) => {
+    const result = [];
+    let heading = "";
+    let open = false;
+    const close = () => {
+      const last = result[result.length - 1];
+      while (last && last.lines.length > 1 && last.lines[last.lines.length - 1].trim() === "") last.lines.pop();
+      open = false;
+    };
+    for (const line of section.split("\n")) {
+      if (/^#### /.test(line)) {
+        close();
+        heading = line;
+      } else if (/^- /.test(line)) {
+        close();
+        result.push({ heading, lines: [line] });
+        open = true;
+      } else if (open) {
+        // Every line up to the next entry or heading belongs to the entry:
+        // indented and unindented continuations, and blank lines that keep
+        // its paragraphs and code blocks.
+        result[result.length - 1].lines.push(line);
+      }
+    }
+    close();
+    return result;
+  };
+  const lf = (text) => text.replace(/\r\n?/g, "\n");
+  const key = (entry) => entry.lines.map((line) => line.trim()).join(" ").replace(/\s+/g, " ");
+  // Counted, so a second copy of an entry the previous release had once is new.
+  const seen = new Map();
+  for (const entry of entries(unreleasedSection(lf(previous)))) seen.set(key(entry), (seen.get(key(entry)) ?? 0) + 1);
+  const blocks = [];
+  for (const entry of entries(unreleasedSection(lf(current)))) {
+    const count = seen.get(key(entry)) ?? 0;
+    if (count > 0) {
+      seen.set(key(entry), count - 1);
+      continue;
+    }
+    const last = blocks[blocks.length - 1];
+    if (last && last.heading === entry.heading) last.entries.push(entry.lines.join("\n"));
+    else blocks.push({ heading: entry.heading, entries: [entry.lines.join("\n")] });
+  }
+  return blocks
+    .map((block) => [block.heading, block.entries.join("\n")].filter(Boolean).join("\n\n"))
+    .join("\n\n");
+}
+
 const INSTALLERS = [
   [/\.dmg$/, "macOS (Apple silicon), disk image"],
   [/-win-x64\.exe$/, "Windows x64, installer"],
@@ -102,7 +163,7 @@ export function buildNotes({ tag, sha, previous, changes, unreleased, downloads,
     sections.push(`${heading}\n\n${changes.join("\n")}${compare}`);
   }
   if (unreleased) {
-    sections.push(`## Unreleased changelog\n\n${unreleased}`);
+    sections.push(`## Changelog entries in this build\n\n${unreleased}`);
   }
   if (downloads) {
     sections.push(`## Downloads\n\n${downloads}\n\nLinux packages are attached here only. The apt repository carries stable releases.`);
@@ -117,12 +178,18 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     throw new Error("Usage: GITHUB_REPOSITORY=owner/repo nightly-release-notes.mjs <tag> <sha> <assets dir>");
   }
 
-  let previous = "";
-  try {
-    previous = git("describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", sha);
-  } catch {
-    previous = "";
-  }
+  // The previous release is the newest tag before this commit. A tag already
+  // on the commit itself (a rerun after its tag was made, or a stable tag on
+  // the same commit) would leave the notes empty, so look from its parent.
+  const describe = (ref) => {
+    try {
+      return git("describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", ref);
+    } catch {
+      return "";
+    }
+  };
+  let previous = describe(sha);
+  if (previous && git("rev-list", "-n", "1", previous) === sha) previous = describe(`${sha}^`);
   const range = previous ? [`${previous}..${sha}`] : ["-n", "100", sha];
   const log = git("log", "--first-parent", "--format=%H%x09%s", ...range).split("\n");
   const bodies = new Map();
@@ -131,13 +198,26 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (/^Merge pull request #/.test(subject)) bodies.set(hash, git("log", "-1", "--format=%b", hash));
   }
 
+  // The CHANGELOG.md of the previous release: its [Unreleased] entries were
+  // in that release's notes already. A stable release has rolled them into
+  // its dated section, so after one every current entry is new.
+  let previousChangelog = "";
+  if (previous) {
+    try {
+      previousChangelog = git("show", `${previous}:CHANGELOG.md`);
+    } catch (error) {
+      process.stderr.write(`Could not read CHANGELOG.md at ${previous}, so every [Unreleased] entry is listed: ${error instanceof Error ? error.message : String(error)}\n`);
+      previousChangelog = "";
+    }
+  }
+
   process.stdout.write(
     buildNotes({
       tag,
       sha,
       previous,
       changes: formatChanges(log, bodies, repo),
-      unreleased: unreleasedSection(readFileSync("CHANGELOG.md", "utf8")),
+      unreleased: newUnreleasedEntries(previousChangelog, readFileSync("CHANGELOG.md", "utf8")),
       downloads: downloadsTable(
         readdirSync(assetsDir).sort(),
         `https://github.com/${repo}/releases/download/${tag}`,

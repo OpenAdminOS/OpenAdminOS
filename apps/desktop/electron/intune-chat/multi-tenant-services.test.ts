@@ -32,11 +32,12 @@ function stateJson(tenants: TenantRecord[]): string {
   });
 }
 
-async function makeFixture(tenants: TenantRecord[]) {
+async function makeFixture(tenants: TenantRecord[], answers?: string[]) {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-mt-services-"));
   const filePath = join(dir, "state.json");
   await writeFile(filePath, stateJson(tenants));
   const graphTenants: string[] = [];
+  const prompts: string[] = [];
   const graphFor = (tenantId: string): RunGraphApi => ({
     async listManagedDevices() { return []; },
     async retireManagedDevice() { throw new Error("No writes in this test."); },
@@ -60,9 +61,14 @@ async function makeFixture(tenants: TenantRecord[]) {
     tokenStore: { read: async () => "", write: async () => undefined },
     graphFactory: ({ tenantId }) => graphFor(tenantId),
     llmFactory: () => ({
-      available: false,
+      available: answers !== undefined,
       defaultModel: "mock-chat",
-      async complete() { throw new Error("Not used."); },
+      async complete(request: { prompt: string }) {
+        prompts.push(request.prompt);
+        const text = answers?.shift();
+        if (text === undefined) throw new Error("Not used.");
+        return { text, model: "mock-chat" };
+      },
       async *stream() { yield { delta: "", accumulated: "", done: true, model: "mock-chat" }; },
     }),
   });
@@ -73,6 +79,7 @@ async function makeFixture(tenants: TenantRecord[]) {
     store,
     filePath,
     graphTenants,
+    prompts,
     async close() {
       store.close();
       await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
@@ -153,6 +160,35 @@ describe("multi-tenant Chat and connected services", () => {
       assert.equal(job.comparisons.find((row) => row.tenantId === "contoso")?.windowsDevices, 1);
     } finally {
       await fixture.close();
+    }
+  });
+
+  it("asks a multi-tenant summary that only promises work again, at most twice, and keeps a real answer", async () => {
+    const tenants = [tenant("contoso", "Contoso"), tenant("fabrikam", "Fabrikam")];
+    const repaired = await makeFixture(tenants, ["I'll check that now.", "Both tenants have 1 compliant Windows device."]);
+    try {
+      const { job } = await repaired.store.runMultiTenantIntuneChat({ prompt: PROMPT, tenantScope: { kind: "all" } });
+      assert.equal(job.assistantText, "Both tenants have 1 compliant Windows device.");
+      assert.equal(repaired.prompts.length, 2);
+      assert.match(repaired.prompts[1]!, /Your previous reply:\nI'll check that now\./);
+    } finally {
+      await repaired.close();
+    }
+    const kept = await makeFixture(tenants, ["Let me look into it.", "One moment, I'm checking.", "I'll check that now.", "unused"]);
+    try {
+      const { job } = await kept.store.runMultiTenantIntuneChat({ prompt: PROMPT, tenantScope: { kind: "all" } });
+      assert.equal(kept.prompts.length, 3);
+      assert.equal(job.assistantText, "I'll check that now.");
+    } finally {
+      await kept.close();
+    }
+    const answered = await makeFixture(tenants, ["Both tenants are compliant. I'll check the app installs next.", "unused"]);
+    try {
+      const { job } = await answered.store.runMultiTenantIntuneChat({ prompt: PROMPT, tenantScope: { kind: "all" } });
+      assert.equal(answered.prompts.length, 1);
+      assert.equal(job.assistantText, "Both tenants are compliant. I'll check the app installs next.");
+    } finally {
+      await answered.close();
     }
   });
 });

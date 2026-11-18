@@ -8,6 +8,8 @@ import {
 } from "@openadminos/runtime";
 import {
   AVAILABLE_SERVICES,
+  GRAPH_CACHE_LOG_ROW_LIMIT,
+  GRAPH_CACHE_LOG_WINDOW_DAYS,
   graphAccessDenialFromError,
   graphAccessDenialText,
   SAVED_APP_REGISTRATION_LIMIT,
@@ -1028,6 +1030,9 @@ export const COUNTABLE_GRAPH_RESOURCES: ReadonlySet<string> = new Set([
 
 export const GRAPH_CACHE_ROW_LIMIT = 1000;
 
+/** Memory budget for one resource in a complete or limited refresh. */
+export const GRAPH_CACHE_REFRESH_BYTE_LIMIT = 128 * 1024 * 1024;
+
 
 
 export interface GraphCacheRequestPage {
@@ -1052,6 +1057,12 @@ export async function fetchGraphCachePages(
   request: GraphCacheRequestPage,
   signal?: AbortSignal,
   complete = false,
+  /**
+   * Hard row limit that also applies to a complete collection. Used for
+   * log windows: collection stops at the limit, or at the memory budget,
+   * and the result is reported as capped instead of failing.
+   */
+  rowLimit?: number,
 ): Promise<{
   rows: unknown[];
   pages: number;
@@ -1067,12 +1078,14 @@ export async function fetchGraphCachePages(
   let bytes = 0;
   const seenLinks = new Set<string>();
   const seenIds = new Set<string>();
+  const limited = rowLimit !== undefined;
+  // A complete or limited collection reads past the sample caps, so it
+  // deduplicates IDs and enforces the memory budget.
+  const thorough = complete || limited;
+  const rowCap = limited ? rowLimit : complete ? Infinity : GRAPH_CACHE_ROW_LIMIT;
+  const pageCap = thorough ? Infinity : GRAPH_CACHE_PAGE_LIMIT;
 
-  while (
-    nextRequest &&
-    (complete || pages < GRAPH_CACHE_PAGE_LIMIT) &&
-    (complete || rows.length < GRAPH_CACHE_ROW_LIMIT)
-  ) {
+  while (nextRequest && pages < pageCap && rows.length < rowCap) {
     signal?.throwIfAborted();
     const response = await graph.request({
       method: "GET",
@@ -1089,23 +1102,31 @@ export async function fetchGraphCachePages(
       totalCount = page.totalCount;
     }
     pages += 1;
-    const remainingRows = complete
-      ? page.rows.length
-      : GRAPH_CACHE_ROW_LIMIT - rows.length;
+    const remainingRows = rowCap - rows.length;
     truncated ||= page.rows.length > remainingRows;
+    let overBudget = false;
     for (const row of page.rows.slice(0, remainingRows)) {
       const id =
         row && typeof row === "object" && "id" in row
           ? String(row.id)
           : undefined;
-      if (complete && id && seenIds.has(id)) continue;
+      if (thorough && id && seenIds.has(id)) continue;
       if (id) seenIds.add(id);
-      bytes += Buffer.byteLength(JSON.stringify(row));
-      if (complete && bytes > 128 * 1024 * 1024)
-        throw new Error(
-          "This resource exceeds the 128 MiB refresh memory limit. The previous snapshot was kept. Reduce the selected scope or contact support.",
-        );
+      const rowBytes = Buffer.byteLength(JSON.stringify(row));
+      if (thorough && bytes + rowBytes > GRAPH_CACHE_REFRESH_BYTE_LIMIT) {
+        if (!limited)
+          throw new Error(
+            "This resource exceeds the 128 MiB refresh memory limit. The previous snapshot was kept. Reduce the selected scope or contact support.",
+          );
+        overBudget = true;
+        break;
+      }
+      bytes += rowBytes;
       rows.push(row);
+    }
+    if (overBudget) {
+      truncated = true;
+      break;
     }
     if (page.nextLink && seenLinks.has(page.nextLink))
       throw new Error(
@@ -1331,6 +1352,7 @@ export function buildIntuneChatSystemPrompt(isLocalProvider: boolean, publicRese
     "A tool returning zero rows means zero matched that query, not that the tenant has none. Never state that a tenant has none of something on the strength of an empty result; check the unfiltered count first.",
     "For any question about how many, use tenantTotal for unfiltered totals when present, otherwise the breakdown that matches the asked dimension: operatingSystem, complianceState, state, severity, securityEnabled, signInAudience, @odata.type, policyPlatform, appPlatform, platforms, or another named breakdown. Breakdowns are counted over every cached row only when breakdownsCoverAllCachedRows is true; when it is false, they describe selectedRows only, so do not quote them as tenant-wide counts. Boolean buckets may be labelled true/false or 1/0. Never count the sampleRows: they are a small illustrative subset, and counting them undercounts. Array breakdowns such as platforms and groupTypes can count one row in more than one bucket.",
     "When cachedRows is below tenantTotal, or pageLimitReached is true, say that the detail rows cover only part of the tenant.",
+    `Sign-in logs, directory audit logs and Intune audit events are cached only for the last ${GRAPH_CACHE_LOG_WINDOW_DAYS} days before their refreshedAt, newest first, at most ${GRAPH_CACHE_LOG_ROW_LIMIT.toLocaleString("en-US")} entries; a coverage field, when present, gives the exact window. Counts over them describe that window, never all retained logs, so say so, and for a longer period say that older entries were not collected.`,
     "Do not perform or imply Graph writes from chat. For changes, tell the admin to run an installed write agent so confirmation remains enforced.",
     isLocalProvider && publicResearch
       ? "Reasoning is local, but this hosted Nova session shares audio, answers and public research queries with OpenAI under explicit session consent."

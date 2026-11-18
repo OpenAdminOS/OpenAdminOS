@@ -24,7 +24,7 @@ import { formatAgentDisplayName } from "../shared/agent-display";
 import { registerOverlay } from "../shared/overlay-stack";
 import { createPendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
-import { openNovaPanel } from "../shared/nova-panel";
+import { openNovaPanel, openNovaShortcut } from "../shared/nova-panel";
 import { Kbd } from "./ui";
 import type { IntuneChatConversation, WorkspaceSummary } from "../shared/openAdminOS";
 import {
@@ -296,6 +296,17 @@ export function CommandPalette({
           openNovaPanel();
         },
       },
+      ...(state.novaProfile?.shortcuts ?? []).map((shortcut) => ({
+        id: `nova-shortcut-${shortcut.id}`,
+        label: `Nova: run ${shortcut.name}`,
+        hint: `Shortcut · ${shortcut.prompt}`,
+        group: "Actions" as const,
+        icon: <IconSparkle size={13} className="text-[var(--color-accent)]" />,
+        action: () => {
+          onClose();
+          openNovaShortcut(shortcut.name);
+        },
+      })),
       ...SETTINGS_SECTIONS.map((entry) => ({
         id: `settings-section-${entry.id}`,
         label: `Settings: ${entry.title}`,
@@ -325,7 +336,7 @@ export function CommandPalette({
           ] as PaletteItem[])
         : []),
     ];
-  }, [activeTheme, conversationSearchResult, navigate, onClose, query, recentConversations, requireTenantAndProvider, startRun, state.installedAgents, state.tenants.length, workspaces]);
+  }, [activeTheme, conversationSearchResult, navigate, onClose, query, recentConversations, requireTenantAndProvider, startRun, state.installedAgents, state.novaProfile?.shortcuts, state.tenants.length, workspaces]);
 
   const filtered = useMemo(() => {
     if (!query.trim()) return items;

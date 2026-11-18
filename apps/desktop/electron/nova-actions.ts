@@ -1,6 +1,14 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
-import type { AppState, ConnectorSummary, NovaActionPreview, RunRecord, StartRunOptions } from '@openadminos/agent-sdk';
+import type { AppState, ConnectorSummary, EffectiveNovaProfile, ManagedPolicyStatus, NovaActionPreview, NovaCapabilityName, NovaFollowUp, NovaNote, NovaNoteSource, NovaProfile, NovaProfilePatch, ProviderId, RunRecord, StartRunOptions } from '@openadminos/agent-sdk';
+import { organizationForTenant, resolveProviderDefaultModel } from '@openadminos/agent-sdk';
+import { applyNovaProfilePatch, novaCapabilityAllowed, novaCapabilityOffMessage, novaConnectorSendAllowed, novaShortcutPromptIssue } from './nova-profile.js';
+import { novaNoteText } from './nova-memory.js';
+import { novaFollowUpQuestion } from './nova-followups.js';
+import type { NovaProfileProposal, NovaProposableCapability } from '../src/shared/nova-command.js';
+
+/** Nova's settings with the IT policy, as `NovaActionHost.profile` reads them. */
+export interface NovaSettings { profile: NovaProfile | undefined; effective: EffectiveNovaProfile; policy: ManagedPolicyStatus | undefined }
 
 export interface NovaActionHost {
   classifyCommand?(text: string, context: import("../src/shared/nova-command.js").NovaCommandContext, options: Pick<import("./nova.js").NovaChatOptions, "scope" | "signal">): Promise<string>;
@@ -10,11 +18,93 @@ export interface NovaActionHost {
   /** The tenant of the active organization now, read when an action runs. */
   activeTenantId(): Promise<string | undefined>;
   /**
+   * Where a provider is reached now, for providers that can be pointed
+   * elsewhere under the same id (Ollama, LM Studio, Azure OpenAI). A voice
+   * session that started on one endpoint does not go on with another.
+   */
+  providerEndpoint?(providerId: ProviderId): Promise<string | undefined>;
+  /**
    * Run an approved action under its tenant's lease: refused once the
    * organization is being disconnected, drained by Disconnect, and the
    * signal fires when it starts closing, so a multi-part send stops.
    */
   tenantLease?<T>(tenantId: string, work: (signal: AbortSignal) => Promise<T>): Promise<T>;
+  /**
+   * Nova's settings now, with the IT policy applied. Read again for every
+   * action, at preparation and at the click, so a switch turned off in
+   * between stops it. A failed read refuses the action. With `tenantId`,
+   * the organization instructions are those of that tenant's organization,
+   * not of whichever organization is active: a voice session reads its own.
+   */
+  profile(tenantId?: string): Promise<NovaSettings>;
+  /**
+   * Saves a settings change the admin confirmed on a Nova card. The IT
+   * policy is applied again. `assertUnchanged` runs inside the same
+   * serialized write with the settings as stored, and throws when they
+   * changed since the card was prepared.
+   */
+  applyProfileProposal?(patch: NovaProfilePatch, assertUnchanged: (effective: EffectiveNovaProfile) => void): Promise<void>;
+  /** Nova's notes of one organization. Absent: Nova keeps no notes in this app session. */
+  notes?: {
+    /** Confirmed and edited notes for the prompt, newest first. */
+    promptNotes(tenantId: string): Promise<string[]>;
+    /** Stores a note for review; it reaches no prompt until confirmed. */
+    propose(input: { tenantId: string; text: string; source: NovaNoteSource; sessionId?: string; conversationId?: string; turnId?: string }): Promise<NovaNote>;
+    /**
+     * Confirms a proposed note of `tenantId`, refused unless that
+     * organization is still active at the write and, with `expectedText`,
+     * the note is still proposed with that text.
+     */
+    confirm(id: string, tenantId: string, expectedText?: string): Promise<NovaNote>;
+    forget(id: string): Promise<void>;
+    /** Forgets a note only while it is still proposed: a note confirmed or edited in Settings meanwhile stays. */
+    discardProposed(id: string): Promise<void>;
+  };
+  /** One-time follow-up questions. Absent: Nova sets none in this app session. */
+  followUps?: {
+    /** Throws the designed refusal when a follow-up with this delay is over a limit. */
+    check(delayMinutes: number): Promise<void>;
+    create(input: { tenantId: string; question: string; providerId: ProviderId; model?: string; delayMinutes: number }): Promise<NovaFollowUp>;
+  };
+  /**
+   * Records the consent to send audio and shared context to OpenAI for one
+   * voice session. Throws when no store kept it: the session does not start.
+   */
+  recordVoiceConsent?(input: { tenantId: string; sessionId: string; acknowledgedAt: string; voiceModel: string; reasoningProviderId: ProviderId; reasoningModel?: string; includesProfile: boolean; includesMemory: boolean }): void;
+}
+
+/** Said when the consent for a hosted voice session could not be kept on this device. */
+export const NOVA_VOICE_CONSENT_NOT_KEPT =
+  'Nova could not record your consent on this device, so nothing was sent to OpenAI. Open Settings, Audit log, check that it can record, then start Nova again.';
+
+/** Said when the consent for a hosted follow-up could not be kept on this device. */
+export const NOVA_FOLLOW_UP_CONSENT_NOT_KEPT =
+  'Nova could not record your consent for this follow-up on this device, so nothing was set. Open Settings, Audit log, check that it can record, then ask again.';
+
+/** Said when Nova's settings cannot be read: Nova then does not act. */
+export const NOVA_SETTINGS_UNREADABLE =
+  'Nova could not read its settings, so nothing was sent, started or opened. Open Settings, Nova, check it loads, then ask again.';
+
+/** Nova's settings for one action. Throws the designed refusal when they cannot be read. */
+export async function readNovaSettings(host: Pick<NovaActionHost, 'profile'>, tenantId?: string): Promise<NovaSettings> {
+  try {
+    const settings = await (tenantId === undefined ? host.profile() : host.profile(tenantId));
+    if (!settings?.effective) throw new Error('No settings returned.');
+    return settings;
+  } catch {
+    throw new Error(NOVA_SETTINGS_UNREADABLE);
+  }
+}
+
+/** Refuses with the designed message when an ability is turned off now. */
+export async function requireNovaCapability(host: Pick<NovaActionHost, 'profile'>, name: NovaCapabilityName): Promise<void> {
+  const { profile, policy } = await readNovaSettings(host);
+  if (!novaCapabilityAllowed(profile, policy, name)) throw new Error(novaCapabilityOffMessage(policy, name));
+}
+
+async function requireConnectorSend(host: Pick<NovaActionHost, 'profile'>, connectorId: string, connectorName: string): Promise<void> {
+  const { profile, policy } = await readNovaSettings(host);
+  if (!novaConnectorSendAllowed(profile, policy, connectorId)) throw new Error(novaCapabilityOffMessage(policy, 'connectorSends', connectorName));
 }
 
 /** Run an approved action under its tenant's lease, with both signals. */
@@ -37,6 +127,8 @@ async function assertStillActive(host: NovaActionHost, tenantId: string): Promis
 export interface PreparedNovaAction {
   preview: NovaActionPreview;
   execute(signal: AbortSignal): Promise<{ text: string; route?: string }>;
+  /** Undoes what preparing stored, when the admin cancels the card. */
+  cancel?(): Promise<void>;
 }
 export { novaActionIntent } from '../src/shared/nova-action-intent.js';
 import { novaActionIntent, type NovaActionIntent } from '../src/shared/nova-action-intent.js';
@@ -88,16 +180,24 @@ export async function prepareNovaAction(text: string | NovaActionIntent, evidenc
     const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
     const candidates = state.installedAgents.filter(a => normalize(a.name) === normalize(intent.name) || normalize(a.slug) === normalize(intent.name));
     if (candidates.length !== 1) throw new Error('Name one installed agent exactly. Open Agents to see the available names.');
+    await requireNovaCapability(host, 'startAgents');
     const agent = candidates[0]!;
     return { preview: { id, title: `Run ${agent.name}`, target: state.tenants.find(t => t.id === tenantId)?.displayName || 'Selected tenant', body: `Run ${agent.name} against the selected tenant. Write plans require their normal review. Existing saved result-delivery routes may send notifications when the run finishes.`, kind: 'run' }, execute: outer => leased(host, tenantId, outer, async signal => {
       signal.throwIfAborted();
       await assertStillActive(host, tenantId);
+      await requireNovaCapability(host, 'startAgents');
       const run = await host.startRun(agent.slug, { tenantId, providerId: state.activeProviderId });
-      return { text: `${agent.name} was queued. Follow its progress in Runs; any required approvals remain in the app.`, route: `/runs/${run.id}` };
+      // The run page opens only while Nova may open pages; the run is queued either way.
+      const navigation = await readNovaSettings(host).then(({ profile, policy }) => novaCapabilityAllowed(profile, policy, 'navigation'), () => false);
+      return {
+        text: `${agent.name} was queued. Follow its progress in Runs; any required approvals remain in the app.`,
+        ...(navigation ? { route: `/runs/${run.id}` } : {}),
+      };
     }) };
   }
   const connector = (await host.connectors()).find(c => c.descriptor.id === intent.connectorId);
   if (!connector) throw new Error('This connector is unavailable. Open Connectors to configure a supported destination.');
+  await requireConnectorSend(host, intent.connectorId, connector.descriptor.name);
   const setupIssue = novaConnectorSetupIssue(connector);
   if (setupIssue) throw new Error(setupIssue);
   if (!evidence?.trim()) throw new Error('What should I send? There is no completed result to share yet. Ask for a report and a destination together, for example: send me an email with the list of non-compliant devices.');
@@ -131,6 +231,7 @@ export async function prepareNovaAction(text: string | NovaActionIntent, evidenc
   const deliveryNote = parts.length > 1 ? `This report will be sent as ${parts.length} numbered messages, in order. Review the full content below. If a send fails, remaining messages stop without automatic retries.` : undefined;
   return { preview: { id, kind: 'send', title: `Send via ${connector.descriptor.name}`, target, body: evidence, ...(deliveryNote ? { deliveryNote } : {}) }, execute: outer => leased(host, tenantId, outer, async signal => {
     await assertStillActive(host, tenantId);
+    await requireConnectorSend(host, intent.connectorId, connector.descriptor.name);
     let accepted = 0;
     try {
       for (const [index, part] of parts.entries()) {
@@ -147,4 +248,175 @@ export async function prepareNovaAction(text: string | NovaActionIntent, evidenc
     }
     return { text: intent.connectorId === 'outlook' ? 'Outlook accepted the email for sending. Delivery to the recipient is not yet confirmed.' : `${connector.descriptor.name} accepted ${parts.length === 1 ? 'the message' : `all ${parts.length} messages`} to ${target}. Recipient delivery is not yet confirmed.` };
   }) };
+}
+
+const CAPABILITY_TITLES: Record<NovaProposableCapability, string> = {
+  webSearch: 'Web search',
+  startAgents: 'Starting agents',
+  navigation: 'Opening pages',
+};
+
+/** Said when the setting changed between the card and the click. */
+export const NOVA_PROFILE_CHANGED =
+  'Nova settings changed after Nova prepared this. Nothing was changed. Ask Nova again to see the current values.';
+
+/**
+ * A card for a change to Nova's own settings. The change is checked
+ * against the IT policy and the limits now, and again at the click. It
+ * can turn an ability off, never on.
+ */
+export async function prepareNovaProfileChange(change: NovaProfileProposal, host: NovaActionHost): Promise<PreparedNovaAction> {
+  if (!host.applyProfileProposal) throw new Error('Nova cannot change its settings in this app session. Open Settings, Nova, to change them.');
+  const settings = await readNovaSettings(host);
+  const { effective, profile, policy } = settings;
+  let patch: NovaProfilePatch;
+  let title: string, target: string, body: string, previousBody: string;
+  const current = (read: Pick<NovaSettings, 'effective'>) =>
+    change.field === 'instructions' ? read.effective.instructions
+      : change.field === 'greetingName' ? read.effective.greetingName
+        : String(read.effective.capabilities[change.capability]);
+  if (change.field === 'instructions') {
+    const next = change.mode === 'append' && effective.instructions.trim() ? `${effective.instructions.trim()}\n${change.text}` : change.text;
+    patch = { instructions: next };
+    title = change.mode === 'append' ? 'Add to Nova standing instructions' : 'Replace Nova standing instructions';
+    target = 'Settings, Nova, standing instructions';
+    body = next;
+    previousBody = effective.instructions || 'None';
+  } else if (change.field === 'greetingName') {
+    patch = { greetingName: change.text };
+    title = 'Change Nova greeting name';
+    target = 'Settings, Nova, greeting name';
+    body = change.text;
+    previousBody = effective.greetingName || 'None';
+  } else {
+    if (!effective.capabilities[change.capability]) throw new Error(`${CAPABILITY_TITLES[change.capability]} is already off for Nova. Nothing was changed.`);
+    patch = { capabilities: { [change.capability]: false } };
+    title = `Turn off ${CAPABILITY_TITLES[change.capability].toLowerCase()} for Nova`;
+    target = 'Settings, Nova, abilities';
+    body = `${CAPABILITY_TITLES[change.capability]}: off. Turn it on again in Settings, Nova.`;
+    previousBody = `${CAPABILITY_TITLES[change.capability]}: on`;
+  }
+  // The same checks Settings makes; a locked or too long value is refused here, before the card.
+  applyNovaProfilePatch(profile, patch, policy, { now: new Date().toISOString(), newId: () => 'proposal', organizationIds: [], activeOrganizationId: undefined, via: 'nova-proposal' });
+  const before = current(settings);
+  return {
+    preview: { id: randomUUID(), kind: 'profile', title, target, body, previousBody },
+    execute: async (signal) => {
+      signal.throwIfAborted();
+      if (current(await readNovaSettings(host)) !== before) throw new Error(NOVA_PROFILE_CHANGED);
+      // Checked again inside the write, so a Settings save in between is never overwritten.
+      await host.applyProfileProposal!(patch, (effective) => {
+        if (current({ effective }) !== before) throw new Error(NOVA_PROFILE_CHANGED);
+      });
+      return {
+        text: change.field === 'capability'
+          ? `${CAPABILITY_TITLES[change.capability]} is now off for Nova.`
+          : 'Saved in Settings, Nova. Nova uses it from the next conversation.',
+      };
+    },
+  };
+}
+
+/** Said when notes are paused, or off by the IT policy. */
+export function novaNotesOffMessage(effective: EffectiveNovaProfile): string {
+  return effective.locked.memory
+    ? 'Your IT department turned Nova notes off. Nothing was stored.'
+    : 'Nova notes are paused. Resume them in Settings, Nova, then ask again. Nothing was stored.';
+}
+
+function organizationName(state: AppState, tenantId: string): string {
+  return organizationForTenant(state.organizations ?? [], tenantId)?.name
+    || state.tenants.find(t => t.id === tenantId)?.displayName
+    || 'the active organization';
+}
+
+/**
+ * A card for a note. Preparing stores it as proposed, for review in
+ * Settings; it reaches no prompt. Only the click confirms it, and
+ * Cancel forgets it.
+ */
+export async function prepareNovaNote(
+  input: { text: string; source: NovaNoteSource; sessionId?: string; conversationId?: string; turnId?: string },
+  state: AppState,
+  host: NovaActionHost,
+): Promise<PreparedNovaAction> {
+  if (!host.notes) throw new Error('Nova cannot keep notes in this app session. Reopen the latest app build and try again.');
+  if (!state.activeTenantId) throw new Error('Select an organization first. Nova keeps notes for one organization.');
+  const tenantId = state.activeTenantId;
+  const { effective } = await readNovaSettings(host);
+  if (!effective.memoryEnabled) throw new Error(novaNotesOffMessage(effective));
+  const text = novaNoteText(input.text);
+  const note = await host.notes.propose({ tenantId, text, source: input.source, ...(input.sessionId ? { sessionId: input.sessionId } : {}), ...(input.conversationId ? { conversationId: input.conversationId } : {}), ...(input.turnId ? { turnId: input.turnId } : {}) });
+  const name = organizationName(state, tenantId);
+  const notes = host.notes;
+  return {
+    preview: {
+      id: randomUUID(),
+      kind: 'remember',
+      title: 'Remember for Nova',
+      target: name,
+      body: note.text,
+      deliveryNote: input.source === 'user-said'
+        ? `You asked for this note in Nova, ${note.createdAt.slice(0, 16).replace('T', ' ')} UTC. Nova reads confirmed notes in this organization only.`
+        : `Nova worded this note from your request, ${note.createdAt.slice(0, 16).replace('T', ' ')} UTC. Check it before you confirm. Nova reads confirmed notes in this organization only.`,
+    },
+    execute: async (signal) => {
+      signal.throwIfAborted();
+      await assertStillActive(host, tenantId);
+      const settings = await readNovaSettings(host);
+      if (!settings.effective.memoryEnabled) throw new Error(novaNotesOffMessage(settings.effective));
+      // The text the card showed is the text confirmed, checked inside the write.
+      await notes.confirm(note.id, tenantId, note.text);
+      return { text: `Nova will remember this in ${name} from the next conversation. Review notes in Settings, Nova.` };
+    },
+    cancel: () => notes.discardProposed(note.id),
+  };
+}
+
+/** Said when the provider or model changed between the card and the click. */
+export const NOVA_FOLLOW_UP_PROVIDER_CHANGED =
+  'The agent provider or model changed after Nova prepared this. Nothing was set. Ask Nova again.';
+
+/**
+ * A card for a one-time read-only follow-up in the active organization,
+ * with the provider and model it will use. Nothing is set until the click.
+ */
+export async function prepareNovaFollowUp(
+  input: { question: string; minutes: number },
+  state: AppState,
+  host: NovaActionHost,
+): Promise<PreparedNovaAction> {
+  if (!host.followUps) throw new Error('Nova cannot set follow-ups in this app session. Reopen the latest app build and try again.');
+  if (!state.activeTenantId) throw new Error('Select an organization first. A follow-up runs in the organization it was set in.');
+  const tenantId = state.activeTenantId;
+  // The same checks the click makes, so a card is never shown for a question that cannot be set.
+  const question = novaFollowUpQuestion(input.question);
+  const readOnlyIssue = novaShortcutPromptIssue(question);
+  if (readOnlyIssue) throw new Error('A follow-up can only ask a read-only question again. Remove the request to send, run, schedule, change or remember something. Nothing was set.');
+  await host.followUps.check(input.minutes);
+  const provider = state.providers.find(p => p.id === state.activeProviderId);
+  const model = resolveProviderDefaultModel(provider, state.activeModelByProviderId).model;
+  const providerId = state.activeProviderId;
+  const name = organizationName(state, tenantId);
+  const due = new Date(Date.now() + input.minutes * 60_000);
+  const delay = input.minutes % 1440 === 0 ? `${input.minutes / 1440} ${input.minutes === 1440 ? 'day' : 'days'}`
+    : input.minutes % 60 === 0 ? `${input.minutes / 60} ${input.minutes === 60 ? 'hour' : 'hours'}`
+      : `${input.minutes} ${input.minutes === 1 ? 'minute' : 'minutes'}`;
+  const followUps = host.followUps;
+  return {
+    preview: {
+      id: randomUUID(),
+      kind: 'follow-up',
+      title: `Ask again in ${delay}`,
+      target: name,
+      body: question,
+      deliveryNote: `Runs once at about ${due.toISOString().slice(0, 16).replace('T', ' ')} UTC with ${provider?.name ?? providerId}${model ? ` · ${model}` : ''}${provider && !provider.isLocal ? ', a hosted provider' : ''}. The answer appears in Chat. Read-only. Sending the result anywhere still needs your click.`,
+    },
+    execute: async (signal) => {
+      signal.throwIfAborted();
+      await assertStillActive(host, tenantId);
+      const created = await followUps.create({ tenantId, question, providerId, ...(model ? { model } : {}), delayMinutes: input.minutes });
+      return { text: `Set. Nova asks this again at about ${created.dueAt.slice(0, 16).replace('T', ' ')} UTC in ${name}. Cancel it in Settings, Nova.` };
+    },
+  };
 }

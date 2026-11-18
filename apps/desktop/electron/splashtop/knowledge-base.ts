@@ -250,7 +250,7 @@ function helpCenterReference(center: HelpCenter): BuiltinReference {
 
 export const SPLASHTOP_KNOWLEDGE_BASE = helpCenterReference({
   host: SPLASHTOP_KB_HOST,
-  serverName: "Splashtop Docs MCP",
+  serverName: "Splashtop Docs",
   product: "Splashtop",
   covers: "Splashtop Business, Enterprise, SOS and Remote Support",
   example: "reboot computer or SOS connection",
@@ -259,7 +259,7 @@ export const SPLASHTOP_KNOWLEDGE_BASE = helpCenterReference({
 
 export const SPLASHTOP_PACKR_KNOWLEDGE_BASE = helpCenterReference({
   host: SPLASHTOP_PACKR_KB_HOST,
-  serverName: "Splashtop Agentic Packr Docs MCP",
+  serverName: "Splashtop Agentic Packr Docs",
   product: "Splashtop Agentic Packr",
   covers: "Splashtop Agentic Packr: packaging installers, deployment templates and publishing apps to Intune",
   example: "deployment template or package installer",

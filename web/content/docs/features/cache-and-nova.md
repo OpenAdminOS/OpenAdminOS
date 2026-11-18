@@ -222,3 +222,71 @@ quotes, links and code blocks. Expand **View result** to read the full retrieved
 answer while Nova speaks a shorter summary. Message previews use the same formatting.
 The full visual answer stays in the app rather than being added to the speech
 model's context automatically. Raw HTML and executable links are not rendered.
+
+## Nova settings
+
+Open **Settings > Nova** to set how Nova works on this device:
+
+- **Voice and greeting**: the voice provider and the name Nova greets you with.
+- **Standing instructions**: up to 4,000 characters that shape every answer, such as
+  the language or what to name first. They cannot approve actions, choose
+  destinations or skip a confirmation. The last 10 versions are kept; choose
+  **Restore** to go back to one.
+- **Organization instructions**: up to 1,000 characters that apply only while the
+  active organization is selected. When your IT department sets Nova's
+  instructions, these are kept and not used.
+- **Abilities**: turn web search, opening pages, starting agents, or sends through a
+  connector off or on. A turned-off ability is refused when Nova prepares an action
+  and again when you confirm it.
+- **Shortcuts**: named read-only questions. Say "run morning check", or pick
+  **Nova: run Morning check** in the command palette.
+
+You can also ask Nova to change a setting, for example "add to my instructions:
+name device counts first" or "turn off web search". Nova shows the change on a
+card and saves it only when you click **Confirm change**. Nova can turn an ability
+off, never on.
+
+Most models get all of your instructions, the organization instructions and
+recent notes. A small on-device model, such as Apple Intelligence, gets a
+shortened version: the oldest notes are left out first, then the organization
+instructions and the standing instructions are cut at the end. Nova says so when
+a conversation starts.
+
+Values set by your IT department show **Set by your IT department** and cannot be
+changed here. In hosted voice, your instructions and the organization's confirmed
+notes go to OpenAI with the conversation; the consent checkbox says so. OpenAI
+receives them when the session starts. If you then change the instructions, or
+edit, forget or pause a note it received, Nova ends the hosted session and asks
+you to start it again, so the next session uses the current values. Local voice
+reads the current values before every answer.
+
+### Notes
+
+Say "remember that the Berlin office uses the Kiosk profile". Nova shows the note on
+a card. Until you click **Confirm note** it waits for review in **Settings > Nova**
+and Nova does not use it. Nova reads confirmed notes only in the organization they
+belong to. In Settings you can confirm, edit or forget a note, or pause notes.
+A note that is not confirmed within 30 days is removed. While your IT department
+turns notes off, you can forget notes but not confirm or edit them. Disconnecting the
+organization deletes its notes. Each organization can have 200 notes of up to 300
+characters.
+
+### Follow-ups
+
+Say "check compliance again in an hour". Nova shows the question, the organization,
+the time and the provider on a card, and sets the follow-up when you click
+**Confirm follow-up**. It runs once, read-only, and its answer appears in Chat as
+"Follow-up: ...". Sending the result anywhere still needs your click.
+
+A follow-up does not run when another organization is active, the organization is
+disconnected, the provider or model changed, or your IT department no longer
+allows that provider or model; Settings > Nova shows why. One that
+could not run within an hour of its time, for example because the app was closed,
+is shown as missed. You can have 5 pending follow-ups and set 20 in a day, from 1
+minute to 7 days ahead. Cancel one in **Settings > Nova**.
+
+### What needs me
+
+Ask "what needs me?" to hear the open Agent Team findings and the runs waiting for
+your confirmation in the active organization, with links to each. Nova approves
+nothing; open each item to decide.

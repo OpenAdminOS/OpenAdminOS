@@ -1,4 +1,4 @@
-import type { ProviderId } from "./index.js";
+import type { NovaVoiceMode, ProviderId } from "./index.js";
 
 /**
  * Managed configuration: a local policy file an IT department deploys
@@ -21,6 +21,10 @@ export const MANAGED_POLICY_KEYS = [
   "allowedPublicReferences",
   "appRegistration",
   "skipFirstRunScan",
+  "novaVoiceModes",
+  "novaInstructions",
+  "novaCapabilities",
+  "novaMemory",
   "lock",
 ] as const;
 
@@ -34,6 +38,10 @@ export const MANAGED_POLICY_SETTING_KEYS = [
   "allowedPublicReferences",
   "appRegistration",
   "skipFirstRunScan",
+  "novaVoiceModes",
+  "novaInstructions",
+  "novaCapabilities",
+  "novaMemory",
 ] as const;
 
 export type ManagedPolicySettingKey = (typeof MANAGED_POLICY_SETTING_KEYS)[number];
@@ -48,6 +56,18 @@ export interface ManagedPolicyAppRegistration {
   label?: string;
 }
 
+/**
+ * What Nova may do on this device. `false` is enforced whether or not the
+ * key is locked; `true` is a default the admin can change unless locked.
+ * A list for `connectorSends` names the only connectors Nova may send through.
+ */
+export interface ManagedNovaCapabilities {
+  webSearch?: boolean;
+  connectorSends?: boolean | string[];
+  startAgents?: boolean;
+  navigation?: boolean;
+}
+
 /** The values in force after both files were read, validated and merged. */
 export interface ManagedPolicyValues {
   allowedProviders?: ProviderId[];
@@ -56,6 +76,13 @@ export interface ManagedPolicyValues {
   allowedPublicReferences?: string[];
   appRegistration?: ManagedPolicyAppRegistration;
   skipFirstRunScan?: boolean;
+  /** The voice modes Nova may use. Absent allows both; an empty list allows none. */
+  novaVoiceModes?: NovaVoiceMode[];
+  /** Standing instructions for Nova. Locked, they replace the admin's own; otherwise they are the default. */
+  novaInstructions?: string;
+  novaCapabilities?: ManagedNovaCapabilities;
+  /** "off" turns Nova's notes off: none are added and none reach a prompt. */
+  novaMemory?: "off";
 }
 
 /** One problem in a policy file. An invalid key is not applied; the rest of the file is. */
@@ -122,4 +149,15 @@ export function managedPublicReferenceAllowed(status: ManagedPolicyStatus | unde
 export function managedLockedModel(status: ManagedPolicyStatus | undefined, providerId: ProviderId): string | undefined {
   if (!status || !isManagedSettingLocked(status, "defaultModel")) return undefined;
   return status.values.defaultProvider === providerId ? status.values.defaultModel : undefined;
+}
+
+/** Whether Nova may use this voice mode. Enforced whether or not the key is locked. */
+export function managedNovaVoiceModeAllowed(status: ManagedPolicyStatus | undefined, mode: NovaVoiceMode): boolean {
+  const allowed = status?.values.novaVoiceModes;
+  return allowed === undefined || allowed.includes(mode);
+}
+
+/** Whether the IT policy turns Nova's notes off. */
+export function managedNovaMemoryOff(status: ManagedPolicyStatus | undefined): boolean {
+  return status?.values.novaMemory === "off";
 }

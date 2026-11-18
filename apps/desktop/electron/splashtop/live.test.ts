@@ -6,7 +6,7 @@ import { mcpCatalogEntry, mcpHost } from "../mcp/catalog.js";
 import { McpHost } from "../mcp/host.js";
 
 /**
- * Live probe of Splashtop Docs MCP and Splashtop Agentic Packr Docs MCP:
+ * Live probe of Splashtop Docs and Splashtop Agentic Packr Docs:
  * one public Help Center search and article read on each. No sign-in is involved. Skipped in CI, when OPENADMINOS_SKIP_LIVE
  * is set, and when the hosts do not resolve.
  */

@@ -1,7 +1,9 @@
 import { voiceDeviceEvidenceAnswer, voiceDeviceEvidenceIntent } from "./voice-device-evidence.js";
+import { MAX_PROMISE_NUDGES, PROMISE_REPAIR_PROMPT, completeWithPromiseNudge, looksLikeUnkeptPromise } from "./unkept-promise.js";
 import type { WebSearch } from "./web-search.js";
 import { voiceConversationContext, voiceInventoryAnswer, voiceAppPlatformCountAnswer, voiceDeviceSummaryAnswer, voiceResourcesForQuestion, compactVoiceAnswerPack, assertVoicePromptBudget, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
 import { randomUUID } from "node:crypto";
+import { NOVA_PROFILE_BLOCK_END, novaProfilePromptBlock, novaReasoningProfileByteLimit, type NovaProfilePromptInput } from "../nova-profile.js";
 import { fenceTenantData, withTenantDataOutputFilter } from "@openadminos/runtime";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -73,6 +75,9 @@ import {
   type TenantSession,
   type WorkspacePromptContextInput,
   type WorkspacePromptContextSummary,
+  GRAPH_CACHE_LOG_ROW_LIMIT,
+  GRAPH_CACHE_LOG_WINDOW_DAYS,
+  isGraphCacheLogResource,
 } from "@openadminos/agent-sdk";
 
 import { assertAgentCompatible, withAgentCompatibility } from "../agent-draft-helpers.js";
@@ -97,6 +102,7 @@ import {
   resourceStalenessMs,
   GRAPH_REFRESH_CONCURRENCY,
   fetchGraphCachePages,
+  GRAPH_CACHE_ROW_LIMIT,
   hashTenantId,
   intuneChatProviderBudget,
   isGraphCacheStatusStale,
@@ -432,7 +438,8 @@ export interface ChatServiceHost {
   requireIntelligenceStore(): IntelligenceSqliteStore;
   resolveTenant(persisted: ChatPersistedState, tenantId?: string): TenantRecord;
   listProviders(): Promise<ProviderSummary[]>;
-  buildLlm(providerId: ProviderId, model: string | undefined): Promise<RunLlmApi>;
+  /** With a binding, the model is built only for that endpoint (see ProviderEndpointBinding in state.ts). */
+  buildLlm(providerId: ProviderId, model: string | undefined, binding?: { endpoint: string | undefined }): Promise<RunLlmApi>;
   buildGraph(
     pinnedTenantId?: string,
     agentScopes?: string[],
@@ -492,9 +499,38 @@ export interface IntuneChatStreamOptions {
   webSearch?: WebSearch;
   voice?: boolean;
   voiceHistory?: import("@openadminos/agent-sdk").NovaConversationTurn[];
+  /** Nova's profile for the voice prompt; built here within a share of the voice budget. */
+  voiceProfile?: Omit<NovaProfilePromptInput, "byteLimit">;
   signal?: AbortSignal;
   /** Pin delegated voice work before fetching data or invoking a provider. */
   scope?: { tenantId: string; providerId: ProviderId; model?: string; isLocal?: boolean };
+  /**
+   * Main process only, for a Nova follow-up: its hosted consent was given
+   * on the card when it was set, so it is checked against the stored
+   * follow-up instead of the five-minute window of a typed send. The
+   * renderer's Chat IPC never passes options.
+   */
+  scheduledConsent?: (check: { tenantId?: string; providerId: ProviderId; model?: string; acknowledgedAt: string }) => boolean;
+  /**
+   * Main process only, for a Nova follow-up: the model is built only for
+   * the endpoint the follow-up was set for (Ollama, LM Studio, Azure
+   * OpenAI resource and deployment). A configuration saved after the fire
+   * decision makes the build fail before anything is sent.
+   */
+  providerBinding?: { endpoint: string | undefined };
+}
+
+/**
+ * The system prompt of a deterministic Chat answer. Nova's profile block,
+ * in voice, comes first and is closed before the fixed rules, so the
+ * rules follow the admin's text and override it.
+ */
+export function deterministicChatSystemPrompt(isLocalProvider: boolean, voice: boolean, voiceProfile: string): string {
+  return [
+    ...(voice && voiceProfile ? [voiceProfile, NOVA_PROFILE_BLOCK_END] : []),
+    buildIntuneChatSystemPrompt(isLocalProvider, false, voice),
+    voice ? VOICE_ANSWER_INSTRUCTIONS : "",
+  ].filter(Boolean).join("\n");
 }
 
 export class IntuneChatService {
@@ -551,7 +587,7 @@ export class IntuneChatService {
         job.status = controller.signal.aborted
           ? "cancelled"
           : result.resources.length === resources.length &&
-              result.resources.every((r) => r.skipped || (r.ok && !r.pageLimitReached))
+              result.resources.every((r) => r.skipped || (r.ok && (!r.pageLimitReached || isGraphCacheLogResource(r.resource))))
             ? "complete"
             : "incomplete";
       })
@@ -585,8 +621,8 @@ export class IntuneChatService {
    * starts closing, and stops with its signal. Agent Team does the same in
    * its host; runs stop through their lease-cancelled controller.
    */
-  private async tenantLlm(providerId: ProviderId, model: string | undefined, tenantIds: readonly string[]): Promise<RunLlmApi> {
-    const llm = await this.host.buildLlm(providerId, model);
+  private async tenantLlm(providerId: ProviderId, model: string | undefined, tenantIds: readonly string[], binding?: { endpoint: string | undefined }): Promise<RunLlmApi> {
+    const llm = await this.host.buildLlm(providerId, model, binding);
     const writable = this.host.tenantWritable;
     if (!writable) return llm;
     const signalOf = this.host.tenantSignal;
@@ -1672,26 +1708,29 @@ export class IntuneChatService {
     const llm = withTenantDataOutputFilter(await this.tenantLlm(input.providerId, input.model, input.tenantIds));
     if (!llm.available) return deterministic;
     try {
-      const completion = await llm.complete({
-        system: buildIntuneChatSystemPrompt(input.provider?.isLocal === true),
-        prompt: [
-          "Summarize this read-only multi-tenant Chat result for an admin.",
-          "The JSON table is the source of truth. Mention partial, failed, skipped, or stale tenants.",
-          `Question: ${input.prompt}`,
-          fenceTenantData(JSON.stringify(
-            {
-              summary: input.summary,
-              tenants: input.comparisons,
-            },
-            null,
-            2,
-          ), "chat:multi-tenant-result"),
-        ].join("\n\n"),
+      const system = buildIntuneChatSystemPrompt(input.provider?.isLocal === true);
+      const prompt = [
+        "Summarize this read-only multi-tenant Chat result for an admin.",
+        "The JSON table is the source of truth. Mention partial, failed, skipped, or stale tenants.",
+        `Question: ${input.prompt}`,
+        fenceTenantData(JSON.stringify(
+          {
+            summary: input.summary,
+            tenants: input.comparisons,
+          },
+          null,
+          2,
+        ), "chat:multi-tenant-result"),
+      ].join("\n\n");
+      // An answer that only promises work is asked again, at most twice; the last answer is kept.
+      const text = await completeWithPromiseNudge(async (attempt) => (await llm.complete({
+        system,
+        prompt: attempt,
         ...(input.model ? { model: input.model } : {}),
         temperature: 0.2,
         maxTokens: 700,
-      });
-      return completion.text.trim() || deterministic;
+      })).text.trim(), prompt);
+      return text || deterministic;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return `${deterministic}\n\nThe selected LLM provider failed while summarizing this multi-tenant result. ${message}`;
@@ -1874,6 +1913,14 @@ export class IntuneChatService {
           query.$count = "true";
           headers.ConsistencyLevel = "eventual";
         }
+        // Log resources collect a recent window, newest first, instead of
+        // every retained row (see GRAPH_CACHE_LOG_WINDOW_DAYS).
+        if (request.windowField) {
+          const since = new Date(Date.now() - GRAPH_CACHE_LOG_WINDOW_DAYS * 24 * 60 * 60 * 1000)
+            .toISOString()
+            .replace(/\.\d{3}Z$/, "Z");
+          query.$filter = `${request.windowField} ge ${since}`;
+        }
         const pageResult = await fetchGraphCachePages(
           graph,
           {
@@ -1883,10 +1930,17 @@ export class IntuneChatService {
           },
           signal,
           complete,
+          // A quick refresh keeps the usual sample size; a complete one
+          // collects the whole window up to the log row limit.
+          request.windowField
+            ? complete ? GRAPH_CACHE_LOG_ROW_LIMIT : GRAPH_CACHE_ROW_LIMIT
+            : undefined,
         );
         signal?.throwIfAborted();
         const existing = store.getGraphCacheStatus(tenant.id, [definition])[0];
-        if (pageResult.pageLimitReached && existing?.refreshedAt && !existing.pageLimitReached) {
+        // A log window moves with time, so an older complete window is
+        // never kept in place of a newer capped one.
+        if (pageResult.pageLimitReached && !request.windowField && existing?.refreshedAt && !existing.pageLimitReached) {
           throw new Error("Refresh reached a collection limit. The previous complete snapshot was kept. Use Cache → Preload to collect all pages.");
         }
         store.replaceGraphResources({
@@ -2153,7 +2207,7 @@ export class IntuneChatService {
         const before = store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
         const staleResources = planned.resources.filter((resource) => {
           const status = before.find((entry) => entry.resource === resource);
-          if (!status?.refreshedAt || status.lastError || status.pageLimitReached || (status.tenantTotal !== undefined && status.rows < status.tenantTotal)) return true;
+          if (!status?.refreshedAt || status.lastError || (status.pageLimitReached && !isGraphCacheLogResource(resource)) || (status.tenantTotal !== undefined && status.rows < status.tenantTotal)) return true;
           return (
             Date.now() - new Date(status.refreshedAt).getTime() >
             resourceStalenessMs(resource)
@@ -2291,18 +2345,24 @@ export class IntuneChatService {
         citations.addPassages(documentation);
         documentationSources = citations.sources;
         const finishAnswerStep = startAnswerStep(steps, answerModel);
-        const completion = await llm.complete({
-          system: buildIntuneChatSystemPrompt(provider?.isLocal === true),
-          prompt: buildAnswerPrompt(answerPack, documentation),
-          ...(selectedModel ? { model: selectedModel } : {}),
-          temperature: 0.2,
-          maxTokens: chatBudget.maxTokens,
-        });
+        const system = buildIntuneChatSystemPrompt(provider?.isLocal === true);
+        let model: string | undefined;
+        // An answer that only promises work is asked again, at most twice; the last answer is kept.
+        const content = await completeWithPromiseNudge(async (attempt) => {
+          const completion = await llm.complete({
+            system,
+            prompt: attempt,
+            ...(selectedModel ? { model: selectedModel } : {}),
+            temperature: 0.2,
+            maxTokens: chatBudget.maxTokens,
+          });
+          model = completion.model;
+          return completion.text.trim();
+        }, buildAnswerPrompt(answerPack, documentation));
         finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0 });
-        const content = completion.text.trim();
         return {
           content,
-          model: completion.model,
+          model,
         };
       };
 
@@ -2518,12 +2578,13 @@ export class IntuneChatService {
     let consentVerified = provider?.isLocal !== false;
     const verifyConsent = () => {
       if (consentVerified) return;
-      this.requireHostedChatConsent(input, noTenant ? undefined : tenant, provider, providerId, workspaceContext?.summary, selectedModel);
+      this.requireHostedChatConsent(input, noTenant ? undefined : tenant, provider, providerId, workspaceContext?.summary, selectedModel, options.scheduledConsent);
       consentVerified = true;
     };
     if (reachesModel) verifyConsent();
     // The consent audit is per tenant; a no-tenant send has none to record against.
-    if (provider?.isLocal === false && input.hostedProviderConsent && !noTenant) {
+    // A follow-up's consent was recorded when it was set; the fire time adds none.
+    if (provider?.isLocal === false && input.hostedProviderConsent && !noTenant && !options.scheduledConsent) {
       this.recordHostedProviderConsentSafely({
         tenantIds: [tenant.id],
         providerId,
@@ -2568,7 +2629,12 @@ export class IntuneChatService {
     const conversationMemory = options.voice
       ? undefined
       : boundedConversationMemory(history);
-    const voiceByteLimit = providerId === "apple-foundation" ? 3000 : VOICE_PROMPT_BYTE_LIMIT;
+    // The profile has its own room: on a full-size model it is added to the
+    // room for the question and its evidence; a small on-device model keeps
+    // its total and gives the profile a part of it.
+    const smallVoiceModel = providerId === "apple-foundation";
+    const voiceProfile = options.voice && options.voiceProfile ? novaProfilePromptBlock({ ...options.voiceProfile, byteLimit: novaReasoningProfileByteLimit(providerId) }) : "";
+    const voiceByteLimit = smallVoiceModel ? 3000 : VOICE_PROMPT_BYTE_LIMIT + Buffer.byteLength(voiceProfile) + (voiceProfile ? Buffer.byteLength(NOVA_PROFILE_BLOCK_END) + 2 : 0);
     const planned = planChatContext(voiceContext?.planningQuestion ?? content);
     const directResources = voiceDeviceEvidenceIntent(content) ? ["managedDevices" as const] : voiceResourcesForQuestion(content);
     if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
@@ -2726,7 +2792,7 @@ export class IntuneChatService {
         const before = store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
         const staleResources = planned.resources.filter((resource) => {
           const status = before.find((entry) => entry.resource === resource);
-          if (!status?.refreshedAt || status.lastError || status.pageLimitReached || (status.tenantTotal !== undefined && status.rows < status.tenantTotal)) return true;
+          if (!status?.refreshedAt || status.lastError || (status.pageLimitReached && !isGraphCacheLogResource(resource)) || (status.tenantTotal !== undefined && status.rows < status.tenantTotal)) return true;
           return (
             Date.now() - new Date(status.refreshedAt).getTime() >
             resourceStalenessMs(resource)
@@ -2920,7 +2986,7 @@ export class IntuneChatService {
       emitDelta(assistantContent);
     } else {
       // Tenant work goes through the model egress choke point; a send with no tenant has none to close.
-      const llm = withTenantDataOutputFilter(gateHostedLlm(noTenant ? await this.host.buildLlm(providerId, selectedModel) : await this.tenantLlm(providerId, selectedModel, [tenant.id]), verifyConsent));
+      const llm = withTenantDataOutputFilter(gateHostedLlm(noTenant ? await this.host.buildLlm(providerId, selectedModel, options.providerBinding) : await this.tenantLlm(providerId, selectedModel, [tenant.id], options.providerBinding), verifyConsent));
       const contextualQuestion =
         voiceContext?.history ??
         (conversationMemory
@@ -2947,7 +3013,7 @@ export class IntuneChatService {
           generatedAt: answerGeneratedAt,
           limits: chatBudget.answerPackLimits,
         });
-        const system = [buildIntuneChatSystemPrompt(provider?.isLocal === true, false, Boolean(options.voice)), options.voice ? VOICE_ANSWER_INSTRUCTIONS : ""].filter(Boolean).join("\n");
+        const system = deterministicChatSystemPrompt(provider?.isLocal === true, Boolean(options.voice), voiceProfile);
         const streamDocumentation = options.voice
           ? await this.retrieveDocumentationSafely(content)
           : answerPlan?.sources.kind === "tenant" ? [] : await this.searchDocsIndex(modelQuestion, steps);
@@ -2960,22 +3026,31 @@ export class IntuneChatService {
         if (options.voice) answerPack = compactVoiceAnswerPack(answerPack, voiceByteLimit - overhead);
         const prompt = buildAnswerPrompt(answerPack, documentation);
         if (options.voice) assertVoicePromptBudget(system, prompt, voiceByteLimit);
-        for await (const chunk of llm.stream({
-          system,
-          prompt,
-          ...(selectedModel ? { model: selectedModel } : {}),
-          temperature: 0.2,
-          maxTokens: chatBudget.maxTokens,
-          signal: options.signal,
-        })) {
-          if (isCancelled()) {
-            break;
+        // An answer that only promises work is asked again, at most twice; the last answer is kept.
+        let attemptPrompt = prompt;
+        for (let nudge = 0; ; nudge += 1) {
+          for await (const chunk of llm.stream({
+            system,
+            prompt: attemptPrompt,
+            ...(selectedModel ? { model: selectedModel } : {}),
+            temperature: 0.2,
+            maxTokens: chatBudget.maxTokens,
+            signal: options.signal,
+          })) {
+            if (isCancelled()) {
+              break;
+            }
+            responseModel = chunk.model;
+            assistantContent = chunk.accumulated;
+            if (assistantContent.trim()) finishAnswerStep.writing();
+            // No Learn call runs on this path, so the live text is relabelled the same way as the stored one.
+            emitLive(relabelUnverifiedLearn(assistantContent, false), chunk.delta);
           }
-          responseModel = chunk.model;
-          assistantContent = chunk.accumulated;
-          if (assistantContent.trim()) finishAnswerStep.writing();
-          // No Learn call runs on this path, so the live text is relabelled the same way as the stored one.
-          emitLive(relabelUnverifiedLearn(assistantContent, false), chunk.delta);
+          if (isCancelled() || nudge >= MAX_PROMISE_NUDGES || !looksLikeUnkeptPromise(assistantContent)) break;
+          const repaired = `${prompt}\n\nYour previous reply:\n${assistantContent.trim()}\n\n${PROMISE_REPAIR_PROMPT}`;
+          // A voice prompt keeps its byte budget; without room for the repair, the answer stands.
+          if (options.voice && Buffer.byteLength(system) + Buffer.byteLength(repaired) > voiceByteLimit) break;
+          attemptPrompt = repaired;
         }
         assistantContent = relabelUnverifiedLearn(assistantContent.trim(), false);
         emitDelta(assistantContent, "");
@@ -3031,7 +3106,7 @@ export class IntuneChatService {
               ...(selectedModel ? { model: selectedModel } : {}),
               llm,
               tools: { ...this.buildChatToolContext(tenant, options.signal), webSearch: options.webSearch, ...mcp, tenantObservations },
-              ...(options.voice ? { voice: true, promptByteLimit: voiceByteLimit, observationCharBudget: 6000 } : {}),
+              ...(options.voice ? { voice: true, promptByteLimit: voiceByteLimit, observationCharBudget: 6000, ...(voiceProfile ? { voiceProfile } : {}) } : {}),
               plannedResources: planned.resources,
               smallTalk: isSmallTalk(content),
               agentSuggestions: options.voice ? [] : agentSuggestions,
@@ -3675,6 +3750,7 @@ export class IntuneChatService {
     providerId: ProviderId,
     workspaceContext?: WorkspacePromptContextSummary,
     model?: string,
+    scheduled?: IntuneChatStreamOptions["scheduledConsent"],
   ): void {
     if (provider?.isLocal !== false) {
       return;
@@ -3718,7 +3794,10 @@ export class IntuneChatService {
 
     const acknowledgedAt = Date.parse(consent.acknowledgedAt);
     const now = Date.now();
-    if (
+    if (scheduled) {
+      if (!Number.isFinite(acknowledgedAt) || !scheduled({ ...(tenant ? { tenantId: tenant.id } : {}), providerId, ...(model ? { model } : {}), acknowledgedAt: consent.acknowledgedAt }))
+        throw new Error("This follow-up's consent does not match its organization, provider or model now. Nothing was asked. Ask Nova again to set it.");
+    } else if (
       !Number.isFinite(acknowledgedAt) ||
       now - acknowledgedAt > 5 * 60 * 1000 ||
       acknowledgedAt - now > 60 * 1000

@@ -1,3 +1,7 @@
+import {
+  GRAPH_CACHE_LOG_WINDOW_DAYS,
+  isGraphCacheLogResource,
+} from "@openadminos/agent-sdk";
 import type {
   AgentSummary,
   GraphCacheResourceKind,
@@ -1008,11 +1012,35 @@ export function definitionForResource(
   return definition;
 }
 
+/**
+ * Log resources hold a recent window (GRAPH_CACHE_LOG_WINDOW_DAYS), so the
+ * model is told what a count over them covers. Returns an empty object for
+ * every other resource, to spread into a status block.
+ */
+export function logWindowCoverage(status: {
+  resource: string;
+  rows: number;
+  pageLimitReached?: boolean;
+}): { coverage?: string } {
+  if (!isGraphCacheLogResource(status.resource)) return {};
+  const days = GRAPH_CACHE_LOG_WINDOW_DAYS;
+  return {
+    coverage: status.pageLimitReached
+      ? `Newest ${status.rows.toLocaleString("en-US")} entries from the ${days} days before refreshedAt. Older entries in that window and all older logs were not collected, so counts are not totals for the ${days} days.`
+      : `All entries from the ${days} days before refreshedAt. Older logs were not collected, so counts cover only those ${days} days.`,
+  };
+}
+
 export function pathForResource(resource: GraphCacheResourceKind): {
   path: string;
   select?: string[];
   query?: Record<string, string>;
   headers?: Record<string, string>;
+  /**
+   * Log resources only: the timestamp property the refresh filters on to
+   * collect the recent window (see GRAPH_CACHE_LOG_WINDOW_DAYS).
+   */
+  windowField?: string;
 } {
   switch (resource) {
     case "managedDevices":
@@ -1108,7 +1136,9 @@ export function pathForResource(resource: GraphCacheResourceKind): {
           "location",
           "appliedConditionalAccessPolicies",
         ],
-        query: { "$top": "250" },
+        // Explicit order: a capped window must hold the newest entries.
+        query: { "$top": "1000", "$orderby": "createdDateTime desc" },
+        windowField: "createdDateTime",
       };
     case "directoryAudits":
       return {
@@ -1126,7 +1156,9 @@ export function pathForResource(resource: GraphCacheResourceKind): {
           "targetResources",
           "additionalDetails",
         ],
-        query: { "$top": "250" },
+        // Explicit order: a capped window must hold the newest entries.
+        query: { "$top": "1000", "$orderby": "activityDateTime desc" },
+        windowField: "activityDateTime",
       };
     case "intuneAuditEvents":
       return {
@@ -1144,7 +1176,8 @@ export function pathForResource(resource: GraphCacheResourceKind): {
           "actor",
           "resources",
         ],
-        query: { "$top": "250", "$orderby": "activityDateTime desc" },
+        query: { "$top": "1000", "$orderby": "activityDateTime desc" },
+        windowField: "activityDateTime",
       };
     case "conditionalAccessPolicies":
       return {
@@ -1720,6 +1753,9 @@ export function buildAnswerPack(input: {
           : {}),
         pages: status.pages,
         pageLimitReached: status.pageLimitReached,
+        // Log resources hold a recent window, so a count describes the
+        // window, never all retained logs.
+        ...logWindowCoverage(status),
         selectedRows: selectedRows.length,
         includedSampleRows: sampleRows.length,
         omittedCachedRows: Math.max(0, status.rows - selectedRows.length),
