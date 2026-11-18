@@ -883,6 +883,39 @@ describe("an endpoint the scan did not contact is served as not contacted (PR #2
   });
 });
 
+describe("an Ollama on this device that redirects its model list (PR #204 review round 5)", () => {
+  it("is a failed check with the reason, and nothing reaches the redirect target", async () => {
+    const { createServer } = await import("node:http");
+    let hits = 0;
+    const target = createServer((_request, response) => {
+      hits += 1;
+      response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ models: [{ name: "llama3" }] }));
+    });
+    await new Promise<void>((resolve) => target.listen(0, "127.0.0.1", resolve));
+    const targetPort = (target.address() as { port: number }).port;
+    const origin = createServer((request, response) => {
+      response.writeHead(307, { location: `http://127.0.0.1:${targetPort}${request.url ?? "/"}` }).end();
+    });
+    await new Promise<void>((resolve) => origin.listen(0, "127.0.0.1", resolve));
+    const original = { ollama: process.env.OPENAGENTS_OLLAMA_URL, host: process.env.OLLAMA_HOST };
+    process.env.OPENAGENTS_OLLAMA_URL = `http://127.0.0.1:${(origin.address() as { port: number }).port}`;
+    delete process.env.OLLAMA_HOST;
+    try {
+      const summary = await checkOllama(providerCatalog.find((provider) => provider.id === "ollama")!, { localOnly: true });
+      assert.equal(summary.checkFailed, true);
+      assert.deepEqual(summary.models, []);
+      assert.match(summary.detail ?? "", /answered with a redirect to another address/);
+      assert.equal(hits, 0);
+    } finally {
+      for (const [key, value] of [["OPENAGENTS_OLLAMA_URL", original.ollama], ["OLLAMA_HOST", original.host]] as const) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      await Promise.all([new Promise((resolve) => origin.close(resolve)), new Promise((resolve) => target.close(resolve))]);
+    }
+  });
+});
+
 describe("checking one provider again from Chat (PR #204 review round 3)", () => {
   it("checks a local runtime local only, so an endpoint set outside this device after the scan is not contacted (round 4, P1)", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
@@ -943,6 +976,27 @@ describe("checking one provider again from Chat (PR #204 review round 3)", () =>
       assert.deepEqual(listed.find((provider) => provider.id === "copilot"), copilot);
       assert.equal(listed.find((provider) => provider.id === "lm-studio")!.status, "not-installed");
       assert.equal((await store.getAppState()).activeProviderId, "anthropic");
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+
+  it("checks nothing itself outside served scan results, because the app state read that follows checks every provider (round 5)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
+    await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [] }));
+    let listings = 0;
+    const store = new AppStateStore({
+      filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
+      tokenStore: { read: async () => "", write: async () => undefined },
+      providerListFactory: async () => {
+        listings += 1;
+        return providerCatalog.map((provider) => ({ ...provider, status: "not-installed" as const, models: [] }));
+      },
+    });
+    try {
+      await store.recheckProvider("lm-studio");
+      assert.equal(listings, 0);
     } finally {
       store.close();
       await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });

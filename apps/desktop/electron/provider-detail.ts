@@ -7,6 +7,9 @@ import {
   classifyLemonadeEndpoint,
   classifyLmStudioEndpoint,
   fetchLocal,
+  isRefusedRedirect,
+  modelServerRedirect,
+  redirectRefusedDetail,
   isConnectionRefused,
   probeAppleFoundationLlm,
   probeClaudeCodeLlm,
@@ -93,7 +96,16 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
   const endpoint = resolveOllamaEndpoint().replace(/\/$/, "");
   const endpointTrust = classifyOllamaEndpoint(endpoint);
   if (options.localOnly && !endpointTrust.isLocal) {
-    return { ...provider, isLocal: false, status: "error", checkFailed: true, notContacted: true, detail: `Ollama is set to ${endpoint}, outside this device, so it is not checked here.`, models: [] };
+    return {
+      ...provider,
+      isLocal: false,
+      description: "Use an Ollama-compatible endpoint outside this device. Tenant prompts leave this device when active.",
+      status: "error",
+      checkFailed: true,
+      notContacted: true,
+      detail: `Ollama is set to ${endpoint}, outside this device, so it is not checked here.`,
+      models: [],
+    };
   }
   const controller = new AbortController();
   // With a budget (a scan check), the tags request and the capability reads share it.
@@ -121,7 +133,7 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
         checkFailed: true,
         detail: ollamaEndpointDetail(
           endpointTrust,
-          `Ollama responded with HTTP ${response.status}`,
+          isRefusedRedirect(response, `${endpoint}/api/tags`) ? redirectRefusedDetail("Ollama", `${endpoint}/api/tags`) : `Ollama responded with HTTP ${response.status}`,
         ),
         models: [],
       };
@@ -148,6 +160,8 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ model }),
           signal: showController.signal,
+          // A model server on this device never sends a capability read elsewhere.
+          redirect: modelServerRedirect(`${endpoint}/api/show`),
         });
         if (!details.ok) throw new Error("Model details unavailable");
         const data = await details.json() as { capabilities?: unknown };
@@ -308,7 +322,16 @@ async function checkLocalOpenAiServer(
   const endpoint = server.resolveEndpoint().replace(/\/$/, "");
   const endpointTrust = server.classifyEndpoint(endpoint);
   if (options.localOnly && !endpointTrust.isLocal) {
-    return { ...provider, isLocal: false, status: "error", checkFailed: true, notContacted: true, detail: `${server.name} is set to ${endpoint}, outside this device, so it is not checked here.`, models: [] };
+    return {
+      ...provider,
+      isLocal: false,
+      description: `Use an ${server.name}-compatible endpoint outside this device. Tenant prompts leave this device when active.`,
+      status: "error",
+      checkFailed: true,
+      notContacted: true,
+      detail: `${server.name} is set to ${endpoint}, outside this device, so it is not checked here.`,
+      models: [],
+    };
   }
   const trustedProvider = endpointTrust.isLocal
     ? provider

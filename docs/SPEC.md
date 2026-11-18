@@ -435,6 +435,15 @@ run as a private subprocess) was considered and not adopted: it would add
 per-platform binaries to the installer and to signing, and there is no macOS
 x64 or Windows arm64 build.
 
+A model server on this device never has a redirect followed (decided
+2026-11-18, PR #204 review round 5): every request to an Ollama, LM Studio or
+Lemonade endpoint on loopback, the checks, the model-list read before a
+Lemonade request and the chat request itself, is sent with redirects off.
+A 3xx answer fails with the reason ("answered with a redirect to another
+address"), so neither a model-list read nor a prompt goes to the address it
+points to, and the check reads as could not check. Endpoints outside this
+device keep following redirects, because their prompts already leave it.
+
 Apple Foundation support uses Apple's on-device Foundation Models framework
 through a small signed macOS helper binary bundled with the Electron app. The
 provider is local-only when the helper talks directly to

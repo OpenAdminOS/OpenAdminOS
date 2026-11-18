@@ -155,8 +155,9 @@ export function optionsFromProviders(providers: readonly ProviderSummary[]): Cho
         providerId: provider.id,
         name,
         where: provider.isLocal ? "local" : "hosted",
-        // Retry reads Gemini's install again; an earlier failed request stays until a Test.
-        whereLine: provider.id === "gemini" ? `${reason} ${MODEL_CHOICE_COPY.geminiTestHint}` : reason,
+        // Retry reads Gemini's install again; an earlier failed request (the CLI was found,
+        // so its version is known) stays until a Test.
+        whereLine: provider.id === "gemini" && provider.cli?.version ? `${reason} ${MODEL_CHOICE_COPY.geminiTestHint}` : reason,
         state: MODEL_CHOICE_COPY.couldNotCheck,
         action: provider.isLocal ? "start" : "use",
         unavailable: true,

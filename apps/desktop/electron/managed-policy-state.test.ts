@@ -226,6 +226,26 @@ describe("managed policy: providers", () => {
     }
   });
 
+  it("keeps a failed check's own reason with a locked model, never the install instruction (PR #204 review round 5)", async () => {
+    const fixture = await makeFixture({
+      policy: await policyOf({ defaultProvider: "lemonade", defaultModel: "Qwen3-8B-GGUF" }),
+      providers: () =>
+        readyProviders().map((provider) =>
+          provider.id === "lemonade"
+            ? { ...provider, status: "error" as const, checkFailed: true, models: [], defaultModel: undefined, detail: "Lemonade asks for an API key." }
+            : provider,
+        ),
+    });
+    try {
+      const provider = (await fixture.store.getAppState()).providers.find((entry) => entry.id === "lemonade");
+      assert.equal(provider!.status, "error");
+      assert.equal(provider!.checkFailed, true);
+      assert.equal(provider!.detail, "Lemonade asks for an API key.");
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("applies an unlocked default until the admin picks another provider", async () => {
     const policy = await policyOf({ defaultProvider: "lm-studio", defaultModel: "lm-studio-other", lock: [] });
     const fixture = await makeFixture({ policy });

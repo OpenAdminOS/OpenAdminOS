@@ -175,7 +175,9 @@ describe("a provider whose check failed in Chat's choice (PR #191 follow-up)", (
   });
 
   it("tells the admin that only a Test clears an earlier failed Gemini request (round 4)", () => {
-    const gemini: ProviderSummary = { id: "gemini", name: "Gemini CLI", description: "", isLocal: false, status: "error", detail: "Gemini CLI request failed.", models: [], cli: { state: "request-failed" } };
+    const gemini: ProviderSummary = { id: "gemini", name: "Gemini CLI", description: "", isLocal: false, status: "error", detail: "Gemini CLI request failed.", models: [], cli: { version: "0.60.1", state: "request-failed" } };
+    // A discovery failure (the CLI was not found or did not answer) gets no Test hint: Retry can fix it.
+    expect(optionsFromProviders([{ ...gemini, detail: "gemini --version failed.", cli: { state: "request-failed" } }])[0]!.whereLine).toBe("gemini --version failed.");
     expect(optionsFromProviders([gemini])[0]!.whereLine).toBe("Gemini CLI request failed. A failed Gemini request clears only after a Test in Settings, Providers.");
   });
 

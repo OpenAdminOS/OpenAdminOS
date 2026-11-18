@@ -4008,6 +4008,9 @@ export class AppStateStore {
     if (served?.notContacted) {
       throw new Error(served.detail ?? "This provider is set to an endpoint outside this device, so it is not checked here. Check it in Settings, Providers.");
     }
+    // Without served results every app state read checks all providers in
+    // full already, so the read that follows is the check; nothing runs twice.
+    if (!this.scanResultsServed) return;
     // While scan results are served, a local runtime is checked like the scan
     // checks it: an endpoint now set outside this device is served as not
     // contacted instead of being contacted.
