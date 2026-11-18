@@ -962,7 +962,7 @@ describe("Settings provider section", () => {
       getRetrievalStatus: vi.fn(async () => ({ available: false, ollamaReachable: true, embeddingModelInstalled: false })),
     });
     renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/privacy", bridge });
-    expect(await screen.findByText("The embedding model is not installed yet. It downloads automatically in the background through Ollama; answers stay ungrounded until it arrives.")).toBeVisible();
+    expect(await screen.findByText("The embedding model is not installed yet. OpenAdminOS downloads it through Ollama in the background when it starts with Ollama running; answers stay ungrounded until it arrives.")).toBeVisible();
     expect(screen.queryByText(/setting above/)).toBeNull();
   });
 
