@@ -174,6 +174,11 @@ describe("a provider whose check failed in Chat's choice (PR #191 follow-up)", (
     );
   });
 
+  it("tells the admin that only a Test clears an earlier failed Gemini request (round 4)", () => {
+    const gemini: ProviderSummary = { id: "gemini", name: "Gemini CLI", description: "", isLocal: false, status: "error", detail: "Gemini CLI request failed.", models: [], cli: { state: "request-failed" } };
+    expect(optionsFromProviders([gemini])[0]!.whereLine).toBe("Gemini CLI request failed. A failed Gemini request clears only after a Test in Settings, Providers.");
+  });
+
   it("leaves a completed check's row as it was", () => {
     // No text model is a completed check: the scan's recovery, not could not check.
     expect(optionsFromProviders([local("ollama", "Ollama", { checkFailed: undefined })])[0]).toMatchObject({ state: "No model yet", action: "get-model" });

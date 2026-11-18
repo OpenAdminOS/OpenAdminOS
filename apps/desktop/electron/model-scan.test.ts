@@ -864,6 +864,8 @@ describe("an endpoint the scan did not contact is served as not contacted (PR #2
       assert.equal(listed.notContacted, true);
       assert.equal(listed.isLocal, false);
       assert.equal(listed.checkFailed, true);
+      // Settings reads the same summary: its description does not say prompts stay here (Sol round 4, P3).
+      assert.match(listed.description, /outside this device\. Tenant prompts leave this device/);
       // Chat's Retry on another provider checks only that one: still nothing off the device (Sol rounds 2 and 3).
       await store.completeFirstRunScan({ microsoftStepPending: false });
       await store.recheckProvider("ollama");
@@ -882,6 +884,41 @@ describe("an endpoint the scan did not contact is served as not contacted (PR #2
 });
 
 describe("checking one provider again from Chat (PR #204 review round 3)", () => {
+  it("checks a local runtime local only, so an endpoint set outside this device after the scan is not contacted (round 4, P1)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
+    await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [], firstRunScan: "pending" }));
+    const original = process.env.OPENADMINOS_LM_STUDIO_URL;
+    // On this device at scan time, and nothing listens there.
+    process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:9/v1";
+    const realFetch = globalThis.fetch;
+    const contacted: string[] = [];
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.includes("10.255.255.1")) {
+        contacted.push(url);
+        throw Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }) });
+      }
+      return realFetch(input, init);
+    }) as typeof fetch;
+    const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
+    try {
+      await store.scanModels();
+      await store.completeFirstRunScan({ microsoftStepPending: false });
+      process.env.OPENADMINOS_LM_STUDIO_URL = "http://10.255.255.1:1234/v1";
+      await store.recheckProvider("lm-studio");
+      const listed = (await store.listProviders()).find((provider) => provider.id === "lm-studio")!;
+      assert.equal(listed.notContacted, true);
+      assert.equal(listed.isLocal, false);
+      assert.deepEqual(contacted, []);
+    } finally {
+      globalThis.fetch = realFetch;
+      if (original === undefined) delete process.env.OPENADMINOS_LM_STUDIO_URL;
+      else process.env.OPENADMINOS_LM_STUDIO_URL = original;
+      store.close();
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+
   it("keeps the other providers' results, such as a signed-in Copilot, and leaves the active provider alone", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
     await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [], activeProviderId: "anthropic", providerChosenByUser: true }));

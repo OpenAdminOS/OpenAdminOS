@@ -1759,7 +1759,13 @@ function scanResultsFor(found: ReadonlyMap<ProviderId, ProviderSummary>, probes:
     results.set(probe.providerId, {
       ...entry,
       // An endpoint outside this device that the scan refused stays off the device, and not contacted.
-      ...(probe.notContacted ? { isLocal: false, notContacted: true as const } : {}),
+      ...(probe.notContacted
+        ? {
+            isLocal: false,
+            notContacted: true as const,
+            description: `Use an ${probe.name}-compatible endpoint outside this device. Tenant prompts leave this device when active.`,
+          }
+        : {}),
       status: "error",
       checkFailed: true,
       detail: probe.facts[0] ?? `${probe.name} could not be checked. Retry or refresh providers.`,
@@ -4002,7 +4008,10 @@ export class AppStateStore {
     if (served?.notContacted) {
       throw new Error(served.detail ?? "This provider is set to an endpoint outside this device, so it is not checked here. Check it in Settings, Providers.");
     }
-    await this.detectProvider(providerId);
+    // While scan results are served, a local runtime is checked like the scan
+    // checks it: an endpoint now set outside this device is served as not
+    // contacted instead of being contacted.
+    await this.detectProvider(providerId, { localOnly: true });
   }
 
   /** Set when a scan, Retry or Start is asked for and when the first-run scan completes; cleared by `refreshProviders`. */
@@ -4013,7 +4022,7 @@ export class AppStateStore {
    * first run, while the scan results are served, the result replaces that
    * provider's entry and no other provider is checked.
    */
-  private async detectProvider(id: ProviderId): Promise<ProviderSummary | undefined> {
+  private async detectProvider(id: ProviderId, options: { localOnly?: boolean } = {}): Promise<ProviderSummary | undefined> {
     // While the scan is pending nothing but the scan detects, and without
     // served results listing already checks every provider in full.
     if (!this.scanResultsServed) {
@@ -4033,7 +4042,7 @@ export class AppStateStore {
           configError = error instanceof Error ? error.message : String(error);
         }
       }
-      summary = await this.checkProviderEntry(entry, config, configError);
+      summary = await this.checkProviderEntry(entry, config, configError, options);
     }
     if (summary) this.modelScanProviders.set(id, summary);
     // The same policy view every listing gets: a provider it does not allow is not found.
@@ -4054,12 +4063,15 @@ export class AppStateStore {
     provider: ProviderSummary,
     azureOpenAIConfig: AzureOpenAIProviderConfig | undefined,
     azureOpenAIConfigError: string | undefined,
+    options: { localOnly?: boolean } = {},
   ): Promise<ProviderSummary> {
+    // `localOnly`: a local runtime set to an endpoint outside this device is not contacted.
+    const local = options.localOnly ? { localOnly: true } : {};
     try {
-      if (provider.id === "ollama") return await checkOllama(provider);
+      if (provider.id === "ollama") return await checkOllama(provider, local);
       if (provider.id === "apple-foundation") return await checkAppleFoundation(provider);
-      if (provider.id === "lm-studio") return await checkLmStudio(provider);
-      if (provider.id === "lemonade") return await checkLemonade(provider);
+      if (provider.id === "lm-studio") return await checkLmStudio(provider, local);
+      if (provider.id === "lemonade") return await checkLemonade(provider, local);
       if (provider.id === "anthropic") return await checkClaudeCode(provider);
       if (provider.id === "openai") return await checkCodex(provider);
       if (provider.id === "copilot" || provider.id === "gemini") return await checkAdditionalCli(provider);

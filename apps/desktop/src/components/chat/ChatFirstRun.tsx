@@ -77,7 +77,8 @@ export function ModelChoice({
     setAnnouncement(MODEL_SCAN_COPY.announce(option.name, option.state));
     // The pressed Retry was disabled while checking: focus goes back to its row.
     const target = section.current?.querySelector<HTMLElement>(option.unavailable ? `[data-retry="${done.providerId}"]` : `input[value="${done.providerId}"]`);
-    target?.focus();
+    // A row without Retry (not contacted) keeps focus in the choice through its heading.
+    (target ?? heading.current)?.focus();
   }, [options, retrying]);
 
   // Checks only this provider again, the way selecting it does: the other

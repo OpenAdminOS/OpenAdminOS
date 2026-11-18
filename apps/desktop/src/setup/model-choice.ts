@@ -150,11 +150,13 @@ export function optionsFromProviders(providers: readonly ProviderSummary[]): Cho
     }
     // A check that failed is could not check with its reason, for every provider, as in the scan.
     if (!ready && providerCheckFailed(provider)) {
+      const reason = provider.detail ?? MODEL_CHOICE_COPY.couldNotCheckLine(name);
       options.push({
         providerId: provider.id,
         name,
         where: provider.isLocal ? "local" : "hosted",
-        whereLine: provider.detail ?? MODEL_CHOICE_COPY.couldNotCheckLine(name),
+        // Retry reads Gemini's install again; an earlier failed request stays until a Test.
+        whereLine: provider.id === "gemini" ? `${reason} ${MODEL_CHOICE_COPY.geminiTestHint}` : reason,
         state: MODEL_CHOICE_COPY.couldNotCheck,
         action: provider.isLocal ? "start" : "use",
         unavailable: true,
