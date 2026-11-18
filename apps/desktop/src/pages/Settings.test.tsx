@@ -957,6 +957,15 @@ describe("Settings provider section", () => {
     expect(screen.queryByText(message)).toBeNull();
   });
 
+  it("says the embedding model downloads on its own while Ollama answers and it is missing (PR #206 review round 1, Muse)", async () => {
+    const bridge = makeMockBridge({
+      getRetrievalStatus: vi.fn(async () => ({ available: false, ollamaReachable: true, embeddingModelInstalled: false })),
+    });
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/privacy", bridge });
+    expect(await screen.findByText("The embedding model is not installed yet. It downloads automatically in the background through Ollama; answers stay ungrounded until it arrives.")).toBeVisible();
+    expect(screen.queryByText(/setting above/)).toBeNull();
+  });
+
   it("shows an unavailable retrieval reason and checks for a refreshed index", async () => {
     const user = userEvent.setup();
     const reason = "The local Microsoft documentation index is not installed.";

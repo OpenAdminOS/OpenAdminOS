@@ -4263,7 +4263,7 @@ function PrivacySection({
                   {retrievalStatus.embeddingModelError
                     ?? (retrievalStatus.ollamaReachable === false
                       ? "Ollama not reachable. Start Ollama on this device, then refresh the documentation index status."
-                      : "The embedding model is not installed yet. Install it through Ollama to ground answers in the local index. Automatic downloads follow the setting above.")}
+                      : "The embedding model is not installed yet. It downloads automatically in the background through Ollama; answers stay ungrounded until it arrives.")}
                 </p>
               ) : null}
             </div>
