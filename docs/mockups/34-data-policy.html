@@ -145,6 +145,8 @@
     .boundary .bs { display: none; }
     .boundary[data-where="hosted"] { color: var(--color-warning); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-warning) 35%, transparent); background: var(--color-warning-soft); }
     .boundary[data-where="local"] { color: var(--color-success); }
+    .boundary[data-where="confidential"] { color: var(--color-warning); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-warning) 35%, transparent); }
+    .boundary[data-where="confidential"] svg { width: 11px; height: 11px; flex: none; }
     .boundary .mask { display: inline-flex; align-items: center; gap: 6px; color: var(--color-text-soft); }
     .boundary .blk { color: var(--color-danger); }
     @container (max-width: 1000px) { .boundary .bw { display: none; } .boundary .bs { display: inline; } }
@@ -235,8 +237,8 @@
     .acts3 button[aria-pressed="true"] { background: var(--color-bg-elevated); color: var(--color-text); font-weight: 500; box-shadow: 0 0 0 1px var(--color-border), 0 1px 2px rgba(0,0,0,.06); }
     .cell[data-state="block"] .acts3 button[aria-pressed="true"] { color: var(--color-danger); }
     .cell[data-state="leaves"] .acts3 button[aria-pressed="true"] { color: var(--color-warning); }
-    .acts3 button[disabled] { cursor: not-allowed; text-decoration: line-through; text-decoration-color: var(--color-text-faint); color: var(--color-text-faint); }
-    .mrow[data-locked] .acts3 button { cursor: not-allowed; }
+    .acts3 button[disabled] { cursor: not-allowed; }
+    .acts3 button[data-why="never"] { text-decoration: line-through; text-decoration-color: var(--color-text-faint); color: var(--color-text-faint); }
     .mrow[data-locked] .acts3 button:not([aria-pressed="true"]) { opacity: .5; }
     .mrow .why { grid-column: 2 / -1; margin-top: 6px; font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text-muted); }
     .mrow .why.r { grid-column: 2 / -1; text-align: right; }
@@ -365,6 +367,28 @@
     .dialog .body { padding: 10px 24px 4px; font-size: var(--text-sm); line-height: var(--lh-sm); color: var(--color-text-soft); }
     .dialog .body p + p { margin-top: 8px; }
     .dialog footer { display: flex; align-items: center; gap: 8px; padding: 16px 24px 20px; justify-content: flex-end; flex-wrap: wrap; }
+    .scrim[hidden] { display: none; }
+    .dialog .leave { margin-top: 10px; padding: 9px 12px; border-radius: var(--radius-md); background: var(--color-warning-soft); color: var(--color-text); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-warning) 30%, transparent); }
+    .dialog .leave.stays { background: var(--color-code-bg); box-shadow: none; }
+    .dialog ul.chg { margin: 8px 0 0; padding-left: 18px; color: var(--color-text); }
+    .classes { list-style: none; margin: 10px 0 0; padding: 0; border-radius: var(--radius-md); box-shadow: inset 0 0 0 1px var(--color-border-soft); }
+    .classes li + li { border-top: 1px solid var(--color-border-soft); }
+    .classes label { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 2px 10px; align-items: center; padding: 8px 12px; cursor: pointer; }
+    .classes input { margin: 0; accent-color: var(--color-accent); }
+    .classes .cn { color: var(--color-text); font-weight: 500; display: flex; align-items: center; gap: 8px; }
+    .classes .cd { grid-column: 2 / -1; font-size: var(--text-xs); line-height: 16px; color: var(--color-text-muted); }
+    .classes .ctag { font-size: var(--text-xs); color: var(--color-text-muted); }
+    .classes li[data-off] label { cursor: not-allowed; }
+    .classes li[data-off] .cn { color: var(--color-text-faint); }
+    .calls { list-style: none; margin: 10px 0 0; padding: 0; font-size: var(--text-xs); line-height: var(--lh-xs); }
+    .calls li { display: grid; grid-template-columns: 60px 64px minmax(0, 1fr); gap: 8px; padding: 5px 0; border-top: 1px solid var(--color-border-soft); color: var(--color-text-soft); }
+    .calls .tm { color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+    .calls .sent { color: var(--color-warning); }
+    .calls .not { color: var(--color-danger); font-weight: 500; }
+    .pickst { font-size: var(--text-xs); color: var(--color-text-muted); }
+    .uf .det { grid-column: 1 / -1; font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text); display: flex; gap: 8px; align-items: flex-start; margin-top: 2px; }
+    .uf .det .hx { margin-top: 3px; }
+    .block[data-t="refused"] { box-shadow: inset 0 0 0 1px var(--color-border-strong); }
 
     /* ---------- Open questions ---------- */
     .qs { margin: 0; padding-left: 20px; max-width: 88ch; }
@@ -405,14 +429,14 @@
       <button type="button" data-theme-set="dark" aria-pressed="false">Dark</button>
     </span>
     <nav aria-label="Sections">
-      <a href="#a">A Settings</a><a href="#b">B Status strip</a><a href="#c">C Chat answer</a><a href="#d">D Run activity</a><a href="#e">E Blocked</a><a href="#f">F Not classified</a><a href="#g">G Agent details</a><a href="#q">Questions</a>
+      <a href="#a">A Settings</a><a href="#b">B Status strip</a><a href="#c">C Chat answer</a><a href="#d">D Run activity</a><a href="#e">E Blocked</a><a href="#f">F Not classified</a><a href="#g">G Agent details</a><a href="#h">H Changing a rule</a><a href="#q">Questions</a>
     </nav>
   </div>
 
   <main class="doc">
     <header>
       <h1>Data policy decides what each model may see, and every answer says what was hidden.</h1>
-      <p>Six data classes, three provider tiers, three actions. Rules apply on this device before every model call: agent runs, Chat, Office, drafts, follow-ups and Nova. A masked value is replaced by a token for the call and restored on the way back, so the admin reads real names while a hosted model sees placeholders. Check the frames at 1280 and 900 px, in both themes. Click any cell in A to change a rule; the sample line redraws.</p>
+      <p>Six data classes, three provider tiers, three actions. Rules apply on this device before every model call: agent runs, Chat, Office, drafts, follow-ups and Nova. A masked value is replaced by a token for the call and restored on the way back, so the admin reads real names while a hosted model sees placeholders. Check the frames at 1280 and 900 px, in both themes. Click any cell in A to change a rule; the sample line redraws. A stricter action applies at once, a looser one asks first.</p>
     </header>
 
     <!-- A: Settings -->
@@ -462,8 +486,8 @@
                   </div>
 
                   <div class="sec-h"><h2>Changes to this policy</h2><span class="r xs muted">Kept in the local audit log</span></div>
-                  <ul class="rows sm">
-                    <li style="padding:9px 0;display:flex;gap:12px;flex-wrap:wrap"><span>Activity on Hosted changed from Block to Allow</span><span class="muted">by you, 14 November at 16:02</span></li>
+                  <ul class="rows sm" id="changelog">
+                    <li style="padding:9px 0;display:flex;gap:12px;flex-wrap:wrap"><span>Activity on Hosted changed from Block to Allow, after you confirmed</span><span class="muted">by you, 14 November at 16:02</span></li>
                     <li style="padding:9px 0;display:flex;gap:12px;flex-wrap:wrap"><span>Identity and Device rows set by policy.json</span><span class="muted">by your IT department, loaded 12 November at 08:40</span></li>
                   </ul>
                 </div>
@@ -471,12 +495,21 @@
             </div></div>
           </div>
         </div>
+        <div class="scrim" id="loosen" hidden style="inset:0;border-radius:12px">
+          <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="loosen-t" aria-describedby="loosen-b">
+            <header><h2 id="loosen-t"></h2></header>
+            <div class="body" id="loosen-b"></div>
+            <footer><button class="bt ghost" type="button" id="loosen-keep"></button><button class="bt primary" type="button" id="loosen-ok"></button></footer>
+          </div>
+        </div>
       </div>
       <ul class="notes">
-        <li>The credential row's Allow is struck through on Hosted and cannot be pressed. It is the one rule nobody may loosen, the admin or IT, and the reason sits under the cell instead of in a tooltip.</li>
-        <li>IT-locked rows keep their cells readable but not pressable, and name the file and key that set them. An attempt over IPC is refused the same way and logged.</li>
-        <li>The Confidential column can be set now so the rules are ready, but its header says no provider qualifies. It stays that way until Track C verifies attestation.</li>
-        <li>Loosening a rule (Mask to Allow, Block to anything) asks once in a dialog that names what will leave the device, shown in F. Tightening applies at once.</li>
+        <li>The credential row's Allow is struck through on Hosted and cannot be pressed. It is the one rule nobody may loosen, the admin or IT: credentials never reach a hosted model in clear text. The reason sits under the cell instead of in a tooltip.</li>
+        <li>IT-locked rows are disabled, not merely ignored: their buttons cannot be focused or pressed, carry <code>aria-disabled</code>, and point to the visible line that names the file and key. An attempt over IPC is refused the same way and logged. The Device row also shows the refusal state from H: an earlier setting of the admin's that IT has since made stricter is kept on record but not applied.</li>
+        <li>Decided: the Confidential column is shown, with "No provider qualifies yet" in its header, so the rules are ready. It stays that way until Track C verifies attestation.</li>
+        <li>Decided: Block stays available in the Local column, so an admin can keep a class away from every model.</li>
+        <li>Decided: placeholders are typed, numbered brackets, as the sample line shows: <code>[USER_1]</code>, <code>[DEVICE_1]</code>, and <code>[CREDENTIAL]</code> for every credential.</li>
+        <li>Loosening a rule (Block to Mask or Allow, Mask to Allow, on any tier) opens a dialog that names what will leave the device, and the rule changes only after the admin accepts. Tightening applies at once. Reset to defaults asks the same way when it would loosen a rule. Try it in the matrix; H shows the dialog.</li>
         <li>Below 640 px of content width each row stacks its three cells under the class name, each with its tier label.</li>
       </ul>
     </section>
@@ -491,7 +524,8 @@
           <div><span class="cap">Hosted, defaults</span><span class="boundary" data-where="hosted"><span class="pip"></span>Hosted · Claude Code ·<span class="mask"><span class="hx"></span>identities and devices masked</span></span></div>
           <div><span class="cap">Hosted, narrow window</span><span class="boundary" data-where="hosted"><span class="pip"></span>Hosted · Claude Code ·<span class="mask"><span class="hx"></span>2 masked</span></span></div>
           <div><span class="cap">Hosted, a class blocked</span><span class="boundary" data-where="hosted"><span class="pip"></span>Hosted · Claude Code ·<span class="mask"><span class="hx"></span>identities and devices masked,</span><span class="blk">activity blocked</span></span></div>
-          <div><span class="cap">Hosted, everything allowed</span><span class="boundary" data-where="hosted"><span class="pip"></span>Hosted · Claude Code · tenant data in clear text</span></div>
+          <div><span class="cap">Hosted, only credentials masked</span><span class="boundary" data-where="hosted"><span class="pip"></span>Hosted · Claude Code · tenant data in clear text except credentials</span></div>
+          <div><span class="cap">Confidential, after attestation</span><span class="boundary" data-where="confidential"><svg aria-hidden="true"><use href="#i-lock"/></svg>Confidential · attested enclave · leaves this device ·<span class="mask"><span class="hx"></span>credentials masked</span></span></div>
           <div><span class="cap">Hosted voice, during a call</span><span class="boundary" data-where="hosted"><span class="pip"></span>Hosted voice · OpenAI ·<span class="mask"><span class="hx"></span>speaks roles, not names</span></span></div>
         </div>
         <div class="pop" role="dialog" aria-label="Where data goes">
@@ -511,7 +545,8 @@
       </div>
       <ul class="notes">
         <li>Clicking the strip opens the popover on the right. Public data is not amber: it came from outside the tenant.</li>
-        <li>"Everything allowed" is the only hosted strip without a hatch, so a policy that hides nothing looks different from one that does. Credentials are still masked; the popover says so.</li>
+        <li>"Only credentials masked" names the effective policy: every class but credentials is allowed on hosted. It is the only hosted strip without a hatch, so a policy that hides almost nothing looks different from one that hides names and devices. The words say what is still masked, since credentials never reach a hosted model in clear text.</li>
+        <li>The Confidential strip appears only once a provider has passed attestation (Track C), and until then no frame in the app shows it. It still says "leaves this device" in words: an attested enclave is not this device, and the admin should never read the lock as "local". It is outlined in amber like hosted, without the fill.</li>
         <li>Hosted voice gets its own line because its gate is separate: the voice model gets masked data and says "the user" and "the device"; the transcript on screen shows real values.</li>
       </ul>
     </section>
@@ -537,14 +572,14 @@
                     <tbody>
                       <tr><td>WGB-LT-0412</td><td>Mara Okafor</td><td>2 October</td></tr>
                       <tr><td>WGB-LT-0388</td><td>Jonas Lindqvist</td><td>29 September</td></tr>
-                      <tr><td>WGB-LT-0291</td><td>Priya Raman</td><td>21 October</td></tr>
+                      <tr><td>WGB-LT-0291</td><td>Priya Raman</td><td>16 October</td></tr>
                       <tr><td>iPhone 15, A. Moreau</td><td>Anne Moreau</td><td>18 October</td></tr>
                     </tbody>
                   </table>
                   <p>Mara Okafor and Jonas Lindqvist signed in from other devices this week, so these two laptops are likely replaced rather than lost.</p>
                 </div>
                 <details class="masknote" open>
-                  <summary><span class="hx"></span><span>Masked before the call to Claude Code: 23 identities, 31 devices</span><svg class="chev"><use href="#i-chev"/></svg></summary>
+                  <summary><span class="hx"></span><span>Masked before the call to Claude Code: 23 identity values, 31 device values</span><svg class="chev"><use href="#i-chev"/></svg></summary>
                   <div class="inner">
                     <div class="counts">
                       <span class="h">Class</span><span class="h num">Values</span><span class="h">Action</span>
@@ -565,7 +600,7 @@
       <ul class="notes">
         <li>The line is closed by default in production; it is open here to show the counts. An answer where nothing was masked shows no line at all, and a local answer never shows one.</li>
         <li>The composer repeats the short form of the strip, so the admin sees the rule before sending the next question, not only after.</li>
-        <li>Counts are values replaced, not people or devices: 23 identities can be the names and addresses of fewer people. Question 4 asks whether to count people and devices instead.</li>
+        <li>Decided: counts are values replaced, and every label says "values": 23 identity values can be the names and addresses of fewer people. The app does not group values per person or device for the count.</li>
       </ul>
     </section>
 
@@ -588,7 +623,7 @@
               <ol class="steps">
                 <li><span class="sd"><svg><use href="#i-read"/></svg></span><div><div class="t">Read managed devices</div><div class="d">Intune, 412 devices, from the local cache</div></div><span class="tm">08:14:02</span></li>
                 <li><span class="sd"><svg><use href="#i-read"/></svg></span><div><div class="t">Read sign-ins for 38 users</div><div class="d">Entra, last 30 days</div></div><span class="tm">08:14:09</span></li>
-                <li class="hl"><span class="sd" data-t="policy"></span><div><div class="t">Data policy applied</div><div class="d">Masked 38 devices, 31 identities and 3 credentials before the hosted call. Nothing blocked.</div></div><span class="tm">08:14:11</span>
+                <li class="hl"><span class="sd" data-t="policy"></span><div><div class="t">Data policy applied</div><div class="d">Masked 38 device values, 31 identity values and 3 credential values before the hosted call. Nothing blocked.</div></div><span class="tm">08:14:11</span>
                   <div class="detail">
                     <table class="ptable">
                       <thead><tr><th>Class</th><th>Fields</th><th class="num">Values</th><th>Action</th></tr></thead>
@@ -619,7 +654,7 @@
     <!-- E: Blocked -->
     <section class="sect" id="e">
       <h2>E. When a rule blocks a prompt</h2>
-      <p>The rule set here is Activity on Hosted: Block. The block names the class, the data that carried it and the rule, says nothing was sent, and offers the two real ways out. It appears in Chat in place of the answer and on an agent before the run starts.</p>
+      <p>The rule set here is Activity on Hosted: Block. The block names the class, the data that carried it and the rule, says which call was not sent, lists any earlier calls of the same answer or run that were sent, and offers the two real ways out. It appears in Chat in place of the answer and on an agent before the run starts.</p>
       <div class="two">
         <div class="win">
           <div class="lights"><i></i><i></i><i></i></div>
@@ -632,7 +667,11 @@
                   <span class="glyph" data-t="blocked"><svg><use href="#i-stop"/></svg></span>
                   <div>
                     <h3>This question needs activity data, which your data policy blocks for hosted models</h3>
-                    <p>Answering reads sign-in logs from Entra. Sign-in times and locations are activity data, and the rule for Activity on Hosted is Block. Nothing was sent to Claude Code.</p>
+                    <p>Answering reads sign-in logs from Entra. Sign-in times and locations are activity data, and the rule for Activity on Hosted is Block. This call was not sent to Claude Code.</p>
+                    <ul class="calls" aria-label="Model calls for this question">
+                      <li><span class="tm">09:41:02</span><span class="sent">Sent</span><span>Planning the question. Your question only, no tenant data.</span></li>
+                      <li><span class="tm">09:41:04</span><span class="not">Not sent</span><span>Answer from 214 sign-ins. Activity is blocked on Hosted.</span></li>
+                    </ul>
                     <div class="acts"><button class="bt primary" type="button">Switch to a local model</button><button class="bt secondary" type="button">Change the rule</button></div>
                     <p class="xs muted" style="margin-top:10px">Ollama with gpt-oss:20b is ready on this device. The question is asked again with it.</p>
                   </div>
@@ -647,7 +686,7 @@
             <span class="glyph" data-t="blocked"><svg><use href="#i-stop"/></svg></span>
             <div>
               <h3>This question needs activity data, which your IT department blocks for hosted models</h3>
-              <p>Answering reads sign-in logs from Entra. The rule for Activity on Hosted is Block and was set in policy.json. Nothing was sent to Claude Code.</p>
+              <p>Answering reads sign-in logs from Entra. The rule for Activity on Hosted is Block and was set in policy.json. This call was not sent to Claude Code; the planning call before it was sent, with your question only.</p>
               <div class="acts"><button class="bt primary" type="button">Switch to a local model</button></div>
               <p class="lockline" style="margin-top:10px"><svg><use href="#i-lock"/></svg><span>Set by your IT department in <code>dataPolicy.rules.activity.hosted</code></span></p>
             </div>
@@ -657,7 +696,7 @@
             <span class="glyph" data-t="blocked"><svg><use href="#i-stop"/></svg></span>
             <div>
               <h3>This question needs activity data, which your data policy blocks for hosted models</h3>
-              <p>No local model is set up on this device. Set one up in Providers, or change the rule. Nothing was sent to Claude Code.</p>
+              <p>No local model is set up on this device. Set one up in Providers, or change the rule. This call was not sent to Claude Code.</p>
               <div class="acts"><button class="bt primary" type="button">Set up a local model</button><button class="bt secondary" type="button">Change the rule</button></div>
             </div>
           </div>
@@ -666,17 +705,32 @@
             <span class="glyph" data-t="blocked"><svg><use href="#i-stop"/></svg></span>
             <div>
               <h3>Sign-in risk review cannot run with Claude Code</h3>
-              <p>This agent reads activity data (sign-in logs and risk detections), which your data policy blocks for hosted models. The run did not start and nothing was read.</p>
+              <p>This agent reads activity data (sign-in logs and risk detections), which your data policy blocks for hosted models. The run did not start: nothing was read and no call was sent.</p>
               <div class="acts"><button class="bt primary" type="button">Run with Ollama</button><button class="bt secondary" type="button">Change the rule</button></div>
+            </div>
+          </div>
+          <p class="xs muted" style="margin-top:8px">An agent, at a later step of a run</p>
+          <div class="block" data-t="blocked">
+            <span class="glyph" data-t="blocked"><svg><use href="#i-stop"/></svg></span>
+            <div>
+              <h3>Step 4 of Tenant health report stopped: its call needs activity data</h3>
+              <p>The summary step reads audit entries, which your data policy blocks for hosted models. This call was not sent to Claude Code. Earlier calls in this run were sent:</p>
+              <ul class="calls" aria-label="Model calls in this run">
+                <li><span class="tm">08:20:11</span><span class="sent">Sent</span><span>Step 2, device summary. Identities and devices masked.</span></li>
+                <li><span class="tm">08:20:19</span><span class="sent">Sent</span><span>Step 3, policy summary. Configuration only.</span></li>
+                <li><span class="tm">08:20:26</span><span class="not">Not sent</span><span>Step 4, audit summary. Activity is blocked on Hosted.</span></li>
+              </ul>
+              <div class="acts"><button class="bt primary" type="button">Finish with Ollama</button><button class="bt secondary" type="button">Change the rule</button></div>
             </div>
           </div>
         </div>
       </div>
       <ul class="notes">
-        <li>The title always says which class and which tier. The body names the data source in the admin's words, then the rule in the matrix's words, then "Nothing was sent".</li>
+        <li>The title always says which class and which tier. The body names the data source in the admin's words, then the rule in the matrix's words, then "This call was not sent". It never says "nothing was sent" when an earlier call of the same answer or run went out; those calls are listed with what they carried.</li>
+        <li>Agent preflight checks the classes the manifest declares, so most blocks come before the run. A block at a later step happens when a response carries a class the manifest did not declare; the run keeps the results of earlier steps.</li>
         <li>Switch to a local model changes the model for this conversation only, not the default in Providers, and asks the question again.</li>
         <li>Change the rule opens Settings, Data policy with the cell focused. Coming back, the question is not re-sent by itself.</li>
-        <li>For an agent, the preflight refuses before any read, so the block can say "nothing was read" as well as "nothing was sent".</li>
+        <li>For an agent, the preflight refuses before any read, so that block alone can say "nothing was read" and "no call was sent".</li>
       </ul>
     </section>
 
@@ -695,34 +749,46 @@
               <div class="acts"><button class="bt secondary sm" type="button">Classify this field</button></div>
             </div>
           </div>
-          <p class="xs muted" style="margin-top:8px">Classifying it as a less sensitive class</p>
+          <p class="xs muted" style="margin-top:8px">Classify this field</p>
           <div class="win" style="min-height:0">
-            <div class="dialog" style="width:100%;box-shadow:none;border-radius:12px">
-              <header><h2>Send extensionAttribute7 to hosted models in clear text?</h2></header>
+            <div class="dialog" role="dialog" aria-labelledby="cf-t" style="width:100%;box-shadow:none;border-radius:12px">
+              <header><h2 id="cf-t">Classify extensionAttribute7</h2></header>
               <div class="body">
-                <p>As configuration, its 148 values on users are sent as is to Claude Code and any other hosted model. Woodgrove Bank uses this attribute for cost centers today; if it ever holds names or phone numbers, they leave this device.</p>
-                <p>The change is recorded in the audit log and applies to this device.</p>
+                <p>148 values on users, seen in 6 calls. It is treated as identity today. Here it can move only to a class that is at least as sensitive, so a mistake can only hide more.</p>
+                <ul class="classes" id="cf-list">
+                  <li><label><input type="radio" name="cf" value="credential"><span class="cn"><span class="sens" aria-hidden="true"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span>Credential</span><span class="ctag">Stricter</span><span class="cd">Masked on confidential and hosted, never restored into a prompt</span></label></li>
+                  <li><label><input type="radio" name="cf" value="identity" checked><span class="cn"><span class="sens" aria-hidden="true"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span>Identity</span><span class="ctag">Now</span><span class="cd">Masked on hosted</span></label></li>
+                  <li><label><input type="radio" name="cf" value="device"><span class="cn"><span class="sens" aria-hidden="true"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span>Device</span><span class="ctag">Same sensitivity</span><span class="cd">Masked on hosted</span></label></li>
+                  <li data-off><label><input type="radio" name="cf" value="activity" disabled aria-disabled="true" aria-describedby="cf-why"><span class="cn"><span class="sens" aria-hidden="true"><i class="on"></i><i class="on"></i><i></i><i></i></span>Activity</span><span class="ctag">IT policy file</span><span class="cd">Less sensitive than identity</span></label></li>
+                  <li data-off><label><input type="radio" name="cf" value="configuration" disabled aria-disabled="true" aria-describedby="cf-why"><span class="cn"><span class="sens" aria-hidden="true"><i class="on"></i><i></i><i></i><i></i></span>Configuration</span><span class="ctag">IT policy file</span><span class="cd">Less sensitive than identity</span></label></li>
+                  <li data-off><label><input type="radio" name="cf" value="public" disabled aria-disabled="true" aria-describedby="cf-why"><span class="cn"><span class="sens" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Public</span><span class="ctag">IT policy file</span><span class="cd">Less sensitive than identity</span></label></li>
+                </ul>
+                <p id="cf-why" class="lockline" style="margin-top:10px"><svg><use href="#i-lock"/></svg><span>A less sensitive class can only be set by your IT department, in the IT policy file under <code>dataPolicy.fieldClasses</code>. Woodgrove Bank uses this attribute for cost centers; if that should be configuration, ask IT to map it there.</span></p>
+                <p class="xs muted" style="margin-top:8px">Value detectors still check every value. One that looks like a recovery key, a password or a token is treated as credential, whatever class this field has.</p>
               </div>
-              <footer><button class="bt ghost" type="button">Keep as identity</button><button class="bt primary" type="button">Classify as configuration</button></footer>
+              <footer><button class="bt ghost" type="button">Cancel</button><button class="bt primary" type="button" id="cf-ok" disabled>Keep as identity</button></footer>
             </div>
           </div>
         </div>
         <div class="win">
           <div class="page"><div class="page-in" style="padding:20px 22px 24px">
             <div class="sec-h" style="margin-top:0"><h2>Fields not classified yet</h2><span class="r xs muted">3 fields, seen in the last 7 days</span></div>
-            <p class="sec-sub">Treated as identity: masked on hosted models, allowed on local and confidential.</p>
-            <ul class="rows">
-              <li class="uf"><span class="p">users: onPremisesExtensionAttributes.extensionAttribute7</span><span class="ds">148 values in 6 calls. Sample shape: four digits.</span><span class="a"><select class="pick" aria-label="Class for extensionAttribute7"><option>Identity</option><option>Device</option><option>Activity</option><option selected>Configuration</option></select></span></li>
-              <li class="uf"><span class="p">Splashtop: computers[].note</span><span class="ds">212 values in 2 calls. Free text.</span><span class="a"><select class="pick" aria-label="Class for computers note"><option selected>Identity</option><option>Device</option><option>Activity</option><option>Configuration</option></select></span></li>
-              <li class="uf"><span class="p">managedDevices (beta): hardwareInformation.wiredIPv4Addresses</span><span class="ds">412 values in 3 calls. Sample shape: IPv4 address.</span><span class="a"><select class="pick" aria-label="Class for wiredIPv4Addresses"><option>Identity</option><option selected>Device</option><option>Activity</option><option>Configuration</option></select></span></li>
+            <p class="sec-sub">Treated as identity: masked on hosted models, allowed on local and confidential. Each can move to the same or a more sensitive class here; a less sensitive class comes only from the IT policy file.</p>
+            <ul class="rows" id="fields">
+              <li class="uf"><span class="p">users: onPremisesExtensionAttributes.extensionAttribute7</span><span class="ds">148 values in 6 calls. Sample shape: four digits.</span><span class="a"><select class="pick" aria-label="Class for extensionAttribute7" data-from="identity"></select></span></li>
+              <li class="uf"><span class="p">Splashtop: computers[].note</span><span class="ds">212 values in 2 calls. Free text.</span><span class="a"><select class="pick" aria-label="Class for computers note" data-from="identity"></select></span>
+                <span class="det"><span class="hx"></span><span>A value detector found 3 values shaped like BitLocker recovery keys in this field. Those 3 are treated as credential, masked one way, whatever class the field has.</span></span></li>
+              <li class="uf"><span class="p">managedDevices (beta): hardwareInformation.wiredIPv4Addresses</span><span class="ds">412 values in 3 calls. Sample shape: IPv4 address.</span><span class="a"><select class="pick" aria-label="Class for wiredIPv4Addresses" data-from="identity"></select></span></li>
             </ul>
+            <p class="pickst" id="pickst" aria-live="polite" style="margin-top:10px">Options marked "IT policy file" are less sensitive than the field's class and cannot be chosen here.</p>
             <p class="xs muted" style="margin-top:12px">Free text you type is checked against names and devices this app has seen in the tenant. A name it has never seen cannot be detected and is sent as typed.</p>
           </div></div>
         </div>
       </div>
       <ul class="notes">
         <li>The hatch glyph with a question mark means "hidden because unknown", next to the plain hatch for "hidden by rule".</li>
-        <li>The dialog appears only when the new class is looser on some tier. Moving a field to a stricter class (extensionAttribute7 to credential) applies without asking.</li>
+        <li>Decided: in Settings a field moves only to a class of the same or a higher sensitivity (identity to credential, or identity to device, which ranks the same), and the change applies at once. A less sensitive class is possible only through the IT policy file, and both the dialog and the list say so; the options are disabled, not hidden, so the admin learns where the choice lives.</li>
+        <li>Value detectors run on every value whatever the field's class, and only ever raise it: a recovery key inside a free-text note is a credential even when the note is identity or configuration.</li>
         <li>"Sample shape" describes the value's format, never a value.</li>
       </ul>
     </section>
@@ -762,23 +828,60 @@
       </ul>
     </section>
 
+    <!-- H: Changing a rule -->
+    <section class="sect" id="h">
+      <h2>H. Changing a rule</h2>
+      <p>A stricter action applies the moment it is pressed. A looser one, any move from Block toward Allow on any tier, waits in a dialog that says in plain words what will leave this device, and the rule stays as it was until the admin accepts. A rule IT set cannot be loosened from this device at all.</p>
+      <div class="two">
+        <div style="display:grid;gap:12px;align-content:start">
+          <p class="xs muted">Loosening, after pressing Allow on Activity, Hosted while it is Block</p>
+          <div class="win" style="min-height:0">
+            <div class="dialog" role="dialog" aria-labelledby="h-t" style="width:100%;box-shadow:none;border-radius:12px">
+              <header><h2 id="h-t">Send activity data to hosted models in clear text?</h2></header>
+              <div class="body">
+                <p>Activity on Hosted changes from Block to Allow.</p>
+                <p class="leave">Sign-in times and locations, audit entries and app usage go to Claude Code and any other hosted model as they are. They leave this device. Questions about sign-ins, which are blocked today, will be answered.</p>
+                <p>Nothing changes until you accept. The change is recorded in the local audit log.</p>
+              </div>
+              <footer><button class="bt ghost" type="button">Keep Block</button><button class="bt primary" type="button">Allow on Hosted</button></footer>
+            </div>
+          </div>
+        </div>
+        <div style="display:grid;gap:12px;align-content:start">
+          <p class="xs muted">A setting of yours that IT has since made stricter</p>
+          <div class="block" data-t="refused">
+            <span class="glyph"><svg><use href="#i-lock"/></svg></span>
+            <div>
+              <h3>Your setting for Device on Hosted is not applied</h3>
+              <p>You set Device on Hosted to Allow on 3 November. Your IT department has since set it to Mask, and a setting on this device never loosens a rule IT set. Device names, serial numbers and addresses stay masked on hosted models.</p>
+              <p class="lockline" style="margin-top:10px"><svg><use href="#i-lock"/></svg><span>Set by your IT department in policy.json, <code>dataPolicy.rules.device</code>, loaded 12 November at 08:40</span></p>
+              <div class="acts"><button class="bt secondary sm" type="button">Open IT policy</button><button class="bt ghost sm" type="button">Dismiss</button></div>
+            </div>
+          </div>
+          <p class="xs muted" style="margin-top:8px">A change that reaches the app another way, such as over IPC</p>
+          <div class="block" data-t="refused">
+            <span class="glyph"><svg><use href="#i-lock"/></svg></span>
+            <div>
+              <h3>A change to Identity on Hosted was refused</h3>
+              <p>Something on this device asked to set Identity on Hosted to Allow. Your IT department set that rule, so it stays Mask. The attempt is recorded in the local audit log.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>The safe button is on the left and has the focus when the dialog opens, so Enter keeps the rule. Escape keeps it too.</li>
+        <li>Block to Mask on Hosted is also a loosening: prompts that were refused start going out, with placeholders. The dialog says so in the same plain words.</li>
+        <li>The refusal card appears once, in Settings, Data policy, the first time the app loads an IT rule stricter than the admin's own setting. The admin's setting is kept on record, so it applies again if IT removes the rule.</li>
+      </ul>
+    </section>
+
     <!-- Questions -->
     <section class="sect" id="q">
       <h2>Open questions</h2>
-      <p>Decisions this mockup assumes but does not make. Each one changes copy or a screen above.</p>
+      <p>Decisions this mockup assumes but does not make. The questions decided on 18 November are answered in the notes of A, C and F.</p>
       <ol class="qs">
-        <!-- TODO(ugur): token format in the Settings preview -->
-        <li><b>Token format.</b> The preview shows <code>[DEVICE_1]</code>, <code>[USER_1]</code> and <code>[CREDENTIAL]</code>. The model sees whatever format is chosen, and so does the admin in this preview. Is a typed, numbered bracket the format?</li>
-        <!-- TODO(ugur): who may classify unmapped fields -->
-        <li><b>Classifying fields.</b> F lets the admin classify an unmapped field, including into a looser class after a dialog. Should that be allowed, limited to stricter classes, or left to IT and to mappings shipped with the app?</li>
-        <!-- TODO(ugur): show the confidential column before Track C -->
-        <li><b>Confidential column before Track C.</b> A shows it with "No provider qualifies yet". The alternative is to hide the column until a provider can be confidential, which makes the first release simpler and the later change bigger.</li>
-        <!-- TODO(ugur): what the counts count -->
-        <li><b>What the counts count.</b> C and D count values replaced. Counting distinct people and devices reads better ("4 devices, 4 people") but needs the app to group values per object.</li>
         <!-- TODO(ugur): per-organization rules -->
         <li><b>Per organization.</b> The mockup has one policy for the device. Should an organization be able to carry its own rules, for example stricter ones for a customer tenant an MSP manages?</li>
-        <!-- TODO(ugur): Block on Local -->
-        <li><b>Block on Local.</b> The plan lets the admin tighten any rule, so Block is pressable in the Local column. Is there a real case for it, or should the local column offer Allow and Mask only?</li>
       </ol>
     </section>
   </main>
@@ -820,7 +923,7 @@
     const CLASSES = [
       { id: "credential", name: "Credential", sens: 4, ex: "BitLocker and FileVault keys, LAPS passwords, client secrets, tokens" },
       { id: "identity", name: "Identity", sens: 3, ex: "Names, UPNs, email addresses, phone numbers, user ids", locked: "dataPolicy.rules.identity" },
-      { id: "device", name: "Device", sens: 3, ex: "Device names, serial numbers, IMEI, MAC and IP addresses", locked: "dataPolicy.rules.device" },
+      { id: "device", name: "Device", sens: 3, ex: "Device names, serial numbers, IMEI, MAC and IP addresses", locked: "dataPolicy.rules.device", overridden: "Your own setting, Allow on Hosted from 3 November, is not applied: a setting here never loosens a rule IT set." },
       { id: "activity", name: "Activity", sens: 2, ex: "Sign-in times and locations, audit entries, app usage" },
       { id: "configuration", name: "Configuration", sens: 1, ex: "Policy and group names, settings, app names, compliance rules" },
       { id: "public", name: "Public", sens: 0, ex: "Microsoft Learn and web search results, public references" },
@@ -849,14 +952,17 @@
       if (c.locked) row.dataset.locked = "";
       const bars = [0, 1, 2, 3].map((i) => `<i class="${i < c.sens ? "on" : ""}"></i>`).join("");
       let html = `<div class="cls" role="rowheader"><div class="n"><span class="sens" title="Sensitivity">${bars}</span>${c.name}${c.locked ? '<svg width="12" height="12" style="color:var(--color-text-muted)" aria-label="Set by IT"><use href="#i-lock"/></svg>' : ""}</div><div class="ex">${c.ex}</div></div>`;
+      const lockId = `lock-${c.id}`;
       TIERS.forEach((t) => {
-        html += `<div role="cell"><span class="tlabel ${t}">${t === "confidential" ? "Confidential, no provider yet" : TIER_NAME[t]}</span><div class="cell" data-tier="${t}"><div class="acts3" role="group" aria-label="${c.name} on ${TIER_NAME[t]}">${["allow", "mask", "block"].map((a) => {
-          const dis = c.id === "credential" && a === "allow" && t === "hosted";
-          return `<button type="button" data-a="${a}" ${dis ? 'disabled aria-disabled="true" title="Credentials never reach a hosted model in clear text"' : ""}>${a[0].toUpperCase() + a.slice(1)}</button>`;
+        html += `<div role="cell"><span class="tlabel ${t}">${t === "confidential" ? "Confidential, no provider qualifies yet" : TIER_NAME[t]}</span><div class="cell" data-tier="${t}"><div class="acts3" role="group" aria-label="${c.name} on ${TIER_NAME[t]}">${["allow", "mask", "block"].map((a) => {
+          const never = c.id === "credential" && a === "allow" && t === "hosted";
+          if (never) return `<button type="button" data-a="${a}" data-why="never" disabled aria-disabled="true" aria-describedby="why-credential">Allow</button>`;
+          if (c.locked) return `<button type="button" data-a="${a}" data-why="locked" disabled aria-disabled="true" aria-describedby="${lockId}">${a[0].toUpperCase() + a.slice(1)}</button>`;
+          return `<button type="button" data-a="${a}">${a[0].toUpperCase() + a.slice(1)}</button>`;
         }).join("")}</div></div></div>`;
       });
-      if (c.id === "credential") html += `<div class="why r">Allow is not available on Hosted: credentials never reach a hosted model in clear text.</div>`;
-      if (c.locked) html += `<span class="lockline"><svg><use href="#i-lock"/></svg><span>Set by your IT department in policy.json, <code>${c.locked}</code></span></span>`;
+      if (c.id === "credential") html += `<div class="why r" id="why-credential">Allow is not available on Hosted: credentials never reach a hosted model in clear text.</div>`;
+      if (c.locked) html += `<span class="lockline" id="${lockId}"><svg><use href="#i-lock"/></svg><span>Locked. Set by your IT department in policy.json, <code>${c.locked}</code>.${c.overridden ? " " + c.overridden : ""}</span></span>`;
       row.innerHTML = html;
       matrix.appendChild(row);
     });
@@ -865,16 +971,115 @@
     foot.innerHTML = '<span class="key"><span class="sw" data-k="leaves"></span>Leaves this device in clear text</span><span class="key"><span class="sw" data-k="mask"></span>Masked before the call</span><span class="key"><span class="sw" data-k="block"></span>Blocked, the call does not happen</span><span class="r" id="changed"></span>';
     matrix.appendChild(foot);
 
+    // Strictness: allow < mask < block. Tightening applies at once; loosening waits for the dialog.
+    const RANK = { allow: 0, mask: 1, block: 2 };
+    const ACT = { allow: "Allow", mask: "Mask", block: "Block" };
+    const clsName = (id) => CLASSES.find((x) => x.id === id).name;
+    const scrim = document.getElementById("loosen");
+    const keepBtn = document.getElementById("loosen-keep");
+    const okBtn = document.getElementById("loosen-ok");
+    let pending = null, returnFocus = null;
+
+    const leaveText = (cls, tier, to) => {
+      const c = CLASSES.find((x) => x.id === cls);
+      const what = c.ex;
+      if (tier === "local") return { stays: true, text: `${what} stay on this device. Only a local model sees them${to === "allow" ? " unmasked" : ", with placeholders"}.` };
+      const where = tier === "hosted" ? "Claude Code and any other hosted model" : "an attested enclave";
+      if (to === "allow") return { stays: false, text: `${what} go to ${where} as they are. They leave this device.` };
+      return { stays: false, text: `Prompts with ${c.name.toLowerCase()} data, refused today, go to ${where} with each value replaced by a placeholder. The rest of each prompt leaves this device as it is.` };
+    };
+    function openLoosen(changes, title) {
+      pending = changes;
+      returnFocus = document.activeElement;
+      document.getElementById("loosen-t").textContent = title;
+      const body = document.getElementById("loosen-b");
+      body.innerHTML = changes.map((ch) => {
+        const l = leaveText(ch.cls, ch.tier, ch.to);
+        return `<p>${clsName(ch.cls)} on ${TIER_NAME[ch.tier]} changes from ${ACT[ch.from]} to ${ACT[ch.to]}.</p><p class="leave${l.stays ? " stays" : ""}">${l.text}</p>`;
+      }).join("") + `<p style="margin-top:10px">Nothing changes until you accept. The change is recorded in the local audit log.</p>`;
+      if (changes.length === 1) {
+        keepBtn.textContent = `Keep ${ACT[changes[0].from]}`;
+        okBtn.textContent = `${ACT[changes[0].to]} on ${TIER_NAME[changes[0].tier]}`;
+      } else { keepBtn.textContent = "Keep my rules"; okBtn.textContent = "Reset and loosen"; }
+      scrim.hidden = false;
+      scrim.querySelector(".dialog").scrollIntoView({ block: "center", behavior: "instant" });
+      keepBtn.focus();
+    }
+    function closeLoosen(apply) {
+      if (apply && pending) {
+        pending.forEach((ch) => { rules[ch.cls][ch.tier] = ch.to; logChange(ch); });
+        render();
+      }
+      pending = null; scrim.hidden = true;
+      if (returnFocus) returnFocus.focus();
+    }
+    function logChange(ch) {
+      const li = document.createElement("li");
+      li.style.cssText = "padding:9px 0;display:flex;gap:12px;flex-wrap:wrap";
+      li.innerHTML = `<span>${clsName(ch.cls)} on ${TIER_NAME[ch.tier]} changed from ${ACT[ch.from]} to ${ACT[ch.to]}${RANK[ch.to] < RANK[ch.from] ? ", after you confirmed" : ""}</span><span class="muted">by you, just now</span>`;
+      document.getElementById("changelog").prepend(li);
+    }
+    keepBtn.addEventListener("click", () => closeLoosen(false));
+    okBtn.addEventListener("click", () => closeLoosen(true));
+    scrim.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { e.preventDefault(); closeLoosen(false); }
+      if (e.key === "Tab") { // keep focus inside the dialog
+        const f = [keepBtn, okBtn];
+        const i = f.indexOf(document.activeElement);
+        e.preventDefault(); f[(i + (e.shiftKey ? f.length - 1 : 1)) % f.length].focus();
+      }
+    });
+
     matrix.addEventListener("click", (e) => {
       const b = e.target.closest(".acts3 button");
       if (!b || b.disabled) return;
-      const row = b.closest(".mrow");
-      if (row.hasAttribute("data-locked")) return;
+      const cls = b.closest(".mrow").dataset.cls;
       const tier = b.closest(".cell").dataset.tier;
-      rules[row.dataset.cls][tier] = b.dataset.a;
-      render();
+      const from = rules[cls][tier], to = b.dataset.a;
+      if (from === to) return;
+      const ch = { cls, tier, from, to };
+      if (RANK[to] > RANK[from]) { rules[cls][tier] = to; logChange(ch); render(); return; }
+      const name = clsName(cls).toLowerCase();
+      const title = to === "allow"
+        ? (tier === "local" ? `Allow ${name} data on local models without masking?` : `Send ${name} data to ${TIER_NAME[tier].toLowerCase()} models in clear text?`)
+        : `Mask ${name} data on ${TIER_NAME[tier].toLowerCase()} models instead of blocking it?`;
+      openLoosen([ch], title);
     });
-    document.getElementById("reset").addEventListener("click", () => { rules = structuredClone(DEFAULTS); render(); });
+    document.getElementById("reset").addEventListener("click", () => {
+      const loosen = [];
+      CLASSES.forEach((c) => { if (c.locked) return; TIERS.forEach((t) => {
+        const from = rules[c.id][t], to = DEFAULTS[c.id][t];
+        if (RANK[to] < RANK[from]) loosen.push({ cls: c.id, tier: t, from, to });
+        else if (RANK[to] > RANK[from]) { rules[c.id][t] = to; logChange({ cls: c.id, tier: t, from, to }); }
+      }); });
+      render();
+      if (loosen.length) openLoosen(loosen, `Reset to defaults and loosen ${loosen.length} ${loosen.length === 1 ? "rule" : "rules"}?`);
+    });
+
+    // Field classes: only the same or a higher sensitivity here; lower ones come from the IT policy file.
+    const SENS = Object.fromEntries(CLASSES.map((c) => [c.id, c.sens]));
+    const ORDER = ["credential", "identity", "device", "activity", "configuration", "public"];
+    document.querySelectorAll("#fields select").forEach((sel) => {
+      const from = sel.dataset.from;
+      sel.innerHTML = ORDER.map((id) => {
+        const lower = SENS[id] < SENS[from];
+        return `<option value="${id}" ${id === from ? "selected" : ""} ${lower ? "disabled" : ""}>${clsName(id)}${id === from ? " (now)" : lower ? " (IT policy file)" : ""}</option>`;
+      }).join("");
+      sel.addEventListener("change", () => {
+        const field = sel.getAttribute("aria-label").replace("Class for ", "");
+        document.getElementById("pickst").textContent = sel.value === from
+          ? `${field} stays ${clsName(from).toLowerCase()}.`
+          : `${field} is now ${clsName(sel.value).toLowerCase()}. Applied at once, because it is at least as sensitive as ${clsName(from).toLowerCase()}.`;
+      });
+    });
+    const cfOk = document.getElementById("cf-ok");
+    const cfSync = () => {
+      const v = document.querySelector("#cf-list input:checked").value;
+      cfOk.textContent = v === "identity" ? "Keep as identity" : `Classify as ${clsName(v).toLowerCase()}`;
+      cfOk.disabled = v === "identity";
+    };
+    document.getElementById("cf-list").addEventListener("change", cfSync);
+    cfSync();
     document.getElementById("tiersel").addEventListener("click", (e) => {
       const b = e.target.closest("button"); if (!b) return;
       previewTier = b.dataset.tier; render();
