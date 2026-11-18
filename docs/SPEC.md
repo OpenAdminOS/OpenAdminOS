@@ -458,7 +458,8 @@ Chat searches at the same embedding endpoint Settings checks (an
 timeout that covers reading the answer too. Its error names the server and the
 kind of failure only, never response text, because a local server can echo the
 question in it. Retrieval connects only to a loopback IP address over HTTP
-(127.0.0.0/8 or `[::1]`). A `localhost` name is never resolved, because the
+(127.0.0.0/8 or `[::1]`; an IPv4-mapped loopback address such as
+`[::ffff:127.0.0.1]` connects as its IPv4 literal). A `localhost` name is never resolved, because the
 operating system's resolver could answer with another machine: it is tried as
 127.0.0.1, then as `[::1]` when that refuses the connection, so an Ollama
 listening on IPv6 only still answers. An HTTPS endpoint named `localhost` is

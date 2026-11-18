@@ -20,6 +20,8 @@
 
   PR #206 review round 4 (2026-11-18). GPT-6.2-Sol on 054819de, no blocking findings. Fixed, each with a test that fails without the fix: rewriting `localhost` to 127.0.0.1 broke an Ollama listening on IPv6 only, so a localhost name is tried as 127.0.0.1 and then [::1], still without the resolver (an HTTPS endpoint named localhost needs a certificate for the address, recorded in SPEC); the numbered status reads could drop the only successful install reply when a Refresh started after it, so Refresh and install never run at once and the numbering is gone; a huge but finite query vector overflowed its norm and ranked an unrelated passage first, so the vector is scaled before scoring.
 
+  PR #206 review round 5 (2026-11-18). GPT-6.2-Sol on 8d776910, no blocking findings. Fixed: an `OLLAMA_HOST` of `[::ffff:127.0.0.1]`, which the endpoint rule accepts, was refused by retrieval, so an IPv4-mapped loopback address connects as its IPv4 literal (with a test); the timeout test now fires the budget only after the headers arrive and has its own deadline; the non-finite vector test sends 1e400, which parses as Infinity, instead of NaN, which JSON writes as null.
+
 - [x] Could not check row in Chat's model choice (branch `setup/could-not-check-row`, 2026-11-18). Request: the PR #191 follow-up. When a provider's check fails, Chat's model choice shows no row for LM Studio, Lemonade or Apple Intelligence, and Ollama shows "No model yet" instead of the failure.
 
   Merged as `6dc77828` on 2026-11-18.
