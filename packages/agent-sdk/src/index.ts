@@ -40,11 +40,26 @@ export interface ProviderSummary {
   installed?: boolean;
   models: string[];
   defaultModel?: string;
+  /** Display names for model ids the admin does not know them by, such as Copilot Fusion tiers. */
+  modelLabels?: Record<string, string>;
+  /** Models the provider offers that this account cannot use. Shown greyed out with the reason; never in `models`. */
+  unavailableModels?: UnavailableModel[];
   cli?: {
     binaryPath?: string;
     version?: string;
     state: "ready" | "check-required" | "not-installed" | "signed-out" | "access-denied" | "unsupported-version" | "request-failed";
   };
+}
+
+export interface UnavailableModel {
+  id: string;
+  /** One plain sentence, for example "Not included in your Copilot plan." */
+  reason: string;
+}
+
+/** What a model is called on screen: its label when the provider gives one, otherwise its id. */
+export function providerModelLabel(provider: Pick<ProviderSummary, "modelLabels"> | undefined, model: string): string {
+  return provider?.modelLabels?.[model] ?? model;
 }
 
 /** One provider check in the first-launch scan, as it resolves. */
