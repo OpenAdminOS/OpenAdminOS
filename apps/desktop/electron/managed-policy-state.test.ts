@@ -204,7 +204,7 @@ describe("managed policy: providers", () => {
       const [provider] = (await missing.store.getAppState()).providers;
       assert.equal(provider!.status, "error");
       assert.deepEqual(provider!.models, []);
-      assert.match(provider!.detail ?? "", /set the model llama3\.1:70b, which Ollama does not list/);
+      assert.match(provider!.detail ?? "", /set the model llama3\.1:70b, which Ollama does not list\. Install it, then refresh providers\./);
     } finally {
       await missing.close();
     }
@@ -226,7 +226,9 @@ describe("managed policy: providers", () => {
       const [probe] = scan.probes;
       assert.equal(probe?.state, "unavailable");
       assert.equal(probe.ready, false);
-      assert.match(probe.facts[0] ?? "", /Your IT department set the model missing-model, which Claude Code does not list/);
+      assert.match(probe.facts[0] ?? "", /Your IT department set the model missing-model, which Claude Code does not offer\. Ask IT to choose a model it offers, then refresh providers\./);
+      // A hosted tool's list is fixed: never told to install the model (PR #206 review round 3).
+      assert.doesNotMatch(probe.facts[0] ?? "", /Install it/);
       assert.equal((await fixture.store.getAppState()).providers[0]?.detail, probe.facts[0]);
     } finally {
       await fixture.close();

@@ -126,7 +126,7 @@ describe("first-launch model scan screen", () => {
   });
 
   it("disables a signed-in tool ruled out by policy with its reason and no Retry", async () => {
-    const reason = "Your IT department set the model missing-model, which Claude Code does not list.";
+    const reason = "Your IT department set the model missing-model, which Claude Code does not offer. Ask IT to choose a model it offers, then refresh providers.";
     const probes = [probe("anthropic", "Claude Code", "hosted", "claude --version, claude auth status", {
       state: "unavailable", ready: false, summary: "Unavailable", facts: [reason],
     })];
