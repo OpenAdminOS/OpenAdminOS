@@ -458,10 +458,14 @@ Chat searches at the same embedding endpoint Settings checks (an
 timeout that covers reading the answer too. Its error names the server and the
 kind of failure only, never response text, because a local server can echo the
 question in it. Retrieval connects only to a loopback IP address over HTTP
-(127.0.0.0/8 or `[::1]`): a `localhost` name becomes 127.0.0.1 before any
-connection, because the operating system's resolver could answer with another
-machine, and any other host name is refused. A slower status reply never
-replaces a newer one in Settings. A connection reset reads as a failed request with its
+(127.0.0.0/8 or `[::1]`). A `localhost` name is never resolved, because the
+operating system's resolver could answer with another machine: it is tried as
+127.0.0.1, then as `[::1]` when that refuses the connection, so an Ollama
+listening on IPv6 only still answers. An HTTPS endpoint named `localhost` is
+reached by address, so its certificate must cover the address. Any other host
+name is refused. Settings never runs Check for index and an index install at
+once, so neither reply replaces the other's. A query vector is scaled before
+scoring, so a huge but finite one cannot overflow and rank every passage as 0. A connection reset reads as a failed request with its
 code, not as a stopped Ollama. A vector with an entry that is not a finite
 number, or a model list with an entry without a name, is refused as invalid
 rather than scored or read as a missing model. If an embedding request fails, Chat records
