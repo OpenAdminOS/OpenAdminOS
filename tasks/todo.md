@@ -1,6 +1,18 @@
 # Current active plan
 
-- [ ] Could not check row in Chat's model choice (branch `setup/could-not-check-row`, 2026-11-18). Request: the PR #191 follow-up. When a provider's check fails, Chat's model choice shows no row for LM Studio, Lemonade or Apple Intelligence, and Ollama shows "No model yet" instead of the failure.
+- [ ] First-launch and Chat follow-ups from PR #204 (branch `setup/could-not-check-followups`, 2026-11-18).
+
+  Acceptance criteria
+  1. First launch shows a signed-in hosted tool whose IT-locked model is unusable as Unavailable, with the policy reason and no Retry. Copilot still runs only `--version`. The pinned scan commands test passes unchanged.
+  2. Chat shows failed embedding requests with the reason and recovery. A successful search with zero matches still says "No passages matched". Settings shows the embedding model's real status and says "Ollama not reachable" only for an unreachable Ollama.
+  3. When Retry makes the active provider ready and closes the model choice, Chat announces the outcome and focuses the composer. An IntuneChat test covers the transition.
+  4. A ready Ollama whose capability read was refused shows the reason in the scan's What ran and in Settings, Providers. Readiness stays the same.
+  5. Each new regression test fails with its fix temporarily reverted. Typecheck, runtime, Electron, renderer and script suites, `npm run docs:check`, `npm run qa` and `git diff --check` pass on Node 22.
+  6. SPEC.md and CHANGELOG.md [Unreleased] describe all four user-visible changes.
+
+- [x] Could not check row in Chat's model choice (branch `setup/could-not-check-row`, 2026-11-18). Request: the PR #191 follow-up. When a provider's check fails, Chat's model choice shows no row for LM Studio, Lemonade or Apple Intelligence, and Ollama shows "No model yet" instead of the failure.
+
+  Merged as `6dc77828` on 2026-11-18.
 
   Acceptance criteria:
   1. In Chat's model choice, every provider whose check failed (`checkFailed`) and that is not ready shows one row with the state Could not check, the check's reason (or "X did not answer. Retry to check it again.") and a Retry button, for local and hosted providers alike, the same rule as the first-launch scan.
