@@ -187,7 +187,7 @@ type NodeTone = "checking" | "ready" | "installed" | "muted" | "unknown" | "star
 function toneOf(probe: ModelScanProbe, starting: boolean): NodeTone {
   if (starting) return "starting";
   if (probe.state === "checking") return "checking";
-  if (probe.state === "could-not-check") return "unknown";
+  if (probe.state === "could-not-check" || probe.state === "unavailable") return "unknown";
   if (probe.state === "not-found") return "muted";
   return probe.ready ? "ready" : "installed";
 }
@@ -497,7 +497,7 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
   // reference enabled, question words leave the device for its host.
   const referenceHosts = chatToolHosts(state);
   const localLine = referenceHosts.length > 0 ? MODEL_SCAN_COPY.localWithReferences(deriveToolHostsCopy(referenceHosts)!.strip) : MODEL_SCAN_COPY.nothingLeaves;
-  const found = rows.filter((probe) => probe.state === "found").length;
+  const found = rows.filter((probe) => probe.state === "found" || probe.state === "unavailable").length;
 
   // Focus the heading when the screen opens and when the result settles, so
   // keyboard and screen reader users start from it.

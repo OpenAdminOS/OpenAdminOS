@@ -68,7 +68,7 @@ export function providerModelLabel(provider: Pick<ProviderSummary, "modelLabels"
 }
 
 /** One provider check in the first-launch scan, as it resolves. */
-export type ModelScanProbeState = "checking" | "found" | "not-found" | "could-not-check";
+export type ModelScanProbeState = "checking" | "found" | "not-found" | "could-not-check" | "unavailable";
 
 export interface ModelScanProbe {
   providerId: ProviderId;

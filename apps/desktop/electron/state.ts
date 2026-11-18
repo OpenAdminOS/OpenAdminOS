@@ -4116,6 +4116,12 @@ export class AppStateStore {
 
   /** The first-launch scan's checks, built on `checkProviderEntry`. */
   private async modelScanChecks(found: Map<ProviderId, ProviderSummary>): Promise<ModelScanCheck[]> {
+    const offer = (summary: ProviderSummary): ProviderSummary => {
+      // Keep the raw check for provider listing. Apply policy before offering a signed-in CLI.
+      // Copilot's installation-only result cannot establish whether its model is allowed by the account.
+      if (summary.isLocal || summary.cli?.state !== "ready") return summary;
+      return applyManagedPolicyToProviders([summary], this.managedPolicy)[0] ?? summary;
+    };
     return buildModelScanChecks({
       // The scan checks and offers only providers the IT policy file allows.
       catalog: providerCatalog.filter((provider) => managedProviderAllowed(this.managedPolicy, provider.id)),
@@ -4125,7 +4131,7 @@ export class AppStateStore {
           const listed = (await this.providerListFactory()).find((provider) => provider.id === providerId);
           if (!listed) throw new Error(`${providerId} is not listed.`);
           found.set(providerId, listed);
-          return listed;
+          return offer(listed);
         }
         const entry = providerCatalog.find((provider) => provider.id === providerId)!;
         // Azure OpenAI's check reads the saved configuration and its key from
@@ -4137,7 +4143,7 @@ export class AppStateStore {
           azure: async () => checkAzureOpenAI(entry, await this.getAzureOpenAIConfig()),
         });
         found.set(providerId, summary);
-        return summary;
+        return offer(summary);
       },
     });
   }

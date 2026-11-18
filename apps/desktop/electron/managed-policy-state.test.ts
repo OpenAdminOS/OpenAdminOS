@@ -210,6 +210,29 @@ describe("managed policy: providers", () => {
     }
   });
 
+  it("streams an unavailable scan result for a signed-in tool whose locked model is missing", async () => {
+    const fixture = await makeFixture({
+      fresh: true,
+      policy: await policyOf({ defaultProvider: "anthropic", defaultModel: "missing-model" }),
+      providers: () => readyProviders().map((provider) => provider.id === "anthropic"
+        ? { ...provider, models: ["sonnet"], cli: { version: "2.1.0", state: "ready" } }
+        : provider),
+    });
+    try {
+      const summaries: string[] = [];
+      const scan = await fixture.store.scanModels((probe) => summaries.push(probe.summary));
+      assert.deepEqual(summaries, ["Checking", "Unavailable"]);
+      assert.deepEqual(scan.outcome, { kind: "nothing" });
+      const [probe] = scan.probes;
+      assert.equal(probe?.state, "unavailable");
+      assert.equal(probe.ready, false);
+      assert.match(probe.facts[0] ?? "", /Your IT department set the model missing-model, which Claude Code does not list/);
+      assert.equal((await fixture.store.getAppState()).providers[0]?.detail, probe.facts[0]);
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("never passes a locked model to a Lemonade that lists no usable chat model", async () => {
     // Lemonade's list is filtered to local chat models: an empty list is not "the CLI picks".
     const fixture = await makeFixture({
