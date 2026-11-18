@@ -13,13 +13,21 @@
 // the expression is embedded in surrounding text the result is coerced to
 // string.
 
+import { classifyData, type ClassifiedSource, type PromptClassification } from "./data-classification.js";
 import { fenceTenantData } from "./tenant-data.js";
 
 const EXPRESSION_REGEX = /\{\{\s*([^}]+?)\s*\}\}/g;
 const STANDALONE_REGEX = /^\s*\{\{\s*([^}]+?)\s*\}\}\s*$/;
 
 export const PROMPT_INSTRUCTION_ROOTS = Symbol("promptInstructionRoots");
+export const TEMPLATE_GRAPH_DATA = Symbol("templateGraphData");
+export interface TemplateGraphData {
+  reads: PromptClassification["reads"][number][];
+  paths: WeakMap<object, string>;
+}
+
 export type TemplateContext = Record<string, unknown> & {
+  [TEMPLATE_GRAPH_DATA]?: TemplateGraphData;
   [PROMPT_INSTRUCTION_ROOTS]?: Record<string, unknown>;
 };
 
@@ -207,7 +215,7 @@ export function renderTemplate(input: string, ctx: TemplateContext): unknown {
 }
 
 /** Only model prompts fence interpolations; transforms and displayed results stay typed. */
-export function renderPromptTemplate(input: string, ctx: TemplateContext): string {
+export function renderPromptTemplate(input: string, ctx: TemplateContext, classified?: ClassifiedSource[]): string {
   return input.replace(EXPRESSION_REGEX, (_match, expr: string) => {
     const value = evaluateExpression(expr, ctx);
     const path = parseExpression(expr).path;
@@ -218,7 +226,12 @@ export function renderPromptTemplate(input: string, ctx: TemplateContext): strin
     const root = path.split(".")[0]!;
     if (ctx[PROMPT_INSTRUCTION_ROOTS]?.[root] === ctx[root] &&
       /^(?:settings\.|descriptor\.|ctx\.|task\.instructions$)/.test(path)) return text;
-    return fenceTenantData(text, `template:${path}`);
+    const source = `template:${path}`;
+    if (!classified) return fenceTenantData(text, source);
+    const graphPath = typeof value === "object" ? ctx[TEMPLATE_GRAPH_DATA]?.paths.get(value) : undefined;
+    const fenced = fenceTenantData(text, source, { classification: classifyData(value, { graphPath }) });
+    classified.push({ source, classification: fenced.classification });
+    return fenced.text;
   });
 }
 

@@ -1750,6 +1750,51 @@ every malicious instruction. Host-enforced write confirmation remains the real
 control over tenant changes, with typed confirmation for destructive actions.
 Local providers keep the same on-device data boundary.
 
+### Data policy: data classes and classification (2026-11-18)
+
+Classification runs on this device. Each field has one class, in descending
+sensitivity.
+
+1. **Credential** covers secrets that grant access, including recovery keys,
+   LAPS and device account passwords, client secrets and hints, tokens, shared
+   secrets, product keys and certificate key material.
+2. **Identity** covers names, UPNs, email addresses, phone numbers, user IDs,
+   and a person's sign-in IP and location.
+3. **Device** covers device names, IDs, serial numbers, IMEI, MEID, MAC addresses
+   and private IP addresses.
+4. **Activity** covers timestamps, statuses, results and app usage without the
+   identity of the person.
+5. **Configuration** covers tenant settings without personal data.
+6. **Public** covers reference material such as Microsoft Learn, web search and
+   public MCP results.
+
+The highest sensitivity wins when a field rule and a value detector both
+apply. An unknown Graph field or resource defaults to Identity. Public
+reference results start as Public and can be raised by detection.
+
+The [Graph field record](research/graph-field-classes.md) documents the observed
+and documented response shapes. Rules apply to the values that arrive,
+including fields Graph returns outside a requested projection. Paging and delta
+links count as Identity because continuation tokens can contain tenant values.
+Application secret hints and key material, Autopilot product keys and passwords,
+and Wi-Fi and VPN shared secrets count as Credential. Sign-in IP and location,
+Conditional Access user targets, and authentication method target IDs count as
+Identity. Free text such as descriptions, notes, publishers, assignment filter
+rules, redirect URIs, and audit old and new values can be raised by detectors.
+
+Text checks use recognizable patterns and, in Chat, the active organization's
+local index of known values. A name that the app has never seen cannot be
+detected as a name in free text. An unlabeled, opaque secret can also evade
+pattern matching. Structured field rules cover these values when their paths are
+known.
+
+Classification yields counts and JSON Pointer classes for scalar values, nulls
+and empty containers. In-memory prompt metadata pairs classifications with the
+existing fenced text and retains source read counts separately, since compaction
+or agent transforms can omit or reshape fields. This phase introduces no network
+requests and leaves prompts, provider selection, and sharing behavior as they
+were. Provider tiers, masking, audit decisions and UI are later phases.
+
 ### Intune Chat and local intelligence
 
 Intune Chat is the operating surface for exploratory tenant work. Agents remain

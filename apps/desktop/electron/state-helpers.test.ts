@@ -51,6 +51,22 @@ it("complete preload passes the old page/row caps and deduplicates IDs", async (
   assert.equal(requests,12); assert.equal(result.rows.length,1201); assert.equal(result.pageLimitReached,false);
 });
 
+it("classifies cache pages before discarding paging metadata or applying a row cap", async () => {
+  let requests = 0;
+  const graph = { request: async () => {
+    requests += 1;
+    return {
+      value: [{ productKey: "fixture-one" }, { productKey: "fixture-two" }],
+      "@odata.nextLink": "https://graph.microsoft.com/beta/deviceManagement/windowsAutopilotDeviceIdentities?$skiptoken=fixture",
+    };
+  } } as unknown as RunGraphApi;
+  const result = await fetchGraphCachePages(graph, { path: "/deviceManagement/windowsAutopilotDeviceIdentities" }, undefined, false, 1);
+  assert.equal(requests, 1);
+  assert.deepEqual(result.rows, [{ productKey: "fixture-one" }]);
+  assert.equal(result.classifications[0]?.counts.credential, 2);
+  assert.equal(result.classifications[0]?.counts.identity, 1);
+});
+
 it("exactly reaching the row cap on the last page is complete", async () => {
   const graph = {request:async()=>({value:Array.from({length:1000},(_,i)=>({id:String(i)}))})} as unknown as RunGraphApi;
   assert.equal((await fetchGraphCachePages(graph,{path:"/users"})).pageLimitReached,false);

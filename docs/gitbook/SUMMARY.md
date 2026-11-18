@@ -25,6 +25,7 @@
 
 - [Tenant Chat](features/intune-chat.md)
 - [Cache and Nova](features/cache-and-nova.md)
+- [Data policy](features/data-policy.md)
 - [Multi-tenant Chat](features/multi-tenant-intune-chat.md)
 - [Workspaces](features/workspaces.md)
 - [Changes and drift](features/changes.md)

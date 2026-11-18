@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./data-classification": {
+      "types": "./dist/data-classification.d.ts",
+      "import": "./dist/data-classification.js"
     }
   },
   "files": [

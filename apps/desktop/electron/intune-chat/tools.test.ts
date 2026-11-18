@@ -10,8 +10,16 @@ import {
   type RunGraphApi,
 } from "@openadminos/agent-sdk";
 
+import { hasGraphFieldClasses } from "@openadminos/runtime/data-classification";
+import { GRAPH_CACHE_RESOURCES, pathForResource } from "./planner.js";
 import { executeIntuneChatTool } from "./tools.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
+
+for (const { resource } of GRAPH_CACHE_RESOURCES) {
+  it(`has a field map for the ${resource} cache resource`, () => {
+    assert.ok(hasGraphFieldClasses(pathForResource(resource).path));
+  });
+}
 
 describe("Intune Chat read-only tools", () => {
   it("lists cache inventory and query_cache enforces row caps", async () => {

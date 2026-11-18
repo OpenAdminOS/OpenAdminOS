@@ -1,3 +1,4 @@
+import { countDataClasses, type PromptClassification } from "@openadminos/runtime/data-classification";
 import { createHash } from "node:crypto";
 import {
   OPENADMINOS_CLIENT_ID,
@@ -1068,8 +1069,10 @@ export async function fetchGraphCachePages(
   pages: number;
   pageLimitReached: boolean;
   totalCount?: number;
+  classifications: PromptClassification["reads"];
 }> {
   const rows: unknown[] = [];
+  const classifications: PromptClassification["reads"][number][] = [];
   let totalCount: number | undefined;
   let pages = 0;
   let nextRequest: GraphCacheRequestPage | undefined = request;
@@ -1097,6 +1100,8 @@ export async function fetchGraphCachePages(
       ...(signal ? { signal } : {}),
     });
     signal?.throwIfAborted();
+    const counts = countDataClasses(response, { graphPath: nextRequest.path });
+    classifications.push({ source: `graph:${nextRequest.path}`, counts });
     const page = unwrapGraphCollectionPage(response);
     if (totalCount === undefined && page.totalCount !== undefined) {
       totalCount = page.totalCount;
@@ -1142,6 +1147,7 @@ export async function fetchGraphCachePages(
   return {
     rows,
     pages,
+    classifications,
     // A final page that overflows the row cap without advertising a
     // nextLink would otherwise be reported as complete while rows were
     // dropped, which is a silent truncation.

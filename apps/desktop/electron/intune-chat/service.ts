@@ -4,6 +4,7 @@ import type { WebSearch } from "./web-search.js";
 import { voiceConversationContext, voiceInventoryAnswer, voiceAppPlatformCountAnswer, voiceDeviceSummaryAnswer, voiceResourcesForQuestion, compactVoiceAnswerPack, assertVoicePromptBudget, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
 import { randomUUID } from "node:crypto";
 import { NOVA_PROFILE_BLOCK_END, novaProfilePromptBlock, novaReasoningProfileByteLimit, type NovaProfilePromptInput } from "../nova-profile.js";
+import { countDataClasses, withPromptClassification, type PromptClassification } from "@openadminos/runtime/data-classification";
 import { fenceTenantData, withTenantDataOutputFilter } from "@openadminos/runtime";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -2349,17 +2350,18 @@ export class IntuneChatService {
         const system = buildIntuneChatSystemPrompt(provider?.isLocal === true);
         let model: string | undefined;
         // An answer that only promises work is asked again, at most twice; the last answer is kept.
+        const assembled = buildAnswerPrompt(answerPack, documentation);
         const content = await completeWithPromiseNudge(async (attempt) => {
-          const completion = await llm.complete({
+          const completion = await llm.complete(withPromptClassification({
             system,
             prompt: attempt,
             ...(selectedModel ? { model: selectedModel } : {}),
             temperature: 0.2,
             maxTokens: chatBudget.maxTokens,
-          });
+          }, assembled.classification));
           model = completion.model;
           return completion.text.trim();
-        }, buildAnswerPrompt(answerPack, documentation));
+        }, assembled.prompt);
         finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0 });
         return {
           content,
@@ -3023,21 +3025,21 @@ export class IntuneChatService {
         citations.addPassages(documentation);
         documentationSources = citations.sources;
         const finishAnswerStep = startAnswerStep(steps, answerModel);
-        const overhead = Buffer.byteLength(buildAnswerPrompt("", documentation)) + Buffer.byteLength(system);
+        const overhead = Buffer.byteLength(buildAnswerPrompt("", documentation).prompt) + Buffer.byteLength(system);
         if (options.voice) answerPack = compactVoiceAnswerPack(answerPack, voiceByteLimit - overhead);
-        const prompt = buildAnswerPrompt(answerPack, documentation);
+        const { prompt, classification } = buildAnswerPrompt(answerPack, documentation);
         if (options.voice) assertVoicePromptBudget(system, prompt, voiceByteLimit);
         // An answer that only promises work is asked again, at most twice; the last answer is kept.
         let attemptPrompt = prompt;
         for (let nudge = 0; ; nudge += 1) {
-          for await (const chunk of llm.stream({
+          for await (const chunk of llm.stream(withPromptClassification({
             system,
             prompt: attemptPrompt,
             ...(selectedModel ? { model: selectedModel } : {}),
             temperature: 0.2,
             maxTokens: chatBudget.maxTokens,
             signal: options.signal,
-          })) {
+          }, classification))) {
             if (isCancelled()) {
               break;
             }
@@ -4162,17 +4164,27 @@ function writeIntentBlockedMessage(
 function buildAnswerPrompt(
   answerPack: string,
   documentation: ReadonlyArray<{ file: string; title?: string; text: string }>,
-): string {
+): { prompt: string; classification: PromptClassification } {
   const pack = answerPack ? JSON.parse(answerPack) as Record<string, unknown> : {};
   const { question, instruction, ...evidence } = pack;
+  const source = "chat:answer-pack";
+  const { text, classification } = fenceTenantData(evidence, source, { classification: {} });
+  const blocks = Array.isArray(evidence.resources) ? evidence.resources : [];
+  const reads = GRAPH_CACHE_RESOURCES.flatMap(({ resource }) => {
+    const block = blocks.find((entry) => entry?.resource === resource);
+    if (!block || !Array.isArray(block.sampleRows)) return [];
+    const counts = countDataClasses(block.sampleRows, { graphPath: pathForResource(resource).path });
+    return [{ source: `cache:${resource}`, counts }];
+  });
+  const metadata = { fenced: [{ source, classification }], reads };
   const context = [
     `Admin question:\n${typeof question === "string" ? question : ""}`,
     "Retrieved tenant context:",
-    fenceTenantData(evidence, "chat:answer-pack"),
+    text,
     typeof instruction === "string" ? instruction : "",
   ].join("\n\n");
   if (documentation.length === 0) {
-    return `Use this retrieved tenant context to answer the admin.\n\n${context}`;
+    return { prompt: `Use this retrieved tenant context to answer the admin.\n\n${context}`, classification: metadata };
   }
   const passages = documentation
     .map(
@@ -4180,7 +4192,7 @@ function buildAnswerPrompt(
         `[${index + 1}] ${chunk.title ? `${chunk.title} - ` : ""}${chunk.file}\n${chunk.text.trim()}`,
     )
     .join("\n\n");
-  return [
+  const prompt = [
     "Microsoft documentation passages from the local docs index on this device. Call them the local docs index, never Microsoft Learn:",
     passages,
     "",
@@ -4189,4 +4201,5 @@ function buildAnswerPrompt(
     "Retrieved tenant context, which is this tenant's actual state:",
     context,
   ].join("\n");
+  return { prompt, classification: metadata };
 }

@@ -14,6 +14,7 @@ import type {
 import { assertWritePlanLimits, WritePlanLimitError } from "@openadminos/agent-sdk";
 import { DRY_RUN_WRITE_ERROR } from "./dry-run.js";
 import { confirmationPhraseProblem } from "./confirmation-phrase.js";
+import { countDataClasses, withPromptClassification, type PromptClassification } from "./data-classification.js";
 import { fenceTenantData, withTenantDataInstructions, withTenantDataOutputFilter } from "./tenant-data.js";
 
 export interface SandboxBrokerAgentPolicy {
@@ -55,6 +56,7 @@ class SandboxBrokerError extends Error {
 
 export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
   let writePlan: WritePlan | undefined;
+  const reads: PromptClassification["reads"][number][] = [];
 
   return {
     async handle(request) {
@@ -65,9 +67,9 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
         assertBaseRequest(request);
         switch (request.method) {
           case "graph.request":
-            return ok(id, await handleGraphRequest(input, request.params));
+            return ok(id, await handleGraphRequest(input, request.params, reads));
           case "llm.complete":
-            return ok(id, await handleLlmRequest(input, request.params));
+            return ok(id, await handleLlmRequest(input, request.params, reads));
           case "connector.invoke":
             return ok(id, await handleConnectorRequest(input, request.params));
           case "write.plan":
@@ -98,6 +100,7 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
 async function handleGraphRequest(
   input: SandboxBrokerInput,
   params: GraphRequestInput,
+  reads: PromptClassification["reads"][number][],
 ): Promise<unknown> {
   const request = normalizeGraphRequest(params);
   if (request.method !== "GET") {
@@ -126,12 +129,16 @@ async function handleGraphRequest(
     );
   }
   validateSelectSubset(operation, request);
-  return await input.ctx.graph.request(request);
+  const response = await input.ctx.graph.request(request);
+  const counts = countDataClasses(response, { graphPath: request.path });
+  reads.push({ source: `graph:${request.path}`, counts });
+  return response;
 }
 
 async function handleLlmRequest(
   input: SandboxBrokerInput,
   params: Omit<LlmOptions, "signal">,
+  reads: PromptClassification["reads"],
 ): Promise<unknown> {
   if (!input.ctx.llm.available) {
     throw new SandboxBrokerError(
@@ -155,8 +162,10 @@ async function handleLlmRequest(
     );
   }
 
-  const options: LlmOptions = {
-    prompt: fenceTenantData(params.prompt, `script:${input.agent.slug}:prompt`),
+  const source = `script:${input.agent.slug}:prompt`;
+  const { text: prompt, classification } = fenceTenantData(params.prompt, source, { classification: {} });
+  const options: LlmOptions = withPromptClassification({
+    prompt,
     // The system prompt is the agent author's code, reviewed at install, so it
     // stays an instruction. The prompt is where scripts interpolate tenant
     // records, so the whole prompt is fenced as data.
@@ -174,7 +183,7 @@ async function handleLlmRequest(
       ? { temperature: params.temperature }
       : {}),
     ...(typeof params.maxTokens === "number" ? { maxTokens: params.maxTokens } : {}),
-  };
+  }, { fenced: [{ source, classification }], reads: [...reads] });
   return await withTenantDataOutputFilter(input.ctx.llm).complete(options);
 }
 

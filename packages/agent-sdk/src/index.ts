@@ -4462,6 +4462,14 @@ export interface GraphRequestInput {
   signal?: AbortSignal;
 }
 
+// TODO(ugur): Should the public SDK keep DataClass and ClassifiedCounts as the policy types?
+export const DATA_CLASSES_BY_SENSITIVITY = [
+  "credential", "identity", "device", "activity", "configuration", "public",
+] as const;
+
+export type DataClass = (typeof DATA_CLASSES_BY_SENSITIVITY)[number];
+export type ClassifiedCounts = Record<DataClass, number>;
+
 export interface LlmOptions {
   prompt: string;
   system?: string;

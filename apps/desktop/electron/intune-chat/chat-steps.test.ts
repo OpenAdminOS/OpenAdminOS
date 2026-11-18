@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 
 import { DEFAULT_GRAPH_READ_SCOPE_NAMES, type IntuneChatStep, type RunLlmApi, type TenantRecord } from "@openadminos/agent-sdk";
 
+import { getPromptClassification } from "@openadminos/runtime/data-classification";
 import { numberedMcpResults, runAgenticChat, type RunAgenticChatInput } from "./agentic-loop.js";
 import {
   ChatStepRecorder,
@@ -478,6 +479,47 @@ function learnContext(call: McpChatContext["call"]): McpChatContext {
 }
 
 const callLearn = JSON.stringify({ tool: learnTool.name, params: { query: "Defender for Endpoint on macOS" } });
+
+it("classifies public MCP observations and raises recognizable tenant values", async () => {
+  await withStore(async (store) => {
+    let calls = 0;
+    const mcp = learnContext(async () => {
+      calls += 1;
+      return {
+        text: "See Microsoft Learn. Contact Synthetic Person for details.",
+        structured: {
+          title: "Microsoft Learn",
+          url: "https://learn.microsoft.com/example",
+          excerpt: "Contact Synthetic Person for details.",
+          email: "user@example.invalid",
+        },
+        truncated: false,
+      };
+    });
+    mcp.tenantValues.add("Synthetic Person", "name");
+    const llm: RunLlmApi = {
+      available: true,
+      async complete(options) {
+        if (isMcpQueryWriterRequest(options.system)) {
+          return { text: '{"query":"Defender for Endpoint on macOS"}', model: "test" };
+        }
+        if (calls === 0) return { text: callLearn, model: "test" };
+        const classification = getPromptClassification(options);
+        const source = "third-party:learn.microsoft.com";
+        assert.ok(classification?.reads.some(entry => entry.source === source && entry.counts.public > 0));
+        assert.ok(classification?.reads.some(entry => entry.source === source && entry.counts.identity > 0));
+        assert.equal(classification?.fenced.find(entry => entry.source === source)?.classification.classes[""], "identity");
+        assert.match(options.prompt, /Synthetic Person/);
+        assert.doesNotMatch(options.prompt, /promptClassification/);
+        return { text: '{"final":true,"answer":"Reviewed."}', model: "test" };
+      },
+      async *stream() {},
+    };
+    const result = await runAgenticChat(loopInput(store, llm, mcp, { questionKind: "docs" }));
+    assert.equal(result.ok, true);
+    assert.equal(calls, 1);
+  });
+});
 
 describe("agentic loop sources", () => {
   it("offers no tenant tools for a docs question, and upgrades it to mixed with a refresh when the model calls one", async () => {

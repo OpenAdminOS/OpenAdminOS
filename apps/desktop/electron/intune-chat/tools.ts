@@ -16,6 +16,9 @@ import type {
 
 import { GRAPH_CACHE_LOG_WINDOW_DAYS, graphAccessDenialFromError, graphAccessDenialText, isGraphCacheLogResource, missingServiceCopy, omittedSnapshotsCopy } from "@openadminos/agent-sdk";
 import { fenceTenantData } from "@openadminos/runtime";
+import {
+  classifyData, countDataClasses, PRIVATE_PATTERN, type ClassificationOptions, type ClassifiedSource, type PromptClassification,
+} from "@openadminos/runtime/data-classification";
 
 import { lookupEndpoint, searchEndpoints } from "../graph-catalog.js";
 import { mcpHost, type McpCatalogEntry, type McpItemIdForm, type McpItemIdRule, type McpResultFormat, type McpResultShape } from "../mcp/catalog.js";
@@ -66,6 +69,8 @@ export interface IntuneChatToolDefinition {
 export interface IntuneChatToolExecution {
   result: unknown;
   trace: IntuneChatToolTraceEntry;
+  classification?: ClassifiedSource;
+  reads?: PromptClassification["reads"];
 }
 
 /** A tool from an installed, enabled MCP server, as offered to the model. */
@@ -883,8 +888,10 @@ export async function executeIntuneChatTool(
   // An MCP call is traced with the params it wrote and checked, never the model's.
   const written: { args?: Record<string, unknown> } = {};
   const traceParams = () => (isMcpChatToolName(tool) ? written.args ?? {} : params ?? {});
+  const reads: PromptClassification["reads"][number][] = [];
   try {
-    const result = await executeToolUnchecked(ctx, tool, params, mcpHooks, written);
+    const result = await executeToolUnchecked(ctx, tool, params, mcpHooks, written, reads);
+    const classification = classifyToolResult(ctx, tool, result, mcpSource?.host);
     // Tenant values this answer has seen can never leave in a later MCP query.
     if (TENANT_RESULT_TOOLS.has(tool)) {
       if (ctx.tenantObservations) collectTenantValues(result, ctx.tenantObservations);
@@ -989,7 +996,7 @@ export async function executeIntuneChatTool(
       completedAt: new Date(completedAtMs).toISOString(),
       ...(softError ? { error: softError } : {}),
     };
-    return { result, trace };
+    return { result, trace, ...(classification ? { classification } : {}), ...(reads.length ? { reads } : {}) };
   } catch (caught) {
     const completedAtMs = Date.now();
     const message = caught instanceof Error ? caught.message : String(caught);
@@ -1016,15 +1023,66 @@ export async function executeIntuneChatTool(
   }
 }
 
+function classifyToolResult(
+  ctx: IntuneChatToolContext,
+  tool: IntuneChatInvestigationToolName,
+  result: unknown,
+  mcpHost?: string,
+): ClassifiedSource | undefined {
+  const record = (result ?? {}) as Record<string, unknown>;
+  const identityIndex = classificationIdentityIndex(ctx);
+  if (tool === "query_cache") {
+    const resource = record.resource as GraphCacheResourceKind;
+    const graphPath = pathForResource(resource).path;
+    const rows = (record.rows as { row: unknown }[]).map(({ row }) => row);
+    return { source: `cache:${resource}`, classification: classifyData(rows, { graphPath, identityIndex }) };
+  }
+  if (tool === "graph_get") {
+    const graphPath = String(record.path);
+    return { source: `graph:${graphPath}`, classification: classifyData(record.rows ?? record.value ?? record.valuePreview, { graphPath, identityIndex }) };
+  }
+  if (mcpHost || tool === "web_search") {
+    return {
+      source: mcpHost ? `third-party:${mcpHost}` : "web:search",
+      classification: classifyData(result, { publicReference: true, identityIndex }),
+    };
+  }
+  return undefined;
+}
+
+/** A lazy local index for classification, including existing egress identity sources. */
+export function classificationIdentityIndex(ctx: IntuneChatToolContext): NonNullable<ClassificationOptions["identityIndex"]> {
+  const terms = ctx.mcp?.privateTerms ?? ctx.privateTerms;
+  let indexes: (TenantValueIndex | undefined)[] | undefined;
+  return {
+    matches(text) {
+      if (!indexes) {
+        const privateTerms = new TenantValueIndex();
+        if (terms) privateTerms.addAll(terms.tokens);
+        let cached: TenantValueIndex | undefined;
+        try {
+          cached = (ctx.mcp?.cachedTenantValues ?? ctx.cachedTenantValues)?.();
+        } catch {
+          // The cache can be unavailable. The other detectors still classify the result.
+        }
+        indexes = [privateTerms, cached, ctx.mcp?.tenantValues, ctx.tenantObservations];
+      }
+      return indexes.some(index => index?.matches(text)) ||
+        (terms !== undefined && containsPrivateTerm(text, terms.compact));
+    },
+  };
+}
+
 function executeToolUnchecked(
   ctx: IntuneChatToolContext,
   tool: IntuneChatInvestigationToolName,
   params: unknown,
   mcpHooks: McpCallHooks | undefined,
   written: { args?: Record<string, unknown> },
+  reads: PromptClassification["reads"][number][],
 ): Promise<unknown> {
   ctx.signal?.throwIfAborted();
-  if (isMcpChatToolName(tool)) return executeMcpTool(ctx, tool, mcpHooks, written);
+  if (isMcpChatToolName(tool)) return executeMcpTool(ctx, tool, mcpHooks, written, reads);
   if (isSplashtopReadTool(tool)) {
     if (!ctx.splashtop || !ctx.splashtop.tools.includes(tool)) {
       return Promise.reject(new Error("Splashtop is not connected for this organization, or its token does not reach this data. Connect or test it on Connections."));
@@ -1045,7 +1103,7 @@ function executeToolUnchecked(
     case "find_graph_endpoint":
       return Promise.resolve(findGraphEndpoint(ctx, params));
     case "graph_get":
-      return graphGet(ctx, params);
+      return graphGet(ctx, params, reads);
     case "refresh_resource":
       return refreshResource(ctx, params);
     case "query_drift":
@@ -1089,9 +1147,6 @@ function containsPrivateTerm(text: string, terms: readonly string[]): boolean {
     return compactTerm.length >= 5 && compactText.includes(compactTerm);
   });
 }
-
-/** Email addresses, GUIDs with or without hyphens, IPv4 addresses and credential prefixes. Run on canonical text. */
-const PRIVATE_PATTERN = /\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b|\b[0-9a-f]{32}\b|\b(?:\d{1,3}\.){3}\d{1,3}\b|\b(?:sk-proj-|bearer\s)/i;
 
 /**
  * Whether text holds tenant data by the same rules as the MCP egress
@@ -1188,7 +1243,13 @@ function canonicalMcpArgs(entry: McpChatTool, args: Record<string, unknown>, ref
   return { args: out, checked };
 }
 
-async function executeMcpTool(ctx: IntuneChatToolContext, tool: McpChatToolName, hooks: McpCallHooks | undefined, written: { args?: Record<string, unknown> }): Promise<unknown> {
+async function executeMcpTool(
+  ctx: IntuneChatToolContext,
+  tool: McpChatToolName,
+  hooks: McpCallHooks | undefined,
+  written: { args?: Record<string, unknown> },
+  reads: PromptClassification["reads"][number][],
+): Promise<unknown> {
   const entry = ctx.mcp?.tools.find((candidate) => candidate.name === tool);
   if (!ctx.mcp || !entry) throw new Error(`${tool} is not an installed MCP tool. Use only the tools listed in this session.`);
   // The params the model wrote are never sent: it may have read tenant data.
@@ -1239,6 +1300,11 @@ async function executeMcpTool(ctx: IntuneChatToolContext, tool: McpChatToolName,
     if (caught instanceof McpHostError && !caught.sent) throw new Error(caught.message);
     throw new McpCallFailedError(caught instanceof Error ? caught.message : String(caught), caught instanceof McpHostError && caught.code === "tool-error");
   }
+  const counts = countDataClasses({ text: result.text, structured: result.structured }, {
+    publicReference: true,
+    identityIndex: classificationIdentityIndex(ctx),
+  });
+  reads.push({ source: `third-party:${entry.host}`, counts });
   const read = readMcpResult(result.text, {
     args,
     host: entry.host,
@@ -1476,7 +1542,11 @@ function findGraphEndpoint(ctx: IntuneChatToolContext, params: unknown): unknown
   };
 }
 
-async function graphGet(ctx: IntuneChatToolContext, params: unknown): Promise<unknown> {
+async function graphGet(
+  ctx: IntuneChatToolContext,
+  params: unknown,
+  reads: PromptClassification["reads"][number][],
+): Promise<unknown> {
   const method = stringParam(params, "method") ?? "GET";
   if (method.toUpperCase() !== "GET") {
     throw new Error("graph_get is read-only. Only GET is accepted.");
@@ -1499,9 +1569,13 @@ async function graphGet(ctx: IntuneChatToolContext, params: unknown): Promise<un
     ...(Object.keys(query).length > 0 ? { query } : {}),
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
   };
+  const identityIndex = classificationIdentityIndex(ctx);
   const requestPage = async (input: GraphRequestInput): Promise<unknown> => {
     try {
-      return await graph.request({ ...input, ...(ctx.signal ? { signal: ctx.signal } : {}) });
+      const data = await graph.request({ ...input, ...(ctx.signal ? { signal: ctx.signal } : {}) });
+      const counts = countDataClasses(data, { graphPath: input.path, identityIndex });
+      reads.push({ source: `graph:${input.path}`, counts });
+      return data;
     } catch (error) {
       const denial = graphAccessDenialFromError(error, { path, method: "GET", requiredScopes: validation.scopes });
       if (!denial) throw error;
