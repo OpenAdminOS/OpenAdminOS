@@ -20,7 +20,7 @@ export const CHAT_COPY = {
 /** Chat with a model and nothing connected, and the inline model choice (SPEC.md 4a, 2026-11-08). */
 export const FIRST_RUN_CHAT_COPY = {
   homeTitle: "What are you working on?",
-  modelReadyAfterRetry: (name: string) => `${name} is ready. You can send a message.`,
+  modelReadyAfterChoice: (name: string) => `${name} is ready. You can send a message.`,
   homeSubtitle:
     "Ask about Intune, Entra, Defender, macOS management, KQL or PowerShell. Questions about your own devices and users need a connected service.",
   startersLabel: "Starter questions",

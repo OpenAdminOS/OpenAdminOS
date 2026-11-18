@@ -304,6 +304,49 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
     expect(elsewhere).toHaveFocus();
   });
 
+  it("announces readiness and focuses the composer when Start or Scan again closes the model choice (PR #206 review round 1, Muse)", async () => {
+    const user = userEvent.setup();
+    const ready = mockProviders.find((provider) => provider.id === "ollama")!;
+    const stopped = mockProviders.map((provider) => provider.id === "ollama"
+      ? { ...provider, status: "available" as const, installed: true, models: [], defaultModel: undefined }
+      : provider);
+    let state = guestState({ providers: stopped, activeProviderId: "ollama" });
+    const nowReady = () => {
+      state = { ...state, providers: stopped.map((provider) => provider.id === "ollama" ? ready : provider) };
+    };
+    const startLocalRuntime = vi.fn(async () => {
+      nowReady();
+      return { started: true };
+    });
+    const bridge = makeMockBridge({
+      getAppState: vi.fn(async () => state),
+      startLocalRuntime,
+      setActiveProvider: vi.fn(async (id: ProviderSummary["id"]) => ({ ...state, activeProviderId: id })),
+    }, state);
+    const view = renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+    await user.click(await screen.findByRole("button", { name: "Start Ollama" }));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: FIRST_RUN_CHAT_COPY.modelChoiceTitle })).toBeNull());
+    expect(startLocalRuntime).toHaveBeenCalledWith("ollama");
+    expect(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel })).toHaveFocus();
+    expect(screen.getByText("Ollama is ready. You can send a message.")).toHaveAttribute("role", "status");
+    view.unmount();
+
+    // Scan again: LM Studio without a loaded model, which then has one.
+    const lmReady = { ...mockProviders.find((provider) => provider.id === "lm-studio")!, status: "connected" as const, installed: true, models: ["qwen3-8b"], defaultModel: "qwen3-8b" };
+    const lmEmpty = { ...lmReady, models: [], defaultModel: undefined };
+    state = guestState({ providers: mockProviders.map((provider) => provider.id === "lm-studio" ? lmEmpty : provider), activeProviderId: "lm-studio" });
+    const recheckProvider = vi.fn(async () => {
+      state = { ...state, providers: state.providers.map((provider) => provider.id === "lm-studio" ? lmReady : provider) };
+    });
+    const rescanBridge = makeMockBridge({ getAppState: vi.fn(async () => state), recheckProvider }, state);
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge: rescanBridge });
+    await user.click(await screen.findByRole("radio", { name: /^LM Studio/ }));
+    await user.click(screen.getByRole("button", { name: "Scan again" }));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: FIRST_RUN_CHAT_COPY.modelChoiceTitle })).toBeNull());
+    expect(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel })).toHaveFocus();
+    expect(screen.getByText("LM Studio is ready. You can send a message.")).toHaveAttribute("role", "status");
+  });
+
   it("offers starters for what was connected, one line per service (mockup 32, section B)", async () => {
     const user = userEvent.setup();
     const base = createMockAppState();

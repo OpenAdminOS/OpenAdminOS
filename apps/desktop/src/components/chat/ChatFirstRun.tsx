@@ -40,12 +40,13 @@ export function ModelChoice({
   providers,
   activeProviderId,
   onSelectProvider,
-  onRetryChecked,
+  onChoiceDone,
 }: {
   providers: readonly ProviderSummary[];
   activeProviderId: ProviderId;
   onSelectProvider: (id: ProviderId) => Promise<void>;
-  onRetryChecked?: (id: ProviderId) => void;
+  /** A Retry, Scan again or primary action finished for this provider: the choice may close, so Chat takes over focus. */
+  onChoiceDone?: (id: ProviderId) => void;
 }) {
   const navigate = useNavigate();
   const { refresh } = useAppState();
@@ -116,7 +117,7 @@ export function ModelChoice({
     try {
       const checked = await checkAgain(option.providerId);
       retried.current = { providerId: option.providerId, name: option.name, failed: !checked };
-      if (checked) onRetryChecked?.(option.providerId);
+      if (checked) onChoiceDone?.(option.providerId);
     } finally {
       setRetrying(null);
     }
@@ -132,7 +133,7 @@ export function ModelChoice({
       // LM Studio runs without a loaded model: check the providers again once one is loaded.
       setWorking(option.providerId);
       try {
-        await checkAgain(option.providerId);
+        if (await checkAgain(option.providerId)) onChoiceDone?.(option.providerId);
       } finally {
         setWorking(null);
       }
@@ -149,6 +150,7 @@ export function ModelChoice({
         }
       }
       await onSelectProvider(option.providerId);
+      onChoiceDone?.(option.providerId);
     } catch (caught) {
       setErrors((all) => ({ ...all, [option.providerId]: caught instanceof Error ? caught.message : String(caught) }));
     } finally {

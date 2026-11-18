@@ -298,7 +298,7 @@ function IntuneChatContent() {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
-  const [retriedProviderId, setRetriedProviderId] = useState<ProviderId | null>(null);
+  const [choiceDoneProviderId, setChoiceDoneProviderId] = useState<ProviderId | null>(null);
   const [modelReadyAnnouncement, setModelReadyAnnouncement] = useState("");
   const sendInFlightRef = useRef(false);
   const activeStreamIdRef = useRef<string | null>(null);
@@ -1743,18 +1743,18 @@ function IntuneChatContent() {
     if (!modelReady) setModelReadyAnnouncement("");
   }, [modelReady]);
 
-  // The model choice can unmount as soon as the refreshed provider is ready.
+  // The model choice can unmount as soon as the provider is ready, after a Retry, Scan again, Start or Use.
   // The Chat home keeps the live region and composer available across that change.
   useEffect(() => {
-    if (!retriedProviderId) return;
-    setRetriedProviderId(null);
-    if (homeOpen && !activeTenant && modelReady && provider?.id === retriedProviderId) {
-      setModelReadyAnnouncement(FIRST_RUN_CHAT_COPY.modelReadyAfterRetry(provider.name));
+    if (!choiceDoneProviderId) return;
+    setChoiceDoneProviderId(null);
+    if (homeOpen && !activeTenant && modelReady && provider?.id === choiceDoneProviderId) {
+      setModelReadyAnnouncement(FIRST_RUN_CHAT_COPY.modelReadyAfterChoice(provider.name));
       // Only when focus went down with the closed choice: an admin who moved on keeps their place.
       const active = document.activeElement;
       if (!active || active === document.body) composerRef.current?.focus();
     }
-  }, [retriedProviderId, homeOpen, activeTenant, modelReady, provider]);
+  }, [choiceDoneProviderId, homeOpen, activeTenant, modelReady, provider]);
 
   const calmTopBar = shellChrome ? (
     <>
@@ -1869,7 +1869,7 @@ function IntuneChatContent() {
                   providers={state.providers}
                   activeProviderId={state.activeProviderId}
                   onSelectProvider={setActiveProvider}
-                  onRetryChecked={setRetriedProviderId}
+                  onChoiceDone={setChoiceDoneProviderId}
                 />
               </div>
             ) : null}
