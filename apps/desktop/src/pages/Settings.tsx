@@ -743,7 +743,7 @@ function ProviderRow({
               <ProviderFact label="Executable" value={provider.cli.binaryPath ?? "Not detected"} />
             </dl>
           ) : null}
-          {implemented && installedModels.length > 0 ? (
+          {implemented && (installedModels.length > 0 || (provider.unavailableModels?.length ?? 0) > 0) ? (
             <div className="mt-4">
               <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-text)]">
                 Models
@@ -780,7 +780,7 @@ function ProviderRow({
                   {providerModelLabel(provider, unavailable.id)}: {unavailable.reason}
                 </p>
               ))}
-              {provider.models.some((model) => modelTrustNote(provider.id, model)) ? (
+              {[...provider.models, ...(provider.unavailableModels ?? []).map((entry) => entry.id)].some((model) => modelTrustNote(provider.id, model)) ? (
                 <p className="mt-2 max-w-[720px] text-sm leading-5 text-[var(--color-text-soft)]">{COPILOT_FUSION_DETAIL}</p>
               ) : null}
             </div>

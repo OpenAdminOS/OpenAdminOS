@@ -97,16 +97,23 @@ export function promptsGoTo(provider: Pick<ProviderSummary, "name"> & Partial<Pi
 }
 
 /**
- * Copilot Fusion picks the models per prompt and can have one draft and
- * others review, so a Fusion entry says that more than one model may see it.
+ * What a Copilot Fusion entry says about who sees the prompt. GitHub picks
+ * the models: Standard uses one per task, High and Max can have one model
+ * draft and others review it.
  */
+const FUSION_NOTES: Readonly<Record<string, string>> = {
+  "fusion-standard": "GitHub picks the model for each prompt",
+  "fusion-high": "Several models may see each prompt",
+  "fusion-max": "Several models may see each prompt",
+};
+
 export function modelTrustNote(providerId: string, model: string): string | undefined {
-  return providerId === "copilot" && model.startsWith("fusion-") ? "Several models may see each prompt" : undefined;
+  return providerId === "copilot" && Object.hasOwn(FUSION_NOTES, model) ? FUSION_NOTES[model] : undefined;
 }
 
 /** Settings' Copilot details, under the models, when Fusion is offered. */
 export const COPILOT_FUSION_DETAIL =
-  "Copilot Fusion chooses the models for each prompt. For harder prompts one model drafts and others review, so several models can see the prompt, and each one is billed at its own rate.";
+  "Copilot Fusion chooses the models for each prompt from a pool GitHub can change. Standard uses one model per task. High and Max can have one model draft and others review, so several models can see the prompt. Each model is billed at its own rate.";
 
 /** A CLI that decides its own channel: name the tool, not a company, as where prompts go. */
 export function sendsThroughTool(provider: Partial<Pick<ProviderSummary, "id">>): boolean {

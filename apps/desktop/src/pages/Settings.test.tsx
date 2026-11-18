@@ -169,7 +169,7 @@ describe("Settings provider section", () => {
     const max = screen.getByRole("button", { name: "Copilot Fusion Max" });
     expect(max).toBeDisabled();
     expect(max).toHaveAccessibleDescription("Copilot Fusion Max: Not included in your Copilot plan.");
-    expect(screen.getByText(/several models can see the prompt, and each one is billed at its own rate/)).toBeInTheDocument();
+    expect(screen.getByText(/Standard uses one model per task\. High and Max can have one model draft and others review/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Copilot Fusion Standard" }));
     await waitFor(() => expect(bridge.setActiveModel).toHaveBeenCalledWith("copilot", "fusion-standard"));
   });

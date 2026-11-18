@@ -17,3 +17,23 @@ it('Escape closes per-run model choices and returns focus without starting a run
   expect(trigger).toHaveFocus();
   expect(onRun).not.toHaveBeenCalled();
 });
+
+it('names Copilot Fusion tiers, says who sees the prompt, and never runs a tier the plan lacks', async () => {
+  const user = userEvent.setup();
+  const onRun = vi.fn();
+  const copilot = {
+    id: 'copilot', name: 'GitHub Copilot CLI', description: '', isLocal: false, status: 'connected', models: ['fusion-standard', 'fusion-high'],
+    modelLabels: { 'fusion-high': 'Copilot Fusion High', 'fusion-max': 'Copilot Fusion Max' },
+    unavailableModels: [{ id: 'fusion-max', reason: 'Not included in your Copilot plan.' }],
+  } as ProviderSummary;
+  render(<RunWithMenu providers={[copilot]} activeProviderId="copilot" onRun={onRun} />);
+  await user.click(screen.getByRole('button', { name: 'Choose provider or model for this run' }));
+  expect(screen.getByRole('button', { name: /Copilot Fusion High/ })).toHaveTextContent('Several models may see each prompt');
+  const max = screen.getByRole('button', { name: /Copilot Fusion Max/ });
+  expect(max).toHaveAttribute('aria-disabled', 'true');
+  expect(max).toHaveTextContent('Not included in your Copilot plan.');
+  await user.click(max);
+  expect(onRun).not.toHaveBeenCalled();
+  await user.click(screen.getByRole('button', { name: /Copilot Fusion High/ }));
+  expect(onRun).toHaveBeenCalledWith({ providerId: 'copilot', model: 'fusion-high' });
+});

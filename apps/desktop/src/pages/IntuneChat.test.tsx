@@ -1167,7 +1167,7 @@ describe("IntuneChat trust presentation", () => {
     });
   });
 
-  it("lists Copilot Fusion tiers by name, says several models may see the prompt, and greys out tiers the plan lacks", async () => {
+  it("lists Copilot Fusion tiers by name, says who picks the model, and greys out tiers the plan lacks", async () => {
     const user = userEvent.setup();
     const copilot: ProviderSummary = {
       id: "copilot",
@@ -1185,7 +1185,7 @@ describe("IntuneChat trust presentation", () => {
     await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
     await user.click(screen.getByLabelText(/Model:/));
     const standard = await screen.findByRole("menuitemradio", { name: /Copilot Fusion Standard/ });
-    expect(standard).toHaveTextContent("GitHub Copilot CLI · Several models may see each prompt");
+    expect(standard).toHaveTextContent("GitHub Copilot CLI · GitHub picks the model for each prompt");
     const high = screen.getByRole("menuitemradio", { name: /Copilot Fusion High/ });
     expect(high).toHaveAttribute("aria-disabled", "true");
     expect(high).toHaveTextContent("Not included in your Copilot plan.");

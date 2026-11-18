@@ -7,7 +7,7 @@ import { Card } from "../components/Card";
 import { Pill } from "../components/Pill";
 import { AgentScheduleCard } from "../components/AgentScheduleCard";
 import { InvalidAgentNotice } from "../components/InvalidAgentNotice";
-import { AGENT_COPY, promptsGoTo, providerDataLocationDetail } from "../copy";
+import { AGENT_COPY, modelTrustNote, promptsGoTo, providerDataLocationDetail } from "../copy";
 import {
   DeclaredGraphOperations,
   ManifestPreview,
@@ -86,6 +86,7 @@ import {
   type TenantRecord,
   type WhatsAppWebGroupRef,
   type WhatsAppWebRecipientType,
+  providerModelLabel,
 } from "../shared/openAdminOS";
 
 function manifestLoadErrorCopy(error: string, recovery: string): string {
@@ -1072,6 +1073,7 @@ export default function AgentDetail({
           organizationInactive={pendingTenant !== undefined && pendingTenant.id !== state.activeTenantId}
           hasOrganizations={resolveOrganizations(state).length > 0}
           model={pendingModel}
+          modelLabel={pendingModel ? providerModelLabel(pendingProvider, pendingModel) : undefined}
           deliverySaving={pendingDeliverySaveCount > 0}
           // Provider readiness is checked on its own, whatever the
           // organization state.
@@ -2696,6 +2698,7 @@ function RunPreflightModal({
   organizationInactive = false,
   hasOrganizations = false,
   model,
+  modelLabel,
   deliverySaving,
   onConnect,
   onOpenConnections,
@@ -2727,6 +2730,8 @@ function RunPreflightModal({
   providerIsLocal: boolean;
   requestedScopes: RequestedScope[];
   model: string | undefined;
+  /** What the model is called on screen, such as "Copilot Fusion High". */
+  modelLabel?: string | undefined;
   deliverySaving: boolean;
   onClose: () => void;
   onConfirm: () => void;
@@ -2855,8 +2860,11 @@ function RunPreflightModal({
           <PreflightFact label="Model">
             <span className="inline-flex items-center gap-1.5">
               <ProviderLogo provider={providerId} size={14} />
-              {model ?? "Provider default"}
+              {modelLabel ?? model ?? "Provider default"}
             </span>
+            {model && modelTrustNote(providerId, model) ? (
+              <span className="mt-0.5 block text-xs text-[var(--color-warning)]">{`${modelTrustNote(providerId, model)}.`}</span>
+            ) : null}
             {providerIsLocal ? (
               <span className="mt-0.5 block text-xs text-[var(--color-success)]">{`${providerName}. Prompts stay on this device.`}</span>
             ) : (

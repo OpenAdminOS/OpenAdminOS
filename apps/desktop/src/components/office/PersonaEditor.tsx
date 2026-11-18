@@ -168,7 +168,7 @@ export function PersonaEditor({
       ready: readyProvider && readyModel,
       detail:
         readyProvider && readyModel
-          ? `${provider?.name} · ${form.model ?? "Provider default"}`
+          ? `${provider?.name} · ${form.model ? providerModelLabel(provider, form.model) : "Provider default"}`
           : "Choose an available provider and model",
     },
     {
@@ -777,7 +777,7 @@ export function PersonaEditor({
                         </div>
                         <div>
                           <dt>Model</dt>
-                          <dd>{form.model ?? "Provider default"}</dd>
+                          <dd>{form.model ? providerModelLabel(provider, form.model) : "Provider default"}</dd>
                         </div>
                         <div>
                           <dt>Schedule</dt>
