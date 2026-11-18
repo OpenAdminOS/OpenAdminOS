@@ -298,6 +298,8 @@ function IntuneChatContent() {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const [retriedProviderId, setRetriedProviderId] = useState<ProviderId | null>(null);
+  const [modelReadyAnnouncement, setModelReadyAnnouncement] = useState("");
   const sendInFlightRef = useRef(false);
   const activeStreamIdRef = useRef<string | null>(null);
   // A run keeps going after the admin leaves Chat. Its end must not bring them back.
@@ -1736,6 +1738,17 @@ function IntuneChatContent() {
     displayedMessages.length === 0 &&
     !shownProgress;
 
+  // The model choice can unmount as soon as the refreshed provider is ready.
+  // The Chat home keeps the live region and composer available across that change.
+  useEffect(() => {
+    if (!retriedProviderId) return;
+    setRetriedProviderId(null);
+    if (homeOpen && !activeTenant && modelReady && provider?.id === retriedProviderId) {
+      setModelReadyAnnouncement(FIRST_RUN_CHAT_COPY.modelReadyAfterRetry(provider.name));
+      composerRef.current?.focus();
+    }
+  }, [retriedProviderId, homeOpen, activeTenant, modelReady, provider]);
+
   const calmTopBar = shellChrome ? (
     <>
       <TopBarTitle>
@@ -1845,7 +1858,12 @@ function IntuneChatContent() {
             )}
             {!activeTenant && !modelReady ? (
               <div className="mb-6">
-                <ModelChoice providers={state.providers} activeProviderId={state.activeProviderId} onSelectProvider={setActiveProvider} />
+                <ModelChoice
+                  providers={state.providers}
+                  activeProviderId={state.activeProviderId}
+                  onSelectProvider={setActiveProvider}
+                  onRetryChecked={setRetriedProviderId}
+                />
               </div>
             ) : null}
             {state.providerAutoSelectNotice ? (
@@ -1865,6 +1883,9 @@ function IntuneChatContent() {
               onDismissError={() => setError(null)}
               onDismissNotice={() => setNotice(null)}
             />
+            <p role="status" aria-live="polite" className="sr-only">
+              {modelReady ? modelReadyAnnouncement : ""}
+            </p>
             {renderComposer("home")}
             {needsYouCount > 0 ? (
               <section className="mt-[30px]" aria-labelledby="needs-you-heading">

@@ -80,6 +80,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Chat announces when Retry makes the active model ready and returns keyboard focus to the composer.
+
 - First launch shows signed-in tools with unusable IT-locked models as Unavailable and explains the policy restriction.
 
 - Chat's model choice shows a provider whose check failed as Could not check with its reason and Retry, as the model scan does, instead of leaving LM Studio, Lemonade, Apple Intelligence or a hosted CLI out and showing Ollama as having no model; an endpoint outside this device that the scan did not contact shows as Not checked, without Retry; a signed-in tool that cannot answer, such as a Copilot model set by IT that the account cannot use, shows as Unavailable with the reason instead of Signed in.

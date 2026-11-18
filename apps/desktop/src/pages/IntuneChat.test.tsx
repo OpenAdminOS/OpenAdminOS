@@ -256,6 +256,28 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
     expect(refreshProviders).not.toHaveBeenCalled();
   });
 
+  it("announces readiness and focuses the composer when Retry closes the model choice", async () => {
+    const user = userEvent.setup();
+    const activeProvider = mockProviders.find((provider) => provider.id === "ollama")!;
+    const providers = mockProviders.map((provider) => provider.id === "ollama"
+      ? { ...provider, status: "error" as const, models: [], checkFailed: true, detail: "Ollama timed out." }
+      : provider);
+    let state = guestState({ providers, activeProviderId: "ollama" });
+    const recheckProvider = vi.fn(async () => {
+      state = { ...state, providers: providers.map((provider) => provider.id === "ollama" ? activeProvider : provider) };
+    });
+    const bridge = makeMockBridge({ getAppState: vi.fn(async () => state), recheckProvider }, state);
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+
+    const retry = await screen.findByRole("button", { name: "Check Ollama again" });
+    retry.focus();
+    await user.keyboard("{Enter}");
+    expect(recheckProvider).toHaveBeenCalledWith("ollama");
+    await waitFor(() => expect(screen.queryByRole("heading", { name: FIRST_RUN_CHAT_COPY.modelChoiceTitle })).toBeNull());
+    expect(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel })).toHaveFocus();
+    expect(screen.getByText("Ollama is ready. You can send a message.")).toHaveAttribute("role", "status");
+  });
+
   it("offers starters for what was connected, one line per service (mockup 32, section B)", async () => {
     const user = userEvent.setup();
     const base = createMockAppState();

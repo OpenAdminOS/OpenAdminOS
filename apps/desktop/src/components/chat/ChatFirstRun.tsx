@@ -40,10 +40,12 @@ export function ModelChoice({
   providers,
   activeProviderId,
   onSelectProvider,
+  onRetryChecked,
 }: {
   providers: readonly ProviderSummary[];
   activeProviderId: ProviderId;
   onSelectProvider: (id: ProviderId) => Promise<void>;
+  onRetryChecked?: (id: ProviderId) => void;
 }) {
   const navigate = useNavigate();
   const { refresh } = useAppState();
@@ -114,6 +116,7 @@ export function ModelChoice({
     try {
       const checked = await checkAgain(option.providerId);
       retried.current = { providerId: option.providerId, name: option.name, failed: !checked };
+      if (checked) onRetryChecked?.(option.providerId);
     } finally {
       setRetrying(null);
     }
