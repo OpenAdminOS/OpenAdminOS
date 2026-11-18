@@ -16,7 +16,7 @@ export interface CopilotProviderOptions { binaryPath?: string; defaultModel?: st
 const FUSION_TIERS = {
   "fusion-standard": { tier: "standard", label: "Copilot Fusion Standard", needs: "" },
   "fusion-high": { tier: "high", label: "Copilot Fusion High", needs: " Fusion High needs a Copilot Pro+, Max, Business or Enterprise plan." },
-  "fusion-max": { tier: "max", label: "Copilot Fusion Max", needs: " Fusion Max needs a Copilot Max, Business or Enterprise plan." },
+  "fusion-max": { tier: "max", label: "Copilot Fusion Max", needs: " Fusion Max needs a Copilot Pro+, Max, Business or Enterprise plan." },
 } as const;
 type FusionModel = keyof typeof FUSION_TIERS;
 
@@ -33,7 +33,7 @@ export function copilotModelsFromCatalog(catalog: Record<string, unknown>): { mo
   const models: string[] = [], modelLabels: Record<string, string> = {}, unavailableModels: { id: string; reason: string }[] = [];
   for (const entry of (Array.isArray(catalog.models) ? catalog.models : []).map(rpcObject)) {
     const id = entry.id;
-    if (typeof id !== "string" || !id || id.length >= 150 || models.includes(id)) continue;
+    if (typeof id !== "string" || !id || id.length >= 150 || models.includes(id) || unavailableModels.some((m) => m.id === id)) continue;
     const name = typeof entry.name === "string" ? entry.name.trim() : "";
     if (name && name !== id && name.length <= 80) modelLabels[id] = name;
     if (rpcObject(entry.policy).state === "disabled") unavailableModels.push({ id, reason: "Turned off by your organization's Copilot policy. Ask your GitHub admin to enable it, then refresh providers." });
