@@ -22,6 +22,8 @@ import { Stage } from "./home/Stage";
 import { MarketingShell } from "./MarketingShell";
 import { getLatestReleaseDownloads } from "./release-downloads";
 import {
+  AGENT_BUILD_BOOKING_URL,
+  DEMO_BOOKING_URL,
   DOCS_URL,
   GITHUB_URL,
   HOME_DESCRIPTION,
@@ -34,7 +36,7 @@ import {
   webPageSchema,
   websiteSchema,
 } from "./seo";
-import { buttonSecondary, eyebrow, sectionTitle } from "./ui";
+import { buttonPrimary, buttonSecondary, card, eyebrow, sectionTitle } from "./ui";
 
 export const revalidate = 900;
 
@@ -185,6 +187,23 @@ const GUARANTEES = [
   ["04", "Open source, MIT", "Read the code that touches your tenant before you connect it."],
 ] as const;
 
+// What happens on the free agent build call. Keep in sync with /book and the
+// Cal.com event description.
+const BUILD_CALL_STEPS = [
+  {
+    title: "You describe the task.",
+    text: "When you book, tell us what you do by hand today: a weekly report, a cleanup, an access review.",
+  },
+  {
+    title: "We build it with you.",
+    text: "On the call we build the agent in your app with Build your own Agent, check its Graph scopes, and test it.",
+  },
+  {
+    title: "You keep it.",
+    text: "The agent is saved on your machine and runs on your schedule. Its changes still wait for your approval.",
+  },
+] as const;
+
 const COMMON_QUESTIONS = [
   {
     question: "What is OpenAdminOS?",
@@ -210,6 +229,11 @@ const COMMON_QUESTIONS = [
     question: "What happens before a write agent changes my tenant?",
     answer:
       "Write agents always pause at a diff confirmation screen. Destructive operations require typed confirmation. There is no trust-this-agent bypass and no skip toggle for write operations.",
+  },
+  {
+    question: "Can you build an agent for us?",
+    answer:
+      "Yes. Book a free 60-minute call and bring one task you do by hand today. We build the agent with you on the call, in your own copy of the app, and you keep it. We never sign in to your tenant. A free 30-minute demo is also available.",
   },
   {
     question: "Is OpenAdminOS a Microsoft product?",
@@ -357,7 +381,16 @@ export default async function HomePage() {
               schedule and prepare the fix, using a model that runs on your own
               machine. Nothing changes until you approve it.
             </p>
-            <DownloadCta urls={downloadUrls} className="mt-7" />
+            <DownloadCta urls={downloadUrls} className="mt-7">
+              <a
+                href={DEMO_BOOKING_URL}
+                target="_blank"
+                rel="noreferrer"
+                className={`${buttonSecondary} h-12 px-5 text-[15px]`}
+              >
+                Book a demo
+              </a>
+            </DownloadCta>
             <ul className="mt-6 flex flex-wrap gap-x-5 gap-y-2 text-sm text-brand-faint">
               {HERO_GUARANTEES.map((item) => (
                 <li key={item} className="flex items-center gap-2">
@@ -694,6 +727,59 @@ export default async function HomePage() {
         </div>
       </section>
 
+      {/* Agent build call */}
+      <section id="build-call" className="scroll-mt-16 px-3 sm:px-6">
+        <Stage
+          tone="clay"
+          className="mx-auto max-w-[96rem] overflow-hidden rounded-[18px] sm:rounded-[24px]"
+        >
+          <div className="mx-auto grid w-full max-w-7xl gap-12 px-3 py-20 sm:px-4 sm:py-28 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:items-center">
+            <div data-reveal>
+              <p className={eyebrow}>Free 60-minute call</p>
+              <h2 className="font-display mt-4 text-balance text-[2.5rem] leading-[1.03] sm:text-[3.6rem]">
+                Tell us the task. We build the agent for you.
+              </h2>
+              <p className="mt-6 max-w-xl text-lg leading-8 text-brand-muted">
+                Book a call with the maintainer and bring one job you want off
+                your plate. You share your screen, we build the agent together,
+                and you leave with it running against your own tenant.
+              </p>
+              <div className="mt-8 flex flex-wrap gap-3">
+                <a
+                  href={AGENT_BUILD_BOOKING_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={`${buttonPrimary} h-12 px-5 text-[15px]`}
+                >
+                  Book a build call
+                  <span aria-hidden>↗</span>
+                </a>
+                <Link href="/book#build" className={`${buttonSecondary} h-12 px-5 text-[15px]`}>
+                  What happens on the call
+                </Link>
+              </div>
+              <p className="mt-5 text-sm leading-6 text-brand-faint">
+                Microsoft Teams. We never sign in to your tenant and do not
+                record the call.
+              </p>
+            </div>
+            <ol data-reveal className={`${card} divide-y divide-brand-line`}>
+              {BUILD_CALL_STEPS.map((step, index) => (
+                <li key={step.title} className="flex gap-5 p-6 sm:p-7">
+                  <span className="font-mono text-xs leading-7 text-brand-faint">
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
+                  <div>
+                    <h3 className="text-lg font-medium">{step.title}</h3>
+                    <p className="mt-1 text-[15px] leading-7 text-brand-muted">{step.text}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </Stage>
+      </section>
+
       {/* Benchmarks */}
       <section className="border-t border-brand-line bg-brand-surface">
         <div className="mx-auto w-full max-w-7xl px-6 py-24 sm:px-10 sm:py-32">
@@ -916,7 +1002,23 @@ export default async function HomePage() {
             Read-only agents run once consent is granted. Changes wait for
             you.
           </p>
-          <DownloadCta urls={downloadUrls} className="mt-10 justify-center" />
+          <DownloadCta urls={downloadUrls} className="mt-10 justify-center">
+            <a
+              href={DEMO_BOOKING_URL}
+              target="_blank"
+              rel="noreferrer"
+              className={`${buttonSecondary} h-12 px-5 text-[15px]`}
+            >
+              Book a demo
+            </a>
+          </DownloadCta>
+          <p className="mt-6 text-[15px] text-brand-muted">
+            Or{" "}
+            <Link href="/book#build" className="text-link">
+              book a free call and we build an agent for you
+            </Link>
+            .
+          </p>
         </Stage>
       </section>
     </MarketingShell>

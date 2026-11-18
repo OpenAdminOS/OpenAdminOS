@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { buttonPrimary } from "../ui";
 
@@ -41,9 +41,12 @@ const secondaryLink =
 export function DownloadCta({
   urls,
   className = "",
+  children,
 }: {
   urls: Record<Platform, string>;
   className?: string;
+  /** Further actions shown right after the download button. */
+  children?: ReactNode;
 }) {
   const [platform, setPlatform] = useState<Detected>(null);
 
@@ -58,17 +61,18 @@ export function DownloadCta({
           OpenAdminOS is a desktop app for Windows, macOS, and Linux. Open this
           page on your computer to install it.
         </p>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
           <Link href="/download" className={`${buttonPrimary} h-12 px-5 text-[15px]`}>
             See the desktop downloads
           </Link>
+          {children}
         </div>
       </div>
     );
   }
 
   return (
-    <div className={`flex flex-col gap-3 sm:flex-row sm:items-center ${className}`}>
+    <div className={`flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center ${className}`}>
       {platform ? (
         <a href={urls[platform]} className={`${buttonPrimary} h-12 px-5 text-[15px]`}>
           <PlatformIcon platform={platform} />
@@ -79,6 +83,7 @@ export function DownloadCta({
           Download
         </Link>
       )}
+      {children}
       <Link href="/download" className={secondaryLink}>
         All platforms and checksums
       </Link>
