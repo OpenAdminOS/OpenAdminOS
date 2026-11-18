@@ -840,7 +840,7 @@ describe("a check that times out is served as could not check (Muse round 5, B)"
 });
 
 describe("an endpoint the scan did not contact is served as not contacted (PR #204 review round 1)", () => {
-  it("lists an off-device LM Studio as off the device and not contacted, and contacts nothing there", async () => {
+  it("lists an off-device LM Studio as off the device and not contacted, and contacts nothing there, also after a Retry", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
     await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [], firstRunScan: "pending" }));
     const original = process.env.OPENADMINOS_LM_STUDIO_URL;
@@ -864,6 +864,9 @@ describe("an endpoint the scan did not contact is served as not contacted (PR #2
       assert.equal(listed.notContacted, true);
       assert.equal(listed.isLocal, false);
       assert.equal(listed.checkFailed, true);
+      // Chat's Retry on another provider uses the scan's bounded Retry: still nothing off the device (Sol round 2).
+      await store.retryModelScanProbe("ollama");
+      assert.equal((await store.listProviders()).find((provider) => provider.id === "lm-studio")!.notContacted, true);
       assert.deepEqual(contacted, []);
     } finally {
       globalThis.fetch = realFetch;

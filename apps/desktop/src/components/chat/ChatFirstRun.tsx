@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 
-import { FIRST_RUN_CHAT_COPY, MODEL_SCAN_COPY, NOT_CONNECTED_COPY } from "../../copy";
+import { FIRST_RUN_CHAT_COPY, MODEL_CHOICE_COPY, MODEL_SCAN_COPY, NOT_CONNECTED_COPY } from "../../copy";
 import { copyTextToClipboard } from "../../shared/clipboard";
 import {
   AVAILABLE_SERVICES,
@@ -59,26 +59,38 @@ export function ModelChoice({
   const busy = working !== null || retrying !== null;
   const [announcement, setAnnouncement] = useState("");
   const section = useRef<HTMLElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
   // The provider a finished Retry checked again, announced once the new rows are in.
-  const retried = useRef<ProviderId | null>(null);
+  const retried = useRef<{ providerId: ProviderId; name: string } | null>(null);
 
   useEffect(() => {
-    const providerId = retried.current;
-    if (!providerId || retrying !== null) return;
+    const done = retried.current;
+    if (!done || retrying !== null) return;
     retried.current = null;
-    const option = options.find((entry) => entry.providerId === providerId);
-    if (!option) return;
+    const option = options.find((entry) => entry.providerId === done.providerId);
+    if (!option) {
+      // The check completed without a row to offer (signed out, not installed): say so, and keep focus in the choice.
+      setAnnouncement(MODEL_CHOICE_COPY.checkedAgainNotOffered(done.name));
+      heading.current?.focus();
+      return;
+    }
     setAnnouncement(MODEL_SCAN_COPY.announce(option.name, option.state));
     // The pressed Retry was disabled while checking: focus goes back to its row.
-    const target = section.current?.querySelector<HTMLElement>(option.unavailable ? `[data-retry="${providerId}"]` : `input[value="${providerId}"]`);
+    const target = section.current?.querySelector<HTMLElement>(option.unavailable ? `[data-retry="${done.providerId}"]` : `input[value="${done.providerId}"]`);
     target?.focus();
   }, [options, retrying]);
 
-  // Checks the providers again; a failed check is written under the row it was asked from.
+  // Checks again with the scan's bounded checks, which never contact an
+  // endpoint outside this device (a full refresh would); a failed check is
+  // written under the row it was asked from.
   const checkAgain = async (providerId: ProviderId) => {
     setErrors(({ [providerId]: _cleared, ...rest }) => rest);
     try {
-      await window.openAdminOS?.refreshProviders?.();
+      const api = window.openAdminOS;
+      if (api) {
+        if (!api.retryModelScanProbe) throw new Error(MODEL_CHOICE_COPY.checkAgainUnavailable);
+        await api.retryModelScanProbe(providerId);
+      }
       await refresh({ rethrow: true });
       return true;
     } catch (caught) {
@@ -87,11 +99,13 @@ export function ModelChoice({
     }
   };
 
-  const retry = async (providerId: ProviderId) => {
+  const retry = async (option: ChoiceOption) => {
     if (busy) return;
-    setRetrying(providerId);
+    // A new announcement each time, also when the outcome is the same as the last one.
+    setAnnouncement("");
+    setRetrying(option.providerId);
     try {
-      if (await checkAgain(providerId)) retried.current = providerId;
+      if (await checkAgain(option.providerId)) retried.current = { providerId: option.providerId, name: option.name };
     } finally {
       setRetrying(null);
     }
@@ -132,7 +146,7 @@ export function ModelChoice({
   };
   return (
     <section ref={section} aria-labelledby="model-choice-heading">
-      <h2 id="model-choice-heading" className="text-md font-medium text-[var(--color-text)]">
+      <h2 ref={heading} tabIndex={-1} id="model-choice-heading" className="text-md font-medium text-[var(--color-text)] focus:outline-none">
         {FIRST_RUN_CHAT_COPY.modelChoiceTitle}
       </h2>
       <p className="mt-1 text-sm text-[var(--color-text-soft)]">{MODEL_SCAN_COPY.chooseBody}</p>
@@ -144,7 +158,10 @@ export function ModelChoice({
           disabled={busy}
           errors={errors}
           retrying={retrying}
-          onRetry={(id) => void retry(id)}
+          onRetry={(id) => {
+            const option = options.find((entry) => entry.providerId === id);
+            if (option) void retry(option);
+          }}
           label={FIRST_RUN_CHAT_COPY.modelChoiceTitle}
         />
       </div>

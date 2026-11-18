@@ -46,6 +46,8 @@ export const MODEL_CHOICE_COPY = {
   couldNotCheck: "Could not check",
   couldNotCheckLine: (name: string) => `${name} did not answer. Retry to check it again.`,
   notChecked: "Not checked",
+  checkedAgainNotOffered: (name: string) => `${name} was checked again and is not offered here. All providers shows its state.`,
+  checkAgainUnavailable: "Checking again is not available in this build. Use Refresh providers in Settings, Providers.",
   notCheckedLine: (name: string) => `${name} is set to an endpoint outside this device, so it was not checked here. Check it in Settings, Providers.`,
   localReady: (model: string | undefined) => (model ? `On this device. Answers with ${model}.` : "On this device."),
   localStart: (id: string) =>

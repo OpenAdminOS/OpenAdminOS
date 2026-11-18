@@ -14,12 +14,6 @@ export const LOCAL_AUTO_SELECT_ORDER: readonly ProviderId[] = [
 ];
 
 /**
- * Whether a provider can answer right now, for detection purposes. Follows
- * the host's run gate ("connected", or a configured Azure OpenAI deployment
- * at "available") and is stricter about models, so an embedding-only
- * Ollama or an unconfigured Azure placeholder never counts.
- */
-/**
  * The provider's check itself failed, the scan's rule: an HTTP error, an
  * unreadable answer or a check that threw (`checkFailed`), or a hosted CLI
  * whose sign-in status request failed.
@@ -28,6 +22,12 @@ export function providerCheckFailed(provider: ProviderSummary): boolean {
   return Boolean(provider.checkFailed) || provider.cli?.state === "request-failed";
 }
 
+/**
+ * Whether a provider can answer right now, for detection purposes. Follows
+ * the host's run gate ("connected", or a configured Azure OpenAI deployment
+ * at "available") and is stricter about models, so an embedding-only
+ * Ollama or an unconfigured Azure placeholder never counts.
+ */
 export function isProviderReady(provider: ProviderSummary | undefined): boolean {
   if (!provider || !isProviderImplemented(provider.id)) return false;
   // Ollama counts only with a text-generation model. Azure OpenAI counts

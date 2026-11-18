@@ -4,10 +4,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import { FIRST_RUN_CHAT_COPY } from "../../copy/chat";
 import { createMockAppState, createMockMcpServers, makeMockBridge, mockTenant, renderWithAppState } from "../../test/test-utils";
-import { qualifyScope, requestedScopes, type ProviderSummary, type TenantRecord } from "../../shared/openAdminOS";
+import { qualifyScope, requestedScopes, type ModelScanResult, type ProviderSummary, type TenantRecord } from "../../shared/openAdminOS";
 import { useAppState } from "../../state";
 import { ModelChoice, NoTenantChatHome, NotConnectedCard } from "./ChatFirstRun";
 
+/** The scan's Retry; the rows come from app state afterwards. */
+const scanRetry = () => vi.fn(async (): Promise<ModelScanResult> => ({ probes: [], outcome: { kind: "nothing" }, startedAt: "", finishedAt: "" }));
 const grants = (partIds: string[]) => requestedScopes(partIds).map((scope) => qualifyScope(scope.name));
 const notConnected = { reason: "service-missing" as const, partIds: ["entra.signins", "defender.incidents"], tenantId: mockTenant.id };
 
@@ -99,7 +101,7 @@ describe("ModelChoice with a provider whose check failed (PR #191 follow-up)", (
       const { state } = useAppState();
       return <ModelChoice providers={state.providers} activeProviderId="ollama" onSelectProvider={onSelectProvider} />;
     }
-    const bridge = makeMockBridge({ refreshProviders: vi.fn(async () => undefined) }, createMockAppState({ providers: [failed] }));
+    const bridge = makeMockBridge({ refreshProviders: vi.fn(async () => undefined), retryModelScanProbe: scanRetry() }, createMockAppState({ providers: [failed] }));
     renderWithAppState(<FromAppState />, { bridge });
     const row = await screen.findByText("LM Studio answered HTTP 500.");
     const rowElement = row.closest("[data-provider]") as HTMLElement;
@@ -112,7 +114,9 @@ describe("ModelChoice with a provider whose check failed (PR #191 follow-up)", (
     vi.mocked(bridge.getAppState).mockResolvedValueOnce(createMockAppState({ providers: [working] }));
     await userEvent.click(screen.getByRole("button", { name: "Check LM Studio again" }));
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("LM Studio: Ready."));
-    expect(bridge.refreshProviders).toHaveBeenCalledTimes(1);
+    // The scan's bounded Retry, never a full refresh that would contact an endpoint outside this device.
+    expect(bridge.retryModelScanProbe).toHaveBeenCalledWith("lm-studio");
+    expect(bridge.refreshProviders).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Check LM Studio again" })).not.toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /LM Studio/ })).toHaveFocus();
     await userEvent.click(screen.getByRole("button", { name: "Use qwen3-8b" }));
@@ -120,13 +124,13 @@ describe("ModelChoice with a provider whose check failed (PR #191 follow-up)", (
   });
 
   it("never acts on a chosen row whose check then failed, and shows a failed Retry under the row", async () => {
-    const refreshProviders = vi.fn(async () => {
+    const retryModelScanProbe = vi.fn(async (): Promise<ModelScanResult> => {
       throw new Error("Provider checks could not run. Restart OpenAdminOS.");
     });
     const onSelectProvider = vi.fn(async () => undefined);
     const ollama: ProviderSummary = { id: "ollama", name: "Ollama", description: "", isLocal: true, status: "connected", models: ["llama3"], defaultModel: "llama3" };
     const view = renderWithAppState(<ModelChoice providers={[ollama, working]} activeProviderId="anthropic" onSelectProvider={onSelectProvider} />, {
-      bridge: makeMockBridge({ refreshProviders }),
+      bridge: makeMockBridge({ retryModelScanProbe }),
     });
     await userEvent.click(await screen.findByRole("radio", { name: /LM Studio/ }));
     expect(screen.getByRole("button", { name: "Use qwen3-8b" })).toBeEnabled();
@@ -146,7 +150,7 @@ describe("ModelChoice when checking again fails (PR #204 review round 1)", () =>
   const failed: ProviderSummary = { id: "lm-studio", name: "LM Studio", description: "", isLocal: true, status: "error", checkFailed: true, detail: "LM Studio answered HTTP 500.", models: [] };
 
   it("writes a failed app state read under the row, not only in the app error", async () => {
-    const bridge = makeMockBridge({ refreshProviders: vi.fn(async () => undefined) });
+    const bridge = makeMockBridge({ refreshProviders: vi.fn(async () => undefined), retryModelScanProbe: scanRetry() });
     renderWithAppState(<ModelChoice providers={[failed]} activeProviderId="ollama" onSelectProvider={vi.fn(async () => undefined)} />, { bridge });
     await screen.findByText("LM Studio answered HTTP 500.");
     vi.mocked(bridge.getAppState).mockRejectedValueOnce(new Error("The app state could not be read. Restart OpenAdminOS."));
@@ -159,15 +163,53 @@ describe("ModelChoice when checking again fails (PR #204 review round 1)", () =>
       const { state } = useAppState();
       return <ModelChoice providers={state.providers} activeProviderId="ollama" onSelectProvider={vi.fn(async () => undefined)} />;
     }
-    const bridge = makeMockBridge({ refreshProviders: vi.fn(async () => undefined) }, createMockAppState({ providers: [failed] }));
+    const bridge = makeMockBridge({ refreshProviders: vi.fn(async () => undefined), retryModelScanProbe: scanRetry() }, createMockAppState({ providers: [failed] }));
     renderWithAppState(<FromAppState />, { bridge });
     await userEvent.click(await screen.findByRole("button", { name: "Check LM Studio again" }));
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("LM Studio: Could not check."));
     expect(screen.getByRole("button", { name: "Check LM Studio again" })).toHaveFocus();
   });
 
+  it("announces a second Retry with the same outcome again", async () => {
+    function FromAppState() {
+      const { state } = useAppState();
+      return <ModelChoice providers={state.providers} activeProviderId="ollama" onSelectProvider={vi.fn(async () => undefined)} />;
+    }
+    const bridge = makeMockBridge({ retryModelScanProbe: scanRetry() }, createMockAppState({ providers: [failed] }));
+    renderWithAppState(<FromAppState />, { bridge });
+    await userEvent.click(await screen.findByRole("button", { name: "Check LM Studio again" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("LM Studio: Could not check."));
+    let release: (() => void) | undefined;
+    vi.mocked(bridge.retryModelScanProbe!).mockImplementationOnce(
+      () => new Promise((resolve) => { release = () => resolve({ probes: [], outcome: { kind: "nothing" }, startedAt: "", finishedAt: "" }); }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Check LM Studio again" }));
+    // Cleared while checking, so the same words are spoken again when it finishes.
+    expect(screen.getByRole("status")).toHaveTextContent("");
+    release?.();
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("LM Studio: Could not check."));
+  });
+
+  it("announces a Retry whose provider is no longer offered and keeps focus in the choice (Muse round 2)", async () => {
+    const claude: ProviderSummary = {
+      id: "anthropic", name: "Claude Code", description: "", isLocal: false, status: "error", detail: "claude auth status failed", models: [],
+      cli: { state: "request-failed" },
+    };
+    function FromAppState() {
+      const { state } = useAppState();
+      return <ModelChoice providers={state.providers} activeProviderId="ollama" onSelectProvider={vi.fn(async () => undefined)} />;
+    }
+    const bridge = makeMockBridge({ retryModelScanProbe: scanRetry() }, createMockAppState({ providers: [claude] }));
+    renderWithAppState(<FromAppState />, { bridge });
+    // The check now completes: installed, signed out, which Chat does not offer.
+    vi.mocked(bridge.getAppState).mockResolvedValueOnce(createMockAppState({ providers: [{ ...claude, status: "available", detail: undefined, cli: { state: "signed-out" } }] }));
+    await userEvent.click(await screen.findByRole("button", { name: "Check Claude Code again" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Claude Code was checked again and is not offered here. All providers shows its state."));
+    expect(screen.getByRole("heading", { name: FIRST_RUN_CHAT_COPY.modelChoiceTitle })).toHaveFocus();
+  });
+
   it("writes a failed Scan again under its row", async () => {
-    const bridge = makeMockBridge({ refreshProviders: vi.fn(async () => undefined) });
+    const bridge = makeMockBridge({ refreshProviders: vi.fn(async () => undefined), retryModelScanProbe: scanRetry() });
     const noModel: ProviderSummary = { id: "lm-studio", name: "LM Studio", description: "", isLocal: true, status: "connected", models: [] };
     renderWithAppState(<ModelChoice providers={[noModel]} activeProviderId="ollama" onSelectProvider={vi.fn(async () => undefined)} />, { bridge });
     await screen.findByText("On this device. Load a model in LM Studio, then scan again.");
