@@ -2651,8 +2651,12 @@ function ComposerModelPopover({
       if (list && row) list.scrollTop = Math.max(0, row.offsetTop - (list.clientHeight - row.offsetHeight) / 2);
     });
   };
+  // A provider whose every model is unavailable (all Copilot Fusion tiers outside the plan) stays listed,
+  // so the reasons are visible here too; it offers nothing to select.
   const availableProviders = providers.filter(
-    (provider) => ["connected", "available"].includes(provider.status) && provider.models.length > 0,
+    (provider) =>
+      (["connected", "available"].includes(provider.status) && provider.models.length > 0) ||
+      (provider.unavailableModels?.length ?? 0) > 0,
   );
   const activeProvider = providers.find((provider) => provider.id === activeProviderId);
   const activeLabel = activeModel ? providerModelLabel(activeProvider, activeModel) : undefined;

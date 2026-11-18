@@ -770,7 +770,7 @@ function ProviderRow({
                   );
                 })}
                 {(provider.unavailableModels ?? []).map((unavailable) => (
-                  <UiButton key={`${unavailable.id}:unavailable`} size="sm" variant="ghost" className="max-w-full font-mono" disabled aria-describedby={`${provider.id}-${unavailable.id}-reason`}>
+                  <UiButton key={`${unavailable.id}:unavailable`} size="sm" variant="ghost" className="max-w-full cursor-not-allowed font-mono text-[var(--color-text-muted)]" aria-disabled="true" aria-describedby={`${provider.id}-${unavailable.id}-reason`} onClick={(event) => event.preventDefault()}>
                     <span className="min-w-0 truncate">{providerModelLabel(provider, unavailable.id)}</span>
                   </UiButton>
                 ))}

@@ -37,3 +37,21 @@ it('names Copilot Fusion tiers, says who sees the prompt, and never runs a tier 
   await user.click(screen.getByRole('button', { name: /Copilot Fusion High/ }));
   expect(onRun).toHaveBeenCalledWith({ providerId: 'copilot', model: 'fusion-high' });
 });
+
+it('lists every Copilot Fusion tier with its reason when the plan includes none of them', async () => {
+  const user = userEvent.setup();
+  const onRun = vi.fn();
+  const copilot = {
+    id: 'copilot', name: 'GitHub Copilot CLI', description: '', isLocal: false, status: 'error', models: [],
+    modelLabels: { 'fusion-standard': 'Copilot Fusion Standard' },
+    unavailableModels: [{ id: 'fusion-standard', reason: "Turned off by your organization's policy." }],
+  } as ProviderSummary;
+  render(<RunWithMenu providers={[{ id: 'ollama', name: 'Ollama', description: '', isLocal: true, status: 'connected', models: ['one'] } as ProviderSummary, copilot]} activeProviderId="ollama" onRun={onRun} />);
+  await user.click(screen.getByRole('button', { name: 'Choose provider or model for this run' }));
+  const standard = screen.getByRole('button', { name: /Copilot Fusion Standard/ });
+  expect(standard).toHaveAttribute('aria-disabled', 'true');
+  expect(standard).toHaveTextContent("Turned off by your organization's policy.");
+  expect(screen.queryByText('No models installed')).not.toBeInTheDocument();
+  await user.click(standard);
+  expect(onRun).not.toHaveBeenCalled();
+});

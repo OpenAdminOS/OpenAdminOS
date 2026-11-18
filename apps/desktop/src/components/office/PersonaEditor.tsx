@@ -6,6 +6,7 @@ import type {
   RegistryAgentSummary,
 } from "../../shared/openAdminOS";
 import { providerModelLabel } from "../../shared/openAdminOS";
+import { modelTrustNote } from "../../copy";
 import { useAppState } from "../../state";
 import { useSetupFlow } from "../../setup/SetupFlowContext";
 import { Button } from "../Button";
@@ -777,7 +778,10 @@ export function PersonaEditor({
                         </div>
                         <div>
                           <dt>Model</dt>
-                          <dd>{form.model ? providerModelLabel(provider, form.model) : "Provider default"}</dd>
+                          <dd>
+                            {form.model ? providerModelLabel(provider, form.model) : "Provider default"}
+                            {form.model && provider && modelTrustNote(provider.id, form.model) ? <span className="block">{modelTrustNote(provider.id, form.model)}.</span> : null}
+                          </dd>
                         </div>
                         <div>
                           <dt>Schedule</dt>

@@ -1196,6 +1196,24 @@ describe("IntuneChat trust presentation", () => {
     await waitFor(() => expect(bridge.setActiveModel).toHaveBeenCalledWith("copilot", "fusion-standard"));
   });
 
+  it("keeps a provider whose every Copilot Fusion tier is outside the plan in the menu, with the reasons", async () => {
+    const user = userEvent.setup();
+    const copilot: ProviderSummary = {
+      id: "copilot", name: "GitHub Copilot CLI", description: "", isLocal: false, status: "error", models: [],
+      modelLabels: { "fusion-standard": "Copilot Fusion Standard" },
+      unavailableModels: [{ id: "fusion-standard", reason: "Turned off by your organization's policy." }],
+    };
+    const bridge = makeMockBridge({}, createMockAppState({ providers: [...mockProviders, copilot] }));
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+    await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
+    await user.click(screen.getByLabelText(/Model:/));
+    const standard = await screen.findByRole("menuitemradio", { name: /Copilot Fusion Standard/ });
+    expect(standard).toHaveAttribute("aria-disabled", "true");
+    expect(standard).toHaveTextContent("Turned off by your organization's policy.");
+    await user.click(standard);
+    expect(bridge.setActiveModel).not.toHaveBeenCalled();
+  });
+
   it("re-persists the provider when picking the displayed provider's model", async () => {
     const user = userEvent.setup();
     const bridge = makeMockBridge();

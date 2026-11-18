@@ -52,8 +52,9 @@ export function RunWithMenu({
     0,
   );
 
-  // No menu when there's nothing meaningful to pick.
-  if (totalChoices <= 1) {
+  // No menu when there's nothing meaningful to pick, unless a model the account cannot use needs its reason shown.
+  const hasUnavailable = implemented.some((provider) => (provider.unavailableModels?.length ?? 0) > 0);
+  if (totalChoices <= 1 && !hasUnavailable) {
     return (
       <Button
         variant="primary"
@@ -158,7 +159,7 @@ export function RunWithMenu({
                     <div className="px-3 pb-2 text-xs text-[var(--color-text-muted)]">
                       Coming soon
                     </div>
-                  ) : models.length === 0 ? (
+                  ) : models.length === 0 && !(provider.unavailableModels?.length) ? (
                     <div className="px-3 pb-2 text-xs text-[var(--color-text-muted)]">
                       No models installed
                     </div>

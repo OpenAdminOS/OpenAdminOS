@@ -167,7 +167,9 @@ describe("Settings provider section", () => {
     renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/providers", bridge });
     await user.click(await screen.findByRole("button", { name: "Show details for GitHub Copilot CLI" }));
     const max = screen.getByRole("button", { name: "Copilot Fusion Max" });
-    expect(max).toBeDisabled();
+    expect(max).toHaveAttribute("aria-disabled", "true");
+    await user.click(max);
+    expect(bridge.setActiveModel).not.toHaveBeenCalled();
     expect(max).toHaveAccessibleDescription("Copilot Fusion Max: Not included in your Copilot plan.");
     expect(screen.getByText(/Standard uses one model per task\. High and Max can have one model draft and others review/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Copilot Fusion Standard" }));

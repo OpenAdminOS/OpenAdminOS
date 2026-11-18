@@ -12,7 +12,7 @@ import { NOTHING_LEAVES_COPY, deriveToolHostsCopy, deriveTrustCopy, promptsGoTo,
 
 /** Voice runs on OpenAI's own service, not Codex; the same line as PR #175. */
 const VOICE_LOCATION_DETAIL = "Processing follows your OpenAI workspace's data residency setting.";
-import { resolveProviderDefaultModel, tenantsNamedByOrganization, type AppState } from "../shared/openAdminOS";
+import { providerModelLabel, resolveProviderDefaultModel, tenantsNamedByOrganization, type AppState } from "../shared/openAdminOS";
 import { useAppState } from "./AppStateContext";
 
 export type DataBoundary =
@@ -84,10 +84,12 @@ export function deriveDataBoundary(state: AppState, voiceHosted = false): DataBo
     ? tenantsNamedByOrganization(state).find((tenant) => tenant.id === state.activeTenantId)
     : undefined;
   const provider = state.providers.find((entry) => entry.id === state.activeProviderId);
-  const model = resolveProviderDefaultModel(
+  const resolved = resolveProviderDefaultModel(
     provider,
     state.activeModelByProviderId,
   ).model;
+  // Shown as admins know it ("Copilot Fusion High"), not as its id.
+  const model = resolved ? providerModelLabel(provider, resolved) : undefined;
 
   if (voiceHosted) {
     // Hosted voice names its own destination, says whether tenant data is
