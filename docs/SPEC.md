@@ -107,6 +107,24 @@ Agent documentation is deterministic. `npm run docs:generate` refreshes `agents/
 
 The docs GitHub Action checks generated docs on pull requests and, after commits to `main`, opens a documentation update PR if generated output changed. It does not silently publish LLM-authored documentation to `main`.
 
+### Marketing website: booking calls
+
+Approved 2026-11-17. The marketing site offers two free calls with the
+maintainer, both on Microsoft Teams and booked on Cal.com under the
+maintainer's account: a 30-minute demo (`cal.com/ugur-koc/openadminos-demo`)
+and a 60-minute call where we build an agent for one of the customer's tasks
+(`cal.com/ugur-koc/openadminos-agent-build`, event title "We build an
+OpenAdminOS agent for you"; the booking form asks what the agent should do).
+The header shows "Book a demo" as an outlined button next to Download and links
+to `/book`, which presents both calls. The homepage hero and closing section
+link to the demo, and a band after the registry section presents the build
+call. On the build call the customer shares their screen and runs every step
+in their own app and tenant; we never sign in to their tenant, never ask for a
+password, and do not record the call. The site only links to Cal.com and loads
+nothing from it, and the privacy policy names Cal.com as the booking service.
+Between the `lg` and `xl` breakpoints the header leaves out Blog and Roadmap so
+both buttons fit; the footer and the mobile menu keep them.
+
 ### Marketing website canonical host
 
 The product domain remains `openadminos.com`. The deployed marketing site

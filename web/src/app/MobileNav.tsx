@@ -7,7 +7,10 @@ export interface MobileNavItem {
   href: string;
   label: string;
   external?: boolean;
-  primary?: boolean;
+  /** Shown as a button instead of a text link. */
+  cta?: "primary" | "secondary";
+  /** In the desktop header only from the xl breakpoint. The menu always lists it. */
+  wideOnly?: boolean;
 }
 
 export function MobileNav({ items }: { items: readonly MobileNavItem[] }) {
@@ -97,9 +100,11 @@ export function MobileNav({ items }: { items: readonly MobileNavItem[] }) {
             tabIndex={isOpen ? undefined : -1}
             onClick={() => closeIfRouteWillNotChange(item)}
             className={`block rounded-[10px] px-3 py-2.5 text-sm transition-colors ${
-              item.primary
+              item.cta === "primary"
                 ? "mt-1 bg-brand-ink font-medium text-brand-on-ink hover:bg-brand-ink-hover"
-                : "text-brand-muted hover:bg-brand-hover hover:text-brand-ink"
+                : item.cta === "secondary"
+                  ? "mt-1 border border-brand-line-strong font-medium text-brand-ink hover:bg-brand-hover"
+                  : "text-brand-muted hover:bg-brand-hover hover:text-brand-ink"
             }`}
           >
             {item.label}

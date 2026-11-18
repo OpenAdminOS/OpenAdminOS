@@ -18,7 +18,7 @@ import {
   websiteSchema,
 } from "../seo";
 
-const LAST_UPDATED = "2026-10-24";
+const LAST_UPDATED = "2026-11-17";
 const TITLE = "Privacy policy";
 const DESCRIPTION =
   "How OpenAdminOS handles data from the services you connect, such as Microsoft 365, authentication tokens, LLM prompts, registry install counts, and website analytics.";
@@ -255,6 +255,22 @@ export default function PrivacyPage() {
                 Plausible is not used in the desktop app and never receives
                 tenant data, prompts, run results, tokens, provider credentials,
                 or support diagnostics from the app.
+              </li>
+              <li>
+                <span className="text-brand-ink">Booking a call.</span> The
+                demo and agent build calls are booked on Cal.com. The website
+                only links to it and loads nothing from Cal.com until you open
+                a booking page. Cal.com receives the name, email, and notes you
+                enter, and we use them only to hold the call; see{" "}
+                <Link
+                  href="https://cal.com/privacy"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-link"
+                >
+                  Cal.com&rsquo;s privacy policy
+                </Link>
+                . Calls run on Microsoft Teams and are not recorded.
               </li>
             </ul>
           </section>
