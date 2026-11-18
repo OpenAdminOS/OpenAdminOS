@@ -6,6 +6,7 @@ import { SITE_URL } from "./seo";
 const ROUTES = [
   ["/", "2026-06-05"],
   ["/download", "2026-06-04"],
+  ["/book", "2026-11-17"],
   ["/examples", "2026-07-04"],
   ["/registry", "2026-06-02"],
   ["/trust-model", "2026-06-02"],

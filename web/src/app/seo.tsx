@@ -8,6 +8,10 @@ export const DOCS_URL = "https://docs.openadminos.com/";
 export const ROADMAP_URL = "https://roadmap.openadminos.com/";
 export const LINKEDIN_URL = "https://www.linkedin.com/company/openadminos/";
 export const SUPPORT_EMAIL = "support@openadminos.com";
+/** Cal.com booking pages. Both calls are free and held on Microsoft Teams. */
+export const DEMO_BOOKING_URL = "https://cal.com/ugur-koc/openadminos-demo";
+export const AGENT_BUILD_BOOKING_URL =
+  "https://cal.com/ugur-koc/openadminos-agent-build";
 /** The company behind OpenAdminOS. The product name stays OpenAdminOS. */
 export const LEGAL_ENTITY_NAME = "Ugurlabs UG (haftungsbeschränkt)";
 /** Short form for running text, after the full name has been introduced. */

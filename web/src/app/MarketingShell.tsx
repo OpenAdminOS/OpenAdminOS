@@ -19,12 +19,15 @@ const MARKETING_NAV_ITEMS: readonly MobileNavItem[] = [
   { href: "/trust-model", label: "Trust model" },
   { href: "/registry", label: "Registry" },
   { href: "/benchmarks", label: "Benchmarks" },
-  { href: "/blog", label: "Blog" },
+  // Blog and Roadmap leave the header below xl so the two buttons fit at lg;
+  // the footer still links both.
+  { href: "/blog", label: "Blog", wideOnly: true },
   // Same tab: the roadmap is part of the site, on its own host.
-  { href: ROADMAP_URL, label: "Roadmap" },
+  { href: ROADMAP_URL, label: "Roadmap", wideOnly: true },
   { href: DOCS_URL, label: "Documentation", external: true },
   { href: GITHUB_URL, label: "GitHub", external: true },
-  { href: "/download", label: "Download", primary: true },
+  { href: "/book", label: "Book a demo", cta: "secondary" },
+  { href: "/download", label: "Download", cta: "primary" },
 ];
 
 const FOOTER_GROUPS: readonly {
@@ -35,6 +38,8 @@ const FOOTER_GROUPS: readonly {
     title: "Product",
     links: [
       { href: "/download", label: "Download" },
+      { href: "/book", label: "Book a demo" },
+      { href: "/book#build", label: "We build an agent for you" },
       { href: "/trust-model", label: "Trust model" },
       { href: "/registry", label: "Agent registry" },
       { href: "/llm-providers", label: "Model providers" },
@@ -110,23 +115,29 @@ export function MarketingShell({
             aria-label="Main"
             className="hidden items-center gap-1 text-sm text-brand-muted lg:flex"
           >
-            {MARKETING_NAV_ITEMS.filter((item) => !item.primary).map((item) => (
+            {MARKETING_NAV_ITEMS.filter((item) => !item.cta).map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
                 target={item.external ? "_blank" : undefined}
                 rel={item.external ? "noreferrer" : undefined}
-                className="rounded-lg px-3 py-1.5 transition-colors hover:bg-brand-hover hover:text-brand-ink"
+                className={`rounded-lg px-3 py-1.5 transition-colors hover:bg-brand-hover hover:text-brand-ink ${
+                  item.wideOnly ? "hidden xl:block" : ""
+                }`}
               >
                 {item.label}
               </Link>
             ))}
             <ThemeToggle className="ml-2" />
-            {MARKETING_NAV_ITEMS.filter((item) => item.primary).map((item) => (
+            {MARKETING_NAV_ITEMS.filter((item) => item.cta).map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
-                className="ml-2 inline-flex h-9 items-center rounded-[10px] bg-brand-ink px-3.5 font-medium text-brand-on-ink transition-colors hover:bg-brand-ink-hover"
+                className={`ml-2 inline-flex h-9 items-center whitespace-nowrap rounded-[10px] px-3.5 font-medium transition-colors ${
+                  item.cta === "primary"
+                    ? "bg-brand-ink text-brand-on-ink hover:bg-brand-ink-hover"
+                    : "border border-brand-line-strong text-brand-ink hover:bg-brand-hover"
+                }`}
               >
                 {item.label}
               </Link>
