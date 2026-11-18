@@ -1,0 +1,928 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>34 Data policy, OpenAdminOS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="_design.css">
+  <!--
+    Mockup 34 (2026-11-18): Data policy, Track A of
+    tasks/data-policy-and-personal-agent.md.
+
+    Design plan
+      Palette   The production tokens. Dark values are the legacy tokens in
+                _design.css (--bg-0, --text-0, --warning ...), light values are
+                the light theme of apps/desktop/src/styles/globals.css.
+                Amber keeps the one meaning it has in mockups 32 and 33:
+                tenant data leaves this device in clear text. Masked is a
+                neutral hatch. Block is the danger color and nothing else.
+      Type      Geist for the interface, Newsreader for page and section
+                headings, Geist Mono only for tokens, field paths and keys.
+      Layout    The doc frame from mockups 32 and 33: lettered sections, real
+                app windows, notes under each, open questions at the end.
+      Memorable The policy matrix is a map of what leaves in clear text.
+                Amber fills only the cells where a class reaches a model
+                unmasked off the device. The sample line above it redraws as
+                rules change, so the admin sees what the model would see.
+
+    The doc bar at the top is not part of the app.
+  -->
+  <style>
+    /* Production token names. Dark maps onto the legacy tokens in _design.css. */
+    :root {
+      --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      --font-serif: "Newsreader", "Iowan Old Style", Charter, Georgia, serif;
+      --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      --text-xs: 12px; --lh-xs: 18px;
+      --text-sm: 13px; --lh-sm: 19.5px;
+      --text-base: 14px; --lh-base: 21px;
+      --text-md: 16px; --lh-md: 24px;
+      --text-lg: 24px; --lh-lg: 32px;
+      --text-display: 34px; --lh-display: 42px;
+      --radius-sm: 8px; --radius-md: 10px; --radius-lg: 14px; --radius-xl: 18px;
+      --color-svc-intune: #4e6e9e; --color-svc-entra: #3d7c83; --color-svc-defender: #6a5c90;
+      --dur-fast: 140ms;
+    }
+    :root, [data-theme="light"] {
+      --color-bg: #faf9f6; --color-bg-elevated: #ffffff; --color-bg-raised: #eeebe5;
+      --color-sidebar-solid: #f2f0eb; --color-surface: #ffffff;
+      --color-hover: rgba(31, 29, 26, 0.05); --color-active: rgba(31, 29, 26, 0.085);
+      --color-border: rgba(31, 29, 26, 0.12); --color-border-strong: rgba(31, 29, 26, 0.22); --color-border-soft: rgba(31, 29, 26, 0.065);
+      --color-text: #1f1d1a; --color-text-soft: #5c5852; --color-text-muted: #6f6a63; --color-text-faint: #938d84;
+      --color-accent: #1f1d1a; --color-accent-hover: #37342f; --color-on-accent: #faf9f6; --color-focus: #2f6feb;
+      --color-success: #3a7246; --color-success-soft: #3a72460c;
+      --color-warning: #895a05; --color-warning-soft: #8a5b0514;
+      --color-danger: #a8382b; --color-danger-soft: #a8382b12;
+      --color-code-bg: rgba(31, 29, 26, 0.045); --color-scrim: rgba(28, 25, 22, 0.26);
+      --hatch: rgba(31, 29, 26, 0.16);
+      --shadow-pop: 0 0 0 1px rgba(31, 29, 26, 0.07), 0 10px 32px rgba(31, 29, 26, 0.14);
+      color-scheme: light;
+    }
+    [data-theme="dark"] {
+      --color-bg: var(--bg-0); --color-bg-elevated: #22262c; --color-bg-raised: var(--bg-3);
+      --color-sidebar-solid: var(--bg-1); --color-surface: var(--bg-2);
+      --color-hover: rgba(255, 255, 255, 0.05); --color-active: rgba(255, 255, 255, 0.085);
+      --color-border: rgba(255, 255, 255, 0.12); --color-border-strong: rgba(255, 255, 255, 0.24); --color-border-soft: rgba(255, 255, 255, 0.065);
+      --color-text: var(--text-0); --color-text-soft: var(--text-1); --color-text-muted: #98a0ab; --color-text-faint: var(--text-3);
+      --color-accent: var(--accent); --color-accent-hover: #ffffff; --color-on-accent: var(--bg-0); --color-focus: #8fb4ff;
+      --color-success: var(--success); --color-success-soft: #9cc88f1a;
+      --color-warning: var(--warning); --color-warning-soft: #e5c6781a;
+      --color-danger: var(--danger); --color-danger-soft: #f1a0a01a;
+      --color-code-bg: rgba(255, 255, 255, 0.055); --color-scrim: rgba(0, 0, 0, 0.55);
+      --hatch: rgba(255, 255, 255, 0.16);
+      --shadow-pop: 0 0 0 1px rgba(255, 255, 255, 0.09), 0 12px 36px rgba(0, 0, 0, 0.45);
+      color-scheme: dark;
+    }
+
+    /* Undo the app-shell rules of _design.css for a scrolling document. */
+    * { box-sizing: border-box; }
+    html, body { height: auto; overflow: visible; margin: 0; }
+    body {
+      background: var(--color-bg-raised);
+      color: var(--color-text);
+      font: 400 var(--text-base)/var(--lh-base) var(--font-sans);
+      letter-spacing: 0;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+    button, input, select { font: inherit; color: inherit; }
+    :focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+    code, .mono { font-family: var(--font-mono); font-size: var(--text-xs); }
+    p { margin: 0; }
+
+    /* ---------- Doc chrome (not the app) ---------- */
+    .docbar { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--color-bg-raised); border-bottom: 1px solid var(--color-border-soft); font-size: var(--text-sm); flex-wrap: wrap; }
+    .docbar b { font-weight: 500; }
+    .docbar nav { display: flex; gap: 2px; margin-left: auto; flex-wrap: wrap; }
+    .docbar nav a { color: var(--color-text-soft); text-decoration: none; padding: 2px 6px; border-radius: 6px; }
+    .docbar nav a:hover { background: var(--color-hover); color: var(--color-text); }
+    .seg { display: inline-flex; padding: 2px; border-radius: 8px; background: var(--color-hover); }
+    .seg button { border: 0; background: none; padding: 2px 10px; border-radius: 6px; cursor: pointer; color: var(--color-text-soft); }
+    .seg button[aria-pressed="true"] { background: var(--color-surface); color: var(--color-text); box-shadow: 0 0 0 1px var(--color-border-soft); }
+    .doc { max-width: 1320px; margin: 0 auto; padding: 32px 16px 80px; }
+    .doc > header { max-width: 74ch; margin-bottom: 40px; }
+    .doc h1 { font: 500 var(--text-display)/var(--lh-display) var(--font-serif); margin: 0 0 10px; text-wrap: balance; }
+    .doc > header p { color: var(--color-text-soft); }
+    .sect { margin: 0 0 64px; scroll-margin-top: 56px; }
+    .sect > h2 { font: 500 var(--text-lg)/var(--lh-lg) var(--font-serif); margin: 0 0 4px; }
+    .sect > p { color: var(--color-text-soft); margin: 0 0 16px; max-width: 78ch; }
+    .notes { margin: 16px 0 0; padding-left: 18px; color: var(--color-text-soft); font-size: var(--text-sm); line-height: var(--lh-sm); max-width: 92ch; }
+    .notes li + li { margin-top: 4px; }
+
+    /* ---------- App window ---------- */
+    .win { container-type: inline-size; position: relative; display: flex; flex-direction: column; overflow: hidden; border-radius: 12px; background: var(--color-bg); box-shadow: 0 0 0 1px var(--color-border), 0 20px 50px -20px rgba(0,0,0,.25); }
+    .shell { display: grid; grid-template-columns: 248px minmax(0, 1fr); min-height: 560px; }
+    .side { background: var(--color-sidebar-solid); display: flex; flex-direction: column; padding: 0 8px 8px; min-height: 0; }
+    .side-top { height: 52px; flex: none; }
+    .lights { position: absolute; left: 18px; top: 20px; display: flex; gap: 8px; }
+    .lights i { width: 12px; height: 12px; border-radius: 50%; background: var(--color-border-strong); }
+    .brandrow { display: flex; align-items: center; gap: 8px; padding: 6px 8px 10px; font-weight: 600; }
+    .snav a { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border-radius: var(--radius-sm); color: var(--color-text-soft); text-decoration: none; }
+    .snav a[aria-current] { background: var(--color-active); color: var(--color-text); }
+    .snav svg { width: 15px; height: 15px; opacity: .75; }
+    .side-foot { margin-top: auto; display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: var(--radius-md); }
+    .side-foot[data-current] { background: var(--color-active); }
+    .side-foot .who { min-width: 0; font-size: var(--text-sm); line-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .side-foot .who span { display: block; color: var(--color-text-muted); font-size: var(--text-xs); }
+    .appmain { position: relative; display: flex; flex-direction: column; min-width: 0; }
+    .topbar { height: 52px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 16px; border-bottom: 1px solid var(--color-border-soft); min-width: 0; }
+    .orgchip { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px 0 6px; border-radius: var(--radius-sm); border: 0; background: none; cursor: pointer; font-weight: 500; white-space: nowrap; }
+    .orgchip:hover { background: var(--color-hover); }
+    .orgchip .chev { width: 12px; height: 12px; color: var(--color-text-muted); }
+    .page { flex: 1; min-height: 0; container-type: inline-size; }
+    .page-in { max-width: 940px; margin: 0 auto; padding: 24px 32px 40px; }
+    .page-in.narrow { max-width: 780px; }
+    .page-head { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+    .page-head h1 { font: 500 var(--text-lg)/var(--lh-lg) var(--font-serif); margin: 0; }
+    .page-head p { margin: 2px 0 0; color: var(--color-text-soft); font-size: var(--text-sm); max-width: 66ch; }
+    .page-head .act { margin-left: auto; display: flex; gap: 8px; }
+
+    /* ---------- The status strip ---------- */
+    .boundary { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 10px; border-radius: 999px; font-size: var(--text-xs); color: var(--color-text-soft); box-shadow: inset 0 0 0 1px var(--color-border); white-space: nowrap; max-width: 72%; overflow: hidden; border: 0; background: none; cursor: pointer; }
+    .boundary .bs { display: none; }
+    .boundary[data-where="hosted"] { color: var(--color-warning); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-warning) 35%, transparent); background: var(--color-warning-soft); }
+    .boundary[data-where="local"] { color: var(--color-success); }
+    .boundary .mask { display: inline-flex; align-items: center; gap: 6px; color: var(--color-text-soft); }
+    .boundary .blk { color: var(--color-danger); }
+    @container (max-width: 1000px) { .boundary .bw { display: none; } .boundary .bs { display: inline; } }
+    .pip { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+    .hx { display: inline-block; width: 12px; height: 12px; border-radius: 3px; flex: none; background: repeating-linear-gradient(135deg, var(--hatch) 0 1.5px, transparent 1.5px 4px); box-shadow: inset 0 0 0 1px var(--color-border-strong); }
+
+    /* ---------- Primitives ---------- */
+    .bt { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: var(--radius-sm); border: 0; cursor: pointer; font-size: var(--text-base); font-weight: 500; white-space: nowrap; background: none; color: var(--color-text); transition: background-color var(--dur-fast) ease; }
+    .bt.sm { height: 28px; padding: 0 10px; font-size: var(--text-sm); }
+    .bt.primary { background: var(--color-accent); color: var(--color-on-accent); }
+    .bt.primary:hover { background: var(--color-accent-hover); }
+    .bt.secondary { background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-border); }
+    .bt.secondary:hover { background: var(--color-hover); }
+    .bt.ghost { color: var(--color-text-soft); }
+    .bt.ghost:hover { background: var(--color-hover); color: var(--color-text); }
+    .bt[disabled] { opacity: .45; cursor: not-allowed; }
+    .muted { color: var(--color-text-muted); }
+    .soft { color: var(--color-text-soft); }
+    .leaves { color: var(--color-warning); }
+    .sm { font-size: var(--text-sm); line-height: var(--lh-sm); }
+    .xs { font-size: var(--text-xs); line-height: var(--lh-xs); }
+    .rows { list-style: none; margin: 0; padding: 0; }
+    .rows > li + li { border-top: 1px solid var(--color-border-soft); }
+    .sec-h { display: flex; align-items: baseline; gap: 12px; margin: 28px 0 4px; flex-wrap: wrap; }
+    .sec-h h2 { font-size: var(--text-md); line-height: var(--lh-md); font-weight: 500; margin: 0; }
+    .sec-h .r { margin-left: auto; }
+    .sec-sub { margin: 0 0 10px; color: var(--color-text-muted); font-size: var(--text-sm); max-width: 72ch; }
+    .av { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; font-size: 10px; font-weight: 600; background: var(--color-bg-raised); color: var(--color-text-soft); box-shadow: inset 0 0 0 1px var(--color-border-soft); flex: none; }
+    .mk { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 6px; font-size: 10px; font-weight: 600; color: #fff; }
+    .mk[data-s="intune"] { background: var(--color-svc-intune); }
+    .mk[data-s="entra"] { background: var(--color-svc-entra); }
+    .lockline { display: inline-flex; align-items: flex-start; gap: 6px; font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text-muted); }
+    .lockline svg { width: 12px; height: 12px; flex: none; margin-top: 3px; }
+    .lockline code { color: var(--color-text-soft); overflow-wrap: anywhere; }
+    .block { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 14px; padding: 16px 18px; border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-border); }
+    .block h3 { margin: 2px 0 4px; font-size: var(--text-base); font-weight: 500; }
+    .block p { color: var(--color-text-soft); font-size: var(--text-sm); line-height: var(--lh-sm); max-width: 72ch; }
+    .block .acts { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
+    .block[data-t="blocked"] { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-danger) 35%, transparent); }
+    .glyph { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: var(--color-bg-raised); color: var(--color-text-soft); }
+    .glyph svg { width: 18px; height: 18px; }
+    .glyph[data-t="blocked"] { background: var(--color-danger-soft); color: var(--color-danger); }
+    .glyph[data-t="mask"] { background: repeating-linear-gradient(135deg, var(--hatch) 0 2px, transparent 2px 6px), var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-border-strong); color: var(--color-text); }
+
+    /* ---------- Settings layout ---------- */
+    .settings { display: grid; grid-template-columns: 176px minmax(0, 1fr); gap: 28px; }
+    .setnav { display: flex; flex-direction: column; gap: 1px; font-size: var(--text-sm); position: sticky; top: 16px; align-self: start; }
+    .setnav a { padding: 6px 10px; border-radius: var(--radius-sm); color: var(--color-text-soft); text-decoration: none; }
+    .setnav a[aria-current] { background: var(--color-active); color: var(--color-text); font-weight: 500; }
+    .setnav .new { margin-left: 6px; font-size: 11px; color: var(--color-text-muted); }
+    @container (max-width: 760px) { .settings { grid-template-columns: 1fr; gap: 0; } .setnav { display: none; } }
+    .itnote { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 10px 14px; border-radius: var(--radius-md); background: var(--color-code-bg); font-size: var(--text-sm); line-height: var(--lh-sm); margin-bottom: 20px; }
+    .itnote svg { width: 14px; height: 14px; margin-top: 3px; color: var(--color-text-soft); }
+
+    /* ---------- Sample line: what the model sees ---------- */
+    .seeline { border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-border-soft); padding: 14px 16px 16px; margin-bottom: 18px; }
+    .seeline .hd { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+    .seeline .hd h3 { margin: 0; font-size: var(--text-sm); font-weight: 500; }
+    .seeline .hd .seg { margin-left: auto; }
+    .seeline .ln { font-family: var(--font-mono); font-size: 12.5px; line-height: 26px; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; min-height: 52px; }
+    .seeline .ln .k { color: var(--color-text-faint); margin-right: -6px; }
+    .v { padding: 1px 0; border-radius: 4px; white-space: nowrap; }
+    .v[data-act="allow"][data-off="1"] { color: var(--color-warning); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--color-warning) 50%, transparent); text-underline-offset: 4px; }
+    .v[data-act="mask"] { padding: 1px 6px; background: repeating-linear-gradient(135deg, var(--hatch) 0 1.5px, transparent 1.5px 5px); box-shadow: inset 0 0 0 1px var(--color-border-strong); color: var(--color-text); }
+    .seeline .stopped { display: flex; align-items: center; gap: 8px; font-family: var(--font-sans); font-size: var(--text-sm); color: var(--color-danger); }
+    .seeline .ft { margin-top: 8px; font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text-muted); }
+
+    /* ---------- The policy matrix ---------- */
+    .matrix { border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-border-soft); }
+    .mrow { display: grid; grid-template-columns: minmax(150px, 1.05fr) repeat(3, minmax(0, 1fr)); gap: 0 10px; align-items: center; padding: 12px 14px; }
+    .mrow + .mrow { border-top: 1px solid var(--color-border-soft); }
+    .mrow.head { align-items: end; padding-top: 14px; padding-bottom: 10px; }
+    .tier .n { font-weight: 500; font-size: var(--text-sm); display: flex; align-items: center; gap: 6px; }
+    .tier .w { font-size: var(--text-xs); line-height: 16px; color: var(--color-text-muted); }
+    .tier[data-tier="hosted"] .n { color: var(--color-warning); }
+    .cls .n { font-weight: 500; display: flex; align-items: center; gap: 8px; }
+    .cls .ex { font-size: var(--text-xs); line-height: 16px; color: var(--color-text-muted); margin-top: 2px; }
+    .sens { display: inline-flex; gap: 2px; }
+    .sens i { width: 4px; height: 10px; border-radius: 1px; background: var(--color-border); }
+    .sens i.on { background: var(--color-text-soft); }
+    .cell { position: relative; border-radius: var(--radius-md); padding: 3px; transition: background-color var(--dur-fast) ease; }
+    .cell[data-state="leaves"] { background: var(--color-warning-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-warning) 30%, transparent); }
+    .cell[data-state="mask"] { background: repeating-linear-gradient(135deg, var(--hatch) 0 1px, transparent 1px 6px); box-shadow: inset 0 0 0 1px var(--color-border); }
+    .cell[data-state="block"] { background: var(--color-danger-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-danger) 30%, transparent); }
+    .acts3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; }
+    .acts3 button { height: 26px; border: 0; border-radius: 7px; background: none; cursor: pointer; font-size: var(--text-xs); color: var(--color-text-soft); padding: 0 2px; }
+    .acts3 button:hover:not([disabled]) { background: var(--color-hover); color: var(--color-text); }
+    .acts3 button[aria-pressed="true"] { background: var(--color-bg-elevated); color: var(--color-text); font-weight: 500; box-shadow: 0 0 0 1px var(--color-border), 0 1px 2px rgba(0,0,0,.06); }
+    .cell[data-state="block"] .acts3 button[aria-pressed="true"] { color: var(--color-danger); }
+    .cell[data-state="leaves"] .acts3 button[aria-pressed="true"] { color: var(--color-warning); }
+    .acts3 button[disabled] { cursor: not-allowed; text-decoration: line-through; text-decoration-color: var(--color-text-faint); color: var(--color-text-faint); }
+    .mrow[data-locked] .acts3 button { cursor: not-allowed; }
+    .mrow[data-locked] .acts3 button:not([aria-pressed="true"]) { opacity: .5; }
+    .mrow .why { grid-column: 2 / -1; margin-top: 6px; font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text-muted); }
+    .mrow .why.r { grid-column: 2 / -1; text-align: right; }
+    .mrow .lockline { grid-column: 1 / -1; margin-top: 8px; }
+    .mfoot { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-top: 1px solid var(--color-border-soft); font-size: var(--text-xs); color: var(--color-text-muted); flex-wrap: wrap; }
+    .mfoot .key { display: inline-flex; align-items: center; gap: 6px; }
+    .mfoot .sw { width: 14px; height: 14px; border-radius: 4px; }
+    .mfoot .sw[data-k="leaves"] { background: var(--color-warning-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-warning) 40%, transparent); }
+    .mfoot .sw[data-k="mask"] { background: repeating-linear-gradient(135deg, var(--hatch) 0 1px, transparent 1px 4px); box-shadow: inset 0 0 0 1px var(--color-border-strong); }
+    .mfoot .sw[data-k="block"] { background: var(--color-danger-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-danger) 40%, transparent); }
+    .mfoot .r { margin-left: auto; }
+    .tlabel { display: none; }
+    @container (max-width: 640px) {
+      .mrow { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+      .mrow.head { display: none; }
+      .mrow .cls { grid-column: 1 / -1; }
+      .tlabel { display: block; font-size: 11px; color: var(--color-text-muted); margin: 0 0 3px 4px; }
+      .tlabel.hosted { color: var(--color-warning); }
+      .mrow .why, .mrow .why.r { grid-column: 1 / -1; margin-top: 0; text-align: left; }
+      .mfoot .r { margin-left: 0; }
+    }
+
+    /* ---------- Strip catalogue ---------- */
+    .strips { display: grid; gap: 0; border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-border-soft); container-type: inline-size; }
+    .strips > div { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 16px; align-items: center; padding: 14px 18px; }
+    .strips > div + div { border-top: 1px solid var(--color-border-soft); }
+    .strips .cap { font-size: var(--text-sm); color: var(--color-text-soft); }
+    .strips .boundary { margin-left: 0; max-width: 100%; justify-self: start; }
+    @container (max-width: 640px) { .strips > div { grid-template-columns: 1fr; gap: 6px; } }
+    .pop { width: min(400px, 100%); border-radius: var(--radius-lg); background: var(--color-bg-elevated); box-shadow: var(--shadow-pop); padding: 14px 16px; font-size: var(--text-sm); line-height: var(--lh-sm); }
+    .pop h4 { margin: 0 0 2px; font-size: var(--text-sm); font-weight: 500; color: var(--color-warning); }
+    .pop dl { display: grid; grid-template-columns: minmax(0, 1fr) auto; margin: 10px 0; }
+    .pop dt, .pop dd { margin: 0; padding: 5px 0; border-top: 1px solid var(--color-border-soft); }
+    .pop dd { text-align: right; color: var(--color-text-soft); }
+    .pop dd.lv { color: var(--color-warning); }
+    .pop dd.mk2 { display: inline-flex; gap: 6px; align-items: center; justify-content: flex-end; }
+
+    /* ---------- Chat ---------- */
+    .chat { max-width: 760px; margin: 0 auto; padding: 24px 32px 28px; }
+    .q { margin-left: auto; width: fit-content; max-width: 78%; padding: 9px 14px; border-radius: 16px 16px 4px 16px; background: var(--color-active); }
+    .ans { margin-top: 20px; }
+    .ans .who { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); color: var(--color-text-muted); margin-bottom: 6px; }
+    .ans .body { font: 400 16px/26px var(--font-serif); }
+    .ans .body p + p { margin-top: 10px; }
+    .ans table { width: 100%; border-collapse: collapse; margin: 12px 0 4px; font: 400 var(--text-sm)/var(--lh-sm) var(--font-sans); }
+    .ans th { text-align: left; font-weight: 500; color: var(--color-text-muted); padding: 6px 8px 6px 0; border-bottom: 1px solid var(--color-border); }
+    .ans td { padding: 7px 8px 7px 0; border-bottom: 1px solid var(--color-border-soft); }
+    .ans td:last-child, .ans th:last-child { padding-right: 0; }
+    .masknote { margin-top: 14px; border-radius: var(--radius-md); box-shadow: inset 0 0 0 1px var(--color-border); font-size: var(--text-sm); line-height: var(--lh-sm); }
+    .masknote summary { list-style: none; display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 12px; cursor: pointer; }
+    .masknote summary::-webkit-details-marker { display: none; }
+    .masknote summary .chev { width: 12px; height: 12px; color: var(--color-text-muted); transition: transform var(--dur-fast) ease; }
+    .masknote[open] summary .chev { transform: rotate(180deg); }
+    .masknote .inner { padding: 0 12px 12px 36px; }
+    .counts { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 0 16px; margin: 0 0 8px; }
+    .counts > * { padding: 5px 0; border-top: 1px solid var(--color-border-soft); }
+    .counts .h { color: var(--color-text-muted); font-size: var(--text-xs); border-top: 0; padding-top: 0; }
+    .counts .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .composer { margin-top: 22px; display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 8px 0 14px; border-radius: 14px; background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-border); color: var(--color-text-faint); }
+    .composer .r { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: var(--text-xs); color: var(--color-warning); white-space: nowrap; }
+
+    /* ---------- Run activity ---------- */
+    .facts { display: grid; grid-template-columns: 150px minmax(0, 1fr); margin: 0 0 20px; font-size: var(--text-sm); }
+    .facts dt, .facts dd { padding: 9px 0; border-top: 1px solid var(--color-border-soft); margin: 0; }
+    .facts dt { color: var(--color-text-muted); }
+    .facts dd .xs { display: block; }
+    @container (max-width: 560px) { .facts { grid-template-columns: 1fr; } .facts dd { border-top: 0; padding-top: 0; } }
+    .steps { list-style: none; margin: 0; padding: 0; position: relative; }
+    .steps > li { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 0 12px; padding: 9px 0; position: relative; }
+    .steps > li::before { content: ""; position: absolute; left: 11px; top: 30px; bottom: -9px; width: 1.5px; background: var(--color-border); }
+    .steps > li:last-child::before { display: none; }
+    .steps .sd { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-border-strong); color: var(--color-text-soft); position: relative; z-index: 1; }
+    .steps .sd svg { width: 12px; height: 12px; }
+    .steps .sd[data-t="policy"] { background: repeating-linear-gradient(135deg, var(--hatch) 0 1.5px, transparent 1.5px 4px), var(--color-surface); color: var(--color-text); }
+    .steps .sd[data-t="hosted"] { color: var(--color-warning); box-shadow: inset 0 0 0 1.5px var(--color-warning); background: var(--color-warning-soft); }
+    .steps .t { font-weight: 500; font-size: var(--text-sm); }
+    .steps .d { font-size: var(--text-sm); line-height: var(--lh-sm); color: var(--color-text-soft); }
+    .steps .tm { font-size: var(--text-xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .steps li.hl { background: var(--color-code-bg); border-radius: var(--radius-md); padding: 10px 12px 12px; margin: 4px -12px; grid-template-columns: 24px minmax(0, 1fr) auto; }
+    .steps li.hl::before { left: 23px; }
+    .steps .detail { grid-column: 2 / -1; margin-top: 8px; }
+    .ptable { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+    .ptable th { text-align: left; font-weight: 400; color: var(--color-text-muted); font-size: var(--text-xs); padding: 0 8px 4px 0; }
+    .ptable td { padding: 5px 8px 5px 0; border-top: 1px solid var(--color-border-soft); }
+    .ptable td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .ptable th.num { text-align: right; }
+    .act-chip { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-xs); }
+    .act-chip[data-a="allow"] { color: var(--color-text-soft); }
+    .act-chip[data-a="leaves"] { color: var(--color-warning); }
+    .act-chip[data-a="block"] { color: var(--color-danger); }
+    .act-chip .sq { width: 10px; height: 10px; border-radius: 3px; }
+    .act-chip[data-a="mask"] .sq { background: repeating-linear-gradient(135deg, var(--hatch) 0 1px, transparent 1px 3px); box-shadow: inset 0 0 0 1px var(--color-border-strong); }
+    .act-chip[data-a="leaves"] .sq { background: var(--color-warning-soft); box-shadow: inset 0 0 0 1px var(--color-warning); }
+    .act-chip[data-a="allow"] .sq { box-shadow: inset 0 0 0 1px var(--color-border-strong); }
+    .act-chip[data-a="block"] .sq { background: var(--color-danger-soft); box-shadow: inset 0 0 0 1px var(--color-danger); }
+
+    /* ---------- Unclassified fields ---------- */
+    .uf { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; align-items: center; padding: 12px 0; }
+    .uf .p { font-family: var(--font-mono); font-size: var(--text-xs); overflow-wrap: anywhere; }
+    .uf .ds { font-size: var(--text-sm); color: var(--color-text-soft); }
+    .uf .a { grid-column: 2; grid-row: 1 / span 2; display: flex; gap: 8px; align-items: center; }
+    .pick { height: 28px; padding: 0 8px; border-radius: var(--radius-sm); border: 0; background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-border); font-size: var(--text-sm); }
+    @container (max-width: 600px) { .uf { grid-template-columns: 1fr; } .uf .a { grid-column: 1; grid-row: auto; } }
+
+    /* ---------- Agent details ---------- */
+    .agent-hd { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 14px; align-items: center; margin-bottom: 18px; }
+    .agent-hd .ic { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; background: var(--color-svc-intune); color: #fff; font-weight: 600; }
+    .agent-hd h1 { font: 500 var(--text-lg)/var(--lh-lg) var(--font-serif); margin: 0; }
+    .agent-hd p { font-size: var(--text-sm); color: var(--color-text-soft); }
+    .rw { margin-left: 8px; padding: 1px 7px; border-radius: 5px; font-size: var(--text-xs); color: var(--color-text-soft); box-shadow: inset 0 0 0 1px var(--color-border); white-space: nowrap; }
+    .reads { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+    .reads th { text-align: left; font-weight: 400; font-size: var(--text-xs); color: var(--color-text-muted); padding: 0 12px 6px 0; }
+    .reads td { padding: 10px 12px 10px 0; border-top: 1px solid var(--color-border-soft); vertical-align: top; }
+    .reads td:last-child, .reads th:last-child { padding-right: 0; }
+    .reads .cl { font-weight: 500; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+    .reads code { color: var(--color-text-soft); overflow-wrap: anywhere; }
+    @container (max-width: 600px) { .reads thead { display: none; } .reads tr { display: grid; grid-template-columns: 1fr auto; padding: 8px 0; border-top: 1px solid var(--color-border-soft); } .reads td { border: 0; padding: 2px 0; } .reads td.f { grid-column: 1 / -1; grid-row: 2; } }
+    .runbar { display: flex; align-items: center; gap: 12px; margin-top: 18px; padding: 12px 14px; border-radius: var(--radius-md); background: var(--color-code-bg); font-size: var(--text-sm); flex-wrap: wrap; }
+    .runbar .r { margin-left: auto; display: flex; gap: 8px; }
+
+    /* ---------- Dialog ---------- */
+    .scrim { position: absolute; inset: 52px 0 0 0; background: var(--color-scrim); z-index: 30; display: grid; place-items: center; padding: 24px; }
+    .dialog { width: min(540px, 100%); border-radius: var(--radius-xl); background: var(--color-bg-elevated); box-shadow: var(--shadow-pop); }
+    .dialog header { padding: 20px 24px 0; }
+    .dialog header h2 { margin: 0; font-size: var(--text-md); line-height: var(--lh-md); font-weight: 500; }
+    .dialog .body { padding: 10px 24px 4px; font-size: var(--text-sm); line-height: var(--lh-sm); color: var(--color-text-soft); }
+    .dialog .body p + p { margin-top: 8px; }
+    .dialog footer { display: flex; align-items: center; gap: 8px; padding: 16px 24px 20px; justify-content: flex-end; flex-wrap: wrap; }
+
+    /* ---------- Open questions ---------- */
+    .qs { margin: 0; padding-left: 20px; max-width: 88ch; }
+    .qs li { padding: 7px 0; }
+    .qs li + li { border-top: 1px solid var(--color-border-soft); }
+    .qs b { font-weight: 500; }
+    .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+    @media (max-width: 980px) { .two { grid-template-columns: 1fr; } }
+
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; } }
+    @media (max-width: 720px) { .shell { grid-template-columns: 1fr; } .side { display: none; } .page-in, .chat { padding: 20px 18px 32px; } }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="oa" viewBox="0 0 64 64"><g fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"><circle cx="17" cy="32" r="11.5"/><circle cx="46" cy="32" r="11.5"/><path d="M57.5 20.5v23"/></g></symbol>
+    <symbol id="i-chat" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></symbol>
+    <symbol id="i-agents" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="2" fill="currentColor"/></symbol>
+    <symbol id="i-market" viewBox="0 0 16 16"><path d="M2.5 6.5h11v7h-11zM2 6.5l1.5-3.5h9L14 6.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></symbol>
+    <symbol id="i-conn" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="5" height="5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M1.5 4.5h3M1.5 11.5h3M11.5 8h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></symbol>
+    <symbol id="i-runs" viewBox="0 0 16 16"><path d="M1.5 8.5h3l2-5 3 9 2-4h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round"/></symbol>
+    <symbol id="i-changes" viewBox="0 0 16 16"><circle cx="4.5" cy="4" r="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="4.5" cy="12" r="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="11.5" cy="6" r="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 5.6v4.8M11.5 7.6c0 2-2 2.4-5.4 3.4" fill="none" stroke="currentColor" stroke-width="1.3"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 12 12"><path d="M3 4.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-check" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M3.6 12.4L5 11M11 5l1.4-1.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 16 16"><rect x="3.5" y="7" width="9" height="6.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="currentColor" stroke-width="1.3"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.8" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M4 12L12 4" stroke="currentColor" stroke-width="1.4"/></symbol>
+    <symbol id="i-q" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.8" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M6.3 6.4a1.8 1.8 0 1 1 2.5 1.7c-.5.2-.8.6-.8 1.1v.4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="11.4" r=".8" fill="currentColor"/></symbol>
+    <symbol id="i-read" viewBox="0 0 16 16"><path d="M2 4.5h12M2 8h12M2 11.5h8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></symbol>
+    <symbol id="i-cloud" viewBox="0 0 16 16"><path d="M4.5 12.5h7a2.8 2.8 0 0 0 .4-5.6 3.8 3.8 0 0 0-7.3-.6A3.1 3.1 0 0 0 4.5 12.5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 16 16"><path d="M5 5.5h5.5a3 3 0 0 1 0 6H6M5 5.5l2.2-2.2M5 5.5l2.2 2.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  </svg>
+
+  <div class="docbar">
+    <b>Mockup 34</b>
+    <span class="seg" role="group" aria-label="Theme">
+      <button type="button" data-theme-set="light" aria-pressed="true">Light</button>
+      <button type="button" data-theme-set="dark" aria-pressed="false">Dark</button>
+    </span>
+    <nav aria-label="Sections">
+      <a href="#a">A Settings</a><a href="#b">B Status strip</a><a href="#c">C Chat answer</a><a href="#d">D Run activity</a><a href="#e">E Blocked</a><a href="#f">F Not classified</a><a href="#g">G Agent details</a><a href="#q">Questions</a>
+    </nav>
+  </div>
+
+  <main class="doc">
+    <header>
+      <h1>Data policy decides what each model may see, and every answer says what was hidden.</h1>
+      <p>Six data classes, three provider tiers, three actions. Rules apply on this device before every model call: agent runs, Chat, Office, drafts, follow-ups and Nova. A masked value is replaced by a token for the call and restored on the way back, so the admin reads real names while a hosted model sees placeholders. Check the frames at 1280 and 900 px, in both themes. Click any cell in A to change a rule; the sample line redraws.</p>
+    </header>
+
+    <!-- A: Settings -->
+    <section class="sect" id="a">
+      <h2>A. Settings, Data policy</h2>
+      <p>One matrix, read across: each row is a kind of data, each column a place a model can run. Amber marks the cells where that data leaves this device in clear text, which is the thing an admin is deciding. The sample line on top answers the question a table alone cannot: what will the model actually see.</p>
+      <div class="win">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="shell">
+          <aside class="side" data-side="settings"></aside>
+          <div class="appmain">
+            <div class="topbar" data-top="masked"></div>
+            <div class="page"><div class="page-in">
+              <div class="settings">
+                <nav class="setnav" aria-label="Settings">
+                  <a href="#">Providers</a><a href="#">Data</a><a href="#" aria-current="page">Data policy</a><a href="#">Chat</a><a href="#">Nova</a><a href="#">Gateway</a><a href="#">General</a><a href="#">Appearance</a><a href="#">Privacy</a><a href="#">About</a>
+                </nav>
+                <div>
+                  <div class="page-head">
+                    <div><h1>Data policy</h1><p>What each kind of tenant data may do before a model call. The rules run on this device, so nothing is sent to be classified.</p></div>
+                    <div class="act"><button class="bt ghost sm" type="button" id="reset"><svg width="14" height="14"><use href="#i-undo"/></svg>Reset to defaults</button></div>
+                  </div>
+
+                  <div class="itnote"><svg><use href="#i-lock"/></svg><span>Your IT department set 2 rows on this device. They are marked and cannot be changed here. Changes to the policy file apply at the next launch.</span><button class="bt ghost sm" type="button">Open IT policy</button></div>
+
+                  <div class="seeline" aria-live="polite">
+                    <div class="hd">
+                      <h3>What the model sees for one device row</h3>
+                      <span class="seg" role="group" aria-label="Tier to preview" id="tiersel">
+                        <button type="button" data-tier="local" aria-pressed="false">Local</button>
+                        <button type="button" data-tier="confidential" aria-pressed="false">Confidential</button>
+                        <button type="button" data-tier="hosted" aria-pressed="true">Hosted</button>
+                      </span>
+                    </div>
+                    <div class="ln" id="seeline"></div>
+                    <div class="ft" id="seefoot"></div>
+                  </div>
+
+                  <div class="matrix" id="matrix" role="table" aria-label="Data policy rules">
+                    <div class="mrow head" role="row">
+                      <div class="xs muted" role="columnheader">Data class</div>
+                      <div class="tier" data-tier="local" role="columnheader"><div class="n"><span class="pip" style="color:var(--color-success)"></span>Local</div><div class="w">On this device. Ollama, LM Studio, Lemonade</div></div>
+                      <div class="tier" data-tier="confidential" role="columnheader"><div class="n"><svg width="12" height="12"><use href="#i-lock"/></svg>Confidential</div><div class="w">Attested enclave. No provider qualifies yet</div></div>
+                      <div class="tier" data-tier="hosted" role="columnheader"><div class="n"><svg width="13" height="13"><use href="#i-cloud"/></svg>Hosted</div><div class="w">Claude Code, Codex, Copilot, Azure OpenAI and others</div></div>
+                    </div>
+                    <!-- rows are rendered by the script from RULES so the cells, the sample line and the strip agree -->
+                  </div>
+
+                  <div class="sec-h"><h2>Changes to this policy</h2><span class="r xs muted">Kept in the local audit log</span></div>
+                  <ul class="rows sm">
+                    <li style="padding:9px 0;display:flex;gap:12px;flex-wrap:wrap"><span>Activity on Hosted changed from Block to Allow</span><span class="muted">by you, 14 November at 16:02</span></li>
+                    <li style="padding:9px 0;display:flex;gap:12px;flex-wrap:wrap"><span>Identity and Device rows set by policy.json</span><span class="muted">by your IT department, loaded 12 November at 08:40</span></li>
+                  </ul>
+                </div>
+              </div>
+            </div></div>
+          </div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>The credential row's Allow is struck through on Hosted and cannot be pressed. It is the one rule nobody may loosen, the admin or IT, and the reason sits under the cell instead of in a tooltip.</li>
+        <li>IT-locked rows keep their cells readable but not pressable, and name the file and key that set them. An attempt over IPC is refused the same way and logged.</li>
+        <li>The Confidential column can be set now so the rules are ready, but its header says no provider qualifies. It stays that way until Track C verifies attestation.</li>
+        <li>Loosening a rule (Mask to Allow, Block to anything) asks once in a dialog that names what will leave the device, shown in F. Tightening applies at once.</li>
+        <li>Below 640 px of content width each row stacks its three cells under the class name, each with its tier label.</li>
+      </ul>
+    </section>
+
+    <!-- B: Status strip -->
+    <section class="sect" id="b">
+      <h2>B. The status strip</h2>
+      <p>The strip names the provider and, when a rule masks or blocks, what it does. It names classes the rules hide, not counts: counts belong to an answer. Credentials are not named because no rule can send them to a hosted model in clear text.</p>
+      <div class="two">
+        <div class="strips">
+          <div><span class="cap">Local model</span><span class="boundary" data-where="local"><span class="pip"></span>Local · Ollama · No data leaves this device</span></div>
+          <div><span class="cap">Hosted, defaults</span><span class="boundary" data-where="hosted"><span class="pip"></span>Hosted · Claude Code ·<span class="mask"><span class="hx"></span>identities and devices masked</span></span></div>
+          <div><span class="cap">Hosted, narrow window</span><span class="boundary" data-where="hosted"><span class="pip"></span>Hosted · Claude Code ·<span class="mask"><span class="hx"></span>2 masked</span></span></div>
+          <div><span class="cap">Hosted, a class blocked</span><span class="boundary" data-where="hosted"><span class="pip"></span>Hosted · Claude Code ·<span class="mask"><span class="hx"></span>identities and devices masked,</span><span class="blk">activity blocked</span></span></div>
+          <div><span class="cap">Hosted, everything allowed</span><span class="boundary" data-where="hosted"><span class="pip"></span>Hosted · Claude Code · tenant data in clear text</span></div>
+          <div><span class="cap">Hosted voice, during a call</span><span class="boundary" data-where="hosted"><span class="pip"></span>Hosted voice · OpenAI ·<span class="mask"><span class="hx"></span>speaks roles, not names</span></span></div>
+        </div>
+        <div class="pop" role="dialog" aria-label="Where data goes">
+          <h4>Hosted · Claude Code</h4>
+          <p class="soft">Location set by your account. Before each call, this device applies your data policy:</p>
+          <dl>
+            <dt>Credential</dt><dd class="mk2"><span class="hx"></span>Masked, never restored into a prompt</dd>
+            <dt>Identity</dt><dd class="mk2"><span class="hx"></span>Masked</dd>
+            <dt>Device</dt><dd class="mk2"><span class="hx"></span>Masked</dd>
+            <dt>Activity</dt><dd class="lv">Sent as is</dd>
+            <dt>Configuration</dt><dd class="lv">Sent as is</dd>
+            <dt>Public</dt><dd>Sent as is</dd>
+          </dl>
+          <p class="xs muted" style="margin-bottom:10px">Names the app has never seen, such as a person you type for the first time, cannot be detected and are sent as typed.</p>
+          <button class="bt secondary sm" type="button">Data policy settings</button>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>Clicking the strip opens the popover on the right. Public data is not amber: it came from outside the tenant.</li>
+        <li>"Everything allowed" is the only hosted strip without a hatch, so a policy that hides nothing looks different from one that does. Credentials are still masked; the popover says so.</li>
+        <li>Hosted voice gets its own line because its gate is separate: the voice model gets masked data and says "the user" and "the device"; the transcript on screen shows real values.</li>
+      </ul>
+    </section>
+
+    <!-- C: Chat answer -->
+    <section class="sect" id="c">
+      <h2>C. A Chat answer after a masked call</h2>
+      <p>The answer is written with real names, restored on this device. Under it, one closed line says how many values of each class were replaced before the hosted call. It never lists the values or the tokens.</p>
+      <div class="win">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="shell">
+          <aside class="side" data-side="chat"></aside>
+          <div class="appmain">
+            <div class="topbar" data-top="masked"></div>
+            <div class="page"><div class="chat">
+              <div class="q">Which finance devices have not checked in for 30 days, and who uses them?</div>
+              <div class="ans">
+                <div class="who"><svg width="14" height="14"><use href="#oa"/></svg>Nova with Claude Code, from the Woodgrove Bank cache refreshed 08:10</div>
+                <div class="body">
+                  <p>Four devices in the Finance group have not checked in since at least 18 October. Three are Windows laptops; the fourth is an iPhone that was last seen the day its user changed phones.</p>
+                  <table>
+                    <thead><tr><th>Device</th><th>User</th><th>Last check-in</th></tr></thead>
+                    <tbody>
+                      <tr><td>WGB-LT-0412</td><td>Mara Okafor</td><td>2 October</td></tr>
+                      <tr><td>WGB-LT-0388</td><td>Jonas Lindqvist</td><td>29 September</td></tr>
+                      <tr><td>WGB-LT-0291</td><td>Priya Raman</td><td>21 October</td></tr>
+                      <tr><td>iPhone 15, A. Moreau</td><td>Anne Moreau</td><td>18 October</td></tr>
+                    </tbody>
+                  </table>
+                  <p>Mara Okafor and Jonas Lindqvist signed in from other devices this week, so these two laptops are likely replaced rather than lost.</p>
+                </div>
+                <details class="masknote" open>
+                  <summary><span class="hx"></span><span>Masked before the call to Claude Code: 23 identities, 31 devices</span><svg class="chev"><use href="#i-chev"/></svg></summary>
+                  <div class="inner">
+                    <div class="counts">
+                      <span class="h">Class</span><span class="h num">Values</span><span class="h">Action</span>
+                      <span>Identity</span><span class="num">23</span><span class="act-chip" data-a="mask"><span class="sq"></span>Masked</span>
+                      <span>Device</span><span class="num">31</span><span class="act-chip" data-a="mask"><span class="sq"></span>Masked</span>
+                      <span>Activity</span><span class="num">31</span><span class="act-chip" data-a="leaves"><span class="sq"></span>Sent as is</span>
+                      <span>Configuration</span><span class="num">2</span><span class="act-chip" data-a="leaves"><span class="sq"></span>Sent as is</span>
+                    </div>
+                    <p class="xs muted">Values were replaced on this device and restored in this answer. Follow-up questions in this conversation reuse the same placeholders. <button class="link-ish bt ghost sm" type="button" style="height:22px;padding:0 6px">Data policy</button></p>
+                  </div>
+                </details>
+              </div>
+              <div class="composer">Ask a follow-up<span class="r"><span class="hx"></span>Claude Code, identities and devices masked</span></div>
+            </div></div>
+          </div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>The line is closed by default in production; it is open here to show the counts. An answer where nothing was masked shows no line at all, and a local answer never shows one.</li>
+        <li>The composer repeats the short form of the strip, so the admin sees the rule before sending the next question, not only after.</li>
+        <li>Counts are values replaced, not people or devices: 23 identities can be the names and addresses of fewer people. Question 4 asks whether to count people and devices instead.</li>
+      </ul>
+    </section>
+
+    <!-- D: Run activity -->
+    <section class="sect" id="d">
+      <h2>D. Run activity with a data policy step</h2>
+      <p>Every model call in a run gets a data policy step just before it, in the same list as reads and model calls. The step shows classes, counts and the action per class. The audit log holds the same facts as one event per call.</p>
+      <div class="win">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="shell">
+          <aside class="side" data-side="runs"></aside>
+          <div class="appmain">
+            <div class="topbar" data-top="masked"></div>
+            <div class="page"><div class="page-in narrow">
+              <div class="page-head"><div><h1>Find inactive devices</h1><p>Run for Woodgrove Bank, today at 08:14, 41 seconds</p></div><div class="act"><button class="bt secondary sm" type="button">Export CSV</button></div></div>
+              <dl class="facts">
+                <dt>Model</dt><dd>Claude Code, Hosted<span class="xs muted">Location set by your account</span></dd>
+                <dt>Data policy</dt><dd>Defaults. Identity, device and credential masked on hosted.</dd>
+              </dl>
+              <ol class="steps">
+                <li><span class="sd"><svg><use href="#i-read"/></svg></span><div><div class="t">Read managed devices</div><div class="d">Intune, 412 devices, from the local cache</div></div><span class="tm">08:14:02</span></li>
+                <li><span class="sd"><svg><use href="#i-read"/></svg></span><div><div class="t">Read sign-ins for 38 users</div><div class="d">Entra, last 30 days</div></div><span class="tm">08:14:09</span></li>
+                <li class="hl"><span class="sd" data-t="policy"></span><div><div class="t">Data policy applied</div><div class="d">Masked 38 devices, 31 identities and 3 credentials before the hosted call. Nothing blocked.</div></div><span class="tm">08:14:11</span>
+                  <div class="detail">
+                    <table class="ptable">
+                      <thead><tr><th>Class</th><th>Fields</th><th class="num">Values</th><th>Action</th></tr></thead>
+                      <tbody>
+                        <tr><td>Credential</td><td class="muted">BitLocker recovery key</td><td class="num">3</td><td><span class="act-chip" data-a="mask"><span class="sq"></span>Masked, one way</span></td></tr>
+                        <tr><td>Device</td><td class="muted">deviceName, serialNumber</td><td class="num">38</td><td><span class="act-chip" data-a="mask"><span class="sq"></span>Masked</span></td></tr>
+                        <tr><td>Identity</td><td class="muted">userPrincipalName, userDisplayName</td><td class="num">31</td><td><span class="act-chip" data-a="mask"><span class="sq"></span>Masked</span></td></tr>
+                        <tr><td>Activity</td><td class="muted">lastSyncDateTime, sign-in times</td><td class="num">69</td><td><span class="act-chip" data-a="leaves"><span class="sq"></span>Sent as is</span></td></tr>
+                        <tr><td>Configuration</td><td class="muted">complianceState, operatingSystem</td><td class="num">76</td><td><span class="act-chip" data-a="leaves"><span class="sq"></span>Sent as is</span></td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </li>
+                <li><span class="sd" data-t="hosted"><svg><use href="#i-cloud"/></svg></span><div><div class="t">Model call</div><div class="d">Claude Code, 6.2 seconds, 4,180 tokens in</div></div><span class="tm">08:14:11</span></li>
+                <li><span class="sd"><svg><use href="#i-check"/></svg></span><div><div class="t">Values restored in the result</div><div class="d">69 placeholders replaced on this device. Credentials stay masked in the result.</div></div><span class="tm">08:14:18</span></li>
+              </ol>
+            </div></div>
+          </div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>The step's dot is the hatch, the model call's dot is amber. Together they read as "hidden here, then sent there".</li>
+        <li>The field column names Graph properties, never values. It is what the audit event stores too.</li>
+        <li>A run on a local model shows no data policy step unless a local rule is set to Mask or Block.</li>
+      </ul>
+    </section>
+
+    <!-- E: Blocked -->
+    <section class="sect" id="e">
+      <h2>E. When a rule blocks a prompt</h2>
+      <p>The rule set here is Activity on Hosted: Block. The block names the class, the data that carried it and the rule, says nothing was sent, and offers the two real ways out. It appears in Chat in place of the answer and on an agent before the run starts.</p>
+      <div class="two">
+        <div class="win">
+          <div class="lights"><i></i><i></i><i></i></div>
+          <div class="appmain">
+            <div class="topbar" data-top="blocked" style="padding-left:84px"></div>
+            <div class="page"><div class="chat" style="padding-left:24px;padding-right:24px">
+              <div class="q">Who signed in from outside Germany this week?</div>
+              <div class="ans">
+                <div class="block" data-t="blocked">
+                  <span class="glyph" data-t="blocked"><svg><use href="#i-stop"/></svg></span>
+                  <div>
+                    <h3>This question needs activity data, which your data policy blocks for hosted models</h3>
+                    <p>Answering reads sign-in logs from Entra. Sign-in times and locations are activity data, and the rule for Activity on Hosted is Block. Nothing was sent to Claude Code.</p>
+                    <div class="acts"><button class="bt primary" type="button">Switch to a local model</button><button class="bt secondary" type="button">Change the rule</button></div>
+                    <p class="xs muted" style="margin-top:10px">Ollama with gpt-oss:20b is ready on this device. The question is asked again with it.</p>
+                  </div>
+                </div>
+              </div>
+            </div></div>
+          </div>
+        </div>
+        <div style="display:grid;gap:12px">
+          <p class="xs muted">Same rule, set by IT</p>
+          <div class="block" data-t="blocked">
+            <span class="glyph" data-t="blocked"><svg><use href="#i-stop"/></svg></span>
+            <div>
+              <h3>This question needs activity data, which your IT department blocks for hosted models</h3>
+              <p>Answering reads sign-in logs from Entra. The rule for Activity on Hosted is Block and was set in policy.json. Nothing was sent to Claude Code.</p>
+              <div class="acts"><button class="bt primary" type="button">Switch to a local model</button></div>
+              <p class="lockline" style="margin-top:10px"><svg><use href="#i-lock"/></svg><span>Set by your IT department in <code>dataPolicy.rules.activity.hosted</code></span></p>
+            </div>
+          </div>
+          <p class="xs muted" style="margin-top:8px">No local model set up</p>
+          <div class="block" data-t="blocked">
+            <span class="glyph" data-t="blocked"><svg><use href="#i-stop"/></svg></span>
+            <div>
+              <h3>This question needs activity data, which your data policy blocks for hosted models</h3>
+              <p>No local model is set up on this device. Set one up in Providers, or change the rule. Nothing was sent to Claude Code.</p>
+              <div class="acts"><button class="bt primary" type="button">Set up a local model</button><button class="bt secondary" type="button">Change the rule</button></div>
+            </div>
+          </div>
+          <p class="xs muted" style="margin-top:8px">An agent, before the run starts</p>
+          <div class="block" data-t="blocked">
+            <span class="glyph" data-t="blocked"><svg><use href="#i-stop"/></svg></span>
+            <div>
+              <h3>Sign-in risk review cannot run with Claude Code</h3>
+              <p>This agent reads activity data (sign-in logs and risk detections), which your data policy blocks for hosted models. The run did not start and nothing was read.</p>
+              <div class="acts"><button class="bt primary" type="button">Run with Ollama</button><button class="bt secondary" type="button">Change the rule</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>The title always says which class and which tier. The body names the data source in the admin's words, then the rule in the matrix's words, then "Nothing was sent".</li>
+        <li>Switch to a local model changes the model for this conversation only, not the default in Providers, and asks the question again.</li>
+        <li>Change the rule opens Settings, Data policy with the cell focused. Coming back, the question is not re-sent by itself.</li>
+        <li>For an agent, the preflight refuses before any read, so the block can say "nothing was read" as well as "nothing was sent".</li>
+      </ul>
+    </section>
+
+    <!-- F: Could not classify, and loosening -->
+    <section class="sect" id="f">
+      <h2>F. Data the app could not classify</h2>
+      <p>A field nobody has mapped is treated as identity until someone classifies it, so the safe answer is the default. The admin sees it in two places: a line in the answer or run step, and a list in Settings where the field can be classified.</p>
+      <div class="two">
+        <div style="display:grid;gap:12px;align-content:start">
+          <p class="xs muted">In a run's data policy step, or under a Chat answer</p>
+          <div class="block">
+            <span class="glyph" data-t="mask"><svg><use href="#i-q"/></svg></span>
+            <div>
+              <h3>1 field could not be classified and was masked as identity</h3>
+              <p><code>onPremisesExtensionAttributes.extensionAttribute7</code> on users, 148 values. The app has no class for it yet, so it was treated like a name. The model could not read it, so the answer does not group by it.</p>
+              <div class="acts"><button class="bt secondary sm" type="button">Classify this field</button></div>
+            </div>
+          </div>
+          <p class="xs muted" style="margin-top:8px">Classifying it as a less sensitive class</p>
+          <div class="win" style="min-height:0">
+            <div class="dialog" style="width:100%;box-shadow:none;border-radius:12px">
+              <header><h2>Send extensionAttribute7 to hosted models in clear text?</h2></header>
+              <div class="body">
+                <p>As configuration, its 148 values on users are sent as is to Claude Code and any other hosted model. Woodgrove Bank uses this attribute for cost centers today; if it ever holds names or phone numbers, they leave this device.</p>
+                <p>The change is recorded in the audit log and applies to this device.</p>
+              </div>
+              <footer><button class="bt ghost" type="button">Keep as identity</button><button class="bt primary" type="button">Classify as configuration</button></footer>
+            </div>
+          </div>
+        </div>
+        <div class="win">
+          <div class="page"><div class="page-in" style="padding:20px 22px 24px">
+            <div class="sec-h" style="margin-top:0"><h2>Fields not classified yet</h2><span class="r xs muted">3 fields, seen in the last 7 days</span></div>
+            <p class="sec-sub">Treated as identity: masked on hosted models, allowed on local and confidential.</p>
+            <ul class="rows">
+              <li class="uf"><span class="p">users: onPremisesExtensionAttributes.extensionAttribute7</span><span class="ds">148 values in 6 calls. Sample shape: four digits.</span><span class="a"><select class="pick" aria-label="Class for extensionAttribute7"><option>Identity</option><option>Device</option><option>Activity</option><option selected>Configuration</option></select></span></li>
+              <li class="uf"><span class="p">Splashtop: computers[].note</span><span class="ds">212 values in 2 calls. Free text.</span><span class="a"><select class="pick" aria-label="Class for computers note"><option selected>Identity</option><option>Device</option><option>Activity</option><option>Configuration</option></select></span></li>
+              <li class="uf"><span class="p">managedDevices (beta): hardwareInformation.wiredIPv4Addresses</span><span class="ds">412 values in 3 calls. Sample shape: IPv4 address.</span><span class="a"><select class="pick" aria-label="Class for wiredIPv4Addresses"><option>Identity</option><option selected>Device</option><option>Activity</option><option>Configuration</option></select></span></li>
+            </ul>
+            <p class="xs muted" style="margin-top:12px">Free text you type is checked against names and devices this app has seen in the tenant. A name it has never seen cannot be detected and is sent as typed.</p>
+          </div></div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>The hatch glyph with a question mark means "hidden because unknown", next to the plain hatch for "hidden by rule".</li>
+        <li>The dialog appears only when the new class is looser on some tier. Moving a field to a stricter class (extensionAttribute7 to credential) applies without asking.</li>
+        <li>"Sample shape" describes the value's format, never a value.</li>
+      </ul>
+    </section>
+
+    <!-- G: Agent details -->
+    <section class="sect" id="g">
+      <h2>G. Agent details: what an agent reads</h2>
+      <p>Each agent lists the classes it reads, from <code>descriptor.dataClasses</code> in its manifest or derived from its Graph calls when the manifest does not declare them. The last column applies the current rules to the current provider, so the admin can tell before running what a hosted model will and will not see.</p>
+      <div class="win">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="shell">
+          <aside class="side" data-side="agents"></aside>
+          <div class="appmain">
+            <div class="topbar" data-top="masked"></div>
+            <div class="page"><div class="page-in narrow">
+              <div class="agent-hd"><span class="ic">In</span><div><h1>Find inactive devices</h1><p>Lists devices that have not checked in for 30 days and who used them last. <span class="rw">Reads only</span></p></div></div>
+              <div class="sec-h" style="margin-top:4px"><h2>Data it reads</h2><span class="r xs muted">Declared in the manifest</span></div>
+              <table class="reads">
+                <thead><tr><th>Class</th><th>Fields</th><th>With Claude Code</th></tr></thead>
+                <tbody>
+                  <tr><td><span class="cl"><span class="sens" aria-label="High"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span>Device</span></td><td class="f"><code>managedDevices: deviceName, serialNumber, id</code></td><td><span class="act-chip" data-a="mask"><span class="sq"></span>Masked</span></td></tr>
+                  <tr><td><span class="cl"><span class="sens" aria-label="High"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span>Identity</span></td><td class="f"><code>managedDevices: userPrincipalName, userDisplayName</code></td><td><span class="act-chip" data-a="mask"><span class="sq"></span>Masked</span></td></tr>
+                  <tr><td><span class="cl"><span class="sens" aria-label="Medium"><i class="on"></i><i class="on"></i><i></i><i></i></span>Activity</span></td><td class="f"><code>managedDevices: lastSyncDateTime; signIns: createdDateTime</code></td><td><span class="act-chip" data-a="leaves"><span class="sq"></span>Sent as is</span></td></tr>
+                  <tr><td><span class="cl"><span class="sens" aria-label="Low"><i class="on"></i><i></i><i></i><i></i></span>Configuration</span></td><td class="f"><code>managedDevices: operatingSystem, complianceState</code></td><td><span class="act-chip" data-a="leaves"><span class="sq"></span>Sent as is</span></td></tr>
+                </tbody>
+              </table>
+              <p class="xs muted" style="margin-top:10px">Does not read credentials. If a response carries one anyway, it is masked one way before any model call.</p>
+              <div class="runbar"><span class="hx"></span><span>Runs with Claude Code. Devices and identities are masked; the result shows real names.</span><span class="r"><button class="bt secondary sm" type="button">Schedule</button><button class="bt primary sm" type="button">Run</button></span></div>
+            </div></div>
+          </div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>An agent without <code>descriptor.dataClasses</code> shows "Derived from its Graph calls" in the header line instead; qa-graph warns for bundled agents.</li>
+        <li>When a rule would block the run, the run bar turns into the agent block from E, before Run is pressed.</li>
+        <li>The four-step bar is the class's sensitivity from the plan (credential highest, public none). It appears here and in the matrix so the order is learned once.</li>
+      </ul>
+    </section>
+
+    <!-- Questions -->
+    <section class="sect" id="q">
+      <h2>Open questions</h2>
+      <p>Decisions this mockup assumes but does not make. Each one changes copy or a screen above.</p>
+      <ol class="qs">
+        <!-- TODO(ugur): token format in the Settings preview -->
+        <li><b>Token format.</b> The preview shows <code>[DEVICE_1]</code>, <code>[USER_1]</code> and <code>[CREDENTIAL]</code>. The model sees whatever format is chosen, and so does the admin in this preview. Is a typed, numbered bracket the format?</li>
+        <!-- TODO(ugur): who may classify unmapped fields -->
+        <li><b>Classifying fields.</b> F lets the admin classify an unmapped field, including into a looser class after a dialog. Should that be allowed, limited to stricter classes, or left to IT and to mappings shipped with the app?</li>
+        <!-- TODO(ugur): show the confidential column before Track C -->
+        <li><b>Confidential column before Track C.</b> A shows it with "No provider qualifies yet". The alternative is to hide the column until a provider can be confidential, which makes the first release simpler and the later change bigger.</li>
+        <!-- TODO(ugur): what the counts count -->
+        <li><b>What the counts count.</b> C and D count values replaced. Counting distinct people and devices reads better ("4 devices, 4 people") but needs the app to group values per object.</li>
+        <!-- TODO(ugur): per-organization rules -->
+        <li><b>Per organization.</b> The mockup has one policy for the device. Should an organization be able to carry its own rules, for example stricter ones for a customer tenant an MSP manages?</li>
+        <!-- TODO(ugur): Block on Local -->
+        <li><b>Block on Local.</b> The plan lets the admin tighten any rule, so Block is pressable in the Local column. Is there a real case for it, or should the local column offer Allow and Mask only?</li>
+      </ol>
+    </section>
+  </main>
+
+  <script>
+    // Theme
+    const setTheme = (t) => {
+      document.documentElement.dataset.theme = t;
+      document.querySelectorAll("[data-theme-set]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.themeSet === t)));
+    };
+    document.querySelectorAll("[data-theme-set]").forEach((b) => b.addEventListener("click", () => setTheme(b.dataset.themeSet)));
+    if (matchMedia("(prefers-color-scheme: dark)").matches) setTheme("dark");
+
+    // Shell pieces
+    const navItems = [
+      ["chat", "New chat", "i-chat"], ["agents", "Agents", "i-agents"], ["market", "Marketplace", "i-market"],
+      ["conn", "Connections", "i-conn"], ["runs", "Runs", "i-runs"], ["changes", "Changes", "i-changes"],
+    ];
+    document.querySelectorAll("[data-side]").forEach((el) => {
+      const current = el.dataset.side;
+      el.innerHTML = `<div class="side-top"></div><div class="brandrow"><svg width="20" height="20"><use href="#oa"/></svg>OpenAdminOS</div><nav class="snav">${navItems
+        .map(([k, l, i]) => `<a href="#" ${k === current ? 'aria-current="page"' : ""}><svg><use href="#${i}"/></svg>${l}</a>`).join("")}</nav>
+        <div class="side-foot" ${current === "settings" ? "data-current" : ""}><span class="av">A</span><div class="who">admin@woodgrove.example<span>2 organizations</span></div><svg width="14" height="14" style="margin-left:auto;flex:none;color:var(--color-text-muted)"><use href="#i-gear"/></svg></div>`;
+    });
+    const strips = {
+      local: '<span class="boundary" data-where="local"><span class="pip"></span>Local · Ollama · No data leaves this device</span>',
+      masked: '<button type="button" class="boundary" data-where="hosted"><span class="pip"></span>Hosted · Claude Code ·<span class="mask"><span class="hx"></span><span class="bw">identities and devices masked</span><span class="bs">2 masked</span></span></button>',
+      blocked: '<button type="button" class="boundary" data-where="hosted"><span class="pip"></span>Hosted · Claude Code ·<span class="blk"><span class="bw">activity blocked</span><span class="bs">1 blocked</span></span></button>',
+    };
+    document.querySelectorAll("[data-top]").forEach((el) => {
+      el.innerHTML = '<button class="orgchip" type="button"><span class="av">WB</span>Woodgrove Bank<svg class="chev"><use href="#i-chev"/></svg></button>' + (strips[el.dataset.top] || strips.local);
+    });
+    document.querySelectorAll(".snav a, .setnav a, .docbar nav a[href='#']").forEach((a) => a.addEventListener("click", (e) => e.preventDefault()));
+
+    // ---------- The policy matrix ----------
+    const TIERS = ["local", "confidential", "hosted"];
+    const TIER_NAME = { local: "Local", confidential: "Confidential", hosted: "Hosted" };
+    const OFF_DEVICE = { local: false, confidential: true, hosted: true };
+    const CLASSES = [
+      { id: "credential", name: "Credential", sens: 4, ex: "BitLocker and FileVault keys, LAPS passwords, client secrets, tokens" },
+      { id: "identity", name: "Identity", sens: 3, ex: "Names, UPNs, email addresses, phone numbers, user ids", locked: "dataPolicy.rules.identity" },
+      { id: "device", name: "Device", sens: 3, ex: "Device names, serial numbers, IMEI, MAC and IP addresses", locked: "dataPolicy.rules.device" },
+      { id: "activity", name: "Activity", sens: 2, ex: "Sign-in times and locations, audit entries, app usage" },
+      { id: "configuration", name: "Configuration", sens: 1, ex: "Policy and group names, settings, app names, compliance rules" },
+      { id: "public", name: "Public", sens: 0, ex: "Microsoft Learn and web search results, public references" },
+    ];
+    const DEFAULTS = {
+      credential: { local: "allow", confidential: "mask", hosted: "mask" },
+      identity: { local: "allow", confidential: "allow", hosted: "mask" },
+      device: { local: "allow", confidential: "allow", hosted: "mask" },
+      activity: { local: "allow", confidential: "allow", hosted: "allow" },
+      configuration: { local: "allow", confidential: "allow", hosted: "allow" },
+      public: { local: "allow", confidential: "allow", hosted: "allow" },
+    };
+    let rules = structuredClone(DEFAULTS);
+    let previewTier = "hosted";
+
+    const stateOf = (cls, tier) => {
+      const a = rules[cls][tier];
+      if (a === "allow") return OFF_DEVICE[tier] && cls !== "public" ? "leaves" : "allow";
+      return a;
+    };
+
+    const matrix = document.getElementById("matrix");
+    CLASSES.forEach((c) => {
+      const row = document.createElement("div");
+      row.className = "mrow"; row.setAttribute("role", "row"); row.dataset.cls = c.id;
+      if (c.locked) row.dataset.locked = "";
+      const bars = [0, 1, 2, 3].map((i) => `<i class="${i < c.sens ? "on" : ""}"></i>`).join("");
+      let html = `<div class="cls" role="rowheader"><div class="n"><span class="sens" title="Sensitivity">${bars}</span>${c.name}${c.locked ? '<svg width="12" height="12" style="color:var(--color-text-muted)" aria-label="Set by IT"><use href="#i-lock"/></svg>' : ""}</div><div class="ex">${c.ex}</div></div>`;
+      TIERS.forEach((t) => {
+        html += `<div role="cell"><span class="tlabel ${t}">${t === "confidential" ? "Confidential, no provider yet" : TIER_NAME[t]}</span><div class="cell" data-tier="${t}"><div class="acts3" role="group" aria-label="${c.name} on ${TIER_NAME[t]}">${["allow", "mask", "block"].map((a) => {
+          const dis = c.id === "credential" && a === "allow" && t === "hosted";
+          return `<button type="button" data-a="${a}" ${dis ? 'disabled aria-disabled="true" title="Credentials never reach a hosted model in clear text"' : ""}>${a[0].toUpperCase() + a.slice(1)}</button>`;
+        }).join("")}</div></div></div>`;
+      });
+      if (c.id === "credential") html += `<div class="why r">Allow is not available on Hosted: credentials never reach a hosted model in clear text.</div>`;
+      if (c.locked) html += `<span class="lockline"><svg><use href="#i-lock"/></svg><span>Set by your IT department in policy.json, <code>${c.locked}</code></span></span>`;
+      row.innerHTML = html;
+      matrix.appendChild(row);
+    });
+    const foot = document.createElement("div");
+    foot.className = "mfoot";
+    foot.innerHTML = '<span class="key"><span class="sw" data-k="leaves"></span>Leaves this device in clear text</span><span class="key"><span class="sw" data-k="mask"></span>Masked before the call</span><span class="key"><span class="sw" data-k="block"></span>Blocked, the call does not happen</span><span class="r" id="changed"></span>';
+    matrix.appendChild(foot);
+
+    matrix.addEventListener("click", (e) => {
+      const b = e.target.closest(".acts3 button");
+      if (!b || b.disabled) return;
+      const row = b.closest(".mrow");
+      if (row.hasAttribute("data-locked")) return;
+      const tier = b.closest(".cell").dataset.tier;
+      rules[row.dataset.cls][tier] = b.dataset.a;
+      render();
+    });
+    document.getElementById("reset").addEventListener("click", () => { rules = structuredClone(DEFAULTS); render(); });
+    document.getElementById("tiersel").addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      previewTier = b.dataset.tier; render();
+    });
+
+    // Sample line: one device row from Intune, with its classes.
+    const SAMPLE = [
+      { k: "device", cls: "device", v: "WGB-LT-0412", tok: "[DEVICE_1]" },
+      { k: "user", cls: "identity", v: "m.okafor@woodgrove.example", tok: "[USER_1]" },
+      { k: "serial", cls: "device", v: "PF3KX29A", tok: "[DEVICE_1_SERIAL]" },
+      { k: "recovery key", cls: "credential", v: "412983-067254-…", tok: "[CREDENTIAL]" },
+      { k: "last check-in", cls: "activity", v: "2 Oct 08:14, Frankfurt", tok: "[ACTIVITY_1]" },
+      { k: "policy", cls: "configuration", v: "Windows baseline 24H2", tok: "[CONFIG_1]" },
+    ];
+    function render() {
+      // cells
+      matrix.querySelectorAll(".mrow[data-cls]").forEach((row) => {
+        const cls = row.dataset.cls;
+        row.querySelectorAll(".cell").forEach((cell) => {
+          const t = cell.dataset.tier;
+          cell.dataset.state = stateOf(cls, t);
+          cell.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.a === rules[cls][t])));
+        });
+      });
+      const changed = CLASSES.filter((c) => TIERS.some((t) => rules[c.id][t] !== DEFAULTS[c.id][t])).length;
+      document.getElementById("changed").textContent = changed ? `${changed} ${changed === 1 ? "row differs" : "rows differ"} from the defaults` : "Defaults";
+      // preview
+      document.querySelectorAll("#tiersel button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.tier === previewTier)));
+      const line = document.getElementById("seeline");
+      const footEl = document.getElementById("seefoot");
+      const blocked = SAMPLE.filter((s) => rules[s.cls][previewTier] === "block").map((s) => s.cls);
+      if (blocked.length) {
+        const names = [...new Set(blocked)].map((c) => CLASSES.find((x) => x.id === c).name.toLowerCase());
+        line.innerHTML = `<span class="stopped"><svg width="15" height="15"><use href="#i-stop"/></svg>Not sent. This row has ${names.join(" and ")} data, and the rule on ${TIER_NAME[previewTier]} is Block.</span>`;
+        footEl.textContent = "A prompt that carries a blocked class is not sent at all. The admin sees the block in E instead of an answer.";
+        return;
+      }
+      line.innerHTML = SAMPLE.map((s) => {
+        const a = rules[s.cls][previewTier];
+        const off = OFF_DEVICE[previewTier] && s.cls !== "public" ? 1 : 0;
+        return `<span class="k">${s.k}</span><span class="v" data-act="${a}" data-off="${off}">${a === "mask" ? s.tok : s.v}</span>`;
+      }).join("");
+      const masked = SAMPLE.filter((s) => rules[s.cls][previewTier] === "mask").length;
+      footEl.textContent = previewTier === "local"
+        ? "Local: the model runs on this device, so the row is used as is unless a local rule masks it."
+        : `${masked} of 6 values replaced before the call. Underlined values leave this device in clear text. Placeholders are restored in the answer on this device; the credential is not.`;
+    }
+    render();
+  </script>
+</body>
+</html>
