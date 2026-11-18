@@ -457,8 +457,11 @@ Chat searches at the same embedding endpoint Settings checks (an
 `OLLAMA_HOST`, else the default port). The query embedding has a 30-second
 timeout that covers reading the answer too. Its error names the server and the
 kind of failure only, never response text, because a local server can echo the
-question in it. Any loopback HTTP endpoint the rule picks is used, `[::1]` and
-`127.0.0.2` included. A connection reset reads as a failed request with its
+question in it. Retrieval connects only to a loopback IP address over HTTP
+(127.0.0.0/8 or `[::1]`): a `localhost` name becomes 127.0.0.1 before any
+connection, because the operating system's resolver could answer with another
+machine, and any other host name is refused. A slower status reply never
+replaces a newer one in Settings. A connection reset reads as a failed request with its
 code, not as a stopped Ollama. A vector with an entry that is not a finite
 number, or a model list with an entry without a name, is refused as invalid
 rather than scored or read as a missing model. If an embedding request fails, Chat records
