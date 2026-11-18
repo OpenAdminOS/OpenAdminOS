@@ -3250,6 +3250,52 @@ export interface SandboxSettings {
   diagnostics: SandboxDiagnostics;
 }
 
+/**
+ * Whether optional team features are on, from the main process. With no
+ * valid licence, or in a build from the public repository, it is always
+ * `{ active: false }`. While active, the status strip shows `label`.
+ */
+export type EnterpriseStatus =
+  | {
+      readonly active: false;
+      /**
+       * Why team features are off when that needs the admin's attention:
+       * a licence that was refused or could not be read, or a module that
+       * is missing, incompatible or failed. Absent when no licence is
+       * installed, which is the normal free app.
+       */
+      readonly problem?: EnterpriseProblem;
+    }
+  | {
+      readonly active: true;
+      readonly label: string;
+      readonly detail?: string;
+      readonly settingsSections: readonly EnterpriseSettingsSectionView[];
+    };
+
+export type EnterpriseProblemReason =
+  | "licence-expired"
+  | "licence-not-yet-valid"
+  | "licence-signature"
+  | "licence-malformed"
+  | "licence-unreadable"
+  | "module-missing"
+  | "module-version"
+  | "module-load"
+  | "module-activate";
+
+export interface EnterpriseProblem {
+  readonly reason: EnterpriseProblemReason;
+  /** One or two plain sentences: what is wrong and the step that fixes it. */
+  readonly message: string;
+}
+
+export interface EnterpriseSettingsSectionView {
+  readonly id: string;
+  readonly title: string;
+  readonly description: string;
+}
+
 export type SupportIssueSource =
   | "sidebar"
   | "run-failure"
@@ -3296,6 +3342,15 @@ export interface OpenAdminOSApi {
   getAppState(): Promise<AppState>;
   getSchedulerLaunchSettings(): Promise<SchedulerLaunchSettings>;
   getSandboxSettings(): Promise<SandboxSettings>;
+  /** Optional so test bridges and older preloads need not implement it. */
+  getEnterpriseStatus?(): Promise<EnterpriseStatus>;
+  /** Fires when team features turn on or off or change their status entry. */
+  onEnterpriseStatusChanged?(listener: () => void): () => void;
+  /**
+   * Calls a team features IPC handler, `openadminos-enterprise:<name>`.
+   * Rejects when no module registered that name.
+   */
+  invokeEnterprise?(name: string, input?: unknown): Promise<unknown>;
   getReleaseDiagnostics(): Promise<ReleaseDiagnostics>;
   /**
    * Export a reviewed, sanitized diagnostics JSON file for manual

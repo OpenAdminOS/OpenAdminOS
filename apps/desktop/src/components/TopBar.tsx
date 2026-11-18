@@ -2,6 +2,7 @@ import { useNavigate } from "react-router";
 
 import { chatToolHosts, useAppState, useDataBoundary, useShellChrome } from "../state";
 import { IconChat, IconChevronRight, IconCloud, IconLock, IconSettings } from "./icons";
+import { EnterpriseStatusChip } from "./EnterpriseStatusChip";
 import { OrganizationSwitcher } from "./OrganizationSwitcher";
 import { Tooltip } from "./ui";
 
@@ -56,6 +57,7 @@ export function TopBar() {
       <div ref={setTitleTarget} className="app-region-no-drag pointer-events-auto min-w-0 flex-1 truncate px-4 text-center text-sm font-medium text-[var(--color-text-soft)]" />
       <div className="flex min-w-0 shrink items-center gap-2">
         <div ref={setActionsTarget} className="app-region-no-drag flex shrink-0 items-center gap-1" />
+        <EnterpriseStatusChip />
         <Tooltip content={boundary.tooltip} side="bottom">
           {boundary.kind === "none" ? (
             <button
