@@ -43,3 +43,13 @@ Format:
 **Why:** The first marketplace mockup (`docs/mockups/25-marketplace.html`, 2026-11-03) was a plain card grid with dropdowns and a placement toggle. The user rejected it as bad UI and asked for something eye-catching. They also wanted Marketplace as its own sidebar item, not a tab inside Agents.
 
 **How to apply:** Before building, load the `frontend-design` skill and write a short design plan (palette, type, layout, the one memorable element). Keep the restrained brand for the app chrome, and let the content carry the visual weight (cover art, large serif headings). Check the result in a browser at desktop and narrow widths before showing it. Treat open product questions as questions for the user, not as toggles inside the mockup.
+
+---
+
+## Read vendor plan and pricing tables from the source, not from a page summary
+
+**Pattern:** When copy states which plan, tier or price includes a feature, verify the table from the page's source (for GitHub docs, `gh api repos/github/docs/contents/<path>`) or a rendered screenshot, never from a WebFetch summary alone.
+
+**Why:** For PR #205 two WebFetch summaries of docs.github.com said Fusion Max was not included in Copilot Pro+. The github/docs source shows Pro+ includes it. The wrong plan names shipped in the unavailable-tier reason and the docs until a reviewer (Muse, round 2) checked the source; a Pro user would have been told to buy a larger plan than needed.
+
+**How to apply:** Any user-facing sentence naming plans, tiers, prices or regions gets a source-level check, and a test that asserts the exact sentence.
