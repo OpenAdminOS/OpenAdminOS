@@ -156,6 +156,8 @@ describe("ModelChoice when checking again fails (PR #204 review round 1)", () =>
     vi.mocked(bridge.getAppState).mockRejectedValueOnce(new Error("The app state could not be read. Restart OpenAdminOS."));
     await userEvent.click(screen.getByRole("button", { name: "Check LM Studio again" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("The app state could not be read. Restart OpenAdminOS.");
+    // Focus goes back to the Retry it was asked from (GPT-6.2-Sol round 6, P3).
+    await waitFor(() => expect(screen.getByRole("button", { name: "Check LM Studio again" })).toHaveFocus());
   });
 
   it("announces a Retry whose check still fails and returns focus to its Retry", async () => {

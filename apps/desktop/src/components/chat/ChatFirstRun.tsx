@@ -61,12 +61,17 @@ export function ModelChoice({
   const section = useRef<HTMLElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   // The provider a finished Retry checked again, announced once the new rows are in.
-  const retried = useRef<{ providerId: ProviderId; name: string } | null>(null);
+  const retried = useRef<{ providerId: ProviderId; name: string; failed: boolean } | null>(null);
 
   useEffect(() => {
     const done = retried.current;
     if (!done || retrying !== null) return;
     retried.current = null;
+    if (done.failed) {
+      // The error under the row is announced as an alert; focus goes back to its Retry.
+      (section.current?.querySelector<HTMLElement>(`[data-retry="${done.providerId}"]`) ?? heading.current)?.focus();
+      return;
+    }
     const option = options.find((entry) => entry.providerId === done.providerId);
     if (!option) {
       // The check completed without a row to offer (signed out, not installed): say so, and keep focus in the choice.
@@ -107,7 +112,8 @@ export function ModelChoice({
     setAnnouncement("");
     setRetrying(option.providerId);
     try {
-      if (await checkAgain(option.providerId)) retried.current = { providerId: option.providerId, name: option.name };
+      const checked = await checkAgain(option.providerId);
+      retried.current = { providerId: option.providerId, name: option.name, failed: !checked };
     } finally {
       setRetrying(null);
     }

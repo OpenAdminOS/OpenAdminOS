@@ -916,6 +916,72 @@ describe("an Ollama on this device that redirects its model list (PR #204 review
   });
 });
 
+describe("an Ollama whose capability read redirects, and Start against a redirecting runtime (PR #204 review round 6)", () => {
+  async function servers(origin: (request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse, target: string) => void) {
+    const { createServer } = await import("node:http");
+    let hits = 0;
+    const target = createServer((_request, response) => {
+      hits += 1;
+      response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ capabilities: ["completion"], data: [] }));
+    });
+    await new Promise<void>((resolve) => target.listen(0, "127.0.0.1", resolve));
+    const targetUrl = `http://127.0.0.1:${(target.address() as { port: number }).port}`;
+    const front = createServer((request, response) => origin(request, response, targetUrl));
+    await new Promise<void>((resolve) => front.listen(0, "127.0.0.1", resolve));
+    return {
+      url: `http://127.0.0.1:${(front.address() as { port: number }).port}`,
+      hits: () => hits,
+      close: () => Promise.all([new Promise((resolve) => front.close(resolve)), new Promise((resolve) => target.close(resolve))]),
+    };
+  }
+
+  it("shows the redirect as the reason when the only model's capability read redirects", async () => {
+    const pair = await servers((request, response, target) => {
+      if (request.url === "/api/tags") {
+        response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ models: [{ name: "redirected-model:1" }] }));
+        return;
+      }
+      response.writeHead(307, { location: `${target}${request.url ?? "/"}` }).end();
+    });
+    const original = { ollama: process.env.OPENAGENTS_OLLAMA_URL, host: process.env.OLLAMA_HOST };
+    process.env.OPENAGENTS_OLLAMA_URL = pair.url;
+    delete process.env.OLLAMA_HOST;
+    try {
+      const summary = await checkOllama(providerCatalog.find((provider) => provider.id === "ollama")!, { localOnly: true });
+      assert.equal(summary.checkFailed, true);
+      assert.match(summary.detail ?? "", /answered with a redirect to another address/);
+      assert.equal(pair.hits(), 0);
+    } finally {
+      for (const [key, value] of [["OPENAGENTS_OLLAMA_URL", original.ollama], ["OLLAMA_HOST", original.host]] as const) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      await pair.close();
+    }
+  });
+
+  it("does not start or accept a runtime whose address answers with a redirect, and says why", async () => {
+    const pair = await servers((request, response, target) => response.writeHead(307, { location: `${target}${request.url ?? "/"}` }).end());
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
+    await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [] }));
+    const original = process.env.OPENADMINOS_LM_STUDIO_URL;
+    process.env.OPENADMINOS_LM_STUDIO_URL = `${pair.url}/v1`;
+    const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
+    try {
+      const result = await store.startLocalRuntime("lm-studio");
+      assert.equal(result.started, false);
+      assert.match(result.message ?? "", /LM Studio at .* answered with a redirect to another address/);
+      assert.equal(pair.hits(), 0);
+    } finally {
+      if (original === undefined) delete process.env.OPENADMINOS_LM_STUDIO_URL;
+      else process.env.OPENADMINOS_LM_STUDIO_URL = original;
+      store.close();
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+      await pair.close();
+    }
+  });
+});
+
 describe("checking one provider again from Chat (PR #204 review round 3)", () => {
   it("checks a local runtime local only, so an endpoint set outside this device after the scan is not contacted (round 4, P1)", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
@@ -942,6 +1008,8 @@ describe("checking one provider again from Chat (PR #204 review round 3)", () =>
       const listed = (await store.listProviders()).find((provider) => provider.id === "lm-studio")!;
       assert.equal(listed.notContacted, true);
       assert.equal(listed.isLocal, false);
+      // Settings reads the same summary: it says prompts would leave this device (Muse round 4, P3-2).
+      assert.match(listed.description, /outside this device\. Tenant prompts leave this device/);
       assert.deepEqual(contacted, []);
     } finally {
       globalThis.fetch = realFetch;

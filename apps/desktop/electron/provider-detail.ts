@@ -147,6 +147,8 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
     // /api/tags also includes embedding-only models. Ask Ollama instead of
     // guessing capabilities from names, which can be arbitrary local aliases.
     let unverified = false;
+    // A capability read answered with a redirect, which is not followed: its reason is shown.
+    let redirectedShow: string | undefined;
     const showController = new AbortController();
     const showTimeout = setTimeout(() => showController.abort(), deadline !== undefined ? Math.max(deadline - Date.now(), 0) : OLLAMA_SHOW_TIMEOUT_MS);
     options.signal?.addEventListener("abort", () => showController.abort(), { once: true });
@@ -163,6 +165,7 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
           // A model server on this device never sends a capability read elsewhere.
           redirect: modelServerRedirect(`${endpoint}/api/show`),
         });
+        if (isRefusedRedirect(details, `${endpoint}/api/show`)) redirectedShow = redirectRefusedDetail("Ollama", `${endpoint}/api/show`);
         if (!details.ok) throw new Error("Model details unavailable");
         const data = await details.json() as { capabilities?: unknown };
         if (!Array.isArray(data.capabilities)) throw new Error("Model capabilities unavailable");
@@ -186,7 +189,7 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
         models.length > 0
           ? `Running on ${endpoint}${unverified ? ". Some model capabilities could not be verified; refresh to retry" : ""}`
           : unverified
-            ? "Ollama is running, but text-generation capabilities could not be verified. Check the server's /api/show support and refresh providers."
+            ? redirectedShow ?? "Ollama is running, but text-generation capabilities could not be verified. Check the server's /api/show support and refresh providers."
             : "Ollama has no text-generation models available. Install a text-generation model, then refresh providers.",
       ),
       models,

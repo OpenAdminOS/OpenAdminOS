@@ -437,11 +437,14 @@ x64 or Windows arm64 build.
 
 A model server on this device never has a redirect followed (decided
 2026-11-18, PR #204 review round 5): every request to an Ollama, LM Studio or
-Lemonade endpoint on loopback, the checks, the model-list read before a
-Lemonade request and the chat request itself, is sent with redirects off.
-A 3xx answer fails with the reason ("answered with a redirect to another
-address"), so neither a model-list read nor a prompt goes to the address it
-points to, and the check reads as could not check. Endpoints outside this
+Lemonade endpoint on loopback is sent with redirects off: the checks and
+Ollama's capability reads, the model-list read before a Lemonade request,
+the chat request itself, Start's readiness probe, and local documentation
+retrieval (the query embedding, and the embedding model's state read and
+pull). A 3xx answer fails with the reason ("answered with a redirect to
+another address"), so neither a model-list read, a prompt nor a question
+goes to the address it points to; the check reads as could not check, and
+Start does not start or accept a runtime whose address answers that way. Endpoints outside this
 device keep following redirects, because their prompts already leave it.
 
 Apple Foundation support uses Apple's on-device Foundation Models framework

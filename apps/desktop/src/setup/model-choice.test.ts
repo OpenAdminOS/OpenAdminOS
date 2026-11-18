@@ -175,9 +175,10 @@ describe("a provider whose check failed in Chat's choice (PR #191 follow-up)", (
   });
 
   it("tells the admin that only a Test clears an earlier failed Gemini request (round 4)", () => {
-    const gemini: ProviderSummary = { id: "gemini", name: "Gemini CLI", description: "", isLocal: false, status: "error", detail: "Gemini CLI request failed.", models: [], cli: { version: "0.60.1", state: "request-failed" } };
-    // A discovery failure (the CLI was not found or did not answer) gets no Test hint: Retry can fix it.
-    expect(optionsFromProviders([{ ...gemini, detail: "gemini --version failed.", cli: { state: "request-failed" } }])[0]!.whereLine).toBe("gemini --version failed.");
+    // probeGeminiLlm's cached failed request: the CLI started and lists its model.
+    const gemini: ProviderSummary = { id: "gemini", name: "Gemini CLI", description: "", isLocal: false, status: "error", detail: "Gemini CLI request failed.", models: ["gemini-default"], cli: { version: "0.60.1", state: "request-failed" } };
+    // A CLI that was found but did not start or answer its version check lists no model: Retry can fix it (Muse round 4).
+    expect(optionsFromProviders([{ ...gemini, detail: "gemini --version failed.", models: [] }])[0]!.whereLine).toBe("gemini --version failed.");
     expect(optionsFromProviders([gemini])[0]!.whereLine).toBe("Gemini CLI request failed. A failed Gemini request clears only after a Test in Settings, Providers.");
   });
 

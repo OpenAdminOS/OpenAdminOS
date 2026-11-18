@@ -95,6 +95,9 @@ import {
   cliSpawn,
   resolveLmStudioEndpoint,
   resolveOllamaEndpoint,
+  isRefusedRedirect,
+  modelServerRedirect,
+  redirectRefusedDetail,
 } from "@openadminos/runtime";
 import type {
   AgentDraft,
@@ -4284,9 +4287,16 @@ export class AppStateStore {
     if (!local) {
       return { started: false, message: `${name} is set to ${endpoint}, outside this device. The scan only starts runtimes on this device.` };
     }
+    const readyUrl = runtimeReadyUrl(providerId, endpoint);
+    // A redirect from the runtime's address is never followed, so it is never proof the runtime is up.
+    let redirected = false;
     const isUp = async () => {
       try {
-        const response = await fetch(runtimeReadyUrl(providerId, endpoint), { signal: AbortSignal.timeout(1_000) });
+        const response = await fetch(readyUrl, { signal: AbortSignal.timeout(1_000), redirect: modelServerRedirect(readyUrl) });
+        if (isRefusedRedirect(response, readyUrl)) {
+          redirected = true;
+          return false;
+        }
         return response.ok;
       } catch {
         return false;
@@ -4294,6 +4304,8 @@ export class AppStateStore {
     };
     // Already answering, for example started by an earlier Start from another window: nothing is spawned.
     if (!(await isUp())) {
+      // Something already answers there, with a redirect: nothing is started, and the reason is shown.
+      if (redirected) return { started: false, message: redirectRefusedDetail(name, readyUrl) };
       const launch = await runtimeLaunch(providerId);
       const result = await startLocalRuntime({
         name,
@@ -4318,7 +4330,7 @@ export class AppStateStore {
         isUp,
       });
       // A failed start returns its failure as it is; only a started runtime is scanned again.
-      if (!result.started) return { started: false, message: result.message };
+      if (!result.started) return { started: false, message: redirected ? redirectRefusedDetail(name, readyUrl) : result.message };
     }
     return { started: true, scan: await this.runModelScanOnce() };
   }
