@@ -397,6 +397,12 @@ export function loopbackEndpoints(endpoint: string): string[] {
     throw refused();
   }
   if (!/^https?:$/.test(url.protocol) || url.username || url.password) throw refused();
+  // An IPv4-mapped loopback address ([::ffff:127.0.0.1], which URL writes as [::ffff:7f00:1]) is its IPv4 literal.
+  const mapped = /^\[::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})\]$/.exec(url.hostname.toLowerCase());
+  if (mapped) {
+    const [high, low] = [Number.parseInt(mapped[1]!, 16), Number.parseInt(mapped[2]!, 16)];
+    url.hostname = [high >> 8, high & 255, low >> 8, low & 255].join(".");
+  }
   const host = url.hostname.toLowerCase();
   const text = (candidate: URL) => candidate.toString().replace(/\/$/, "");
   if (host === "localhost" || host === "localhost.") {

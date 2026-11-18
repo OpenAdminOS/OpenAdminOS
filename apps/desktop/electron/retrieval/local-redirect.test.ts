@@ -80,7 +80,7 @@ describe("local documentation retrieval never follows a redirect from this devic
       /HTTP 503/.test(error.message) && !error.message.includes("ollama pull"));
   });
 
-  it("bounds each query embedding to 30 seconds, body included (PR #206 review round 1)", async (t) => {
+  it("bounds each query embedding to 30 seconds, body included (PR #206 review round 1)", { timeout: 10_000 }, async (t) => {
     // A local server that sends its headers, then never finishes the body.
     const stalled = createServer((_request, response) => {
       response.writeHead(200, { "content-type": "application/json" });
@@ -100,13 +100,15 @@ describe("local documentation retrieval never follows a redirect from this devic
       timers.push(controller);
       return controller.signal;
     });
-    const expire = () => {
-      // Fire the budget once the headers are in: only the body read is left.
-      setTimeout(() => timers.at(-1)!.abort(new DOMException("The operation timed out.", "TimeoutError")), 50);
-    };
+    // Fire the budget only once the headers are in, so only the body read is left to bound (round 5).
+    const realFetch = globalThis.fetch;
+    t.mock.method(globalThis, "fetch", async (...args: Parameters<typeof fetch>) => {
+      const response = await realFetch(...args);
+      setTimeout(() => timers.at(-1)!.abort(new DOMException("The operation timed out.", "TimeoutError")), 10);
+      return response;
+    });
     for (const [query, name] of [[ollamaEmbedQuery(endpoint), "Ollama"], [loopbackEmbedQuery(endpoint), "The embedding server"]] as const) {
       const pending = query("test");
-      expire();
       await assert.rejects(pending, (error: Error) =>
         error.message === `${name} did not finish embedding the question within 30 seconds. Check that it is running, then ask again.`);
     }
@@ -158,6 +160,10 @@ describe("local documentation retrieval never follows a redirect from this devic
     for (const endpoint of ["http://127.0.0.1:11434", "http://[::1]:11434", "http://127.0.0.2:11434"]) {
       assert.deepEqual(loopbackEndpoints(endpoint), [endpoint]);
     }
+    // An IPv4-mapped loopback address, which an OLLAMA_HOST may name, connects as its IPv4 literal (round 5).
+    assert.deepEqual(loopbackEndpoints("http://[::ffff:127.0.0.1]:11434"), ["http://127.0.0.1:11434"]);
+    assert.deepEqual(loopbackEndpoints("http://[::FFFF:7f00:2]:11434"), ["http://127.0.0.2:11434"]);
+    assert.throws(() => loopbackEndpoints("http://[::ffff:10.0.0.5]:11434"), /Retrieval must stay local/);
     for (const endpoint of ["http://10.0.0.5:11434", "https://models.example.com", "http://localhost.example.com:11434", "http://ollama.local:11434", "http://user:pass@127.0.0.1:11434", "unix:///var/run/ollama.sock", "not a url"]) {
       assert.throws(() => loopbackEndpoints(endpoint), /Retrieval must stay local/, endpoint);
     }
@@ -205,7 +211,8 @@ describe("local documentation retrieval never follows a redirect from this devic
 
     request.mock.mockImplementation(async () => Response.json({ embeddings: [[0.1, "0.2"]] }));
     await assert.rejects(ollamaEmbedQuery("http://127.0.0.1:11434")("test"), /returned no vector/);
-    request.mock.mockImplementation(async () => Response.json({ data: [{ embedding: [Number.NaN] }] }));
+    // 1e400 parses as Infinity: a finite check, not only a type check, refuses it (round 5).
+    request.mock.mockImplementation(async () => new Response('{"data":[{"embedding":[0.1,1e400]}]}', { headers: { "content-type": "application/json" } }));
     await assert.rejects(loopbackEmbedQuery("http://127.0.0.1:11434")("test"), /returned no embedding vector/);
     request.mock.mockImplementation(async () => Response.json({ models: [null] }));
     assert.match((await embeddingModelState("http://127.0.0.1:11434")).error ?? "", /^Ollama returned an invalid model list\./);
