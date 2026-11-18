@@ -82,8 +82,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 - Chat's local documentation search shows why an embedding request failed and how to recover, without quoting the server's response, and searches at the same embedding endpoint Settings checks. Settings, Privacy distinguishes a failed embedding model check from an unreachable Ollama and keeps that state after an index install or a cancelled folder pick.
 - The scan's What ran and Settings, Providers show when OpenAdminOS refused a redirect during a capability check for one model while another model remains ready.
-- Chat announces when Retry makes the active model ready and returns keyboard focus to the composer, unless the admin already moved focus elsewhere.
-- First launch shows signed-in tools with unusable IT-locked models as Unavailable and explains the policy restriction.
+- Chat announces when a Retry, Scan again, Start or Use in its model choice makes the active model ready, and returns keyboard focus to the composer, unless the admin already moved focus elsewhere.
+- First launch shows a signed-in tool whose IT-locked model the scan already knows it cannot use as Unavailable and explains the policy restriction. Copilot and Gemini, which the scan checks for installation only, are checked when selected.
 - Chat's model choice shows a provider whose check failed as Could not check with its reason and Retry, as the model scan does, instead of leaving LM Studio, Lemonade, Apple Intelligence or a hosted CLI out and showing Ollama as having no model; an endpoint outside this device that the scan did not contact shows as Not checked, without Retry; a signed-in tool that cannot answer, such as a Copilot model set by IT that the account cannot use, shows as Unavailable with the reason instead of Signed in.
 - Sign-in logs, directory audit logs and Intune audit events sync in large tenants: every refresh collects the last 7 days, newest first, up to 10,000 entries, instead of every retained entry, which failed on throttling or the memory limit. A window at the limit shows as capped, not as an error, and Settings, Data and Chat say which window the data covers.
 
