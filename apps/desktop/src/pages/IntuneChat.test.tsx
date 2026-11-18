@@ -347,6 +347,41 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
     expect(screen.getByText("LM Studio is ready. You can send a message.")).toHaveAttribute("role", "status");
   });
 
+  it("drops the readiness line when Chat switches to another ready provider, and does not bring it back (PR #206 review round 2)", async () => {
+    const user = userEvent.setup();
+    const ollama = mockProviders.find((provider) => provider.id === "ollama")!;
+    const lmStudio = { ...mockProviders.find((provider) => provider.id === "lm-studio")!, status: "connected" as const, installed: true, models: ["qwen3-8b"], defaultModel: "qwen3-8b" };
+    const providers = mockProviders.map((provider) => provider.id === "ollama"
+      ? { ...provider, status: "error" as const, models: [], checkFailed: true, detail: "Ollama timed out." }
+      : provider.id === "lm-studio" ? lmStudio : provider);
+    let state = guestState({ providers, activeProviderId: "ollama" });
+    let changed: () => void = () => undefined;
+    const recheckProvider = vi.fn(async () => {
+      state = { ...state, providers: providers.map((provider) => provider.id === "ollama" ? ollama : provider) };
+    });
+    const bridge = makeMockBridge({
+      getAppState: vi.fn(async () => state),
+      recheckProvider,
+      onAppStateChanged: vi.fn((listener: () => void) => {
+        changed = listener;
+        return () => undefined;
+      }),
+    }, state);
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+    await user.click(await screen.findByRole("button", { name: "Check Ollama again" }));
+    expect(await screen.findByText("Ollama is ready. You can send a message.")).toBeInTheDocument();
+
+    state = { ...state, activeProviderId: "lm-studio" };
+    await act(async () => changed());
+    await waitFor(() => expect(screen.queryByText("Ollama is ready. You can send a message.")).toBeNull());
+    state = { ...state, activeProviderId: "ollama" };
+    const reads = vi.mocked(bridge.getAppState).mock.calls.length;
+    await act(async () => changed());
+    await waitFor(() => expect(vi.mocked(bridge.getAppState).mock.calls.length).toBeGreaterThan(reads));
+    await act(async () => undefined);
+    expect(screen.queryByText("Ollama is ready. You can send a message.")).toBeNull();
+  });
+
   it("offers starters for what was connected, one line per service (mockup 32, section B)", async () => {
     const user = userEvent.setup();
     const base = createMockAppState();
