@@ -175,6 +175,28 @@ built on top of them are planned separately.
   value counts with copy that says masking happened on this device before the
   local model saw the data.
 
+**Review findings adopted (2026-11-19, round 6 of the design review)**
+- Voice transfers keep their recorded decision. Each context transfer records
+  what happened under the rules in force when it was sent; changing a rule
+  later never rewrites a past transfer's outcome. The rules in force now drive
+  only the strip, a preview labelled "Next transfer under current rules", and
+  the recovery for withheld context.
+- The session start request of hosted voice (the profile block with standing
+  instructions and confirmed notes that `nova.ts` sends when the OpenAI session
+  opens) goes through the same request scan and rules as later context
+  transfers and is listed as its own transfer. The spoken-audio boundary is
+  unchanged.
+- Rehydration restores only reversible placeholders (identity, device and
+  security names and identifiers). Credential placeholders are one way and
+  stay masked in the answer, the transcript and tool parameters.
+- The status strip names an MCP host from the tools actually offered, not from
+  the server switch. When every approved tool on an enabled server is back in
+  review, the grant stays on, the host is left out of the strip, and the
+  popover says why.
+- A connector send shows a confirmation card with the exact message text, the
+  destination (for Teams, the team and channel), the organization, Confirm
+  and Cancel, and a note that every message is confirmed on its own.
+
 ## Why
 
 Today the choice is binary. A local model keeps tenant data on the device, a
@@ -357,17 +379,29 @@ the IT policy file.
 - [ ] Hosted voice gets its own gate in `nova.ts` and the renderer for tenant
       data the app sends to the voice model as context: it goes through the
       same request scan and follows the same rules as any hosted call, class
-      by class (masked, blocked or sent as is). The voice model speaks roles
+      by class (masked, blocked or sent as is). The first transfer is the
+      session start request: the profile block with standing instructions and
+      confirmed notes that `nova.ts` sends when the OpenAI session opens goes
+      through the same scan and rules as every later context transfer, and the
+      voice popover lists it as its own transfer. When a rule blocks a class
+      it carries, the session starts without that profile block and says so. The voice model speaks roles
       where a value is masked, and the transcript shows real values. When a
       rule blocks a context transfer, the session continues without that
       context and the voice model and the transcript say what was withheld.
       The hosted voice strip and its popover are derived from the live rules
       like the other strips, and the live strip in Settings opens that
       popover; a blocked class reads as withheld context ("security context
-      withheld"). The withheld notice and its recovery come from the decision
-      on the transfer itself, what it carried and which rule withheld it, and
-      the recovery follows the same test as a blocked prompt (mockup 34, A
-      and B). What the admin says aloud goes to the hosted
+      withheld"). Each transfer records the decision made under the rules in
+      force when it was sent (sent, masked with its count, or withheld, and
+      what the voice model said), and the popover shows past transfers from
+      that record: changing a rule later never rewrites a past transfer's
+      outcome. The rules in force now drive only the strip, a preview labelled
+      "Next transfer under current rules", and the recovery for withheld
+      context. The withheld notice names the transfer, what it carried and the
+      rule that withheld it, from the record; its recovery is evaluated
+      against the current rules by the same test as a blocked prompt, and
+      offers Ask again when that rule no longer blocks the context (mockup 34,
+      A and B). What the admin says aloud goes to the hosted
       voice provider as audio and is not gated (proposed 2026-11-19, pending
       confirmation); the hosted voice strip ("hears what you say"), the Data
       policy settings and the docs say so. Voice on this device keeps
@@ -402,18 +436,29 @@ the IT policy file.
    policies is withheld, the voice strip reads "security context withheld",
    and the popover names that transfer and offers a local model only when no
    Local rule blocks a class it carried (renderer test).
-3. A test proves text from voice on this device goes through the request scan
+   A transfer sent under the defaults (6 Conditional Access policies, "Sent,
+   10 values masked") still reads so after Security on Hosted is set to
+   Block, while the next-transfer preview reads withheld; a transfer withheld
+   under Block still reads withheld after the rule returns to Mask, and its
+   recovery offers Ask again (renderer test).
+3. A test inspects the session start request `nova.ts` sends when the OpenAI
+   session opens and shows that a recognized recovery key in a confirmed note
+   is masked one way as `[CREDENTIAL]` with Credential on Hosted at Mask, and
+   that the profile block is withheld with Credential on Hosted at Block, the
+   session starting without it. The voice popover lists the session start as
+   its own transfer (renderer test).
+4. A test proves text from voice on this device goes through the request scan
    before a hosted reasoning call.
-4. A blocked prompt shows a designed error that names the class and offers
+5. A blocked prompt shows a designed error that names the class and offers
    only models whose tier permits every class in the request, or changing the
    rule. When Local blocks the class too, no switch is offered. When every
    applicable rule is locked by IT, the error names the policy file and keys
    instead of offering a switch or a change.
-5. An IT-locked rule cannot be changed in Settings or over IPC.
-6. `npm run qa` passes with `dataClasses` on every bundled agent.
-7. The Credential Block to Mask dialog, direct and in a reset, shows its own
+6. An IT-locked rule cannot be changed in Settings or over IPC.
+7. `npm run qa` passes with `dataClasses` on every bundled agent.
+8. The Credential Block to Mask dialog, direct and in a reset, shows its own
    text (renderer test asserts the sentences).
-8. A call withheld for unexamined data shows the designed state and never
+9. A call withheld for unexamined data shows the designed state and never
    offers a model whose tier has a Block rule.
 
 ### Phase A4: Masking
@@ -425,12 +470,19 @@ the IT policy file.
       and identifiers only.
 - [ ] Rehydration on the way back: streaming with holdback for split tokens,
       before the agentic loop parses tool actions, and in `runLlmSkill` before a
-      step result is stored. Writes never receive tokens.
-- [ ] Credential values are masked one way and never rehydrated into a prompt.
+      step result is stored. Only reversible placeholders are restored: identity,
+      device and security names and identifiers. Writes never receive tokens.
+- [ ] Credential placeholders are one way: a credential value is masked as
+      `[CREDENTIAL]`, never rehydrated into a prompt, and stays `[CREDENTIAL]` in the answer, the transcript and tool
+      parameters.
 
 **Acceptance criteria:**
 1. An end-to-end test with a fake hosted provider shows no masked value in any
-   prompt and the real values in the answer, the transcript and tool parameters.
+   prompt, and real values for reversible placeholders (identity, device and
+   security names and identifiers) in the answer, the transcript and tool
+   parameters. In the same test a masked credential (a BitLocker recovery key)
+   stays `[CREDENTIAL]` in the answer, in the transcript and in tool
+   parameters: the test asserts the recovery key appears in none of the three.
 2. A token split across two stream chunks is restored correctly.
 3. A write plan built after an `llm` step contains no tokens.
 4. Follow-up questions in one conversation keep the same token for the same value.
@@ -489,6 +541,11 @@ the IT policy file.
       agents, skills and web search, enforced when tools are offered and again
       at the call. IT lock keys for each, with a per-skill switch that shows
       its lock reason when IT turned a skill off.
+- [ ] A connector send is proposed on a confirmation card (mockup 35, Teams
+      example): the exact message text, the destination (team and channel for
+      Teams), the organization, Confirm and Cancel, and a note that every
+      message is confirmed on its own. Nothing is sent before Confirm, and a
+      confirmation never covers a later message.
 - [ ] The contract: a tool is offered and callable only while its grant is on
       and the service it uses is connected in the active organization. A
       granted skill is offered only when every grant it uses (for example
@@ -501,7 +558,8 @@ the IT policy file.
 
 **Acceptance criteria:**
 1. A server or connector without a grant is neither offered nor callable.
-2. The status strip names only the hosts the agent is granted.
+2. The status strip names only the hosts whose tools are offered in this
+   conversation.
 3. A granted tool whose service is not connected in the active organization
    is neither offered nor callable, from Chat, a skill or a scheduled check
    (test), and Access shows the designed missing-service state.
@@ -509,6 +567,9 @@ the IT policy file.
    off is not offered, and Access offers Turn on Microsoft 365 Read, not a
    service connection; with both missing, both recoveries are shown (test,
    mockup 35, B).
+5. A connector send shows the card with the exact text, destination and
+   organization; Cancel sends nothing, and a second message needs its own
+   Confirm (test, mockup 35).
 
 ### Phase B4: Skills
 
@@ -538,8 +599,11 @@ the IT policy file.
       written from the admin's question with every value the app recognizes as
       tenant data removed. Text the app cannot recognize, such as an internal
       project name, can still reach the server. The status strip names the
-      host whenever its tools are offered, and the admin can turn the server
-      off.
+      host whenever its tools are offered, derived from the tools actually
+      offered rather than the server switch, and the admin can turn the
+      server off. When every approved tool on an enabled server is back in
+      review, the grant stays on, the host is left out of the strip, and the
+      strip popover says why (mockup 35).
 - [ ] A tool review at add time. Only tools the admin approves as read-only
       are allowed; the tool's read-only annotation is shown but not trusted on
       its own, and a tool annotated as a change cannot be approved. Approval
@@ -562,7 +626,10 @@ the IT policy file.
 
 **Acceptance criteria:**
 1. A user-added server passes the same egress tests as catalog servers.
-2. The status strip names the server's host whenever its tools are offered.
+2. The status strip names the server's host whenever its tools are offered,
+   and only then: with every approved tool back in review, the server's grant
+   stays on, the host is absent from the strip, and the popover names the
+   server and the review that keeps its tools from being offered (test).
 3. A test sends a question containing private text that is absent from the
    tenant value index (an internal project name) and records what reached the
    server's request; the result is documented in the user docs next to the
