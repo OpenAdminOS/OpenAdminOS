@@ -5452,8 +5452,28 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
   }, 500);
 }
 
-/** Registered in both launch modes: the reset-incomplete window uses them without a store. */
-function registerLocalResetIpcHandlers(): void {
+/** Handlers that need no store: registered in both launch modes, the reset-incomplete window uses them. */
+function registerStorelessIpcHandlers(): void {
+  // No store needed; the reset-incomplete window sets its theme too.
+  ipcMain.handle("openadminos:set-appearance", handleTrusted((_event, theme: unknown) => {
+    const appearance = parseNativeAppearance(
+      theme,
+      nativeTheme.shouldUseDarkColors ? "dark" : "light",
+    );
+    const colors = NATIVE_THEME_COLORS[appearance.resolvedTheme];
+    nativeTheme.themeSource = appearance.preference === "system" ? "system" : colors.mode;
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (window.isDestroyed()) continue;
+      window.setBackgroundColor(colors.background);
+      if (process.platform === "win32") {
+        window.setTitleBarOverlay({
+          color: colors.background,
+          symbolColor: colors.textMuted,
+          height: 52,
+        });
+      }
+    }
+  }));
   ipcMain.handle("openadminos:get-local-reset-info", handleTrusted(() => localResetInfo()));
   ipcMain.handle(
     "openadminos:reset-openadminos",
@@ -5502,25 +5522,6 @@ function registerLocalResetIpcHandlers(): void {
 }
 
 function registerIpcHandlers() {
-  ipcMain.handle("openadminos:set-appearance", handleTrusted((_event, theme: unknown) => {
-    const appearance = parseNativeAppearance(
-      theme,
-      nativeTheme.shouldUseDarkColors ? "dark" : "light",
-    );
-    const colors = NATIVE_THEME_COLORS[appearance.resolvedTheme];
-    nativeTheme.themeSource = appearance.preference === "system" ? "system" : colors.mode;
-    for (const window of BrowserWindow.getAllWindows()) {
-      if (window.isDestroyed()) continue;
-      window.setBackgroundColor(colors.background);
-      if (process.platform === "win32") {
-        window.setTitleBarOverlay({
-          color: colors.background,
-          symbolColor: colors.textMuted,
-          height: 52,
-        });
-      }
-    }
-  }));
   ipcMain.handle(
     "openadminos:get-companion-snapshot",
     handleTrusted(() => getCompanionSnapshot()),
@@ -7111,7 +7112,7 @@ if (!gotLock) {
       }
     }
 
-    registerLocalResetIpcHandlers();
+    registerStorelessIpcHandlers();
     if (localResetReport?.status === "incomplete") {
       // The app stays closed until the reset finishes, so old data is never
       // mixed with new. A background wake only waits for the next launch.
