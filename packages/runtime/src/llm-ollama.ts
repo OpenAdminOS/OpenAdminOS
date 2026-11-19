@@ -11,6 +11,8 @@ export interface OllamaProviderOptions {
   endpoint?: string;
   defaultModel?: string;
   timeoutMs?: number;
+  /** How long reading the model's context limit may take (tests). */
+  lookupTimeoutMs?: number;
 }
 
 interface OllamaChatChunk {
@@ -56,6 +58,7 @@ export interface OllamaEndpointTrust {
 export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi {
   const endpoint = resolveOllamaEndpoint(options.endpoint);
   const defaultModel = options.defaultModel;
+  const lookupTimeoutMs = options.lookupTimeoutMs ?? OLLAMA_SHOW_TIMEOUT_MS;
   const timeoutMs =
     options.timeoutMs ??
     Number.parseInt(
@@ -163,8 +166,10 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       };
 
       let response: Response;
+      let raisedCtx: number | undefined;
       try {
         let numCtx = ollamaContextOverrides.get(cacheKey);
+
         response = await send(numCtx);
         let detail = await errorDetail(response);
         const overflow = response.status === 400 ? parseContextOverflow(detail) : undefined;
@@ -172,26 +177,22 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           // Ollama sizes the context from its own default and free memory,
           // not from the model's limit. Ask for enough room for this prompt
           // plus the answer, up to what the model supports, and retry once.
-          const modelMax = await readOllamaContextLength(endpoint, model, controller.signal);
+          const modelMax = await readOllamaContextLength(endpoint, model, controller.signal, lookupTimeoutMs);
           const stopped = abortError();
           if (stopped) throw stopped;
           const wanted = roundUp(overflow.requested + (opts.maxTokens ?? OLLAMA_ANSWER_RESERVE_TOKENS), 1024);
           if (modelMax !== undefined && overflow.requested > modelMax) {
             throw new Error(contextTooSmallMessage(model, overflow.requested, modelMax, true));
           }
-          const target = modelMax === undefined ? wanted : Math.min(wanted, modelMax);
-          if (target <= overflow.available) {
-            throw new Error(contextTooSmallMessage(model, overflow.requested, overflow.available, true));
-          }
-          numCtx = target;
+          numCtx = modelMax === undefined ? wanted : Math.min(wanted, modelMax);
           response = await send(numCtx);
           detail = await errorDetail(response);
           const retryOverflow = response.status === 400 ? parseContextOverflow(detail) : undefined;
           if (retryOverflow) {
-            throw new Error(contextTooSmallMessage(model, retryOverflow.requested, retryOverflow.available, false));
+            const atModelLimit = modelMax !== undefined && retryOverflow.available >= modelMax;
+            throw new Error(contextTooSmallMessage(model, retryOverflow.requested, retryOverflow.available, atModelLimit));
           }
-          // Concurrent requests can raise it at once; keep the largest that worked.
-          if (response.ok) ollamaContextOverrides.set(cacheKey, Math.max(ollamaContextOverrides.get(cacheKey) ?? 0, numCtx));
+          if (response.ok) raisedCtx = numCtx;
         }
         if (!response.ok) {
           if (response.status === 404 && detail.toLowerCase().includes("model")) {
@@ -266,6 +267,11 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
               };
             }
             if (chunk.done) {
+              if (raisedCtx !== undefined) {
+                // Kept only once the stream finished cleanly. Concurrent
+                // requests can raise it at once; keep the largest that worked.
+                ollamaContextOverrides.set(cacheKey, Math.max(ollamaContextOverrides.get(cacheKey) ?? 0, raisedCtx));
+              }
               // If the model never emitted visible content but did
               // produce reasoning (e.g. it hit num_predict mid-thought),
               // surface the reasoning so the agent has *something* to
@@ -470,10 +476,25 @@ export function parseContextOverflow(detail: string): { requested: number; avail
   return { requested: Number(match[1]), available: Number(match[2]) };
 }
 
-/** The model's maximum context length from /api/show, if Ollama reports it. */
-async function readOllamaContextLength(endpoint: string, model: string, signal: AbortSignal): Promise<number | undefined> {
-  const timeout = AbortSignal.timeout(OLLAMA_SHOW_TIMEOUT_MS);
+/**
+ * The model's maximum context length from /api/show. Undefined only when
+ * Ollama answered without that metadata; a stop of the caller's signal
+ * returns undefined so the caller reports it, and a failed or timed out
+ * lookup throws.
+ */
+async function readOllamaContextLength(
+  endpoint: string,
+  model: string,
+  signal: AbortSignal,
+  timeoutMs = OLLAMA_SHOW_TIMEOUT_MS,
+): Promise<number | undefined> {
+  const timeout = AbortSignal.timeout(timeoutMs);
   const url = `${endpoint.replace(/\/$/, "")}/api/show`;
+  const failure = (error: unknown): Error | undefined => {
+    if (signal.aborted) return undefined;
+    if (timeout.aborted) return new Error(`Ollama did not return the model's context limit within ${timeoutMs}ms at ${url}.`);
+    return new Error(`Ollama not reachable at ${url}: ${describe(error)}`);
+  };
   let response: Response;
   try {
     response = await fetch(url, {
@@ -483,22 +504,30 @@ async function readOllamaContextLength(endpoint: string, model: string, signal: 
       signal: AbortSignal.any([signal, timeout]),
       redirect: modelServerRedirect(url),
     });
-  } catch {
-    // The caller checks its own signal for a stop or timeout.
+  } catch (error) {
+    const failed = failure(error);
+    if (failed) throw failed;
     return undefined;
   }
   if (isRefusedRedirect(response, url)) throw new Error(redirectRefusedDetail("Ollama", url));
+  if (!response.ok) return undefined;
+  let raw: string;
   try {
-    if (!response.ok) return undefined;
-    const data = (await response.json()) as { model_info?: Record<string, unknown> };
+    raw = await response.text();
+  } catch (error) {
+    const failed = failure(error);
+    if (failed) throw failed;
+    return undefined;
+  }
+  try {
+    const data = JSON.parse(raw) as { model_info?: Record<string, unknown> };
     for (const [key, value] of Object.entries(data.model_info ?? {})) {
       if (key.endsWith(".context_length") && typeof value === "number" && value > 0) return value;
     }
-    return undefined;
   } catch {
-    // The caller checks its own signal for a stop or timeout.
-    return undefined;
+    // An answer that is not JSON has no limit to read.
   }
+  return undefined;
 }
 
 function contextTooSmallMessage(model: string, requested: number, limit: number, modelLimit: boolean): string {

@@ -78,7 +78,10 @@ describe("Ollama context size", () => {
   async function fakeOllama(options: {
     modelMax?: number;
     limit: (numCtx: number | undefined) => number;
-    onShow?: () => void;
+    onShow?: (res: ServerResponse) => void;
+    retryStreamError?: boolean;
+    /** Reject a request that exactly fills the context too. */
+    rejectAtLimit?: boolean;
     showRedirect?: boolean;
     requested?: (prompt: string) => number;
     stallOverflowBody?: (res: ServerResponse) => void;
@@ -97,7 +100,7 @@ describe("Ollama context size", () => {
             return;
           }
           if (options.onShow) {
-            options.onShow();
+            options.onShow(res);
             return;
           }
           res.end(JSON.stringify({ model_info: options.modelMax ? { "qwen3.context_length": options.modelMax } : {} }));
@@ -107,7 +110,8 @@ describe("Ollama context size", () => {
         const prompt = body.messages?.at(-1)?.content ?? "";
         const requested = options.requested?.(prompt) ?? 40652;
         chats.push(numCtx === undefined ? {} : { num_ctx: numCtx });
-        if (requested > options.limit(numCtx)) {
+        const available = options.limit(numCtx);
+        if (requested > available || (options.rejectAtLimit && requested === available)) {
           if (options.stallOverflowBody) {
             res.writeHead(400, { "content-type": "application/json" });
             res.write("{");
@@ -116,6 +120,10 @@ describe("Ollama context size", () => {
           }
           res.statusCode = 400;
           res.end(overflow(requested, options.limit(numCtx)));
+          return;
+        }
+        if (numCtx !== undefined && options.retryStreamError) {
+          res.end(`${JSON.stringify({ model: "m", message: { content: "partial" }, done: false })}\n${JSON.stringify({ error: "model runner has unexpectedly stopped" })}\n`);
           return;
         }
         const delay = numCtx === undefined ? 0 : options.delayRetryMs?.(prompt) ?? 0;
@@ -249,6 +257,57 @@ describe("Ollama context size", () => {
       await Promise.all([llm.complete({ prompt: "big" }), llm.complete({ prompt: "huge" })]);
       await llm.complete({ prompt: "small" });
       assert.deepEqual(fake.chats.at(-1), { num_ctx: 84992 });
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("retries when the loaded context already equals the model's limit and names that limit", async () => {
+    const fake = await fakeOllama({ modelMax: 40960, requested: () => 40960, limit: () => 40960, rejectAtLimit: true });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "full" });
+      await assert.rejects(llm.complete({ prompt: "big" }), /needs 40,960 tokens of context, but full supports at most 40,960/);
+      assert.deepEqual(fake.chats, [{}, { num_ctx: 40960 }]);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("reports an unreachable model lookup instead of retrying without a limit", async () => {
+    const fake = await fakeOllama({ limit: (numCtx) => numCtx ?? 16384, onShow: (res) => res.socket?.destroy() });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "reset" });
+      await assert.rejects(llm.complete({ prompt: "big" }), /Ollama not reachable at http:\/\/127\.0\.0\.1:\d+\/api\/show/);
+      assert.equal(fake.chats.length, 1);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("reports a model lookup that does not answer in time", async () => {
+    const open: ServerResponse[] = [];
+    const fake = await fakeOllama({ limit: (numCtx) => numCtx ?? 16384, onShow: (res) => {
+      open.push(res);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.write("{");
+    } });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "slow", lookupTimeoutMs: 100 });
+      await assert.rejects(llm.complete({ prompt: "big" }), /did not return the model's context limit within 100ms/);
+      assert.equal(fake.chats.length, 1);
+    } finally {
+      for (const res of open) res.destroy();
+      await fake.close();
+    }
+  });
+
+  it("does not keep a raised context when the retry's stream fails", async () => {
+    const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384, retryStreamError: true });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "broken" });
+      await assert.rejects(llm.complete({ prompt: "big" }), /model runner has unexpectedly stopped/);
+      await assert.rejects(llm.complete({ prompt: "big" }));
+      assert.deepEqual(fake.chats.at(-2), {});
     } finally {
       await fake.close();
     }
