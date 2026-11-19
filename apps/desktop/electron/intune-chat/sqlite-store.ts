@@ -72,7 +72,7 @@ interface MessageRow {
 }
 
 /** Answer fields stored together: the question kind, steps, citation targets, follow-ups and prompt provenance. */
-type AnswerMeta = Pick<IntuneChatMessage, "questionKind" | "steps" | "documentationSources" | "followUps" | "tenantFollowUps" | "tenantContext" | "privatePrompt" | "notConnected">;
+type AnswerMeta = Pick<IntuneChatMessage, "questionKind" | "steps" | "documentationSources" | "followUps" | "tenantFollowUps" | "tenantContext" | "privatePrompt" | "notConnected" | "modelFit" | "switchedFrom">;
 
 interface ResourceStatusRow {
   resource: GraphCacheResourceKind;
@@ -4162,6 +4162,8 @@ function answerMetaJson(message: IntuneChatMessage): string | null {
     ...(message.tenantContext ? { tenantContext: true } : {}),
     ...(message.privatePrompt ? { privatePrompt: true } : {}),
     ...(message.notConnected ? { notConnected: message.notConnected } : {}),
+    ...(message.modelFit ? { modelFit: message.modelFit } : {}),
+    ...(message.switchedFrom ? { switchedFrom: message.switchedFrom } : {}),
   };
   return Object.keys(meta).length > 0 ? JSON.stringify(meta) : null;
 }

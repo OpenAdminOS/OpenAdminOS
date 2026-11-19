@@ -38,6 +38,7 @@ import {
   type IntuneChatDocumentationSource,
   type IntuneChatInvestigationToolName,
   type IntuneChatMessage,
+  type ModelFitIssue,
   type IntuneChatProgressStep,
   type IntuneChatStreamEvent,
   type IntuneChatStreamStage,
@@ -168,6 +169,7 @@ import {
   type DocsIndexPassage,
 } from "./chat-steps.js";
 import { TenantValueIndex } from "./tenant-values.js";
+import { chatModelFitFailure, ModelOverrideError, repeatedFailureIssue, resolveChatTurnProvider } from "./model-fit.js";
 import { usedTenantEvidence } from "../../src/shared/chat-steps.js";
 
 type WorkspacePromptContextPayload = {
@@ -2087,6 +2089,8 @@ export class IntuneChatService {
     if (!content) {
       throw new Error("Chat message must not be empty.");
     }
+    // A per-request provider is offered only in the streaming Chat the renderer uses.
+    if (input.modelOverride) throw new ModelOverrideError("Choosing another provider for one request works only in Chat. Send the question there.");
 
     const store = this.host.requireIntelligenceStore();
     const persisted = await this.host.read();
@@ -2548,7 +2552,18 @@ export class IntuneChatService {
     return this.leasedScope(noTenant ? undefined : tenant.id, options.signal, async (leaseSignal) => {
     if (leaseSignal) options = { ...options, signal: leaseSignal };
     const providers = await this.host.listProviders();
-    const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
+    const activeProvider = this.resolveActiveProvider(providers, persisted.activeProviderId);
+    // One request may run on a provider the admin chose after the local model could not do it (model-fit.ts).
+    const turn = resolveChatTurnProvider({
+      override: input.modelOverride,
+      providers,
+      active: activeProvider,
+      activeModel: resolveProviderDefaultModel(activeProvider, persisted.activeModelByProviderId).model,
+      activeModelByProviderId: persisted.activeModelByProviderId,
+      consent: input.hostedProviderConsent,
+      nova: Boolean(options.voice || options.scope),
+    });
+    const provider = turn.provider;
     const providerId = provider.id;
     options.signal?.throwIfAborted();
     // Nova keeps requiring a tenant.
@@ -2557,10 +2572,7 @@ export class IntuneChatService {
     }
     if (options.scope && (options.scope.tenantId !== tenant.id || options.scope.providerId !== providerId))
       throw new Error("Nova's tenant or provider changed. Start a new conversation.");
-    const selectedModel = resolveProviderDefaultModel(
-      provider,
-      persisted.activeModelByProviderId,
-    ).model;
+    const selectedModel = turn.model;
     if (options.scope && (("model" in options.scope && options.scope.model !== selectedModel) || (options.scope.isLocal !== undefined && options.scope.isLocal !== provider?.isLocal)))
       throw new Error("Nova's reasoning model or provider trust changed. Start a new conversation.");
     const chatBudget = intuneChatProviderBudget(providerId);
@@ -2660,6 +2672,7 @@ export class IntuneChatService {
       createdAt: new Date().toISOString(),
       providerId,
       ...(selectedModel ? { model: selectedModel } : {}),
+      ...(turn.switchedFrom ? { switchedFrom: turn.switchedFrom } : {}),
     };
     const initialCacheStatus: GraphCacheStatus = {
       ...(noTenant ? {} : { tenantId: tenant.id }),
@@ -2937,6 +2950,7 @@ export class IntuneChatService {
     let assistantStatus: IntuneChatMessage["status"] = "completed";
     let assistantError: string | undefined;
     let engineNotice: string | undefined;
+    let modelFit: ModelFitIssue | undefined;
     let responseModel = selectedModel;
     let toolTrace: IntuneChatMessage["toolTrace"];
     let documentationSources: IntuneChatDocumentationSource[] = [];
@@ -3215,10 +3229,15 @@ export class IntuneChatService {
                       : "Nova reached its tool-call limit before finishing. Ask a more focused question or open Chat to inspect the evidence.";
                 assistantContent = assistantError;
                 emitDelta(assistantContent);
-              } else await streamDeterministicAnswer(agentic.fallbackNotice);
+              } else {
+                // The investigation failed on this local model often enough that Chat stops trying it.
+                if (agentic.reason !== "context-limit" && agenticModelHasFailedRepeatedly(providerId, selectedModel ?? llm.defaultModel)) modelFit = repeatedFailureIssue(provider, selectedModel ?? llm.defaultModel);
+                await streamDeterministicAnswer(agentic.fallbackNotice);
+              }
             }
           } else {
             const notice = withMcpSkippedNotice(capability, answerPlan?.mcpInstalled ?? false);
+            if (capability.reason === "capability-fallback" && !capability.tooSmall && !options.voice) modelFit = repeatedFailureIssue(provider, selectedModel);
             if (capability.reason === "capability-fallback" && notice) {
               sendProgress({
                 message: notice,
@@ -3250,6 +3269,7 @@ export class IntuneChatService {
           } else {
             assistantStatus = "failed";
             assistantError = caught instanceof Error ? caught.message : String(caught);
+            modelFit = options.voice ? undefined : chatModelFitFailure(caught, provider, selectedModel);
             assistantContent = assistantContent.trim()
               ? `${assistantContent.trim()}\n\nThe selected LLM provider failed while answering this chat message. ${assistantError}`
               : `The selected LLM provider failed while answering this chat message. ${assistantError}`;
@@ -3314,6 +3334,8 @@ export class IntuneChatService {
       providerId,
       ...(responseModel ? { model: responseModel } : {}),
       ...(engineNotice ? { engineNotice } : {}),
+      ...(modelFit ? { modelFit } : {}),
+      ...(turn.switchedFrom ? { switchedFrom: turn.switchedFrom } : {}),
       ...(answerPlan ? { questionKind: answerPlan.sources.kind } : {}),
       ...(notConnectedFor(accessBlockedMessage, restriction, Boolean(namedAgent) || planned.hasWriteIntent)),
       steps: steps.steps,

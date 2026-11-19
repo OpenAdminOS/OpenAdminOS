@@ -1446,6 +1446,52 @@ export interface IntuneChatMessage {
    * not-connected card from the service registry.
    */
   notConnected?: IntuneChatNotConnected;
+  /**
+   * The local model could not do this request (SPEC.md, Model fit). Chat
+   * offers the configured alternatives; nothing is sent elsewhere until the
+   * admin chooses one and accepts.
+   */
+  modelFit?: ModelFitIssue;
+  /**
+   * This answer came from a provider the admin chose for this request only,
+   * after the local model could not do it. Names the model it replaced.
+   */
+  switchedFrom?: { providerId: ProviderId; model?: string; reason: ModelFitReason };
+}
+
+/**
+ * Why the local model is a poor fit for a request: the prompt does not fit
+ * its context window, the investigation failed on it repeatedly, or it spent
+ * its whole answer budget on reasoning.
+ */
+export type ModelFitReason = "context-too-small" | "repeated-failure" | "thinking-only";
+
+export interface ModelFitIssue {
+  reason: ModelFitReason;
+  /** The local provider and model that could not do the request. */
+  providerId: ProviderId;
+  model?: string;
+  /** Tokens the request needed, when the provider or the fit check said. */
+  neededTokens?: number;
+  /** Tokens the model could take, when known. */
+  limitTokens?: number;
+  /** The limit is the most the model supports, not the size it was loaded with. */
+  limitIsModelMax?: true;
+}
+
+/**
+ * One request answered by another provider or model than the active one,
+ * after the local model could not do it. Never persisted as a setting: the
+ * next send uses the active provider again. A hosted provider also needs a
+ * fresh `hostedProviderConsent` for it that is not a remembered one.
+ */
+export interface ChatModelOverride {
+  providerId: ProviderId;
+  model?: string;
+  /** The active local provider and model this request was first sent to. */
+  fromProviderId: ProviderId;
+  fromModel?: string;
+  reason: ModelFitReason;
 }
 
 /**
@@ -2938,6 +2984,14 @@ export interface SendIntuneChatMessageInput {
    * active conversation tenant before adding it to the model prompt.
    */
   workspaceContext?: WorkspacePromptContextInput;
+  /**
+   * Run this one request with another configured provider or a larger local
+   * model, after the local model could not do it. The host checks that the
+   * active provider is the local one named, that the chosen provider is
+   * listed and ready, and, for a hosted one, that the admin accepted it for
+   * this request.
+   */
+  modelOverride?: ChatModelOverride;
 }
 
 export interface SendIntuneChatMessageResult {
