@@ -150,6 +150,7 @@ function matchMode(value: Scalar, kind: DataClass): MatchMode {
   if (/^[+-]?[\p{N}.,]+$/u.test(value)) return "field";
   if (length < 12) return hasLetter && hasDigit ? "word" : "field";
   if (/^[\p{L}\p{N}\p{M}_]+$/u.test(value)) return hasDigit && hasLetter || kind === "credential" ? "word" : "field";
+  if (/^[\p{L}\p{M}_]+(?:\s+[\p{L}\p{M}_]+)+$/u.test(value)) return "word";
   return "text";
 }
 

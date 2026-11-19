@@ -607,3 +607,13 @@ test("Conditional Access references and delegated permissions distinguish identi
   assert.equal(application.counts.security, 2);
   assert.deepEqual(Object.values(application.securityMaskRoles), ["nameOrIdentifier", "nameOrIdentifier"]);
 });
+
+test("generic phrases match only at word boundaries", () => {
+  const ledger = new ClassificationLedger();
+  ledger.register("fixture", { status: "not configured" });
+  const prompt = 'isnot configured; not configuredsuffix; (not configured); {"status":"not configured"}';
+  const { spans } = ledger.classifyRequest({ prompt });
+  assert.deepEqual(spans.map(span => span.start), [
+    prompt.indexOf("(not configured)") + 1, prompt.lastIndexOf("not configured"),
+  ]);
+});
