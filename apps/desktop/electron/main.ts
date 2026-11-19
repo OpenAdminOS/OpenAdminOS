@@ -956,13 +956,14 @@ function createIntuneChatSmokeLlm(): RunLlmApi {
           done: false,
           model: smokeModelName,
         };
-        const started = Date.now();
-        while (!options.signal?.aborted && Date.now() - started < 5000) {
-          await new Promise((resolve) => setTimeout(resolve, 50));
+        const { signal } = options;
+        if (!signal) throw new Error("The smoke stream requires a cancellation signal.");
+        if (!signal.aborted) {
+          await new Promise<void>((resolve) => {
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          });
         }
-        if (options.signal?.aborted) {
-          throw new Error("Smoke stream stopped by user.");
-        }
+        throw new Error("Smoke stream stopped by user.");
       }
       yield {
         delta: "WIN-01 is stale",
@@ -1903,7 +1904,10 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
 
   await setTextarea("Hold response for cancellation smoke.");
   await pressEnterInTextarea();
-  await waitFor(() => Boolean(findButton("Stop")), "chat stop action", 2500);
+  await waitFor(
+    () => Boolean(findButton("Stop")) && bodyText().includes("Partial response"),
+    "chat stream ready to stop",
+  );
   await clickButton("Stop");
   await waitFor(
     () => bodyText().includes("Response stopped by user"),
