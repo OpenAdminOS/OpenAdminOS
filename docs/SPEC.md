@@ -1759,7 +1759,7 @@ below are in descending sensitivity.
 | --- | --- |
 | Credential | Recovery keys, LAPS and device account passwords, client secrets and their hints, tokens, shared secrets, product keys and certificate key material |
 | Identity | Names, UPNs, email addresses, phone numbers, user and group IDs in security policies, sign-in locations, and sign-in and audit actor IP addresses |
-| Security | Conditional Access and named locations, authentication methods and strength policies, security defaults, security baselines, Defender, firewall, disk encryption, attack surface reduction, admin roles and assignments, PIM, cross-tenant access, and identity protection policies |
+| Security | Conditional Access and named locations, authentication methods and strength policies, security defaults, authorization policy, device compliance policies, application and service principal permission footprints, security baselines, Defender, firewall, disk encryption, attack surface reduction, admin roles and assignments, PIM, cross-tenant access, and identity protection policies |
 | Device | Device names and IDs, serial numbers, IMEI, MEID, MAC addresses and private IP addresses |
 | Activity | Timestamps, statuses, results and app usage without the person's identity |
 | Configuration | Tenant settings outside the Security class |
@@ -1771,20 +1771,25 @@ providers. Phase A4 masking will replace policy names and IDs, named locations
 and their IP ranges, excluded users and groups, and role names and identifiers
 while keeping setting values readable. User and group identifiers keep their
 Identity class and secrets keep their Credential class within security objects.
+Security fields carry a mask role for names and identifiers or for setting values.
+App role and permission scope names are identifiers. App role flags,
+compliance rules and authorization policy settings stay readable in A4.
 
 An unmapped Graph field or resource defaults to Identity. Mapped containers
 supply a class to unmapped descendants. An explicit child rule can specialize
 that class, with Credential and Security inheritance preserving the higher
 sensitivity. Settings Catalog, intent and Group Policy values use their setting
 metadata, including metadata in `additionalData`, to identify secrets.
-Null, empty and absent secret values do not add credential counts.
+Counts cover present scalar leaves. Nulls, blank strings, empty objects or arrays
+and absent fields add no counts.
 A returned secret hint counts as Credential when it has a value. Credential
 key matching is anchored to the whole normalized key so metadata such as
 `preSharedKeyIsSet` keeps its own class.
 
 Rules apply to response fields that actually arrive, including fields Graph
 returns outside a requested projection. Route normalization and case-insensitive
-lookup preserve original JSON Pointers. Paging and delta links count as Identity
+lookup preserve original JSON Pointers. Credential endpoint aliases share one
+field map. Paging and delta links count as Identity
 because continuation tokens can carry tenant values. The device name fields
 `deviceName`, `managedDeviceName` and Entra device `displayName` start as Device.
 The tenant identity index and text detectors run on all of them, so an embedded
@@ -1792,7 +1797,8 @@ known person's name can raise the value to Identity. Free-text scan rules includ
 descriptions, notes, group tags, publishers, assignment filter rules, redirect
 URIs and audit change values. Recognizable credentials can raise any value,
 including a public result. MCP results start as Identity unless the catalog
-marks the server as a public reference.
+marks the server as a public reference. The built-in web search tool is a separate
+Public ingress. Text detectors can raise its class too.
 
 The [Graph field record](research/graph-field-classes.md) tracks observed and
 documented shapes. Revalidate the versioned field map when a Graph beta shape or
@@ -1802,22 +1808,54 @@ fixtures, run the mapped-field and cache ingestion checks, and increment the
 field map version when classifications change.
 
 The SDK exposes `DataClass`, `DATA_CLASSES_BY_SENSITIVITY`, `DataClassCounts`,
-`highestDataClass` and `maxDataClass`. `classifyData` and `countDataClasses` are
-host-only APIs on `@openadminos/runtime/data-classification`.
+`highestDataClass` and `maxDataClass`. `classifyData` is a host-only API on
+`@openadminos/runtime/data-classification` and returns both field counts and
+coverage. The SQLite cache classifies a row on write and stores the versioned
+paths, classes and mask roles alongside it. The classifier reads the existing
+row values at those paths. It stores no second copy of the values in SQLite.
+Cached users and groups are indexed by resource when their snapshot changes
+and when the store opens. The desktop prepares new classifications and builds
+startup indexes in batches, yielding between batches. Older cache rows are
+backfilled once. The existing SQLite snapshot replacement is atomic.
 
-A memory-only ledger registers leaf values at model-facing ingress for each
-agent run or Chat conversation. Chat retains values for up to eight recent
-conversations in memory. The host provider decorator scans final system
-and prompt text for raw and JSON-serialized values, then applies credential,
-email and tenant identity checks to the entire request. It exposes counts and
-offsets by request section and source to a host observer. Values shorter than
-six characters match only complete JSON string values. An unfamiliar name and
-an opaque unlabeled secret can evade text detection. If the work budget leaves
-fields or request text unexamined, the classifier records the unexamined data
-as Credential because it may contain secrets. If the ledger fills while
-registering classified values, it records a request-wide span at the highest
-class of the observations it could not retain, with Identity as the floor.
-The request observer marks either fallback as budget exhausted.
+The model-facing ledger is a plaintext secret store in process memory. Never
+log, persist or send its contents. Runs dispose of it when they finish or are
+cancelled. Chat retains observations per completed turn for up to four turns
+in each of eight conversations, with a 15-minute maximum lifetime per ledger.
+Cancellation disposes of the active turn. Conversation deletion, disconnect
+and switching organizations release the corresponding observations. Temporary
+history evidence is disposed of after the current turn. A new process can
+still scan saved conversation text, using the available detectors and cache
+index.
+
+The decorator scans final system and prompt text for raw and JSON-serialized
+values and recognizes credential and identifier patterns, including UPNs,
+GUIDs, IPs, MAC addresses and labeled serials. It keeps UTF-16 offsets for
+exact spans in the provider's request. Strings under 12 Unicode code points
+and low-specificity values need field or rendering provenance, or a
+whole-word match for distinctive short identifiers. Boolean and numeric
+values need provenance. Transformed values carry their original class through
+clipping, scalar interpolation and standalone fences. An unfamiliar name or
+an opaque unlabeled secret can evade detection.
+
+A turn keeps up to two million units for values and provenance, favoring
+Credential and Identity when it has to drop lower classes. Retained evidence
+and drops are counted separately. Received data has
+a 32-million-unit work limit per classification. The request scan works in
+chunks over up to 16 million UTF-16 code units and 200,000 units of match work
+per section. Desktop provider calls yield between large scan chunks.
+If work or retention limits leave evidence unexamined, the
+effective class is Credential, with a separate coverage-incomplete flag,
+unexamined quantities and text ranges where applicable. Observed counts and
+spans only include evidence the classifier found. A turn's dropped evidence
+does not mark a later turn incomplete. If classification fails, the observer
+marks the request failed and the provider call proceeds with unchanged options.
+
+Each event includes the field map version, timestamp and available run or
+conversation ID. The host retains the most recent 16 records per scope across
+32 scopes for development and tests, with up to 256 offsets per retained
+record. Live observers receive the full result. The host exposes counters for unscoped
+registrations and requests. The records are local diagnostics.
 
 Record IDs and tenant IDs can correlate fields of one record. Phase A4 will
 treat fields that co-occur in a record at that record's highest class when it

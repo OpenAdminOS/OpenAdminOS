@@ -12,7 +12,7 @@ provider receives.
 | --- | --- |
 | Credential | Recovery keys, LAPS passwords, application secrets and their hints, tokens, product keys and private keys |
 | Identity | Names, user IDs, email addresses, phone numbers, and a person's sign-in IP and location |
-| Security | Conditional Access, named locations, authentication policies, security baselines, endpoint security settings, and admin role definitions and assignments |
+| Security | Conditional Access, named locations, authentication and authorization policies, device compliance policies, endpoint security settings, application permissions, and admin role assignments |
 | Device | Device names and IDs, serial numbers, IMEI, MEID, MAC addresses and private IP addresses |
 | Activity | Timestamps, statuses, results and app usage without the person's identity |
 | Configuration | Tenant settings without personal data |
@@ -24,11 +24,25 @@ or resource defaults to Identity. MCP results start as Identity unless the
 server is a listed public reference. The public references are Microsoft Learn,
 KQL Search, IntuneAutomation, Microsoft Release Communications, WindowsForum,
 Splashtop Docs, Splashtop Agentic Packr Docs and endoflife.ai. Text checks can
-raise the class of a public result.
+raise the class of a public result, including results from the built-in web search tool.
 
 Text checks recognize some patterns, such as email addresses and labeled
 passwords, and can find values the app already knows about the organization.
 An unfamiliar name or an opaque, unlabeled secret can evade these checks.
+
+OpenAdminOS classifies cache rows when it saves them. A model request scan
+can examine up to 16 million UTF-16 code units each for the system text and
+the prompt, subject to the match work limit. If the scan cannot examine all
+the evidence, its local record marks coverage incomplete separately from
+the credentials it found. The local evidence budget favors credentials and
+identity values. Temporary Chat observations are kept on this device
+for up to four completed turns in each of eight conversations, with a
+15-minute maximum lifetime. Cancelling a turn clears its active observations.
+Deleting the conversation or disconnecting or switching organizations also
+releases the associated observations.
+
+Hosted Nova voice uses a separate request path. Its classification coverage
+is planned with provider routing in Phase A3.
 
 Classification provides information for future data policy controls. Provider
 selection, prompt content and data sharing follow the existing
