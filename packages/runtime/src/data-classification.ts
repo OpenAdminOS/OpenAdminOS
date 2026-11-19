@@ -76,7 +76,7 @@ function isCredentialField(key: string): boolean {
 }
 
 /** Parse a bounded label and consume whitespace once before reading a value. */
-function* labeledCredentials(text: string): Iterable<TextSpan> {
+export function* labeledCredentials(text: string): Iterable<TextSpan> {
   if (!text.includes(":") && !text.includes("=")) return;
   const separators = /[:=]/g;
   for (let separator; (separator = separators.exec(text)); ) {
@@ -133,12 +133,12 @@ function* pemSpans(text: string): Iterable<TextSpan> {
   if (pending) yield { start: pending.start, end: pending.end };
 }
 
-function* credentialSpans(text: string, decode = true): IterableIterator<TextSpan> {
+function* credentialSpans(text: string, decode = true, includeLabels = true): IterableIterator<TextSpan> {
   for (const pattern of CREDENTIAL_PATTERNS) {
     for (const match of text.matchAll(pattern)) yield { start: match.index, end: match.index + match[0].length };
   }
   yield* pemSpans(text);
-  yield* labeledCredentials(text);
+  if (includeLabels) yield* labeledCredentials(text);
   if (text.includes(".")) {
     // A compact JWT can use different whitespace and property order in its header.
     for (const match of text.matchAll(/(?<![\w-])([\w-]{8,2048})\.[\w-]+\.([\w-]*)(?![\w-])/g)) {
@@ -201,7 +201,7 @@ function* identifierSpans(text: string, kind: DataClass): Iterable<TextSpan & { 
 }
 
 export function* requestTextSpans(text: string, index?: ClassificationOptions["identityIndex"]): Iterable<TextSpan & { kind: DataClass; source: string }> {
-  for (const span of credentialSpans(text)) yield { ...span, kind: "credential", source: "detector:credential" };
+  for (const span of credentialSpans(text, true, false)) yield { ...span, kind: "credential", source: "detector:credential" };
   yield* identifierSpans(text, "public");
   for (const span of index?.spans?.(text) ?? []) {
     const value = text.slice(span.start, span.end);

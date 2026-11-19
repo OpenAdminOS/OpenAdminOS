@@ -617,3 +617,13 @@ test("generic phrases match only at word boundaries", () => {
     prompt.indexOf("(not configured)") + 1, prompt.lastIndexOf("not configured"),
   ]);
 });
+
+test("credential labels and values can be separated by whitespace across scan chunks", () => {
+  const value = "q7z";
+  const prompt = "Client secret" + " ".repeat(140_000) + "=" + " ".repeat(140_000) + value;
+  const result = new ClassificationLedger().classifyRequest({ prompt });
+  assert.equal(result.coverageIncomplete, false);
+  assert.equal(result.counts.credential, 1);
+  assert.equal(result.spans[0]?.start, prompt.length - value.length);
+  assert.equal(result.spans[0]?.end, prompt.length);
+});

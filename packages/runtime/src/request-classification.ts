@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { setImmediate as yieldToMain } from "node:timers/promises";
 import { DATA_CLASSES_BY_SENSITIVITY, maxDataClass, type DataClass, type DataClassCounts, type LlmOptions, type ProviderId, type RunLlmApi } from "@openadminos/agent-sdk";
-import { emptyDataClassCounts, requestTextSpans, walkDataClasses, type ClassificationOptions, type TextSpan } from "./data-classification.js";
+import { emptyDataClassCounts, labeledCredentials, requestTextSpans, walkDataClasses, type ClassificationOptions, type TextSpan } from "./data-classification.js";
 import { GRAPH_FIELD_CLASSES_VERSION, type SecurityMaskRole } from "./graph-field-classes.js";
 
 export interface ClassificationSpan extends TextSpan {
@@ -636,7 +636,17 @@ export class ClassificationLedger {
         }
       }
       const folded = retained.some(ledger => ledger.foldedAnchors.length) ? foldIdentity(text) : undefined;
+      // Labels, separators, and values can be arbitrarily far apart within a
+      // section. Scan them together so chunk windows cannot split that state.
+      for (const span of labeledCredentials(text)) {
+        if (--work.remaining < 0) {
+          ranges.push({ section, start: 0, end: text.length, reason: "match-limit" });
+          break;
+        }
+        collect(span, { kind: "credential", source: "detector:credential", key: "" });
+      }
       for (let from = 0; from < text.length; from += TEXT_CHUNK) {
+        if (work.remaining < 0) break;
         if (from > 0) yield;
         const to = Math.min(text.length, from + TEXT_CHUNK);
         if (retained.some(ledger => !ledger.scan(ledger.anchors, text, from, to, work, collect, fieldAt) ||
