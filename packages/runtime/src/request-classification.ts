@@ -945,17 +945,7 @@ export class ClassificationLedger {
         }
       }
       const folded = retained.some(ledger => ledger.foldedAnchors.length) ? foldIdentity(text) : undefined;
-      // Labels, separators, and values can be arbitrarily far apart within a
-      // section. Scan them together so chunk windows cannot split that state.
-      for (const span of labeledCredentials(text)) {
-        if (--work.remaining < 0) {
-          ranges.push({ section, start: 0, end: text.length, reason: "match-limit" });
-          break;
-        }
-        collect(span, { kind: "credential", source: "detector:credential", key: "" });
-      }
       for (let from = 0; from < text.length; from += TEXT_CHUNK) {
-        if (work.remaining < 0) break;
         const to = Math.min(text.length, from + TEXT_CHUNK);
         if (retained.some(ledger => !ledger.scan(ledger.anchors, text, from, to, work, collect, fieldAt) ||
             folded !== undefined && !ledger.scan(ledger.foldedAnchors, folded, from, to, work, collect))) {
@@ -975,6 +965,15 @@ export class ClassificationLedger {
           ranges.push({ section, start: from, end: text.length, reason: "match-limit" });
           break;
         }
+      }
+      // Scan labels after the ledger so a detector cannot replace Graph
+      // provenance for the same span. A full section keeps long gaps intact.
+      if (work.remaining >= 0) for (const span of labeledCredentials(text)) {
+        if (--work.remaining < 0) {
+          ranges.push({ section, start: 0, end: text.length, reason: "match-limit" });
+          break;
+        }
+        collect(span, { kind: "credential", source: "detector:credential", key: "" });
       }
       const ordered = [...found.values()].sort((a, b) => a.start - b.start || a.end - b.end);
       for (const { authoritative: _, ...span } of ordered) spans.push(span);
