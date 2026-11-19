@@ -128,6 +128,7 @@ async function makeFixture(
   const legacyTokenStores = stores.legacyTokenStores;
   const signIns: Array<{ clientId: string; authority: string }> = [];
   const store = new AppStateStore({
+    providerListFactory: () => [],
     filePath: statePath,
     tokenStore: defaultStore,
     tokenStoreFor: (clientId) => {

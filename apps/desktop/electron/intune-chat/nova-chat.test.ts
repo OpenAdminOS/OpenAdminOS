@@ -4,6 +4,7 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { it } from "node:test";
+import { providerCatalog } from "@openadminos/agent-sdk";
 import { AppStateStore } from "../state.js";
 import type { RunGraphApi, RunLlmApi } from "@openadminos/agent-sdk";
 import { TENANT_DATA_INSTRUCTIONS } from "@openadminos/runtime";
@@ -85,6 +86,7 @@ async function fixture(empty = false, deviceRows?: unknown[]) {
     },
   };
   const store = new AppStateStore({
+    providerListFactory: () => [...providerCatalog],
     filePath: path,
     userDataPath: dir,
     statsApiUrl: "",

@@ -1,3 +1,4 @@
+import { providerCatalog } from "@openadminos/agent-sdk";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
@@ -69,11 +70,8 @@ function buildServer(): McpServer {
 
 let httpServer: Server;
 let endpoint: McpEndpoint;
-const originalOllamaUrl = process.env.OPENAGENTS_OLLAMA_URL;
 
 before(async () => {
-  // Provider detection must not reach a real local Ollama.
-  process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:9";
   httpServer = createServer((request, response) => {
     // The endpoint moved within the same origin.
     if (request.url === "/old") { response.writeHead(308, { location: "/mcp" }).end(); return; }
@@ -94,8 +92,6 @@ before(async () => {
 });
 
 after(async () => {
-  if (originalOllamaUrl === undefined) delete process.env.OPENAGENTS_OLLAMA_URL;
-  else process.env.OPENAGENTS_OLLAMA_URL = originalOllamaUrl;
   await new Promise<void>((resolve) => httpServer.close(() => resolve()));
 });
 
@@ -469,7 +465,7 @@ describe("MCP installs in app state", () => {
       { ...MCP_CATALOG[0]!, id: "test-docs", name: "Test Docs", url: endpoint.url },
       { ...MCP_CATALOG[1]!, id: "gone", name: "Gone", url: "http://127.0.0.1:9/mcp" },
     ];
-    const store = new AppStateStore({ filePath: statePath, tokenStore: { read: async () => "", write: async () => undefined }, statsApiUrl: "", mcpCatalog: catalog });
+    const store = new AppStateStore({ providerListFactory: () => [...providerCatalog], filePath: statePath, tokenStore: { read: async () => "", write: async () => undefined }, statsApiUrl: "", mcpCatalog: catalog });
     try { await run(store, statePath, catalog); } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
   }
   const persisted = async (statePath: string) => JSON.parse(await readFile(statePath, "utf8")).mcpServers;
@@ -503,6 +499,7 @@ describe("MCP installs in app state", () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-mcp-allowlist-"));
     const tenant = { id: "tenant-1", displayName: "Contoso", username: "admin@contoso.example", homeAccountId: "home-1", addedAt: "2026-06-01T10:00:00.000Z" };
     const make = (tools: string[]) => new AppStateStore({
+      providerListFactory: () => [...providerCatalog],
       filePath: join(dir, "state.json"), tokenStore: { read: async () => "", write: async () => undefined }, statsApiUrl: "",
       mcpCatalog: [{ ...MCP_CATALOG[0]!, id: "test-docs", name: "Test Docs", url: endpoint.url, tools }],
     });
@@ -574,6 +571,7 @@ describe("MCP installs in app state", () => {
     ];
     const writer = writerDouble();
     const store = new AppStateStore({
+      providerListFactory: () => [...providerCatalog],
       filePath: statePath, userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
       mcpCatalog: [{ ...MCP_CATALOG[0]!, id: "test-docs", name: "Test Docs", url: endpoint.url }],
@@ -623,6 +621,7 @@ describe("MCP installs in app state", () => {
     let reply = 0;
     const writer = writerDouble();
     const store = new AppStateStore({
+      providerListFactory: () => [...providerCatalog],
       filePath: statePath, userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
       mcpCatalog: [{ ...MCP_CATALOG[0]!, id: "test-docs", name: "Test Docs", url: endpoint.url }],
@@ -672,6 +671,7 @@ describe("MCP installs in app state", () => {
       const writer = writerDouble();
       let store: AppStateStore;
       store = new AppStateStore({
+        providerListFactory: () => [...providerCatalog],
         filePath: statePath, userDataPath: dir, statsApiUrl: "",
         tokenStore: { read: async () => "", write: async () => undefined },
         mcpCatalog: [{ ...MCP_CATALOG[0]!, id: "test-docs", name: "Test Docs", url: endpoint.url }],
@@ -732,6 +732,7 @@ describe("MCP installs in app state", () => {
       installedAgents: [], runs: [], tenants: [tenant], activeTenantId: tenant.id,
     }));
     const store = new AppStateStore({
+      providerListFactory: () => [...providerCatalog],
       filePath: statePath, userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
       mcpCatalog: [],

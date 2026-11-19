@@ -117,7 +117,7 @@ async function makeFixture() {
     }),
     "utf8",
   );
-  const store = new AppStateStore({ filePath, tokenStore, userDataPath: dir, userAgentsDir, statsApiUrl: "" });
+  const store = new AppStateStore({ providerListFactory: () => [], filePath, tokenStore, userDataPath: dir, userAgentsDir, statsApiUrl: "" });
   return {
     store,
     userAgentsDir,
@@ -214,7 +214,7 @@ async function bundledFixture(dir: string, options: { schedule?: boolean } = {})
     }),
     "utf8",
   );
-  return new AppStateStore({ filePath, tokenStore, userDataPath: dir, statsApiUrl: "" });
+  return new AppStateStore({ providerListFactory: () => [], filePath, tokenStore, userDataPath: dir, statsApiUrl: "" });
 }
 
 describe("the manifest an installed agent would run", () => {

@@ -144,6 +144,7 @@ async function makeStoreFixture(input: { runs: RunRecord[] }): Promise<{
     "utf8",
   );
   const store = new AppStateStore({
+    providerListFactory: () => [],
     filePath: statePath,
     tokenStore,
     userDataPath: dir,

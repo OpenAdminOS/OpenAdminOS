@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, it } from "node:test";
+import { after, afterEach, before, describe, it } from "node:test";
 
 import { providerCatalog, resolveProviderDefaultModel, type ModelScanProbe, type ProviderId, type ProviderSummary } from "@openadminos/agent-sdk";
 
@@ -20,9 +20,10 @@ import {
 import { checkAzureOpenAI, checkLemonade, checkLmStudio, checkOllama, lemonadeStartHint } from "./provider-detail.js";
 import { installedOnDisk, scanProviderCheck, runScanCheck } from "./model-scan.js";
 import { AppStateStore } from "./state.js";
-import { guardProviderCliFixtures, onlyScanProviders } from "../tests/provider-cli-fixtures.js";
+import { assertProviderTestGuardActive } from "../../../tests/provider-test-guard.mjs";
+import { fakeCli, gone, onlyScanProviders } from "../tests/provider-cli-fixtures.js";
 
-const fakeCli = guardProviderCliFixtures();
+assertProviderTestGuardActive();
 
 const catalog = (id: string) => providerCatalog.find((provider) => provider.id === id)!;
 const ollamaReady = (models: string[]): ProviderSummary => ({ ...catalog("ollama"), status: "connected", models, defaultModel: models[0] });
@@ -94,7 +95,8 @@ describe("first-launch model scan", () => {
         urls.push(String(input instanceof Request ? input.url : input));
         throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } });
       }) as typeof fetch;
-      delete process.env.OPENAGENTS_OLLAMA_URL;
+      process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:11434";
+      process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:1234/v1";
       const checks = buildModelScanChecks({
         catalog: providerCatalog.filter((provider) => provider.id === "ollama" || provider.id === "lm-studio"),
         check: (id) => (id === "ollama" ? checkOllama(catalog("ollama")) : checkLmStudio(catalog("lm-studio"))),
@@ -471,8 +473,7 @@ describe("review round 1 on PR #175", () => {
       );
       assert.equal(probe.state, "could-not-check");
       const pid = Number((await readFile(pidFile, "utf8")).trim());
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      assert.throws(() => process.kill(pid, 0), "the hanging CLI must be killed");
+      assert.equal(await gone(pid), true, "the hanging CLI must be killed");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -487,7 +488,7 @@ describe("review round 1 on PR #175", () => {
   });
 
   it("reports a failed check as could not check, not as a negative result (finding 7)", async () => {
-    delete process.env.OPENAGENTS_OLLAMA_URL;
+    process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:11434";
     globalThis.fetch = (async () => new Response("unavailable", { status: 503 })) as typeof fetch;
     const http = scanProbeFromProvider(await scanProviderCheck(catalog("ollama")));
     assert.equal(http.state, "could-not-check");
@@ -535,9 +536,8 @@ describe("startup while the first-run scan is pending (review round 2, items 2 a
     // to loopback, so neither the host's CLIs nor its environment decide
     // what the scan checks.
     const original = { ollama: process.env.OPENAGENTS_OLLAMA_URL, host: process.env.OLLAMA_HOST, lm: process.env.OPENADMINOS_LM_STUDIO_URL };
-    process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:11434";
-    delete process.env.OLLAMA_HOST;
-    process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:1234/v1";
+    process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:9";
+    process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:9/v1";
     // A pinned Gemini CLI spy: any spawn writes its arguments.
     let geminiLog: string | undefined;
     if (process.platform !== "win32") {
@@ -1197,16 +1197,20 @@ describe("Gemini Test refreshes what listing serves (review round 4, item 2)", {
     }
   };
 
-  it("shows Gemini connected using only the fixture even with an inherited Gemini override", async () => {
-    const outside = await mkdtemp(join(tmpdir(), "openadminos-external-gemini-"));
-    try {
-      const binary = join(outside, "gemini");
-      await writeFile(binary, "#!/bin/sh\nexit 99\n", { mode: 0o755 });
-      process.env.OPENADMINOS_GEMINI_BINARY = binary;
+  describe("with an inherited Gemini override", () => {
+    const inherited = process.env.OPENADMINOS_GEMINI_BINARY;
+    before(() => {
+      process.env.OPENADMINOS_GEMINI_BINARY = join(tmpdir(), "unregistered-gemini");
+    });
+    after(() => {
+      if (inherited === undefined) delete process.env.OPENADMINOS_GEMINI_BINARY;
+      else process.env.OPENADMINOS_GEMINI_BINARY = inherited;
+    });
+
+    it("clears the override before checking Gemini with the pinned fixture", async () => {
+      assert.equal(process.env.OPENADMINOS_GEMINI_BINARY, undefined);
       assert.equal((await run(true)).status, "connected");
-    } finally {
-      await rm(outside, { recursive: true, force: true });
-    }
+    });
   });
 
   it("shows what a failed Test found", async () => {
@@ -1222,9 +1226,8 @@ describe("after the first-run scan (review round 3, item 1)", () => {
     let listed = 0;
     let generation = 0;
     const original = { ollama: process.env.OPENAGENTS_OLLAMA_URL, host: process.env.OLLAMA_HOST, lm: process.env.OPENADMINOS_LM_STUDIO_URL };
-    process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:11434";
-    delete process.env.OLLAMA_HOST;
-    process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:1234/v1";
+    process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:9";
+    process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:9/v1";
     const store = new AppStateStore({
       filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
@@ -1459,7 +1462,7 @@ describe("Lemonade in the scan", () => {
   });
 
   it("checks Lemonade on its loopback port and reads its chat models", async () => {
-    delete process.env.OPENADMINOS_LEMONADE_URL;
+    process.env.OPENADMINOS_LEMONADE_URL = "http://127.0.0.1:13305/v1";
     const urls: string[] = [];
     globalThis.fetch = (async (input: string | URL | Request) => {
       urls.push(String(input instanceof Request ? input.url : input));
@@ -1528,7 +1531,7 @@ describe("Lemonade in the scan", () => {
   });
 
   it("names the start command for this OS in the provider detail when Lemonade refuses the connection", async () => {
-    delete process.env.OPENADMINOS_LEMONADE_URL;
+    process.env.OPENADMINOS_LEMONADE_URL = "http://127.0.0.1:13305/v1";
     globalThis.fetch = (async () => {
       throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } });
     }) as typeof fetch;

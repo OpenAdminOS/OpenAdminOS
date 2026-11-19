@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { mkdtemp, mkdir, writeFile, readFile, rm, chmod } from "node:fs/promises";
-import { join, dirname } from "node:path";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { writeNodeCliFixture } from "../../../tests/node-cli-fixture.mjs";
 import { createCopilotLlm, probeCopilotLlm } from "./llm-copilot.js";
 import { createGeminiLlm, GEMINI_DEFAULT_MODEL, probeGeminiLlm } from "./llm-gemini.js";
 import { cliProviderEnv, CliProviderError, cliFailure } from "./cli-provider.js";
@@ -10,16 +11,7 @@ import { cliProviderEnv, CliProviderError, cliFailure } from "./cli-provider.js"
 async function fixture(provider: "copilot" | "gemini", scenario = "ok") {
   const folder = await mkdtemp(join(tmpdir(), "openadminos-cli-test-"));
   const capture = join(folder, "capture.json");
-  let binaryPath = join(folder, provider);
-  let scriptPath = binaryPath;
-  if (process.platform === "win32") {
-    binaryPath += ".cmd";
-    scriptPath = join(folder, "node_modules", provider === "copilot" ? "@github/copilot/npm-loader.js" : "@google/gemini-cli/bundle/gemini.js");
-    await mkdir(dirname(scriptPath), { recursive: true });
-    await writeFile(binaryPath, "@exit /b 99\r\n");
-  }
-  const script = `#!/usr/bin/env node
-const fs = require('node:fs');
+  const script = `const fs = require('node:fs');
 const scenario = ${JSON.stringify(scenario)}, capture = ${JSON.stringify(capture)};
 const args = process.argv.slice(2);
 if (args.includes('--version')) { console.log(${JSON.stringify(provider === "copilot" ? "1.0.83" : "0.59.0")}); process.exit(0); }
@@ -75,7 +67,8 @@ if (${JSON.stringify(provider)} === 'gemini') {
   });
 }
 `;
-  await writeFile(scriptPath, script); await chmod(scriptPath, 0o755);
+  const windowsEntry = provider === "copilot" ? "@github/copilot/npm-loader.js" : "@google/gemini-cli/bundle/gemini.js";
+  const binaryPath = await writeNodeCliFixture(folder, provider, script, windowsEntry);
   return { binaryPath, capture: async () => JSON.parse(await readFile(capture, "utf8")), cleanup: () => rm(folder, { recursive: true, force: true }) };
 }
 

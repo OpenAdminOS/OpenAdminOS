@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { afterEach, it, mock } from "node:test";
 import { providerCatalog } from "@openadminos/agent-sdk";
+import { assertProviderTestGuardActive } from "../../../tests/provider-test-guard.mjs";
 import { checkOllama } from "./provider-detail.js";
+
+assertProviderTestGuardActive();
 
 afterEach(() => mock.restoreAll());
 const provider = providerCatalog.find((p) => p.id === "ollama")!;

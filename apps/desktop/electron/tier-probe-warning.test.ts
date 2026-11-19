@@ -76,6 +76,7 @@ async function makeFixture(options: {
   }));
   const signIns = [...options.signIns];
   const store = new AppStateStore({
+    providerListFactory: () => [],
     filePath, userDataPath: dir, statsApiUrl: "", appVersion: "0.7.2",
     tokenStore: { read: async () => "", write: async () => undefined },
     tokenStoreFor: () => ({ read: async () => "", write: async () => undefined }),

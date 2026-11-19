@@ -58,6 +58,7 @@ async function makeStore(options: { policy?: ManagedPolicyStatus; clock?: () => 
     "utf8",
   );
   const store = new AppStateStore({
+    providerListFactory: () => [],
     filePath: statePath,
     tokenStore,
     tokenStoreFor: () => tokenStore,

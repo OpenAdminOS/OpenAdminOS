@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
 
+import { providerCatalog } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 
 import { IntelligenceSqliteStore } from "./intune-chat/sqlite-store.js";
@@ -71,6 +72,7 @@ describe("tenant disconnect", () => {
     db.close();
 
     const store = new AppStateStore({
+      providerListFactory: () => [],
       filePath: statePath,
       tokenStore,
       userDataPath: dir,
@@ -242,7 +244,7 @@ async function fixture(extra: Record<string, unknown> = {}, options: Record<stri
   const dir = await mkdtemp(join(tmpdir(), "openadminos-disconnect-"));
   const statePath = join(dir, "state.json");
   await writeFile(statePath, `${JSON.stringify({ activeProviderId: "ollama", installedAgents: [agent], tenants: [tenant], activeTenantId: tenant.id, runs: [], ...extra })}\n`, "utf8");
-  const store = new AppStateStore({ filePath: statePath, tokenStore, userDataPath: dir, statsApiUrl: "", ...options });
+  const store = new AppStateStore({ providerListFactory: () => [], filePath: statePath, tokenStore, userDataPath: dir, statsApiUrl: "", ...options });
   // No real MSAL cache in tests: removing the sign-in succeeds and is counted.
   const signIn = { removed: 0 };
   (store as unknown as { removeCachedAccount: () => Promise<void> }).removeCachedAccount = async () => {
@@ -842,7 +844,10 @@ describe("Disconnect redesign: choke points, restart and agent batches", () => {
   });
 
   it("refuses a multi-tenant agent batch that includes a closing organization and writes no batch", async () => {
-    const f = await fixture({ tenants: [tenant, otherTenant] }, { appVersion: "0.8.0" });
+    const f = await fixture({ tenants: [tenant, otherTenant] }, {
+      appVersion: "0.8.0",
+      providerListFactory: () => [...providerCatalog],
+    });
     const internals = f.store as unknown as { tenantLifecycle: { close(id: string): void } };
     try {
       internals.tenantLifecycle.close(tenant.id);

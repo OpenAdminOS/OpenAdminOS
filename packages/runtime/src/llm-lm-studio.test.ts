@@ -38,6 +38,7 @@ describe("classifyLmStudioEndpoint", () => {
 
 describe("probeLmStudioLlm", () => {
   it("reads OpenAI-compatible model ids from /models", async () => {
+    process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:1234/v1";
     await withFetch(async (input) => {
       assert.equal(String(input), "http://127.0.0.1:1234/v1/models");
       return jsonResponse({

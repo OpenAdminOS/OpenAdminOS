@@ -411,7 +411,7 @@ async function withStore(run: (input: {
   const tokens = new MemorySplashtopTokenStore();
   const route = { current: splashtopTeam };
   const { calls, fetch } = recorder((call) => route.current(call));
-  const store = new AppStateStore({ filePath, tokenStore, statsApiUrl: "", userDataPath: dir, splashtopTokens: tokens, splashtopFetch: fetch });
+  const store = new AppStateStore({ providerListFactory: () => [], filePath, tokenStore, statsApiUrl: "", userDataPath: dir, splashtopTokens: tokens, splashtopFetch: fetch });
   try {
     await run({ store, tokens, calls, route, file: async () => JSON.parse(await readFile(filePath, "utf8")) });
   } finally {

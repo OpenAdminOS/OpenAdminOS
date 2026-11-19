@@ -419,6 +419,7 @@ describe("Nova settings in the store", () => {
       "utf8",
     );
     const store = new AppStateStore({
+      providerListFactory: () => [],
       filePath: statePath,
       tokenStore,
       tokenStoreFor: () => tokenStore,

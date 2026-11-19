@@ -17,7 +17,7 @@
   "scripts": {
     "build": "npm run build -w @openadminos/agent-sdk && npm run build -w @openadminos/connector-teams && npm run build -w @openadminos/connector-whatsapp-web && npm run build -w @openadminos/connector-outlook && npm run build -w @openadminos/connector-slack && npm run build -w @openadminos/connector-discord && npm run build -w @openadminos/connector-signal && tsc -p tsconfig.json",
     "typecheck": "npm run build -w @openadminos/agent-sdk && npm run build -w @openadminos/connector-teams && npm run build -w @openadminos/connector-whatsapp-web && npm run build -w @openadminos/connector-outlook && npm run build -w @openadminos/connector-slack && npm run build -w @openadminos/connector-discord && npm run build -w @openadminos/connector-signal && tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test \"src/**/*.test.ts\""
+    "test": "node --import tsx --import ../../tests/provider-test-setup.mjs --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@azure/msal-node": "^5.2.1",

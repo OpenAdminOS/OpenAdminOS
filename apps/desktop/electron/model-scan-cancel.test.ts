@@ -11,26 +11,14 @@ import { createGeminiLlm, discoverCli, probeLmStudioLlm } from "@openadminos/run
 import { runScanCheck, scanProbeFromProvider, scanProviderCheck } from "./model-scan.js";
 import { checkLmStudio, checkOllama } from "./provider-detail.js";
 import { AppStateStore } from "./state.js";
-import { guardProviderCliFixtures, onlyScanProviders } from "../tests/provider-cli-fixtures.js";
+import { assertProviderTestGuardActive } from "../../../tests/provider-test-guard.mjs";
+import { fakeCli, gone, onlyScanProviders } from "../tests/provider-cli-fixtures.js";
 
 /** Review round 2 on PR #175: items 4, 5, 6 and Muse G, K and T. */
 
 const catalog = (id: string) => providerCatalog.find((provider) => provider.id === id)!;
 const posix = process.platform !== "win32";
-const fakeCli = guardProviderCliFixtures();
-
-// Up to 5 seconds: a killed child is reaped by the system, which can be slow on a loaded machine.
-async function gone(pid: number): Promise<boolean> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    try {
-      process.kill(pid, 0);
-    } catch {
-      return true;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  return false;
-}
+assertProviderTestGuardActive();
 
 /**
  * Runs a scan check and stops it through its signal once the wrapper has
@@ -208,7 +196,7 @@ describe("failed HTTP checks are not install results (item 6 and G)", () => {
     }
   });
 
-  it("reports a server stopped after an earlier check as not running, on a real socket (CI on Linux, PR #175)", async () => {
+  it("reports a stopped server as not running after a socket check times out (CI on Linux, PR #175)", async () => {
     const { server, url } = await serve(() => undefined);
     process.env.OPENAGENTS_OLLAMA_URL = url;
     process.env.OPENADMINOS_LM_STUDIO_URL = `${url}/v1`;
@@ -220,6 +208,9 @@ describe("failed HTTP checks are not install results (item 6 and G)", () => {
       server.closeAllConnections?.();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+    // A just-closed ephemeral port could be reused by another process.
+    process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:9";
+    process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:9/v1";
     assertNotRunning(scanProbeFromProvider(await checkOllama(catalog("ollama"))));
     assertNotRunning(scanProbeFromProvider(await checkLmStudio(catalog("lm-studio"))));
   });
@@ -283,10 +274,7 @@ describe("failed HTTP checks are not install results (item 6 and G)", () => {
     try {
       await fakeCli(bin, "ollama", "exit 0");
       process.env.PATH = `${bin}:/usr/bin:/bin`;
-      // A port that was just closed: the connection is refused.
-      const { server, url } = await serve(() => undefined);
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-      process.env.OPENAGENTS_OLLAMA_URL = url;
+      process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:9";
       const summary = await checkOllama(catalog("ollama"));
       assert.equal(summary.status, "not-installed");
       assert.equal(summary.installed, true);

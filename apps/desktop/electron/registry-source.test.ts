@@ -30,6 +30,7 @@ describe("registry source trust gate", () => {
 
     const originalFetch = globalThis.fetch;
     const store = new AppStateStore({
+      providerListFactory: () => [],
       filePath: statePath,
       tokenStore,
       userDataPath: dir,

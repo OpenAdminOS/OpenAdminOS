@@ -27,6 +27,7 @@ async function makeFixture(options: {
   const requests: string[][] = [];
   const loginHints: Array<string | undefined> = [];
   const store = new AppStateStore({
+    providerListFactory: () => [],
     filePath: statePath,
     tokenStore: storage,
     tokenStoreFor: () => storage,

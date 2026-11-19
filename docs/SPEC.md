@@ -85,6 +85,12 @@ interpretation. Unrecognized batch launchers are rejected with installation guid
 persona instructions, model names, and prompt punctuation must remain literal arguments.
 No additional runtime dependency is introduced for this resolution.
 
+Electron and runtime unit tests preload a shared provider guard. Tests register
+temporary CLI fixtures and use stubbed model responses or servers they start.
+The guard clears inherited provider binary and endpoint overrides around each
+test and fails when a provider tries to launch an unregistered executable or
+contact a model server outside the fixtures.
+
 ### Public roadmap
 
 The public roadmap is the `/roadmap` page of the Next.js app in `web/`, served at the root of `roadmap.openadminos.com` by a host rewrite in `web/next.config.js` (the same pattern as the docs host). Other page paths on that host redirect to the main site, and `/roadmap` on the main site redirects to the roadmap host. The page lists ordered stages without dates, release numbers or pricing; every item has a public GitHub issue. Stage content lives in `web/src/app/roadmap/stages.ts`.
