@@ -6,7 +6,9 @@ built on top of them are planned separately.
 
 **Decisions (Ugur, 2026-11-18)**
 - Our own engine, not Purview. It runs on the device, works offline and with local
-  models, covers every connector and needs no E5 licence.
+  models and covers every connector. Purview is a separate Microsoft service with
+  its own licensing outside this app, and it classifies content after the fact,
+  so the engine does not depend on it.
 - Names: **data classes** for the tags, **Data policy** for the feature and its
   settings page, **Masking** for replacing identities with tokens before a hosted
   call.
@@ -33,10 +35,17 @@ built on top of them are planned separately.
   A reset that both tightens and loosens applies nothing until the admin
   accepts the dialog. The status strip and the preview are derived from the
   effective rules.
-- Remote MCP servers receive public queries only, written by the query writer
-  without tenant data. Tenant data and answer context never go into their
-  requests, and the status strip names their hosts whenever their tools are
-  offered.
+- Remote MCP servers (decided on the maintainer's lead, round 3): be honest
+  about the boundary. A remote reference server receives a query written from
+  the admin's question with every value the app recognizes as tenant data
+  removed. Text the app cannot recognize, such as an internal project name,
+  can still reach the server. The status strip names the host whenever such
+  tools are offered, and the admin can turn a server off.
+- User-added MCP servers: the first version allows only tools the admin
+  approves as read-only at add time. The tool's read-only annotation is shown
+  but not trusted on its own, a tool annotated as a change cannot be approved,
+  the approval is enforced at every call (including calls from skills and
+  scheduled checks), and a tool that is not approved is never offered.
 - Skills never use send tools. A send tool named in a skill is kept in the file
   and marked unavailable to skills, whatever the grants.
 - Every connector send is proposed by the agent on a card and confirmed message
@@ -52,8 +61,14 @@ built on top of them are planned separately.
   exists. Block stays available on Local.
 - Agent names are 1 to 24 characters of letters, digits, spaces and hyphens;
   names that read as OpenAdminOS or Microsoft are refused. New policy keys keep
-  the `nova` prefix. In SKILL.md `allowed-tools`, MCP tools are
-  `mcp__<server>__<tool>` and agents their slug.
+  the `nova` prefix. SKILL.md `allowed-tools` is the standard space-delimited
+  list of tool ids: `graph_get`, MCP tools as `mcp__<server>__<tool>`, agents
+  by their slug. Resource selectors (which Graph resources a skill reads) go
+  in the instructions and in namespaced `metadata`
+  (`openadminos-graph-resources`), and the app limits `graph_get` to them.
+- A check skipped because its organization was not active runs at the next
+  scheduled time when that organization is active and its services are
+  connected. It is never replayed on an organization switch.
 
 **Decisions (Ugur, 2026-11-18, round 3 of the design review)**
 - A seventh data class, `security`, between `identity` and `device`. It covers
@@ -302,7 +317,8 @@ action. A less sensitive class comes from the IT policy file.
 
 - [ ] Per-agent grants for MCP servers, connectors (read and send), installed
       agents, skills and web search, enforced when tools are offered and again
-      at the call. IT lock keys for each.
+      at the call. IT lock keys for each, with a per-skill switch that shows
+      its lock reason when IT turned a skill off.
 
 **Acceptance criteria:**
 1. A server or connector without a grant is neither offered nor callable.
@@ -312,7 +328,8 @@ action. A less sensitive class comes from the IT policy file.
 
 - [ ] Skills are named procedures the agent loads when relevant. Each has a name,
       a description, instructions and the tools it may use, in the open SKILL.md
-      format, stored per device and
+      format (`allowed-tools` as space-delimited tool ids, resource selectors
+      in the instructions and namespaced `metadata`), stored per device and
       optionally per organization, with version history, import and export.
 - [ ] A "Save as skill" card turns a conversation into a draft skill.
 - [ ] A skill can never grant write access and never uses a send tool. Writes
@@ -329,15 +346,32 @@ action. A less sensitive class comes from the IT policy file.
 ### Phase B5: Your own MCP servers
 
 - [ ] Add a remote MCP server by URL, with headers or sign-in secrets in the
-      keychain, a tool review at add time, the existing egress checks and
-      query-writer boundary, and an IT allowlist key. The server receives public
-      queries only; tenant data and answer context never go into its requests.
+      keychain, the existing egress checks and query-writer boundary, and an IT
+      allowlist key.
+- [ ] The boundary, stated in the grant copy: the server receives a query
+      written from the admin's question with every value the app recognizes as
+      tenant data removed. Text the app cannot recognize, such as an internal
+      project name, can still reach the server. The status strip names the
+      host whenever its tools are offered, and the admin can turn the server
+      off.
+- [ ] A tool review at add time. Only tools the admin approves as read-only
+      are allowed; the tool's read-only annotation is shown but not trusted on
+      its own, and a tool annotated as a change cannot be approved. The
+      approval is enforced at every call, including calls from skills and
+      scheduled checks. A tool that is not approved, or added by the server
+      later and not yet reviewed, is never offered.
 - [ ] Local stdio servers are out of scope for the first version
       (`TODO(ugur)`: they run code on the device).
 
 **Acceptance criteria:**
 1. A user-added server passes the same egress tests as catalog servers.
 2. The status strip names the server's host whenever its tools are offered.
+3. A test sends a question containing private text that is absent from the
+   tenant value index (an internal project name) and records what reached the
+   server's request; the result is documented in the user docs next to the
+   boundary statement.
+4. A tool the admin did not approve is neither offered nor callable, from Chat,
+   a skill or a scheduled check (test per path).
 
 ### Phase B6: Learning
 
@@ -356,7 +390,10 @@ action. A less sensitive class comes from the IT policy file.
       confirmed on a card, capped at 5 checks per organization (the brief is
       not counted), listed in Settings and stopped on Disconnect. Restarting
       after a reconnect is confirmed on a card. Checks run while the app is
-      open; missed runs are listed as missed, never caught up silently.
+      open; missed runs are listed as missed, never caught up silently. A
+      check skipped because its organization was not active runs at the next
+      scheduled time when it is active and its services are connected, never
+      replayed on a switch.
 
 **Acceptance criteria:**
 1. A recurring check never runs a write step, and a test proves it.
@@ -368,8 +405,8 @@ action. A less sensitive class comes from the IT policy file.
 ### Phase C1: Research and lab
 
 - [ ] Compare attestable stacks (confidential GPU VMs with NVIDIA confidential
-      computing, CPU TEEs, third-party attested endpoints) for models, cost and
-      how evidence is verified. Record findings here. No code.
+      computing, CPU TEEs, third-party attested endpoints) for model support and
+      how attestation evidence is verified. Record findings here. No code.
 
 ### Phase C2: Attestation and the confidential tier
 
