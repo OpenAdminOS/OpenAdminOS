@@ -3,10 +3,11 @@ import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { Agent as HttpAgent, ClientRequest, createServer, get, request } from "node:http";
-import { get as httpsGet } from "node:https";
-import { connect } from "node:net";
+import { createServer as createHttpsServer, get as httpsGet } from "node:https";
+import { connect, createServer as createTcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Duplex } from "node:stream";
 import { after, it } from "node:test";
 import { Agent as FetchAgent } from "undici";
 import { registerProviderFixtureDirectory } from "../provider-test-guard.mjs";
@@ -78,6 +79,18 @@ if (scenario === "fetch") {
     const url = new URL(`http://127.0.0.1:${fixture.address().port}/health`);
     const destination = new URL(origin);
     const reroute = () => connect(Number(destination.port), destination.hostname);
+    const tlsFixture = createHttpsServer();
+    tlsFixture.listen(0, "127.0.0.1");
+    await once(tlsFixture, "listening");
+    // Open the second connection only if TLS starts writing through this socket.
+    let upstream;
+    const socket = new Duplex({
+      read() {},
+      write(chunk, encoding, callback) {
+        upstream ??= reroute();
+        upstream.write(chunk, encoding, callback);
+      },
+    });
     const agent = new HttpAgent();
     agent.createConnection = reroute;
     const dispatcher = new FetchAgent({ connect: (_options, callback) => {
@@ -96,11 +109,50 @@ if (scenario === "fetch") {
         assert.throws(() => get(url, { [key]: value }), new RegExp(`Blocked node:http\\.get.*${key} override`));
       }
       assert.throws(() => new ClientRequest(url, { agent }), /Blocked node:http\.ClientRequest.*agent override/);
+      assert.throws(() => httpsGet(`https://127.0.0.1:${tlsFixture.address().port}/health`, { socket }),
+        /Blocked node:https\.get.*socket override/);
       await assert.rejects(fetch(url, { dispatcher }), /Blocked fetch.*dispatcher override/);
     } finally {
+      upstream?.destroy();
+      socket.destroy();
       agent.destroy();
       await dispatcher.close();
-      await new Promise((resolve) => fixture.close(resolve));
+      await Promise.all([fixture, tlsFixture].map((server) => new Promise((resolve) => server.close(resolve))));
+    }
+  });
+} else if (scenario === "localhost-family") {
+  it("pins localhost to the registered fixture even when family requests another listener", async (t) => {
+    const fixture = createServer((_request, response) => response.end("fixture"));
+    fixture.listen(0, "localhost");
+    await once(fixture, "listening");
+    const { family, port } = fixture.address();
+    const otherFamily = family === "IPv4" ? 6 : 4;
+    const otherHost = otherFamily === 6 ? "::1" : "127.0.0.1";
+    let connections = 0;
+    const other = createTcpServer((socket) => {
+      connections++;
+      socket.destroy();
+    });
+    try {
+      other.listen(port, otherHost);
+      try {
+        await once(other, "listening");
+      } catch (error) {
+        if (otherFamily !== 6 || !["EAFNOSUPPORT", "EADDRNOTAVAIL"].includes(error.code)) throw error;
+        t.skip("IPv6 loopback unavailable");
+        return;
+      }
+      const url = `http://localhost:${port}/health`;
+      const response = await new Promise((resolve, reject) => {
+        get(url, { family: otherFamily }, resolve).once("error", reject);
+      });
+      const chunks = [];
+      for await (const chunk of response) chunks.push(chunk);
+      assert.equal(Buffer.concat(chunks).toString(), "fixture");
+      assert.equal(await (await fetch(url)).text(), "fixture");
+      assert.equal(connections, 0);
+    } finally {
+      await Promise.all([fixture, other].map((server) => new Promise((resolve) => server.close(resolve))));
     }
   });
 } else if (scenario === "dual-stack") {

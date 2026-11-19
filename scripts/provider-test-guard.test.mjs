@@ -102,13 +102,23 @@ it("rejects transport overrides for an approved origin without connecting to ano
     const { code, stdout, stderr } = await runFixture("route-overrides", `http://127.0.0.1:${listener.address().port}`);
     assert.equal(code, 1, stdout + stderr);
     assert.match(stdout, /failureType: 'hookFailed'/);
-    for (const key of ["agent", "lookup", "createConnection", "socketPath", "_defaultAgent", "dispatcher"]) {
+    for (const key of ["agent", "lookup", "createConnection", "socketPath", "socket", "_defaultAgent", "dispatcher"]) {
       assert.ok(stdout.includes(`outside test HTTP servers: ${key} override`), stdout);
     }
     assert.equal(connections, 0);
   } finally {
     await new Promise((resolve, reject) => listener.close((error) => error ? reject(error) : resolve()));
   }
+});
+
+it("pins localhost requests to the fixture's bound address", async (t) => {
+  const { code, stdout, stderr } = await runFixture("localhost-family", "");
+  assert.equal(code, 0, stdout + stderr);
+  if (/IPv6 loopback unavailable/.test(stdout)) {
+    t.skip("IPv6 loopback unavailable");
+    return;
+  }
+  assert.match(stdout, /^# pass 1$/m);
 });
 
 it("sends approved requests directly despite inherited proxy settings and a preinstalled dispatcher", async () => {

@@ -7,7 +7,7 @@ import { realpathSync, writeSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import { syncBuiltinESMExports } from "node:module";
-import { Server } from "node:net";
+import { isIP, Server } from "node:net";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { afterEach, beforeEach } from "node:test";
 import { urlToHttpOptions } from "node:url";
@@ -194,16 +194,25 @@ function checkHttpTarget(method, url, path = url.pathname) {
   }
   if (liveMcpOrigins.has(url.origin) || smokeOrigins.has(url.origin)) return;
 
-  const fixture = [...servers].some(([server, { protocol, host, ipv6Only }]) => {
+  for (const [server, { protocol, host, ipv6Only }] of servers) {
     const address = server.address();
-    if (!server.listening || !address || typeof address === "string" || protocol !== url.protocol) return false;
+    if (!server.listening || !address || typeof address === "string" || protocol !== url.protocol) continue;
     const port = url.port || (protocol === "https:" ? "443" : "80");
-    return port === String(address.port) &&
-      (url.hostname === new URL(`${protocol}//${urlHost(address.address)}`).hostname ||
-        (address.address === "::" && (url.hostname === "[::1]" || (!ipv6Only && url.hostname === "127.0.0.1"))) ||
-        (host === "localhost" && url.hostname === host));
-  });
-  if (!fixture) throw blocked(`Blocked ${method} outside test HTTP servers: ${url.origin}${path}`);
+    if (port !== String(address.port)) continue;
+    if (host === "localhost" && url.hostname === host) return address.address;
+    if (url.hostname === new URL(`${protocol}//${urlHost(address.address)}`).hostname ||
+        (address.address === "::" && (url.hostname === "[::1]" || (!ipv6Only && url.hostname === "127.0.0.1")))) return;
+  }
+  throw blocked(`Blocked ${method} outside test HTTP servers: ${url.origin}${path}`);
+}
+
+function pinnedLookup(address) {
+  // Keep localhost in the HTTP and TLS metadata while dialing the fixture.
+  const family = isIP(address);
+  return (_hostname, options, callback) => {
+    if (options.all) callback(null, [{ address, family }]);
+    else callback(null, address, family);
+  };
 }
 
 function checkedNodeRequest(method, protocol, agent, args) {
@@ -218,13 +227,17 @@ function checkedNodeRequest(method, protocol, agent, args) {
   const host = urlHost(options.hostname || options.host || "localhost");
   const port = options.port || options.defaultPort || agent.defaultPort || 80;
   const origin = new URL(`${options.protocol || protocol}//${host}:${port}`);
-  checkHttpTarget(method, origin, String(options.path ?? "/").split("?")[0]);
+  const boundAddress = checkHttpTarget(method, origin, String(options.path ?? "/").split("?")[0]);
 
-  for (const key of ["lookup", "createConnection", "socketPath", "_defaultAgent"]) {
+  for (const key of ["lookup", "createConnection", "socketPath", "socket", "_defaultAgent"]) {
     if (options[key] != null) throw blocked(`Blocked ${method} outside test HTTP servers: ${key} override`);
   }
   if (options.agent != null && options.agent !== agent) {
     throw blocked(`Blocked ${method} outside test HTTP servers: agent override`);
+  }
+  if (boundAddress) {
+    options.lookup = pinnedLookup(boundAddress);
+    options.family = isIP(boundAddress);
   }
   return [{ ...options, agent }, callback];
 }
@@ -248,9 +261,10 @@ function guardHttp({ directHttpAgent, directHttpsAgent, directDispatcher }) {
   });
 
   const fetch = globalThis.fetch;
+  const pinnedDispatchers = new Map();
   globalThis.fetch = async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : input);
-    checkHttpTarget("fetch", url);
+    const boundAddress = checkHttpTarget("fetch", url);
     const options = { ...init };
     if (options.dispatcher != null && options.dispatcher !== directDispatcher) {
       throw blocked("Blocked fetch outside test HTTP servers: dispatcher override");
@@ -258,7 +272,14 @@ function guardHttp({ directHttpAgent, directHttpsAgent, directDispatcher }) {
     // Any redirect can lead to an unregistered origin. Explicit redirect
     // handlers can issue the next request through this guard.
     const redirect = options.redirect ?? (input instanceof Request ? input.redirect : "follow");
-    return fetch(input, { ...options, dispatcher: directDispatcher, redirect: redirect === "follow" ? "error" : redirect });
+    let dispatcher = directDispatcher;
+    if (boundAddress) {
+      if (!pinnedDispatchers.has(boundAddress)) {
+        pinnedDispatchers.set(boundAddress, new Agent({ connect: { lookup: pinnedLookup(boundAddress) } }));
+      }
+      dispatcher = pinnedDispatchers.get(boundAddress);
+    }
+    return fetch(input, { ...options, dispatcher, redirect: redirect === "follow" ? "error" : redirect });
   };
 }
 
