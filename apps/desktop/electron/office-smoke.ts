@@ -122,10 +122,11 @@ export async function runOfficeSmoke(
   await wait(
     `document.querySelector('.office-persona-heading h2')?.textContent === 'Chief of Staff'`,
   );
+  await wait(
+    `document.querySelector('.scene-ball')?.getAnimations().some(a => a.playState === 'running' && a.effect.getTiming().iterations === Infinity)`,
+  );
   await evaluate(`(() => {
     if (!document.querySelector('.office-interior') || !document.querySelector('.scene-ball')) throw new Error('Office furnishings are missing.');
-    const animated = document.querySelector('.scene-ball').getAnimations();
-    if (!animated.some(a => a.playState === 'running' && a.effect.getTiming().iterations === Infinity)) throw new Error('Office game animation is not running.');
     Array.from(document.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === 'Pause motion').click();
   })()`);
   await wait(
