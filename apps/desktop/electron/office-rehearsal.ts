@@ -42,15 +42,21 @@ export async function runOfficeRehearsal(
     );
     throw new Error(`Rehearsal timed out: ${code}`);
   };
-  const frame = async (path: string) => {
-    window.webContents.invalidate();
-    await window.webContents.capturePage();
-    await sleep(70);
-    const captured = await window.webContents.capturePage();
-    await writeFile(
-      path,
-      path.endsWith(".jpg") ? captured.toJPEG(85) : captured.toPNG(),
-    );
+  let captureQueue = Promise.resolve();
+  const frame = (path: string) => {
+    // The recording loop and milestone screenshots share one compositor.
+    const capture = captureQueue.then(async () => {
+      window.webContents.invalidate();
+      await window.webContents.capturePage();
+      await sleep(70);
+      const captured = await window.webContents.capturePage();
+      await writeFile(
+        path,
+        path.endsWith(".jpg") ? captured.toJPEG(85) : captured.toPNG(),
+      );
+    });
+    captureQueue = capture.catch(() => {});
+    return capture;
   };
   window.setContentSize(1440, 1000);
   await evaluate(`location.hash='/office'`);
