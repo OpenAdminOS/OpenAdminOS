@@ -563,9 +563,30 @@ function errorText(value: unknown): string {
   }
 }
 
-/** Ollama's wording when it cannot fit a model and its context in memory. */
+/**
+ * Ollama's out-of-memory wording: the substrings its own classifier uses
+ * (llm/status.go outOfMemorySubstrings) plus the scheduler's messages when a
+ * model and its context do not fit.
+ */
+const OLLAMA_MEMORY_ERRORS = [
+  "out of memory",
+  "out of device memory",
+  "cudamalloc failed",
+  "hipmalloc failed",
+  "failed to allocate",
+  "allocation failed",
+  "not enough memory",
+  "insufficient memory",
+  "vk_error_out_of_device_memory",
+  "erroroutofmemory",
+  "failed to reserve graph",
+  "requires more system memory",
+  "unable to load full model",
+];
+
 function isOllamaMemoryError(detail: string): boolean {
-  return /requires more system memory|unable to load full model|out of memory|insufficient memory|failed to allocate|cannot allocate|allocation failed/i.test(detail);
+  const lower = detail.toLowerCase();
+  return OLLAMA_MEMORY_ERRORS.some((text) => lower.includes(text));
 }
 
 function contextMemoryMessage(model: string, requested: number, numCtx: number, detail: string): string {

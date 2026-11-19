@@ -134,3 +134,10 @@ it.each([
     expect(screen.queryByText(title)).not.toBeInTheDocument();
   }
 });
+
+it("does not show the missing-model playbook for a lookup error that quotes it", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama could not report the model's context limit: HTTP 502 at http://127.0.0.1:11434/api/show: upstream said Ollama model \"qwen3:8b\" is not pulled. Run `ollama pull qwen3:8b`." };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama did not report the model's context limit")).toBeInTheDocument();
+  expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
+});

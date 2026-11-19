@@ -31,8 +31,9 @@ const SUGGESTIONS: Suggestion[] = [
   },
   {
     match: (e) =>
-      /Ollama model "[^"]+" is not pulled\. Run `ollama pull [^`]+`\./.test(e) ||
-      /No Ollama model available\. Pull a model with `ollama pull <model>`\./.test(e),
+      !isContextLimitLookup(e) &&
+      (/Ollama model "[^"]+" is not pulled\. Run `ollama pull [^`]+`\./.test(e) ||
+        /No Ollama model available\. Pull a model with `ollama pull <model>`\./.test(e)),
     title: "Model not pulled",
     body: "Run `ollama pull <model>` for the model you selected in Settings → LLM Providers, then try again.",
   },
