@@ -416,6 +416,24 @@
     .tierlist .not { color: var(--color-danger); font-weight: 500; }
     .tierlist .ok { color: var(--color-text); font-weight: 500; }
 
+    /* ---------- Round 5: voice context, successive moves, unexamined data ---------- */
+    .voicerow .vlive { display: block; margin-top: 8px; }
+    .voicerow .vlive .boundary { margin-left: 0; max-width: 100%; white-space: normal; height: auto; min-height: 28px; padding-top: 4px; padding-bottom: 4px; flex-wrap: wrap; row-gap: 2px; border-radius: 14px; text-align: left; cursor: default; }
+    .pop .sub { margin: 12px 0 0; font-size: var(--text-xs); color: var(--color-text-muted); }
+    .pop .sub + dl { margin-top: 4px; }
+    .withheld { margin: 4px 0 10px; padding: 10px 12px; border-radius: var(--radius-md); background: var(--color-danger-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-danger) 30%, transparent); font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text); }
+    .withheld b { font-weight: 500; color: var(--color-danger); display: block; font-size: var(--text-sm); line-height: var(--lh-sm); margin-bottom: 2px; }
+    .withheld q { display: block; margin-top: 6px; color: var(--color-text-soft); font-style: italic; quotes: none; }
+    .worked { margin-top: 18px; padding: 14px 16px; border-radius: var(--radius-lg); background: var(--color-code-bg); }
+    .worked h3 { margin: 0 0 2px; font-size: var(--text-sm); font-weight: 500; }
+    .worked .ptable td, .worked .ptable th { vertical-align: top; }
+    .worked .ptable .from { display: block; font-size: 11px; line-height: 15px; color: var(--color-text-muted); }
+    .worked .ptable tr.hl td { background: color-mix(in srgb, var(--color-danger) 6%, transparent); }
+    .worked .wrapt { overflow-x: auto; margin-top: 8px; }
+    .worked .ptable { min-width: 520px; }
+    .uf .held { grid-column: 1 / -1; font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text-muted); }
+    .uf .held:empty { display: none; }
+
     /* ---------- Open questions ---------- */
     .qs { margin: 0; padding-left: 20px; max-width: 88ch; }
     .qs li { padding: 7px 0; }
@@ -512,7 +530,7 @@
                     <!-- rows are rendered by the script from RULES so the cells, the sample line and the strip agree -->
                   </div>
 
-                  <div class="voicerow"><svg aria-hidden="true"><use href="#i-mic"/></svg><span><b style="font-weight:500">Voice.</b> Hosted voice hears what you say: your spoken words go to OpenAI as audio and these rules do not check them. Tenant data the app sends to the voice model follows these rules. Voice on this device turns your words into text here first, so they get the same check as a typed question before any hosted call.</span><button class="bt ghost sm" type="button">Voice settings</button></div>
+                  <div class="voicerow"><svg aria-hidden="true"><use href="#i-mic"/></svg><span><b style="font-weight:500">Voice.</b> Hosted voice hears what you say: your spoken words go to OpenAI as audio and these rules do not check them. Tenant data the app sends to the voice model as context goes through the same check as any hosted call and follows this matrix, class by class. Voice on this device turns your words into text here first, so they get the same check as a typed question before any hosted call.<span class="vlive" id="vlive"></span></span><button class="bt ghost sm" type="button">Voice settings</button></div>
 
                   <div class="sec-h"><h2>Changes to this policy</h2><span class="r xs muted">Kept in the local audit log</span></div>
                   <ul class="rows sm" id="changelog">
@@ -562,23 +580,15 @@
         <div><span class="cap">Same, narrow window</span><span data-strip="credblock" data-form="short"></span></div>
         <div><span class="cap">Hosted, only credentials masked</span><span data-strip="clear" data-form="full"></span></div>
         <div><span class="cap">Confidential, after attestation</span><span class="boundary" data-where="confidential"><svg aria-hidden="true"><use href="#i-lock"/></svg>Confidential · attested enclave · leaves this device ·<span class="mask"><span class="hx"></span>credentials masked</span></span></div>
-        <div><span class="cap">Hosted voice, during a call</span><span class="boundary" data-where="hosted"><span class="pip"></span>Hosted voice · OpenAI · hears what you say ·<span class="mask"><span class="hx"></span>tenant data masked</span></span></div>
+        <div><span class="cap">Hosted voice, during a call</span><span data-strip="defaults" data-form="full" data-label="Hosted voice · OpenAI · hears what you say"></span></div>
+        <div><span class="cap">Hosted voice, a class blocked</span><span data-strip="blocked" data-form="full" data-label="Hosted voice · OpenAI · hears what you say"></span></div>
         <div><span class="cap">Voice on this device, hosted reasoning</span><span data-strip="defaults" data-form="full" data-label="Voice on this device · Claude Code"></span></div>
       </div>
       <div class="two" style="margin-top:16px">
         <div style="display:grid;gap:12px">
           <div class="pop" role="dialog" aria-label="Where data goes" data-pop="defaults"></div>
-          <div class="pop" role="dialog" aria-label="Where voice goes">
-            <h4 class="voice">Hosted voice · OpenAI</h4>
-            <p class="soft">During a voice call, two kinds of data go to OpenAI:</p>
-            <dl>
-              <dt>What you say aloud</dt><dd class="lv">Sent as audio, not checked by data policy</dd>
-              <dt>Tenant data the app sends</dt><dd class="mk2"><span class="hx"></span>Masked by your rules</dd>
-              <dt>Transcript on screen</dt><dd>Real values, on this device</dd>
-            </dl>
-            <p class="xs muted" style="margin-bottom:10px">The voice model speaks roles, such as "the user" and "the device". To keep what you say under data policy, use voice on this device: your words are turned into text here and get the same check as a typed question before any hosted call.</p>
-            <button class="bt secondary sm" type="button">Use voice on this device</button>
-          </div>
+          <div class="pop" role="dialog" aria-label="Where voice goes" data-voicepop="defaults"></div>
+          <div class="pop" role="dialog" aria-label="Where voice goes, context withheld" data-voicepop="blocked"></div>
         </div>
       <ul class="notes" style="margin-top:0">
         <li>Clicking the strip opens the popover on the left. It is built from the effective rules by the same function as the strip, so it lists what each class does now, with a lock where IT set the rule. Try it on the strip in A after changing a cell. Public data is not amber: it came from outside the tenant.</li>
@@ -586,7 +596,9 @@
         <li>The strip picks its form by the space it has, not by the window width: the long form while it fits next to the organization, the count when it would be cut. The catalogue above shows both forms side by side.</li>
         <li>"Only credentials masked" names the effective policy: every class but credentials is allowed on hosted. It is the only hosted strip without a hatch, so a policy that hides almost nothing looks different from one that hides names and devices. The words say what is still masked, since recognized credentials never reach a hosted model in clear text.</li>
         <li>The Confidential strip appears only once a provider has passed attestation (Track C), and until then no frame in the app shows it. It still says "leaves this device" in words: an attested enclave is not this device, and the admin should never read the lock as "local". It is outlined in amber like hosted, without the fill.</li>
-        <li>Decided: hosted voice is honest about its boundary. Its strip says "hears what you say": the admin's spoken words go to OpenAI as audio and data policy does not check them. Only tenant data the app sends to the voice model is masked, and the voice model says "the user" and "the device"; the transcript on screen shows real values.</li>
+        <li>Proposed 2026-11-19, pending the maintainer's confirmation: hosted voice is honest about its boundary. Its strip says "hears what you say": the admin's spoken words go to OpenAI as audio and data policy does not check them.</li>
+        <li>Tenant data the app sends to the hosted voice model as context goes through the same request scan and the same rules as any hosted call, so the voice strip is drawn by the same function as every other hosted strip and names the same classes: with the defaults, "identities, security names and devices masked". Where a value is masked the voice model says "the user" and "the device"; the transcript on screen shows real values.</li>
+        <li>The voice popover lists the effective rule per class for voice context. When a rule blocks a context transfer, as in the second popover with Activity on Hosted set to Block, that context is withheld, the voice session continues without it, and the voice model says what it could not use. The transcript records the same line, so the admin can read later what was withheld and why.</li>
         <li>Voice on this device keeps spoken words under data policy. The words are transcribed on this device, then the text goes through the same request scan as a typed question before any hosted reasoning call, so its strip is the ordinary hosted strip with the voice named first.</li>
       </ul>
       </div>
@@ -820,8 +832,22 @@
             <span class="glyph" data-t="mask"><svg><use href="#i-q"/></svg></span>
             <div>
               <h3>Some values were not examined and were treated as credentials</h3>
-              <p>Sign-ins for 90 days had more fields than this device examines before a call. 12,400 values were not examined, so they were treated as credential: masked one way before the call to Claude Code and never restored. The answer does not use them.</p>
+              <p>Sign-ins for 90 days had more fields than this device examines before a call. 12,400 values were not examined, so they were reported as credential and given the strictest rule any class has on Hosted. With your rules that is Mask: they were masked one way before the call to Claude Code and never restored. The answer does not use them.</p>
               <p class="xs muted" style="margin-top:8px">Ask about a shorter period to have every value examined.</p>
+            </div>
+          </div>
+          <p class="xs muted" style="margin-top:8px">Part of a request was not examined, and a rule on that tier is Block</p>
+          <div class="block" data-t="blocked">
+            <span class="glyph" data-t="blocked"><svg><use href="#i-q"/></svg></span>
+            <div>
+              <h3>This call was withheld: part of the request could not be examined</h3>
+              <p>Managed devices with 90 days of check-ins had more values than this device examines before a call, and 12,400 were not examined. Values the app has not examined are reported as credential and get the strictest rule any class has on Hosted. Security on Hosted is Block, so this call was not sent to Claude Code, although the part that was examined held only device and activity data.</p>
+              <ul class="calls" aria-label="Model calls for this question">
+                <li><span class="tm">10:12:40</span><span class="sent">Sent</span><span>Planning the question. Your question only, no tenant data.</span></li>
+                <li><span class="tm">10:12:43</span><span class="not">Not sent</span><span>Answer from 412 devices. 12,400 values not examined; Security is Block on Hosted.</span></li>
+              </ul>
+              <div class="acts"><button class="bt primary" type="button">Ask about the last 30 days</button><button class="bt secondary" type="button">Switch to a local model</button></div>
+              <p class="xs muted" style="margin-top:10px">A shorter period fits in what this device examines before a call, so every value is checked and the usual rules apply. Ollama with gpt-oss:20b is ready on this device, and no rule on Local is Block, so the full question can be answered there.</p>
             </div>
           </div>
           <p class="xs muted" style="margin-top:8px">Classify this field</p>
@@ -829,11 +855,11 @@
             <div class="dialog" role="dialog" aria-labelledby="cf-t" style="width:100%;box-shadow:none;border-radius:12px">
               <header><h2 id="cf-t">Classify extensionAttribute7</h2></header>
               <div class="body">
-                <p>148 values on users, seen in 6 calls. It is treated as identity today. Here it can move only to a more sensitive class, and on each tier it keeps the masking coverage of both classes, so a reclassification can only hide more.</p>
+                <p>148 values on users, seen in 6 calls. It is treated as identity today. Here it can move only to a more sensitive class, and on each tier it keeps the strictest coverage of every class it has held, so a reclassification can only hide more.</p>
                 <ul class="classes" id="cf-list" role="radiogroup" aria-label="Class for extensionAttribute7"></ul>
                 <div class="eff" aria-live="polite">
                   <table class="ptable" id="cf-eff">
-                    <thead><tr><th>Tier</th><th>Identity, now</th><th id="cf-new">New class</th><th>Applied</th></tr></thead>
+                    <thead><tr><th>Tier</th><th>Identity, held</th><th id="cf-new">New class</th><th>Applied</th></tr></thead>
                     <tbody></tbody>
                   </table>
                   <p class="xs muted" id="cf-effnote" style="margin-top:6px"></p>
@@ -850,16 +876,23 @@
             <div class="sec-h" style="margin-top:0"><h2>Fields not classified yet</h2><span class="r xs muted">3 fields, seen in the last 7 days</span></div>
             <p class="sec-sub">Treated as identity: masked on hosted models, allowed on local and confidential. Each can move to a more sensitive class here, and keeps identity's coverage on every tier. A less sensitive class comes only from the IT policy file.</p>
             <ul class="rows" id="fields">
-              <li class="uf"><span class="p">users: onPremisesExtensionAttributes.extensionAttribute7</span><span class="ds">148 values in 6 calls. Sample shape: four digits.</span><span class="a"><select class="pick" aria-label="Class for extensionAttribute7" data-orig="identity" data-from="identity"></select></span><span class="cov"></span></li>
-              <li class="uf"><span class="p">Splashtop: computers[].note</span><span class="ds">212 values in 2 calls. Free text.</span><span class="a"><select class="pick" aria-label="Class for computers note" data-orig="identity" data-from="identity"></select></span>
+              <li class="uf"><span class="p">users: onPremisesExtensionAttributes.extensionAttribute7</span><span class="ds">148 values in 6 calls. Sample shape: four digits.</span><span class="a"><select class="pick" aria-label="Class for extensionAttribute7" data-hist="identity"></select></span><span class="held"></span><span class="cov"></span></li>
+              <li class="uf"><span class="p">Splashtop: computers[].note</span><span class="ds">212 values in 2 calls. Free text.</span><span class="a"><select class="pick" aria-label="Class for computers note" data-hist="identity"></select></span><span class="held"></span>
                 <span class="det"><span class="hx"></span><span>A value detector found 3 values shaped like BitLocker recovery keys in this field. Those 3 are treated as credential, masked one way, whatever class the field has.</span></span><span class="cov"></span></li>
-              <li class="uf"><span class="p">managedDevices (beta): hardwareInformation.wiredIPv4Addresses</span><span class="ds">412 values in 3 calls. Sample shape: IPv4 address.</span><span class="a"><select class="pick" aria-label="Class for wiredIPv4Addresses" data-orig="identity" data-from="identity"></select></span><span class="cov"></span></li>
+              <li class="uf"><span class="p">managedDevices (beta): hardwareInformation.wiredIPv4Addresses</span><span class="ds">412 values in 3 calls. Sample shape: IPv4 address.</span><span class="a"><select class="pick" aria-label="Class for wiredIPv4Addresses" data-hist="identity"></select></span><span class="held"></span><span class="cov"></span></li>
             </ul>
             <p class="ufgrp">Mapped fields<span>The app's class, which you can make stricter</span></p>
             <ul class="rows" id="fields2">
-              <li class="uf"><span class="p">deviceConfigurations (Windows custom): omaSettings[].value</span><span class="ds">Configuration in the app's map. 96 values in 4 calls.</span><span class="a"><select class="pick" aria-label="Class for omaSettings value" data-orig="configuration" data-from="configuration"></select></span><span class="cov"></span>
+              <li class="uf"><span class="p">deviceConfigurations (Windows custom): omaSettings[].value</span><span class="ds">Configuration in the app's map. 96 values in 4 calls.</span><span class="a"><select class="pick" aria-label="Class for omaSettings value" data-hist="configuration"></select></span><span class="held"></span><span class="cov"></span>
                 <span class="det"><span class="hx"></span><span>Moving it to Security keeps configuration's coverage. Where Configuration is Mask on a tier, as an IT rule can set it, the whole value stays masked there, although Security on its own leaves setting values readable.</span></span></li>
+              <li class="uf"><span class="p">deviceConfigurations: description</span><span class="ds">Configuration in the app's map, moved to Security on 17 November and to Identity today. 58 values in 3 calls.</span><span class="a"><select class="pick" aria-label="Class for configuration description" data-hist="configuration,security,identity"></select></span><span class="held"></span><span class="cov"></span></li>
             </ul>
+            <div class="worked" aria-label="Worked example of two moves">
+              <h3>Two moves, every class counts</h3>
+              <p class="xs muted">The description above, with Security on Hosted set to Block. Each tier applies the strictest action of every class the field has held, not only the mapped class and the latest one.</p>
+              <div class="wrapt"><table class="ptable" id="worked"><thead><tr><th>Tier</th><th>Configuration, mapped</th><th>Security, 17 Nov</th><th>Identity, today</th><th>Applied</th></tr></thead><tbody></tbody></table></div>
+              <p class="xs muted" style="margin-top:8px">Counting only the mapped class and the latest one would give Masked on Hosted and send the field's values with placeholders, although Security forbids the call. It stays Blocked.</p>
+            </div>
             <p class="pickst" id="pickst" aria-live="polite" style="margin-top:10px">Options marked "IT policy file" are less sensitive than the field's current class and cannot be chosen here.</p>
             <p class="xs muted" style="margin-top:12px">Free text you type is checked against names and devices this app has seen in the tenant. A name it has never seen cannot be detected and is sent as typed.</p>
           </div></div>
@@ -867,11 +900,12 @@
       </div>
       <ul class="notes">
         <li>The hatch glyph with a question mark means "hidden because unknown", next to the plain hatch for "hidden by rule".</li>
-        <li>Decided: in Settings a field moves only to a class higher in the order (credential, identity, security, device, activity, configuration, public), and the change applies at once. On every tier the field then keeps the masking coverage of both its original and its new class, so a reclassification never weakens a tier, including a rule IT set: with Identity on Local set to Mask by IT, a field moved from identity to credential stays masked on Local. The dialog previews the applied action per tier from the current rules.</li>
+        <li>Decided: in Settings a field moves only to a class higher in the order (credential, identity, security, device, activity, configuration, public), and the change applies at once. On every tier the field then applies the strictest action of every class it has ever held, its mapped class and every later pick, so a reclassification never weakens a tier, including a rule IT set: with Identity on Local set to Mask by IT, a field moved from identity to credential stays masked on Local. The dialog previews the applied action per tier from the current rules.</li>
         <li>A less sensitive class is possible only through the IT policy file, where it replaces the app's mapping for that field instead of reclassifying it. Both the dialog and the list say so; the options are disabled, not hidden, so the admin learns where the choice lives.</li>
         <li>Value detectors run on every value whatever the field's class, and only ever raise it: a recovery key inside a free-text note is a credential even when the note is identity or configuration.</li>
-        <li>Decided: a reclassified field keeps the masking coverage of both its original and its new class. The list shows the applied coverage per tier under each field the moment it changes, the choice becomes the field's current class, and every class below it is disabled with "IT policy file". Try it: move the custom setting value to Security, then set Configuration on Hosted to Mask in A; the field stays fully masked on Hosted, kept from configuration.</li>
-        <li>Data the check could not examine in time is treated as credential, the highest class, and counted as not examined. It is never sent in clear text to a hosted model and never restored into a prompt.</li>
+        <li>Decided: a reclassified field keeps the strictest coverage of every class it has held, never only the original and the latest. The list shows the classes held and the applied coverage per tier under each field the moment it changes, the choice becomes the field's current class, and every class below it is disabled with "IT policy file". Try it: move the custom setting value to Security, then set Configuration on Hosted to Mask in A; the field stays fully masked on Hosted, kept from configuration. Set Security on Hosted to Block in A and the description, moved from configuration to security to identity, reads Blocked on Hosted, kept from security, as the worked example shows.</li>
+        <li>Data the check could not examine in time is reported as credential and counted as not examined. Its action on a tier is the strictest action any class has on that tier, so a Block anywhere on the tier withholds the call: the examined part may need only allowed classes, and the unexamined part could hold anything. It is never sent in clear text to a hosted model and never restored into a prompt.</li>
+        <li>The withheld call offers only recoveries that work: a smaller question that fits in what the device examines, and a local model when no rule on Local is Block. When a Local rule is Block too, only the smaller question is offered.</li>
         <li>"Sample shape" describes the value's format, never a value.</li>
       </ul>
     </section>
@@ -929,6 +963,14 @@
               <footer><button class="bt ghost" type="button">Keep Block</button><button class="bt primary" type="button">Allow on Hosted</button></footer>
             </div>
           </div>
+          <p class="xs muted" style="margin-top:8px">Loosening credentials, after pressing Mask on Credential, Hosted while it is Block</p>
+          <div class="win" style="min-height:0">
+            <div class="dialog" role="dialog" aria-labelledby="h-t2" style="width:100%;box-shadow:none;border-radius:12px">
+              <header><h2 id="h-t2">Let calls that carry credentials go to hosted models, masked?</h2></header>
+              <div class="body" id="h-cred"></div>
+              <footer><button class="bt ghost" type="button">Keep Block</button><button class="bt primary" type="button">Mask on Hosted</button></footer>
+            </div>
+          </div>
         </div>
         <div style="display:grid;gap:12px;align-content:start">
           <p class="xs muted">A setting of yours that IT has since made stricter</p>
@@ -954,6 +996,7 @@
       <ul class="notes">
         <li>The safe button is on the left and has the focus when the dialog opens, so Enter keeps the rule. Escape keeps it too.</li>
         <li>Block to Mask on Hosted is also a loosening: prompts that were refused start going out, with placeholders. The dialog says so in the same plain words.</li>
+        <li>Credential Block to Mask has its own words, in this dialog, in the matrix and in a reset that includes it: calls that were blocked can now leave this device; values the app recognizes as credentials are replaced one way and never restored; a secret written in free text in a form the app does not recognize may still be sent. The same function writes all three, so the text cannot drift.</li>
         <li>The refusal card appears once, in Settings, Data policy, the first time the app loads an IT rule stricter than the admin's own setting. The admin's setting is kept on record, so it applies again if IT removes the rule.</li>
       </ul>
     </section>
@@ -1015,6 +1058,8 @@
       public: { local: "allow", confidential: "allow", hosted: "allow" },
     };
     let rules = structuredClone(DEFAULTS);
+    // Strictness: allow < mask < block.
+    const RANK = { allow: 0, mask: 1, block: 2 };
     let previewTier = "hosted";
 
     // One function draws every hosted strip from a set of rules, long and short form alike.
@@ -1034,20 +1079,44 @@
     }
     // The popover lists the effective rule for every class on Hosted, from the same rules as the strip.
     const lockIcon = '<svg class="lk" aria-label="Set by IT"><use href="#i-lock"/></svg>';
-    function popInner(r) {
+    // Data the scan could not examine is reported as credential and takes the strictest action of any class on the tier.
+    const strictest = (r, tier) => CLASSES.reduce((a, c) => RANK[r[c.id][tier]] > RANK[a] ? r[c.id][tier] : a, "allow");
+    const strictestFrom = (r, tier) => CLASSES.find((c) => r[c.id][tier] === strictest(r, tier)).name;
+    // One row per class on Hosted, plus the row for data not examined. Voice context withholds instead of refusing the call.
+    function policyRows(r, voice = false) {
       const row = (c) => {
         const a = r[c.id].hosted;
         const lk = c.locked ? lockIcon : "";
         let dd;
-        if (a === "block") dd = '<dd class="bk">Blocked, the call is not sent</dd>';
+        if (a === "block") dd = voice ? '<dd class="bk">Withheld, the call goes on without it</dd>' : '<dd class="bk">Blocked, the call is not sent</dd>';
         else if (a === "mask") dd = `<dd class="mk2"><span class="hx"></span>${c.id === "credential" ? "Masked, never restored into a prompt" : c.id === "security" ? "Names masked, settings sent as is" : "Masked"}</dd>`;
         else dd = `<dd class="${c.id === "public" ? "" : "lv"}">Sent as is</dd>`;
         return `<dt>${c.name}${lk}</dt>${dd}`;
       };
-      return `<h4>Hosted · Claude Code</h4><p class="soft">Location set by your account. Before each call, this device applies your data policy:</p><dl>${CLASSES.map(row).join("")}</dl>
+      const s = strictest(r, "hosted");
+      const ne = s === "block"
+        ? `<dd class="bk">${voice ? "Withheld" : "Blocked"}, strictest rule: ${strictestFrom(r, "hosted")}</dd>`
+        : `<dd class="mk2"><span class="hx"></span>Masked one way, strictest rule: ${strictestFrom(r, "hosted")}</dd>`;
+      return CLASSES.map(row).join("") + `<dt>Not examined in time</dt>${ne}`;
+    }
+    function popInner(r) {
+      return `<h4>Hosted · Claude Code</h4><p class="soft">Location set by your account. Before each call, this device applies your data policy:</p><dl>${policyRows(r)}</dl>
+        <p class="xs muted" style="margin-bottom:6px">Data the check could not examine in time is reported as credential and gets the strictest rule any class has on Hosted.</p>
         <p class="xs muted" style="margin-bottom:6px">Values the app recognizes as credentials never reach a hosted model in clear text. A secret written into a free-text field in a form the app does not recognize can still be sent.</p>
         <p class="xs muted" style="margin-bottom:10px">Names the app has never seen, such as a person you type for the first time, cannot be detected and are sent as typed.</p>
         <button class="bt secondary sm" type="button">Data policy settings</button>`;
+    }
+    function voicePopInner(r) {
+      const withheld = CLASSES.filter((c) => r[c.id].hosted === "block" && c.id !== "credential");
+      const note = withheld.length ? `<div class="withheld" role="status"><b>Context withheld at 09:42</b>214 sign-ins for "who signed in from outside Germany". ${joinList(withheld.map((c) => c.name))} is Block on Hosted, so the app did not send them to OpenAI. The call goes on without them, and the voice model said so:<q>I can't use sign-in data in this call. Your data policy keeps it from hosted models. Ask in Chat with a local model to see it.</q></div>` : "";
+      return `<h4 class="voice">Hosted voice · OpenAI</h4>
+        <p class="soft">During a voice call, OpenAI receives what you say and the tenant data the app sends as context.</p>
+        <dl><dt>What you say aloud</dt><dd class="lv">Sent as audio, not checked by data policy</dd><dt>Transcript on screen</dt><dd>Real values, on this device</dd></dl>
+        ${note}
+        <p class="sub">Tenant data sent as context, checked like any hosted call:</p>
+        <dl>${policyRows(r, true)}</dl>
+        <p class="xs muted" style="margin-bottom:10px">Where a value is masked, the voice model speaks roles, such as "the user" and "the device". To keep what you say under data policy, use voice on this device: your words are turned into text here and get the same check as a typed question before any hosted call.</p>
+        <span style="display:flex;gap:8px;flex-wrap:wrap"><button class="bt secondary sm" type="button">Use voice on this device</button>${withheld.length ? '<button class="bt ghost sm" type="button">Ask in Chat with Ollama</button>' : ""}</span>`;
     }
     const withRule = (cls, tier, act) => { const r = structuredClone(DEFAULTS); r[cls][tier] = act; return r; };
     const ALL_CLEAR = Object.fromEntries(CLASSES.map((c) => [c.id, { local: "allow", confidential: "allow", hosted: c.id === "credential" ? "mask" : "allow" }]));
@@ -1076,6 +1145,7 @@
     document.querySelectorAll("[data-top]").forEach(drawTop);
     document.querySelectorAll("[data-strip]").forEach((el) => { el.outerHTML = stripHtml(STRIP_RULES[el.dataset.strip], el.dataset.form, el.dataset.label); });
     document.querySelectorAll("[data-pop]:not([data-top])").forEach((el) => { el.innerHTML = popInner(STRIP_RULES[el.dataset.pop]); });
+    document.querySelectorAll("[data-voicepop]").forEach((el) => { el.innerHTML = voicePopInner(STRIP_RULES[el.dataset.voicepop]); });
     document.addEventListener("click", (e) => {
       const b = e.target.closest(".topbar button.boundary");
       if (e.target.closest(".pop.floating")) return;
@@ -1124,7 +1194,6 @@
     matrix.appendChild(foot);
 
     // Strictness: allow < mask < block. Tightening applies at once; loosening waits for the dialog.
-    const RANK = { allow: 0, mask: 1, block: 2 };
     const ACT = { allow: "Allow", mask: "Mask", block: "Block" };
     const clsName = (id) => CLASSES.find((x) => x.id === id).name;
     const scrim = document.getElementById("loosen");
@@ -1145,6 +1214,7 @@
         if (to === "allow") return { stays: false, text: `Security objects, refused today, go to ${where} in clear text: ${SEC_NAMES}, and every setting value. They leave this device.` };
         return { stays: false, text: `Security objects, refused today, go to ${where}. Their ${SEC_NAMES} are replaced by placeholders. ${SEC_SETTINGS} are sent in clear text. They leave this device.` };
       }
+      if (cls === "credential" && to === "mask") return { stays: false, text: `Calls that were blocked because they carried credentials can now leave this device and go to ${where}. Values the app recognizes as credentials, such as recovery keys, LAPS passwords and client secrets, are replaced one way by [CREDENTIAL] and never restored. A secret written in free text in a form the app does not recognize may still be sent in clear text.` };
       if (cls === "credential" && to === "allow") return { stays: false, text: `Values the app recognizes as credentials, such as BitLocker and FileVault recovery keys, LAPS passwords and client secrets, go to ${where} in clear text. They leave this device. Your IT department can lock this rule.` };
       if (to === "allow") return { stays: false, text: `${what} go to ${where} as they are. They leave this device.` };
       return { stays: false, text: `Prompts with ${c.name.toLowerCase()} data, refused today, go to ${where} with each value replaced by a placeholder. The rest of each prompt leaves this device as it is.` };
@@ -1208,6 +1278,7 @@
         ? (to === "allow" && from === "mask" ? `Send security object names to ${TIER_NAME[tier].toLowerCase()} models in clear text?` : to === "allow" ? `Send security objects to ${TIER_NAME[tier].toLowerCase()} models in clear text?` : `Send security objects to ${TIER_NAME[tier].toLowerCase()} models with names masked?`)
         : to === "allow"
         ? (tier === "local" ? `Allow ${name} data on local models without masking?` : `Send ${name} data to ${TIER_NAME[tier].toLowerCase()} models in clear text?`)
+        : cls === "credential" && tier !== "local" ? `Let calls that carry credentials go to ${TIER_NAME[tier].toLowerCase()} models, masked?`
         : `Mask ${name} data on ${TIER_NAME[tier].toLowerCase()} models instead of blocking it?`;
       openLoosen([ch], title);
     });
@@ -1227,40 +1298,60 @@
     const SENS = Object.fromEntries(CLASSES.map((c) => [c.id, c.sens]));
     const ORDER = CLASSES.map((c) => c.id);
     // Coverage of one class on one tier: 0 sent as is, 1 names masked (security), 2 whole value masked, 3 blocked.
-    // A reclassified field keeps the coverage of both its original and its new class.
-    const covOf = (cls, tier) => { const a = rules[cls][tier]; return a === "block" ? 3 : a === "mask" ? (cls === "security" ? 1 : 2) : 0; };
+    // A reclassified field applies the strictest coverage of every class it has held: its mapped class and every later pick.
+    const covOf = (cls, tier, r = rules) => { const a = r[cls][tier]; return a === "block" ? 3 : a === "mask" ? (cls === "security" ? 1 : 2) : 0; };
     const COV_WORD = ["Sent as is", "Names masked", "Masked", "Blocked"];
     const covChip = (lvl, tier) => {
       const k = lvl === 3 ? "block" : lvl > 0 ? "mask" : OFF_DEVICE[tier] ? "leaves" : "allow";
       const word = lvl === 0 && OFF_DEVICE[tier] ? "Sent as is, leaves" : COV_WORD[lvl];
       return `<span class="act-chip" data-a="${k}"><span class="sq"></span>${word}</span>`;
     };
-    const coverage = (orig, now, tier) => {
-      const o = covOf(orig, tier), n = covOf(now, tier);
-      const lk = CLASSES.find((x) => x.id === orig).locked;
-      return { lvl: Math.max(o, n), src: orig === now ? "" : o > n ? `kept from ${clsName(orig).toLowerCase()}${lk ? ", set by IT" : ""}` : n > o ? `from ${clsName(now).toLowerCase()}` : "same in both" };
+    const coverage = (hist, tier, r = rules) => {
+      const lv = hist.map((c) => covOf(c, tier, r));
+      const lvl = Math.max(...lv);
+      const now = hist[hist.length - 1];
+      if (hist.length === 1) return { lvl, src: "" };
+      const top = hist.filter((c, i) => lv[i] === lvl);
+      if (top.length === hist.length) return { lvl, src: "same for every class held" };
+      if (top.includes(now)) return { lvl, src: `from ${clsName(now).toLowerCase()}` };
+      const lk = CLASSES.find((x) => x.id === top[0]).locked;
+      return { lvl, src: `kept from ${clsName(top[0]).toLowerCase()}${lk ? ", set by IT" : ""}` };
     };
+    const histOf = (sel) => sel.dataset.hist.split(",");
+    const histWords = (hist) => hist.map((c) => clsName(c).toLowerCase()).join(", then ");
     const fillPick = (sel) => {
-      const from = sel.dataset.from, orig = sel.dataset.orig;
+      const hist = histOf(sel), from = hist[hist.length - 1];
       sel.innerHTML = ORDER.map((id) => {
         const lower = SENS[id] < SENS[from];
-        const tag = id === from ? (id === orig ? " (now)" : " (now, was " + clsName(orig).toLowerCase() + ")") : lower ? " (IT policy file)" : "";
+        const tag = id === from ? " (now)" : lower ? " (IT policy file)" : "";
         return `<option value="${id}" ${id === from ? "selected" : ""} ${lower ? "disabled" : ""}>${clsName(id)}${tag}</option>`;
       }).join("");
-      const cov = sel.closest(".uf").querySelector(".cov");
-      cov.innerHTML = from === orig ? "" : TIERS.map((t) => { const c = coverage(orig, from, t); return `<span>${TIER_NAME[t]}: ${covChip(c.lvl, t)}<span class="src">${c.src}</span></span>`; }).join("");
+      const li = sel.closest(".uf");
+      li.querySelector(".held").textContent = hist.length > 1 ? `Classes held: ${histWords(hist)}. Each tier applies the strictest of them.` : "";
+      li.querySelector(".cov").innerHTML = hist.length === 1 ? "" : TIERS.map((t) => { const c = coverage(hist, t); return `<span>${TIER_NAME[t]}: ${covChip(c.lvl, t)}<span class="src">${c.src}</span></span>`; }).join("");
     };
     const picks = document.querySelectorAll("#fields select, #fields2 select");
     picks.forEach((sel) => {
       fillPick(sel);
       sel.addEventListener("change", () => {
         const field = sel.getAttribute("aria-label").replace("Class for ", "");
-        const was = sel.dataset.from;
-        sel.dataset.from = sel.value;
+        const hist = histOf(sel);
+        const was = hist[hist.length - 1];
+        if (!hist.includes(sel.value)) hist.push(sel.value);
+        sel.dataset.hist = hist.join(",");
         fillPick(sel);
-        document.getElementById("pickst").textContent = `${field} moved from ${clsName(was).toLowerCase()} to ${clsName(sel.value).toLowerCase()}. Applied at once: on each tier it keeps the coverage of both ${clsName(sel.dataset.orig).toLowerCase()} and ${clsName(sel.value).toLowerCase()}, shown under the field. Classes below ${clsName(sel.value).toLowerCase()} now come only from the IT policy file.`;
+        document.getElementById("pickst").textContent = `${field} moved from ${clsName(was).toLowerCase()} to ${clsName(sel.value).toLowerCase()}. Applied at once: on each tier it keeps the strictest coverage of every class it has held (${histWords(hist)}), shown under the field. Classes below ${clsName(sel.value).toLowerCase()} now come only from the IT policy file.`;
       });
     });
+    // Worked example: configuration, then security, then identity, with Security on Hosted set to Block.
+    const WORKED_RULES = withRule("security", "hosted", "block");
+    const WORKED_HIST = ["configuration", "security", "identity"];
+    document.querySelector("#worked tbody").innerHTML = TIERS.map((t) => {
+      const c = coverage(WORKED_HIST, t, WORKED_RULES);
+      return `<tr${t === "hosted" ? ' class="hl"' : ""}><td>${TIER_NAME[t]}</td>${WORKED_HIST.map((h) => `<td>${covChip(covOf(h, t, WORKED_RULES), t)}</td>`).join("")}<td>${covChip(c.lvl, t)}<span class="from">${c.src.replace(/^./, (x) => x.toUpperCase())}</span></td></tr>`;
+    }).join("");
+    // The H example for credential Block to Mask uses the same words as the live dialogs.
+    document.getElementById("h-cred").innerHTML = `<p>Credential on Hosted changes from Block to Mask.</p><p class="leave">${leaveText("credential", "hosted", "mask", "block").text}</p><p style="margin-top:10px">Nothing changes until you accept. The change is recorded in the local audit log.</p>`;
     // Classify dialog: the list comes from CLASSES; the preview applies the coverage of both classes per tier.
     const cfFrom = "identity";
     const cfList = document.getElementById("cf-list");
@@ -1277,12 +1368,12 @@
       const fromLocked = CLASSES.find((x) => x.id === cfFrom).locked;
       document.getElementById("cf-new").textContent = v === cfFrom ? "New class" : clsName(v);
       document.querySelector("#cf-eff tbody").innerHTML = TIERS.map((t) => {
-        const c = coverage(cfFrom, v, t);
+        const c = coverage(v === cfFrom ? [cfFrom] : [cfFrom, v], t);
         return `<tr><td>${TIER_NAME[t]}</td><td>${covChip(covOf(cfFrom, t), t)}</td><td>${v === cfFrom ? '<span class="muted">Not chosen</span>' : covChip(covOf(v, t), t)}</td><td>${covChip(c.lvl, t)}<span class="from">${v === cfFrom ? "No change" : c.src.replace(/^./, (x) => x.toUpperCase())}</span></td></tr>`;
       }).join("");
       document.getElementById("cf-effnote").textContent = v === cfFrom
         ? "Choose a stricter class to see what each tier would apply."
-        : `Each tier keeps the masking coverage of both ${clsName(cfFrom).toLowerCase()} and ${clsName(v).toLowerCase()} from the current rules, so this can only hide more.${fromLocked ? " Identity's rules are set by your IT department and stay in force for this field." : ""}`;
+        : `Each tier applies the strictest coverage of every class the field has held, here ${clsName(cfFrom).toLowerCase()} and ${clsName(v).toLowerCase()}, from the current rules, so this can only hide more.${fromLocked ? " Identity's rules are set by your IT department and stay in force for this field." : ""}`;
       cfOk.textContent = v === cfFrom ? "Keep as identity" : `Classify as ${clsName(v).toLowerCase()}`;
       cfOk.disabled = v === cfFrom;
     };
@@ -1316,6 +1407,7 @@
       const changed = CLASSES.filter((c) => TIERS.some((t) => rules[c.id][t] !== DEFAULTS[c.id][t])).length;
       document.getElementById("changed").textContent = changed ? `${changed} ${changed === 1 ? "row differs" : "rows differ"} from the defaults` : "Defaults";
       document.querySelectorAll('[data-top="live"]').forEach(drawTop);
+      document.getElementById("vlive").innerHTML = `<span class="xs muted" style="display:block;margin-bottom:4px">During a hosted voice call, with these rules:</span>` + stripHtml(rules, "full", "Hosted voice · OpenAI · hears what you say");
       cfSync();
       picks.forEach(fillPick);
       // preview
