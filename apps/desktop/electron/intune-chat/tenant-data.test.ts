@@ -138,8 +138,10 @@ for (const action of ["delete", "switch", "disconnect", "expire"] as const) {
 }
 
 test("Chat discards the active turn's observations on abort before the provider exits", async () => {
-  const reachedProvider = Promise.withResolvers<void>();
-  const releaseProvider = Promise.withResolvers<void>();
+  let reachedProvider!: () => void;
+  let releaseProvider!: () => void;
+  const entered = new Promise<void>(resolve => { reachedProvider = resolve; });
+  const release = new Promise<void>(resolve => { releaseProvider = resolve; });
   const controller = new AbortController();
   let ledger: ClassificationLedger | undefined;
   const probe = { prompt: '{"hint":"q7z"}' };
@@ -147,20 +149,20 @@ test("Chat discards the active turn's observations on abort before the provider 
     beforeStream: async () => {
       ledger = currentClassificationLedger();
       ledger?.register("fixture", { hint: "q7z" }, { graphPath: "/applications/app/addPassword" });
-      reachedProvider.resolve();
-      await releaseProvider.promise;
+      reachedProvider();
+      await release;
     },
   });
   const result = f.store.streamIntuneChatMessage({ content: "Explain device compliance." }, () => {}, { signal: controller.signal });
   try {
-    await Promise.race([reachedProvider.promise, result.then(() => assert.fail("Expected the provider to be called"))]);
+    await Promise.race([entered, result.then(() => assert.fail("Expected the provider to be called"))]);
     assert.ok(ledger);
     assert.equal(ledger.classifyRequest(probe).counts.credential, 1);
     controller.abort();
     assert.equal(ledger.expired, true);
     assert.equal(ledger.classifyRequest(probe).counts.credential, 0);
   } finally {
-    releaseProvider.resolve();
+    releaseProvider();
     await result.catch(() => undefined);
     await f.close();
   }
