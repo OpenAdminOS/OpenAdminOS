@@ -359,6 +359,10 @@ provider or a no-op model. Providers whose CLI exposes no model list (Gemini)
 advertise a single default-model entry so they stay selectable in Chat; the
 sentinel is never passed to the CLI as a model name.
 
+Model scan tests clear inherited provider executable overrides and allow subprocess
+launches only from registered fixture directories. Tests that exercise the Gemini
+connectivity prompt pin Gemini to a fixture executable.
+
 Anthropic support is delivered through the user's locally installed Claude Code
 CLI (`claude`) rather than a stored Anthropic API key. OpenAdminOS probes the CLI
 version and Claude Code auth status, requires Claude Code 2.1.200 or newer, then

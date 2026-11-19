@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,18 +11,13 @@ import { createGeminiLlm, discoverCli, probeLmStudioLlm } from "@openadminos/run
 import { runScanCheck, scanProbeFromProvider, scanProviderCheck } from "./model-scan.js";
 import { checkLmStudio, checkOllama } from "./provider-detail.js";
 import { AppStateStore } from "./state.js";
+import { guardProviderCliFixtures, onlyScanProviders } from "../tests/provider-cli-fixtures.js";
 
 /** Review round 2 on PR #175: items 4, 5, 6 and Muse G, K and T. */
 
 const catalog = (id: string) => providerCatalog.find((provider) => provider.id === id)!;
 const posix = process.platform !== "win32";
-
-async function fakeCli(dir: string, name: string, body: string): Promise<string> {
-  const path = join(dir, name);
-  await writeFile(path, `#!/bin/sh\necho "$*" >> "${join(dir, `${name}.log`)}"\n${body}\n`);
-  await chmod(path, 0o755);
-  return path;
-}
+const fakeCli = guardProviderCliFixtures();
 
 // Up to 5 seconds: a killed child is reaped by the system, which can be slow on a loaded machine.
 async function gone(pid: number): Promise<boolean> {
@@ -344,7 +339,11 @@ describe("Retry gives HTTP checks its longer budget (review round 3, item 4)", (
     const original = { ollama: process.env.OPENAGENTS_OLLAMA_URL, lm: process.env.OPENADMINOS_LM_STUDIO_URL };
     process.env.OPENAGENTS_OLLAMA_URL = url;
     process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:9/v1";
-    const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
+    const store = new AppStateStore({
+      filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
+      tokenStore: { read: async () => "", write: async () => undefined },
+      managedPolicy: onlyScanProviders("ollama"),
+    });
     try {
       const first = await store.scanModels();
       assert.equal(first.probes.find((probe) => probe.providerId === "ollama")?.state, "could-not-check");
@@ -370,7 +369,11 @@ describe("Azure settings inside a bounded check (item 5)", () => {
     const dir = await mkdtemp(join(tmpdir(), "oaos-azure-"));
     const original = process.env.OPENAGENTS_OLLAMA_URL;
     process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:9";
-    const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
+    const store = new AppStateStore({
+      filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
+      tokenStore: { read: async () => "", write: async () => undefined },
+      managedPolicy: onlyScanProviders("ollama", "azure-openai"),
+    });
     Object.assign(store, { getAzureOpenAIConfig: () => new Promise(() => undefined) });
     try {
       const seen: string[] = [];
