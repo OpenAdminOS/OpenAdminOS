@@ -27,12 +27,14 @@ const SUGGESTIONS: Suggestion[] = [
     body: "The request did not fit in the context Ollama loaded, and Ollama did not answer when OpenAdminOS asked for the model's limit before raising it. Check that Ollama is responsive with `ollama ps`, restart it if it is stuck, then re-run.",
   },
   {
-    match: (e) => /ollama/i.test(e) && /is not pulled|no ollama model available/i.test(e),
+    match: (e) =>
+      /Ollama model "[^"]+" is not pulled\. Run `ollama pull [^`]+`\./.test(e) ||
+      /No Ollama model available\. Pull a model with `ollama pull <model>`\./.test(e),
     title: "Model not pulled",
     body: "Run `ollama pull <model>` for the model you selected in Settings → LLM Providers, then try again.",
   },
   {
-    match: (e) => /ollama/i.test(e) && /timed out|timeout|aborted/i.test(e),
+    match: (e) => /ollama/i.test(e) && /timed out|timeout|aborted/i.test(e) && !/\/api\/show/i.test(e),
     title: "Ollama generation timed out",
     body: "The local model did not finish in time. OpenAdminOS now waits up to 3 minutes by default; restart the app to pick up that change. For very large local models, set `OPENAGENTS_OLLAMA_TIMEOUT_MS` higher or pick a smaller model.",
   },

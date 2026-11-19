@@ -100,3 +100,16 @@ it("matches the provider's message when no Ollama model is available", () => {
   render(<RunFailureRemediation run={run} />);
   expect(screen.getByText("Model not pulled")).toBeInTheDocument();
 });
+
+it("treats the overall deadline during the context limit lookup as a lookup failure, not a slow generation", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama timed out after 180000ms at http://127.0.0.1:11434/api/show." };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama did not report the model's context limit")).toBeInTheDocument();
+  expect(screen.queryByText("Ollama generation timed out")).not.toBeInTheDocument();
+});
+
+it("does not read incidental `is not pulled` text as a missing model", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama could not report the model's context limit: HTTP 503 at http://127.0.0.1:11434/api/show: maintenance index is not pulled from cache" };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
+});

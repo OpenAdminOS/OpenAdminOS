@@ -156,11 +156,11 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           throw abortError() ?? new Error(`Ollama not reachable at ${url}: ${describe(error)}`);
         }
       };
-      const abortError = (): Error | undefined => {
+      const abortError = (activeUrl = url): Error | undefined => {
         if (!controller.signal.aborted) return undefined;
         return opts.signal?.aborted
           ? new Error("Ollama request stopped by user.")
-          : new Error(`Ollama timed out after ${timeoutMs}ms at ${url}.`);
+          : new Error(`Ollama timed out after ${timeoutMs}ms at ${activeUrl}.`);
       };
 
       let response: Response;
@@ -176,7 +176,8 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           // not from the model's limit. Ask for enough room for this prompt
           // plus the answer, up to what the model supports, and retry once.
           const modelMax = await readOllamaContextLength(endpoint, model, controller.signal, lookupTimeoutMs);
-          const stopped = abortError();
+          // A stop or the overall deadline during the lookup names the lookup.
+          const stopped = abortError(`${endpoint.replace(/\/$/, "")}/api/show`);
           if (stopped) throw stopped;
           const wanted = roundUp(overflow.requested + (opts.maxTokens ?? OLLAMA_ANSWER_RESERVE_TOKENS), 1024);
           if (modelMax !== undefined && overflow.requested > modelMax) {
@@ -531,7 +532,7 @@ async function readOllamaContextLength(
   }
   const answer = data as { error?: unknown; model_info?: unknown };
   if (answer.error !== undefined) {
-    throw new Error(`Ollama could not report the model's context limit: ${url} answered with an error: ${truncate(String(answer.error), 200)}`);
+    throw new Error(`Ollama could not report the model's context limit: ${url} answered with an error: ${truncate(errorText(answer.error), 200)}`);
   }
   // A valid answer without the metadata leaves the limit unknown.
   if (typeof answer.model_info !== "object" || answer.model_info === null) return undefined;
@@ -539,6 +540,16 @@ async function readOllamaContextLength(
     if (key.endsWith(".context_length") && typeof value === "number" && value > 0) return value;
   }
   return undefined;
+}
+
+/** Readable text for an error field of any shape. */
+function errorText(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value) ?? "an unreadable error";
+  } catch {
+    return "an unreadable error";
+  }
 }
 
 function contextTooSmallMessage(model: string, requested: number, limit: number, modelLimit: boolean): string {

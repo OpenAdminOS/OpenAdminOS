@@ -437,4 +437,27 @@ describe("Ollama context size", () => {
       await fake.close();
     }
   });
+
+  it("keeps the lookup diagnostic for a structured error answer", async () => {
+    const fake = await fakeOllama({ showBody: JSON.stringify({ error: { toString: "invalid" } }), limit: (numCtx) => numCtx ?? 16384 });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "structured" });
+      await assert.rejects(llm.complete({ prompt: "big" }), /answered with an error: \{"toString":"invalid"\}/);
+      assert.equal(fake.chats.length, 1);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("names the model lookup when the overall deadline passes during it", async () => {
+    const open: ServerResponse[] = [];
+    const fake = await fakeOllama({ limit: (numCtx) => numCtx ?? 16384, onShow: (res) => open.push(res) });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "deadline", timeoutMs: 150 });
+      await assert.rejects(llm.complete({ prompt: "big" }), /^Error: Ollama timed out after 150ms at http:\/\/127\.0\.0\.1:\d+\/api\/show\.$/);
+    } finally {
+      for (const res of open) res.destroy();
+      await fake.close();
+    }
+  });
 });
