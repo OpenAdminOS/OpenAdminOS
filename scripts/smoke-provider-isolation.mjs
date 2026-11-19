@@ -53,7 +53,7 @@ export async function terminateSmokeChild(child) {
 
 export async function isolateSmokeProviders() {
   const servers = [];
-  const unexpected = [];
+  const unexpected = new Map();
   const checked = [];
   try {
     for (const [provider, port] of modelPorts) {
@@ -64,7 +64,7 @@ export async function isolateSmokeProviders() {
       for (const host of ["127.0.0.1", "::1"]) {
         const label = `${provider} on ${host} port ${port}`;
         const server = createServer((socket) => {
-          unexpected.push(label);
+          unexpected.set(label, (unexpected.get(label) ?? 0) + 1);
           socket.destroy();
         });
         try {
@@ -106,7 +106,7 @@ export async function isolateSmokeProviders() {
       },
       async close() {
         await closeServers(servers);
-        assert.deepEqual(unexpected, [], "Electron connected to a default model port");
+        assert.deepEqual(Object.fromEntries(unexpected), {}, "Default model ports received connections during the smoke run");
         if (checked.length) {
           console.log(`[smoke:providers] Zero connections to ${checked.join(", ")}.`);
         }
