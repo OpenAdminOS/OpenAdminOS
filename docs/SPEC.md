@@ -2406,8 +2406,10 @@ the CI host. It does not replace a final live-tenant pilot run, but it guards th
 desktop path without requiring tenant credentials in CI or local automation.
 The Intune Chat, Office, and Report Issue smoke profiles disable retrieval and
 embedding auto-install. The smoke runners route local model endpoints to a
-fixture and assert zero connections on each available default model port.
-The runners report any port checks they skip because the port is already in use.
+fixture and load the test provider guard into the Electron main process before
+startup, only when a smoke flag is set. The guard allows only the run's fixture
+origins and writes each blocked attempt to a per-run violation log; the runner
+fails the smoke on any entry, even when app code caught the error.
 The v0.3 release gate also includes `npm run screenshots`, a dev-only Electron
 capture harness gated by `OPENADMINOS_SCREENSHOT_CAPTURE=1` and `!app.isPackaged`.
 It seeds a Contoso Demo tenant with an `.invalid` admin address, a local Ollama
