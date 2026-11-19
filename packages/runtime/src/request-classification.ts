@@ -110,6 +110,12 @@ interface MatchPattern {
 }
 
 type AnchorIndex = Map<number, Map<string, Set<MatchPattern>>>;
+type ScanLane = { width: number; buckets: Array<Map<string, Set<MatchPattern>>> };
+type ScanIndex = {
+  ascii: Array<ScanLane[] | undefined>;
+  unicode: Map<number, ScanLane[]>;
+  resolved: Map<string, Array<Set<MatchPattern>> | null>;
+};
 type RequestText = Pick<LlmOptions, "system" | "prompt">;
 type EncodedText = { buffer: ArrayBuffer; length: number };
 type Fence = { body: string; evidence: Evidence };
@@ -705,41 +711,76 @@ export class ClassificationLedger {
     }
   }
 
+  private static scanIndex(retained: readonly ClassificationLedger[], folded: boolean): ScanIndex {
+    const ascii: ScanIndex["ascii"] = new Array(128);
+    const unicode: ScanIndex["unicode"] = new Map();
+    // Merge only the first-code-unit dispatch tables. The prebuilt bucket
+    // maps stay in their original ledgers and anchors are sliced once.
+    for (const ledger of retained) {
+      const anchors = folded ? ledger.foldedAnchors : ledger.anchors;
+      for (let width = 1; width < anchors.length; width++) {
+        for (const [first, buckets] of anchors[width] ?? []) {
+          let lanes = first < ascii.length ? ascii[first] : unicode.get(first);
+          if (!lanes) {
+            lanes = [];
+            if (first < ascii.length) ascii[first] = lanes;
+            else unicode.set(first, lanes);
+          }
+          const existing = lanes.find(lane => lane.width === width);
+          if (existing) existing.buckets.push(buckets);
+          else lanes.push({ width, buckets: [buckets] });
+        }
+      }
+    }
+    return { ascii, unicode, resolved: new Map() };
+  }
+
   private scan(
-    anchors: ClassificationLedger["anchors"], text: string, from: number, to: number, work: { remaining: number },
+    index: ScanIndex, text: string, from: number, to: number, work: { remaining: number },
     emit: (span: TextSpan, evidence: Evidence, authoritative?: boolean) => void,
     fieldAt?: (start: number, end: number) => string | undefined,
   ): boolean {
-    for (let width = 1; width < anchors.length; width++) {
-      const prefixes = anchors[width];
-      if (!prefixes?.size) continue;
-      for (let at = from; at < to && at + width <= text.length; at++) {
-        // Most offsets cannot start an anchor. Avoid substring allocation
-        // and hashing unless the index contains that first code unit.
-        const buckets = prefixes.get(text.charCodeAt(at));
-        if (!buckets) continue;
-        const bucket = buckets.get(text.slice(at, at + width));
-        if (!bucket) continue;
-        for (const { text: value, offset, mode, entry, before, after } of bucket) {
-          if (--work.remaining < 0) return false;
-          const start = at - offset;
-          const end = start + value.length;
-          if (start < 0 || end > text.length) continue;
-          if (value.length > 64) {
-            if (!text.startsWith(value.slice(-8), end - 8) || !text.startsWith(value.slice(0, 8), start)) continue;
-            work.remaining -= Math.ceil(value.length / 64);
-            if (work.remaining < 0) return false;
+    for (let at = from; at < to; at++) {
+      const first = text.charCodeAt(at);
+      const lanes = first < index.ascii.length ? index.ascii[first] : index.unicode.get(first);
+      if (!lanes) continue;
+      for (const { width, buckets } of lanes) {
+        if (at + width > text.length) continue;
+        const anchor = text.slice(at, at + width);
+        let matched = index.resolved.get(anchor);
+        if (matched === undefined) {
+          matched = null;
+          for (const anchors of buckets) {
+            const patterns = anchors.get(anchor);
+            if (patterns) (matched ??= []).push(patterns);
           }
-          if (!text.startsWith(value, start)) continue;
-          if ((mode === "word" || mode === "folded") && (!wordBoundary(text, start - 1) || !wordBoundary(text, end))) continue;
-          if (mode === "context" && (before && (start < before.length || !text.startsWith(before, start - before.length)) ||
-              after && !text.startsWith(after, end))) continue;
-          const field = mode === "field" ? fieldAt?.(start, end) : undefined;
-          const evidence = mode === "field" ? (field === undefined ? undefined : entry.fields.get(field)) : entry.best;
-          if (evidence) {
-            // String quotes are syntax, separate from the value to be masked.
-            const quoteWidth = mode === "field" ? value.startsWith('\\"') ? 2 : value.startsWith('"') ? 1 : 0 : 0;
-            emit({ start: start + quoteWidth, end: end - quoteWidth }, evidence, mode === "field" || mode === "context");
+          // Cache misses too, since repeated prompt wording otherwise
+          // probes every retained ledger's bucket for the same anchor.
+          if (index.resolved.size < 8_192) index.resolved.set(anchor, matched);
+        }
+        if (!matched) continue;
+        for (const bucket of matched) {
+          for (const { text: value, offset, mode, entry, before, after } of bucket) {
+            if (--work.remaining < 0) return false;
+            const start = at - offset;
+            const end = start + value.length;
+            if (start < 0 || end > text.length) continue;
+            if (value.length > 64) {
+              if (!text.startsWith(value.slice(-8), end - 8) || !text.startsWith(value.slice(0, 8), start)) continue;
+              work.remaining -= Math.ceil(value.length / 64);
+              if (work.remaining < 0) return false;
+            }
+            if (!text.startsWith(value, start)) continue;
+            if ((mode === "word" || mode === "folded") && (!wordBoundary(text, start - 1) || !wordBoundary(text, end))) continue;
+            if (mode === "context" && (before && (start < before.length || !text.startsWith(before, start - before.length)) ||
+                after && !text.startsWith(after, end))) continue;
+            const field = mode === "field" ? fieldAt?.(start, end) : undefined;
+            const evidence = mode === "field" ? (field === undefined ? undefined : entry.fields.get(field)) : entry.best;
+            if (evidence) {
+              // String quotes are syntax, separate from the value to be masked.
+              const quoteWidth = mode === "field" ? value.startsWith('\\"') ? 2 : value.startsWith('"') ? 1 : 0 : 0;
+              emit({ start: start + quoteWidth, end: end - quoteWidth }, evidence, mode === "field" || mode === "context");
+            }
           }
         }
       }
@@ -896,6 +937,9 @@ export class ClassificationLedger {
     const spans: ClassificationSpan[] = [];
     const ranges: UnexaminedRange[] = [];
     const { retained, historyFences, identityIndex } = state;
+    const rawIndex = ClassificationLedger.scanIndex(retained, false);
+    const foldedIndex = retained.some(ledger => ledger.foldedAnchors.length)
+      ? ClassificationLedger.scanIndex(retained, true) : undefined;
     for (const section of ["system", "prompt"] as const) {
       const original = request[section];
       if (!original) continue;
@@ -946,11 +990,11 @@ export class ClassificationLedger {
           }
         }
       }
-      const folded = retained.some(ledger => ledger.foldedAnchors.length) ? foldIdentity(text) : undefined;
+      const folded = foldedIndex ? foldIdentity(text) : undefined;
       for (let from = 0; from < text.length; from += TEXT_CHUNK) {
         const to = Math.min(text.length, from + TEXT_CHUNK);
-        if (retained.some(ledger => !ledger.scan(ledger.anchors, text, from, to, work, collect, fieldAt) ||
-            folded !== undefined && !ledger.scan(ledger.foldedAnchors, folded, from, to, work, collect))) {
+        if (!this.scan(rawIndex, text, from, to, work, collect, fieldAt) ||
+            foldedIndex && folded !== undefined && !this.scan(foldedIndex, folded, from, to, work, collect)) {
           ranges.push({ section, start: from, end: text.length, reason: "match-limit" });
           break;
         }
