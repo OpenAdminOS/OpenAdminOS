@@ -3,7 +3,7 @@ import type { DataClass } from "@openadminos/agent-sdk";
 // Source: docs/research/graph-field-classes.md and the decisions in docs/SPEC.md.
 // [] matches an array element. * matches one property in a keyed object.
 // Mapped containers set an inherited class. Unknown branches start at the resource default.
-export const GRAPH_FIELD_CLASSES_VERSION = 3;
+export const GRAPH_FIELD_CLASSES_VERSION = 4;
 
 /** Equivalent paths in the bundled Graph index, with route parameters normalized by the classifier. */
 export const GRAPH_ROUTE_ALIASES = {
@@ -36,9 +36,14 @@ export const GRAPH_ROUTE_ALIASES = {
 const SECURITY_MASK_NAMES = /^(?:name|id|.*(?:Name|Id|Ids)|.*ConsentDescription|description|cidrAddress|rolePermissions|permissionGrantPolicyIdsAssignedToDefaultUserRole)$/i;
 const SECURITY_PERMISSION_NAMES = /\/(?:(?:approles|oauth2permissionscopes)\/\[\]\/value|oauth2permissiongrants\/\[\]\/scope)$/;
 const SECURITY_LOCATION_RANGES = /\/ipranges\//;
+const CONDITIONAL_ACCESS_IDENTIFIERS = /^\/conditions\/(?:locations\/(?:include|exclude)locations|users\/(?:include|exclude)roles)\/\[\]$/;
+const GRAPH_GUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
-export function graphSecurityMaskRole(field: string, path: string, route: string): SecurityMaskRole {
-  return SECURITY_MASK_NAMES.test(field) || SECURITY_PERMISSION_NAMES.test(path) || SECURITY_LOCATION_RANGES.test(path) || field.toLowerCase() === "scope" && route === "/oauth2permissiongrants"
+export function graphSecurityMaskRole(field: string, path: string, route: string, value: unknown): SecurityMaskRole {
+  const conditionalAccessId = route === "/identity/conditionalaccess/policies" &&
+    CONDITIONAL_ACCESS_IDENTIFIERS.test(path) && typeof value === "string" && GRAPH_GUID.test(value);
+  return conditionalAccessId || SECURITY_MASK_NAMES.test(field) || SECURITY_PERMISSION_NAMES.test(path) ||
+    SECURITY_LOCATION_RANGES.test(path) || field.toLowerCase() === "scope" && route === "/oauth2permissiongrants"
     ? "nameOrIdentifier" : "setting";
 }
 export type SecurityMaskRole = "nameOrIdentifier" | "setting";
@@ -230,7 +235,8 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
     security: `
       id templateId displayName createdDateTime modifiedDateTime state deletedDateTime
       partialEnablementStrategy sessionControls conditions.userRiskLevels[] conditions.signInRiskLevels[]
-      conditions.clientAppTypes[] conditions.locations conditions.times conditions.deviceStates
+      conditions.clientAppTypes[] conditions.locations conditions.locations.includeLocations[]
+      conditions.locations.excludeLocations[] conditions.times conditions.deviceStates
       conditions.devices conditions.clientApplications conditions.agents conditions.actionsAndDestinations
       conditions.applications.includeApplications[] conditions.applications.excludeApplications[]
       conditions.applications.includeUserActions[] conditions.applications.includeAgentActions[]
@@ -487,7 +493,7 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
     configuration: "id displayName description visibility",
   },
   "/applications": {
-    security: "requiredResourceAccess[] appRoles[] oauth2PermissionScopes[] api.oauth2PermissionScopes[] appRoleAssignments[] appRoleAssignedTo[] oauth2PermissionGrants[]",
+    security: "requiredResourceAccess[] appRoles[] oauth2PermissionScopes[] api.oauth2PermissionScopes[] api.preAuthorizedApplications[].delegatedPermissionIds[] appRoleAssignments[] appRoleAssignedTo[] oauth2PermissionGrants[]",
     credential: "passwordCredentials[].secretText passwordCredentials[].hint keyCredentials[].key",
     configuration: `
       passwordCredentials[] keyCredentials[] id appId displayName createdDateTime publisherDomain signInAudience tags[] description

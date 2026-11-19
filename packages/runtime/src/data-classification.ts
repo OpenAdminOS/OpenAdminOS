@@ -445,7 +445,7 @@ export function walkDataClasses(
         mapped === undefined && inherited === undefined, effective));
     }
     counts[effective]++;
-    onField?.(child, effective, pointer, key, effective === "security" ? graphSecurityMaskRole(key, pattern, route) : undefined);
+    onField?.(child, effective, pointer, key, effective === "security" ? graphSecurityMaskRole(key, pattern, route, child) : undefined);
   }
 
   visit(value, "", "", "", undefined, true);

@@ -576,3 +576,34 @@ test("serialized field provenance follows every array element across nesting and
     }
   }
 });
+
+test("Conditional Access references and delegated permissions distinguish identifiers from settings", () => {
+  const ids = ["aaaaaaaa-1111-2222-3333-444444444444", "bbbbbbbb-1111-2222-3333-444444444444"];
+  const graphPath = "/identity/conditionalAccess/policies";
+  const data = {
+    conditions: {
+      locations: { includeLocations: [...ids, "All"], excludeLocations: ["AllTrusted", ...ids] },
+      users: { includeRoles: ids, excludeRoles: ids },
+    },
+    grantControls: { builtInControls: ["mfa"] },
+  };
+  const classified = classifyData(data, { graphPath });
+  assert.deepEqual(Object.values(classified.securityMaskRoles).sort(), [
+    ...Array(8).fill("nameOrIdentifier"), ...Array(3).fill("setting"),
+  ]);
+  const ledger = new ClassificationLedger();
+  ledger.register("graph:policies", data, { graphPath });
+  for (const prompt of [JSON.stringify(data), JSON.stringify({ data: JSON.stringify(data, null, 2) })]) {
+    const { spans } = ledger.classifyRequest({ prompt });
+    for (const value of [...ids, "All", "AllTrusted", "mfa"]) {
+      const matches = spans.filter(span => prompt.slice(span.start, span.end) === value);
+      assert.equal(matches.length, ids.includes(value) ? 4 : 1);
+      assert.ok(matches.every(span => span.kind === "security" && span.maskRole === (ids.includes(value) ? "nameOrIdentifier" : "setting")));
+    }
+  }
+  const application = classifyData({
+    api: { preAuthorizedApplications: [{ delegatedPermissionIds: ids }] },
+  }, { graphPath: "/applications" });
+  assert.equal(application.counts.security, 2);
+  assert.deepEqual(Object.values(application.securityMaskRoles), ["nameOrIdentifier", "nameOrIdentifier"]);
+});
