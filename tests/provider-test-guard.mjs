@@ -98,7 +98,7 @@ function blocked(message) {
   return new Error(message);
 }
 
-function guardCommand(method, call, receiver, args) {
+function guardCommand(method, call, receiver, args, { promisified = false } = {}) {
   const [command, second, third] = args;
   const node = realAbsolutePath(process.execPath);
   const failure = () => blocked(`Blocked ${method} outside provider fixtures: ${command}`);
@@ -115,9 +115,11 @@ function guardCommand(method, call, receiver, args) {
   const options = effectiveOptions != null && typeof effectiveOptions === "object" && !Array.isArray(effectiveOptions)
     ? { ...effectiveOptions }
     : effectiveOptions;
+  // Node's promisified execFile appends its own callback after the arguments
+  // it receives, so it must get exactly file, args and options.
   const normalized = method === "execFile" && typeof second === "function"
     ? [command, second]
-    : method === "execFile"
+    : method === "execFile" && !promisified
       ? [command, argv, options, optionsInSecond ? third : args[3]]
       : [command, argv, options];
 
@@ -163,7 +165,7 @@ function guardChildren() {
     // The built-in promisified variants call Node's original functions internally.
     if (custom) {
       Object.defineProperty(guarded, promisify.custom, {
-        value: (...args) => guardCommand(method, custom, childProcess, args),
+        value: (...args) => guardCommand(method, custom, childProcess, args, { promisified: true }),
       });
     }
     childProcess[method] = guarded;

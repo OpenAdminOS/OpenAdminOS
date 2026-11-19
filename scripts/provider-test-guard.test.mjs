@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { access, mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { it } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -91,6 +94,36 @@ it("blocks shell launches when the spawn argument array is omitted, undefined or
   assert.match(stdout, /failureType: 'hookFailed'/);
   assert.match(stdout, /Blocked spawn outside provider fixtures/);
   assert.match(stdout, /Blocked spawnSync outside provider fixtures/);
+});
+
+it("resolves promisified execFile for a registered fixture", { skip: process.platform === "win32" }, async () => {
+  const { code, stdout, stderr } = await runFixture("execfile-promisify", "");
+  assert.equal(code, 0, stdout + stderr);
+  assert.match(stdout, /^# pass 1$/m);
+});
+
+it("leaves a launch without a smoke flag unguarded even with the harness environment", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "smoke-preload-"));
+  const logPath = join(directory, "violations.log");
+  const smokePreload = fileURLToPath(new URL("./smoke-provider-preload.cjs", import.meta.url));
+  const env = { ...process.env, OPENADMINOS_SMOKE_PROVIDER_GUARD: JSON.stringify({ origins: [], logPath }) };
+  for (const name of ["OPENADMINOS_INTUNE_CHAT_SMOKE", "OPENADMINOS_REPORT_ISSUE_SMOKE", "OPENADMINOS_OFFICE_SMOKE", "NODE_TEST_CONTEXT"]) {
+    delete env[name];
+  }
+  try {
+    const run = (extra) => new Promise((resolve) => {
+      execFile(process.execPath, ["--require", smokePreload, "-e", ""], { env: { ...env, ...extra } },
+        (error, stdout, stderr) => resolve({ code: error ? error.code : 0, stderr }));
+    });
+    const plain = await run({});
+    assert.equal(plain.code, 0, plain.stderr);
+    await assert.rejects(access(logPath), { code: "ENOENT" });
+    // With a smoke flag the preload proceeds and insists on the Electron main process.
+    const flagged = await run({ OPENADMINOS_INTUNE_CHAT_SMOKE: "1" });
+    assert.notEqual(flagged.code, 0);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 it("accepts a file URL for a registered fork entry", async () => {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { fork, spawn, spawnSync } from "node:child_process";
+import { execFile, fork, spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { Agent as HttpAgent, ClientRequest, createServer, get, request } from "node:http";
@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { Duplex } from "node:stream";
 import { after, it } from "node:test";
 import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 import { Agent as FetchAgent } from "undici";
 import { registerProviderFixtureDirectory } from "../provider-test-guard.mjs";
 
@@ -47,6 +48,22 @@ if (scenario === "fetch") {
   after(() => {
     assert.throws(() => spawnSync(process.execPath, ["--version"]), /Blocked spawnSync outside provider fixtures/);
     process.exitCode = 0;
+  });
+} else if (scenario === "execfile-promisify") {
+  it("resolves promisified execFile for a registered fixture with and without options", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "provider-guard-execfile-"));
+    try {
+      const fixture = join(directory, "cli");
+      await writeFile(fixture, "#!/bin/sh\necho ok\n", { mode: 0o755 });
+      registerProviderFixtureDirectory(directory);
+      const run = promisify(execFile);
+      for (const args of [[], [[]], [[], {}], [[], { encoding: "utf8" }]]) {
+        const { stdout } = await run(fixture, ...args);
+        assert.equal(String(stdout).trim(), "ok");
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 } else if (scenario === "spawn-options" || scenario === "spawn-shell") {
   it("checks the same effective options that Node receives", async () => {
