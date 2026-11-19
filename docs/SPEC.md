@@ -2499,6 +2499,55 @@ or logging noisy console warnings. That state
 is for renderer-only development; tenant-connected testing belongs in the
 Electron window.
 
+### Reset OpenAdminOS and uninstall (2026-11-19)
+
+Removing the app does not remove its data, so a reinstall restored tenant
+access with no sign-in (tester finding, 18 Nov, macOS). Settings > Data has
+**Reset OpenAdminOS**: a product modal with the data folder, what is removed and
+what stays (the enterprise application and admin consent in each tenant, the IT
+`policy.json`, exports), and the typed phrase `RESET OPENADMINOS`, checked again
+in the main process. Mockup: `docs/mockups/34-local-reset.html`.
+
+- **Two phases.** The request refuses while a confirmed write run is applying,
+  writes `local-reset-pending.json` into the data folder first (if that fails,
+  nothing changed and the modal says so), then removes the Microsoft sign-in of
+  every tenant and pending disconnect from the token caches, turns off the OS
+  scheduler and the menu bar login item (installed builds), stops the gateway,
+  MCP servers and stores with a bounded wait, and relaunches.
+- **Wipe at launch.** At the top of the main script, after the single-instance
+  lock and before `whenReady`, so before Chromium reads Local State (the Windows
+  safeStorage key) and before any store, session or safeStorage use: every entry
+  of the data folder except `policy.json`, the marker and Chromium's lock files.
+  The audit anchor and pending files go after everything else, the database
+  included, so a database that could not be removed keeps its anchor. Then,
+  installed builds only: the Keychain item `OpenAdminOS Safe Storage` by exact
+  service name, the LaunchAgent or scheduled task, the electron-updater cache
+  `@openadminosdesktop-updater`, and on macOS the Squirrel ShipIt cache, the
+  bundle's Caches, HTTPStorages and saved state, and `defaults delete
+  com.openadminos.desktop`. The marker goes last, so an interrupted wipe resumes
+  at the next launch.
+- **Failures.** A data folder entry that cannot be removed keeps the marker and
+  opens **Reset did not finish** instead of the app (the paths with reasons,
+  Try again relaunches, Show data folder, Quit); a background wake just exits.
+  Leftovers outside the data folder that fail are warnings on the notice after
+  the reset and are not retried, because a later retry could delete the new
+  Keychain key. After a completed reset the app opens at first run with a
+  dismissible notice.
+- **Development builds** reset `OPENADMINOS_USER_DATA_DIR` when set, otherwise
+  the default folder the installed app also uses (the modal names it). They use
+  Chromium's mock keychain on macOS, so they never touch the Keychain item, and
+  never touch the installed app's scheduler, login item or caches.
+- **Linux** keeps the safeStorage key in the desktop keyring; the reset does
+  not remove keyring entries (the docs say how).
+- **Windows uninstaller.** `nsis.deleteAppDataOnUninstall` stays `false`. In
+  electron-builder 26.15 the flag applies to assisted installers too (the
+  uninstaller checks it outside any one-click guard) and never on an update
+  (the installer runs the old uninstaller with `--updated`), but it removes the
+  whole `%APPDATA%\OpenAdminOS` folder, including an IT `policy.json`, and not
+  the updater cache or the scheduled task. Turning it on is a trust decision
+  left open in `electron/local-reset.ts`. User docs: Basics > Uninstall and
+  reset.
+
 ### Code signing
 
 The macOS release job applies a fail-closed workaround for app-builder-lib
