@@ -44,21 +44,21 @@ the installed app's scheduler, login item or caches.
 
 ## Checklist
 
-- [ ] Mockup `docs/mockups/34-local-reset.html` (Settings entry, modal, closing
+- [x] Mockup `docs/mockups/34-local-reset.html` (Settings entry, modal, closing
       state, failure state, reset did not finish, post-reset first run), linked
       from `docs/mockups/index.html`
-- [ ] `electron/local-reset.ts`: marker, wipe plan, wipe, leftovers, request
+- [x] `electron/local-reset.ts`: marker, wipe plan, wipe, leftovers, request
       orchestration with injected steps
-- [ ] Main process wiring: IPC (reset, report, dismiss, relaunch, show folder,
+- [x] Main process wiring: IPC (reset, report, dismiss, relaunch, show folder,
       quit), top-level wipe, incomplete mode, phase 2 scheduler and login item
-- [ ] Store: forget every sign-in, bounded awaited shutdown, applying-run check
-- [ ] Renderer: Data section row, `ResetOpenAdminOSDialog`, reset incomplete
+- [x] Store: forget every sign-in, bounded awaited shutdown, applying-run check
+- [x] Renderer: Data section row, `ResetOpenAdminOSDialog`, reset incomplete
       screen, post-reset notice, settings search item, copy
-- [ ] NSIS research and `TODO(ugur)` on `deleteAppDataOnUninstall`
-- [ ] Docs page "Uninstall and reset" (gitbook + generated web docs)
-- [ ] Tests (electron + renderer), typecheck, Node 22
-- [ ] Local unsigned packaged build check with a throwaway profile
-- [ ] SPEC.md, CHANGELOG.md
+- [x] NSIS research and `TODO(ugur)` on `deleteAppDataOnUninstall`
+- [x] Docs page "Uninstall and reset" (gitbook + generated web docs)
+- [x] Tests (electron + renderer), typecheck, Node 22
+- [x] End-to-end check in a development build with a throwaway profile (see Review)
+- [x] SPEC.md, CHANGELOG.md
 - [ ] PR, reviews (Sol, Muse, Claude), fixes
 
 ## Acceptance criteria
@@ -73,4 +73,26 @@ the installed app's scheduler, login item or caches.
 
 ## Review
 
-(filled in at the end)
+- Electron tests (Node 22): 1539 of 1539 pass; `electron/local-reset.test.ts`
+  covers the removal plan, policy.json kept, audit anchor removed only with the
+  database, resume after interruption, Keychain call arguments, and an end to
+  end run with the store (fresh first-run state, audit export without an
+  integrity error).
+- Renderer tests (Node 22): all pass; 17 timed out in the full run at load
+  average 27 and passed when run alone.
+- Typecheck passes.
+- End to end in a development build with `OPENADMINOS_USER_DATA_DIR` set to a
+  scratch folder, driven over CDP: seeded tenant, token file and provider and
+  connector secrets; a wrong phrase kept Reset disabled; Reset and restart
+  relaunched into first run with the notice, no tenants, `firstRunScan`
+  pending, no tokens or secrets, `policy.json` unchanged, and an audit export
+  without an integrity error. A folder made undeletable opened Reset did not
+  finish; after unlocking it, Try again finished the reset.
+- Not done: a packaged build. Installed builds ignore
+  `OPENADMINOS_USER_DATA_DIR` and would delete the real Keychain item
+  `OpenAdminOS Safe Storage`, so the Keychain, LaunchAgent, login item and
+  cache removal ran only in tests with a recorded command runner. Windows was
+  not run.
+- Found in the end to end run and fixed: the incomplete screen called the
+  appearance handler before it was registered, and failure reasons repeated
+  full paths.
