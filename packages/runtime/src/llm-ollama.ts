@@ -6,6 +6,7 @@ import type {
   RunLlmApi,
 } from "@openadminos/agent-sdk";
 import { isRefusedRedirect, modelServerRedirect, redirectRefusedDetail } from "./llm-openai-compatible.js";
+import { readOllamaContextWindow } from "./ollama-context.js";
 
 export interface OllamaProviderOptions {
   endpoint?: string;
@@ -57,6 +58,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
     available: true,
     defaultModel,
     streamsIncrementally: true,
+    contextWindow: (model) => readOllamaContextWindow(endpoint, model ?? defaultModel),
     async complete(opts: LlmOptions): Promise<LlmCompletion> {
       let last: LlmStreamChunk | undefined;
       for await (const chunk of this.stream(opts)) {
