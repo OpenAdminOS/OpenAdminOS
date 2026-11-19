@@ -328,6 +328,25 @@ test("ledger value budget prioritizes credentials and does not invent prompt spa
   assert.equal(result.unexamined.values, 1);
   assert.equal(result.counts.credential, 0);
   assert.equal(ledger.classifyRequest({ prompt: secret }).counts.credential, 1);
+  const next = new ClassificationLedger();
+  next.include(ledger);
+  const followUp = next.classifyRequest({ prompt: secret });
+  assert.equal(followUp.coverageIncomplete, false);
+  assert.equal(followUp.droppedValues, 0);
+  assert.deepEqual(followUp.unexamined, { values: 0, registrations: 0, textCodeUnits: 0, ranges: [] });
+  assert.equal(followUp.counts.credential, 1);
+});
+
+test("chunked request scanning preserves offsets across a chunk boundary", async () => {
+  const secret = "opaque-fixture-material";
+  const ledger = new ClassificationLedger();
+  ledger.register("fixture", { secretText: secret });
+  const start = 127_996;
+  const request = { prompt: `${" ".repeat(start)}${secret}\n` };
+  const result = await ledger.classifyLargeRequest(request);
+  assert.deepEqual(result, ledger.classifyRequest(request));
+  assert.equal(result.coverageIncomplete, false);
+  assert.deepEqual(result.spans, [{ section: "prompt", start, end: start + secret.length, kind: "credential", source: "fixture" }]);
 });
 
 test("reports the unexamined tail without counting it as a credential", () => {
