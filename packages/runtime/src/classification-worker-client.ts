@@ -50,7 +50,7 @@ export class ClassificationWorker {
     this.worker.on("exit", () => this.stop(new Error("Classification worker exited.")));
     this.worker.unref();
     this.garbage = new FinalizationRegistry(id => {
-      if (!this.failure) this.post({ type: "drop", id });
+      this.release(id);
     });
   }
 
@@ -63,6 +63,11 @@ export class ClassificationWorker {
   drop(owner: object, id: number): void {
     if (this.failure) return;
     this.garbage.unregister(owner);
+    this.release(id);
+  }
+
+  private release(id: number): void {
+    if (this.failure) return;
     try { this.post({ type: "drop", id }); }
     catch { this.stop(new Error("Classification worker could not release evidence.")); }
   }

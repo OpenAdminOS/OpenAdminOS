@@ -836,7 +836,7 @@ export class ClassificationLedger {
         const id = await ledger.syncLedger(client, slice);
         if (!ledger.disposed) ledgers.push(id);
       }
-      const shards: number[] = [];
+      const indexedShards: Array<[TenantValueIndex, number]> = [];
       for (const shard of identityIndex?.workerShards?.() ?? []) {
         let id = client.shards.get(shard);
         if (id === undefined) {
@@ -857,15 +857,17 @@ export class ClassificationLedger {
           }
           if (entries.length && client.shards.get(shard) === id) client.post({ type: "identity", id, entries });
         }
-        shards.push(id);
+        indexedShards.push([shard, id]);
       }
       // Resample expiry after asynchronous synchronization. Disposed mirrors
       // have already been dropped; history will mark their replay ranges.
       const latest = this.scanState();
+      const shards = indexedShards.flatMap(([shard, id]) => client.shards.get(shard) === id ? [id] : []);
       return {
         message: { type: "scan", sections, ledgers, shards, state: {
           ...state, historyFences: latest.historyFences,
-          incomplete: latest.incomplete || Boolean(identityIndex && !identityIndex.workerShards),
+          incomplete: latest.incomplete || shards.length !== indexedShards.length ||
+            Boolean(identityIndex && !identityIndex.workerShards),
         } },
         transfers,
       };

@@ -706,3 +706,30 @@ test("worker preserves long fenced evidence and can remove its mirror", async ()
   }
   assert.equal((await ledger.classifyLargeRequest(request)).counts.credential, 0);
 });
+
+test("a failed worker transport reports incomplete coverage and recovers on the next request", async t => {
+  const post = ClassificationWorker.prototype.post;
+  const transport = t.mock.method(ClassificationWorker.prototype, "post", function (
+    this: ClassificationWorker, ...args: Parameters<ClassificationWorker["post"]>
+  ) {
+    if (args[0].type === "scan") throw new Error("fixture transport failure");
+    post.apply(this, args);
+  });
+  const request = { prompt: " ".repeat(4000) + "password=q7z" };
+  const events: RequestClassificationEvent[] = [];
+  const model = withRequestClassification({
+    available: true,
+    async complete(options) {
+      assert.equal(options, request);
+      return { text: "complete", model: "fixture" };
+    },
+    async *stream() { throw new Error("Unused"); },
+  }, "ollama", event => events.push(event));
+  assert.equal((await model.complete(request)).text, "complete");
+  assert.equal(events[0]?.failed, true);
+  assert.equal(events[0]?.classification.effectiveClass, "credential");
+  transport.mock.restore();
+  assert.equal((await model.complete(request)).text, "complete");
+  assert.equal(events[1]?.failed, false);
+  assert.equal(events[1]?.classification.counts.credential, 1);
+});
