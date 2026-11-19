@@ -477,6 +477,40 @@ deterministic counts/findings. If the prompt still exceeds the on-device
 context window, the provider fails with explicit recovery copy instead of a
 generic model error.
 
+#### Prompt size preflight for agent runs (2026-11-19)
+
+Every LLM call in an agent run is size-checked before anything is sent.
+`RunLlmApi.contextWindow(model)` is an optional provider capability; a
+provider that cannot report a window leaves it out, and its requests are
+never blocked. Hosted providers (Claude Code, Codex, Copilot, Gemini, Azure
+OpenAI) report none. Ollama reports it from `/api/show` and `/api/ps` in
+`ollama-context.ts`: a `num_ctx` pinned in the Modelfile wins while the app
+does not raise `num_ctx` itself, a model without one uses the size Ollama
+loaded it with, and the architecture's `context_length` is the fallback. LM
+Studio reports none for now because its context fields could not be verified.
+
+The runtime's `estimateTokens` counts letters, digits, mixed ids,
+punctuation and line breaks separately. Calibrated against OpenAdmin 8B
+(Mistral tokenizer) and gpt-oss 20B, it overestimates by 3% to 43% and never
+underestimates, so it refuses early rather than late. `checkPromptFit`
+compares system text, prompt and answer budget (`maxTokens`, else 1,024
+tokens) with the window. A request that does not fit fails with a
+`ContextTooSmallError`; the run record carries `failureReason`
+(`code: "context-too-small"`, prompt, answer, needed and limit tokens, model)
+so the run failure playbook and the provider switch flow act on numbers, not
+on message text. The message names the size needed, the limit, that nothing
+was sent, and the ways out: a larger local model, a hosted provider, or a
+narrower scope.
+
+Agent prompts carry summaries, not inventories. The Conditional Access
+explainer sends one compact record per policy (`compact-conditional-access`
+transform: scope as counts or `All`, built-in role names, conditions, grant
+and session controls) and policy names in its age groups, so 100 policies
+need about 14,000 estimated tokens (about 11,000 real) with an 1,100 token
+answer and fit a 16k local model; about 120 fit by the estimate. Grouped
+records reach prompts only as counts (`counts` filter), and breakdowns by
+high-cardinality fields keep their largest buckets (`top(n)` filter).
+
 Per-agent model overrides are required: an agent's manifest can specify a preferred model and the user can override it.
 
 Desktop CLI provider discovery appends known install folders to the child PATH
