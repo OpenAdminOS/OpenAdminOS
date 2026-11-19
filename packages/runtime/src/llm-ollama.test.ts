@@ -82,18 +82,21 @@ describe("Ollama context size", () => {
     retryStreamError?: boolean;
     /** Reject a request that exactly fills the context too. */
     rejectAtLimit?: boolean;
+    retryRedirect?: boolean;
     showRedirect?: boolean;
     requested?: (prompt: string) => number;
     stallOverflowBody?: (res: ServerResponse) => void;
     delayRetryMs?: (prompt: string) => number;
   }) {
     const chats: Array<{ num_ctx?: number }> = [];
+    const shows: string[] = [];
     const server = createServer((req: IncomingMessage, res: ServerResponse) => {
       let raw = "";
       req.on("data", (part) => (raw += part));
       req.on("end", () => {
         const body = JSON.parse(raw) as { options?: { num_ctx?: number }; messages?: Array<{ content: string }> };
         if (req.url === "/api/show") {
+          shows.push(raw);
           if (options.showRedirect) {
             res.writeHead(307, { location: "http://example.com/api/show" });
             res.end();
@@ -122,6 +125,11 @@ describe("Ollama context size", () => {
           res.end(overflow(requested, options.limit(numCtx)));
           return;
         }
+        if (numCtx !== undefined && options.retryRedirect) {
+          res.writeHead(307, { location: "http://example.com/api/chat" });
+          res.end();
+          return;
+        }
         if (numCtx !== undefined && options.retryStreamError) {
           res.end(`${JSON.stringify({ model: "m", message: { content: "partial" }, done: false })}\n${JSON.stringify({ error: "model runner has unexpectedly stopped" })}\n`);
           return;
@@ -136,7 +144,7 @@ describe("Ollama context size", () => {
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-    return { endpoint, chats, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
+    return { endpoint, chats, shows, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
   }
 
   it("parses Ollama's context overflow error", () => {
@@ -308,6 +316,41 @@ describe("Ollama context size", () => {
       await assert.rejects(llm.complete({ prompt: "big" }), /model runner has unexpectedly stopped/);
       await assert.rejects(llm.complete({ prompt: "big" }));
       assert.deepEqual(fake.chats.at(-2), {});
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("leaves a request that fits unchanged: no num_ctx and no model lookup", async () => {
+    const fake = await fakeOllama({ modelMax: 131072, limit: () => 65536 });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "fits" });
+      assert.equal((await llm.complete({ prompt: "big" })).text, "ok");
+      assert.deepEqual(fake.chats, [{}]);
+      assert.equal(fake.shows.length, 0);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("leaves room for the caller's maxTokens instead of the default reserve", async () => {
+    const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384 });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "budget" });
+      await llm.complete({ prompt: "big", maxTokens: 10000 });
+      assert.deepEqual(fake.chats.at(-1), { num_ctx: 51200 });
+      assert.equal(fake.shows.length, 1);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("refuses a redirect on the retry", async () => {
+    const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384, retryRedirect: true });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "moved" });
+      await assert.rejects(llm.complete({ prompt: "big" }), /answered with a redirect to another address/);
+      assert.equal(fake.chats.length, 2);
     } finally {
       await fake.close();
     }

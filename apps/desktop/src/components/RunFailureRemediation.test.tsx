@@ -59,3 +59,10 @@ it.each([
   expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
   expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
 });
+
+it("still matches a model that is not pulled", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: 'Ollama model "qwen3:8b" is not pulled. Run `ollama pull qwen3:8b`.' };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Model not pulled")).toBeInTheDocument();
+  expect(screen.queryByText("Ollama context too small")).not.toBeInTheDocument();
+});
