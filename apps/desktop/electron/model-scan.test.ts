@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,8 +22,9 @@ import { checkAzureOpenAI, checkLemonade, checkLmStudio, checkOllama, lemonadeSt
 import { installedOnDisk, scanProviderCheck, runScanCheck } from "./model-scan.js";
 import { AppStateStore } from "./state.js";
 import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
-import { assertProviderTestGuardActive, stubLoopbackConnectionRefused } from "../../../tests/provider-test-guard.mjs";
-import { fakeCli, fakeCliWithExit, onlyScanProviders } from "../tests/provider-cli-fixtures.js";
+import { writeNodeCliFixture } from "../../../tests/node-cli-fixture.mjs";
+import { assertProviderTestGuardActive, stubLoopbackConnectionRefused, waitForProviderFixtureSpawn } from "../../../tests/provider-test-guard.mjs";
+import { fakeCli, onlyScanProviders } from "../tests/provider-cli-fixtures.js";
 
 assertProviderTestGuardActive();
 
@@ -463,19 +465,46 @@ describe("review round 1 on PR #175", () => {
     }
   });
 
-  it("kills a CLI that does not answer when the check times out (finding 4)", { skip: process.platform === "win32", timeout: 10_000 }, async () => {
+  it("kills a CLI that does not answer when the check times out (finding 4)", { skip: process.platform === "win32" }, async (t) => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-scan-hang-"));
     try {
-      const { binaryPath, exit } = await fakeCliWithExit(dir, "claude", "exec /bin/sleep 30");
-      const [probe, exitSignal] = await Promise.all([
-        runScanCheck(
-          { providerId: "anthropic", name: "Claude Code", where: "hosted", target: "claude auth status", run: (signal) => scanProviderCheck(catalog("anthropic"), { signal, binaryPath }).then((summary) => scanProbeFromProvider(summary)) },
-          1500,
-        ),
-        exit,
+      const binaryPath = await writeNodeCliFixture(dir, "claude", `
+process.stdout.write("ready\\n");
+setInterval(() => {}, 1_000);
+`, "@anthropic-ai/claude-code/bin/claude.exe");
+      const spawn = waitForProviderFixtureSpawn(binaryPath);
+      const timeoutMs = 1_500;
+      t.mock.timers.enable({ apis: ["setTimeout"] });
+      const scan = runScanCheck({
+        providerId: "anthropic",
+        name: "Claude Code",
+        where: "hosted",
+        target: "claude --version",
+        run: async (signal) => scanProbeFromProvider(await scanProviderCheck(catalog("anthropic"), { signal, binaryPath })),
+      }, timeoutMs);
+      const child = await Promise.race([
+        spawn,
+        scan.then(() => assert.fail("The scan finished before spawning the fixture")),
       ]);
-      assert.equal(probe.state, "could-not-check");
-      assert.equal(exitSignal, "SIGKILL", "the hanging CLI must be killed");
+      const exit = once(child, "exit");
+      try {
+        assert.ok(child.stdout);
+        const [ready] = await Promise.race([
+          once(child.stdout, "data"),
+          exit.then(() => assert.fail("The fixture exited before reporting readiness")),
+        ]);
+        assert.equal(ready, "ready\n");
+        t.mock.timers.tick(timeoutMs);
+        const probe = await scan;
+        assert.equal(probe.state, "could-not-check");
+        assert.match(probe.facts[0] ?? "", /did not answer within 1\.5 seconds/);
+        const [exitCode, exitSignal] = await exit;
+        assert.equal(exitCode, null);
+        assert.equal(exitSignal, "SIGKILL", "the hanging CLI must be killed");
+      } finally {
+        if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+        await exit;
+      }
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

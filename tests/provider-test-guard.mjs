@@ -48,16 +48,13 @@ export function registerProviderFixtureDirectory(directory) {
   directories.add(realpathSync(directory));
 }
 
-export function waitForProviderFixtureExit(executable) {
+export function waitForProviderFixtureSpawn(executable) {
   assertProviderTestGuardActive();
-  assert.ok(isFixture(executable), "Register the provider fixture before watching its exit.");
+  assert.ok(isFixture(executable), "Register the provider fixture before watching it spawn.");
   const path = realpathSync(executable);
-  assert.ok(!fixtureSpawnObservers.has(path), "The fixture already has a pending exit watcher.");
-  return new Promise((resolve, reject) => {
-    fixtureSpawnObservers.set(path, (child) => {
-      child.once("exit", (_code, signal) => resolve(signal));
-      child.once("error", reject);
-    });
+  assert.ok(!fixtureSpawnObservers.has(path), "The fixture already has a pending spawn watcher.");
+  return new Promise((resolve) => {
+    fixtureSpawnObservers.set(path, resolve);
   });
 }
 
