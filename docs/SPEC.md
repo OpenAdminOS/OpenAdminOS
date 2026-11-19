@@ -464,7 +464,10 @@ operating system's resolver could answer with another machine: it is tried as
 127.0.0.1, then as `[::1]` when that refuses the connection, so an Ollama
 listening on IPv6 only still answers. An HTTPS endpoint named `localhost` is
 reached by address, so its certificate must cover the address. Any other host
-name is refused. Settings never runs Check for index and an index install at
+name is refused. Retrieval connects directly, with its own HTTP agent per request,
+never through the global fetch or HTTP agents, which send to an environment proxy
+when `NODE_USE_ENV_PROXY` is set: a loopback address missing from `NO_PROXY`
+would otherwise reach the proxy, question included. Settings never runs Check for index and an index install at
 once, so neither reply replaces the other's. A query vector is scaled before
 scoring, so a huge but finite one cannot overflow and rank every passage as 0. A connection reset reads as a failed request with its
 code, not as a stopped Ollama. A vector with an entry that is not a finite

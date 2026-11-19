@@ -22,6 +22,8 @@
 
   PR #206 review round 5 (2026-11-18). GPT-6.2-Sol on 8d776910, no blocking findings. Fixed: an `OLLAMA_HOST` of `[::ffff:127.0.0.1]`, which the endpoint rule accepts, was refused by retrieval, so an IPv4-mapped loopback address connects as its IPv4 literal (with a test); the timeout test now fires the budget only after the headers arrive and has its own deadline; the non-finite vector test sends 1e400, which parses as Infinity, instead of NaN, which JSON writes as null.
 
+  PR #206 review round 6 (2026-11-18). GPT-6.2-Sol on acfb2c52: one blocking finding, fixed with a test that fails without the fix. Retrieval used Electron's global fetch, which sends to an environment proxy when `NODE_USE_ENV_PROXY` is set; following a moved `OLLAMA_HOST` could pick a loopback address missing from `NO_PROXY`, so the question could reach an off-device proxy. Retrieval now uses `directFetch` (electron/retrieval/direct-fetch.ts, node:http with a fresh agent per request, no redirects followed, a budget that runs out mid-body ends the read with its reason); the test installs a stand-in proxy as the global fetch dispatcher and global agent and shows neither is used. Follow-up, not in this PR: the other requests to model servers on this device (the Ollama, LM Studio and Lemonade chat and checks in packages/runtime) still use the global fetch, so they follow `NODE_USE_ENV_PROXY` the same way; this predates the PR.
+
 - [x] Could not check row in Chat's model choice (branch `setup/could-not-check-row`, 2026-11-18). Request: the PR #191 follow-up. When a provider's check fails, Chat's model choice shows no row for LM Studio, Lemonade or Apple Intelligence, and Ollama shows "No model yet" instead of the failure.
 
   Merged as `6dc77828` on 2026-11-18.
