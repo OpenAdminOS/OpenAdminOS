@@ -410,6 +410,24 @@
     .clipnote summary { cursor: pointer; color: var(--color-text); font-size: var(--text-xs); }
     .clipnote ul { margin: 6px 0 0; padding-left: 16px; font-size: var(--text-xs); line-height: var(--lh-xs); }
     .composer { margin-top: 22px; display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 14px; border-radius: 14px; background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-border); color: var(--color-text-faint); }
+    .trv .anns { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+    @container (max-width: 520px) { .trv .anns { grid-column: 2; align-items: flex-start; flex-direction: row; flex-wrap: wrap; } }
+    .trv .d .flag { display: block; margin-top: 2px; color: var(--color-danger); }
+    .svcs { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 3px; font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text-muted); }
+    .svcs span { display: inline-flex; align-items: center; gap: 5px; }
+    .svcs span::before { content: ""; width: 6px; height: 6px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--color-text-faint); }
+    .svcs span[data-on]::before { background: var(--color-success); box-shadow: none; }
+    .svcs span[data-on] { color: var(--color-text-soft); }
+    .needs { list-style: none; margin: 8px 0 0; padding: 0; border-radius: var(--radius-md); box-shadow: inset 0 0 0 1px var(--color-border-soft); }
+    .needs li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; align-items: center; padding: 9px 12px; }
+    .needs li + li { border-top: 1px solid var(--color-border-soft); }
+    .needs .n { display: block; font-size: var(--text-sm); font-weight: 500; }
+    .needs .d { display: block; font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text-muted); }
+    .needs .st { font-size: var(--text-xs); white-space: nowrap; color: var(--color-text-soft); }
+    .needs li[data-state="missing"] .st { color: var(--color-danger); }
+    .needs li[data-state="missing"] .n { color: var(--color-text-muted); }
+    .missing { margin-top: 14px; }
+    .missing[hidden] { display: none; }
     .trvcap { font-size: var(--text-xs); color: var(--color-text-muted); margin: 0 0 8px; }
     .namerr { display: block; margin-top: 6px; font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-danger); }
     .namerr[hidden] { display: none; }
@@ -543,7 +561,7 @@
                 <div class="grant one"><span class="ic"><svg><use href="#i-book"/></svg></span><div><div class="nm">Microsoft Learn</div><div class="ds">Reference server at <span class="host">learn.microsoft.com</span>. Receives queries with recognized tenant data removed.</div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="true" aria-label="Use Microsoft Learn" data-host="learn.microsoft.com"></button></span></div>
                 <div class="grant one"><span class="ic"><svg><use href="#i-book"/></svg></span><div><div class="nm">Splashtop Docs</div><div class="ds">Reference server at <span class="host">support-splashtopbusiness.splashtop.com</span>. Not on your IT department's list, so it is off.</div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="false" disabled aria-disabled="true" aria-describedby="lock-mcp" aria-label="Use Splashtop Docs, set by IT" data-host="support-splashtopbusiness.splashtop.com"></button></span>
                   <span class="lockline" id="lock-mcp"><svg><use href="#i-lock"/></svg><span>Locked. Set by your IT department in policy.json, <code>allowedPublicReferences</code></span></span></div>
-                <div class="grant one"><span class="ic"><svg><use href="#i-plug"/></svg></span><div><div class="nm">Policy settings reference</div><div class="ds">Added by you on 12 November. Remote server at <span class="host">tools.contoso.example</span>. 4 of its 6 tools approved as read-only; the other 2 are never offered. Receives queries with recognized tenant data removed.</div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="true" aria-label="Use Policy settings reference" data-host="tools.contoso.example"></button></span></div>
+                <div class="grant one"><span class="ic"><svg><use href="#i-plug"/></svg></span><div><div class="nm">Policy settings reference</div><div class="ds">Added by you on 12 November. Remote server at <span class="host">tools.contoso.example</span>. 4 of its 6 tools approved as read-only; the other 2 cannot be approved and are never offered. Receives queries with recognized tenant data removed.</div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="true" aria-label="Use Policy settings reference" data-host="tools.contoso.example"></button></span></div>
                 <div class="grant one"><span class="ic"><svg><use href="#i-plug"/></svg></span><div><div class="nm">KQL reference</div><div class="ds">Reference server at <span class="host">kql.contoso.example</span>. Receives queries with recognized tenant data removed.</div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="true" aria-label="Use KQL reference" data-host="kql.contoso.example"></button></span></div>
                 <p class="limit"><svg><use href="#i-globe"/></svg><span>What a server receives: a query written from your question, with every value the app recognizes as tenant data removed. Text the app cannot recognize, such as an internal project name, can still reach the server. While a server is on, the status strip names its host; turn it off here to stop that.</span></p>
                 <div style="padding:10px 0 0;border-top:1px solid var(--color-border-soft)"><button class="bt secondary sm" type="button">Add a server by URL</button> <span class="xs muted" style="margin-left:8px">Only servers your IT department lists can be added.</span></div>
@@ -588,6 +606,50 @@
           </div>
         </div>
       </div>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:24px 0 8px">
+        <p class="trvcap" style="margin:0">The same grants in Contoso Retail, an organization where Entra is not connected</p>
+        <span class="seg" role="group" aria-label="Entra in Contoso Retail" id="entraseg">
+          <button type="button" data-entra="off" aria-pressed="true">Entra not connected</button>
+          <button type="button" data-entra="on" aria-pressed="false">Entra connected</button>
+        </span>
+      </div>
+      <div class="win">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="shell">
+          <aside class="side" data-side="settings"></aside>
+          <div class="appmain">
+            <div class="topbar" data-top="tools" data-org="contoso"></div>
+            <div class="page"><div class="page-in narrow">
+              <div class="page-head"><div><h1>Access</h1><p>A granted tool is offered only while the service it reads is connected in the active organization. Grants stay as you set them.</p></div></div>
+              <div class="grp">
+                <h3>Connectors <span>Contoso Retail</span></h3>
+                <div class="grant one"><span class="ic" data-s="intune">M</span><div><div class="nm">Microsoft 365</div><div class="ds">Read granted, with your sign-in</div><div class="svcs" id="svcs"><span data-on>Intune connected</span><span id="svc-entra">Entra not connected</span><span>Defender not connected</span></div></div><span class="tg"><span class="lab">Read</span><button class="sw" role="switch" aria-checked="true" aria-label="Read Microsoft 365 in Contoso Retail"></button></span></div>
+              </div>
+              <div class="grp">
+                <h3>Skills in this organization</h3>
+                <ul class="needs" id="needs">
+                  <li data-state="missing" data-needs="entra"><span><span class="n">Stale device triage</span><span class="d">graph_get on managedDevices, signIns and windowsAutopilotDeviceIdentities. Needs Intune and Entra.</span></span><span class="st"></span></li>
+                  <li data-state="missing" data-needs="entra"><span><span class="n">Conditional Access gaps</span><span class="d">graph_get on conditionalAccessPolicies. Needs Entra.</span></span><span class="st"></span></li>
+                  <li data-state="ok"><span><span class="n">Morning compliance check</span><span class="d">graph_get on managedDevices and deviceCompliancePolicies. Needs Intune.</span></span><span class="st"></span></li>
+                </ul>
+                <div class="block missing" data-t="blocked" id="missing">
+                  <span class="glyph" data-t="blocked"><svg><use href="#i-plug"/></svg></span>
+                  <div>
+                    <h3>2 granted skills are not offered in Contoso Retail: Entra is not connected here</h3>
+                    <p>Stale device triage reads Entra sign-ins, and Conditional Access gaps reads Conditional Access policies. Entra is not connected in Contoso Retail, so <span data-name>Nova</span> does not offer these skills here, and a call to an Entra resource from any skill, check or Chat is refused. Your grants stay on, and the skills are offered again once Entra is connected, or in an organization where it is.</p>
+                    <div class="acts"><button class="bt primary" type="button" id="connect-entra">Connect Entra in Contoso Retail</button><button class="bt secondary" type="button">Switch organization</button></div>
+                  </div>
+                </div>
+                <p class="xs muted" id="entra-ok" hidden style="margin-top:10px">Entra is connected in Contoso Retail. Every granted skill in this organization is offered.</p>
+              </div>
+            </div></div>
+          </div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>A grant is not enough on its own. A tool, skill or check is offered, and a call goes through, only while its grant is on and the service it reads is connected in the active organization, as the hard rule on organizations requires. Both are checked when tools are offered and again at the call.</li>
+        <li>A missing service is shown where the grant lives, with the two ways out: connect the service in this organization, or switch to one where it is connected. The grant itself is never turned off by it. Use the switch above the frame to see the state after Entra is connected.</li>
+      </ul>
       <div class="two" style="margin-top:16px">
         <div style="display:grid;gap:8px;align-content:start">
           <p class="trvcap">Add a server by URL: the tool review as it opens, nothing approved</p>
@@ -595,7 +657,7 @@
             <div class="dialog" role="dialog" aria-labelledby="tr-t-open" style="width:100%;box-shadow:none;border-radius:12px">
               <header><span class="xs muted">Step 2 of 2, tools.contoso.example</span><h2 id="tr-t-open">Which tools may <span data-name>Nova</span> use?</h2></header>
               <div class="body">
-                <p>The server offers 6 tools, and none is approved yet. Approve only tools that read. The server's own read-only label is shown, but it does not approve a tool: a tool you leave unapproved is never offered, and every call is checked against this list, including calls from skills and scheduled checks.</p>
+                <p>The server offers 6 tools, and none is approved yet. Approve only tools that read. The server's own read-only label is shown, but it does not approve a tool, and a tool whose description says it saves, changes, sends or deletes cannot be approved at all. A tool you leave unapproved is never offered, and every call is checked against this list, including calls from skills and scheduled checks.</p>
                 <ul class="trv" data-trv="open"></ul>
               </div>
               <footer><span class="xs muted trv-count" aria-live="polite" style="margin-right:auto"></span><button class="bt ghost" type="button">Back</button><button class="bt primary trv-ok" type="button"></button></footer>
@@ -619,6 +681,7 @@
       <ul class="notes">
         <li>Decided: in the first version a user-added server offers only the tools the admin approves as read-only at add time. The review opens with every tool unchecked, so nothing is approved by default, and Add server stays disabled until at least one tool is approved. The tool's read-only label from the server is shown in each row but never approves a tool on its own.</li>
         <li>A tool the server labels as a change is disabled from the start and cannot be approved at all; its row says why. Both frames are live: check and uncheck tools to see the count and the button follow.</li>
+        <li>Decided in round 4: approval needs a read-only label and no documented write behavior. The app flags a tool whose name or description describes saving, changing, sending or deleting, such as <code>export_report</code>, which saves a report on the server; a flagged tool is disabled in every review state with the reason under its name, whatever its read-only label. The flag is a check the app makes, not a promise about the server: a write the description does not mention cannot be detected, which is why approval stays a human decision.</li>
         <li>A tool that is not approved is never offered to the model. The approval is checked again at every call, whether it comes from Chat, a skill or a scheduled check, so a skill that names <code>mcp__policy-settings__export_report</code> cannot use it.</li>
         <li>When the server later adds or relabels a tool, the new tool stays off until the admin reviews it here. The review can be reopened from the server's row in Access; approving a tool later is the same step.</li>
       </ul>
@@ -726,11 +789,11 @@ identities with graph_get. Nothing else.
             <div class="tools">
               <code>graph_get</code><span class="ok">Granted, reads only</span>
               <code>find-inactive-devices</code><span class="ok">Agent, granted</span>
-              <code>mcp__policy-settings__export_report</code><span class="off">Not approved on its server, never offered</span>
+              <code>mcp__policy-settings__export_report</code><span class="off">Saves on its server, cannot be approved, never offered</span>
               <code>servicenow_send</code><span class="off">A send, never available to skills</span>
               <code>graph_post</code><span class="no">A change, removed</span>
             </div>
-            <p class="why" style="margin-top:8px">The skill is kept. <code>servicenow_send</code> and <code>mcp__policy-settings__export_report</code> stay in the file so an export round-trips, but this skill cannot use them: a send is never available to skills, and an MCP tool is offered only after its approval on the server.</p>
+            <p class="why" style="margin-top:8px">The skill is kept. <code>servicenow_send</code> and <code>mcp__policy-settings__export_report</code> stay in the file so an export round-trips, but this skill cannot use them: a send is never available to skills, and an MCP tool that saves on its server can never be approved there.</p>
           </div>
           <div class="acts"><button class="bt primary sm" type="button">Import without graph_post</button><button class="bt ghost sm" type="button">Cancel</button><span class="r">Saved for this device</span></div>
         </div>
@@ -1033,7 +1096,7 @@ identities with graph_get. Nothing else.
       document.getElementById("mcpcount").textContent = `${hosts.length} of ${sw.length} on`;
     }
     document.querySelectorAll("[data-top]").forEach((el) => {
-      const [ini, org] = el.dataset.org === "fabrikam" ? ["FA", "Fabrikam"] : ["WB", "Woodgrove Bank"];
+      const [ini, org] = el.dataset.org === "fabrikam" ? ["FA", "Fabrikam"] : el.dataset.org === "contoso" ? ["CR", "Contoso Retail"] : ["WB", "Woodgrove Bank"];
       el.innerHTML = `<button class="orgchip" type="button"><span class="av">${ini}</span>${org}<svg class="chev"><use href="#i-chev"/></svg></button>`;
     });
     document.addEventListener("click", (e) => {
@@ -1126,17 +1189,20 @@ identities with graph_get. Nothing else.
       ["get_setting", "Returns one setting with its allowed values", "ro"],
       ["list_baselines", "Lists security baseline versions", "ro"],
       ["compare_baselines", "Compares two baseline versions", "ro"],
-      ["export_report", "Saves a report on the server and returns a link. Labelled read-only, but it stores what it is sent.", "ro"],
+      ["export_report", "Saves a report on the server and returns a link.", "writes"],
       ["apply_setting", "Changes a setting. The server says so, and a tool that changes data cannot be approved; changes go through agents and diff confirmation.", "change"],
     ];
     const APPROVED_AFTER = ["search_settings", "get_setting", "list_baselines", "compare_baselines"];
     document.querySelectorAll("[data-trv]").forEach((trv) => {
       const key = trv.dataset.trv;
       trv.innerHTML = TOOLS.map(([t, d, kind]) => {
-        const change = kind === "change";
-        const why = `trv-why-${key}`;
+        // A tool labelled as a change, or one whose description documents a write, cannot be approved.
+        const change = kind === "change", writes = kind === "writes", off = change || writes;
+        const why = `trv-why-${key}-${t}`;
         const on = key === "after" && APPROVED_AFTER.includes(t);
-        return `<li ${change ? "data-off" : ""}><label><input type="checkbox" ${on ? "checked" : ""} ${change ? `disabled aria-disabled="true" aria-describedby="${why}"` : ""}><span><code>mcp__policy-settings__${t}</code><span class="d" ${change ? `id="${why}"` : ""}>${d}</span></span><span class="ann${change ? " warn" : ""}">${change ? "Labelled as a change" : "Labelled read-only"}</span></label></li>`;
+        const flag = writes ? `<span class="flag">Its description says it saves on the server, so it cannot be approved, whatever its read-only label.</span>` : "";
+        const anns = writes ? `<span class="anns"><span class="ann">Labelled read-only</span><span class="ann warn">Describes saving</span></span>` : `<span class="ann${change ? " warn" : ""}">${change ? "Labelled as a change" : "Labelled read-only"}</span>`;
+        return `<li ${off ? "data-off" : ""}><label><input type="checkbox" ${on ? "checked" : ""} ${off ? `disabled aria-disabled="true" aria-describedby="${why}"` : ""}><span><code>mcp__policy-settings__${t}</code><span class="d" ${off ? `id="${why}"` : ""}>${d}${flag}</span></span>${anns}</label></li>`;
       }).join("");
       const dialog = trv.closest(".dialog");
       const sync = () => {
@@ -1152,7 +1218,24 @@ identities with graph_get. Nothing else.
       sync();
     });
     // The second frame describes the state after selection, so its intro says so.
-    document.querySelector('[data-trv="after"]').closest(".body").querySelector("p").textContent = "You approved the four tools that only read. export_report stays unapproved because it stores what it is sent on the server, and apply_setting cannot be approved. Only approved tools are offered, and every call is checked against this list, including calls from skills and scheduled checks.";
+    document.querySelector('[data-trv="after"]').closest(".body").querySelector("p").textContent = "You approved the four tools that only read. export_report and apply_setting cannot be approved: one says in its description that it saves on the server, the other is labelled as a change. Only approved tools are offered, and every call is checked against this list, including calls from skills and scheduled checks.";
+
+    // Access in an organization where a service is missing: a granted skill is offered only while its services are connected.
+    function setEntra(on) {
+      document.querySelectorAll("#entraseg button").forEach((b) => b.setAttribute("aria-pressed", String((b.dataset.entra === "on") === on)));
+      const svc = document.getElementById("svc-entra");
+      svc.textContent = on ? "Entra connected" : "Entra not connected";
+      on ? svc.setAttribute("data-on", "") : svc.removeAttribute("data-on");
+      document.querySelectorAll("#needs li").forEach((li) => {
+        if (li.dataset.needs) li.dataset.state = on ? "ok" : "missing";
+        li.querySelector(".st").textContent = li.dataset.state === "ok" ? "Granted, offered" : "Granted, not offered here";
+      });
+      document.getElementById("missing").hidden = on;
+      document.getElementById("entra-ok").hidden = !on;
+    }
+    document.getElementById("entraseg").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setEntra(b.dataset.entra === "on"); });
+    document.getElementById("connect-entra").addEventListener("click", () => setEntra(true));
+    setEntra(false);
 
     // Skill detail tabs
     document.querySelectorAll(".tabs").forEach((t) => t.addEventListener("click", (e) => {
