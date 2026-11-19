@@ -151,6 +151,30 @@ built on top of them are planned separately.
   service with its recovery (connect the service, or switch organization), and
   the grant itself stays on.
 
+**Review findings adopted (2026-11-19, round 5 of the design review)**
+- Hosted voice popover: the live voice strip in Settings opens a popover built
+  from the current rules by the same function as every other strip. A voice
+  strip names a blocked class as withheld context ("security context
+  withheld"), not as blocked. The withheld notice and its recovery come from
+  the decision on one context transfer (what it carried, which rule withheld
+  it), never from the configured rules alone, and the recovery follows the
+  same test as a blocked prompt.
+- MCP tool definitions: an approval belongs to the exact definition the admin
+  saw. Any change to an approved tool's description, input schema,
+  annotations or name under the same id invalidates the approval before the
+  tool can be offered or called; the tool returns to review, and a change that
+  now describes saving, changing, sending or deleting makes it unapprovable.
+- Access: a granted skill is offered only when every grant it uses (for
+  example Microsoft 365 Read) is on and every service it reads is connected in
+  the active organization. The recovery names which one needs attention: turn
+  the grant on, or connect the service.
+- Remote endpoints: Ollama or LM Studio at an address on another machine is
+  Hosted, with the destination host named in the status strip, Connections
+  and Chat.
+- Local masking: when a Local rule is Mask, a local answer shows the masked
+  value counts with copy that says masking happened on this device before the
+  local model saw the data.
+
 ## Why
 
 Today the choice is binary. A local model keeps tenant data on the device, a
@@ -319,7 +343,11 @@ the IT policy file.
 **Acceptance criteria:**
 1. Status strip, Connections and Chat agree on the tier for all eight providers
    (renderer test).
-2. Ollama or LM Studio on a remote endpoint reports `hosted`.
+2. Ollama or LM Studio on a remote endpoint reports `hosted`, and the status
+   strip, Connections and Chat name the destination host in the same words
+   (mockup 34, B, "Ollama on another machine"). An address counts as this
+   device only when it resolves to this machine: localhost, a loopback
+   address or a local socket.
 
 ### Phase A3: Routing and blocked states
 
@@ -334,7 +362,12 @@ the IT policy file.
       rule blocks a context transfer, the session continues without that
       context and the voice model and the transcript say what was withheld.
       The hosted voice strip and its popover are derived from the live rules
-      like the other strips. What the admin says aloud goes to the hosted
+      like the other strips, and the live strip in Settings opens that
+      popover; a blocked class reads as withheld context ("security context
+      withheld"). The withheld notice and its recovery come from the decision
+      on the transfer itself, what it carried and which rule withheld it, and
+      the recovery follows the same test as a blocked prompt (mockup 34, A
+      and B). What the admin says aloud goes to the hosted
       voice provider as audio and is not gated (proposed 2026-11-19, pending
       confirmation); the hosted voice strip ("hears what you say"), the Data
       policy settings and the docs say so. Voice on this device keeps
@@ -365,6 +398,10 @@ the IT policy file.
    continues and says what was withheld. The docs and the hosted voice strip
    state that spoken input is not gated in hosted voice; a renderer test
    asserts that the strip copy is derived from the rules.
+   With Security on Hosted set to Block, a transfer of Conditional Access
+   policies is withheld, the voice strip reads "security context withheld",
+   and the popover names that transfer and offers a local model only when no
+   Local rule blocks a class it carried (renderer test).
 3. A test proves text from voice on this device goes through the request scan
    before a hosted reasoning call.
 4. A blocked prompt shows a designed error that names the class and offers
@@ -399,6 +436,10 @@ the IT policy file.
 4. Follow-up questions in one conversation keep the same token for the same value.
 5. A ledger value the admin types into a question is masked like the same value
    from a response.
+6. With a Local rule set to Mask, a local call is masked on this device before
+   the local model sees the request, and the answer shows the masked value
+   counts with copy that says so (mockup 34, C, second frame). With no Local
+   rule set to Mask, a local answer shows no line.
 
 ### Phase A5: Audit and visibility (after the sandbox stack merges)
 
@@ -450,11 +491,13 @@ the IT policy file.
       its lock reason when IT turned a skill off.
 - [ ] The contract: a tool is offered and callable only while its grant is on
       and the service it uses is connected in the active organization. A
-      granted skill or tool that needs a missing service (for example a device
+      granted skill is offered only when every grant it uses (for example
+      Microsoft 365 Read) is on and every service it reads is connected. A
+      skill or tool that needs a missing service (for example a device
       triage skill with a Graph grant in an organization where Entra is not
-      connected) is not offered there, and Access shows the missing service
-      with its recovery: connect the service, or switch organization. The
-      grant stays on.
+      connected) is not offered there. Access names each cause with its own
+      recovery: turn the grant on, or connect the service (or switch
+      organization). A missing service never turns a grant off.
 
 **Acceptance criteria:**
 1. A server or connector without a grant is neither offered nor callable.
@@ -462,6 +505,10 @@ the IT policy file.
 3. A granted tool whose service is not connected in the active organization
    is neither offered nor callable, from Chat, a skill or a scheduled check
    (test), and Access shows the designed missing-service state.
+4. A skill whose service is connected but whose grant (Microsoft 365 Read) is
+   off is not offered, and Access offers Turn on Microsoft 365 Read, not a
+   service connection; with both missing, both recoveries are shown (test,
+   mockup 35, B).
 
 ### Phase B4: Skills
 
@@ -503,6 +550,13 @@ the IT policy file.
       approval is enforced at every call, including calls from skills and
       scheduled checks. A tool that is not approved, or added by the server
       later and not yet reviewed, is never offered.
+- [ ] An approval belongs to the exact definition the admin approved. Any
+      change to an approved tool's definition (description, input schema,
+      annotations, or name under the same id) invalidates its approval before
+      the tool can be offered or called: the tool returns to review,
+      unchecked, with the old and new definition side by side, and a change
+      that now describes saving, changing, sending or deleting makes it
+      unapprovable (mockup 35, B, "Review 3 changed tools").
 - [ ] Local stdio servers are out of scope for the first version
       (`TODO(ugur)`: they run code on the device).
 
@@ -518,6 +572,12 @@ the IT policy file.
 5. A tool annotated read-only whose description says it saves on the server
    (`export_report`) is flagged and cannot be approved, in the first review
    and when the review is reopened (test).
+6. Regression test: an approved read tool (`get_setting`) whose description
+   changes under the same id is neither offered nor callable, from Chat, a
+   skill or a scheduled check, until it is approved again; the same holds for
+   a change in its input schema, annotations or name. When the changed
+   description says it saves on the server (`compare_baselines`), the tool
+   is flagged and cannot be approved again.
 
 ### Phase B6: Learning
 
