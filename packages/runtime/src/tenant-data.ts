@@ -42,6 +42,7 @@ export function withTenantDataOutputFilter(base: RunLlmApi): RunLlmApi {
     get available() { return base.available; },
     get defaultModel() { return base.defaultModel; },
     get streamsIncrementally() { return base.streamsIncrementally; },
+    ...(base.contextWindow ? { contextWindow: (model?: string) => base.contextWindow!(model) } : {}),
     async complete(options) {
       const result = await base.complete(options);
       return { ...result, text: stripTenantDataFences(result.text) };

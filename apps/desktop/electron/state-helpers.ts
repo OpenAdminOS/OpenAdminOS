@@ -1375,6 +1375,10 @@ export function withSelfTrainingOverlay(base: RunLlmApi, overlay: string): RunLl
     get defaultModel() {
       return base.defaultModel;
     },
+    get streamsIncrementally() {
+      return base.streamsIncrementally;
+    },
+    ...(base.contextWindow ? { contextWindow: (model?: string) => base.contextWindow!(model) } : {}),
     complete: (options) =>
       base.complete({
         ...options,

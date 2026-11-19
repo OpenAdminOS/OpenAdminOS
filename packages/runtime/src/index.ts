@@ -39,7 +39,18 @@ import { withTenantDataInstructions, withTenantDataOutputFilter } from "./tenant
 export { TENANT_DATA_INSTRUCTIONS, fenceTenantData, stripTenantDataFences,
   withTenantDataInstructions, withTenantDataOutputFilter } from "./tenant-data.js";
 import { accumulateRunUsage } from "./run-usage.js";
-import { graphAccessDenialFromError } from "@openadminos/agent-sdk";
+import { contextTooSmallFromError, graphAccessDenialFromError } from "@openadminos/agent-sdk";
+import { assertPromptFits, resolveContextWindow } from "./prompt-fit.js";
+export {
+  assertPromptFits,
+  checkPromptFit,
+  DEFAULT_ANSWER_RESERVE_TOKENS,
+  estimateTokens,
+  resolveContextWindow,
+  type PromptFit,
+  type PromptFitInput,
+} from "./prompt-fit.js";
+export { parseOllamaLoadedContext, parseOllamaShow, readOllamaContextWindow } from "./ollama-context.js";
 
 import { createOllamaLlm, noopLlm } from "./llm-ollama.js";
 import { createCodexLlm, probeCodexLlm } from "./llm-codex.js";
@@ -861,9 +872,22 @@ function wrapLlmWithThinking(base: RunLlmApi, hooks: ThinkingHooks, signal?: Abo
     }
   };
 
+  // One lookup per model and run: map steps call the model many times.
+  const windows = new Map<string, Promise<number | undefined>>();
+  const contextWindow = (model?: string) => {
+    const key = model ?? "";
+    let window = windows.get(key);
+    if (!window) {
+      window = resolveContextWindow(base, model);
+      windows.set(key, window);
+    }
+    return window;
+  };
+
   return {
     available: base.available,
     defaultModel: base.defaultModel,
+    contextWindow,
     async complete(options) {
       guardAvailable();
       let last: LlmStreamChunk | undefined;
@@ -883,6 +907,18 @@ function wrapLlmWithThinking(base: RunLlmApi, hooks: ThinkingHooks, signal?: Abo
       guardAvailable();
       signal?.throwIfAborted();
       options = { ...options, system: withTenantDataInstructions(options.system), signal: signal && options.signal ? AbortSignal.any([signal, options.signal]) : signal ?? options.signal };
+      // Check the size before anything is sent. A model whose window is
+      // unknown (every hosted provider) is never blocked here.
+      const model = options.model ?? runModel ?? base.defaultModel;
+      const window = await contextWindow(model);
+      signal?.throwIfAborted();
+      assertPromptFits({
+        system: options.system,
+        prompt: options.prompt,
+        ...(options.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
+        ...(window !== undefined ? { contextWindow: window } : {}),
+        ...(model ? { model } : {}),
+      });
       const stepId = hooks.getCurrentStepId();
       let usageRecorded = false;
       const reset = () => {
@@ -943,6 +979,7 @@ async function failPhase(
   const finishedAt = new Date().toISOString();
   const message = error instanceof Error ? error.message : String(error);
   const accessDenial = graphAccessDenialFromError(error);
+  const failureReason = contextTooSmallFromError(error);
   const failed: RunRecord = {
     ...working,
     status: "failed",
@@ -950,6 +987,7 @@ async function failPhase(
     summary: `${input.agent.name} failed: ${message}`,
     error: message,
     ...(accessDenial ? { accessDenial } : {}),
+    ...(failureReason ? { failureReason } : {}),
     logs: [
       ...working.logs,
       buildLog(working.id, "error", `Agent failed: ${message}`, finishedAt),
