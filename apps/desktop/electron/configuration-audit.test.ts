@@ -115,6 +115,8 @@ async function makeFixture(initial: Record<string, unknown> = {}, options: { mcp
       } as never;
     },
   });
+  // The audit fixtures exercise configuration writes independently of license discovery.
+  Object.defineProperty(store, "backgroundTierProbe", { value: async () => undefined });
   return {
     store,
     statePath,
@@ -129,12 +131,6 @@ async function makeFixture(initial: Record<string, unknown> = {}, options: { mcp
       await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     },
   };
-}
-
-async function waitForLicenseCheck(store: AppStateStore) {
-  // Wait for the background license check to finish before adding access.
-  for (let index = 0; index < 500 && (await store.getAppState()).tenantChecks?.length; index += 1)
-    await new Promise((resolve) => setTimeout(resolve, 10));
 }
 
 /** Two configuration changes, then a prune that removes the older of two runs. */
@@ -183,7 +179,6 @@ describe("configuration audit events", () => {
       });
       assert.deepEqual(connected[2]!.details, { noOrganization: false, previousNoOrganization: true });
 
-      await waitForLicenseCheck(fixture.store);
       await fixture.store.addTenantAccess(contoso.id, ["defender.incidents"]);
       const added = (await fixture.recorded()).slice(connected.length);
       assert.deepEqual(typesOf(added), ["microsoft365.access-added"]);
@@ -211,7 +206,6 @@ describe("configuration audit events", () => {
     const fixture = await makeFixture();
     try {
       await fixture.store.connectTenant();
-      await waitForLicenseCheck(fixture.store);
       await fixture.store.addTenantAccess(contoso.id, ["defender.incidents"]);
       const raw = JSON.stringify(await fixture.recorded());
       assert.ok(raw.length > 2);
