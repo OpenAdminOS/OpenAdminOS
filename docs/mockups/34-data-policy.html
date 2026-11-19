@@ -434,6 +434,37 @@
     .uf .held { grid-column: 1 / -1; font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text-muted); }
     .uf .held:empty { display: none; }
 
+    /* ---------- Round 6: live voice popover, transfers, remote endpoints, local masking ---------- */
+    .voicerow .vlive { position: relative; }
+    .voicerow .vlive .boundary { cursor: pointer; }
+    .voicerow .vlive .pop.floating { left: 0; right: auto; top: auto; bottom: calc(100% + 6px); width: min(440px, 100%); max-height: 520px; overflow-y: auto; overscroll-behavior: contain; }
+    .pop dl.tx dt { display: flex; gap: 8px; min-width: 0; }
+    .pop dl.tx .tt { color: var(--color-text-muted); font-variant-numeric: tabular-nums; flex: none; }
+    .withheld .rec { display: block; margin-top: 8px; color: var(--color-text-soft); }
+    .withheld .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+    .prov { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 14px 16px; border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-border); }
+    .prov + .prov { margin-top: 10px; }
+    .prov .ic { width: 36px; height: 36px; border-radius: 9px; display: grid; place-items: center; font-size: var(--text-xs); font-weight: 600; background: var(--color-bg-elevated); box-shadow: inset 0 0 0 1px var(--color-border); }
+    .prov .nm { font-weight: 500; }
+    .prov .ds { font-size: var(--text-sm); line-height: var(--lh-sm); color: var(--color-text-soft); margin-top: 2px; }
+    .prov .ds code { display: block; font-size: 12px; overflow-wrap: anywhere; }
+    .prov .tierchip { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: 999px; font-size: var(--text-xs); white-space: nowrap; }
+    .prov .tierchip[data-where="hosted"] { color: var(--color-warning); background: var(--color-warning-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-warning) 35%, transparent); }
+    .prov .tierchip[data-where="local"] { color: var(--color-success); box-shadow: inset 0 0 0 1px var(--color-border); }
+    .prov .tierchip svg { width: 12px; height: 12px; }
+    .prov .hostline { grid-column: 2 / -1; display: flex; gap: 8px; align-items: flex-start; font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text); padding: 8px 10px; border-radius: var(--radius-md); background: var(--color-warning-soft); }
+    .prov .hostline svg { width: 13px; height: 13px; flex: none; margin-top: 2px; color: var(--color-warning); }
+    @container (max-width: 560px) { .prov { grid-template-columns: 36px minmax(0, 1fr); } .prov .tierchip { grid-column: 2; justify-self: start; } }
+    .remote2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+    @container (max-width: 720px) { .remote2 { grid-template-columns: 1fr; } }
+    .remote2 h3 { margin: 0 0 10px; font-size: var(--text-sm); font-weight: 500; color: var(--color-text-soft); }
+    .remote2 .chat { padding: 0; max-width: none; }
+    .remote2 .ans { margin-top: 12px; }
+    .remote2 .ans .body { font-size: 15px; line-height: 24px; }
+    .boundary[data-where="local"] .mask { color: var(--color-text-soft); }
+    .composer .r[data-where="local"] { color: var(--color-success); }
+    .masknote[data-where="local"] { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-success) 35%, var(--color-border)); }
+
     /* ---------- Open questions ---------- */
     .qs { margin: 0; padding-left: 20px; max-width: 88ch; }
     .qs li { padding: 7px 0; }
@@ -523,9 +554,9 @@
                   <div class="matrix" id="matrix" role="table" aria-label="Data policy rules">
                     <div class="mrow head" role="row">
                       <div class="xs muted" role="columnheader">Data class</div>
-                      <div class="tier" data-tier="local" role="columnheader"><div class="n"><span class="pip" style="color:var(--color-success)"></span>Local</div><div class="w">On this device. Ollama, LM Studio, Lemonade</div></div>
+                      <div class="tier" data-tier="local" role="columnheader"><div class="n"><span class="pip" style="color:var(--color-success)"></span>Local</div><div class="w">On this device: Ollama, LM Studio or Lemonade at an address on this device</div></div>
                       <div class="tier" data-tier="confidential" role="columnheader"><div class="n"><svg width="12" height="12"><use href="#i-lock"/></svg>Confidential</div><div class="w">Attested enclave. No provider qualifies yet</div></div>
-                      <div class="tier" data-tier="hosted" role="columnheader"><div class="n"><svg width="13" height="13"><use href="#i-cloud"/></svg>Hosted</div><div class="w">Claude Code, Codex, Copilot, Azure OpenAI and others</div></div>
+                      <div class="tier" data-tier="hosted" role="columnheader"><div class="n"><svg width="13" height="13"><use href="#i-cloud"/></svg>Hosted</div><div class="w">Claude Code, Codex, Copilot, Azure OpenAI and others, and Ollama or LM Studio on another machine</div></div>
                     </div>
                     <!-- rows are rendered by the script from RULES so the cells, the sample line and the strip agree -->
                   </div>
@@ -560,7 +591,7 @@
         <li>Decided: placeholders are typed, numbered brackets, as the sample line shows: <code>[USER_1]</code>, <code>[DEVICE_1]</code>, and <code>[CREDENTIAL]</code> for every credential.</li>
         <li>Loosening a rule (Block to Mask or Allow, Mask to Allow, on any tier) opens a dialog that names what will leave the device, and the rule changes only after the admin accepts. Tightening applies at once. Reset to defaults applies nothing while it would loosen any rule: the dialog lists the looser rules with what leaves, then the stricter ones, and all of them apply together only after the admin accepts. Try it in the matrix; H shows the dialog.</li>
         <li>The strip in this frame is computed from the effective rules, in both its long and its short form, and pressing it opens the popover from B with the same rules. Block Activity on Hosted and it reads "activity blocked" next to the masked classes. Block Credential on Hosted and "credentials blocked" joins the list and the count. The long form is used while it fits the space next to the organization; when it would be cut, the strip switches to the count ("3 masked, 2 blocked"), so no state clips in a 1280 px window. The preview line follows the same rules.</li>
-        <li>Proposed 2026-11-19, pending the maintainer's confirmation: the voice line under the matrix states the boundary of hosted voice. What the admin says aloud goes to the hosted voice provider as audio and is not checked by data policy. Tenant data the app sends to the voice model as context follows these rules class by class, like any hosted call, and the voice strip under the line is drawn from them. Voice on this device is the way to keep spoken words under data policy: they are transcribed on this device and the text goes through the same request scan as a typed question before any hosted reasoning call.</li>
+        <li>Proposed 2026-11-19, pending the maintainer's confirmation: the voice line under the matrix states the boundary of hosted voice. What the admin says aloud goes to the hosted voice provider as audio and is not checked by data policy. Tenant data the app sends to the voice model as context follows these rules class by class, like any hosted call, and the voice strip under the line is drawn from them. Pressing it opens the voice popover from B, built from these rules and the context transfers of the current call: set Security on Hosted to Block and the strip reads "security context withheld", while the popover names the Conditional Access transfer it withheld at 09:43 and offers the recovery that works. Voice on this device is the way to keep spoken words under data policy: they are transcribed on this device and the text goes through the same request scan as a typed question before any hosted reasoning call.</li>
         <li>Changing Security on Hosted asks first like any loosening, and the dialog is specific to security objects: it names what masking replaces (policy names, named locations, IP ranges, excluded users and groups, role names) and says that setting values go to the hosted model in clear text either way. A reset that loosens Security shows the same words.</li>
         <li>Below 640 px of content width each row stacks its three cells under the class name, each with its tier label.</li>
       </ul>
@@ -580,15 +611,21 @@
         <div><span class="cap">Same, narrow window</span><span data-strip="credblock" data-form="short"></span></div>
         <div><span class="cap">Hosted, only credentials masked</span><span data-strip="clear" data-form="full"></span></div>
         <div><span class="cap">Confidential, after attestation</span><span class="boundary" data-where="confidential"><svg aria-hidden="true"><use href="#i-lock"/></svg>Confidential · attested enclave · leaves this device ·<span class="mask"><span class="hx"></span>credentials masked</span></span></div>
-        <div><span class="cap">Hosted voice, during a call</span><span data-strip="defaults" data-form="full" data-label="Hosted voice · OpenAI · hears what you say"></span></div>
-        <div><span class="cap">Hosted voice, a class blocked</span><span data-strip="blocked" data-form="full" data-label="Hosted voice · OpenAI · hears what you say"></span></div>
+        <div><span class="cap">Ollama on another machine</span><span data-strip="defaults" data-form="full" data-label="Hosted · Ollama on gpu-01.woodgrove.example"></span></div>
+        <div><span class="cap">Hosted voice, during a call</span><span data-strip="defaults" data-form="full" data-voice data-label="Hosted voice · OpenAI · hears what you say"></span></div>
+        <div><span class="cap">Hosted voice, Security on Hosted is Block</span><span data-strip="secblock" data-form="full" data-voice data-label="Hosted voice · OpenAI · hears what you say"></span></div>
+        <div><span class="cap">Same, narrow window</span><span data-strip="secblock" data-form="short" data-voice data-label="Hosted voice · OpenAI · hears what you say"></span></div>
         <div><span class="cap">Voice on this device, hosted reasoning</span><span data-strip="defaults" data-form="full" data-label="Voice on this device · Claude Code"></span></div>
       </div>
       <div class="two" style="margin-top:16px">
         <div style="display:grid;gap:12px">
           <div class="pop" role="dialog" aria-label="Where data goes" data-pop="defaults"></div>
+          <p class="xs muted" style="margin:4px 0 -4px">Hosted voice with the defaults</p>
           <div class="pop" role="dialog" aria-label="Where voice goes" data-voicepop="defaults"></div>
-          <div class="pop" role="dialog" aria-label="Where voice goes, context withheld" data-voicepop="blocked"></div>
+          <p class="xs muted" style="margin:4px 0 -4px">Security on Hosted is Block</p>
+          <div class="pop" role="dialog" aria-label="Where voice goes, security context withheld" data-voicepop="secblock"></div>
+          <p class="xs muted" style="margin:4px 0 -4px">Security is Block on Hosted and on Local</p>
+          <div class="pop" role="dialog" aria-label="Where voice goes, security context withheld on every tier" data-voicepop="secboth"></div>
         </div>
       <ul class="notes" style="margin-top:0">
         <li>Clicking the strip opens the popover on the left. It is built from the effective rules by the same function as the strip, so it lists what each class does now, with a lock where IT set the rule. Try it on the strip in A after changing a cell. Public data is not amber: it came from outside the tenant.</li>
@@ -597,11 +634,66 @@
         <li>"Only credentials masked" names the effective policy: every class but credentials is allowed on hosted. It is the only hosted strip without a hatch, so a policy that hides almost nothing looks different from one that hides names and devices. The words say what is still masked, since recognized credentials never reach a hosted model in clear text.</li>
         <li>The Confidential strip appears only once a provider has passed attestation (Track C), and until then no frame in the app shows it. It still says "leaves this device" in words: an attested enclave is not this device, and the admin should never read the lock as "local". It is outlined in amber like hosted, without the fill.</li>
         <li>Proposed 2026-11-19, pending the maintainer's confirmation: hosted voice is honest about its boundary. Its strip says "hears what you say": the admin's spoken words go to OpenAI as audio and data policy does not check them.</li>
-        <li>Tenant data the app sends to the hosted voice model as context goes through the same request scan and the same rules as any hosted call, so the voice strip is drawn by the same function as every other hosted strip and names the same classes: with the defaults, "identities, security names and devices masked". Where a value is masked the voice model says "the user" and "the device"; the transcript on screen shows real values.</li>
-        <li>The voice popover lists the effective rule per class for voice context. When a rule blocks a context transfer, as in the second popover with Activity on Hosted set to Block, that context is withheld, the voice session continues without it, and the voice model says what it could not use. The transcript records the same line, so the admin can read later what was withheld and why.</li>
+        <li>Tenant data the app sends to the hosted voice model as context goes through the same request scan and the same rules as any hosted call, so the voice strip is drawn by the same function as every other hosted strip and names the same masked classes: with the defaults, "identities, security names and devices masked". Where a value is masked the voice model says "the user" and "the device"; the transcript on screen shows real values.</li>
+        <li>Ollama or LM Studio at an address on another machine is Hosted: data policy applies the Hosted column, and the strip names the host instead of a vendor, "Hosted · Ollama on gpu-01.woodgrove.example". The frame below shows the same state in Connections and in Chat.</li>
+        <li>The voice popover is built by one function from the effective rules and the context transfers of the current call, here and on the live strip in A. It lists what each transfer did (sent, masked with its count, or withheld) and the rule per class for voice context.</li>
+        <li>A voice strip names a blocked class as withheld context, not as blocked: with Security on Hosted set to Block it reads "security context withheld", because the session goes on and only that context stays on this device.</li>
+        <li>The withheld notice comes from the decision on one transfer, not from the configured rules: at 09:43 the app was about to send 6 Conditional Access policies, Security is Block on Hosted, so that transfer was withheld and the notice names it, the class that withheld it and what the voice model said. A rule that no transfer in the call has hit shows no notice. The transcript records the same line.</li>
+        <li>Recovery follows the test in E: Ask in Chat with Ollama only when the rules on Local allow every class the withheld context carries, with Change the rule beside it. With Security Block on Local too, as in the third popover, only Change the rule is offered, and when IT set every rule involved, the notice names policy.json and offers nothing.</li>
         <li>Voice on this device keeps spoken words under data policy. The words are transcribed on this device, then the text goes through the same request scan as a typed question before any hosted reasoning call, so its strip is the ordinary hosted strip with the voice named first.</li>
       </ul>
       </div>
+
+      <h3 class="subh" id="b-remote" style="margin:32px 0 6px;font-size:var(--text-base);font-weight:500">Ollama on another machine</h3>
+      <p>An address that is not on this device is a hosted endpoint, whatever runs there. The tier comes from where the model runs, not from the provider's name, and the destination host is named wherever the tier is shown.</p>
+      <div class="win">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="shell" style="min-height:720px">
+          <aside class="side" data-side="conn"></aside>
+          <div class="appmain">
+            <div class="topbar" data-top="defaults" data-prov="remote"></div>
+            <div class="page"><div class="page-in">
+              <div class="page-head"><div><h1>Connections</h1><p>Model providers, and where each one runs.</p></div></div>
+              <div class="remote2">
+                <div>
+                  <h3>Model providers</h3>
+                  <div class="prov">
+                    <span class="ic">OL</span>
+                    <div><div class="nm">Ollama</div><div class="ds"><code>http://gpu-01.woodgrove.example:11434</code>gpt-oss:20b. In use for Chat and agents.</div></div>
+                    <span class="tierchip" data-where="hosted"><svg aria-hidden="true"><use href="#i-cloud"/></svg>Hosted</span>
+                    <span class="hostline"><svg aria-hidden="true"><use href="#i-cloud"/></svg><span>This address is on another machine, gpu-01.woodgrove.example, so tenant data in a call leaves this device for that host. Data policy applies the Hosted column: identities, security names and devices are masked before each call.</span></span>
+                  </div>
+                  <div class="prov">
+                    <span class="ic">LM</span>
+                    <div><div class="nm">LM Studio</div><div class="ds"><code>http://localhost:1234</code>qwen3-14b. Not in use.</div></div>
+                    <span class="tierchip" data-where="local"><span class="pip" style="width:7px;height:7px;border-radius:50%;background:currentColor"></span>Local</span>
+                  </div>
+                </div>
+                <div>
+                  <h3>Chat with this provider</h3>
+                  <div class="chat">
+                    <div class="q">Which finance devices have not checked in for 30 days?</div>
+                    <div class="ans">
+                      <div class="who"><svg width="14" height="14"><use href="#oa"/></svg>Nova with Ollama on gpu-01.woodgrove.example</div>
+                      <div class="body"><p>Four devices in the Finance group have not checked in since at least 18 October: WGB-LT-0412, WGB-LT-0388, WGB-LT-0291 and the iPhone of Anne Moreau.</p></div>
+                      <details class="masknote">
+                        <summary><span class="hx"></span><span>Masked before the call to Ollama on gpu-01.woodgrove.example: 4 identity values, 4 device values</span><svg class="chev"><use href="#i-chev"/></svg></summary>
+                        <div class="inner"><p class="xs muted">Values were replaced on this device, sent to gpu-01.woodgrove.example as placeholders and restored in this answer.</p></div>
+                      </details>
+                    </div>
+                    <div class="composer">Ask a follow-up<span class="r"><span class="hx"></span>Ollama on gpu-01.woodgrove.example, 3 masked</span></div>
+                  </div>
+                </div>
+              </div>
+            </div></div>
+          </div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>Decided in Phase A2: Ollama or LM Studio on a remote endpoint reports Hosted. An address counts as on this device only when it resolves to this machine (localhost, a loopback address or a local socket). Any other host, on the office network included, is another machine.</li>
+        <li>The strip, Connections and Chat agree and name the host in the same words: "Hosted · Ollama on gpu-01.woodgrove.example" in the strip and its popover, a Hosted chip with the host line in Connections, and "Nova with Ollama on gpu-01.woodgrove.example" on the answer and in the composer. The strip's popover says that data leaves this device for that host, not "location set by your account".</li>
+        <li>Masking, blocks and the request scan treat the call like any hosted call. The rules on Local never apply to it.</li>
+      </ul>
     </section>
 
     <!-- C: Chat answer -->
@@ -651,9 +743,47 @@
         </div>
       </div>
       <ul class="notes">
-        <li>The line is closed by default in production; it is open here to show the counts. An answer where nothing was masked shows no line at all, and a local answer never shows one.</li>
+        <li>The line is closed by default in production; it is open here to show the counts. An answer where nothing was masked shows no line at all, and a local answer shows one only when a Local rule masked something, as in the frame below.</li>
         <li>The composer repeats the short form of the strip, so the admin sees the rule before sending the next question, not only after.</li>
         <li>Decided: counts are values replaced, and every label says "values": 23 identity values can be the names and addresses of fewer people. The app does not group values per person or device for the count.</li>
+      </ul>
+
+      <h3 style="margin:32px 0 6px;font-size:var(--text-base);font-weight:500">A local answer when a Local rule is Mask</h3>
+      <p>In this frame your IT department set Identity on Local to Mask. Masking runs on this device before the local model sees the data, so the answer carries the same line, with copy that says nothing left this device.</p>
+      <div class="win">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="shell">
+          <aside class="side" data-side="chat"></aside>
+          <div class="appmain">
+            <div class="topbar" data-local="localmask"></div>
+            <div class="page"><div class="chat">
+              <div class="q">Which finance devices have not checked in for 30 days, and who uses them?</div>
+              <div class="ans">
+                <div class="who"><svg width="14" height="14"><use href="#oa"/></svg>Nova with Ollama on this device, from the Woodgrove Bank cache refreshed 08:10</div>
+                <div class="body">
+                  <p>Four devices in the Finance group have not checked in since at least 18 October. Mara Okafor and Jonas Lindqvist signed in from other devices this week, so WGB-LT-0412 and WGB-LT-0388 are likely replaced rather than lost.</p>
+                </div>
+                <details class="masknote" data-where="local" open>
+                  <summary><span class="hx"></span><span>Masked on this device before Ollama saw the data: 23 identity values</span><svg class="chev"><use href="#i-chev"/></svg></summary>
+                  <div class="inner">
+                    <div class="counts">
+                      <span class="h">Class</span><span class="h num">Values</span><span class="h">Action</span>
+                      <span>Identity</span><span class="num">23</span><span class="act-chip" data-a="mask"><span class="sq"></span>Masked</span>
+                      <span>Device</span><span class="num">31</span><span class="act-chip" data-a="allow"><span class="sq"></span>Used as is, on this device</span>
+                      <span>Activity</span><span class="num">31</span><span class="act-chip" data-a="allow"><span class="sq"></span>Used as is, on this device</span>
+                    </div>
+                    <p class="xs muted">Masking happened on this device, before the local model saw the data, because Identity on Local is Mask. Nothing in this answer left this device. Names were restored in this answer.</p>
+                  </div>
+                </details>
+              </div>
+              <div class="composer">Ask a follow-up<span class="r" data-where="local"><span class="hx"></span>Ollama on this device, identities masked</span></div>
+            </div></div>
+          </div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>The line appears on a local answer only when a Local rule masked values in it. Its summary says where masking ran ("on this device, before Ollama saw the data"), and the inner copy names the rule. Classes the rule allowed read "Used as is, on this device" in grey, not amber, because they did not leave.</li>
+        <li>The local strip names a Local rule that masks, as the hosted strip does: "Local · Ollama · No data leaves this device · identities masked". With no Local rule set to Mask or Block it stays "No data leaves this device".</li>
       </ul>
     </section>
 
@@ -1065,15 +1195,17 @@
     // One function draws every hosted strip from a set of rules, long and short form alike.
     const joinList = (xs) => xs.length < 3 ? xs.join(" and ") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
     // Masked credentials are never named: no rule sends them in clear text. Blocked ones are.
-    function stripHtml(r, form = "both", label = "Hosted · Claude Code", popId = "") {
+    // Voice context withholds a transfer instead of refusing a call, so a voice strip names blocked classes as withheld context.
+    function stripHtml(r, form = "both", label = "Hosted · Claude Code", popId = "", voice = false) {
       const named = (act) => CLASSES.filter((c) => c.strip && r[c.id].hosted === act && !(c.id === "credential" && act === "mask")).map((c) => c.strip);
-      const m = named("mask"), b = named("block");
+      const m = named("mask");
+      const b = voice ? CLASSES.filter((c) => r[c.id].hosted === "block").map((c) => c.name.toLowerCase()) : named("block");
       const pick = (full, short) => form === "full" ? full : form === "short" ? short : `<span class="bw">${full}</span><span class="bs">${short}</span>`;
       const comma = b.length ? "," : "";
       let tail = "";
       if (!m.length && !b.length) tail = `<span>${pick("tenant data in clear text except credentials", "only credentials masked")}</span>`;
       if (m.length) tail += `<span class="mask"><span class="hx"></span>${pick(`${joinList(m)} masked${comma}`, `${m.length} masked${comma}`)}</span>`;
-      if (b.length) tail += `<span class="blk">${pick(`${joinList(b)} blocked`, `${b.length} blocked`)}</span>`;
+      if (b.length) tail += `<span class="blk">${voice ? pick(`${joinList(b)} context withheld`, `${b.length} withheld`) : pick(`${joinList(b)} blocked`, `${b.length} blocked`)}</span>`;
       const ctl = popId ? ` aria-expanded="false" aria-controls="${popId}"` : "";
       return `<button type="button" class="boundary" data-where="hosted" data-fit="full"${ctl}><span class="pip"></span>${label} ·${tail}</button>`;
     }
@@ -1099,29 +1231,84 @@
         : `<dd class="mk2"><span class="hx"></span>Masked one way, strictest rule: ${strictestFrom(r, "hosted")}</dd>`;
       return CLASSES.map(row).join("") + `<dt>Not examined in time</dt>${ne}`;
     }
-    function popInner(r) {
-      return `<h4>Hosted · Claude Code</h4><p class="soft">Location set by your account. Before each call, this device applies your data policy:</p><dl>${policyRows(r)}</dl>
+    // Where a hosted provider sends data. An Ollama or LM Studio address on another machine is hosted, with its host named.
+    const PROVIDERS = {
+      claude: { label: "Hosted · Claude Code", where: "Location set by your account." },
+      remote: { label: "Hosted · Ollama on gpu-01.woodgrove.example", where: "Ollama runs on another machine, so tenant data in a call leaves this device for gpu-01.woodgrove.example." },
+    };
+    function popInner(r, prov = "claude") {
+      const p = PROVIDERS[prov];
+      return `<h4>${p.label}</h4><p class="soft">${p.where} Before each call, this device applies your data policy:</p><dl>${policyRows(r)}</dl>
         <p class="xs muted" style="margin-bottom:6px">Data the check could not examine in time is reported as credential and gets the strictest rule any class has on Hosted.</p>
         <p class="xs muted" style="margin-bottom:6px">Values the app recognizes as credentials never reach a hosted model in clear text. A secret written into a free-text field in a form the app does not recognize can still be sent.</p>
         <p class="xs muted" style="margin-bottom:10px">Names the app has never seen, such as a person you type for the first time, cannot be detected and are sent as typed.</p>
         <button class="bt secondary sm" type="button">Data policy settings</button>`;
     }
-    function voicePopInner(r) {
-      const withheld = CLASSES.filter((c) => r[c.id].hosted === "block" && c.id !== "credential");
-      const note = withheld.length ? `<div class="withheld" role="status"><b>Context withheld at 09:42</b>214 sign-ins for "who signed in from outside Germany". ${joinList(withheld.map((c) => c.name))} is Block on Hosted, so the app did not send them to OpenAI. The call goes on without them, and the voice model said so:<q>I can't use sign-in data in this call. Your data policy keeps it from hosted models. Ask in Chat with a local model to see it.</q></div>` : "";
+    // Context the app sends to the hosted voice model during a call. Each transfer carries values of some classes;
+    // what happens to it is decided from the rules, the same way as for a hosted call.
+    const VOICE_CALL = [
+      { at: "09:41", what: "38 finance devices", ask: "which finance devices have not checked in", carries: { device: 38, identity: 31, activity: 38, configuration: 12 } },
+      { at: "09:42", what: "214 sign-ins", ask: "who signed in from outside Germany", carries: { activity: 214, identity: 38 } },
+      { at: "09:43", what: "6 Conditional Access policies", ask: "which policies exclude the break-glass admins", carries: { security: 6, identity: 4, configuration: 9 } },
+    ];
+    const clsName = (id) => CLASSES.find((c) => c.id === id).name;
+    const isAre = (xs) => xs.length === 1 ? "is" : "are";
+    function transferDecision(r, t) {
+      const ids = Object.keys(t.carries);
+      const withheldBy = ids.filter((c) => r[c].hosted === "block");
+      const masked = ids.filter((c) => r[c].hosted === "mask");
+      return { ids, withheldBy, masked, sent: !withheldBy.length, maskedValues: masked.reduce((n, c) => n + t.carries[c], 0) };
+    }
+    // Recovery for withheld context offers only what would work, by the same test as E.
+    function voiceRecovery(r, t, d) {
+      const localBlocks = d.ids.filter((c) => r[c].local === "block");
+      const lockedAll = d.withheldBy.every((c) => CLASSES.find((x) => x.id === c).locked) && localBlocks.every((c) => CLASSES.find((x) => x.id === c).locked);
+      const names = joinList(d.withheldBy.map((c) => clsName(c).toLowerCase()));
+      if (!localBlocks.length) return {
+        acts: ['<button class="bt primary sm" type="button">Ask in Chat with Ollama</button>', lockedAll ? "" : '<button class="bt ghost sm" type="button">Change the rule</button>'],
+        text: `Ollama with gpt-oss:20b is ready on this device, and your rules on Local allow every class this context carries.`,
+        say: "Ask in Chat with a local model to see it.",
+      };
+      if (lockedAll) return { acts: [], text: `${joinList(localBlocks.map(clsName))} ${isAre(localBlocks)} Block on Local too, and your IT department set these rules in policy.json, so no model on this device may use this context. Ask IT to change them.`, say: "Your IT department's policy keeps it from every model on this device." };
+      return {
+        acts: ['<button class="bt primary sm" type="button">Change the rule</button>'],
+        text: `${joinList(localBlocks.map(clsName))} ${isAre(localBlocks)} Block on Local too, so a local model would refuse this context as well.`,
+        say: `Your data policy keeps ${names} data from every model, so I can't answer that.`,
+      };
+    }
+    function transferLine(r, t) {
+      const d = transferDecision(r, t);
+      const res = !d.sent
+        ? `<dd class="bk">Withheld, ${joinList(d.withheldBy.map(clsName))} ${isAre(d.withheldBy)} Block</dd>`
+        : d.masked.length ? `<dd class="mk2"><span class="hx"></span>Sent, ${d.maskedValues} values masked</dd>` : '<dd class="lv">Sent as is</dd>';
+      return `<dt><span class="tt">${t.at}</span>${t.what}</dt>${res}`;
+    }
+    function voicePopInner(r, call = VOICE_CALL) {
+      // The notice speaks for the latest transfer that was withheld in this call, from its own decision.
+      const last = [...call].reverse().find((t) => !transferDecision(r, t).sent);
+      let note = "";
+      if (last) {
+        const d = transferDecision(r, last), rec = voiceRecovery(r, last, d);
+        const names = joinList(d.withheldBy.map((c) => clsName(c).toLowerCase()));
+        note = `<div class="withheld" role="status"><b>Context withheld at ${last.at}</b>${last.what} for "${last.ask}". ${joinList(d.withheldBy.map(clsName))} ${isAre(d.withheldBy)} Block on Hosted, so the app sent none of this context to OpenAI. The call goes on without it, and the voice model said so:<q>I can't use the ${names} data for that in this call. ${rec.say}</q><span class="rec">${rec.text}</span>${rec.acts.join("") ? `<span class="acts">${rec.acts.join("")}</span>` : ""}</div>`;
+      }
       return `<h4 class="voice">Hosted voice · OpenAI</h4>
         <p class="soft">During a voice call, OpenAI receives what you say and the tenant data the app sends as context.</p>
         <dl><dt>What you say aloud</dt><dd class="lv">Sent as audio, not checked by data policy</dd><dt>Transcript on screen</dt><dd>Real values, on this device</dd></dl>
+        <p class="sub">Context sent in this call</p>
+        <dl class="tx">${call.map((t) => transferLine(r, t)).join("")}</dl>
         ${note}
         <p class="sub">Tenant data sent as context, checked like any hosted call:</p>
         <dl>${policyRows(r, true)}</dl>
         <p class="xs muted" style="margin-bottom:10px">Where a value is masked, the voice model speaks roles, such as "the user" and "the device". To keep what you say under data policy, use voice on this device: your words are turned into text here and get the same check as a typed question before any hosted call.</p>
-        <span style="display:flex;gap:8px;flex-wrap:wrap"><button class="bt secondary sm" type="button">Use voice on this device</button>${withheld.length ? '<button class="bt ghost sm" type="button">Ask in Chat with Ollama</button>' : ""}</span>`;
+        <span style="display:flex;gap:8px;flex-wrap:wrap"><button class="bt secondary sm" type="button">Use voice on this device</button><button class="bt ghost sm" type="button">Data policy settings</button></span>`;
     }
     const withRule = (cls, tier, act) => { const r = structuredClone(DEFAULTS); r[cls][tier] = act; return r; };
     const ALL_CLEAR = Object.fromEntries(CLASSES.map((c) => [c.id, { local: "allow", confidential: "allow", hosted: c.id === "credential" ? "mask" : "allow" }]));
     const CRED_BLOCK = withRule("activity", "hosted", "block"); CRED_BLOCK.credential.hosted = "block";
-    const STRIP_RULES = { defaults: DEFAULTS, blocked: withRule("activity", "hosted", "block"), credblock: CRED_BLOCK, clear: ALL_CLEAR };
+    const SEC_BOTH = withRule("security", "hosted", "block"); SEC_BOTH.security.local = "block";
+    const LOCAL_MASK = withRule("identity", "local", "mask");
+    const STRIP_RULES = { defaults: DEFAULTS, blocked: withRule("activity", "hosted", "block"), credblock: CRED_BLOCK, clear: ALL_CLEAR, secblock: withRule("security", "hosted", "block"), secboth: SEC_BOTH, localmask: LOCAL_MASK };
     const orgchip = '<button class="orgchip" type="button"><span class="av">WB</span>Woodgrove Bank<svg class="chev"><use href="#i-chev"/></svg></button>';
     let popSeq = 0;
     const topRules = (el) => el.dataset.top === "live" ? rules : el.dataset.top === "blocked" ? STRIP_RULES.blocked : DEFAULTS;
@@ -1129,7 +1316,8 @@
       if (!el.dataset.pop) el.dataset.pop = `strip-pop-${++popSeq}`;
       const open = el.querySelector(".pop.floating:not([hidden])");
       const r = topRules(el);
-      el.innerHTML = orgchip + stripHtml(r, "both", undefined, el.dataset.pop) + `<div class="pop floating" id="${el.dataset.pop}" role="dialog" aria-label="Where data goes"${open ? "" : " hidden"}>${popInner(r)}</div>`;
+      const prov = el.dataset.prov || "claude";
+      el.innerHTML = orgchip + stripHtml(r, "both", PROVIDERS[prov].label, el.dataset.pop) + `<div class="pop floating" id="${el.dataset.pop}" role="dialog" aria-label="Where data goes"${open ? "" : " hidden"}>${popInner(r, prov)}</div>`;
       if (open) el.querySelector(".boundary").setAttribute("aria-expanded", "true");
       fitStrip(el.querySelector(".boundary"));
     };
@@ -1143,14 +1331,21 @@
     new ResizeObserver(fitAll).observe(document.body);
     document.fonts && document.fonts.ready.then(fitAll);
     document.querySelectorAll("[data-top]").forEach(drawTop);
-    document.querySelectorAll("[data-strip]").forEach((el) => { el.outerHTML = stripHtml(STRIP_RULES[el.dataset.strip], el.dataset.form, el.dataset.label); });
-    document.querySelectorAll("[data-pop]:not([data-top])").forEach((el) => { el.innerHTML = popInner(STRIP_RULES[el.dataset.pop]); });
+    // The local strip names Local rules that mask or block, from the same rules.
+    function localStrip(r) {
+      const m = CLASSES.filter((c) => r[c.id].local === "mask").map((c) => c.strip), b = CLASSES.filter((c) => r[c.id].local === "block").map((c) => c.strip);
+      return `<span class="boundary" data-where="local"><span class="pip"></span>Local · Ollama · No data leaves this device${m.length ? ` ·<span class="mask"><span class="hx"></span>${joinList(m)} masked</span>` : ""}${b.length ? ` ·<span class="blk">${joinList(b)} blocked</span>` : ""}</span>`;
+    }
+    document.querySelectorAll("[data-local]").forEach((el) => { el.innerHTML = orgchip + localStrip(STRIP_RULES[el.dataset.local]); });
+    document.querySelectorAll("[data-strip]").forEach((el) => { el.outerHTML = stripHtml(STRIP_RULES[el.dataset.strip], el.dataset.form, el.dataset.label, "", "voice" in el.dataset); });
+    document.querySelectorAll("[data-pop]:not([data-top])").forEach((el) => { el.innerHTML = popInner(STRIP_RULES[el.dataset.pop], el.dataset.prov); });
     document.querySelectorAll("[data-voicepop]").forEach((el) => { el.innerHTML = voicePopInner(STRIP_RULES[el.dataset.voicepop]); });
     document.addEventListener("click", (e) => {
-      const b = e.target.closest(".topbar button.boundary");
+      const b = e.target.closest("button.boundary[aria-controls]");
       if (e.target.closest(".pop.floating")) return;
       document.querySelectorAll(".pop.floating").forEach((p) => {
         const owner = p.parentElement.querySelector("button.boundary");
+        if (!owner) return;
         const open = owner === b && p.hidden;
         p.hidden = !open; owner.setAttribute("aria-expanded", String(open));
       });
@@ -1195,7 +1390,6 @@
 
     // Strictness: allow < mask < block. Tightening applies at once; loosening waits for the dialog.
     const ACT = { allow: "Allow", mask: "Mask", block: "Block" };
-    const clsName = (id) => CLASSES.find((x) => x.id === id).name;
     const scrim = document.getElementById("loosen");
     const keepBtn = document.getElementById("loosen-keep");
     const okBtn = document.getElementById("loosen-ok");
@@ -1407,7 +1601,12 @@
       const changed = CLASSES.filter((c) => TIERS.some((t) => rules[c.id][t] !== DEFAULTS[c.id][t])).length;
       document.getElementById("changed").textContent = changed ? `${changed} ${changed === 1 ? "row differs" : "rows differ"} from the defaults` : "Defaults";
       document.querySelectorAll('[data-top="live"]').forEach(drawTop);
-      document.getElementById("vlive").innerHTML = `<span class="xs muted" style="display:block;margin-bottom:4px">During a hosted voice call, with these rules:</span>` + stripHtml(rules, "full", "Hosted voice · OpenAI · hears what you say");
+      // The live voice strip and its popover come from the current rules, by the same functions as B.
+      const vl = document.getElementById("vlive");
+      const vOpen = vl.querySelector(".pop.floating:not([hidden])");
+      vl.innerHTML = `<span class="xs muted" style="display:block;margin-bottom:4px">During a hosted voice call, with these rules:</span>` + stripHtml(rules, "full", "Hosted voice · OpenAI · hears what you say", "vlive-pop", true)
+        + `<div class="pop floating" id="vlive-pop" role="dialog" aria-label="Where voice goes"${vOpen ? "" : " hidden"}>${voicePopInner(rules)}</div>`;
+      if (vOpen) vl.querySelector(".boundary").setAttribute("aria-expanded", "true");
       cfSync();
       picks.forEach(fillPick);
       // preview
