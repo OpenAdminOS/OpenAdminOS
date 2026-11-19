@@ -128,7 +128,7 @@
     .side-foot .who span { display: block; color: var(--color-text-muted); font-size: var(--text-xs); }
     .appmain { position: relative; display: flex; flex-direction: column; min-width: 0; }
     .topbar { height: 52px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 16px; border-bottom: 1px solid var(--color-border-soft); min-width: 0; }
-    .orgchip { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px 0 6px; border-radius: var(--radius-sm); border: 0; background: none; cursor: pointer; font-weight: 500; white-space: nowrap; }
+    .orgchip { flex: none; display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px 0 6px; border-radius: var(--radius-sm); border: 0; background: none; cursor: pointer; font-weight: 500; white-space: nowrap; }
     .orgchip:hover { background: var(--color-hover); }
     .orgchip .chev { width: 12px; height: 12px; color: var(--color-text-muted); }
     .page { flex: 1; min-height: 0; container-type: inline-size; }
@@ -140,13 +140,16 @@
     .page-head .act { margin-left: auto; display: flex; gap: 8px; }
 
     /* ---------- The status strip ---------- */
-    .boundary { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 10px; border-radius: 999px; font-size: var(--text-xs); color: var(--color-text-soft); box-shadow: inset 0 0 0 1px var(--color-border); white-space: nowrap; max-width: 72%; overflow: hidden; border: 0; background: none; cursor: pointer; }
+    .boundary { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 10px; border-radius: 999px; font-size: var(--text-xs); color: var(--color-text-soft); box-shadow: inset 0 0 0 1px var(--color-border); white-space: nowrap; min-width: 0; overflow: hidden; border: 0; background: none; cursor: pointer; }
     .boundary .bs { display: none; }
+    .boundary[data-fit="short"] .bw { display: none; }
+    .boundary[data-fit="short"] .bs { display: inline-flex; min-width: 0; gap: 4px; }
+    .boundary .first { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    .boundary .leaves { display: inline-flex; min-width: 0; gap: 4px; white-space: nowrap; }
     .boundary[data-where="hosted"] { color: var(--color-warning); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-warning) 35%, transparent); background: var(--color-warning-soft); }
     .boundary[data-where="local"] { color: var(--color-success); }
     .boundary .mask { display: inline-flex; align-items: center; gap: 6px; color: var(--color-text-soft); }
     .boundary .blk { color: var(--color-danger); }
-    @container (max-width: 1000px) { .boundary .bw { display: none; } .boundary .bs { display: inline; } }
     .pip { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
     .hx { display: inline-block; width: 12px; height: 12px; border-radius: 3px; flex: none; background: repeating-linear-gradient(135deg, var(--hatch) 0 1.5px, transparent 1.5px 4px); box-shadow: inset 0 0 0 1px var(--color-border-strong); }
 
@@ -397,9 +400,17 @@
     .trv .d { display: block; font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text-muted); }
     .trv .ann { font-size: 11px; line-height: 18px; padding: 0 6px; border-radius: 5px; color: var(--color-text-soft); box-shadow: inset 0 0 0 1px var(--color-border); white-space: nowrap; }
     .trv .ann.warn { color: var(--color-danger); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-danger) 35%, transparent); }
-    .trv li[data-state="off"] code { color: var(--color-text-muted); text-decoration: line-through; text-decoration-color: var(--color-text-faint); }
+    .trv li[data-state="off"] code { color: var(--color-text-muted); }
+    .trv li[data-off] code { text-decoration: line-through; text-decoration-color: var(--color-text-faint); }
     .trv li[data-off] label { cursor: not-allowed; }
     @container (max-width: 520px) { .trv label { grid-template-columns: 16px minmax(0, 1fr); } .trv .ann { grid-column: 2; justify-self: start; } }
+    .clipnote { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 10px; margin: 0 0 18px; padding: 10px 12px; border-radius: var(--radius-md); background: var(--color-code-bg); font-size: var(--text-sm); line-height: var(--lh-sm); color: var(--color-text-soft); }
+    .clipnote svg { width: 13px; height: 13px; margin-top: 3px; color: var(--color-text-muted); }
+    .clipnote details { margin-top: 6px; }
+    .clipnote summary { cursor: pointer; color: var(--color-text); font-size: var(--text-xs); }
+    .clipnote ul { margin: 6px 0 0; padding-left: 16px; font-size: var(--text-xs); line-height: var(--lh-xs); }
+    .composer { margin-top: 22px; display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 14px; border-radius: 14px; background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-border); color: var(--color-text-faint); }
+    .trvcap { font-size: var(--text-xs); color: var(--color-text-muted); margin: 0 0 8px; }
     .namerr { display: block; margin-top: 6px; font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-danger); }
     .namerr[hidden] { display: none; }
   </style>
@@ -435,7 +446,7 @@
       <button type="button" data-theme-set="dark" aria-pressed="false">Dark</button>
     </span>
     <nav aria-label="Sections">
-      <a href="#a">A Name and persona</a><a href="#b">B Access</a><a href="#c">C Skills</a><a href="#d">D Save as skill</a><a href="#e">E Learning</a><a href="#f">F Checks and brief</a><a href="#q">Questions</a>
+      <a href="#a">A Name and persona</a><a href="#b">B Access</a><a href="#c">C Skills</a><a href="#d">D Save as skill</a><a href="#e">E Learning</a><a href="#f">F Checks and brief</a><a href="#g">G Profile in Chat</a><a href="#q">Questions</a>
     </nav>
   </div>
 
@@ -578,35 +589,41 @@
         </div>
       </div>
       <div class="two" style="margin-top:16px">
-        <div style="display:grid;gap:12px;align-content:start">
-          <p class="cardcap" style="margin:0">Add a server by URL, the tool review</p>
+        <div style="display:grid;gap:8px;align-content:start">
+          <p class="trvcap">Add a server by URL: the tool review as it opens, nothing approved</p>
           <div class="win" style="min-height:0">
-            <div class="dialog" role="dialog" aria-labelledby="tr-t" style="width:100%;box-shadow:none;border-radius:12px">
-              <header><span class="xs muted">Step 2 of 2, tools.contoso.example</span><h2 id="tr-t">Which tools may <span data-name>Nova</span> use?</h2></header>
+            <div class="dialog" role="dialog" aria-labelledby="tr-t-open" style="width:100%;box-shadow:none;border-radius:12px">
+              <header><span class="xs muted">Step 2 of 2, tools.contoso.example</span><h2 id="tr-t-open">Which tools may <span data-name>Nova</span> use?</h2></header>
               <div class="body">
-                <p>The server offers 6 tools. Approve only tools that read. The server's own read-only label is shown, but it does not approve a tool: a tool you leave unapproved is never offered, and every call is checked against this list, including calls from skills and scheduled checks.</p>
-                <ul class="trv" id="trv">
-                  <li><label><input type="checkbox" checked><span><code>mcp__policy-settings__search_settings</code><span class="d">Searches setting names and descriptions</span></span><span class="ann">Labelled read-only</span></label></li>
-                  <li><label><input type="checkbox" checked><span><code>mcp__policy-settings__get_setting</code><span class="d">Returns one setting with its allowed values</span></span><span class="ann">Labelled read-only</span></label></li>
-                  <li><label><input type="checkbox" checked><span><code>mcp__policy-settings__list_baselines</code><span class="d">Lists security baseline versions</span></span><span class="ann">Labelled read-only</span></label></li>
-                  <li><label><input type="checkbox" checked><span><code>mcp__policy-settings__compare_baselines</code><span class="d">Compares two baseline versions</span></span><span class="ann">Labelled read-only</span></label></li>
-                  <li><label><input type="checkbox"><span><code>mcp__policy-settings__export_report</code><span class="d">Saves a report on the server and returns a link. Labelled read-only, but it stores what it is sent, so you left it unapproved.</span></span><span class="ann">Labelled read-only</span></label></li>
-                  <li data-off><label><input type="checkbox" disabled aria-disabled="true" aria-describedby="trv-why"><span><code>mcp__policy-settings__apply_setting</code><span class="d" id="trv-why">Changes a setting. The server says so, and a tool that changes data cannot be approved; changes go through agents and diff confirmation.</span></span><span class="ann warn">Labelled as a change</span></label></li>
-                </ul>
+                <p>The server offers 6 tools, and none is approved yet. Approve only tools that read. The server's own read-only label is shown, but it does not approve a tool: a tool you leave unapproved is never offered, and every call is checked against this list, including calls from skills and scheduled checks.</p>
+                <ul class="trv" data-trv="open"></ul>
               </div>
-              <footer><span class="xs muted" id="trv-count" aria-live="polite" style="margin-right:auto"></span><button class="bt ghost" type="button">Back</button><button class="bt primary" type="button" id="trv-ok"></button></footer>
+              <footer><span class="xs muted trv-count" aria-live="polite" style="margin-right:auto"></span><button class="bt ghost" type="button">Back</button><button class="bt primary trv-ok" type="button"></button></footer>
             </div>
           </div>
         </div>
-        <ul class="notes" style="margin-top:22px">
-          <li>Decided: in the first version a user-added server offers only the tools the admin approves as read-only at add time. The tool's read-only label from the server is shown in each row but never approves a tool on its own.</li>
-          <li>A tool that is not approved is never offered to the model. The approval is checked again at every call, whether it comes from Chat, a skill or a scheduled check, so a skill that names <code>mcp__policy-settings__export_report</code> cannot use it.</li>
-          <li>A tool the server labels as a change cannot be approved at all. When the server later adds or relabels a tool, the new tool stays off until the admin reviews it here.</li>
-          <li>The review can be reopened from the server's row in Access; approving a tool later is the same step.</li>
-        </ul>
+        <div style="display:grid;gap:8px;align-content:start">
+          <p class="trvcap">The same review after you approve four tools</p>
+          <div class="win" style="min-height:0">
+            <div class="dialog" role="dialog" aria-labelledby="tr-t-after" style="width:100%;box-shadow:none;border-radius:12px">
+              <header><span class="xs muted">Step 2 of 2, tools.contoso.example</span><h2 id="tr-t-after">Which tools may <span data-name>Nova</span> use?</h2></header>
+              <div class="body">
+                <p>The server offers 6 tools, and none is approved yet. Approve only tools that read. The server's own read-only label is shown, but it does not approve a tool: a tool you leave unapproved is never offered, and every call is checked against this list, including calls from skills and scheduled checks.</p>
+                <ul class="trv" data-trv="after"></ul>
+              </div>
+              <footer><span class="xs muted trv-count" aria-live="polite" style="margin-right:auto"></span><button class="bt ghost" type="button">Back</button><button class="bt primary trv-ok" type="button"></button></footer>
+            </div>
+          </div>
+        </div>
       </div>
       <ul class="notes">
-        <li>The strip is derived from the grants: it names the host of every server switched on, and drops a host the moment its switch goes off. Try it on the MCP switches. In a narrow window the strip shows the count, and pressing it lists every host.</li>
+        <li>Decided: in the first version a user-added server offers only the tools the admin approves as read-only at add time. The review opens with every tool unchecked, so nothing is approved by default, and Add server stays disabled until at least one tool is approved. The tool's read-only label from the server is shown in each row but never approves a tool on its own.</li>
+        <li>A tool the server labels as a change is disabled from the start and cannot be approved at all; its row says why. Both frames are live: check and uncheck tools to see the count and the button follow.</li>
+        <li>A tool that is not approved is never offered to the model. The approval is checked again at every call, whether it comes from Chat, a skill or a scheduled check, so a skill that names <code>mcp__policy-settings__export_report</code> cannot use it.</li>
+        <li>When the server later adds or relabels a tool, the new tool stays off until the admin reviews it here. The review can be reopened from the server's row in Access; approving a tool later is the same step.</li>
+      </ul>
+      <ul class="notes">
+        <li>The strip is derived from the grants: it names the host of every server switched on, and drops a host the moment its switch goes off. Try it on the MCP switches. When the full list does not fit the space next to the organization, the strip keeps the first host visible with a count of the rest, such as "learn.microsoft.com +2"; pressing it lists every host with the disclosure of what they receive.</li>
         <li>Decided, the honest boundary for remote MCP servers, catalog or added by URL: each request is written by the query writer from SPEC (Marketplace MCP, query writer boundary) from the admin's question and the tool's schema, with every value the app recognizes as tenant data removed, and the egress check runs on what it writes. Text the app cannot recognize, such as an internal project name, can still reach the server. The grant copy says this in those words, the strip names the host whenever the server's tools are offered, and the admin can turn the server off.</li>
         <li>Decided: every connector send is confirmed message by message. A send is only ever proposed by the agent on a card that shows the exact message and channel; there is no "allow further sends" option, and skills can never use a send tool.</li>
         <li>Microsoft 365 has no Send switch: changes to a tenant are never a connector send. The cell says so in words instead of showing a disabled switch.</li>
@@ -912,6 +929,46 @@ identities with graph_get. Nothing else.
       </ul>
     </section>
 
+    <!-- G -->
+    <section class="sect" id="g">
+      <h2>G. The profile in typed Chat, when it does not fit</h2>
+      <p>Standing instructions, organization instructions and confirmed notes reach typed Chat as well as voice, within a budget that leaves room for the conversation and the evidence. A small model gets a shortened profile, and the conversation says so at the start, before the first answer, as voice does today.</p>
+      <div class="win">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="shell">
+          <aside class="side" data-side="chat"></aside>
+          <div class="appmain">
+            <div class="topbar" data-top="tools" data-model="Apple Intelligence"></div>
+            <div class="page"><div class="chat">
+              <div class="clipnote" role="status"><svg aria-hidden="true"><use href="#i-skill"/></svg><div>
+                This model gets a shortened version of <span data-name>Nova</span>'s instructions and notes: the oldest notes are left out first, then the organization instructions and the standing instructions are cut at the end. For this conversation, 9 of 14 notes for Woodgrove Bank were left out. <button class="bt ghost sm" type="button" style="height:22px;padding:0 6px"><span>Settings, <span data-name>Nova</span></span></button>
+                <details><summary>What this model received</summary>
+                  <ul>
+                    <li>Standing instructions, version 6, in full</li>
+                    <li>Organization instructions for Woodgrove Bank, in full</li>
+                    <li>The 5 most recently used notes. The 9 older notes were left out.</li>
+                    <li>Data policy applied to all of it before the call, as to any prompt</li>
+                  </ul>
+                </details>
+              </div></div>
+              <div class="q">How many devices have not checked in for 30 days?</div>
+              <div class="ans">
+                <div class="who"><span class="mini" data-initial>N</span><span><span data-name>Nova</span> with Apple Intelligence, Woodgrove Bank</span></div>
+                <div class="body">Woodgrove Bank has 38 devices that have not checked in for 30 days, after leaving out 9 kiosks named WGB-KSK. The data is from the 08:10 cache, older than an hour, so check-ins after that are not counted.</div>
+              </div>
+              <div class="composer"><span>Ask <span data-name>Nova</span></span></div>
+            </div></div>
+          </div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>The answer follows the standing instructions from A: it names the organization and says the data is older than an hour. The kiosk note was one of the 5 kept, so the kiosks are left out.</li>
+        <li>The notice appears once, as the first line of a conversation whose model gets a shortened profile, and never between answers. Its first sentence is the wording voice uses today, so the two read the same; the second sentence counts what was left out for this conversation.</li>
+        <li>What this model received lists the parts by name and size, never the text of a note, and a model that gets the whole profile shows no notice.</li>
+        <li>Data policy applies to the profile block like any other part of the prompt: a note that names a user is masked on a hosted model.</li>
+      </ul>
+    </section>
+
     <!-- Questions -->
     <section class="sect" id="q">
       <h2>Open questions</h2>
@@ -947,20 +1004,31 @@ identities with graph_get. Nothing else.
     // The strip is derived from the effective grants: every MCP server switched on in B adds its host.
     const grantedHosts = () => [...document.querySelectorAll(".sw[data-host]")].filter((s) => s.getAttribute("aria-checked") === "true").map((s) => s.dataset.host);
     let popSeq = 0;
-    function stripHtml(hosts) {
-      if (!hosts.length) return '<span class="boundary" data-where="local"><span class="pip"></span>Local · Ollama · No data leaves this device</span>';
+    // Long form while it fits next to the organization; otherwise the first host stays visible with a +N count.
+    function stripHtml(hosts, model = "Ollama") {
+      if (!hosts.length) return `<span class="boundary" data-where="local"><span class="pip"></span>Local · ${model} · No data leaves this device</span>`;
       const id = `hosts-${++popSeq}`;
       const n = hosts.length;
-      const label = `Local · Ollama · queries to ${hosts.join(", ")}`;
-      return `<button type="button" class="boundary" data-where="local" aria-expanded="false" aria-controls="${id}" aria-label="${label}. Show tool hosts"><span class="pip"></span>Local · Ollama<span class="leaves"><span class="bw">· queries to ${hosts.join(", ")}</span><span class="bs">· ${n} tool ${n === 1 ? "host" : "hosts"}</span></span></button>
-        <div class="hostpop" id="${id}" role="dialog" aria-label="Tool hosts" hidden><h4>The model runs on this device</h4><p class="xs muted">Tools granted in Access send queries to these hosts, written from your question with every value the app recognizes as tenant data removed. Text it cannot recognize, such as an internal project name, can still be sent.</p><ul>${hosts.map((h) => `<li><b>${h}</b><span>Recognized tenant data removed</span></li>`).join("")}</ul><p class="xs muted">Turn a server off in Access and its host leaves this list.</p></div>`;
+      const label = `Local · ${model} · queries to ${hosts.join(", ")}`;
+      const more = n > 1 ? `<span>+${n - 1}</span>` : "";
+      return `<button type="button" class="boundary" data-where="local" data-fit="full" aria-expanded="false" aria-controls="${id}" aria-label="${label}. Show tool hosts"><span class="pip"></span>Local · ${model}<span class="leaves"><span class="bw">· queries to ${hosts.join(", ")}</span><span class="bs"><span>· queries to</span><span class="first">${hosts[0]}</span>${more}</span></span></button>
+        <div class="hostpop" id="${id}" role="dialog" aria-label="Tool hosts" hidden><h4>The model runs on this device</h4><p class="xs muted">Tools granted in Access send queries to these ${n === 1 ? "host" : n + " hosts"}, written from your question with every value the app recognizes as tenant data removed. Text it cannot recognize, such as an internal project name, can still be sent.</p><ul>${hosts.map((h) => `<li><b>${h}</b><span>Recognized tenant data removed</span></li>`).join("")}</ul><p class="xs muted">Turn a server off in Access and its host leaves this list.</p></div>`;
     }
+    function fitStrip(b) {
+      if (!b || !b.dataset.fit) return;
+      b.dataset.fit = "full";
+      if (b.scrollWidth > b.clientWidth + 1) b.dataset.fit = "short";
+    }
+    const fitAll = () => document.querySelectorAll(".topbar .boundary").forEach(fitStrip);
+    new ResizeObserver(fitAll).observe(document.body);
+    document.fonts && document.fonts.ready.then(fitAll);
     function renderStrips() {
       const hosts = grantedHosts();
       document.querySelectorAll('[data-top="tools"]').forEach((el) => {
         el.querySelectorAll(".boundary, .hostpop").forEach((x) => x.remove());
-        el.insertAdjacentHTML("beforeend", stripHtml(hosts));
+        el.insertAdjacentHTML("beforeend", stripHtml(hosts, el.dataset.model));
       });
+      fitAll();
       const sw = document.querySelectorAll(".sw[data-host]");
       document.getElementById("mcpcount").textContent = `${hosts.length} of ${sw.length} on`;
     }
@@ -1052,19 +1120,39 @@ identities with graph_get. Nothing else.
       document.getElementById("skillpick").hidden = !open;
     });
 
-    // Tool review: only approved tools are offered; a tool labelled as a change cannot be approved.
-    const trv = document.getElementById("trv");
-    const trvSync = () => {
-      const boxes = [...trv.querySelectorAll("input")];
-      const ok = boxes.filter((b) => b.checked).length;
-      document.getElementById("trv-count").textContent = `${ok} approved, ${boxes.length - ok} never offered`;
-      const btn = document.getElementById("trv-ok");
-      btn.textContent = ok ? `Add server with ${ok} ${ok === 1 ? "tool" : "tools"}` : "Approve a tool to add the server";
-      btn.disabled = !ok;
-      trv.querySelectorAll("li").forEach((li) => { li.dataset.state = li.querySelector("input").checked ? "on" : "off"; });
-    };
-    trv.addEventListener("change", trvSync);
-    trvSync();
+    // Tool review: it opens with nothing approved; a tool labelled as a change cannot be approved.
+    const TOOLS = [
+      ["search_settings", "Searches setting names and descriptions", "ro"],
+      ["get_setting", "Returns one setting with its allowed values", "ro"],
+      ["list_baselines", "Lists security baseline versions", "ro"],
+      ["compare_baselines", "Compares two baseline versions", "ro"],
+      ["export_report", "Saves a report on the server and returns a link. Labelled read-only, but it stores what it is sent.", "ro"],
+      ["apply_setting", "Changes a setting. The server says so, and a tool that changes data cannot be approved; changes go through agents and diff confirmation.", "change"],
+    ];
+    const APPROVED_AFTER = ["search_settings", "get_setting", "list_baselines", "compare_baselines"];
+    document.querySelectorAll("[data-trv]").forEach((trv) => {
+      const key = trv.dataset.trv;
+      trv.innerHTML = TOOLS.map(([t, d, kind]) => {
+        const change = kind === "change";
+        const why = `trv-why-${key}`;
+        const on = key === "after" && APPROVED_AFTER.includes(t);
+        return `<li ${change ? "data-off" : ""}><label><input type="checkbox" ${on ? "checked" : ""} ${change ? `disabled aria-disabled="true" aria-describedby="${why}"` : ""}><span><code>mcp__policy-settings__${t}</code><span class="d" ${change ? `id="${why}"` : ""}>${d}</span></span><span class="ann${change ? " warn" : ""}">${change ? "Labelled as a change" : "Labelled read-only"}</span></label></li>`;
+      }).join("");
+      const dialog = trv.closest(".dialog");
+      const sync = () => {
+        const boxes = [...trv.querySelectorAll("input")];
+        const ok = boxes.filter((b) => b.checked).length;
+        dialog.querySelector(".trv-count").textContent = ok ? `${ok} approved, ${boxes.length - ok} never offered` : `None approved, ${boxes.length} never offered`;
+        const btn = dialog.querySelector(".trv-ok");
+        btn.textContent = ok ? `Add server with ${ok} ${ok === 1 ? "tool" : "tools"}` : "Approve a tool to add the server";
+        btn.disabled = !ok;
+        trv.querySelectorAll("li").forEach((li) => { li.dataset.state = li.querySelector("input").checked ? "on" : "off"; });
+      };
+      trv.addEventListener("change", sync);
+      sync();
+    });
+    // The second frame describes the state after selection, so its intro says so.
+    document.querySelector('[data-trv="after"]').closest(".body").querySelector("p").textContent = "You approved the four tools that only read. export_report stays unapproved because it stores what it is sent on the server, and apply_setting cannot be approved. Only approved tools are offered, and every call is checked against this list, including calls from skills and scheduled checks.";
 
     // Skill detail tabs
     document.querySelectorAll(".tabs").forEach((t) => t.addEventListener("click", (e) => {
