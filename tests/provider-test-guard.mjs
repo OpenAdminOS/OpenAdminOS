@@ -27,6 +27,7 @@ const overrides = [
 const proxyKeys = ["NODE_USE_ENV_PROXY", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"];
 const proxyOverrides = [...proxyKeys, ...proxyKeys.map((key) => key.toLowerCase())];
 const directories = new Set();
+const fixtureSpawnObservers = new Map();
 const servers = new Map();
 const refusedOrigins = new Set();
 const liveMcpOrigins = new Set();
@@ -42,6 +43,19 @@ export function assertProviderTestGuardActive() {
 export function registerProviderFixtureDirectory(directory) {
   assertProviderTestGuardActive();
   directories.add(realpathSync(directory));
+}
+
+export function waitForProviderFixtureExit(executable) {
+  assertProviderTestGuardActive();
+  assert.ok(isFixture(executable), "Register the provider fixture before watching its exit.");
+  const path = realpathSync(executable);
+  assert.ok(!fixtureSpawnObservers.has(path), "The fixture already has a pending exit watcher.");
+  return new Promise((resolve, reject) => {
+    fixtureSpawnObservers.set(path, (child) => {
+      child.once("exit", (_code, signal) => resolve(signal));
+      child.once("error", reject);
+    });
+  });
 }
 
 export function stubLoopbackConnectionRefused() {
@@ -108,7 +122,16 @@ function guardCommand(method, call, receiver, args) {
 
   const allowed = node && realAbsolutePath(command) === node ? isFixture(argv[0]) : isFixture(command);
   if (!allowed) throw failure();
-  return Reflect.apply(call, receiver, args);
+  const result = Reflect.apply(call, receiver, args);
+  if (method === "spawn" && fixtureSpawnObservers.size > 0) {
+    const path = realAbsolutePath(command);
+    const observe = fixtureSpawnObservers.get(path);
+    if (observe) {
+      fixtureSpawnObservers.delete(path);
+      observe(result);
+    }
+  }
+  return result;
 }
 
 function guardChildren() {
@@ -265,6 +288,7 @@ export function installProviderTestGuard() {
   afterEach(() => {
     restoreOverrides();
     directories.clear();
+    fixtureSpawnObservers.clear();
     refusedOrigins.clear();
     liveMcpOrigins.clear();
     globalThis.fetch = guardedFetch;

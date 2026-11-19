@@ -3,7 +3,7 @@ import type { ManagedPolicyStatus, ProviderId } from "@openadminos/agent-sdk";
 import { chmod, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { registerProviderFixtureDirectory } from "../../../tests/provider-test-guard.mjs";
+import { registerProviderFixtureDirectory, waitForProviderFixtureExit } from "../../../tests/provider-test-guard.mjs";
 
 export async function fakeCli(directory: string, name: string, body: string): Promise<string> {
   const binary = join(directory, name);
@@ -12,6 +12,11 @@ export async function fakeCli(directory: string, name: string, body: string): Pr
   await chmod(binary, 0o755);
   registerProviderFixtureDirectory(directory);
   return binary;
+}
+
+export async function fakeCliWithExit(directory: string, name: string, body: string) {
+  const binaryPath = await fakeCli(directory, name, body);
+  return { binaryPath, exit: waitForProviderFixtureExit(binaryPath) };
 }
 
 /** Narrow scan checks only. Provider discovery outside a scan still needs a providerListFactory stub. */

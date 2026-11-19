@@ -22,7 +22,7 @@ import { installedOnDisk, scanProviderCheck, runScanCheck } from "./model-scan.j
 import { AppStateStore } from "./state.js";
 import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 import { assertProviderTestGuardActive, stubLoopbackConnectionRefused } from "../../../tests/provider-test-guard.mjs";
-import { fakeCli, gone, onlyScanProviders } from "../tests/provider-cli-fixtures.js";
+import { fakeCli, fakeCliWithExit, onlyScanProviders } from "../tests/provider-cli-fixtures.js";
 
 assertProviderTestGuardActive();
 
@@ -463,18 +463,19 @@ describe("review round 1 on PR #175", () => {
     }
   });
 
-  it("kills a CLI that does not answer when the check times out (finding 4)", { skip: process.platform === "win32" }, async () => {
+  it("kills a CLI that does not answer when the check times out (finding 4)", { skip: process.platform === "win32", timeout: 10_000 }, async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-scan-hang-"));
     try {
-      const pidFile = join(dir, "pid");
-      const claude = await fakeCli(dir, "claude", `echo $$ > "${pidFile}"\nexec sleep 30`);
-      const probe = await runScanCheck(
-        { providerId: "anthropic", name: "Claude Code", where: "hosted", target: "claude auth status", run: (signal) => scanProviderCheck(catalog("anthropic"), { signal, binaryPath: claude }).then((summary) => scanProbeFromProvider(summary)) },
-        1500,
-      );
+      const { binaryPath, exit } = await fakeCliWithExit(dir, "claude", "exec /bin/sleep 30");
+      const [probe, exitSignal] = await Promise.all([
+        runScanCheck(
+          { providerId: "anthropic", name: "Claude Code", where: "hosted", target: "claude auth status", run: (signal) => scanProviderCheck(catalog("anthropic"), { signal, binaryPath }).then((summary) => scanProbeFromProvider(summary)) },
+          1500,
+        ),
+        exit,
+      ]);
       assert.equal(probe.state, "could-not-check");
-      const pid = Number((await readFile(pidFile, "utf8")).trim());
-      assert.equal(await gone(pid), true, "the hanging CLI must be killed");
+      assert.equal(exitSignal, "SIGKILL", "the hanging CLI must be killed");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
