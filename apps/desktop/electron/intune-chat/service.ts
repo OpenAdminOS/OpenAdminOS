@@ -2717,6 +2717,7 @@ export class IntuneChatService {
     // room for the question and its evidence; a small on-device model keeps
     // its total and gives the profile a part of it.
     const smallVoiceModel = providerId === "apple-foundation";
+    if (options.voice && options.voiceProfile) registerTenantData("nova:profile", options.voiceProfile);
     const voiceProfile = options.voice && options.voiceProfile ? novaProfilePromptBlock({ ...options.voiceProfile, byteLimit: novaReasoningProfileByteLimit(providerId) }) : "";
     const voiceByteLimit = smallVoiceModel ? 3000 : VOICE_PROMPT_BYTE_LIMIT + Buffer.byteLength(voiceProfile) + (voiceProfile ? Buffer.byteLength(NOVA_PROFILE_BLOCK_END) + 2 : 0);
     const planned = planChatContext(voiceContext?.planningQuestion ?? content);
@@ -2724,8 +2725,6 @@ export class IntuneChatService {
     if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
     const restriction = restrictPlannedResourcesForTenant(planned, tenant, noTenant);
     registerTransientTenantData("chat:history", conversationMemory);
-    if (options.voice) registerTransientTenantData("nova:history", options.voiceHistory ?? store.listMessages(conversation.id).map(message => message.content));
-    if (voiceProfile) registerTenantData("nova:profile", options.voiceProfile);
     const userMessage: IntuneChatMessage = {
       id: `msg_${randomUUID()}`,
       conversationId: conversation.id,

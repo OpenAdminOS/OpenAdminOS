@@ -1,4 +1,4 @@
-import { registerRenderedFragment } from "@openadminos/runtime/data-classification";
+import { registerRenderedFragment, registerTransientTenantData } from "@openadminos/runtime/data-classification";
 import { isNovaConversationOnly } from "../../src/shared/nova-transcript.js";
 import { fenceTenantData } from "@openadminos/runtime";
 import type {
@@ -34,7 +34,9 @@ export function voiceConversationContext(
     if (turn.role === "user") conversational = isNovaConversationOnly(turn.text);
     if (!conversational) reference.push(turn);
   }
-  const history = reference.slice(smallContext ? -2 : -6).map(turn => ({
+  const selected = reference.slice(smallContext ? -2 : -6);
+  if (followsUp) registerTransientTenantData("nova:history", selected);
+  const history = selected.map(turn => ({
     role: turn.role, text: clipVoiceText(turn.text, smallContext ? 128 : 400),
   }));
   const priorQuestion = reference.slice().reverse().find(turn => turn.role === "user")?.text;

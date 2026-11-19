@@ -4,6 +4,7 @@ import type {
   GraphCacheResourceStatus,
   IntuneChatMessage,
 } from "@openadminos/agent-sdk";
+import { ClassificationLedger, withClassificationScope } from "@openadminos/runtime/data-classification";
 import {
   voiceInventoryAnswer,
   voiceAppPlatformCountAnswer,
@@ -148,6 +149,17 @@ it("caps large Unicode evidence without losing totals or claiming omitted bucket
       ),
     /fewer resources/,
   );
+});
+
+it("observes clipped voice history only for the active turn", () => {
+  const text = `LAPS password: ${"opaque".repeat(100)}`;
+  const ledger = new ClassificationLedger();
+  const { history } = withClassificationScope(ledger, () =>
+    voiceConversationContext("What about that device?", [], true, [{ role: "assistant", text }]));
+  const probe = { prompt: history };
+  assert.ok(ledger.classifyRequest(probe).spans.some(span => span.kind === "credential" && span.source === "nova:history"));
+  ledger.discardTransient();
+  assert.equal(ledger.classifyRequest(probe).spans.some(span => span.source === "nova:history"), false);
 });
 
 it("summarizes encryption and OS versions without treating unknown values as false", () => {

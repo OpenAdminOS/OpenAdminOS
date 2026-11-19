@@ -352,8 +352,11 @@ function pathValue(record: Record<string, unknown>, key: string): unknown {
 }
 
 function textOf(value: unknown): string | undefined {
-  if (typeof value === "string") return value.trim() || undefined;
-  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed) return trimmed === value ? trimmed : registerRenderedFragment(value, trimmed);
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return registerRenderedFragment(value, String(value));
   return undefined;
 }
 
@@ -445,7 +448,7 @@ function readFormatted(data: unknown, text: string, format: McpResultFormat, cal
   const params = Object.values(call.args ?? {}).flatMap((value) => (Array.isArray(value) ? value : [value])).map((value) => textOf(value)).filter(Boolean);
   const title = clean(`${call.tool ?? "Result"}${params.length > 0 ? `: ${params.join(" ")}` : ""}`);
   const url = httpsLink(record, format.whole.url);
-  return { items: [{ title, ...(url ? { url } : {}), excerpt: text.trim() || JSON.stringify(record) }], empty: false };
+  return { items: [{ title, ...(url ? { url } : {}), excerpt: textOf(text) || JSON.stringify(record) }], empty: false };
 }
 
 function isUrlOnHost(value: string, host: string): boolean {
@@ -513,7 +516,7 @@ function readDefault(text: string, call: { structured?: unknown; args?: Record<s
       if (depth === 0) rootMatched = true;
       if (found.length >= MCP_RESULT_LIMIT) return;
       const excerpt = EXCERPT_KEYS.map((key) => record[key]).find((candidate): candidate is string => typeof candidate === "string" && candidate.trim().length > 0);
-      found.push({ title: clean(title), url, ...(excerpt ? { excerpt: excerpt.trim() } : {}) });
+      found.push({ title: clean(title), url, ...(excerpt ? { excerpt: textOf(excerpt)! } : {}) });
       return;
     }
     for (const child of Object.values(record)) walk(child, depth + 1);
@@ -535,7 +538,7 @@ function readDefault(text: string, call: { structured?: unknown; args?: Record<s
   // card link when it points at the server's own host.
   const fetched = typeof call.args?.url === "string" && call.host && isUrlOnHost(call.args.url, call.host) ? call.args.url : undefined;
   const heading = /^#\s+(.+)$/m.exec(text)?.[1];
-  if (fetched && heading && clean(heading)) return { items: [{ title: clean(heading), url: fetched, excerpt: text.trim() }] };
+  if (fetched && heading && clean(heading)) return { items: [{ title: clean(heading), url: fetched, excerpt: textOf(text)! }] };
   const seen = new Set<string>();
   for (const match of text.matchAll(/\[([^\]\n]{1,200})\]\((https?:\/\/[^)\s]+)\)/g)) {
     if (seen.has(match[2]!) || !clean(match[1]!)) continue;

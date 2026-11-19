@@ -7,6 +7,7 @@ import { describe, it } from "node:test";
 
 import { providerCatalog, type AppState, type ManagedPolicyStatus, type SecretAccessor } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
+import { ClassificationLedger, withClassificationScope } from "@openadminos/runtime/data-classification";
 
 import { diffConfigurationAudit, type ConfigurationAuditEvent } from "./configuration-audit.js";
 import { sanitizeManagedPolicyRecord } from "./managed-policy-state.js";
@@ -634,6 +635,20 @@ describe("Nova profile prompt block", () => {
     const block = novaProfilePromptBlock({ effective: effective('"\n'.repeat(1000) + "Ü".repeat(500)), byteLimit: 900 });
     assert.ok(Buffer.byteLength(block) <= 900);
     JSON.parse(block.slice(NOVA_PROFILE_BLOCK_INTRO.length + 1));
+  });
+
+  it("keeps classified provenance for clipped instructions in the reasoning prompt", () => {
+    const instructions = "fixture".repeat(400);
+    const input = { effective: effective(instructions), byteLimit: 1800 };
+    const ledger = new ClassificationLedger();
+    ledger.register("fixture", { secretText: instructions });
+    const block = withClassificationScope(ledger, () => novaProfilePromptBlock(input));
+    assert.equal(block, novaProfilePromptBlock(input));
+    const { standingInstructions } = JSON.parse(block.slice(NOVA_PROFILE_BLOCK_INTRO.length + 1));
+    assert.match(standingInstructions.text, /\[clipped\]$/);
+    const probe = `${block}\n${standingInstructions.text}`;
+    const spans = ledger.classifyRequest({ system: probe, prompt: "" }).spans.filter(span => span.kind === "credential");
+    assert.deepEqual(spans.map(span => probe.slice(span.start, span.end)), [standingInstructions.text]);
   });
 
   it("lets a shortcut ask what needs the admin", () => {
