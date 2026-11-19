@@ -3768,3 +3768,58 @@ Decided with the user after a docs question ("What does the Microsoft Learn say 
   - *Chat titles.* The first answer of a new chat may return `title` in its final JSON: plain text on one line, at most 60 characters, no links, no write intent, no tenant values (checked like `next`). It names the chat in the sidebar and header unless the chat was renamed meanwhile; otherwise, and on the deterministic path, the chat keeps the trimmed question. The title is asked for only on that first answer and costs no extra model call.
   - *Hosted disclosure.* The status strip pill is unchanged. The sentence under the composer ("Prompts and tenant data go to ... while this model is selected. MCP queries are written from your current question only, ...") shows in full on the first message of a conversation and whenever the provider, model or MCP hosts differ from what the conversation last sent with (kept per viewer in local storage, falling back to the provider and model of the latest answer). Otherwise a shield icon in the composer carries the same sentence as its tooltip and accessible description and opens it in full on click. Hard constraint 1 is unchanged: the strip always says where data goes.
   - *Other.* Scroll to latest sits in its own row above the composer, outside the scrolling conversation. Each numbered step in an answer has a copy button (plain text, without citation numbers), shown on hover and keyboard focus.
+
+### Local model accuracy in Chat (2026-11-19)
+
+Tester findings on 2026-11-18 with the local OpenAdmin 8B model: device counts
+read from sample rows (3 noncompliant instead of 6), no per OS split, unmanaged
+Entra devices listed as Intune devices, follow-ups planned from scratch, and auto
+mode spending up to about 22 model calls before a fallback whose notice blamed
+the format. Decisions:
+
+- Code does the counting. `count_cached {resource, where?, filters?, groupBy?,
+  list?}` counts every cached row in SQL under the filters, with one breakdown
+  per groupBy field, and returns the matching rows when at most 50 match. The
+  loop prompt sends every count and breakdown to it.
+- Device questions the parser fully understands (counts, per OS, per
+  compliance state or ownership, OS, compliance and sync filters, and lists of
+  those) become a structured query. Any word outside its vocabulary leaves the
+  question to the planner, so "which Macs need attention" is never answered
+  with a list of all Macs. The deterministic answer pack carries the result as
+  an authoritative `computedResult` (exact counts, the full filtered list,
+  plain fact lines) and no sample rows for that resource. "Not compliant" is
+  `complianceState != compliant`.
+- Intune is the device inventory. Device, OS, sync and compliance wording plans
+  `managedDevices` only; `entraDevices` joins for Entra, directory, join,
+  registration, stale-device cleanup, duplicate and deleted-record wording.
+- Row samples use structured filters for the OS and compliance state a question
+  names, and question words are no longer ANDed as text matches.
+- Follow-ups: the structured result of the last answer is stored per
+  conversation (`chat_result_context`: resource, filters, label, total; deleted
+  with the conversation) and a follow-up such as "only Windows" or "which of
+  those synced this month" narrows it. Any other answer clears it. Short
+  follow-ups are planned with the previous question as context.
+- Questions the data cannot answer: "why is <device> not compliant" names the
+  device's cached state, says the failing rule is not in the cached data, and
+  gives the last sync as the lead, with nothing invented.
+- A local model's answer that leaves out or changes a computed fact (a count,
+  a breakdown, a listed name, the not-in-data statement or the sync date) is
+  replaced by the computed answer, with the notice "The local model's answer
+  did not match the counts computed from cached data, so the computed result is
+  shown instead." This applies to the deterministic path for any local model
+  and to the tool loop in auto mode.
+- Auto mode, local model, Chat: a compact loop budget (four iterations, one
+  repair for malformed, empty, unfinished or evidence-free replies, no repair
+  turn for a missing question kind, at most four model calls before the
+  fallback). For a structured question the host runs `count_cached` before the
+  first model call and gives the facts as an observation, so a good reply needs
+  one call. A context overflow falls back instead of failing the message.
+  Always investigative mode and hosted providers keep the established budget,
+  prompts and notices.
+- The loop returns `failureReason`: `malformed`, `thinking-only` (a reply with
+  no text), `context-too-small`, `iteration-cap`, `no-evidence`,
+  `empty-answer`, `unfinished` or `provider-unavailable`. Local fallbacks say
+  what happened in plain words, for example "The local model did not finish
+  its plan. Answered from cached data instead." The per-model failure memory
+  (two failures, in memory until restart) now says what the model did on its
+  last failed turn instead of blaming the format.
