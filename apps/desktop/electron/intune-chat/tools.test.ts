@@ -10,7 +10,7 @@ import {
   type RunGraphApi,
 } from "@openadminos/agent-sdk";
 
-import { executeIntuneChatTool } from "./tools.js";
+import { executeIntuneChatTool, type IntuneChatToolContext } from "./tools.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 
 describe("Intune Chat read-only tools", () => {
@@ -1164,4 +1164,39 @@ it('rejects invented or malformed filters, preserves optional fields, and handle
     assert.equal((validBoolean.result as { totalCount: number }).totalCount, 1);
 
   } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+describe("count_cached", () => {
+  it("counts every cached row under filters, with breakdowns and the matching rows", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-count-cached-"));
+    const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+    try {
+      store.replaceGraphResources({
+        tenantId: "tenant-1", resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: "2026-11-19T10:00:00.000Z",
+        rows: Array.from({ length: 60 }, (_, i) => ({ id: `d-${i}`, deviceName: `DEV-${String(i).padStart(2, "0")}`, operatingSystem: i % 3 ? "Windows" : "macOS", complianceState: i < 6 ? "noncompliant" : "compliant", isEncrypted: i % 2 === 0 })),
+      });
+      const ctx = { tenantId: "tenant-1", store, grantedScopes: new Set(DEFAULT_GRAPH_READ_SCOPE_NAMES) } as unknown as IntuneChatToolContext;
+      const all = await executeIntuneChatTool(ctx, "count_cached", { resource: "managedDevices", groupBy: ["operatingSystem", "isEncrypted"] });
+      const counted = all.result as { totalCount: number; groups: Record<string, Record<string, number>>; returnedRows: number };
+      assert.equal(counted.totalCount, 60);
+      assert.deepEqual(counted.groups.operatingSystem, { Windows: 40, macOS: 20 });
+      assert.deepEqual(counted.groups.isEncrypted, { false: 30, true: 30 });
+      assert.equal(counted.returnedRows, 0);
+      assert.match(all.trace.resultSummary, /^60 matching cached rows counted · by operatingSystem, isEncrypted$/);
+
+      const listed = (await executeIntuneChatTool(ctx, "count_cached", { resource: "managedDevices", where: { complianceState: "noncompliant" }, list: true })).result as { totalCount: number; rows: Array<Record<string, unknown>> };
+      assert.equal(listed.totalCount, 6);
+      assert.deepEqual(listed.rows.map((row) => row.deviceName), ["DEV-00", "DEV-01", "DEV-02", "DEV-03", "DEV-04", "DEV-05"]);
+      assert.deepEqual(Object.keys(listed.rows[0]!).sort(), ["complianceState", "deviceName", "id", "isEncrypted", "operatingSystem"]);
+
+      // More than 50 matches are counted, not listed.
+      const many = (await executeIntuneChatTool(ctx, "count_cached", { resource: "managedDevices", list: true })).result as { totalCount: number; returnedRows: number; note: string };
+      assert.equal(many.totalCount, 60);
+      assert.equal(many.returnedRows, 0);
+      assert.match(many.note, /more than 50, so none are listed/);
+
+      const invalid = await executeIntuneChatTool(ctx, "count_cached", { resource: "managedDevices", groupBy: ["noSuchField"] });
+      assert.match(invalid.trace.error ?? "", /Unsupported managedDevices field: noSuchField/);
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
 });

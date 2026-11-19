@@ -415,6 +415,7 @@ export function mcpSentText(params: unknown): string {
 const TOOL_STEP: Record<string, { active: string; done: string; failed: string; origin: "device" | "graph" }> = {
   list_cached_resources: { active: "Checking the cache inventory", done: "Checked the cache inventory", failed: "Could not read the cache inventory", origin: "device" },
   query_cache: { active: "Querying cached data", done: "Queried cached data", failed: "Cache query failed", origin: "device" },
+  count_cached: { active: "Counting cached data", done: "Counted cached data", failed: "Cache count failed", origin: "device" },
   find_graph_endpoint: { active: "Looking up Graph endpoints", done: "Looked up Graph endpoints", failed: "Endpoint lookup failed", origin: "device" },
   graph_get: { active: "Reading Microsoft Graph", done: "Read Microsoft Graph", failed: "Graph read failed", origin: "graph" },
   refresh_resource: { active: "Refreshing tenant data", done: "Refreshed tenant data", failed: "Refresh failed", origin: "graph" },
@@ -571,10 +572,11 @@ function midSentenceLabel(label: string): string {
 export function toolDecision(tool: IntuneChatInvestigationToolName, params: unknown, mcp: McpChatTool | undefined): string {
   if (isMcpChatToolName(tool)) return `Chose to ask ${mcp?.serverName ?? "an MCP server"}`;
   if (isSplashtopReadTool(tool)) return `Chose to read Splashtop ${splashtopToolLabel(tool)}`;
-  if (tool === "query_cache") {
+  if (tool === "query_cache" || tool === "count_cached") {
+    const verb = tool === "count_cached" ? "count" : "query";
     const label = resourceLabel(params);
-    if (!label) return "Chose to query cached data";
-    return `Chose to query cached ${midSentenceLabel(label)}`;
+    if (!label) return `Chose to ${verb} cached data`;
+    return `Chose to ${verb} cached ${midSentenceLabel(label)}`;
   }
   return DECISION[tool] ?? "Chose a tool";
 }

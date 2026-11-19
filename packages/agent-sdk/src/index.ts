@@ -1510,6 +1510,7 @@ export interface IntuneChatDocumentationSource {
 export type IntuneChatInvestigationToolName =
   | "list_cached_resources"
   | "query_cache"
+  | "count_cached"
   | "find_graph_endpoint"
   | "graph_get"
   | "refresh_resource"

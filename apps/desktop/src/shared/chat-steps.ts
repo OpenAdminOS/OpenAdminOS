@@ -40,7 +40,7 @@ export function currentStepTitle(steps: readonly IntuneChatStep[] | undefined): 
   return [...list].reverse().find((step) => step.status === "active")?.title ?? list.at(-1)?.title ?? "Reading the question";
 }
 
-const TENANT_TOOLS = new Set(["list_cached_resources", "query_cache", "graph_get", "refresh_resource", "query_drift"]);
+const TENANT_TOOLS = new Set(["list_cached_resources", "query_cache", "count_cached", "graph_get", "refresh_resource", "query_drift"]);
 
 /**
  * Whether the answer rests on tenant data: the host marked it (cached rows
