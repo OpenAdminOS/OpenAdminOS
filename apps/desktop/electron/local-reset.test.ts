@@ -371,7 +371,7 @@ describe("local reset: end to end with the store", () => {
 
       // Phase 1, as the main process runs it.
       await requestLocalReset(LOCAL_RESET_PHRASE, {
-        checkReady: async () => assert.equal(await store.localResetBlocker(), undefined),
+        checkReady: async () => assert.equal(await store.beginLocalReset(), undefined),
         writeMarker: (marker) => writeLocalResetMarker(dir, marker),
         forgetSignIns: async () => {
           const problems = await store.forgetAllSignIns();
@@ -381,6 +381,8 @@ describe("local reset: end to end with the store", () => {
         disableScheduler: async () => undefined,
         disableLoginItem: async () => undefined,
       });
+      // No confirmed change starts between the request and the restart.
+      await assert.rejects(store.confirmRun("any-run", "ANY PHRASE"), /OpenAdminOS is resetting.*Nothing was applied/);
       await store.shutdown(500);
 
       // Phase 2, at the next launch.
@@ -421,6 +423,9 @@ describe("local reset: end to end with the store", () => {
       const store = new AppStateStore({ filePath: statePath, tokenStore: memoryTokenStore(new Map()), userDataPath: dir, statsApiUrl: "" });
       try {
         assert.match((await store.localResetBlocker()) ?? "", /is applying a confirmed change.*Nothing was removed/);
+        // A refused reset does not hold back confirmations.
+        assert.match((await store.beginLocalReset()) ?? "", /is applying a confirmed change/);
+        await assert.rejects(store.confirmRun("missing-run", "X"), (error: Error) => !/is resetting/.test(error.message));
       } finally {
         store.close();
       }

@@ -126,7 +126,9 @@ export async function requestLocalReset(
   if (warnings.length > 0) {
     marker.requestWarnings = warnings;
     // The marker is already on disk; this only adds the warnings to it.
-    await steps.writeMarker(marker).catch(() => undefined);
+    await steps.writeMarker(marker).catch((cause: unknown) => {
+      console.warn(`[local-reset] the request warnings could not be added to the marker: ${reasonOf(cause)}`);
+    });
   }
   return { marker };
 }

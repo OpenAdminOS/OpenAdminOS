@@ -5421,7 +5421,7 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
   try {
     await requestLocalReset(confirmation, {
       checkReady: async () => {
-        const blocker = await store.localResetBlocker();
+        const blocker = await store.beginLocalReset();
         if (blocker) throw new LocalResetRequestError(blocker);
       },
       writeMarker: (marker) => writeLocalResetMarker(app.getPath("userData"), marker),
@@ -5440,6 +5440,7 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
     });
   } catch (error) {
     localResetRequested = false;
+    store.cancelLocalReset();
     throw error;
   }
   console.info("[local-reset] reset requested; restarting");
