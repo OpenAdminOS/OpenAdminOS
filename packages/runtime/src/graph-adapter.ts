@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import { awaitWithSignal } from "./cancellation.js";
+import { registerTenantData } from "./data-classification.js";
 import { scopesFromAccessToken } from "./token-scopes.js";
 import { GraphAccessDeniedError, type GraphAccessContext } from "@openadminos/agent-sdk";
 import type {
@@ -204,6 +205,8 @@ export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
           log: options.log,
           accessContext: options.accessContext,
         });
+        const graphPath = "/deviceManagement/managedDevices";
+        registerTenantData(`graph:${graphPath}`, payload, { graphPath });
         for (const item of payload.value ?? []) {
           records.push(toManagedDeviceRecord(item));
         }

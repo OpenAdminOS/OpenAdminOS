@@ -3,7 +3,45 @@ import type { DataClass } from "@openadminos/agent-sdk";
 // Source: docs/research/graph-field-classes.md and the decisions in docs/SPEC.md.
 // [] matches an array element. * matches one property in a keyed object.
 // Mapped containers set an inherited class. Unknown branches start at the resource default.
-export const GRAPH_FIELD_CLASSES_VERSION = 2;
+export const GRAPH_FIELD_CLASSES_VERSION = 3;
+
+/** Equivalent paths in the bundled Graph index, with route parameters normalized by the classifier. */
+export const GRAPH_ROUTE_ALIASES = {
+  "/deviceManagement/comanagedDevices/{id}/getFileVaultKey": "/deviceManagement/managedDevices/{id}/getFileVaultKey",
+  "/me/managedDevices/{id}/getFileVaultKey": "/deviceManagement/managedDevices/{id}/getFileVaultKey",
+  "/users/{id}/managedDevices/{id}/getFileVaultKey": "/deviceManagement/managedDevices/{id}/getFileVaultKey",
+  "/deviceManagement/comanagedDevices": "/deviceManagement/managedDevices",
+  "/me/managedDevices": "/deviceManagement/managedDevices",
+  "/users/{id}/managedDevices": "/deviceManagement/managedDevices",
+  "/me/informationProtection/bitlocker/recoveryKeys": "/informationProtection/bitlocker/recoveryKeys",
+  "/users/{id}/informationProtection/bitlocker/recoveryKeys": "/informationProtection/bitlocker/recoveryKeys",
+  "/sites/{id}/informationProtection/bitlocker/recoveryKeys": "/informationProtection/bitlocker/recoveryKeys",
+  "/groups/{id}/sites/{id}/informationProtection/bitlocker/recoveryKeys": "/informationProtection/bitlocker/recoveryKeys",
+  "/directory/deviceLocalCredentials/{id}": "/directory/deviceLocalCredentials",
+  "/applications/{id}/microsoft.graph.agentIdentityBlueprint/addPassword": "/applications/{id}/addPassword",
+  "/servicePrincipals/{id}/addPassword": "/applications/{id}/addPassword",
+  "/applications/{id}/appRoleAssignedTo": "/appRoleAssignments",
+  "/applications/{id}/appRoleAssignments": "/appRoleAssignments",
+  "/servicePrincipals/{id}/appRoleAssignedTo": "/appRoleAssignments",
+  "/servicePrincipals/{id}/appRoleAssignments": "/appRoleAssignments",
+  "/users/{id}/appRoleAssignments": "/appRoleAssignments",
+  "/me/appRoleAssignments": "/appRoleAssignments",
+  "/groups/{id}/appRoleAssignments": "/appRoleAssignments",
+  "/servicePrincipals/{id}/oauth2PermissionGrants": "/oauth2PermissionGrants",
+  "/users/{id}/oauth2PermissionGrants": "/oauth2PermissionGrants",
+  "/me/oauth2PermissionGrants": "/oauth2PermissionGrants",
+} as const;
+
+/** Security fields carry a mask role. Unlisted settings use "setting". */
+const SECURITY_MASK_NAMES = /^(?:name|id|.*(?:Name|Id|Ids)|.*ConsentDescription|description|cidrAddress|rolePermissions|permissionGrantPolicyIdsAssignedToDefaultUserRole)$/i;
+const SECURITY_PERMISSION_NAMES = /\/(?:(?:approles|oauth2permissionscopes)\/\[\]\/value|oauth2permissiongrants\/\[\]\/scope)$/;
+const SECURITY_LOCATION_RANGES = /\/ipranges\//;
+
+export function graphSecurityMaskRole(field: string, path: string, route: string): SecurityMaskRole {
+  return SECURITY_MASK_NAMES.test(field) || SECURITY_PERMISSION_NAMES.test(path) || SECURITY_LOCATION_RANGES.test(path) || field.toLowerCase() === "scope" && route === "/oauth2permissiongrants"
+    ? "nameOrIdentifier" : "setting";
+}
+export type SecurityMaskRole = "nameOrIdentifier" | "setting";
 
 export const GRAPH_TEXT_FIELDS = /^(?:notes?|groupTag|publisher|rule|redirectUris?|.*(?:description|name|url|uri|reason)|comment|summary|details|title|message|oldValue|newValue)$/i;
 export const GRAPH_DEVICE_NAME_FIELDS = /^(?:deviceName|managedDeviceName)$/i;
@@ -14,6 +52,8 @@ export const GRAPH_SECURITY_RESOURCES = new Set([
   "/identity/conditionalAccess/authenticationStrength/policies",
   "/policies/identitySecurityDefaultsEnforcementPolicy", "/policies/crossTenantAccessPolicy",
   "/policies/crossTenantAccessPolicy/default", "/policies/crossTenantAccessPolicy/partners",
+  "/policies/authorizationPolicy", "/deviceManagement/deviceCompliancePolicies",
+  "/appRoleAssignments", "/oauth2PermissionGrants",
   "/directoryRoles", "/directoryRoleTemplates", "/roleManagement/directory/roleDefinitions",
   "/roleManagement/directory/roleAssignments", "/roleManagement/directory/transitiveRoleAssignments",
   "/roleManagement/directory/roleAssignmentScheduleRequests", "/roleManagement/directory/roleEligibilityScheduleRequests",
@@ -100,7 +140,7 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
     configuration: "id displayName mail securityEnabled groupTypes[] createdDateTime",
   },
   "/deviceManagement/deviceCompliancePolicies": {
-    configuration: "@odata.type id displayName description createdDateTime lastModifiedDateTime",
+    security: "@odata.type id displayName description createdDateTime lastModifiedDateTime",
   },
   "/deviceManagement/deviceConfigurations": {
     credential: `
@@ -410,7 +450,7 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
     `,
   },
   "/policies/authorizationPolicy": {
-    configuration: `
+    security: `
       id allowInvitesFrom allowedToSignUpEmailBasedSubscriptions allowedToUseSSPR
       allowEmailVerifiedUsersToJoinOrganization allowUserConsentForRiskyApps blockMsolPowerShell
       description displayName enabledPreviewFeatures[] guestUserRoleId
@@ -447,15 +487,15 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
     configuration: "id displayName description visibility",
   },
   "/applications": {
+    security: "requiredResourceAccess[] appRoles[] oauth2PermissionScopes[] api.oauth2PermissionScopes[] appRoleAssignments[] appRoleAssignedTo[] oauth2PermissionGrants[]",
     credential: "passwordCredentials[].secretText passwordCredentials[].hint keyCredentials[].key",
     configuration: `
       passwordCredentials[] keyCredentials[] id appId displayName createdDateTime publisherDomain signInAudience tags[] description
-      identifierUris[] notes serviceManagementReference appRoles[] api.requestedAccessTokenVersion
-      api.acceptMappedClaims api.knownClientApplications[] api.oauth2PermissionScopes[]
+      identifierUris[] notes serviceManagementReference api.requestedAccessTokenVersion
+      api.acceptMappedClaims api.knownClientApplications[]
       api.preAuthorizedApplications[] api.tokenEncryptionSetting.scheme
       api.tokenEncryptionSetting.audience api.tokenEncryptionSetting.automatedTokenVersion.current
-      api.tokenEncryptionSetting.automatedTokenVersion.available[] requiredResourceAccess[].resourceAppId
-      requiredResourceAccess[].resourceAccess[].id requiredResourceAccess[].resourceAccess[].type
+      api.tokenEncryptionSetting.automatedTokenVersion.available[]
       passwordCredentials[].customKeyIdentifier passwordCredentials[].endDateTime
       passwordCredentials[].keyId passwordCredentials[].startDateTime passwordCredentials[].displayName
       keyCredentials[].customKeyIdentifier keyCredentials[].endDateTime keyCredentials[].keyId
@@ -464,20 +504,11 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
       web.logoutUrl web.enabledResponseModes web.customAuthenticationUx web.redirectUriSettings[].uri
       web.redirectUriSettings[].index web.implicitGrantSettings.enableIdTokenIssuance
       web.implicitGrantSettings.enableAccessTokenIssuance spa.redirectUris[] spa.enabledResponseModes
-      publicClient.redirectUris[] publicClient.enabledResponseModes appRoles[].id appRoles[].displayName
-      appRoles[].description appRoles[].value appRoles[].isEnabled appRoles[].allowedMemberTypes[]
-      appRoles[].adminConsentDescription appRoles[].adminConsentDisplayName
-      appRoles[].userConsentDescription appRoles[].userConsentDisplayName appRoles[].type
-      api.oauth2PermissionScopes[].id api.oauth2PermissionScopes[].displayName
-      api.oauth2PermissionScopes[].description api.oauth2PermissionScopes[].value
-      api.oauth2PermissionScopes[].isEnabled api.oauth2PermissionScopes[].allowedMemberTypes[]
-      api.oauth2PermissionScopes[].adminConsentDescription
-      api.oauth2PermissionScopes[].adminConsentDisplayName
-      api.oauth2PermissionScopes[].userConsentDescription
-      api.oauth2PermissionScopes[].userConsentDisplayName api.oauth2PermissionScopes[].type
+      publicClient.redirectUris[] publicClient.enabledResponseModes
     `,
   },
   "/servicePrincipals": {
+    security: "requiredResourceAccess[] appRoles[] oauth2PermissionScopes[] api.oauth2PermissionScopes[] appRoleAssignments[] appRoleAssignedTo[] oauth2PermissionGrants[]",
     credential: "passwordCredentials[].secretText passwordCredentials[].hint keyCredentials[].key",
     configuration: `
       passwordCredentials[] keyCredentials[] id appId displayName accountEnabled servicePrincipalType appOwnerOrganizationId
@@ -487,6 +518,17 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
       keyCredentials[].startDateTime keyCredentials[].type keyCredentials[].usage
       keyCredentials[].displayName keyCredentials[].hasExtendedValue
     `,
+  },
+  "/applications/{id}/addPassword": {
+    credential: "secretText hint passwordCredential.secretText passwordCredential.hint",
+  },
+  "/appRoleAssignments": {
+    identity: "principalId principalDisplayName",
+    security: "id appRoleId resourceId resourceDisplayName principalType createdDateTime",
+  },
+  "/oauth2PermissionGrants": {
+    identity: "principalId",
+    security: "id clientId resourceId consentType scope",
   },
   "/domains": {
     configuration: "id isDefault isInitial isVerified authenticationType",

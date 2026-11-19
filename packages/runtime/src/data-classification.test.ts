@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
 import { DATA_CLASSES_BY_SENSITIVITY, highestDataClass, maxDataClass, type DataClass } from "@openadminos/agent-sdk";
-import { ClassificationLedger, classifyData, countDataClasses, hasGraphFieldClasses, withClassificationScope, withRequestClassification, type RequestClassificationEvent } from "./data-classification.js";
-import { GRAPH_FIELD_CLASSES } from "./graph-field-classes.js";
+import { ClassificationLedger, classificationDiagnostics, classifyData, hasGraphFieldClasses, registerRenderedFragment, registerTenantData, withClassificationScope, withRequestClassification, type RequestClassificationEvent } from "./data-classification.js";
+import { GRAPH_FIELD_CLASSES, GRAPH_FIELD_CLASSES_VERSION, GRAPH_ROUTE_ALIASES } from "./graph-field-classes.js";
 import { GRAPH_CLASSIFICATION_FIXTURES } from "./graph-classification.fixtures.js";
 import { fenceTenantData } from "./tenant-data.js";
+import { renderPromptTemplate } from "./template-engine.js";
+import { REQUEST_CLASSIFICATION_MAX_SECTION } from "./request-classification.js";
 import { agentTemplateToRegistrySummary, parseAgentTemplate } from "./agent-template.js";
 
 for (const [graphPath, [field, value, expected]] of Object.entries(GRAPH_CLASSIFICATION_FIXTURES)) {
@@ -18,7 +20,6 @@ for (const [graphPath, [field, value, expected]] of Object.entries(GRAPH_CLASSIF
       const result = classifyData(payload, { graphPath });
       assert.deepEqual(result.classes, { [pointer]: expected });
       assert.equal(result.counts[expected], 1);
-      assert.deepEqual(countDataClasses(payload, { graphPath }), result.counts);
     }
   });
 }
@@ -173,7 +174,7 @@ test("classifying a fenced request leaves its bytes and options unchanged", () =
   assert.equal(result.counts.credential, 1);
   const credential = result.spans.find(({ kind }) => kind === "credential")!;
   assert.equal(credential.source, source);
-  assert.equal(options.prompt.slice(credential.start, credential.end), '"fix"');
+  assert.equal(options.prompt.slice(credential.start, credential.end), "fix");
 });
 
 for (const [graphPath, groups] of Object.entries(GRAPH_FIELD_CLASSES)) {
@@ -294,47 +295,155 @@ test("bounded detectors handle whitespace runs, encoded PEM, labeled values and 
   }
 });
 
-test("reports unvisited Graph fields conservatively when traversal runs out of budget", () => {
+test("unexamined evidence stays separate from observed credentials and expires after one turn", () => {
   const data = { first: "safe", second: "x".repeat(100), password: "unvisited" };
   const options = { workBudget: 40, publicReference: true };
   const result = classifyData(data, options);
   assert.deepEqual(result.remainder, { from: "/second", kind: "credential" });
   assert.equal(result.budgetExhausted, true);
+  assert.equal(result.counts.credential, 0);
   const ledger = new ClassificationLedger();
   ledger.register("fixture", data, options);
   const request = ledger.classifyRequest({ prompt: '"unvisited"' });
-  assert.equal(request.budgetExhausted, true);
-  assert.equal(request.counts.credential, 1);
+  assert.equal(request.coverageIncomplete, true);
+  assert.equal(request.effectiveClass, "credential");
+  assert.equal(request.unexamined.registrations, 1);
+  assert.equal(request.unexamined.textCodeUnits, 0);
+  assert.equal(request.counts.credential, 0);
+  assert.deepEqual(request.spans, []);
+  const next = new ClassificationLedger();
+  next.include(ledger);
+  assert.equal(next.classifyRequest({ prompt: "unvisited" }).coverageIncomplete, false);
 });
 
-test("marks a section as credential when its text or candidate match budget is exhausted", () => {
+test("ledger value budget prioritizes credentials and does not invent prompt spans", () => {
+  const ledger = new ClassificationLedger();
+  ledger.register("public", ["a".repeat(950_000), "b".repeat(950_000)], { publicReference: true });
+  const secret = "different opaque material".repeat(10_000);
+  ledger.register("private", { secretText: secret });
+  const result = ledger.classifyRequest({ prompt: "Question with no credential" });
+  assert.equal(result.coverageIncomplete, true);
+  assert.equal(result.retainedValues, 2);
+  assert.equal(result.droppedValues, 1);
+  assert.equal(result.unexamined.values, 1);
+  assert.equal(result.counts.credential, 0);
+  assert.equal(ledger.classifyRequest({ prompt: secret }).counts.credential, 1);
+});
+
+test("reports the unexamined tail without counting it as a credential", () => {
   const ledger = new ClassificationLedger();
   ledger.register("fixture", { code: "abc" }, { publicReference: true });
-  for (const prefix of ["x".repeat(4_000_000), 'x"abc"'.repeat(200_001)]) {
-    const prompt = `${prefix}\npassword=opaque`;
-    const result = ledger.classifyRequest({ system: "Fixture instructions", prompt });
-    assert.equal(result.budgetExhausted, true);
-    assert.deepEqual(result.spans, [{ section: "prompt", start: 0, end: prompt.length,
-      kind: "credential", source: "detector:work-budget" }]);
-    assert.equal(result.counts.credential, 1);
+  const prompt = `password=opaque
+${"z".repeat(REQUEST_CLASSIFICATION_MAX_SECTION)}`;
+  const result = ledger.classifyRequest({ system: "Fixture instructions", prompt });
+  assert.equal(result.coverageIncomplete, true);
+  assert.equal(result.counts.credential, 1);
+  assert.deepEqual(result.unexamined.ranges, [{ section: "prompt", start: REQUEST_CLASSIFICATION_MAX_SECTION,
+    end: prompt.length, reason: "text-limit" }]);
+  const busy = ledger.classifyRequest({ prompt: 'x"abc"'.repeat(200_001) });
+  assert.equal(busy.coverageIncomplete, true);
+  assert.equal(busy.unexamined.ranges[0]?.reason, "match-limit");
+  assert.equal(busy.counts.credential, 0);
+});
+
+test("short values use key or rendering provenance and scalars do not match on their own", () => {
+  const ledger = new ClassificationLedger();
+  ledger.register("graph:/applications", { passwordCredentials: [{ hint: "abc", secretText: 2 }], accountEnabled: true }, { graphPath: "/applications" });
+  const system = '{"hint":"abc","secretText":2}';
+  const result = ledger.classifyRequest({ system, prompt: 'abc xabcx "abc" is prose. true 2 {"wrong":"abc","other":2}' });
+  const credential = result.spans.filter(span => span.kind === "credential");
+  assert.deepEqual(credential.map(span => [span.section, system.slice(span.start, span.end)]), [["system", "abc"], ["system", "2"]]);
+  assert.equal(result.counts.identity, 0);
+  const escaped = JSON.stringify({ excerpt: JSON.stringify({ hint: "abc" }, null, 2) });
+  assert.equal(ledger.classifyRequest({ prompt: escaped }).counts.credential, 1);
+  const unscoped = renderPromptTemplate("{{ fixture.hint }}", { fixture: { hint: "abc" } });
+  const scoped = withClassificationScope(ledger, () => renderPromptTemplate("{{ fixture.hint }}", { fixture: { hint: "abc" } }));
+  assert.equal(scoped.replace(/nonce="[0-9a-f]+"/g, 'nonce="fixture"'), unscoped.replace(/nonce="[0-9a-f]+"/g, 'nonce="fixture"'));
+  assert.equal(ledger.classifyRequest({ prompt: scoped }).counts.credential, 1);
+  assert.equal(ledger.classifyRequest({ prompt: unscoped }).counts.credential, 0);
+  const scalar = withClassificationScope(ledger, () => renderPromptTemplate("Matching secret code: {{ fixture.secretText }} units.", { fixture: { secretText: 2 } }));
+  assert.equal(scalar, "Matching secret code: 2 units.");
+  assert.equal(ledger.classifyRequest({ prompt: scalar + " 2 more." }).counts.credential, 1);
+  const shortName = "\u{10400}\u{10401}\u{10402}";
+  ledger.register("fixture-user", { contactLabel: shortName }, { graphPath: "/users" });
+  assert.equal(ledger.classifyRequest({ prompt: shortName }).counts.identity, 0);
+  assert.equal(ledger.classifyRequest({ prompt: JSON.stringify({ contactLabel: shortName }) }).counts.identity, 1);
+});
+
+test("case normalization keeps matching unaffected offsets and applies word boundaries", () => {
+  const ledger = new ClassificationLedger();
+  ledger.register("directory", { displayName: "Ada Lovelace" }, { graphPath: "/users" });
+  const prompt = "İ before ada lovelace after ADA LOVELACEX";
+  const result = ledger.classifyRequest({ prompt });
+  assert.deepEqual(result.spans.map(span => prompt.slice(span.start, span.end)), ["ada lovelace"]);
+});
+
+test("keeps provenance for a credential clipped inside a serialized preview", () => {
+  const ledger = new ClassificationLedger();
+  ledger.register("tenant:fixture", { hint: "ab9-secret-fixture" }, { graphPath: "/applications/app/addPassword" });
+  const original = '{"hint":"ab9-secret-fixture"}';
+  const preview = withClassificationScope(ledger, () =>
+    fenceTenantData({ excerpt: registerRenderedFragment(original, original.slice(0, 12), { jsonPrefix: true }) }, "preview"));
+  const prompt = `General text ab9. ${preview}`;
+  const result = ledger.classifyRequest({ prompt });
+  assert.deepEqual(result.spans.filter(span => span.kind === "credential").map(span => prompt.slice(span.start, span.end)), ["ab9"]);
+});
+
+test("request detectors see identifier spans without registration", () => {
+  const pieces = ["8bdd9e58-aa93-4032-b2cf-2d0bf207005c", "192.168.1.50", "AA:BB:CC:DD:EE:FF", "C02XL0ABJ1H0", "bob%40example.com", "+1 206-555-0134"];
+  const prompt = `Device ${pieces[0]} at ${pieces[1]} MAC ${pieces[2]} serial ${pieces[3]} user ${pieces[4]} phone ${pieces[5]}`;
+  const result = new ClassificationLedger().classifyRequest({ prompt });
+  for (const piece of pieces) assert.ok(result.spans.some(span => prompt.slice(span.start, span.end) === piece), piece);
+  const indexed = new ClassificationLedger({ matches: () => true });
+  assert.deepEqual(indexed.classifyRequest({ prompt: "123 true False" }).spans, []);
+});
+
+test("absent Graph leaves do not add counts", () => {
+  const { classes, counts } = classifyData({ secretText: null, empty: [], user: {}, email: "", whitespace: "  ", enabled: false });
+  assert.deepEqual(classes, { "/enabled": "identity" });
+  assert.equal(counts.identity, 1);
+  assert.equal(counts.credential, 0);
+});
+
+test("Graph credential route aliases preserve response classes", () => {
+  for (const [path, canonical] of Object.entries(GRAPH_ROUTE_ALIASES)) {
+    const graphPath = "/beta" + path.replaceAll("{id}", "fixture%2Dopaque");
+    if (canonical.endsWith("getFileVaultKey")) {
+      assert.equal(classifyData({ value: "opaque" }, { graphPath: graphPath + "()" }).classes["/value"], "credential");
+    } else if (canonical.endsWith("recoveryKeys")) {
+      for (const suffix of ["", "/opaque-key-id?$select=key"]) {
+        assert.equal(classifyData({ key: "opaque" }, { graphPath: graphPath + suffix }).classes["/key"], "credential");
+      }
+    } else if (canonical.endsWith("addPassword")) {
+      assert.equal(classifyData({ hint: "xyz" }, { graphPath }).classes["/hint"], "credential");
+    }
+  }
+  for (const graphPath of ["/directory/deviceLocalCredentials", "/beta/directory/deviceLocalCredentials(opaque-id)"]) {
+    assert.equal(classifyData({ credentials: [{ passwordBase64: "opaque" }] }, { graphPath }).classes["/credentials/0/passwordBase64"], "credential");
   }
 });
 
-test("short ledger values match complete JSON string values across the request only", () => {
-  const ledger = new ClassificationLedger();
-  ledger.register("graph:/applications", { passwordCredentials: [{ hint: "abc" }] }, { graphPath: "/applications" });
-  const result = ledger.classifyRequest({ system: '{"hint":"abc"}', prompt: 'abc xabcx "abc" is prose. {"abc":false,"hint":"abcx"}' });
-  const credential = result.spans.filter(span => span.kind === "credential");
-  assert.deepEqual(credential, [{ section: "system", start: 8, end: 13, kind: "credential", source: "graph:/applications" }]);
-  const escaped = JSON.stringify({ excerpt: JSON.stringify({ hint: "abc" }, null, 2) });
-  assert.equal(ledger.classifyRequest({ prompt: escaped }).counts.credential, 1);
-  const fenced = fenceTenantData(JSON.stringify("abc"), "fixture");
-  assert.equal(ledger.classifyRequest({ prompt: `Example:\n${fenced}\nExplain.` }).counts.credential, 1);
-  assert.equal(ledger.classifyRequest({ prompt: fenced.replace(/nonce="[0-9a-f]+">$/, 'nonce="wrong">') }).counts.credential, 0);
-  const shortName = "\u{10400}\u{10401}\u{10402}";
-  ledger.register("fixture-user", { displayName: shortName }, { graphPath: "/users" });
-  assert.equal(ledger.classifyRequest({ prompt: shortName }).counts.identity, 0);
-  assert.equal(ledger.classifyRequest({ prompt: JSON.stringify(shortName) }).counts.identity, 1);
+test("security fields retain distinct mask roles and principals retain identity", () => {
+  for (const graphPath of ["/policies/authorizationPolicy", "/deviceManagement/deviceCompliancePolicies"]) {
+    const result = classifyData({ displayName: "Tenant policy", blocked: true, groupId: "group-1" }, { graphPath });
+    assert.deepEqual(result.classes, { "/displayName": "security", "/blocked": "security", "/groupId": "identity" });
+    assert.deepEqual(result.securityMaskRoles, { "/displayName": "nameOrIdentifier", "/blocked": "setting" });
+  }
+  for (const graphPath of ["/applications", "/servicePrincipals"]) {
+    const result = classifyData({ requiredResourceAccess: [{ resourceAppId: "fixture" }],
+      appRoles: [{ displayName: "Reader", isEnabled: true }], oauth2PermissionScopes: [{ id: "fixture-id" }],
+      appRoleAssignments: [{ principalId: "group-1" }] }, { graphPath });
+    assert.equal(result.securityMaskRoles["/requiredResourceAccess/0/resourceAppId"], "nameOrIdentifier");
+    assert.equal(result.securityMaskRoles["/appRoles/0/isEnabled"], "setting");
+    assert.equal(result.securityMaskRoles["/oauth2PermissionScopes/0/id"], "nameOrIdentifier");
+    assert.equal(result.classes["/appRoleAssignments/0/principalId"], "identity");
+  }
+  for (const graphPath of ["/oauth2PermissionGrants", "/servicePrincipals/app-id/oauth2PermissionGrants/grant-id",
+    "/appRoleAssignments", "/users/user-id/appRoleAssignments"]) {
+    const result = classifyData({ id: "assignment", principalId: "group-id" }, { graphPath });
+    assert.equal(result.securityMaskRoles["/id"], "nameOrIdentifier");
+    assert.equal(result.classes["/principalId"], "identity");
+  }
 });
 
 test("nested application evidence keeps credential shapes without an original Graph route", () => {
@@ -375,4 +484,48 @@ test("the provider observer receives each method's scoped result without extendi
   assert.equal(complete.classification.spans.find(span => span.kind === "credential")?.section, "system");
   assert.equal(stream.classification.counts.credential, 0);
   assert.equal(stream.classification.counts.identity, 1);
+});
+
+
+test("stream captures the call scope and failed classification still calls the provider", async () => {
+  const events: RequestClassificationEvent[] = [];
+  const request = { prompt: '{"hint":"abc"}' };
+  const scoped = new ClassificationLedger(undefined, "fixture-run");
+  scoped.register("graph:/applications", { passwordCredentials: [{ hint: "abc" }] }, { graphPath: "/applications" });
+  const model = withRequestClassification({
+    available: true,
+    async complete(options) {
+      assert.equal(options, request);
+      return { text: "complete", model: "fixture" };
+    },
+    async *stream(options) {
+      assert.equal(options, request);
+      yield { delta: "stream", accumulated: "stream", model: "fixture", done: true };
+    },
+  }, "ollama", event => {
+    events.push(event);
+    throw new Error("observer fixture");
+  });
+  const iterator = withClassificationScope(scoped, () => model.stream(request));
+  for await (const chunk of iterator) assert.equal(chunk.accumulated, "stream");
+  assert.equal(events[0]?.scopeId, "fixture-run");
+  assert.equal(events[0]?.scopePresent, true);
+  assert.equal(events[0]?.fieldMapVersion, GRAPH_FIELD_CLASSES_VERSION);
+  assert.ok(Number.isFinite(Date.parse(events[0]!.timestamp)));
+  assert.equal(events[0]?.classification.counts.credential, 1);
+  const broken = new ClassificationLedger({ matches() { throw new Error("index fixture"); } }, "broken-run");
+  assert.equal((await withClassificationScope(broken, () => model.complete(request))).text, "complete");
+  assert.equal(events[1]?.failed, true);
+  assert.equal(events[1]?.classification.coverageIncomplete, true);
+  assert.equal(events[1]?.classification.counts.credential, 0);
+
+  const diagnostics = classificationDiagnostics();
+  registerTenantData("unscoped fixture", "value");
+  await model.complete(request);
+  assert.equal(events[2]?.scopeId, undefined);
+  assert.equal(events[2]?.scopePresent, false);
+  assert.deepEqual(classificationDiagnostics(), {
+    unscopedRegistrations: diagnostics.unscopedRegistrations + 1,
+    unscopedRequests: diagnostics.unscopedRequests + 1,
+  });
 });

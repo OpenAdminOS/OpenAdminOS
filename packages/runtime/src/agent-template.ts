@@ -1008,7 +1008,6 @@ async function runGraphSkill(
     (!settings.select || settings.select.length === 0)
   ) {
     const devices = await ctx.graph.listManagedDevices();
-    registerTenantData(`graph:${settings.path}`, devices, { graphPath: settings.path });
     ctx.log("info", `Loaded ${devices.length} managed devices.`);
     return devices as ManagedDeviceRecord[];
   }

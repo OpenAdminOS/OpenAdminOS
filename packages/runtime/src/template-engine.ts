@@ -13,6 +13,7 @@
 // the expression is embedded in surrounding text the result is coerced to
 // string.
 
+import { registerRenderedFragment } from "./data-classification.js";
 import { fenceTenantData } from "./tenant-data.js";
 
 const EXPRESSION_REGEX = /\{\{\s*([^}]+?)\s*\}\}/g;
@@ -178,7 +179,11 @@ function evaluateExpression(raw: string, ctx: TemplateContext): unknown {
     if (!filter) {
       throw new Error(`Unknown template filter: "${step.filter}"`);
     }
-    value = filter(value, ...step.args);
+    const rendered = filter(value, ...step.args);
+    if ((step.filter === "upper" || step.filter === "lower") && typeof rendered === "string" && value !== rendered) {
+      registerRenderedFragment(value, rendered, { key: parsed.path.split(".").at(-1)! });
+    }
+    value = rendered;
   }
   return value;
 }
@@ -208,17 +213,24 @@ export function renderTemplate(input: string, ctx: TemplateContext): unknown {
 
 /** Only model prompts fence interpolations; transforms and displayed results stay typed. */
 export function renderPromptTemplate(input: string, ctx: TemplateContext): string {
-  return input.replace(EXPRESSION_REGEX, (_match, expr: string) => {
+  return input.replace(EXPRESSION_REGEX, (match, expr: string, offset: number) => {
     const value = evaluateExpression(expr, ctx);
     const path = parseExpression(expr).path;
     const text = typeof value === "string" ? value : JSON.stringify(value) ?? "";
-    if (value === undefined || value === null || typeof value === "number" || typeof value === "boolean") return text;
-    // Saved settings and admin-approved standing instructions stay trusted. Pipeline
-    // outputs, map bindings and task evidence can contain tenant-authored text.
+    if (value === undefined || value === null) return text;
+    // Saved settings and admin-approved standing instructions stay trusted.
     const root = path.split(".")[0]!;
     if (ctx[PROMPT_INSTRUCTION_ROOTS]?.[root] === ctx[root] &&
       /^(?:settings\.|descriptor\.|ctx\.|task\.instructions$)/.test(path)) return text;
-    return fenceTenantData(text, `template:${path}`);
+    if (typeof value === "number" || typeof value === "boolean") {
+      const before = input.slice(Math.max(0, offset - 48), offset).split("}}").at(-1);
+      const after = input.slice(offset + match.length, offset + match.length + 48).split("{{")[0];
+      if (before?.trim() || after?.trim()) registerRenderedFragment(value, value, {
+        key: path.split(".").at(-1)!, ...(before ? { before } : {}), ...(after ? { after } : {}),
+      });
+      return text;
+    }
+    return fenceTenantData(typeof value === "string" ? value : text, `template:${path}`);
   });
 }
 

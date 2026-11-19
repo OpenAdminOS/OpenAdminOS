@@ -1,3 +1,4 @@
+import { registerRenderedFragment } from "./data-classification.js";
 import { randomBytes } from "node:crypto";
 import type { RunLlmApi } from "@openadminos/agent-sdk";
 
@@ -16,6 +17,7 @@ export function fenceTenantData(content: unknown, source: string): string {
   const text = typeof content === "string" ? content : JSON.stringify(content) ?? "null";
   const body = text.replace(/[<>\uff1c\uff1e\ufe64\ufe65\u2329\u232a\u27e8\u27e9\u2039\u203a]/gu,
     char => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`);
+  registerRenderedFragment(content, body, { fence: nonce });
   const attribute = source.replace(/&/g, "&amp;").replace(/"/g, "&quot;")
     .replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/[\r\n]/g, " ");
   return `<tenant_data source="${attribute}" nonce="${nonce}">\n${body}\n</tenant_data nonce="${nonce}">`;

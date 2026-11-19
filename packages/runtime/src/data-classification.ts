@@ -6,17 +6,19 @@ import {
   type DataClass,
 } from "@openadminos/agent-sdk";
 import {
-  GRAPH_DEVICE_NAME_FIELDS, GRAPH_FIELD_CLASSES, GRAPH_SECURITY_RESOURCES, GRAPH_TEXT_FIELDS,
+  GRAPH_DEVICE_NAME_FIELDS, GRAPH_FIELD_CLASSES, GRAPH_ROUTE_ALIASES, graphSecurityMaskRole,
+  GRAPH_SECURITY_RESOURCES, GRAPH_TEXT_FIELDS, type SecurityMaskRole,
 } from "./graph-field-classes.js";
 
 export { GRAPH_FIELD_CLASSES_VERSION } from "./graph-field-classes.js";
-export { ClassificationLedger, currentClassificationLedger, registerTenantData, withClassificationScope, withRequestClassification } from "./request-classification.js";
-export type { ClassificationSpan, RequestClassification, RequestClassificationEvent } from "./request-classification.js";
+export { ClassificationLedger, currentClassificationLedger, classificationDiagnostics, collectClassifiedValues, registerClassifiedValues, registerRenderedFragment, registerTenantData, registerTransientTenantData, withTransientClassificationScope, withClassificationScope, withRequestClassification } from "./request-classification.js";
+export type { ClassifiedValues, ClassificationSpan, RequestClassification, RequestClassificationEvent } from "./request-classification.js";
 
 export interface DataClassification {
   /** Original JSON Pointers. A truncated classification can cover the rest of a subtree. */
   classes: Readonly<Record<string, DataClass>>;
   counts: DataClassCounts;
+  securityMaskRoles: Readonly<Record<string, SecurityMaskRole>>;
   budgetExhausted: boolean;
   /** The rest of the traversal starting at this pointer has the conservative class. */
   remainder?: { from: string; kind: DataClass };
@@ -28,6 +30,7 @@ export interface ClassificationOptions {
   identityIndex?: {
     matches(text: string): boolean;
     spans?(text: string): Iterable<{ start: number; end: number }>;
+    isComplete?(): boolean;
   };
   /** A host-side work limit. Each field and each scanned code unit costs one unit. */
   workBudget?: number;
@@ -51,12 +54,11 @@ const CREDENTIAL_FIELD = /^(?:password|laps(?:password)?|passwordbase64|deviceac
 // These Graph shapes retain their meaning when evidence nests the original response.
 const CREDENTIAL_SHAPE = /\/(?:passwordcredentials\/\[\]\/(?:hint|secrettext)|keycredentials\/\[\]\/key)$/;
 const CREDENTIAL_AUDIT_VALUE = /^(?:oldValue|newValue)$/i;
-const IDENTIFIER = /\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b|\b[0-9a-f]{32}\b/i;
+const IDENTIFIER = /\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b|\b[0-9a-f]{32}\b/gi;
 const EMAIL = /(?<![\w.+-])[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/gi;
 const IP_ADDRESS = /\b(?:\d{1,3}\.){3}\d{1,3}\b|(?<![\da-f:])[\da-f:]*:[\da-f:]+(?![\da-f:])/gi;
-const PHONE_NUMBER = /(?<!\w)(?:\+[1-9]\d{0,2}[ .-]?)?(?:\(\d{3}\)|\b\d{3})[ .-]\d{3}[ .-]\d{4}\b/;
-const MAC_ADDRESS = /\b(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}\b/i;
-const GRAPH_ENTITY_ID = /^(?:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[^/]+@[^/]+|\d+)$/i;
+const PHONE_NUMBER = /(?<!\w)(?:\+[1-9]\d{0,2}[ .-]?)?(?:\(\d{3}\)|\b\d{3})[ .-]\d{3}[ .-]\d{4}\b/g;
+const MAC_ADDRESS = /\b(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}\b/gi;
 const SECURITY_IDENTITY_KEYS = /^(?:user|group|(?:(?:include|exclude|target)?(?:users?|groups?|principals?)ids?|(?:include|exclude|target)(?:users|groups))|userprincipalname|userdisplayname|principaldisplayname|principal)$/i;
 const SECURITY_ODATA_TYPE = /^(?:.*(?:endpointsecurity|securitybaseline|defender|firewall|diskencryption|attacksurfacereduction|antivirus|authenticationmethod|conditionalaccess|namedlocation|roleassignment|roledefinition|rolesetting|crosstenantaccess).*|windows(?:10|81)endpointprotectionconfiguration|windowsdefenderapplicationguardconfiguration|bitlockerencryptionpolicy)$/i;
 const SETTINGS_PATH = /^(?:\/devicemanagement\/(?:configurationpolicies|intents|grouppolicyconfigurations)$)|\/(?:settings|definitionvalues|presentationvalues)$/;
@@ -172,19 +174,50 @@ function hasWrappedPem(text: string): boolean {
     /^-----BEGIN [A-Z0-9 ]{1,80}-----/i.test(Buffer.from(text, "base64").toString("utf8"));
 }
 
+const ENCODED_UPN = /(?<![\w.+%-])[\w.+-]+(?:%[0-9a-f]{2}[\w.+-]*)*%40[\w.-]+(?:\.|%2e)[a-z]{2,}\b/gi;
+const SERIAL = /\b(?:serial(?:[ _-]*number)?[ :=]+)([a-z0-9-]{6,40})\b/gi;
+
+function* identifierSpans(text: string, kind: DataClass): Iterable<TextSpan & { kind: DataClass; source: string }> {
+  const security = kind === "security";
+  const patterns: ReadonlyArray<readonly [RegExp, DataClass, string]> = [
+    [IDENTIFIER, "identity", "identifier"], [EMAIL, "identity", "email"],
+    [ENCODED_UPN, "identity", "encoded-upn"], [PHONE_NUMBER, "identity", "phone"],
+    [MAC_ADDRESS, "device", "mac"], [IP_ADDRESS, "device", "ip"],
+    [SERIAL, "device", "serial"],
+  ];
+  for (const [pattern, defaultKind, source] of patterns) {
+    if (security && source === "identifier" || source === "email" && !text.includes("@") ||
+        source === "encoded-upn" && !text.includes("%40") ||
+        source === "ip" && !text.includes(":") && !text.includes(".")) continue;
+    for (const match of text.matchAll(pattern)) {
+      const value = match[1] ?? match[0];
+      const end = match.index + match[0].length;
+      if (source === "ip" && (!isIP(value) || /^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$/i.test(value))) continue;
+      if (source === "serial" && !/\d/.test(value)) continue;
+      const kind = source === "ip" && !security && !isPrivateIp(value) ? "identity" : defaultKind;
+      yield { start: end - value.length, end, kind, source: `detector:${source}` };
+    }
+  }
+}
+
 export function* requestTextSpans(text: string, index?: ClassificationOptions["identityIndex"]): Iterable<TextSpan & { kind: DataClass; source: string }> {
   for (const span of credentialSpans(text)) yield { ...span, kind: "credential", source: "detector:credential" };
-  if (text.includes("@")) {
-    for (const match of text.matchAll(EMAIL)) {
-      yield { start: match.index, end: match.index + match[0].length, kind: "identity", source: "detector:email" };
-    }
+  yield* identifierSpans(text, "public");
+  for (const span of index?.spans?.(text) ?? []) {
+    const value = text.slice(span.start, span.end);
+    if (!isUnlabeledScalar(value)) yield { ...span, kind: "identity", source: "detector:tenant-index" };
   }
-  for (const span of index?.spans?.(text) ?? []) yield { ...span, kind: "identity", source: "detector:tenant-index" };
   if (index && !index.spans) {
-    for (const match of text.matchAll(/[\w-]+/g)) {
-      if (index.matches(match[0])) yield { start: match.index, end: match.index + match[0].length, kind: "identity", source: "detector:tenant-index" };
+    for (const match of text.matchAll(/[\p{L}\p{N}_-]+/gu)) {
+      if (!isUnlabeledScalar(match[0]) && index.matches(match[0])) {
+        yield { start: match.index, end: match.index + match[0].length, kind: "identity", source: "detector:tenant-index" };
+      }
     }
   }
+}
+
+function isUnlabeledScalar(text: string): boolean {
+  return /^(?:true|false|[+-]?\p{N}{1,6})$/iu.test(text);
 }
 
 type FieldMap = ReadonlyMap<string, DataClass>;
@@ -214,7 +247,12 @@ for (const [path, groups] of Object.entries(GRAPH_FIELD_CLASSES)) {
   fieldMaps.set(path.toLowerCase(), fields);
 }
 const securityPaths = new Set([...GRAPH_SECURITY_RESOURCES].map(path => path.toLowerCase()));
-const knownPaths = new Set([...fieldMaps.keys(), ...securityPaths]);
+const routeAliases = new Map(Object.entries(GRAPH_ROUTE_ALIASES).map(([from, to]) => [from.toLowerCase(), to.toLowerCase()]));
+const knownPaths = new Set([...fieldMaps.keys(), ...securityPaths, ...routeAliases.keys()]);
+const canonicalRoute = (route: string) => routeAliases.get(route) ?? route;
+const routeBranches = [...knownPaths].filter(path => path.includes("{id}"))
+  .sort((a, b) => b.split("/").length - a.split("/").length)
+  .map(path => ({ path, parts: path.split("/") }));
 
 function graphRoute(graphPath: string): string {
   const clean = graphPath.split(/[?#]/, 1)[0]!.replace(/^\/(?:beta|v1\.0)(?=\/)/i, "").replace(/\/$/, "");
@@ -226,19 +264,14 @@ function graphRoute(graphPath: string): string {
     return key[2] ? [key[1]!.toLowerCase(), "{id}"] : [key[1]!.toLowerCase()];
   });
   const path = segments.join("/");
-  if (knownPaths.has(path)) return path;
-  // Known routes alone define where an opaque ID is accepted as a segment.
-  for (const known of knownPaths) {
-    if (!known.includes("{id}")) continue;
-    const parts = known.split("/");
-    if (parts.length === segments.length && parts.every((part, index) => part === "{id}" || part === segments[index])) return known;
-    if (parts.length === segments.length - 1 && parts.every((part, index) => part === "{id}" || part === segments[index]) &&
-      (GRAPH_ENTITY_ID.test(segments.at(-1)!) || segments.at(-1) === "{id}")) return known;
+  if (knownPaths.has(path)) return canonicalRoute(path);
+  for (const { path: known, parts } of routeBranches) {
+    if ((parts.length === segments.length || parts.length === segments.length - 1) &&
+        parts.every((part, index) => part === "{id}" || part === segments[index])) return canonicalRoute(known);
   }
-  const id = segments.pop()!;
+  segments.pop();
   const parent = segments.join("/");
-  if (knownPaths.has(parent) && (id === "{id}" || GRAPH_ENTITY_ID.test(id) || clean.split("/").at(-1)?.includes("%") ||
-      (parent === "/domains" && /^[\w.-]+\.[a-z]+$/i.test(id)))) return parent;
+  if (knownPaths.has(parent)) return canonicalRoute(parent);
   // Security settings can be reached through navigation beneath a keyed security resource.
   for (const resource of securityPaths) {
     if (path.startsWith(resource + "/")) return resource;
@@ -261,12 +294,13 @@ export function hasGraphFieldClass(graphPath: string, field: string): boolean {
 function detectValueClass(text: string, detectIdentifiers: boolean, options: ClassificationOptions, kind: DataClass): DataClass {
   if (credentialSpans(text).next().done === false) return "credential";
   if (!detectIdentifiers) return "public";
-  const ips = text.includes(".") || text.includes(":")
-    ? [...text.matchAll(IP_ADDRESS)].map(match => match[0]).filter(value => isIP(value) !== 0) : [];
-  if ((kind !== "security" && IDENTIFIER.test(text)) || (text.includes("@") && [...text.matchAll(EMAIL)].length > 0) ||
-      (kind !== "security" && ips.some(value => !isPrivateIp(value))) || PHONE_NUMBER.test(text) ||
-      options.identityIndex?.matches(text)) return "identity";
-  return ips.length > 0 || MAC_ADDRESS.test(text) ? "device" : "public";
+  if (options.identityIndex?.matches(text)) return "identity";
+  let found: DataClass = "public";
+  for (const span of identifierSpans(text, kind)) {
+    found = maxDataClass(found, span.kind);
+    if (found === "identity") break;
+  }
+  return found;
 }
 
 function isPrivateIp(value: string): boolean {
@@ -285,14 +319,12 @@ export function emptyDataClassCounts(): DataClassCounts {
 /** Host-only. Classifies received JSON with original JSON Pointer coordinates. */
 export function classifyData(value: unknown, options: ClassificationOptions = {}): DataClassification {
   const classes: Record<string, DataClass> = {};
-  const result = walkDataClasses(value, options, (_value, kind, pointer) => { classes[pointer] = kind; });
-  return { counts: result.counts, budgetExhausted: result.budgetExhausted, classes,
-    ...(result.remainder ? { remainder: result.remainder } : {}) };
-}
-
-/** Host-only. Summarizes received JSON without retaining a path table. */
-export function countDataClasses(value: unknown, options: ClassificationOptions = {}): DataClassCounts {
-  return walkDataClasses(value, options).counts;
+  const securityMaskRoles: Record<string, SecurityMaskRole> = {};
+  const result = walkDataClasses(value, options, (_value, kind, pointer, _key, role) => {
+    classes[pointer] = kind;
+    if (role) securityMaskRoles[pointer] = role;
+  });
+  return { ...result, classes, securityMaskRoles };
 }
 
 function ownCaseInsensitive(record: Record<string, unknown> | undefined, key: string): unknown {
@@ -312,7 +344,7 @@ function graphProperty(record: Record<string, unknown> | undefined, additional: 
 export function walkDataClasses(
   value: unknown,
   options: ClassificationOptions,
-  onField?: (value: unknown, kind: DataClass, pointer: string) => void,
+  onField?: (value: unknown, kind: DataClass, pointer: string, key: string, maskRole?: SecurityMaskRole) => void,
 ): { counts: DataClassCounts; budgetExhausted: boolean; remainder?: { from: string; kind: DataClass } } {
   const route = options.graphPath ? graphRoute(options.graphPath) : "";
   const fields = fieldMaps.get(route);
@@ -322,19 +354,27 @@ export function walkDataClasses(
   let budget = options.workBudget ?? 32_000_000;
   let remainder: { from: string; kind: DataClass } | undefined;
   const active = new Set<object>();
+  const detections = new Map<string, DataClass>();
+
+  function detect(text: string, allowIdentifiers: boolean, kind: DataClass): DataClass {
+    if (text.length > 4096) return detectValueClass(text, allowIdentifiers, options, kind);
+    const key = `${kind}:${allowIdentifiers ? "text" : "secret"}:${text}`;
+    const known = detections.get(key);
+    if (known) return known;
+    const detected = detectValueClass(text, allowIdentifiers, options, kind);
+    if (detections.size < 512) detections.set(key, detected);
+    return detected;
+  }
 
   function visit(child: unknown, pointer: string, pattern: string, key: string, inherited?: DataClass,
     root = false, collection = false, secretSetting = false): void {
-    if (remainder) return;
+    if (remainder || child === undefined || child === null) return;
     budget -= 1 + key.length + (typeof child === "string" ? child.length : 0);
     if (budget < 0 || active.size >= 128) {
       // Unvisited fields may contain credentials, regardless of the classes seen so far.
       remainder = { from: pointer, kind: "credential" };
-      counts.credential++;
-      onField?.(undefined, "credential", pointer);
       return;
     }
-    if (child === undefined) return;
     const wildcard = pattern.startsWith("/authenticationmethodconfigurations/[]/featuresettings/")
       ? pattern.replace(/(\/featuresettings)\/[^/]+/, "$1/*") : pattern;
     const mapped = fields?.get(pattern) ?? fields?.get(wildcard);
@@ -350,7 +390,7 @@ export function walkDataClasses(
     const templateFamily = template && typeof template === "object"
       ? ownCaseInsensitive(template as Record<string, unknown>, "templateFamily") : undefined;
     const shape = typeof type === "string" ? type.replace(/^#?(?:microsoft\.graph\.)?/i, "") : "";
-    const identityType = /^(?:user|group)$/i.test(shape) && base === "security";
+    const identityType = /^(?:user|group)$/i.test(shape) && (base === "security" || inherited === "security");
     const securityType = SECURITY_ODATA_TYPE.test(shape) || settings && (
       typeof templateFamily === "string" && SECURITY_ODATA_TYPE.test(templateFamily) ||
       typeof definition === "string" && SECURITY_ODATA_TYPE.test(definition)
@@ -363,7 +403,7 @@ export function walkDataClasses(
     if (deviceName && route && !mapped && !inherited) effective = "device";
     if (isCredentialField(key) || CREDENTIAL_SHAPE.test(pattern)) effective = "credential";
     if (/^@odata\.(?:nextLink|deltaLink)$/i.test(key)) effective = maxDataClass(effective, "identity");
-    const keyClass = base === "public" && key ? detectValueClass(key, true, options, "public") : "public";
+    const keyClass = base === "public" && key ? detect(key, true, "public") : "public";
     effective = maxDataClass(effective, keyClass);
 
     if (record && !active.has(record)) {
@@ -390,7 +430,7 @@ export function walkDataClasses(
         const auditCredential = typeof auditLabel === "string" && isCredentialField(auditLabel);
         const nextInherited = auditCredential || recordSecret && SETTING_VALUE_KEYS.test(prop) ? "credential"
           : mapped || inherited || identityType || securityType || keyClass !== "public" || effective === "credential" ||
-            effective === "identity" && base === "security" ? effective : undefined;
+            effective === "identity" && (base === "security" || inherited === "security") ? effective : undefined;
         visit(record[prop], onField ? `${pointer}/${part}` : "",
           array && (root || collection) ? "" : transparent ? pattern : `${pattern}/${array ? "[]" : propertyPattern}`,
           array ? key : prop, nextInherited, transparent && root, nextCollection, recordSecret);
@@ -399,14 +439,13 @@ export function walkDataClasses(
       active.delete(record);
       if (hasChildren) return;
     }
-    const absent = child === null || (typeof child === "string" && !child.trim()) || record !== undefined;
-    if (effective === "credential" && absent) effective = "configuration";
-    if (typeof child === "string" && effective !== "credential" && !absent) {
-      effective = maxDataClass(effective, detectValueClass(child, deviceName || GRAPH_TEXT_FIELDS.test(key) ||
-        mapped === undefined && inherited === undefined, options, effective));
+    if (record || (typeof child === "string" && !child.trim())) return;
+    if (typeof child === "string" && effective !== "credential") {
+      effective = maxDataClass(effective, detect(child, deviceName || GRAPH_TEXT_FIELDS.test(key) ||
+        mapped === undefined && inherited === undefined, effective));
     }
     counts[effective]++;
-    onField?.(child, effective, pointer);
+    onField?.(child, effective, pointer, key, effective === "security" ? graphSecurityMaskRole(key, pattern, route) : undefined);
   }
 
   visit(value, "", "", "", undefined, true);
