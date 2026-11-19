@@ -4,6 +4,8 @@ import { join } from "node:path";
 import type { RetrievalStatus } from "@openadminos/agent-sdk";
 import { isConnectionRefused, isRefusedRedirect, modelServerRedirect, redirectRefusedDetail } from "@openadminos/runtime";
 
+import { loopbackTransport } from "./direct-fetch.js";
+
 export type { RetrievalStatus } from "@openadminos/agent-sdk";
 
 /**
@@ -283,7 +285,7 @@ class EmbeddingQueryError extends Error {}
  * echo the question in it, so no response text reaches the message or its cause.
  */
 function embeddingFailure(server: string, url: string, error: unknown): Error {
-  if (error instanceof Error && error.name === "TimeoutError") {
+  if (isTimeout(error)) {
     return new EmbeddingQueryError(`${server} did not finish embedding the question within ${EMBEDDING_QUERY_TIMEOUT_MS / 1000} seconds. Check that it is running, then ask again.`);
   }
   const code = connectionCode(error);
@@ -423,8 +425,17 @@ export function loopbackLabel(endpoint: string, path: string): string {
 
 /** A network failure's code, such as ECONNREFUSED or UND_ERR_SOCKET, when fetch gave one. */
 export function connectionCode(error: unknown): string | undefined {
-  const cause = error instanceof Error ? error.cause : undefined;
-  return cause && typeof cause === "object" && "code" in cause && typeof cause.code === "string" ? cause.code : undefined;
+  // node:http puts the code on the error, fetch on its cause.
+  for (const value of [error, error instanceof Error ? error.cause : undefined]) {
+    if (value && typeof value === "object" && "code" in value && typeof value.code === "string" && value.code !== "ABORT_ERR") return value.code;
+  }
+  return undefined;
+}
+
+/** A request or body read stopped by an AbortSignal.timeout budget. */
+function isTimeout(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.name === "TimeoutError" || (error.name === "AbortError" && error.cause instanceof Error && error.cause.name === "TimeoutError");
 }
 
 /**
@@ -436,7 +447,8 @@ export async function fetchLoopback(
   endpoint: string,
   path: string,
   init: RequestInit,
-  fetchImpl: typeof fetch = fetch,
+  // Never the global fetch: it can send to an environment proxy (see direct-fetch.ts).
+  fetchImpl: typeof fetch = loopbackTransport.fetch,
 ): Promise<{ response: Response; url: string }> {
   const candidates = loopbackEndpoints(endpoint);
   for (const [index, base] of candidates.entries()) {

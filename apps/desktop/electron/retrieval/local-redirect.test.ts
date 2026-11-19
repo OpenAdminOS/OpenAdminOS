@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createServer, type Server } from "node:http";
+import { createServer, globalAgent as httpGlobalAgent, type Server } from "node:http";
 import { describe, it } from "node:test";
 
 import { AppStateStore } from "../state.js";
 import { embeddingModelState, pullEmbeddingModel } from "./embedding-model.js";
+import { loopbackTransport } from "./direct-fetch.js";
 import { EMBEDDING_QUERY_TIMEOUT_MS, loopbackEmbedQuery, loopbackEndpoints, ollamaEmbedQuery } from "./retrieval.js";
 
 /** An embedding server on this device that redirects every request to a second one, which counts what reaches it. */
@@ -71,7 +72,7 @@ describe("local documentation retrieval never follows a redirect from this devic
 
   it("keeps missing model and HTTP failures distinct", async (t) => {
     const endpoint = "http://127.0.0.1:11434";
-    const request = t.mock.method(globalThis, "fetch", async (_url: Parameters<typeof fetch>[0], _options?: RequestInit) =>
+    const request = t.mock.method(loopbackTransport, "fetch", async (_url: Parameters<typeof fetch>[0], _options?: RequestInit) =>
       Response.json({ error: "model 'nomic-embed-text' not found" }, { status: 404 }),
     );
     await assert.rejects(ollamaEmbedQuery(endpoint)("test"), /HTTP 404.*ollama pull nomic-embed-text/i);
@@ -101,8 +102,8 @@ describe("local documentation retrieval never follows a redirect from this devic
       return controller.signal;
     });
     // Fire the budget only once the headers are in, so only the body read is left to bound (round 5).
-    const realFetch = globalThis.fetch;
-    t.mock.method(globalThis, "fetch", async (...args: Parameters<typeof fetch>) => {
+    const realFetch = loopbackTransport.fetch;
+    t.mock.method(loopbackTransport, "fetch", async (...args: Parameters<typeof fetch>) => {
       const response = await realFetch(...args);
       setTimeout(() => timers.at(-1)!.abort(new DOMException("The operation timed out.", "TimeoutError")), 10);
       return response;
@@ -118,7 +119,7 @@ describe("local documentation retrieval never follows a redirect from this devic
 
   it("never puts response text, which can echo the question, into an embedding error (PR #206 review round 1)", async (t) => {
     const question = "which devices does alice.private@contoso.com own";
-    t.mock.method(globalThis, "fetch", async (_url: Parameters<typeof fetch>[0], options?: RequestInit) =>
+    t.mock.method(loopbackTransport, "fetch", async (_url: Parameters<typeof fetch>[0], options?: RequestInit) =>
       new Response(`not json, you asked: ${String(options?.body)}`, { status: 200, headers: { "content-type": "application/json" } }),
     );
     for (const [query, name] of [[ollamaEmbedQuery("http://127.0.0.1:11434"), "Ollama"], [loopbackEmbedQuery("http://127.0.0.1:11434"), "The embedding server"]] as const) {
@@ -135,7 +136,7 @@ describe("local documentation retrieval never follows a redirect from this devic
     const dropped = () => {
       throw new TypeError("fetch failed", { cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }) });
     };
-    const request = t.mock.method(globalThis, "fetch", async () => dropped());
+    const request = t.mock.method(loopbackTransport, "fetch", async () => dropped());
     for (const [query, name] of [[ollamaEmbedQuery("http://127.0.0.1:11434"), "Ollama"], [loopbackEmbedQuery("http://127.0.0.1:11434"), "The embedding server"]] as const) {
       await assert.rejects(query("test"), (error: Error) =>
         error.message === `${name} did not complete the embedding request (UND_ERR_SOCKET). Check the local server, then ask again.`);
@@ -168,7 +169,7 @@ describe("local documentation retrieval never follows a redirect from this devic
       assert.throws(() => loopbackEndpoints(endpoint), /Retrieval must stay local/, endpoint);
     }
     const urls: string[] = [];
-    t.mock.method(globalThis, "fetch", async (url: Parameters<typeof fetch>[0]) => {
+    t.mock.method(loopbackTransport, "fetch", async (url: Parameters<typeof fetch>[0]) => {
       urls.push(String(url));
       return Response.json({ embeddings: [[0.1]], data: [{ embedding: [0.1] }], models: [] });
     });
@@ -183,7 +184,7 @@ describe("local documentation retrieval never follows a redirect from this devic
       throw new TypeError("fetch failed", { cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }) });
     };
     const urls: string[] = [];
-    const request = t.mock.method(globalThis, "fetch", async (url: Parameters<typeof fetch>[0]) => {
+    const request = t.mock.method(loopbackTransport, "fetch", async (url: Parameters<typeof fetch>[0]) => {
       urls.push(String(url));
       if (String(url).startsWith("http://127.0.0.1")) refused();
       return Response.json({ embeddings: [[0.1]], models: [{ name: "nomic-embed-text:latest" }] });
@@ -202,7 +203,7 @@ describe("local documentation retrieval never follows a redirect from this devic
     const reset = () => {
       throw new TypeError("fetch failed", { cause: Object.assign(new Error("socket hang up"), { code: "ECONNRESET" }) });
     };
-    const request = t.mock.method(globalThis, "fetch", async () => reset());
+    const request = t.mock.method(loopbackTransport, "fetch", async () => reset());
     await assert.rejects(ollamaEmbedQuery("http://127.0.0.1:11434")("test"), (error: Error) =>
       error.message === "Ollama did not complete the embedding request (ECONNRESET). Check the local server, then ask again.");
     const state = await embeddingModelState("http://127.0.0.1:11434");
@@ -216,6 +217,45 @@ describe("local documentation retrieval never follows a redirect from this devic
     await assert.rejects(loopbackEmbedQuery("http://127.0.0.1:11434")("test"), /returned no embedding vector/);
     request.mock.mockImplementation(async () => Response.json({ models: [null] }));
     assert.match((await embeddingModelState("http://127.0.0.1:11434")).error ?? "", /^Ollama returned an invalid model list\./);
+  });
+
+  it("never sends a retrieval request through a proxy the global fetch or HTTP agent would use (PR #206 review round 6)", async (t) => {
+    let hits = 0;
+    const local = createServer((_request, response) => {
+      hits += 1;
+      response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ embeddings: [[0.1]], models: [{ name: "nomic-embed-text:latest" }] }));
+    });
+    await listen(local);
+    t.after(() => new Promise<void>((resolve) => local.close(() => resolve())));
+    const endpoint = `http://127.0.0.1:${(local.address() as { port: number }).port}`;
+
+    // What NODE_USE_ENV_PROXY installs: a global dispatcher (a proxy) for fetch, and proxying global agents.
+    const key = Symbol.for("undici.globalDispatcher.1");
+    const previous = (globalThis as Record<symbol, unknown>)[key];
+    let proxied = 0;
+    (globalThis as Record<symbol, unknown>)[key] = {
+      dispatch() {
+        proxied += 1;
+        throw new Error("sent to the proxy");
+      },
+    };
+    t.after(() => {
+      (globalThis as Record<symbol, unknown>)[key] = previous;
+    });
+    // addRequest is how a request joins an agent; it is not in the typings.
+    t.mock.method(httpGlobalAgent as unknown as { addRequest: () => void }, "addRequest", () => {
+      proxied += 1;
+      throw new Error("sent through the global agent");
+    });
+    // The stand-in is in effect: the global fetch would go through it.
+    await assert.rejects(fetch(`${endpoint}/api/tags`));
+    assert.equal(proxied, 1);
+
+    assert.deepEqual(await ollamaEmbedQuery(endpoint)("test"), [0.1]);
+    assert.deepEqual(await embeddingModelState(endpoint), { ollamaReachable: true, installed: true });
+    await pullEmbeddingModel(endpoint);
+    assert.equal(proxied, 1);
+    assert.equal(hits, 3);
   });
 
   it("searches the documentation at the same endpoint Settings checks, also when OLLAMA_HOST moved Ollama (PR #206 review round 1)", async (t) => {

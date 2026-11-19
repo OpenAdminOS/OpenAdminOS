@@ -1,4 +1,5 @@
 import { classifyOllamaEndpoint, isConnectionRefused, isRefusedRedirect, ollamaHostEndpoint, redirectRefusedDetail } from "@openadminos/runtime";
+import { loopbackTransport } from "./direct-fetch.js";
 import { DEFAULT_INDEX_EMBEDDING_MODEL, connectionCode, fetchLoopback, loopbackLabel } from "./retrieval.js";
 
 /**
@@ -27,9 +28,7 @@ export function embeddingEndpoint(): string {
 
 /** A network failure's code, such as UND_ERR_SOCKET, rather than undici's bare "fetch failed". */
 function failureCode(error: unknown): string {
-  const cause = error instanceof Error ? error.cause : undefined;
-  if (cause && typeof cause === "object" && "code" in cause && typeof cause.code === "string") return cause.code;
-  return error instanceof Error ? error.message : String(error);
+  return connectionCode(error) ?? (error instanceof Error ? error.message : String(error));
 }
 
 function normalizeModelName(name: string): string {
@@ -40,7 +39,7 @@ function normalizeModelName(name: string): string {
 export async function embeddingModelState(
   endpoint: string = embeddingEndpoint(),
   model: string = DEFAULT_INDEX_EMBEDDING_MODEL,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = loopbackTransport.fetch,
 ): Promise<{ ollamaReachable?: boolean; installed: boolean; error?: string }> {
   // Refuses a non-loopback endpoint before any connection.
   loopbackLabel(endpoint, "/api/tags");
@@ -69,7 +68,7 @@ export async function embeddingModelState(
     if (!answered && connectionCode(error) !== "ECONNRESET" && isConnectionRefused(error)) return { ollamaReachable: false, installed: false };
     const reason = error instanceof SyntaxError
       ? "Ollama returned an invalid model list."
-      : error instanceof Error && error.name === "TimeoutError"
+      : error instanceof Error && (error.name === "TimeoutError" || (error.name === "AbortError" && error.cause instanceof Error && error.cause.name === "TimeoutError"))
         ? "Ollama's model list request timed out."
         : `Could not read Ollama's model list (${failureCode(error)}).`;
     return { ...(answered ? { ollamaReachable: true } : {}), installed: false, error: `${reason} ${recovery}` };
@@ -85,7 +84,7 @@ export async function embeddingModelState(
 export async function pullEmbeddingModel(
   endpoint: string = embeddingEndpoint(),
   model: string = DEFAULT_INDEX_EMBEDDING_MODEL,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = loopbackTransport.fetch,
 ): Promise<void> {
   const { response, url } = await fetchLoopback(endpoint, "/api/pull", {
     method: "POST",
