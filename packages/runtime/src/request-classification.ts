@@ -176,7 +176,7 @@ export class ClassificationLedger {
     if (previous.fallback) this.exhaust(previous.fallback.kind, previous.fallback.source);
   }
 
-  private *match(root: Node, text: string): IterableIterator<TextSpan & Pattern> {
+  private *match(root: Node, text: string, work?: { remaining: number }): IterableIterator<TextSpan & Pattern> {
     let state = root;
     for (let i = 0; i < text.length; i++) {
       const char = text[i]!;
@@ -184,6 +184,7 @@ export class ClassificationLedger {
       state = state.edges.get(char) ?? root;
       for (let output: Node | undefined = state; output; output = output.suffix) {
         for (const pattern of output.patterns ?? []) {
+          if (work && work.remaining-- <= 0) return;
           const start = i + 1 - pattern.text.length;
           if (wholeMatch(pattern.mode, text, start, i + 1)) yield { ...pattern, start, end: i + 1 };
         }
@@ -197,16 +198,15 @@ export class ClassificationLedger {
     const root = this.matcher ??= trie(this.patterns.values());
     const identities = this.identityMatcher ??= trie(this.identities.values());
     let budgetExhausted = this.fallback !== undefined;
-    let highest: DataClass = this.highest;
     for (const section of ["system", "prompt"] as const) {
       const text = request[section];
       if (!text) continue;
       const scanned = text.slice(0, REQUEST_BUDGET);
       const found = new Map<string, ClassificationSpan>();
+      const matchWork = { remaining: MATCH_BUDGET };
       const collect = (items: Iterable<TextSpan & { kind: DataClass; source: string }>) => {
         for (const { start, end, kind, source } of items) {
           if (found.size >= MATCH_BUDGET) return false;
-          highest = maxDataClass(highest, kind);
           const key = `${start}:${end}`;
           const previous = found.get(key);
           if (!previous || previous.kind !== kind && maxDataClass(previous.kind, kind) === kind) {
@@ -217,14 +217,17 @@ export class ClassificationLedger {
       };
       // Case folding can change UTF-16 length. Keep original offsets in that case.
       const lower = scanned.toLowerCase();
-      const complete = collect(this.match(root, scanned)) &&
-        (lower.length !== scanned.length || collect(this.match(identities, lower))) &&
+      const complete = collect(this.match(root, scanned, matchWork)) && matchWork.remaining >= 0 &&
+        (lower.length !== scanned.length || collect(this.match(identities, lower, matchWork))) && matchWork.remaining >= 0 &&
         collect(requestTextSpans(scanned, this.identityIndex));
       spans.push(...found.values());
-      if (this.fallback || !complete || scanned.length !== text.length) {
+      // A skipped part of the request may contain a credential the ledger has never seen.
+      const fallback = !complete || scanned.length !== text.length
+        ? { kind: "credential" as const, source: "detector:work-budget" }
+        : this.fallback;
+      if (fallback) {
         budgetExhausted = true;
-        spans.push({ section, start: 0, end: text.length, kind: maxDataClass(this.fallback?.kind ?? "identity", highest),
-          source: this.fallback?.source ?? "detector:work-budget" });
+        spans.push({ section, start: 0, end: text.length, ...fallback });
       }
     }
     for (const span of spans) counts[span.kind]++;

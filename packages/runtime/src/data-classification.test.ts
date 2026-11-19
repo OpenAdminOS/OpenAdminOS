@@ -272,14 +272,29 @@ test("bounded detectors handle whitespace runs, encoded PEM, labeled values and 
   }
 });
 
-test("records budget exhaustion with an identity floor and the highest class already seen", () => {
-  for (const [data, kind] of [
-    [{ first: "safe", second: "x".repeat(100), third: "unvisited" }, "identity"],
-    [{ password: "opaque", second: "x".repeat(100), third: "unvisited" }, "credential"],
-  ] as const) {
-    const result = classifyData(data, { workBudget: 40, publicReference: true });
-    assert.deepEqual(result.remainder, { from: "/second", kind });
+test("reports unvisited Graph fields conservatively when traversal runs out of budget", () => {
+  const data = { first: "safe", second: "x".repeat(100), password: "unvisited" };
+  const options = { workBudget: 40, publicReference: true };
+  const result = classifyData(data, options);
+  assert.deepEqual(result.remainder, { from: "/second", kind: "credential" });
+  assert.equal(result.budgetExhausted, true);
+  const ledger = new ClassificationLedger();
+  ledger.register("fixture", data, options);
+  const request = ledger.classifyRequest({ prompt: '"unvisited"' });
+  assert.equal(request.budgetExhausted, true);
+  assert.equal(request.counts.credential, 1);
+});
+
+test("marks a section as credential when its text or candidate match budget is exhausted", () => {
+  const ledger = new ClassificationLedger();
+  ledger.register("fixture", { code: "abc" }, { publicReference: true });
+  for (const prefix of ["x".repeat(4_000_000), 'x"abc"'.repeat(200_001)]) {
+    const prompt = `${prefix}\npassword=opaque`;
+    const result = ledger.classifyRequest({ system: "Fixture instructions", prompt });
     assert.equal(result.budgetExhausted, true);
+    assert.deepEqual(result.spans, [{ section: "prompt", start: 0, end: prompt.length,
+      kind: "credential", source: "detector:work-budget" }]);
+    assert.equal(result.counts.credential, 1);
   }
 });
 

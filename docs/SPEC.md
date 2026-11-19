@@ -1806,11 +1806,12 @@ and prompt text for raw and JSON-serialized values, then applies credential,
 email and tenant identity checks to the entire request. It exposes counts and
 offsets by request section and source to a host observer. Values shorter than
 six characters match only complete JSON string values. An unfamiliar name and
-an opaque unlabeled secret can evade text detection. A page that exhausts the
-classification budget records the rest of its traversal at the highest class
-already seen, with Identity as the floor. If the ledger cannot retain the
-remainder, the request observer reports a conservative span and marks the
-classification as budget exhausted.
+an opaque unlabeled secret can evade text detection. If the work budget leaves
+fields or request text unexamined, the classifier records the unexamined data
+as Credential because it may contain secrets. If the ledger fills while
+registering classified values, it records a request-wide span at the highest
+class of the observations it could not retain, with Identity as the floor.
+The request observer marks either fallback as budget exhausted.
 
 Record IDs and tenant IDs can correlate fields of one record. Phase A4 will
 treat fields that co-occur in a record at that record's highest class when it

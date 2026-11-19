@@ -316,7 +316,6 @@ export function walkDataClasses(
   const settings = SETTINGS_PATH.test(route) || route === "/devicemanagement/configurationpolicies";
   const counts = emptyDataClassCounts();
   let budget = options.workBudget ?? 32_000_000;
-  let highest: DataClass = "identity";
   let remainder: { from: string; kind: DataClass } | undefined;
   const active = new Set<object>();
 
@@ -325,9 +324,10 @@ export function walkDataClasses(
     if (remainder) return;
     budget -= 1 + key.length + (typeof child === "string" ? child.length : 0);
     if (budget < 0 || active.size >= 128) {
-      remainder = { from: pointer, kind: highest };
-      counts[highest]++;
-      onField?.(undefined, highest, pointer);
+      // Unvisited fields may contain credentials, regardless of the classes seen so far.
+      remainder = { from: pointer, kind: "credential" };
+      counts.credential++;
+      onField?.(undefined, "credential", pointer);
       return;
     }
     if (child === undefined) return;
@@ -400,7 +400,6 @@ export function walkDataClasses(
       effective = maxDataClass(effective, detectValueClass(child, deviceName || GRAPH_TEXT_FIELDS.test(key) ||
         mapped === undefined && inherited === undefined, options, effective));
     }
-    highest = maxDataClass(highest, effective);
     counts[effective]++;
     onField?.(child, effective, pointer);
   }
