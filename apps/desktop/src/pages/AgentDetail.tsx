@@ -7,7 +7,9 @@ import { Card } from "../components/Card";
 import { Pill } from "../components/Pill";
 import { AgentScheduleCard } from "../components/AgentScheduleCard";
 import { InvalidAgentNotice } from "../components/InvalidAgentNotice";
-import { AGENT_COPY, modelTrustNote, promptsGoTo, providerDataLocationDetail } from "../copy";
+import { AGENT_COPY, PROVIDER_TOOL_NAMES, modelTrustNote, promptsGoTo, providerDataLocationDetail } from "../copy";
+import { MODEL_FIT_COPY } from "../copy/model-fit";
+import { modelFitModelName } from "../components/ModelFitNotice";
 import {
   DeclaredGraphOperations,
   ManifestPreview,
@@ -78,6 +80,7 @@ import {
   type ConnectorChannelRef,
   type ConnectorSummary,
   type ConnectorTeamRef,
+  type ModelFitIssue,
   type ProviderId,
   type ProviderSummary,
   type RequestedScope,
@@ -170,7 +173,7 @@ export default function AgentDetail({
   const [uninstalling, setUninstalling] = useState(false);
   const [requestedScopes, setRequestedScopes] = useState<RequestedScope[]>([]);
   const [pendingRunChoice, setPendingRunChoice] = useState<
-    { dryRun?: boolean; runForRealOfRunId?: string; retryOfRunId?: string; tenantId?: string; providerId?: ProviderId; model?: string } | null
+    { dryRun?: boolean; runForRealOfRunId?: string; retryOfRunId?: string; tenantId?: string; providerId?: ProviderId; model?: string; modelFit?: ModelFitIssue } | null
   >(null);
   const consumedStartRunOnOpen = useRef(false);
   const resumedIntentRef = useRef<string | null>(null);
@@ -220,6 +223,8 @@ export default function AgentDetail({
     tenantId?: string;
     providerId?: ProviderId;
     model?: string;
+    /** Run with <provider> after the local model could not fit the last run. */
+    modelFit?: ModelFitIssue;
   }) => {
     // With no organization the preflight opens instead of setup: it names
     // the services the agent needs, and starts an agent that calls no
@@ -275,6 +280,7 @@ export default function AgentDetail({
     queueRunPreflight({
       ...(runChoice?.providerId ? { providerId: runChoice.providerId } : {}),
       ...(typeof runChoice?.model === "string" ? { model: runChoice.model } : {}),
+      ...(runChoice?.modelFit ? { modelFit: runChoice.modelFit } : {}),
     });
     // Only the first open reads the route state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1074,6 +1080,7 @@ export default function AgentDetail({
           hasOrganizations={resolveOrganizations(state).length > 0}
           model={pendingModel}
           modelLabel={pendingModel ? providerModelLabel(pendingProvider, pendingModel) : undefined}
+          modelFit={pendingRunChoice?.modelFit}
           deliverySaving={pendingDeliverySaveCount > 0}
           // Provider readiness is checked on its own, whatever the
           // organization state.
@@ -2683,6 +2690,8 @@ function noOrganizationReportLine(destinations: { mayGo: string[]; skipped: stri
 export interface RerunChoice {
   providerId?: ProviderId;
   model?: string;
+  /** Set by Run with <provider> on a run the local model could not fit (mockup 36, section F). */
+  modelFit?: ModelFitIssue;
 }
 
 function RunPreflightModal({
@@ -2708,7 +2717,10 @@ function RunPreflightModal({
   onOpenProviderSettings,
   onClose,
   onConfirm,
+  modelFit,
 }: {
+  /** This run moves off the local model that could not fit the last one: say why, and that it is this run only. */
+  modelFit?: ModelFitIssue | undefined;
   /** The run's provider can start a run now. */
   providerReady?: boolean;
   providerStatusDetail?: string | undefined;
@@ -2838,6 +2850,11 @@ function RunPreflightModal({
       />
       <div className="space-y-4 px-6 pb-6 pt-4">
         {blocker ? <PreflightBlockerBlock blocker={blocker} /> : null}
+        {modelFit && (modelFit.providerId !== providerId || modelFit.model !== model) ? (
+          <p data-model-fit-reason="" className="rounded-lg bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text-soft)] ring-1 ring-[var(--color-border)]">
+            {MODEL_FIT_COPY.runReason(modelFit, modelFitModelName(modelFit), providerIsLocal ? (modelLabel ?? model ?? providerName) : PROVIDER_TOOL_NAMES[providerId] ?? providerName)}
+          </p>
+        ) : null}
         {missingServicesBlock ? (
           <ServiceNotConnectedNotice id={PREFLIGHT_BLOCKER_ID} tenant={activeTenant} serviceIds={missingServices.map((service) => service.id)} primary />
         ) : null}

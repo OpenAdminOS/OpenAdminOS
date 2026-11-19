@@ -808,3 +808,53 @@ it("says Run again did not continue when the run page closes before the switch l
   expect(await screen.findByText(RERUN_COPY.rerunNotContinued)).toBeInTheDocument();
   expect(bridge.startRun).not.toHaveBeenCalled();
 });
+
+describe("Run with another provider after a model fit failure (mockup 36, section F)", () => {
+  const CONTEXT_ERROR = "Ollama context size too small: This request needs 40,652 tokens of context, but Ollama could only give llama3.1 16,384, usually because free memory ran out.";
+
+  it("offers the ready hosted provider with its location label, accepts in the run review, and reruns with it", async () => {
+    const user = userEvent.setup();
+    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "ollama", model: "llama3.1", tenantId: "tenant-1", error: CONTEXT_ERROR });
+    const bridge = makeMockBridge({}, createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "write" })], runs: [run] }));
+    renderWithPreflight(run.id, bridge);
+    const notice = await screen.findByRole("region", { name: "llama3.1 cannot fit this run" });
+    expect(within(notice).getByText("This run needs about 40,652 tokens. llama3.1 is set to 16,384.")).toBeInTheDocument();
+    expect(within(notice).getByText("Codex · location set by your account")).toBeInTheDocument();
+    await user.click(within(notice).getByRole("button", { name: "Run with Codex" }));
+
+    // The run review is the accept step: it names the provider, where prompts go and why.
+    const dialog = await screen.findByRole("dialog", { name: /Review run/ });
+    expect(within(dialog).getByText("llama3.1 could not fit the last run, so this run uses Codex. This run only: the agent keeps its model for later runs.")).toBeInTheDocument();
+    expect(within(dialog).getByText(/leave this device through Codex; location set by your account/)).toBeInTheDocument();
+    // A write agent still stops at the diff.
+    expect(within(dialog).getByText("Pauses for a diff and typed confirmation before anything is applied.")).toBeInTheDocument();
+    expect(bridge.startRun).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole("button", { name: "Start run" }));
+    await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({ providerId: "openai", model: "gpt-5" })));
+  });
+
+  it("keeps Run again on the run's own provider", async () => {
+    const user = userEvent.setup();
+    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "ollama", model: "llama3.1", tenantId: "tenant-1", error: CONTEXT_ERROR });
+    const bridge = makeMockBridge({}, createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "read" })], runs: [run] }));
+    renderWithPreflight(run.id, bridge);
+    await user.click(await screen.findByRole("button", { name: "Run again" }));
+    const dialog = await screen.findByRole("dialog", { name: /Review run/ });
+    expect(within(dialog).queryByText(/could not fit the last run/)).toBeNull();
+    await user.click(within(dialog).getByRole("button", { name: "Start run" }));
+    await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({ providerId: "ollama", model: "llama3.1" })));
+  });
+
+  it("does not offer a hosted provider for a failure that is not about the context, or a run on a hosted provider", async () => {
+    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "ollama", model: "llama3.1", tenantId: "tenant-1", error: "Ollama not reachable at http://127.0.0.1:11434: connect ECONNREFUSED" });
+    const hosted = createAwaitingConfirmationRun({ id: "run-hosted", status: "failed", plan: undefined, providerId: "openai", model: "gpt-5", tenantId: "tenant-1", error: CONTEXT_ERROR });
+    const bridge = makeMockBridge({}, createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "read" })], runs: [run, hosted] }));
+    const { unmount } = renderWithPreflight(run.id, bridge);
+    await screen.findByRole("button", { name: "Run again" });
+    expect(screen.queryByRole("region", { name: /cannot fit this run/ })).toBeNull();
+    unmount();
+    renderWithPreflight(hosted.id, bridge);
+    await screen.findByRole("button", { name: "Run again" });
+    expect(screen.queryByRole("region", { name: /cannot fit this run/ })).toBeNull();
+  });
+});
