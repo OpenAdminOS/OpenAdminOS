@@ -4,6 +4,11 @@ Research for the data policy that classifies every Graph field at the moment it 
 
 No secret values are reproduced. Values are replaced by their type; for credential fields only presence is stated. Person names, IPs and device names seen in the lab are described, not quoted.
 
+The tables below are the historical record from 2026-11-18. For current
+classifications and mask roles, including Conditional Access identifiers and
+controls, see the [runtime field map](../../packages/runtime/src/graph-field-classes.ts)
+and [the specification](../SPEC.md#data-policy-data-classes-and-classification-2026-11-18).
+
 ## Method
 
 - Endpoint list: every entry of `GRAPH_CACHE_RESOURCES` (45 resources) in apps/desktop/electron/intune-chat/planner.ts with its `pathForResource` path and `$select`, plus every `graph` step `path`/`select` in agents/*/manifest.yaml, plus the one script agent (agents/intune-device-posture-auditor/agent.mjs, same managedDevices path and fields as its manifest).
