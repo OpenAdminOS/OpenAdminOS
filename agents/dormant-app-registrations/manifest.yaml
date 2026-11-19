@@ -7,8 +7,8 @@ descriptor:
   id: dormant-app-registrations
   name: Dormant app registrations
   description: Reviews app registrations for stale experiments, risky exposure, credentials, and cleanup candidates with evidence-backed recommendations.
-  version: 1.1.1
-  minAppVersion: 0.6.3
+  version: 1.2.0
+  minAppVersion: 0.7.3
   author:
     name: OpenAdminOS
     handle: openadminos
@@ -112,7 +112,7 @@ skills:
       prompt: |-
         The tenant has {{ load_apps.output | size }} app registrations.
         Audience breakdown: {{ by_audience.output }}.
-        Publisher domain breakdown: {{ by_publisher_domain.output }}.
+        Publisher domain breakdown: {{ by_publisher_domain.output | top(25) }}.
         Created-age groups overlap; do not add their counts:
         Created 3y+ ago: {{ by_created_age.output.created 3y+ ago | size }}.
         Created 1y+ ago: {{ by_created_age.output.created 1y+ ago | size }}.

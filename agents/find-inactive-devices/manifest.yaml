@@ -11,8 +11,8 @@ descriptor:
   id: find-inactive-devices
   name: Find inactive devices
   description: Reviews Intune-managed device inactivity by sync age, compliance, OS, ownership, and enrollment signals with review-first cleanup guidance.
-  version: 1.1.0
-  minAppVersion: 0.1.0
+  version: 1.2.0
+  minAppVersion: 0.7.3
   author:
     name: OpenAdminOS
     handle: openadminos
@@ -148,8 +148,8 @@ skills:
 
         Stale compliance breakdown: {{ stale_by_compliance.output }}.
         Retirement-candidate compliance breakdown: {{ retire_by_compliance.output }}.
-        Warn-band devices by operating system: {{ inactive_by_os.output }}.
-        Retirement candidates by owner type: {{ retire_by_owner_type.output }}.
+        Warn-band devices by operating system: {{ inactive_by_os.output | counts }}.
+        Retirement candidates by owner type: {{ retire_by_owner_type.output | counts }}.
         Oldest retirement-candidate sample: {{ oldest_devices.output }}.
 
         Write a compact report with these sections:

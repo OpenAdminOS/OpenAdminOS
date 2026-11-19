@@ -3,8 +3,8 @@ descriptor:
   id: user-license-overview
   name: User license overview
   description: Reviews tenant user licensing hygiene by usage location, account state, and assigned-license presence.
-  version: 1.1.0
-  minAppVersion: 0.1.0
+  version: 1.2.0
+  minAppVersion: 0.7.3
   author:
     name: OpenAdminOS
     handle: openadminos
@@ -80,10 +80,10 @@ skills:
         this agent only checks user-level readiness signals.
       prompt: |-
         Total users: {{ load_users.output | size }}.
-        By usage location: {{ by_location.output }}.
+        By usage location: {{ by_location.output | top(40) }}.
         By account state: {{ by_account_enabled.output }}.
         By user type: {{ by_user_type.output }}.
-        Users by usage location, with unset bucket included: {{ missing_usage_location.output }}.
+        Users by usage location, with unset bucket included: {{ missing_usage_location.output | top(40) }}.
 
         Write a compact report with these sections:
         1. Main finding.

@@ -13,8 +13,8 @@ descriptor:
   id: os-update-posture
   name: OS update posture
   description: Reviews Intune OS version distribution, compliance, ownership, enrollment, and stale inventory signals so admins can prioritize update work.
-  version: 1.1.0
-  minAppVersion: 0.1.0
+  version: 1.2.0
+  minAppVersion: 0.7.3
   author:
     name: OpenAdminOS
     handle: openadminos
@@ -150,12 +150,12 @@ skills:
       prompt: |-
         Tenant managed devices: {{ load_devices.output | size }}.
         By operating system: {{ by_os.output }}
-        By OS version: {{ by_os_version.output }}
+        By OS version: {{ by_os_version.output | top(30) }}
         By compliance state: {{ by_compliance.output }}
-        Devices by owner type: {{ by_owner_type.output }}
-        Devices by enrollment type: {{ by_enrollment_type.output }}
+        Devices by owner type: {{ by_owner_type.output | counts }}
+        Devices by enrollment type: {{ by_enrollment_type.output | counts }}
         Inventory stale >= {{ settings.staleSyncDays }} days: {{ stale_inventory.output | size }} devices.
-        Stale inventory by OS: {{ stale_by_os.output }}
+        Stale inventory by OS: {{ stale_by_os.output | counts }}
         Oldest stale inventory sample: {{ oldest_inventory.output }}
 
         Write a compact report with these sections:
