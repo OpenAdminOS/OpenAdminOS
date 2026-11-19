@@ -1774,6 +1774,9 @@ Identity class and secrets keep their Credential class within security objects.
 Security fields carry a mask role for names and identifiers or for setting values.
 App role and permission scope names are identifiers. App role flags,
 compliance rules and authorization policy settings stay readable in A4.
+Conditional Access location and role GUIDs and preauthorized delegated
+permission IDs use the identifier role. Terms such as All and AllTrusted
+and control values such as mfa use the setting role.
 
 An unmapped Graph field or resource defaults to Identity. Mapped containers
 supply a class to unmapped descendants. An explicit child rule can specialize
@@ -1819,15 +1822,17 @@ startup indexes in batches, yielding between batches. Older cache rows are
 backfilled once. The existing SQLite snapshot replacement is atomic.
 
 The model-facing ledger is a plaintext secret store in process memory. Never
-log, persist or send its contents. Runs dispose of it when they finish or are
-cancelled. Chat retains observations per completed turn for up to four turns
+log, persist or send its contents outside the local classification worker.
+Runs keep registering evidence for their full lifetime and dispose of it when
+they finish or are cancelled. Chat retains observations per completed turn for up to four turns
 in each of eight conversations, with a 15-minute maximum lifetime per ledger.
 Cancellation disposes of the active turn. Conversation deletion and switching
 organizations release the corresponding observations. Disconnect releases them
 when the organization is removed, even if subsequent cleanup needs a retry.
-Temporary history evidence is disposed of after the current turn. A new process can
-still scan saved conversation text, using the available detectors and cache
-index.
+Temporary history evidence is disposed of after the current turn. If a
+request replays a saved Chat turn whose ledger is unavailable, including
+after expiry or restart, the replayed range has incomplete coverage. Text
+detectors and the cache index still identify evidence in the replay.
 
 The decorator scans final system and prompt text for raw and JSON-serialized
 values and recognizes credential and identifier patterns, including UPNs,
@@ -1835,7 +1840,9 @@ GUIDs, IPs, MAC addresses and labeled serials. It keeps UTF-16 offsets for
 exact spans in the provider's request. Strings under 12 Unicode code points
 and low-specificity values need field or rendering provenance, or a
 whole-word match for distinctive short identifiers. Boolean and numeric
-values need provenance. Transformed values carry their original class through
+values need provenance. Serialized arrays preserve field provenance for all
+elements, including nested arrays. Generic phrases use word boundaries.
+Transformed values carry their original class through
 clipping, scalar interpolation and standalone fences. An unfamiliar name or
 an opaque unlabeled secret can evade detection.
 
@@ -1846,12 +1853,20 @@ a 32-million-unit work limit per classification. The request scan works in
 chunks over up to 16 million UTF-16 code units and 200,000 units of match work
 per section. Each turn indexes its own match patterns, and the scanner checks
 an anchor's first code unit before looking up the full anchor. Later turns
-reuse the existing indexes. Desktop provider calls yield between large scan chunks.
+reuse the existing indexes. One local worker per desktop process scans larger
+requests and requests with cached identity indexes. Matcher changes synchronize
+in batches. The desktop transfers request text and receives classification
+offsets from the worker. The main thread handles up to 512 UTF-16 code units
+of combined request text with bounded matcher state. The worker has a
+three-second deadline covering queueing, synchronization and scanning.
+Multi-tenant summaries use the job ID as their scope.
+Stopping the job releases the summary ledger.
 If work or retention limits leave evidence unexamined, the
 effective class is Credential, with a separate coverage-incomplete flag,
 unexamined quantities and text ranges where applicable. Observed counts and
 spans only include evidence the classifier found. A turn's dropped evidence
-does not mark a later turn incomplete. If classification fails, the observer
+does not mark a later turn incomplete. If classification fails or the worker
+times out, the observer
 marks the request failed and the provider call proceeds with unchanged options.
 
 Each event includes the field map version, timestamp and available run or

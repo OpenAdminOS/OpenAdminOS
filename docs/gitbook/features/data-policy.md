@@ -30,14 +30,20 @@ Text checks recognize some patterns, such as email addresses and labeled
 passwords, and can find values the app already knows about the organization.
 An unfamiliar name or an opaque, unlabeled secret can evade these checks.
 
-OpenAdminOS classifies cache rows when it saves them. A model request scan
+OpenAdminOS classifies cache rows when it saves them. Larger model requests
+are scanned by a background worker on this device. A model request scan
 can examine up to 16 million UTF-16 code units each for the system text and
 the prompt, subject to the match work limit. If the scan cannot examine all
 the evidence, its local record marks coverage incomplete separately from
-the credentials it found. The local evidence budget favors credentials and
-identity values. Temporary Chat observations are kept on this device
+the credentials it found and uses Credential as the effective class. The
+provider call proceeds with the original request if the scan fails or its
+worker times out. The local evidence budget favors credentials and identity
+values. Live runs keep registering evidence until they finish or are
+cancelled. Temporary Chat observations are kept on this device
 for up to four completed turns in each of eight conversations, with a
-15-minute maximum lifetime. Cancelling a turn clears its active observations.
+15-minute maximum lifetime. A saved Chat turn included in a follow-up
+has incomplete coverage if its observations have expired or are otherwise
+unavailable. Cancelling a turn clears its active observations.
 Deleting the conversation or disconnecting or switching organizations also
 releases the associated observations.
 
