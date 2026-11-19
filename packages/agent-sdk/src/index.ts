@@ -153,8 +153,10 @@ export type AgentMode = "read" | "write";
 
 export * from "./write-limits.js";
 export * from "./graph-access.js";
+export * from "./context-fit.js";
 import type { WriteLimits } from "./write-limits.js";
 import type { GraphAccessDenial } from "./graph-access.js";
+import type { RunFailureReason } from "./context-fit.js";
 import type {
   ConnectSplashtopInput,
   PrepareSplashtopChangeInput,
@@ -1051,6 +1053,8 @@ export interface RunRecord {
   error?: string;
   steps: RunStepRecord[];
   accessDenial?: GraphAccessDenial;
+  /** Machine readable reason for a failed run, such as `context-too-small`. */
+  failureReason?: RunFailureReason;
   logs: RunLogRecord[];
   plan?: WritePlan;
   /** Host-produced assessment, retained with the reviewed plan in run history. */
@@ -4521,6 +4525,12 @@ export interface RunLlmApi {
    */
   complete(options: LlmOptions): Promise<LlmCompletion>;
   stream(options: LlmOptions): AsyncIterable<LlmStreamChunk>;
+  /**
+   * The context window in tokens that a request to `model` gets, when the
+   * provider can report it. `undefined` means unknown, and callers then send
+   * the request without a size check. Hosted providers leave this out.
+   */
+  contextWindow?(model?: string): Promise<number | undefined>;
 }
 
 export type SandboxBrokerRequest =
