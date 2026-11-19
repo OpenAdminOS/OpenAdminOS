@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { LlmOptions, RunGraphApi, RunLlmApi } from "@openadminos/agent-sdk";
 import { TENANT_DATA_INSTRUCTIONS } from "@openadminos/runtime";
-import type { RequestClassificationEvent } from "@openadminos/runtime/data-classification";
+import { currentClassificationLedger, type ClassificationLedger, type RequestClassificationEvent } from "@openadminos/runtime/data-classification";
 import { GRAPH_CACHE_RESOURCES, planChatContext } from "./planner.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 import { AppStateStore } from "../state.js";
@@ -16,6 +16,7 @@ async function fixture(options: {
   respond?: (request: LlmOptions, index: number) => string;
   bypassClassification?: boolean;
   graphResult?: (path: string) => unknown;
+  beforeStream?: () => Promise<void>;
 } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "tenant-data-host-"));
   const filePath = join(dir, "state.json");
@@ -25,15 +26,19 @@ async function fixture(options: {
   await writeFile(filePath, JSON.stringify({ activeTenantId: "tenant-a", activeProviderId: "ollama",
     activeModelByProviderId: { ollama: "test" }, installedAgents: [agent], runs: [],
     tenants: [{ id: "tenant-a", displayName: hostile, username: "test@example.invalid",
-      homeAccountId: "test", addedAt: new Date().toISOString() }] }));
+      homeAccountId: "test", addedAt: new Date().toISOString() },
+    { id: "tenant-b", displayName: "Other organization", username: "other@example.invalid",
+      homeAccountId: "other", addedAt: new Date().toISOString() }] }));
   const prompts: LlmOptions[] = [];
   const respond = (request: LlmOptions) => options.respond?.(request, prompts.length - 1)
     ?? '<tenant_data nonce="echo">Reviewed</tenant_data>';
+  const { beforeStream } = options;
   const llm: RunLlmApi = { available: true, defaultModel: "test",
     complete: async options => { prompts.push(options); return { text: respond(options), model: "test" }; },
     async *stream(options) {
       prompts.push(options);
       const output = respond(options);
+      await beforeStream?.();
       for (let i = 1; i <= output.length; i++) yield {
         delta: output[i - 1]!, accumulated: output.slice(0, i), done: i === output.length, model: "test",
       };
@@ -82,6 +87,83 @@ test("Chat fences answer packs, workspace evidence and history and filters every
     for (const message of messages.filter(message => message.role === "assistant")) assert.equal(message.content, "Reviewed");
     assert.doesNotMatch(f.prompts[0]!.prompt, /<\/tenant_data nonce="fake"/);
   } finally { await f.close(); }
+});
+
+for (const action of ["delete", "switch", "disconnect", "expire"] as const) {
+  test(`Chat discards credential observations on ${action}`, async t => {
+    const probe = { prompt: '{"hint":"q7z"}' };
+    let ledger: ClassificationLedger | undefined;
+    const f = await fixture({
+      respond: () => {
+        ledger = currentClassificationLedger();
+        ledger?.register("fixture", { hint: "q7z" }, { graphPath: "/applications/app/addPassword" });
+        return "Reviewed.";
+      },
+    });
+    try {
+      if (action === "expire") t.mock.timers.enable({ apis: ["setTimeout"] });
+      if (action === "disconnect") {
+        // Keep tenant A inactive in persisted state without exercising the
+        // normal switch first. Its retained observations must be cleared even
+        // when the sign-in cleanup fails before the cache purge.
+        Object.defineProperty(f.store, "removeCachedAccount", { value: async () => { throw new Error("Sign-in unavailable"); } });
+      }
+      const result = await f.store.streamIntuneChatMessage({ content: "Explain device compliance." }, () => {});
+      assert.equal(result.assistantMessage.status, "completed", result.assistantMessage.error);
+      assert.ok(ledger);
+      assert.equal(ledger.classifyRequest(probe).counts.credential, 1);
+      switch (action) {
+        case "delete":
+          await f.store.deleteIntuneChatConversation(result.conversation.id);
+          break;
+        case "switch":
+          await f.store.setActiveTenant("tenant-b");
+          break;
+        case "disconnect": {
+          const state = JSON.parse(await readFile(f.filePath, "utf8"));
+          await writeFile(f.filePath, JSON.stringify({ ...state, activeTenantId: "tenant-b" }));
+          await f.store.disconnectTenant("tenant-a");
+          break;
+        }
+        case "expire":
+          t.mock.timers.tick(15 * 60_000 - 1);
+          assert.equal(ledger.classifyRequest(probe).counts.credential, 1);
+          t.mock.timers.tick(1);
+          break;
+      }
+      assert.equal(ledger.expired, true);
+      assert.equal(ledger.classifyRequest(probe).counts.credential, 0);
+    } finally { await f.close(); }
+  });
+}
+
+test("Chat discards the active turn's observations on abort before the provider exits", async () => {
+  const reachedProvider = Promise.withResolvers<void>();
+  const releaseProvider = Promise.withResolvers<void>();
+  const controller = new AbortController();
+  let ledger: ClassificationLedger | undefined;
+  const probe = { prompt: '{"hint":"q7z"}' };
+  const f = await fixture({
+    beforeStream: async () => {
+      ledger = currentClassificationLedger();
+      ledger?.register("fixture", { hint: "q7z" }, { graphPath: "/applications/app/addPassword" });
+      reachedProvider.resolve();
+      await releaseProvider.promise;
+    },
+  });
+  const result = f.store.streamIntuneChatMessage({ content: "Explain device compliance." }, () => {}, { signal: controller.signal });
+  try {
+    await Promise.race([reachedProvider.promise, result.then(() => assert.fail("Expected the provider to be called"))]);
+    assert.ok(ledger);
+    assert.equal(ledger.classifyRequest(probe).counts.credential, 1);
+    controller.abort();
+    assert.equal(ledger.expired, true);
+    assert.equal(ledger.classifyRequest(probe).counts.credential, 0);
+  } finally {
+    releaseProvider.resolve();
+    await result.catch(() => undefined);
+    await f.close();
+  }
 });
 
 test("Office persona evidence is fenced and cleaned before conversation storage", async () => {

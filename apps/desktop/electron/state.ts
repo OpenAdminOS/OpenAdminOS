@@ -8674,6 +8674,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         this.tenantLifecycle.abortClose(id);
         throw cause;
       }
+      this.chatService.clearTenantClassification(id);
     });
     // A license check of the removed connection saves nothing.
     this.supersedeTenantCheck(id, "disconnected");
@@ -8761,7 +8762,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       }
       try {
         this.intelligenceStore?.purgeTenant(id);
-        this.chatService.clearTenantClassification(id);
       } catch (cause) {
         throw new Error(`Its Chat and cache data could not be deleted. ${errorText(cause)}`, { cause });
       }
