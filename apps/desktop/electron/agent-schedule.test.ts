@@ -6,7 +6,7 @@ import { describe, it } from "node:test";
 
 import type { RunRecord } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
-import { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 
 const tokenStore: TokenCacheStorage = {
   read: async () => "",
@@ -52,7 +52,7 @@ async function makeStore(state: Record<string, unknown>) {
     `${JSON.stringify({ activeProviderId: "ollama", tenants: [], runs: [], installedAgents: [], ...state }, null, 2)}\n`,
     "utf8",
   );
-  const store = new AppStateStore({ providerListFactory: () => [], filePath, tokenStore, statsApiUrl: "" });
+  const store = createTestAppStateStore({ filePath, tokenStore, statsApiUrl: "" });
   return {
     store,
     filePath,
@@ -107,7 +107,7 @@ describe("agent scheduling", () => {
       }, null, 2)}\n`,
       "utf8",
     );
-    const store = new AppStateStore({ providerListFactory: () => [], filePath, tokenStore, statsApiUrl: "" });
+    const store = createTestAppStateStore({ filePath, tokenStore, statsApiUrl: "" });
     try {
       const before = Date.now();
       await store.updateAgentSchedule("agent-1", {

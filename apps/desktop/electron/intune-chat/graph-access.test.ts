@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
 import { GraphAccessDeniedError, type GraphAccessContext, type RunGraphApi } from "@openadminos/agent-sdk";
-import { AppStateStore } from "../state.js";
+import { createTestAppStateStore } from "../../tests/app-state-store-fixture.js";
 
 it("persists each cache denial and keeps consent, role, and licence readiness distinct", async () => {
   const dir = await mkdtemp(join(tmpdir(), "oaos-access-"));
@@ -24,7 +24,7 @@ it("persists each cache denial and keeps consent, role, and licence readiness di
     },
   };
   const options = { filePath, userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => {} }, graphFactory: () => graph };
-  const openStore = () => new AppStateStore({
+  const openStore = () => createTestAppStateStore({
     ...options,
     providerListFactory: () => [
       { id: "ollama", name: "Ollama", description: "Local", isLocal: true, status: "connected", models: ["test"], defaultModel: "test" },

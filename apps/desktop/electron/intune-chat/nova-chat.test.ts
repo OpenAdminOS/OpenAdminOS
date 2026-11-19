@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { it } from "node:test";
 import { providerCatalog } from "@openadminos/agent-sdk";
-import { AppStateStore } from "../state.js";
+import { createTestAppStateStore } from "../../tests/app-state-store-fixture.js";
 import type { RunGraphApi, RunLlmApi } from "@openadminos/agent-sdk";
 import { TENANT_DATA_INSTRUCTIONS } from "@openadminos/runtime";
 
@@ -85,7 +85,7 @@ async function fixture(empty = false, deviceRows?: unknown[]) {
       };
     },
   };
-  const store = new AppStateStore({
+  const store = createTestAppStateStore({
     providerListFactory: () => [...providerCatalog],
     filePath: path,
     userDataPath: dir,

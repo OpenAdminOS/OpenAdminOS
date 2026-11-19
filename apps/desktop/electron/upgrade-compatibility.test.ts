@@ -12,7 +12,7 @@ import {
 } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 
-import { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 
 const tokenStore: TokenCacheStorage = {
   read: async () => "",
@@ -39,7 +39,7 @@ describe("upgrade compatibility", () => {
     await writeFile(statePath, `${JSON.stringify(v030State, null, 2)}\n`, "utf8");
     seedLegacyDatabase(dbPath);
 
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
       filePath: statePath,
       userDataPath: dir,
       tokenStore,
@@ -133,7 +133,7 @@ describe("services grant migration", () => {
       ],
     }), "utf8");
 
-    const open = () => new AppStateStore({
+    const open = () => createTestAppStateStore({
       filePath: statePath,
       userDataPath: dir,
       tokenStore,

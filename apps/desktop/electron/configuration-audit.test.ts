@@ -17,7 +17,7 @@ import {
 } from "./configuration-audit.js";
 import { MCP_CATALOG, type McpCatalogEntry } from "./mcp/catalog.js";
 import type { McpHost } from "./mcp/host.js";
-import { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 
 const tokenStore: TokenCacheStorage = { read: async () => "", write: async () => undefined };
 const ZERO_HASH = "0".repeat(64);
@@ -90,7 +90,7 @@ async function makeFixture(initial: Record<string, unknown> = {}, options: { mcp
     "utf8",
   );
   const requests: string[][] = [];
-  const store = new AppStateStore({
+  const store = createTestAppStateStore({
     providerListFactory: () => [...providerCatalog],
     filePath: statePath,
     tokenStore,

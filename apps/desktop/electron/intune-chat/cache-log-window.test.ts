@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
-import { AppStateStore } from "../state.js";
+import { createTestAppStateStore } from "../../tests/app-state-store-fixture.js";
 import {
   GRAPH_CACHE_LOG_ROW_LIMIT,
   GRAPH_CACHE_LOG_WINDOW_DAYS,
@@ -56,8 +56,7 @@ it("collects log resources as a capped recent window instead of every retained r
       };
     },
   } as unknown as RunGraphApi;
-  const store = new AppStateStore({
-    providerListFactory: () => [],
+  const store = createTestAppStateStore({
     filePath,
     userDataPath: dir,
     statsApiUrl: "",

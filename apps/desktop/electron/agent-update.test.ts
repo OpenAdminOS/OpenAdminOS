@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import type { TokenCacheStorage } from "@openadminos/runtime";
-import { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 import { DEFAULT_REGISTRY_SOURCE } from "./registry-client.js";
 
 const tokenStore: TokenCacheStorage = {
@@ -61,8 +61,7 @@ describe("registry manifest integrity and update lifecycle", () => {
     };
 
     const dir = await mkdtemp(join(tmpdir(), "openadminos-agent-update-"));
-    const store = new AppStateStore({
-      providerListFactory: () => [],
+    const store = createTestAppStateStore({
       filePath: join(dir, "state.json"),
       userDataPath: dir,
       tokenStore,
@@ -135,8 +134,7 @@ describe("registry manifest integrity and update lifecycle", () => {
         : new Response(manifest, { status: 200 });
 
     const dir = await mkdtemp(join(tmpdir(), "openadminos-agent-digest-"));
-    const store = new AppStateStore({
-      providerListFactory: () => [],
+    const store = createTestAppStateStore({
       filePath: join(dir, "state.json"),
       userDataPath: dir,
       tokenStore,
@@ -174,7 +172,7 @@ describe("Marketplace network failures (design and enterprise round)", () => {
       throw unreachable();
     };
     const dir = await mkdtemp(join(tmpdir(), "openadminos-agent-network-"));
-    const store = new AppStateStore({ providerListFactory: () => [], filePath: join(dir, "state.json"), userDataPath: dir, tokenStore, statsApiUrl: "", appVersion: "0.4.0", resolveProxy: async () => "PROXY proxy.contoso.com:8080" });
+    const store = createTestAppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, tokenStore, statsApiUrl: "", appVersion: "0.4.0", resolveProxy: async () => "PROXY proxy.contoso.com:8080" });
     try {
       await store.setRegistrySource(source, { confirmExternalSource: true });
       await assert.rejects(

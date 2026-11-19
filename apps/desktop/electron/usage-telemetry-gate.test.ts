@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 
 import type { TokenCacheStorage } from "@openadminos/runtime";
 
-import { AppStateStore } from "./state.js";
+import type { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 
 const tokenStore: TokenCacheStorage = {
   read: async () => "",
@@ -30,8 +31,7 @@ async function makeStore(usageTelemetryUrl: string): Promise<{
     }),
     "utf8",
   );
-  const store = new AppStateStore({
-    providerListFactory: () => [],
+  const store = createTestAppStateStore({
     filePath: statePath,
     tokenStore,
     userDataPath: dir,

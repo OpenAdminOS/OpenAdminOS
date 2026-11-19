@@ -7,7 +7,7 @@ import { describe, it } from "node:test";
 import { partIdsFor } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 
-import { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 
 const G = "https://graph.microsoft.com/";
 
@@ -26,8 +26,7 @@ async function makeFixture(options: {
   const storage: TokenCacheStorage = { read: async () => "", write: async () => undefined };
   const requests: string[][] = [];
   const loginHints: Array<string | undefined> = [];
-  const store = new AppStateStore({
-    providerListFactory: () => [],
+  const store = createTestAppStateStore({
     filePath: statePath,
     tokenStore: storage,
     tokenStoreFor: () => storage,

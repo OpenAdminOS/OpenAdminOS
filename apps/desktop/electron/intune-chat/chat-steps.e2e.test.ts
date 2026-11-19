@@ -12,7 +12,8 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { z } from "zod";
 import { partIdsFor, providerCatalog, qualifyScope, requestedScopes, type IntuneChatStep, type IntuneChatStreamEvent } from "@openadminos/agent-sdk";
 
-import { AppStateStore } from "../state.js";
+import type { AppStateStore } from "../state.js";
+import { createTestAppStateStore } from "../../tests/app-state-store-fixture.js";
 import { MCP_CATALOG } from "../mcp/catalog.js";
 import type { IntelligenceSqliteStore } from "./sqlite-store.js";
 import { isMcpQueryWriterRequest } from "./mcp-query-writer.js";
@@ -132,7 +133,7 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: {
   };
   const learn = MCP_CATALOG.find((entry) => entry.id === "microsoft-learn")!;
   const kql = MCP_CATALOG.find((entry) => entry.id === "kql-search")!;
-  const store = new AppStateStore({
+  const store = createTestAppStateStore({
     filePath: statePath, userDataPath: dir, statsApiUrl: "",
     tokenStore: { read: async () => "", write: async () => undefined },
     mcpCatalog: [{ ...learn, url: `${baseUrl}/learn` }, { ...kql, url: `${baseUrl}/kql` }],

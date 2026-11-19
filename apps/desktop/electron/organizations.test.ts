@@ -28,7 +28,7 @@ import {
   type RunPersistedState,
   type RunServiceHost,
 } from "./runs.js";
-import { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 
 const tokenStore: TokenCacheStorage = { read: async () => "", write: async () => undefined };
 
@@ -133,7 +133,7 @@ async function makeStore(state: Record<string, unknown>) {
   const filePath = join(dir, "state.json");
   const raw = `${JSON.stringify(state, null, 2)}\n`;
   await writeFile(filePath, raw, "utf8");
-  const store = new AppStateStore({ filePath, tokenStore, statsApiUrl: "", userDataPath: dir, providerListFactory: () => [] });
+  const store = createTestAppStateStore({ filePath, tokenStore, statsApiUrl: "", userDataPath: dir, providerListFactory: () => [] });
   const internal = store as unknown as {
     read(): Promise<Record<string, unknown> & { organizations: OrganizationRecord[]; installedAgents: AgentSummary[] }>;
   };
@@ -1009,7 +1009,7 @@ describe("connector tests from No organization (Muse round 4)", () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-no-org-connector-"));
     const statePath = join(dir, "state.json");
     await writeFile(statePath, JSON.stringify({ activeProviderId: "ollama", installedAgents: [], runs: [], tenants: [] }));
-    const store = new AppStateStore({ filePath: statePath, tokenStore, userDataPath: dir, statsApiUrl: "", providerListFactory: () => [] });
+    const store = createTestAppStateStore({ filePath: statePath, tokenStore, userDataPath: dir, statsApiUrl: "", providerListFactory: () => [] });
     try {
       await assert.rejects(store.testConnector("teams"), (error: Error) => {
         assert.equal(error.message, NO_MICROSOFT_365_ORGANIZATION("testing this connector"));

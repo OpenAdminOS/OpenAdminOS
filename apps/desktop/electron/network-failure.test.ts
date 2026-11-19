@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import { classifyNetworkFailure, describeNetworkFailure, systemProxyFrom } from "./network-failure.js";
-import { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 
 /** Design and enterprise round: proxy and offline failures name the host, the proxy and the fix. */
 
@@ -90,8 +90,7 @@ describe("the message names the host, whether a proxy was used and the fix", () 
 describe("Microsoft sign-in in the setup dialog", () => {
   it("names login.microsoftonline.com, the system proxy and the fix when sign-in cannot reach Microsoft", async () => {
     const dir = await mkdtemp(join(tmpdir(), "oaos-network-"));
-    const store = new AppStateStore({
-      providerListFactory: () => [],
+    const store = createTestAppStateStore({
       filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
       resolveProxy: async () => "PROXY proxy.contoso.com:8080",
@@ -127,7 +126,7 @@ describe("the local index model download", () => {
     const dir = await mkdtemp(join(tmpdir(), "oaos-network-"));
     const { writeFile } = await import("node:fs/promises");
     await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [] }));
-    const store = new AppStateStore({ providerListFactory: () => [], filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
+    const store = createTestAppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
     try {
       await store.autoInstallEmbeddingModel();
       const status = await store.getRetrievalStatusWithUpdates();

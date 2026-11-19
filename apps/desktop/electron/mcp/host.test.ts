@@ -12,7 +12,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 
-import { AppStateStore } from "../state.js";
+import type { AppStateStore } from "../state.js";
+import { createTestAppStateStore } from "../../tests/app-state-store-fixture.js";
 import { MCP_CATALOG, mcpHost, type McpCatalogEntry } from "./catalog.js";
 import { MCP_SCHEMA_UNAVAILABLE, McpHost, McpHostError, type McpEndpoint } from "./host.js";
 import { isMcpQueryWriterRequest } from "../intune-chat/mcp-query-writer.js";
@@ -464,7 +465,7 @@ describe("MCP installs in app state", () => {
       { ...MCP_CATALOG[0]!, id: "test-docs", name: "Test Docs", url: endpoint.url },
       { ...MCP_CATALOG[1]!, id: "gone", name: "Gone", url: "http://127.0.0.1:9/mcp" },
     ];
-    const store = new AppStateStore({ providerListFactory: () => [...providerCatalog], filePath: statePath, tokenStore: { read: async () => "", write: async () => undefined }, statsApiUrl: "", mcpCatalog: catalog });
+    const store = createTestAppStateStore({ providerListFactory: () => [...providerCatalog], filePath: statePath, tokenStore: { read: async () => "", write: async () => undefined }, statsApiUrl: "", mcpCatalog: catalog });
     try { await run(store, statePath, catalog); } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
   }
   const persisted = async (statePath: string) => JSON.parse(await readFile(statePath, "utf8")).mcpServers;
@@ -497,7 +498,7 @@ describe("MCP installs in app state", () => {
   it("shows only allowlisted tools, names missing ones, and keeps Chat off the server until they are back", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-mcp-allowlist-"));
     const tenant = { id: "tenant-1", displayName: "Contoso", username: "admin@contoso.example", homeAccountId: "home-1", addedAt: "2026-06-01T10:00:00.000Z" };
-    const make = (tools: string[]) => new AppStateStore({
+    const make = (tools: string[]) => createTestAppStateStore({
       providerListFactory: () => [...providerCatalog],
       filePath: join(dir, "state.json"), tokenStore: { read: async () => "", write: async () => undefined }, statsApiUrl: "",
       mcpCatalog: [{ ...MCP_CATALOG[0]!, id: "test-docs", name: "Test Docs", url: endpoint.url, tools }],
@@ -569,7 +570,7 @@ describe("MCP installs in app state", () => {
       JSON.stringify({ final: true, answer: "Windows Autopatch is a cloud service that automates Windows updates." }),
     ];
     const writer = writerDouble();
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
       providerListFactory: () => [...providerCatalog],
       filePath: statePath, userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
@@ -619,7 +620,7 @@ describe("MCP installs in app state", () => {
     ];
     let reply = 0;
     const writer = writerDouble();
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
       providerListFactory: () => [...providerCatalog],
       filePath: statePath, userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
@@ -669,7 +670,7 @@ describe("MCP installs in app state", () => {
       let reply = 0;
       const writer = writerDouble();
       let store: AppStateStore;
-      store = new AppStateStore({
+      store = createTestAppStateStore({
         providerListFactory: () => [...providerCatalog],
         filePath: statePath, userDataPath: dir, statsApiUrl: "",
         tokenStore: { read: async () => "", write: async () => undefined },
@@ -730,7 +731,7 @@ describe("MCP installs in app state", () => {
       activeProviderId: "ollama", providerChosenByUser: true, activeModelByProviderId: { ollama: "llama3.1:8b" },
       installedAgents: [], runs: [], tenants: [tenant], activeTenantId: tenant.id,
     }));
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
       providerListFactory: () => [...providerCatalog],
       filePath: statePath, userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },

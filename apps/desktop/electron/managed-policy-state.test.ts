@@ -16,7 +16,8 @@ import type { ConfigurationAuditEvent } from "./configuration-audit.js";
 import { MCP_CATALOG, type McpCatalogEntry } from "./mcp/catalog.js";
 import { McpHost, McpHostError } from "./mcp/host.js";
 import { ManagedPolicyError, loadManagedPolicy } from "./managed-policy.js";
-import { AppStateStore } from "./state.js";
+import type { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 
 const tokenStore: TokenCacheStorage = { read: async () => "", write: async () => undefined };
 const MACHINE = "/etc/openadminos/policy.json";
@@ -86,7 +87,7 @@ async function makeFixture(
   const llmCalls: Array<[ProviderId, string | undefined]> = [];
   const signIns: unknown[] = [];
   const open = (policy: ManagedPolicyStatus | undefined) =>
-    new AppStateStore({
+    createTestAppStateStore({
       filePath: statePath,
       tokenStore,
       tokenStoreFor: () => tokenStore,

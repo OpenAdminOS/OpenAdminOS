@@ -11,7 +11,8 @@ import type { TokenCacheStorage } from "@openadminos/runtime";
 
 import { IntelligenceSqliteStore } from "./intune-chat/sqlite-store.js";
 import { prepareNovaAction, type NovaActionHost } from "./nova-actions.js";
-import { AppStateStore } from "./state.js";
+import type { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 import { TenantClosedError } from "./tenant-lifecycle.js";
 
 const tokenStore: TokenCacheStorage = {
@@ -71,8 +72,7 @@ describe("tenant disconnect", () => {
     seedTenantRows(db);
     db.close();
 
-    const store = new AppStateStore({
-      providerListFactory: () => [],
+    const store = createTestAppStateStore({
       filePath: statePath,
       tokenStore,
       userDataPath: dir,
@@ -244,7 +244,7 @@ async function fixture(extra: Record<string, unknown> = {}, options: Record<stri
   const dir = await mkdtemp(join(tmpdir(), "openadminos-disconnect-"));
   const statePath = join(dir, "state.json");
   await writeFile(statePath, `${JSON.stringify({ activeProviderId: "ollama", installedAgents: [agent], tenants: [tenant], activeTenantId: tenant.id, runs: [], ...extra })}\n`, "utf8");
-  const store = new AppStateStore({ providerListFactory: () => [], filePath: statePath, tokenStore, userDataPath: dir, statsApiUrl: "", ...options });
+  const store = createTestAppStateStore({ filePath: statePath, tokenStore, userDataPath: dir, statsApiUrl: "", ...options });
   // No real MSAL cache in tests: removing the sign-in succeeds and is counted.
   const signIn = { removed: 0 };
   (store as unknown as { removeCachedAccount: () => Promise<void> }).removeCachedAccount = async () => {

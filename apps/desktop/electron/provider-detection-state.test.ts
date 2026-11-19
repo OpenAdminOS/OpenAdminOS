@@ -11,7 +11,8 @@ import {
 } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 
-import { AppStateStore } from "./state.js";
+import type { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 
 type Readiness = Partial<Record<ProviderId, Partial<ProviderSummary>>>;
 
@@ -252,7 +253,7 @@ async function makeFixture(options: {
   const tokenStore: TokenCacheStorage = { read: async () => "", write: async () => undefined };
   const stores: AppStateStore[] = [];
   const open = () => {
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
       filePath: statePath,
       tokenStore,
       tokenStoreFor: () => tokenStore,

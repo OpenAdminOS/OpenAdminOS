@@ -11,7 +11,7 @@ import { parseAgentTemplate } from "@openadminos/runtime";
 import { buildAgentUpdateReview } from "./agent-draft-helpers.js";
 import { entryToRegistrySummary } from "./state-helpers.js";
 import type { RegistryIndexEntry } from "./registry-client.js";
-import { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 
 const source = readFileSync(fileURLToPath(new URL("../../../agents/offboarding-agent/manifest.yaml", import.meta.url)), "utf8");
 
@@ -85,8 +85,7 @@ it("retains installed limits, reviews increases, and clears removed declarations
   const index = JSON.parse(readFileSync(fileURLToPath(new URL("../../../agents/index.json", import.meta.url)), "utf8")) as { agents: RegistryIndexEntry[] };
   const entry = index.agents.find(agent => agent.slug === "offboarding-agent")!;
   const parsed = parseAgentTemplate(source);
-  const store = new AppStateStore({
-    providerListFactory: () => [],
+  const store = createTestAppStateStore({
     filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", appVersion: "0.7.2",
     tokenStore: { read: async () => "", write: async () => undefined, clear: async () => undefined },
   });

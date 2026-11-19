@@ -14,7 +14,7 @@ import {
   type TokenCacheStorage,
 } from "@openadminos/runtime";
 
-import { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 
 const CUSTOM_CLIENT_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const OTHER_CLIENT_ID = "11111111-2222-4333-8444-555555555555";
@@ -127,8 +127,7 @@ async function makeFixture(
   const perClientStores = stores.perClientStores ?? new Map<string, TokenCacheStorage>();
   const legacyTokenStores = stores.legacyTokenStores;
   const signIns: Array<{ clientId: string; authority: string }> = [];
-  const store = new AppStateStore({
-    providerListFactory: () => [],
+  const store = createTestAppStateStore({
     filePath: statePath,
     tokenStore: defaultStore,
     tokenStoreFor: (clientId) => {

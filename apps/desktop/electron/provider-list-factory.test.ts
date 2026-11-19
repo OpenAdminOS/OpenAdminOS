@@ -7,7 +7,7 @@ import { describe, it } from "node:test";
 import type { ProviderSummary } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 
-import { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 
 const tokenStore: TokenCacheStorage = {
   read: async () => "",
@@ -40,7 +40,7 @@ describe("provider list fixture", () => {
       },
     ];
     let calls = 0;
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
       filePath: statePath,
       tokenStore,
       statsApiUrl: "",

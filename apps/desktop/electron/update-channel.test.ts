@@ -7,7 +7,7 @@ import type { UpdateState } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 import type { CancellationToken } from "electron-updater";
 import { withAgentCompatibility } from "./agent-draft-helpers.js";
-import { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 import {
   UpdateController,
   switchAndSaveChannel,
@@ -114,8 +114,7 @@ describe("update channel preference", () => {
   async function store(t: TestContext, appVersion: string, dir?: string) {
     const root = dir ?? (await mkdtemp(join(tmpdir(), "openadminos-update-channel-")));
     if (!dir) t.after(() => rm(root, { recursive: true, force: true }));
-    const instance = new AppStateStore({
-      providerListFactory: () => [],
+    const instance = createTestAppStateStore({
       filePath: join(root, "state.json"),
       tokenStore,
       statsApiUrl: "",

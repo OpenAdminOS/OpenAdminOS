@@ -17,7 +17,8 @@ import { findConnectorFactory, noSecrets, type TokenCacheStorage } from "@openad
 
 import { AuditLogBehindError, AuditLogIntegrityError } from "./audit-log.js";
 import { IntelligenceSqliteStore } from "./intune-chat/sqlite-store.js";
-import { AppStateStore } from "./state.js";
+import type { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 
 const tokenStore: TokenCacheStorage = {
   read: async () => "",
@@ -146,7 +147,7 @@ describe("append-only audit log in the export", () => {
       assert.equal(again.eventCount, first.eventCount);
       assert.equal(again.hashChain.finalHash, first.hashChain.finalHash);
       // A second store on the same files, as after a restart.
-      const reopened = new AppStateStore({ providerListFactory: () => [], filePath: join(fixture.dir, "state.json"), tokenStore, userDataPath: fixture.dir, statsApiUrl: "" });
+      const reopened = createTestAppStateStore({ filePath: join(fixture.dir, "state.json"), tokenStore, userDataPath: fixture.dir, statsApiUrl: "" });
       try {
         const restarted = await reopened.exportAuditLog({ format: "json" });
         assert.equal(restarted.eventCount, first.eventCount);
@@ -594,7 +595,7 @@ describe("connector Graph writes in the audit log", () => {
 
       // Kept across a restart, and cleared only when the result is recorded.
       recovered = true;
-      const reopened = new AppStateStore({ providerListFactory: () => [], filePath: join(fixture.dir, "state.json"), tokenStore, userDataPath: fixture.dir, statsApiUrl: "" });
+      const reopened = createTestAppStateStore({ filePath: join(fixture.dir, "state.json"), tokenStore, userDataPath: fixture.dir, statsApiUrl: "" });
       try {
         assert.deepEqual((await reopened.getAuditLogStatus()).unrecordedResults, { count: 1 });
         await reopened.setActiveProvider("openai");
@@ -658,8 +659,7 @@ async function makeStoreFixture(options: { extraRuns?: RunRecord[] } = {}): Prom
   });
   intelligenceStore.close();
 
-  const store = new AppStateStore({
-    providerListFactory: () => [],
+  const store = createTestAppStateStore({
     filePath: statePath,
     tokenStore,
     userDataPath: dir,

@@ -6,7 +6,7 @@ import { describe, it } from "node:test";
 
 import type { TokenCacheStorage } from "@openadminos/runtime";
 
-import { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 
 const tokenStore: TokenCacheStorage = {
   read: async () => "",
@@ -29,8 +29,7 @@ describe("registry source trust gate", () => {
     );
 
     const originalFetch = globalThis.fetch;
-    const store = new AppStateStore({
-      providerListFactory: () => [],
+    const store = createTestAppStateStore({
       filePath: statePath,
       tokenStore,
       userDataPath: dir,
