@@ -69,6 +69,16 @@ it("allows fetch and node:http requests to a server the test starts", async () =
   assert.match(stdout, /^# pass 1$/m);
 });
 
+it("allows both loopback addresses on a dual-stack fixture", async (t) => {
+  const { code, stdout, stderr } = await runFixture("dual-stack", "");
+  assert.equal(code, 0, stdout + stderr);
+  if (/IPv6 wildcard unavailable/.test(stdout)) {
+    t.skip("IPv6 wildcard unavailable");
+    return;
+  }
+  assert.match(stdout, /^# pass 1$/m);
+});
+
 it("preserves spawn options when the argument array is omitted, undefined or null", async () => {
   const { code, stdout, stderr } = await runFixture("spawn-options", "");
   assert.equal(code, 0, stdout + stderr);

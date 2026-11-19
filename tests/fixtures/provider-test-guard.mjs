@@ -103,6 +103,24 @@ if (scenario === "fetch") {
       await new Promise((resolve) => fixture.close(resolve));
     }
   });
+} else if (scenario === "dual-stack") {
+  it("allows IPv4 and IPv6 loopback for the default wildcard listener", async (t) => {
+    const server = createServer((_request, response) => response.end("fixture"));
+    server.listen(0);
+    await once(server, "listening");
+    try {
+      const { address, port } = server.address();
+      if (address !== "::") {
+        t.skip("IPv6 wildcard unavailable");
+        return;
+      }
+      for (const host of ["[::1]", "127.0.0.1"]) {
+        assert.equal(await (await fetch(`http://${host}:${port}/health`)).text(), "fixture");
+      }
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
 } else {
   it("allows requests to its own listening test server", async () => {
     if (scenario === "proxy") {

@@ -177,7 +177,7 @@ function trackTestServers() {
     if (!protocol) return server;
 
     const host = typeof args[1] === "string" ? args[1] : args[0]?.host;
-    servers.set(server, { protocol, host });
+    servers.set(server, { protocol, host, ipv6Only: args[0]?.ipv6Only === true });
     server.once("close", () => servers.delete(server));
     return server;
   };
@@ -194,12 +194,13 @@ function checkHttpTarget(method, url, path = url.pathname) {
   }
   if (liveMcpOrigins.has(url.origin)) return;
 
-  const fixture = [...servers].some(([server, { protocol, host }]) => {
+  const fixture = [...servers].some(([server, { protocol, host, ipv6Only }]) => {
     const address = server.address();
     if (!server.listening || !address || typeof address === "string" || protocol !== url.protocol) return false;
     const port = url.port || (protocol === "https:" ? "443" : "80");
     return port === String(address.port) &&
       (url.hostname === new URL(`${protocol}//${urlHost(address.address)}`).hostname ||
+        (address.address === "::" && (url.hostname === "[::1]" || (!ipv6Only && url.hostname === "127.0.0.1"))) ||
         (host === "localhost" && url.hostname === host));
   });
   if (!fixture) throw blocked(`Blocked ${method} outside test HTTP servers: ${url.origin}${path}`);
