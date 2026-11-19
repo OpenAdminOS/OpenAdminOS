@@ -21,12 +21,18 @@ built on top of them are planned separately.
   each confirmed on a card and capped.
 
 **Decisions (Ugur, 2026-11-18, design review of mockups 34 and 35)**
-- Field reclassification in Settings only moves a field to a stricter class (or
-  one of the same sensitivity, as identity and device). A less sensitive class
-  comes only from the IT policy file. Value detectors still raise the class of a
-  value that looks more sensitive, and a setting on the device never loosens an
-  IT-locked rule.
+- Field reclassification in Settings only moves a field to a class higher in
+  the order. On every tier the reclassified field gets the strictest of its
+  original class's action and its new class's action, so a reclassification
+  can never weaken any tier, including against IT-set rules; the classify
+  dialog previews the applied action per tier. A less sensitive class comes
+  only from the IT policy file, where it replaces the app's mapping for the
+  field. Value detectors still raise the class of a value that looks more
+  sensitive, and a setting on the device never loosens an IT-locked rule.
 - Loosening any rule waits for a confirmation dialog; tightening applies at once.
+  A reset that both tightens and loosens applies nothing until the admin
+  accepts the dialog. The status strip and the preview are derived from the
+  effective rules.
 - Remote MCP servers receive public queries only, written by the query writer
   without tenant data. Tenant data and answer context never go into their
   requests, and the status strip names their hosts whenever their tools are
@@ -49,12 +55,33 @@ built on top of them are planned separately.
   the `nova` prefix. In SKILL.md `allowed-tools`, MCP tools are
   `mcp__<server>__<tool>` and agents their slug.
 
+**Decisions (Ugur, 2026-11-18, round 3 of the design review)**
+- A seventh data class, `security`, between `identity` and `device`. It covers
+  Conditional Access policies and named locations, authentication methods,
+  security defaults, security baselines and endpoint security policies, admin
+  role definitions and assignments, PIM, cross-tenant access and identity
+  protection policies. Masking a security object replaces its names and
+  identifiers (policy names, named locations, IP ranges, excluded users and
+  groups, role names); setting values stay readable.
+- Classification uses a request ledger. Values are classified by field when
+  they arrive and registered for the run or Chat conversation, in memory only.
+  Just before each model call, the final request (system text plus prompt,
+  including the admin's own words) is scanned against those values and the
+  detectors, at the one place every provider call is built. Routing and
+  masking act on that scan.
+- The credential promise, in every place it appears: values the app
+  recognizes as credentials never reach a hosted model in clear text. A secret
+  written into a free-text field in a form the app does not recognize can
+  still be sent. On Confidential, `credential` defaults to Mask; Allow is
+  possible only after the confirmation dialog, and IT can lock it.
+
 ## Why
 
 Today the choice is binary. A local model keeps tenant data on the device, a
 hosted model is stronger but sees everything. Data policy adds a middle path:
 hosted quality without the model seeing who or what the data is about, with
-credentials never reaching a hosted model in clear text. Purview cannot do this for us because it
+values the app recognizes as credentials never reaching a hosted model in clear
+text. Purview cannot do this for us because it
 sees opaque text after the fact; we know the shape of every response at the
 moment it arrives.
 
@@ -86,14 +113,19 @@ moment it arrives.
 
 ## Data classes
 
-| Class | Examples | Sensitivity |
+| Class | Examples | Order |
 |---|---|---|
-| `credential` | BitLocker and FileVault recovery keys, LAPS passwords, client secrets, tokens, pre-shared keys | highest |
-| `identity` | display names, UPNs, email addresses, phone numbers, user ids | high |
-| `device` | device names, serial numbers, IMEI, MAC and IP addresses, device ids | high |
-| `activity` | sign-in times, locations, audit entries, app usage | medium |
-| `configuration` | policy names and settings, group names, app names, compliance rules | low |
-| `public` | Microsoft Learn results, web search results, public reference MCP servers | none |
+| `credential` | BitLocker and FileVault recovery keys, LAPS passwords, client secrets, tokens, pre-shared keys | 1, highest |
+| `identity` | display names, UPNs, email addresses, phone numbers, user ids | 2 |
+| `security` | Conditional Access policies and named locations, authentication methods, security defaults, security baselines and endpoint security policies, admin role definitions and assignments, PIM, cross-tenant access, identity protection policies | 3 |
+| `device` | device names, serial numbers, IMEI, MAC and IP addresses, device ids | 4 |
+| `activity` | sign-in times, locations, audit entries, app usage | 5 |
+| `configuration` | policy names and settings, group names, app names, compliance rules | 6 |
+| `public` | Microsoft Learn results, web search results, public reference MCP servers | 7, none |
+
+The order is strict, highest first. Masking a `security` object replaces its
+names and identifiers (policy names, named locations, IP ranges, excluded users
+and groups, role names); its setting values stay readable.
 
 A field nobody has classified is treated as `identity` until it is classified.
 Free text the admin types is checked against the tenant value index, so known
@@ -106,16 +138,23 @@ Default rules (decided 2026-11-18):
 |---|---|---|---|
 | `credential` | allow | mask | mask |
 | `identity` | allow | allow | mask |
+| `security` | allow | allow | mask |
 | `device` | allow | allow | mask |
 | `activity` | allow | allow | allow |
 | `configuration` | allow | allow | allow |
 | `public` | allow | allow | allow |
 
 Actions are allow, mask and block. The admin and IT may tighten any rule and
-loosen all but one: `credential` never reaches a hosted model in clear text.
+loosen all but one: values the app recognizes as credentials never reach a
+hosted model in clear text, so `credential` on Hosted has no Allow. A secret
+written into a free-text field in a form the app does not recognize can still
+be sent, and the docs say so. `credential` on Confidential defaults to Mask;
+Allow there is possible only after the confirmation dialog, and IT can lock it.
 Loosening from Settings asks for confirmation first, and never applies to a rule
-IT locked. Fields move only to the same or a stricter class in Settings; a less
-sensitive class comes from the IT policy file.
+IT locked; a reset that mixes tightening and loosening applies nothing until the
+admin accepts. In Settings a field moves only to a class higher in the order,
+and on each tier it gets the strictest of its original and its new class's
+action. A less sensitive class comes from the IT policy file.
 
 ## Track A: Data policy
 
@@ -139,6 +178,11 @@ sensitive class comes from the IT policy file.
       `GRAPH_CACHE_RESOURCES` entry and the endpoints bundled agents read.
 - [ ] Value detectors for unknown shapes and free text, built on
       `tenant-values.ts` and the existing private patterns.
+- [ ] A request ledger: values are classified by field when they arrive and
+      registered for the run or Chat conversation, in memory only.
+- [ ] Just before each model call, the final request (system text plus
+      prompt, including the admin's own words) is scanned against the ledger
+      and the detectors, at the one place every provider call is built.
 - [ ] Fenced tenant content carries its classes and counts.
 - [ ] Field names verified against real responses in the lab tenant with Lokka.
 
@@ -147,8 +191,13 @@ sensitive class comes from the IT policy file.
    test per resource.
 2. A BitLocker key, a LAPS password and a client secret are classed
    `credential` from both a structured response and free text.
-3. An unmapped field is classed `identity`, and a test proves it.
-4. Every field mapping was checked against a live Graph response in the lab
+3. A Conditional Access policy, a named location and a role assignment are
+   classed `security`, and a value from the ledger typed back by the admin is
+   found by the scan of the final request.
+4. An unmapped field is classed `identity`, and a test proves it.
+5. A reclassified field gets the strictest action of both classes on every
+   tier, including against an IT-locked rule (test).
+6. Every field mapping was checked against a live Graph response in the lab
    tenant, and the record lists the calls.
 
 ### Phase A2: Provider tiers
@@ -166,8 +215,9 @@ sensitive class comes from the IT policy file.
 
 ### Phase A3: Routing and blocked states
 
-- [ ] A data policy decorator applied in `buildLlm`, so agent runs, Chat, Office,
-      drafts, follow-ups and the Nova command all pass through it.
+- [ ] Routing acts on the scan of the final request: a data policy decorator
+      applied in `buildLlm`, so agent runs, Chat, Office, drafts, follow-ups
+      and the Nova command all pass through it.
 - [ ] Hosted voice gets its own gate in `nova.ts` and the renderer. Masked data
       goes to the voice model, which speaks roles; the transcript shows real values.
 - [ ] Settings > Data policy and a managed configuration key `dataPolicy`
@@ -188,8 +238,11 @@ sensitive class comes from the IT policy file.
 
 ### Phase A4: Masking
 
-- [ ] Typed tokens replace masked values before the call. The table lives in
-      memory for one run or one Chat conversation and is never stored.
+- [ ] Masking acts on the scan of the final request: typed tokens replace the
+      values it found before the call. The table lives in memory for one run or
+      one Chat conversation and is never stored.
+- [ ] A masked `security` object keeps its setting values and replaces names
+      and identifiers only.
 - [ ] Rehydration on the way back: streaming with holdback for split tokens,
       before the agentic loop parses tool actions, and in `runLlmSkill` before a
       step result is stored. Writes never receive tokens.
@@ -201,6 +254,8 @@ sensitive class comes from the IT policy file.
 2. A token split across two stream chunks is restored correctly.
 3. A write plan built after an `llm` step contains no tokens.
 4. Follow-up questions in one conversation keep the same token for the same value.
+5. A ledger value the admin types into a question is masked like the same value
+   from a response.
 
 ### Phase A5: Audit and visibility (after the sandbox stack merges)
 
