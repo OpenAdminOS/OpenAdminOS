@@ -93,6 +93,12 @@ it("blocks shell launches when the spawn argument array is omitted, undefined or
   assert.match(stdout, /Blocked spawnSync outside provider fixtures/);
 });
 
+it("accepts a file URL for a registered fork entry", async () => {
+  const { code, stdout, stderr } = await runFixture("fork-file-url", "");
+  assert.equal(code, 0, stdout + stderr);
+  assert.match(stdout, /^# pass 1$/m);
+});
+
 it("rejects transport overrides for an approved origin without connecting to another listener", async () => {
   let connections = 0;
   const listener = createServer((_request, response) => response.end("unexpected request"));

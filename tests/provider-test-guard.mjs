@@ -10,7 +10,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { isIP, Server } from "node:net";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { afterEach, beforeEach } from "node:test";
-import { urlToHttpOptions } from "node:url";
+import { fileURLToPath, urlToHttpOptions } from "node:url";
 import { promisify } from "node:util";
 import { Agent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
 
@@ -126,9 +126,10 @@ function guardCommand(method, call, receiver, args) {
   if (options?.shell) throw failure();
 
   if (method === "fork") {
-    if (!isFixture(command) || (options?.execPath && realAbsolutePath(options.execPath) !== node) ||
+    const entry = command instanceof URL && command.protocol === "file:" ? fileURLToPath(command) : command;
+    if (!isFixture(entry) || (options?.execPath && realAbsolutePath(options.execPath) !== node) ||
         options?.execArgv?.length) throw failure();
-    return Reflect.apply(call, receiver, [command, argv, { ...options, execArgv: [] }]);
+    return Reflect.apply(call, receiver, [entry, argv, { ...options, execArgv: [] }]);
   }
 
   // An empty command reaches Node's native parameter validation without launching anything.

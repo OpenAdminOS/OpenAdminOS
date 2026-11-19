@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
+import { fork, spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { Agent as HttpAgent, ClientRequest, createServer, get, request } from "node:http";
@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Duplex } from "node:stream";
 import { after, it } from "node:test";
+import { pathToFileURL } from "node:url";
 import { Agent as FetchAgent } from "undici";
 import { registerProviderFixtureDirectory } from "../provider-test-guard.mjs";
 
@@ -68,6 +69,19 @@ if (scenario === "fetch") {
           assert.equal(spawnSync(fixture, ...args).status, 23);
         }
       }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+} else if (scenario === "fork-file-url") {
+  it("forks a registered entry supplied as a file URL", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "provider-guard-fork-"));
+    try {
+      const entry = join(directory, "cli fixture.cjs");
+      await writeFile(entry, "process.exit(Number(process.argv[2]));\n");
+      registerProviderFixtureDirectory(directory);
+      const entryUrl = new URL("./cli%20fixture.cjs", pathToFileURL(entry));
+      assert.deepEqual(await once(fork(entryUrl, ["23"]), "exit"), [23, null]);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
