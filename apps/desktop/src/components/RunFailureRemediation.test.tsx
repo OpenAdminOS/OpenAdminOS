@@ -55,7 +55,7 @@ it.each([
 ])("gives an Ollama context overflow its own recovery: %s", (error) => {
   const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
   render(<RunFailureRemediation run={run} />);
-  expect(screen.getByText("Request larger than the model's context")).toBeInTheDocument();
+  expect(screen.getByText("Ollama context too small")).toBeInTheDocument();
   expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
   expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
 });

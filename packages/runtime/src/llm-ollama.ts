@@ -19,8 +19,9 @@ interface OllamaChatChunk {
     content?: string;
     /**
      * Ollama 0.10+ emits reasoning-model chain-of-thought in this
-     * separate field. It is never used as the answer; it only tells us
-     * the model ran out of tokens while reasoning.
+     * separate field. We capture it so the Reasoning tab can show it
+     * and so we can fall back to using it as the answer if the model
+     * exhausts its token budget inside the reasoning phase.
      */
     thinking?: string;
   };
@@ -107,11 +108,12 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         messages,
         stream: true,
         // Ask Ollama to skip reasoning-model "thinking" mode and have
-        // the model produce its answer directly, so the model does not
-        // spend its token budget inside a hidden chain-of-thought.
-        // gpt-oss ignores `false` and always reasons, so it gets the
-        // lowest effort level instead.
-        think: ollamaThinkSetting(model),
+        // the model produce its answer directly. For reasoning models
+        // (deepseek-r1, qwen-qwq, gpt-oss, etc.) this prevents the
+        // model from spending its entire token budget inside a hidden
+        // chain-of-thought and emitting empty `message.content`. For
+        // non-reasoning models the flag is silently ignored.
+        think: false,
       };
       const optionsPayload: Record<string, number> = {};
       if (typeof opts.temperature === "number") {
@@ -142,6 +144,17 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         if (isRefusedRedirect(response, url)) throw new Error(redirectRefusedDetail("Ollama", url));
         return response;
       };
+      /** The body of a failed response; a stop or timeout while reading it keeps its own message. */
+      const errorDetail = async (response: Response): Promise<string> => {
+        if (response.ok) return "";
+        try {
+          return await response.text();
+        } catch {
+          const stopped = abortError();
+          if (stopped) throw stopped;
+          return "";
+        }
+      };
       const abortError = (): Error | undefined => {
         if (!controller.signal.aborted) return undefined;
         return opts.signal?.aborted
@@ -153,7 +166,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       try {
         let numCtx = ollamaContextOverrides.get(cacheKey);
         response = await send(numCtx);
-        let detail = response.ok ? "" : await response.text().catch(() => "");
+        let detail = await errorDetail(response);
         const overflow = response.status === 400 ? parseContextOverflow(detail) : undefined;
         if (overflow) {
           // Ollama sizes the context from its own default and free memory,
@@ -163,18 +176,22 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           const stopped = abortError();
           if (stopped) throw stopped;
           const wanted = roundUp(overflow.requested + (opts.maxTokens ?? OLLAMA_ANSWER_RESERVE_TOKENS), 1024);
+          if (modelMax !== undefined && overflow.requested > modelMax) {
+            throw new Error(contextTooSmallMessage(model, overflow.requested, modelMax, true));
+          }
           const target = modelMax === undefined ? wanted : Math.min(wanted, modelMax);
-          if (target <= Math.max(overflow.available, overflow.requested)) {
-            throw new Error(contextTooSmallMessage(model, overflow.requested, modelMax ?? overflow.available, true));
+          if (target <= overflow.available) {
+            throw new Error(contextTooSmallMessage(model, overflow.requested, overflow.available, true));
           }
           numCtx = target;
           response = await send(numCtx);
-          detail = response.ok ? "" : await response.text().catch(() => "");
+          detail = await errorDetail(response);
           const retryOverflow = response.status === 400 ? parseContextOverflow(detail) : undefined;
           if (retryOverflow) {
             throw new Error(contextTooSmallMessage(model, retryOverflow.requested, retryOverflow.available, false));
           }
-          if (response.ok) ollamaContextOverrides.set(cacheKey, numCtx);
+          // Concurrent requests can raise it at once; keep the largest that worked.
+          if (response.ok) ollamaContextOverrides.set(cacheKey, Math.max(ollamaContextOverrides.get(cacheKey) ?? 0, numCtx));
         }
         if (!response.ok) {
           if (response.status === 404 && detail.toLowerCase().includes("model")) {
@@ -229,8 +246,11 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
             }
             const tokenUsage = extractTokenUsage(chunk);
             const delta = chunk.message?.content ?? "";
-            // Track reasoning-model chain-of-thought separately so an
-            // empty answer can be reported as a reasoning overrun.
+            // Capture reasoning-model chain-of-thought separately. We
+            // don't yield this as content (the renderer surfaces it via
+            // the runtime's thinking hook on the accumulated stream),
+            // but we keep it around so we can fall back to it if the
+            // model never produced visible content.
             const reasoningDelta = chunk.message?.thinking ?? "";
             if (reasoningDelta.length > 0) {
               reasoningOnly += reasoningDelta;
@@ -246,15 +266,21 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
               };
             }
             if (chunk.done) {
-              // A model that hit num_predict while still reasoning has no
-              // answer. Its reasoning is not one, so never return it.
-              if (accumulated.length === 0 && reasoningOnly.length > 0) {
-                throw new Error(
-                  `Ollama model "${actualModel}" used its whole token budget on reasoning and wrote no answer. ` +
-                    "Raise the step's maxTokens or pick a model that answers without reasoning.",
-                );
-              }
-              if (delta.length === 0) {
+              // If the model never emitted visible content but did
+              // produce reasoning (e.g. it hit num_predict mid-thought),
+              // surface the reasoning so the agent has *something* to
+              // work with. The cleanLlmText filter in the runtime will
+              // re-strip <think> tags if the model also wrapped output.
+              if (delta.length === 0 && accumulated.length === 0 && reasoningOnly.length > 0) {
+                accumulated = reasoningOnly;
+                yield {
+                  delta: reasoningOnly,
+                  accumulated,
+                  done: true,
+                  model: actualModel,
+                  ...(tokenUsage ? { tokenUsage } : {}),
+                };
+              } else if (delta.length === 0) {
                 yield {
                   delta: "",
                   accumulated,
@@ -274,14 +300,6 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       }
     },
   };
-}
-
-/**
- * Ollama's `think` value for a model. gpt-oss cannot turn reasoning off and
- * ignores `false`, so it gets the lowest effort level.
- */
-export function ollamaThinkSetting(model: string): false | "low" {
-  return /(^|\/)gpt-oss([:-]|$)/i.test(model) ? "low" : false;
 }
 
 export function resolveOllamaEndpoint(endpoint?: string): string {
@@ -456,14 +474,21 @@ export function parseContextOverflow(detail: string): { requested: number; avail
 async function readOllamaContextLength(endpoint: string, model: string, signal: AbortSignal): Promise<number | undefined> {
   const timeout = AbortSignal.timeout(OLLAMA_SHOW_TIMEOUT_MS);
   const url = `${endpoint.replace(/\/$/, "")}/api/show`;
+  let response: Response;
   try {
-    const response = await fetch(url, {
+    response = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ model }),
       signal: AbortSignal.any([signal, timeout]),
       redirect: modelServerRedirect(url),
     });
+  } catch {
+    // The caller checks its own signal for a stop or timeout.
+    return undefined;
+  }
+  if (isRefusedRedirect(response, url)) throw new Error(redirectRefusedDetail("Ollama", url));
+  try {
     if (!response.ok) return undefined;
     const data = (await response.json()) as { model_info?: Record<string, unknown> };
     for (const [key, value] of Object.entries(data.model_info ?? {})) {

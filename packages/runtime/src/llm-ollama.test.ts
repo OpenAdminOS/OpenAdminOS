@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import { classifyOllamaEndpoint, createOllamaLlm, ollamaEndpointOverride, ollamaHostEndpoint, ollamaThinkSetting, parseContextOverflow } from "./llm-ollama.js";
+import { classifyOllamaEndpoint, createOllamaLlm, ollamaEndpointOverride, ollamaHostEndpoint, parseContextOverflow } from "./llm-ollama.js";
 
 describe("classifyOllamaEndpoint", () => {
   it("treats loopback and Unix socket endpoints as local", () => {
@@ -75,14 +75,27 @@ describe("Ollama context size", () => {
   const overflow = (requested: number, available: number) =>
     JSON.stringify({ error: `request (${requested} tokens) exceeds the available context size (${available} tokens), try increasing it` });
 
-  async function fakeOllama(options: { modelMax?: number; limit: (numCtx: number | undefined) => number; onShow?: () => void }) {
+  async function fakeOllama(options: {
+    modelMax?: number;
+    limit: (numCtx: number | undefined) => number;
+    onShow?: () => void;
+    showRedirect?: boolean;
+    requested?: (prompt: string) => number;
+    stallOverflowBody?: (res: ServerResponse) => void;
+    delayRetryMs?: (prompt: string) => number;
+  }) {
     const chats: Array<{ num_ctx?: number }> = [];
     const server = createServer((req: IncomingMessage, res: ServerResponse) => {
       let raw = "";
       req.on("data", (part) => (raw += part));
       req.on("end", () => {
-        const body = JSON.parse(raw) as { options?: { num_ctx?: number } };
+        const body = JSON.parse(raw) as { options?: { num_ctx?: number }; messages?: Array<{ content: string }> };
         if (req.url === "/api/show") {
+          if (options.showRedirect) {
+            res.writeHead(307, { location: "http://example.com/api/show" });
+            res.end();
+            return;
+          }
           if (options.onShow) {
             options.onShow();
             return;
@@ -91,10 +104,23 @@ describe("Ollama context size", () => {
           return;
         }
         const numCtx = body.options?.num_ctx;
+        const prompt = body.messages?.at(-1)?.content ?? "";
+        const requested = options.requested?.(prompt) ?? 40652;
         chats.push(numCtx === undefined ? {} : { num_ctx: numCtx });
-        if (40652 > options.limit(numCtx)) {
+        if (requested > options.limit(numCtx)) {
+          if (options.stallOverflowBody) {
+            res.writeHead(400, { "content-type": "application/json" });
+            res.write("{");
+            options.stallOverflowBody(res);
+            return;
+          }
           res.statusCode = 400;
-          res.end(overflow(40652, options.limit(numCtx)));
+          res.end(overflow(requested, options.limit(numCtx)));
+          return;
+        }
+        const delay = numCtx === undefined ? 0 : options.delayRetryMs?.(prompt) ?? 0;
+        if (delay > 0) {
+          setTimeout(() => res.end(`${JSON.stringify({ model: "m", message: { content: "ok" }, done: true })}\n`), delay);
           return;
         }
         res.end(`${JSON.stringify({ model: "m", message: { content: "ok" }, done: true, prompt_eval_count: 40652, eval_count: 1 })}\n`);
@@ -169,57 +195,60 @@ describe("Ollama context size", () => {
       fake.close().catch(() => {});
     }
   });
-});
 
-describe("Ollama reasoning models", () => {
-  async function fakeChat(lines: object[]) {
-    const bodies: Array<{ think?: unknown }> = [];
-    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
-      let raw = "";
-      req.on("data", (part) => (raw += part));
-      req.on("end", () => {
-        if (req.url === "/api/chat") bodies.push(JSON.parse(raw) as { think?: unknown });
-        res.end(lines.map((line) => `${JSON.stringify(line)}\n`).join(""));
-      });
-    });
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-    return { endpoint, bodies, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
-  }
-
-  it("asks gpt-oss for low reasoning and every other model for none", () => {
-    assert.equal(ollamaThinkSetting("gpt-oss:20b"), "low");
-    assert.equal(ollamaThinkSetting("gpt-oss"), "low");
-    assert.equal(ollamaThinkSetting("gpt-oss-safeguard:20b"), "low");
-    assert.equal(ollamaThinkSetting("hf.co/openai/gpt-oss:120b"), "low");
-    assert.equal(ollamaThinkSetting("qwen3:8b"), false);
-    assert.equal(ollamaThinkSetting("my-gpt-oss-finetune:latest"), false);
-  });
-
-  it("sends the think setting and returns only the answer, not the reasoning", async () => {
-    const fake = await fakeChat([
-      { model: "gpt-oss:20b", message: { content: "", thinking: "We need to produce a report." }, done: false },
-      { model: "gpt-oss:20b", message: { content: "# Report" }, done: true, eval_count: 5 },
-    ]);
+  it("retries a prompt exactly at the model's limit with the limit", async () => {
+    const fake = await fakeOllama({ modelMax: 40960, requested: () => 40960, limit: (numCtx) => numCtx ?? 16384 });
     try {
-      const result = await createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss:20b" }).complete({ prompt: "p" });
-      assert.equal(result.text, "# Report");
-      assert.equal(fake.bodies[0]?.think, "low");
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "exact" });
+      assert.equal((await llm.complete({ prompt: "big" })).text, "ok");
+      assert.deepEqual(fake.chats, [{}, { num_ctx: 40960 }]);
     } finally {
       await fake.close();
     }
   });
 
-  it("fails with a named cause when the model ran out of tokens while reasoning", async () => {
-    const fake = await fakeChat([
-      { model: "gpt-oss:20b", message: { content: "", thinking: "We need to produce a concise report." }, done: false },
-      { model: "gpt-oss:20b", message: { content: "" }, done: true, done_reason: "length", eval_count: 1100 },
-    ]);
+  it("refuses a redirect from the model lookup instead of retrying without a limit", async () => {
+    const fake = await fakeOllama({ showRedirect: true, limit: (numCtx) => numCtx ?? 16384 });
     try {
-      await assert.rejects(
-        createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss:20b" }).complete({ prompt: "p" }),
-        /used its whole token budget on reasoning and wrote no answer/,
-      );
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "redirected" });
+      await assert.rejects(llm.complete({ prompt: "big" }), /answered with a redirect to another address/);
+      assert.equal(fake.chats.length, 1);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("reports a stop while reading an error body as stopped by the user", async () => {
+    const stop = new AbortController();
+    const open: ServerResponse[] = [];
+    const fake = await fakeOllama({
+      limit: () => 16384,
+      stallOverflowBody: (res) => {
+        open.push(res);
+        setTimeout(() => stop.abort(), 20);
+      },
+    });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "stalled" });
+      await assert.rejects(llm.complete({ prompt: "big", signal: stop.signal }), /^Error: Ollama request stopped by user\.$/);
+    } finally {
+      for (const res of open) res.destroy();
+      await fake.close();
+    }
+  });
+
+  it("keeps the largest context when concurrent retries finish out of order", async () => {
+    const fake = await fakeOllama({
+      modelMax: 131072,
+      requested: (prompt) => (prompt === "huge" ? 80000 : 40652),
+      limit: (numCtx) => numCtx ?? 16384,
+      delayRetryMs: (prompt) => (prompt === "huge" ? 0 : 150),
+    });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "concurrent" });
+      await Promise.all([llm.complete({ prompt: "big" }), llm.complete({ prompt: "huge" })]);
+      await llm.complete({ prompt: "small" });
+      assert.deepEqual(fake.chats.at(-1), { num_ctx: 84992 });
     } finally {
       await fake.close();
     }

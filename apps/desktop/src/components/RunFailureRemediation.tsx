@@ -18,8 +18,8 @@ const SUGGESTIONS: Suggestion[] = [
   },
   {
     match: (e) => /ollama/i.test(e) && /context size/i.test(e),
-    title: "Request larger than the model's context",
-    body: "The prompt did not fit in the local model's context window. OpenAdminOS already asks Ollama for as much context as the model supports. Narrow the question or the agent's scope, close other apps to free memory, or pick a model with a larger context window in Settings → LLM Providers, then re-run.",
+    title: "Ollama context too small",
+    body: "The request did not fit in the context Ollama loaded for this model. OpenAdminOS tried to raise it, up to the model's limit, and the error shows how far it got. Narrow the question or the agent's scope, close other apps to free memory, or pick a model with a larger context window in Settings → LLM Providers, then re-run.",
   },
   {
     match: (e) => /ollama/i.test(e) && /(not pulled|ollama pull)/i.test(e),
