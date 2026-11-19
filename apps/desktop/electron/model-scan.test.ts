@@ -469,6 +469,7 @@ describe("review round 1 on PR #175", () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-scan-hang-"));
     try {
       const binaryPath = await writeNodeCliFixture(dir, "claude", `
+process.once("SIGTERM", () => process.exit(23));
 process.stdout.write("ready\\n");
 setInterval(() => {}, 1_000);
 `, "@anthropic-ai/claude-code/bin/claude.exe");
@@ -498,13 +499,12 @@ setInterval(() => {}, 1_000);
         const probe = await scan;
         assert.equal(probe.state, "could-not-check");
         assert.match(probe.facts[0] ?? "", /did not answer within 1\.5 seconds/);
-        const [exitCode, exitSignal] = await exit;
-        assert.equal(exitCode, null);
-        assert.equal(exitSignal, "SIGKILL", "the hanging CLI must be killed");
       } finally {
-        if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+        // If abort missed the child, teardown exits with the fixture's own code.
+        if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
         await exit;
       }
+      assert.deepEqual(await exit, [null, "SIGKILL"], "the scan must kill the hanging CLI before teardown");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
