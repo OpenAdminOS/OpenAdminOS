@@ -1,10 +1,10 @@
+import { ClassificationLedger, currentClassificationLedger, registerTenantData, withClassificationScope } from "@openadminos/runtime/data-classification";
 import { voiceDeviceEvidenceAnswer, voiceDeviceEvidenceIntent } from "./voice-device-evidence.js";
 import { MAX_PROMISE_NUDGES, PROMISE_REPAIR_PROMPT, completeWithPromiseNudge, looksLikeUnkeptPromise } from "./unkept-promise.js";
 import type { WebSearch } from "./web-search.js";
 import { voiceConversationContext, voiceInventoryAnswer, voiceAppPlatformCountAnswer, voiceDeviceSummaryAnswer, voiceResourcesForQuestion, compactVoiceAnswerPack, assertVoicePromptBudget, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
 import { randomUUID } from "node:crypto";
 import { NOVA_PROFILE_BLOCK_END, novaProfilePromptBlock, novaReasoningProfileByteLimit, type NovaProfilePromptInput } from "../nova-profile.js";
-import { countDataClasses, withPromptClassification, type PromptClassification } from "@openadminos/runtime/data-classification";
 import { fenceTenantData, withTenantDataOutputFilter } from "@openadminos/runtime";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -536,6 +536,37 @@ export function deterministicChatSystemPrompt(isLocalProvider: boolean, voice: b
 }
 
 export class IntuneChatService {
+  // Retain recent conversations for follow-up turns while bounding in-memory tenant data.
+  private readonly classificationConversations = new Map<string, { tenantId: string | undefined; ledger: ClassificationLedger }>();
+
+  private retainConversationClassification(id: string, tenantId: string | undefined): void {
+    const ledger = currentClassificationLedger();
+    if (!ledger) return;
+    const previous = this.classificationConversations.get(id);
+    if (previous && previous.tenantId === tenantId) ledger.include(previous.ledger);
+    this.classificationConversations.delete(id);
+    this.classificationConversations.set(id, { tenantId, ledger });
+    if (this.classificationConversations.size > 8) {
+      const oldest = this.classificationConversations.keys().next().value;
+      if (oldest !== undefined) this.classificationConversations.delete(oldest);
+    }
+  }
+
+  clearTenantClassification(tenantId: string): void {
+    for (const [id, entry] of this.classificationConversations) {
+      if (entry.tenantId === tenantId) this.classificationConversations.delete(id);
+    }
+  }
+
+  private chatClassificationScope<T>(tenantId: string | undefined, work: () => T): T {
+    const store = this.host.requireIntelligenceStore();
+    const ledger = new ClassificationLedger(tenantId ? {
+      matches: text => store.classificationIdentityIndex(tenantId).hasClassifiedIdentity(text),
+      spans: text => store.classificationIdentityIndex(tenantId).spans(text),
+    } : undefined);
+    return withClassificationScope(ledger, work);
+  }
+
   private readonly preloadJobs = new Map<
     string,
     {
@@ -609,7 +640,8 @@ export class IntuneChatService {
    */
   /** `leased` for a tenant send; a send with no tenant (SPEC.md 4a) has no lease to take. */
   private leasedScope<T>(tenantId: string | undefined, signal: AbortSignal | undefined, work: (signal: AbortSignal | undefined) => Promise<T>): Promise<T> {
-    return tenantId ? this.leased(tenantId, signal, work) : work(signal);
+    return this.chatClassificationScope(tenantId, () =>
+      tenantId ? this.leased(tenantId, signal, work) : work(signal));
   }
 
   private leased<T>(tenantId: string, signal: AbortSignal | undefined, work: (signal: AbortSignal | undefined) => Promise<T>): Promise<T> {
@@ -908,6 +940,7 @@ export class IntuneChatService {
   }
 
   async deleteIntuneChatConversation(conversationId: string): Promise<void> {
+    this.classificationConversations.delete(conversationId);
     if (!conversationId.trim()) {
       throw new Error("Conversation id is required.");
     }
@@ -1388,21 +1421,26 @@ export class IntuneChatService {
       throw new Error("Workspace context includes evidence or notes that no longer exist.");
     }
 
+    registerTenantData("workspace:scope", [workspace.title, workspace.tenantName ?? workspace.tenantId]);
     const lines = [
       "Workspace context attached by the admin.",
       `Workspace: ${fenceTenantData(workspace.title, "workspace:title")}`,
       `Tenant: ${fenceTenantData(workspace.tenantName ?? workspace.tenantId, "workspace:tenant")}`,
     ];
     if (includesInstructions && workspace.instructions) {
+      registerTenantData("workspace:instructions", workspace.instructions.trim());
       lines.push("", "Workspace instructions:", workspace.instructions.trim());
     }
     if (notes.length > 0) {
       lines.push("", "Workspace notes:");
       notes.slice(0, 12).forEach((note, index) => {
-        lines.push(`${index + 1}. ${fenceTenantData(trimForPrompt(note.content, 1400), "workspace:note")}`);
+        const content = trimForPrompt(note.content, 1400);
+        registerTenantData("workspace:note", content);
+        lines.push(`${index + 1}. ${fenceTenantData(content, "workspace:note")}`);
       });
     }
     if (evidence.length > 0) {
+      registerTenantData("workspace:evidence", evidence.slice(0, 8));
       lines.push("", "Workspace evidence:");
       evidence.slice(0, 8).forEach((entry, index) => {
         const serialized = JSON.stringify(entry.content) ?? "null";
@@ -1707,36 +1745,39 @@ export class IntuneChatService {
     comparisons: MultiTenantChatJob["comparisons"];
   }): Promise<string> {
     const deterministic = summarizeMultiTenantResult(input.summary, input.comparisons);
-    const llm = withTenantDataOutputFilter(await this.tenantLlm(input.providerId, input.model, input.tenantIds));
-    if (!llm.available) return deterministic;
-    try {
-      const system = buildIntuneChatSystemPrompt(input.provider?.isLocal === true);
-      const prompt = [
-        "Summarize this read-only multi-tenant Chat result for an admin.",
-        "The JSON table is the source of truth. Mention partial, failed, skipped, or stale tenants.",
-        `Question: ${input.prompt}`,
-        fenceTenantData(JSON.stringify(
-          {
-            summary: input.summary,
-            tenants: input.comparisons,
-          },
-          null,
-          2,
-        ), "chat:multi-tenant-result"),
-      ].join("\n\n");
-      // An answer that only promises work is asked again, at most twice; the last answer is kept.
-      const text = await completeWithPromiseNudge(async (attempt) => (await llm.complete({
-        system,
-        prompt: attempt,
-        ...(input.model ? { model: input.model } : {}),
-        temperature: 0.2,
-        maxTokens: 700,
-      })).text.trim(), prompt);
-      return text || deterministic;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return `${deterministic}\n\nThe selected LLM provider failed while summarizing this multi-tenant result. ${message}`;
-    }
+    return withClassificationScope(new ClassificationLedger(), async () => {
+      registerTenantData("chat:multi-tenant-result", { summary: input.summary, tenants: input.comparisons });
+      const llm = withTenantDataOutputFilter(await this.tenantLlm(input.providerId, input.model, input.tenantIds));
+      if (!llm.available) return deterministic;
+      try {
+        const system = buildIntuneChatSystemPrompt(input.provider?.isLocal === true);
+        const prompt = [
+          "Summarize this read-only multi-tenant Chat result for an admin.",
+          "The JSON table is the source of truth. Mention partial, failed, skipped, or stale tenants.",
+          `Question: ${input.prompt}`,
+          fenceTenantData(JSON.stringify(
+            {
+              summary: input.summary,
+              tenants: input.comparisons,
+            },
+            null,
+            2,
+          ), "chat:multi-tenant-result"),
+        ].join("\n\n");
+        // An answer that only promises work is asked again, at most twice; the last answer is kept.
+        const text = await completeWithPromiseNudge(async (attempt) => (await llm.complete({
+          system,
+          prompt: attempt,
+          ...(input.model ? { model: input.model } : {}),
+          temperature: 0.2,
+          maxTokens: 700,
+        })).text.trim(), prompt);
+        return text || deterministic;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return `${deterministic}\n\nThe selected LLM provider failed while summarizing this multi-tenant result. ${message}`;
+      }
+    });
   }
 
   async getGraphCacheStatus(tenantId?: string): Promise<GraphCacheStatus> {
@@ -1801,6 +1842,7 @@ export class IntuneChatService {
   }
 
   async clearIntuneChatHistory(): Promise<LocalDataSummary> {
+    this.classificationConversations.clear();
     this.host.requireIntelligenceStore().clearChatHistory();
     return this.getLocalDataSummary();
   }
@@ -2168,8 +2210,11 @@ export class IntuneChatService {
       });
     }
 
+    this.retainConversationClassification(conversation.id, noTenant ? undefined : tenant.id);
+    if (!noTenant) registerTenantData("tenant:displayName", tenant.displayName);
     const history = store.listMessages(conversation.id);
     const conversationMemory = boundedConversationMemory(history);
+    registerTenantData("chat:history", conversationMemory);
     const userMessage: IntuneChatMessage = {
       id: `msg_${randomUUID()}`,
       conversationId: conversation.id,
@@ -2350,18 +2395,17 @@ export class IntuneChatService {
         const system = buildIntuneChatSystemPrompt(provider?.isLocal === true);
         let model: string | undefined;
         // An answer that only promises work is asked again, at most twice; the last answer is kept.
-        const assembled = buildAnswerPrompt(answerPack, documentation);
         const content = await completeWithPromiseNudge(async (attempt) => {
-          const completion = await llm.complete(withPromptClassification({
+          const completion = await llm.complete({
             system,
             prompt: attempt,
             ...(selectedModel ? { model: selectedModel } : {}),
             temperature: 0.2,
             maxTokens: chatBudget.maxTokens,
-          }, assembled.classification));
+          });
           model = completion.model;
           return completion.text.trim();
-        }, assembled.prompt);
+        }, buildAnswerPrompt(answerPack, documentation));
         finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0 });
         return {
           content,
@@ -2625,6 +2669,8 @@ export class IntuneChatService {
       });
     }
 
+    this.retainConversationClassification(conversation.id, noTenant ? undefined : tenant.id);
+    if (!noTenant) registerTenantData("tenant:displayName", tenant.displayName);
     const voiceContext = options.voice
       ? voiceConversationContext(content, input.conversationId ? store.listMessages(conversation.id) : [], providerId === "apple-foundation", options.voiceHistory)
       : undefined;
@@ -2642,6 +2688,9 @@ export class IntuneChatService {
     const directResources = voiceDeviceEvidenceIntent(content) ? ["managedDevices" as const] : voiceResourcesForQuestion(content);
     if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
     const restriction = restrictPlannedResourcesForTenant(planned, tenant, noTenant);
+    registerTenantData("chat:history", conversationMemory);
+    if (options.voice) registerTenantData("nova:history", options.voiceHistory ?? store.listMessages(conversation.id).map(message => message.content));
+    if (voiceProfile) registerTenantData("nova:profile", options.voiceProfile);
     const userMessage: IntuneChatMessage = {
       id: `msg_${randomUUID()}`,
       conversationId: conversation.id,
@@ -3025,21 +3074,21 @@ export class IntuneChatService {
         citations.addPassages(documentation);
         documentationSources = citations.sources;
         const finishAnswerStep = startAnswerStep(steps, answerModel);
-        const overhead = Buffer.byteLength(buildAnswerPrompt("", documentation).prompt) + Buffer.byteLength(system);
+        const overhead = Buffer.byteLength(buildAnswerPrompt("", documentation)) + Buffer.byteLength(system);
         if (options.voice) answerPack = compactVoiceAnswerPack(answerPack, voiceByteLimit - overhead);
-        const { prompt, classification } = buildAnswerPrompt(answerPack, documentation);
+        const prompt = buildAnswerPrompt(answerPack, documentation);
         if (options.voice) assertVoicePromptBudget(system, prompt, voiceByteLimit);
         // An answer that only promises work is asked again, at most twice; the last answer is kept.
         let attemptPrompt = prompt;
         for (let nudge = 0; ; nudge += 1) {
-          for await (const chunk of llm.stream(withPromptClassification({
+          for await (const chunk of llm.stream({
             system,
             prompt: attemptPrompt,
             ...(selectedModel ? { model: selectedModel } : {}),
             temperature: 0.2,
             maxTokens: chatBudget.maxTokens,
             signal: options.signal,
-          }, classification))) {
+          })) {
             if (isCancelled()) {
               break;
             }
@@ -4164,27 +4213,17 @@ function writeIntentBlockedMessage(
 function buildAnswerPrompt(
   answerPack: string,
   documentation: ReadonlyArray<{ file: string; title?: string; text: string }>,
-): { prompt: string; classification: PromptClassification } {
+): string {
   const pack = answerPack ? JSON.parse(answerPack) as Record<string, unknown> : {};
   const { question, instruction, ...evidence } = pack;
-  const source = "chat:answer-pack";
-  const { text, classification } = fenceTenantData(evidence, source, { classification: {} });
-  const blocks = Array.isArray(evidence.resources) ? evidence.resources : [];
-  const reads = GRAPH_CACHE_RESOURCES.flatMap(({ resource }) => {
-    const block = blocks.find((entry) => entry?.resource === resource);
-    if (!block || !Array.isArray(block.sampleRows)) return [];
-    const counts = countDataClasses(block.sampleRows, { graphPath: pathForResource(resource).path });
-    return [{ source: `cache:${resource}`, counts }];
-  });
-  const metadata = { fenced: [{ source, classification }], reads };
   const context = [
     `Admin question:\n${typeof question === "string" ? question : ""}`,
     "Retrieved tenant context:",
-    text,
+    fenceTenantData(evidence, "chat:answer-pack"),
     typeof instruction === "string" ? instruction : "",
   ].join("\n\n");
   if (documentation.length === 0) {
-    return { prompt: `Use this retrieved tenant context to answer the admin.\n\n${context}`, classification: metadata };
+    return `Use this retrieved tenant context to answer the admin.\n\n${context}`;
   }
   const passages = documentation
     .map(
@@ -4192,7 +4231,7 @@ function buildAnswerPrompt(
         `[${index + 1}] ${chunk.title ? `${chunk.title} - ` : ""}${chunk.file}\n${chunk.text.trim()}`,
     )
     .join("\n\n");
-  const prompt = [
+  return [
     "Microsoft documentation passages from the local docs index on this device. Call them the local docs index, never Microsoft Learn:",
     passages,
     "",
@@ -4201,5 +4240,4 @@ function buildAnswerPrompt(
     "Retrieved tenant context, which is this tenant's actual state:",
     context,
   ].join("\n");
-  return { prompt, classification: metadata };
 }

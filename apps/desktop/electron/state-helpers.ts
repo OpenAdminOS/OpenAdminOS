@@ -1,11 +1,13 @@
-import { countDataClasses, type PromptClassification } from "@openadminos/runtime/data-classification";
+import { currentClassificationLedger } from "@openadminos/runtime/data-classification";
 import { createHash } from "node:crypto";
 import {
   OPENADMINOS_CLIENT_ID,
   TENANT_DATA_INSTRUCTIONS,
+  createGraphAdapter,
   defaultClientId,
   tenantAuthority,
   type ExpectedTenantAccount,
+  type GraphAdapterOptions,
 } from "@openadminos/runtime";
 import {
   AVAILABLE_SERVICES,
@@ -936,6 +938,35 @@ export function stringValue(value: unknown): string | undefined {
 
 
 
+/** Capture legacy list pages before the adapter creates its narrower device records. */
+export function createGraphWithLegacyDeviceClassification(options: GraphAdapterOptions): RunGraphApi {
+  const graph = createGraphAdapter(options);
+  return {
+    ...graph,
+    listManagedDevices() {
+      const ledger = currentClassificationLedger();
+      if (!ledger) return graph.listManagedDevices();
+      const fetchImpl = options.fetchImpl ?? fetch;
+      const legacy = createGraphAdapter({ ...options, fetchImpl: async (input, init) => {
+        const response = await fetchImpl(input, init);
+        if (!response.ok) return response;
+        const readText = response.text.bind(response);
+        response.text = async () => {
+          const text = await readText();
+          let payload: unknown;
+          try { payload = JSON.parse(text); } catch { payload = text; }
+          ledger.register("graph:/deviceManagement/managedDevices", payload, {
+            graphPath: "/deviceManagement/managedDevices",
+          });
+          return text;
+        };
+        return response;
+      } });
+      return legacy.listManagedDevices();
+    },
+  };
+}
+
 export function readPlannedChatRows(
   store: IntelligenceSqliteStore,
   input: {
@@ -1069,10 +1100,8 @@ export async function fetchGraphCachePages(
   pages: number;
   pageLimitReached: boolean;
   totalCount?: number;
-  classifications: PromptClassification["reads"];
 }> {
   const rows: unknown[] = [];
-  const classifications: PromptClassification["reads"][number][] = [];
   let totalCount: number | undefined;
   let pages = 0;
   let nextRequest: GraphCacheRequestPage | undefined = request;
@@ -1100,8 +1129,6 @@ export async function fetchGraphCachePages(
       ...(signal ? { signal } : {}),
     });
     signal?.throwIfAborted();
-    const counts = countDataClasses(response, { graphPath: nextRequest.path });
-    classifications.push({ source: `graph:${nextRequest.path}`, counts });
     const page = unwrapGraphCollectionPage(response);
     if (totalCount === undefined && page.totalCount !== undefined) {
       totalCount = page.totalCount;
@@ -1147,7 +1174,6 @@ export async function fetchGraphCachePages(
   return {
     rows,
     pages,
-    classifications,
     // A final page that overflows the row cap without advertising a
     // nextLink would otherwise be reported as complete while rows were
     // dropped, which is a silent truncation.

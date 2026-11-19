@@ -85,6 +85,7 @@ const COMPACT_IDENTIFIER_MIN = 8;
  * "A1:B2:C3:D4:E5:F6".
  */
 export class TenantValueIndex {
+  private readonly longestSequence = new Map<string, number>();
   private readonly buckets = new Map<string, Map<string, string[]>>();
   private readonly compact = new Set<string>();
   private compactMaxLength = 0;
@@ -124,6 +125,35 @@ export class TenantValueIndex {
     return this.matchesTokens(tokens) || this.matchesTokens(joinNumericRuns(tokens)) || this.matchesCompact(tokens);
   }
 
+  hasClassifiedIdentity(text: string): boolean {
+    return !this.spans(text).next().done;
+  }
+
+  /** Source offsets for policy classification. Egress keeps its existing matcher. */
+  *spans(text: string): IterableIterator<{ start: number; end: number }> {
+    const tokens = [...text.matchAll(/[\p{L}\p{N}\p{M}\p{Cf}]+/gu)].flatMap(match =>
+      normalizeTokens(match[0]).map(token => ({ token, start: match.index, end: match.index + match[0].length })));
+    for (let first = 0; first < tokens.length; first++) {
+      const start = tokens[first]!;
+      const bucket = this.buckets.get(start.token);
+      if (bucket) {
+        let sequence = "";
+        const limit = Math.min(tokens.length, first + (this.longestSequence.get(start.token) ?? 0));
+        for (let last = first; last < limit; last++) {
+          sequence += (last === first ? "" : " ") + tokens[last]!.token;
+          if (bucket.has(sequence)) yield { start: start.start, end: tokens[last]!.end };
+        }
+      }
+      let joined = "";
+      for (let last = first; last < tokens.length; last++) {
+        const end = tokens[last]!;
+        joined += end.token;
+        if (joined.length > this.compactMaxLength) break;
+        if (this.compact.has(joined)) yield { start: start.start, end: end.end };
+      }
+    }
+  }
+
   private matchesCompact(tokens: readonly string[]): boolean {
     if (this.compact.size === 0) return false;
     for (let start = 0; start < tokens.length; start += 1) {
@@ -143,6 +173,7 @@ export class TenantValueIndex {
     if (!bucket) this.buckets.set(tokens[0]!, (bucket = new Map()));
     if (!bucket.has(key)) {
       bucket.set(key, tokens);
+      this.longestSequence.set(tokens[0]!, Math.max(this.longestSequence.get(tokens[0]!) ?? 0, tokens.length));
       this.count += 1;
     }
   }

@@ -1,3 +1,4 @@
+import { ClassificationLedger, withClassificationScope } from "@openadminos/runtime/data-classification";
 import { TENANT_CLOSED_COPY } from "./tenant-lifecycle.js";
 import { createHash, randomUUID } from "node:crypto";
 
@@ -398,13 +399,19 @@ export class RunService {
    * the lease signal cancels the run and Disconnect waits for the drive.
    */
   private track(runId: string, tenantId: string | undefined, start: () => Promise<void>): void {
+    const index = () => tenantId ? this.host.intelligenceStore?.classificationIdentityIndex(tenantId) : undefined;
+    const ledger = new ClassificationLedger({
+      matches: text => index()?.hasClassifiedIdentity(text) ?? false,
+      spans: text => index()?.spans(text) ?? [],
+    });
+    const run = () => withClassificationScope(ledger, start);
     const leased = tenantId && this.host.tenantLease
       ? this.host.tenantLease(tenantId, async (signal) => {
           const stop = () => this.controllers.get(runId)?.abort(signal.reason);
           signal.addEventListener("abort", stop, { once: true });
-          try { return await start(); } finally { signal.removeEventListener("abort", stop); }
+          try { return await run(); } finally { signal.removeEventListener("abort", stop); }
         })
-      : start();
+      : run();
     const settled = leased.catch(() => undefined).finally(() => {
       if (this.drives.get(runId) === settled) this.drives.delete(runId);
     });

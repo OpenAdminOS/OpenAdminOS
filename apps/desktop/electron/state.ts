@@ -1,3 +1,7 @@
+import {
+  ClassificationLedger, registerTenantData, withClassificationScope,
+  withRequestClassification, type RequestClassificationEvent,
+} from "@openadminos/runtime/data-classification";
 import { OfficeService } from "./office.js";
 import { describeNetworkFailure, timeoutWhenAborted, type ProxyResolver } from "./network-failure.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -45,7 +49,6 @@ import {
   acquireTokenSilent,
   auditGraphWritesFetch,
   compareSemver,
-  createGraphAdapter,
   type GraphWriteAuditSink,
   createClaudeCodeLlm,
   createAzureOpenAiLlm,
@@ -422,6 +425,7 @@ import {
   tenantNamesById,
   tokenCacheForPartition,
   tokenCachePartition,
+  createGraphWithLegacyDeviceClassification,
 } from "./state-helpers.js";
 import { lookupEndpoint } from "./graph-catalog.js";
 import { TenantClosedError, TenantLifecycle } from "./tenant-lifecycle.js";
@@ -1818,6 +1822,18 @@ function novaProviderEndpoint(providerId: ProviderId, persisted?: Pick<Persisted
 }
 
 export class AppStateStore {
+  private lastModelRequestClassification?: RequestClassificationEvent;
+  private readonly requestClassificationObservers = new Set<(event: RequestClassificationEvent) => void>();
+
+  getLastRequestClassification(): RequestClassificationEvent | undefined {
+    return this.lastModelRequestClassification;
+  }
+
+  observeRequestClassifications(observer: (event: RequestClassificationEvent) => void): () => void {
+    this.requestClassificationObservers.add(observer);
+    return () => this.requestClassificationObservers.delete(observer);
+  }
+
   /**
    * The lifecycle of each tenant (open, closing, removed) and the one place
    * that decides whether its work may start, reach the network or persist.
@@ -2250,7 +2266,12 @@ export class AppStateStore {
       },
       startRun: (slug, options) => this.startRun(slug, options),
       cancelRun: id => this.cancelRun(id),
-      complete: async (p, question, context, planning) => {
+      complete: async (p, question, context, planning) => withClassificationScope(new ClassificationLedger({
+        matches: text => this.intelligenceStore?.classificationIdentityIndex(p.tenantId).hasClassifiedIdentity(text) ?? false,
+        spans: text => this.intelligenceStore?.classificationIdentityIndex(p.tenantId).spans(text) ?? [],
+      }), async () => {
+        registerTenantData("office:context", { tenantId: p.tenantId, evidence: context.evidence, conversation: context.conversation });
+        registerTenantData("office:instructions", context.instructions);
         // Egress of tenant evidence to the model: refused for a closing
         // tenant, and stopped by its signal when Disconnect begins.
         this.tenantLifecycle.assertWritable(p.tenantId, "agent team question");
@@ -2268,7 +2289,7 @@ export class AppStateStore {
         const prompt = `Admin question: ${question}\n\n${fenceTenantData({tenantId:p.tenantId,evidence:context.evidence,conversation:context.conversation}, "office:context")}`;
         // A planning reply is JSON, not an answer; only answers get the promise nudge.
         return planning ? once(prompt) : completeWithPromiseNudge(once, prompt);
-      },
+      }),
       changed: () => this.emitStateChanged("office-changed"),
     });
   }
@@ -4467,7 +4488,7 @@ export class AppStateStore {
       }
     }
 
-    const llm = providerId === "gemini" ? createGeminiLlm({ defaultModel: selectedModel }) : await this.buildLlm(providerId, selectedModel);
+    const llm = await this.buildLlm(providerId, selectedModel, undefined, true);
     if (!llm.available) {
       return {
         providerId,
@@ -8735,6 +8756,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       }
       try {
         this.intelligenceStore?.purgeTenant(id);
+        this.chatService.clearTenantClassification(id);
       } catch (cause) {
         throw new Error(`Its Chat and cache data could not be deleted. ${errorText(cause)}`, { cause });
       }
@@ -8820,6 +8842,23 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   private async buildLlm(
+    providerId: ProviderId,
+    model: string | undefined,
+    binding?: ProviderEndpointBinding,
+    probe = false,
+  ): Promise<RunLlmApi> {
+    const llm = probe && providerId === "gemini"
+      ? createGeminiLlm({ defaultModel: model })
+      : await this.createProviderLlm(providerId, model, binding);
+    return withRequestClassification(llm, providerId, event => {
+      this.lastModelRequestClassification = event;
+      for (const observer of this.requestClassificationObservers) {
+        try { observer(event); } catch { /* Observers cannot interrupt the provider request. */ }
+      }
+    });
+  }
+
+  private async createProviderLlm(
     providerId: ProviderId,
     model: string | undefined,
     binding?: ProviderEndpointBinding,
@@ -9044,20 +9083,19 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
             return recordTokenScopes({ accessToken: result.accessToken, scopes: result.scopes });
           };
     return {
-      createGraph: (log) => this.graphFactory
-        ? this.graphFactory({ tenantId: tenant.id, scopes, log, writeAudit: this.graphWriteAudit(tenant.id, tenant, execution?.audit) })
-        : createGraphAdapter({ tokenProvider, log, signal: execution?.signal,
-            // The Graph egress choke point: every request and retry for a
-            // closing tenant is refused and aborted with its signal.
-            fetchImpl: this.tenantLifecycle.guardedFetch(tenant.id),
-            // Every write is in the audit log before it is sent.
-            writeAudit: this.graphWriteAudit(tenant.id, tenant, execution?.audit),
-            accessContext: (method, path) => ({
-              requiredScopes: lookupEndpoint(method, path)?.scopesDelegated,
-              entraTier: tenant.entraTier,
-              intuneLicensed: tenant.intuneLicensed,
-            }),
+      createGraph: (log) => {
+        const writeAudit = this.graphWriteAudit(tenant.id, tenant, execution?.audit);
+        if (this.graphFactory) return this.graphFactory({ tenantId: tenant.id, scopes, log, writeAudit });
+        const fetchImpl = this.tenantLifecycle.guardedFetch(tenant.id);
+        return createGraphWithLegacyDeviceClassification({
+          tokenProvider, log, signal: execution?.signal, fetchImpl, writeAudit,
+          accessContext: (method, path) => ({
+            requiredScopes: lookupEndpoint(method, path)?.scopesDelegated,
+            entraTier: tenant.entraTier,
+            intuneLicensed: tenant.intuneLicensed,
           }),
+        });
+      },
       tenantId: tenant.id,
       tenantSession,
     };

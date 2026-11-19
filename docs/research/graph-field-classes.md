@@ -9,7 +9,7 @@ No secret values are reproduced. Values are replaced by their type; for credenti
 - Endpoint list: every entry of `GRAPH_CACHE_RESOURCES` (45 resources) in apps/desktop/electron/intune-chat/planner.ts with its `pathForResource` path and `$select`, plus every `graph` step `path`/`select` in agents/*/manifest.yaml, plus the one script agent (agents/intune-device-posture-auditor/agent.mjs, same managedDevices path and fields as its manifest).
 - Agents with no Graph read: team-evidence-review, team-script-draft. team-script-draft only emits PowerShell text that calls `v1.0/deviceManagement/managedDevices?$select=id,deviceName,complianceState,lastSyncDateTime`; the app does not execute it. stale-guest-cleanup also has a write step (`PATCH /users/{id}`), out of scope.
 - Schemas for unverified endpoints come from the msgraph skill (`api-docs-search --resource`).
-- Classes: credential, identity, device, activity, configuration, public. A `?` after a class marks an ambiguous field explained in the notes. Field paths use dot notation for nested objects and `[]` for arrays.
+- Original research classes: credential, identity, device, activity, configuration, public. The runtime map and SPEC also define Security for policy and posture objects. A `?` after a class marks an ambiguous field explained in the notes. Field paths use dot notation for nested objects and `[]` for arrays.
 - Classing rule applied to log records (signIns, audits, alerts): fields that do not identify a person or device are activity, because the record as a whole says who did what when. In configuration objects, non-identifying fields are configuration. Device posture attributes (OS, version, model, compliance) do not identify a device, so they are configuration.
 
 ## Endpoints
@@ -1429,7 +1429,7 @@ Notes:
 Notes:
 
 - `$select` is ignored here: the response carried `azureTenantId`, `enabledServices`, `averageComparativeScores`, `controlScores` and `vendorInformation` although only 6 fields were requested. One row was about 72 KB. The classifier cannot rely on `$select` to bound what arrives.
-- `controlScores[].implementationStatus` is Microsoft-generated text with counts ("You have 26 of 26 users ..."). In the lab it never named a person; ambiguous because some controls may list accounts.
+- `controlScores[].implementationStatus` is Microsoft-generated text with counts ("You have <enabled count> of <user count> users ..."). In the lab it never named a person; ambiguous because some controls may list accounts.
 
 ### secureScoreControlProfiles
 
@@ -1546,7 +1546,7 @@ Notes:
 - Path: `/deviceManagement/managedDevices/{id}/getFileVaultKey`
 - API version: beta
 - Status: unverified (404)
-- Lokka call: `GET /deviceManagement/managedDevices/<the only macOS device>/getFileVaultKey returned 404 ResourceNotFound (device has no escrowed key; last check-in 2025-08)`
+- Lokka call: `GET /deviceManagement/managedDevices/<device id>/getFileVaultKey returned 404 ResourceNotFound (device has no escrowed key; last check-in <month>)`
 - Used by: none today; credential reference
 
 | Property path | Class |
@@ -1562,7 +1562,7 @@ Notes:
 - Path: `/deviceManagement/deviceConfigurations (Wi-Fi @odata.types)`
 - API version: beta
 - Status: unverified (no Wi-Fi profiles in lab)
-- Lokka call: `GET /deviceManagement/deviceConfigurations?$filter=isof(<Wi-Fi and VPN types>)&$select=id,displayName returned []; GET ?$top=100&$select=id listed all 32 profiles and none is a Wi-Fi or VPN type`
+- Lokka call: `GET /deviceManagement/deviceConfigurations?$filter=isof(<Wi-Fi and VPN types>)&$select=id,displayName returned []; GET ?$top=100&$select=id listed all <profile count> profiles and none is a Wi-Fi or VPN type`
 - Used by: none today (cache selects metadata only); credential reference
 
 | Property path | Class |

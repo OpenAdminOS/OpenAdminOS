@@ -15,9 +15,6 @@ import type {
 
 import { GRAPH_CACHE_RESOURCES, asksHowTo, pathForResource, resolveQuestionKind } from "./planner.js";
 import { buildIntuneChatSystemPrompt } from "../state-helpers.js";
-import {
-  withPromptClassification, type ClassifiedSource, type PromptClassification,
-} from "@openadminos/runtime/data-classification";
 import { fenceTenantData, stripTenantDataFences } from "@openadminos/runtime";
 import { tenantDataSourceForTool } from "./tools.js";
 import { writeMcpQuery } from "./mcp-query-writer.js";
@@ -28,7 +25,6 @@ import {
   MCP_TOOL_RULES,
   SPLASHTOP_TOOL_RULES,
   splashtopToolDefinitionsForPrompt,
-  classificationIdentityIndex,
   executeIntuneChatTool,
   holdsTenantData,
   isMcpChatToolName,
@@ -282,7 +278,7 @@ export type RunAgenticChatResult =
 
 type LoopTurn =
   | { role: "assistant"; content: string }
-  | { role: "observation"; content: string; source?: string; classification?: ClassifiedSource; reads?: PromptClassification["reads"] }
+  | { role: "observation"; content: string; source?: string }
   | { role: "repair"; content: string };
 
 /** The question kind and sources a reply declared, when it declared a valid kind. */
@@ -383,10 +379,9 @@ export async function runAgenticChat(
     withdrawAnswer();
     const system = buildAgenticSystemPrompt(input, questionKind, [...required].filter((id) => !attemptedServers.has(id)), documentation.length > 0 || fallbackPending);
     const loopInput = { ...input, documentation };
-    const assembled = input.voice
+    const prompt = input.voice
       ? buildVoiceLoopPrompt(loopInput, turns, system)
       : buildLoopPrompt(loopInput, turns);
-    const { prompt } = assembled;
     if (input.voice) {
       try { assertVoicePromptBudget(system, prompt, input.promptByteLimit); }
       catch {
@@ -394,14 +389,14 @@ export async function runAgenticChat(
         return { ok: false, reason: "context-limit", fallbackNotice: "Nova used bounded retrieved evidence because this investigation exceeded its voice context budget.", toolTrace, iterations: iteration, model: responseModel };
       }
     }
-    const options = withPromptClassification({
+    const options = {
       system,
       prompt,
       ...(input.model ? { model: input.model } : {}),
       temperature: 0.1,
       maxTokens: Math.max(500, input.maxTokens),
       signal: input.signal,
-    }, assembled.classification);
+    };
     let completion: { text: string; model: string };
     consultedSources = citations.sources.length;
     input.modelStep?.start();
@@ -664,7 +659,6 @@ export async function runAgenticChat(
     const mcpHooks: McpCallHooks | undefined = mcpTool ? {
       writeQuery: (entry) => writeMcpQuery({
         llm: input.llm,
-        identityIndex: classificationIdentityIndex(input.tools),
         ...(input.model ? { model: input.model } : {}),
         ...(input.signal ? { signal: input.signal } : {}),
         question: input.adminQuestion ?? "",
@@ -775,8 +769,6 @@ export async function runAgenticChat(
     });
     turns.push({
       role: "observation",
-      classification: execution.classification,
-      reads: execution.reads,
       source: execution.trace.mcpSource
         ? `third-party:${execution.trace.mcpSource.host}`
         : tenantDataSourceForTool(action.tool, action.params),
@@ -952,30 +944,16 @@ function buildAgenticSystemPrompt(input: RunAgenticChatInput, questionKind: Intu
   ].join("\n");
 }
 
-function buildLoopPrompt(input: RunAgenticChatInput, turns: LoopTurn[]): { prompt: string; classification: PromptClassification } {
-  const fenced: ClassifiedSource[] = [];
-  const reads: PromptClassification["reads"][number][] = [];
-  const identityIndex = classificationIdentityIndex(input.tools);
-  const fence = (content: string, source: string, publicReference = false) => {
-    const result = fenceTenantData(content, source, { classification: { publicReference, identityIndex } });
-    fenced.push({ source, classification: result.classification });
-    return result.text;
-  };
+function buildLoopPrompt(input: RunAgenticChatInput, turns: LoopTurn[]): string {
   const transcript = turns
     .map((turn) => {
       if (turn.role === "observation") {
-        if (turn.classification) {
-          const { source, classification } = turn.classification;
-          reads.push({ source, counts: classification.counts });
-        }
-        reads.push(...(turn.reads ?? []));
-        const source = turn.source ?? "tool:observation";
-        return `Observation:\n${fence(turn.content, source, source.startsWith("third-party:") || source === "tool:web_search")}`;
+        return `Observation:\n${fenceTenantData(turn.content, turn.source ?? "tool:observation")}`;
       }
       if (turn.role === "repair") {
         return `Repair instruction:\n${turn.content}`;
       }
-      return `Assistant (previous response, reference only):\n${fence(turn.content, "chat:model-turn")}`;
+      return `Assistant (previous response, reference only):\n${fenceTenantData(turn.content, "chat:model-turn")}`;
     })
     .join("\n\n");
   const documentation = (input.documentation ?? [])
@@ -984,7 +962,7 @@ function buildLoopPrompt(input: RunAgenticChatInput, turns: LoopTurn[]): { promp
         `[${(chunk as Partial<LoopPassage>).citation ?? index + 1}] ${chunk.title ? `${chunk.title} - ` : ""}${chunk.file}\n${chunk.text.trim()}`,
     )
     .join("\n\n");
-  const prompt = [
+  return [
     documentation
       ? `Microsoft documentation passages from the local docs index on this device. They describe general product behaviour, not this tenant's state. Cite them with their numbers, such as [1], when you rely on them, and call them the local docs index. A passage about another product or topic is not a source: do not cite it, also not to say that it does not apply.\n\n${documentation}`
       : "",
@@ -995,11 +973,10 @@ function buildLoopPrompt(input: RunAgenticChatInput, turns: LoopTurn[]): { promp
       : "",
     "Next response:",
   ].filter(Boolean).join("\n\n");
-  return { prompt, classification: { fenced, reads } };
 }
 
 /** Optional documentation must never crowd out the question or tool evidence. */
-function buildVoiceLoopPrompt(input: RunAgenticChatInput, turns: LoopTurn[], system: string): ReturnType<typeof buildLoopPrompt> {
+function buildVoiceLoopPrompt(input: RunAgenticChatInput, turns: LoopTurn[], system: string): string {
   const limit = input.promptByteLimit ?? VOICE_PROMPT_BYTE_LIMIT;
   const compact = {
     ...input,
@@ -1018,7 +995,7 @@ function buildVoiceLoopPrompt(input: RunAgenticChatInput, turns: LoopTurn[], sys
     ? [{ role: "repair", content: "Earlier tool exchanges were omitted to fit voice context. Do not treat missing detail as absent evidence; retrieve it again if needed." }, ...recent]
     : recent);
   let prompt = build();
-  const size = () => Buffer.byteLength(system) + Buffer.byteLength(prompt.prompt);
+  const size = () => Buffer.byteLength(system) + Buffer.byteLength(prompt);
   if (size() <= limit) return prompt;
   compact.documentation = [];
   prompt = build();

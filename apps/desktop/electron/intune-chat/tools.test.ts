@@ -10,16 +10,73 @@ import {
   type RunGraphApi,
 } from "@openadminos/agent-sdk";
 
-import { hasGraphFieldClasses } from "@openadminos/runtime/data-classification";
+import { ClassificationLedger, hasGraphFieldClass, hasGraphFieldClasses, withClassificationScope } from "@openadminos/runtime/data-classification";
 import { GRAPH_CACHE_RESOURCES, pathForResource } from "./planner.js";
 import { executeIntuneChatTool } from "./tools.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 
-for (const { resource } of GRAPH_CACHE_RESOURCES) {
-  it(`has a field map for the ${resource} cache resource`, () => {
-    assert.ok(hasGraphFieldClasses(pathForResource(resource).path));
+const { GRAPH_CLASSIFICATION_FIXTURES } = await import(new URL(
+  "../../../../packages/runtime/src/graph-classification.fixtures.ts", import.meta.url,
+).href) as { GRAPH_CLASSIFICATION_FIXTURES: Record<string, [string, unknown, import("@openadminos/agent-sdk").DataClass]> };
+
+for (const { resource, label } of GRAPH_CACHE_RESOURCES) {
+  it(`classifies the ${resource} cache fixture and maps every planner selection`, async () => {
+    const { path, select, query } = pathForResource(resource);
+    assert.ok(hasGraphFieldClasses(path));
+    for (const field of [...select ?? [], ...query?.$select?.split(",") ?? []]) {
+      assert.ok(hasGraphFieldClass(path, field), `${path} selects ${field}`);
+    }
+    const fixture = GRAPH_CLASSIFICATION_FIXTURES[path];
+    assert.ok(fixture, path);
+    const [field, value, kind] = fixture;
+    const row = { id: "synthetic-row-id", [field]: value };
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-classification-cache-"));
+    const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+    try {
+      store.replaceGraphResources({ tenantId: "tenant-1", resource, label, scopeSet: [], rows: [row],
+        refreshedAt: "2026-11-18T00:00:00.000Z" });
+      const ledger = new ClassificationLedger();
+      const result = withClassificationScope(ledger, () => store.queryGraphCache({ tenantId: "tenant-1", resource }));
+      assert.deepEqual(result.rows[0]?.row, row);
+      const prompt = JSON.stringify(result.rows[0]?.row);
+      const spans = ledger.classifyRequest({ prompt }).spans;
+      assert.ok(spans.some(span => span.source === `cache:${resource}` && span.kind === kind &&
+        prompt.slice(span.start, span.end).includes(String(value))), resource);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 }
+
+it("recognizes a cached user's first name inside a device name and resolves typed user IDs", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-classification-identities-"));
+  const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+  try {
+    const tenantId = "tenant-1";
+    const knownId = "c91daa9b-3502-4b61-a461-31862371cad0";
+    const unknownId = "a10daa9b-3502-4b61-a461-31862371cad1";
+    const deviceName = "Synthea's laptop";
+    const common = { tenantId, scopeSet: [], refreshedAt: "2026-11-18T00:00:00.000Z" };
+    store.replaceGraphResources({ ...common, resource: "users", label: "Users",
+      rows: [{ id: knownId, displayName: "Synthea Fixture", userPrincipalName: "synthea@example.invalid" }] });
+    store.replaceGraphResources({ ...common, resource: "managedDevices", label: "Devices",
+      rows: [{ id: "workstation-01", deviceName }, { id: "workstation-02", deviceName: "Desk computer" }] });
+    const index = store.classificationIdentityIndex(tenantId);
+    const ledger = new ClassificationLedger({ matches: text => index.hasClassifiedIdentity(text), spans: text => index.spans(text) });
+    const read = withClassificationScope(ledger, () => store.queryGraphCache({ tenantId, resource: "managedDevices" }));
+    const prompt = JSON.stringify(read.rows);
+    const system = `Compare ${knownId} with ${unknownId}`;
+    const spans = ledger.classifyRequest({ system, prompt }).spans;
+    assert.ok(spans.some(span => span.kind === "identity" && span.source === "cache:managedDevices" &&
+      prompt.slice(span.start, span.end) === deviceName));
+    assert.ok(spans.some(span => span.kind === "device" && prompt.slice(span.start, span.end) === "Desk computer"));
+    assert.deepEqual(spans.filter(span => span.section === "system").map(span => system.slice(span.start, span.end)), [knownId]);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 
 describe("Intune Chat read-only tools", () => {
   it("lists cache inventory and query_cache enforces row caps", async () => {

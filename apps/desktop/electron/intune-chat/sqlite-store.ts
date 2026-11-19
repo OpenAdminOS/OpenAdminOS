@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { collectTenantValues, TenantValueIndex } from "./tenant-values.js";
+import { registerTenantData } from "@openadminos/runtime/data-classification";
+import { pathForResource } from "./planner.js";
 import { GRAPH_CACHE_LOG_RESOURCES } from "@openadminos/agent-sdk";
 
 /** Cached resources whose rows describe people, groups, devices or their activity. */
@@ -410,6 +412,7 @@ export class IntelligenceSqliteStore {
   // Identity values of the cached rows per tenant, built on the first MCP
   // call and dropped whenever that tenant's cache changes.
   private readonly tenantIdentityIndexes = new Map<string, TenantValueIndex>();
+  private readonly classificationIndexes = new Map<string, TenantValueIndex>();
 
   constructor(dbPath: string) {
     const root = dirname(dbPath);
@@ -749,6 +752,7 @@ export class IntelligenceSqliteStore {
     this.assertTenantWritable(input.tenantId, "graph cache");
     const snapshotId = `${input.resource}-${input.refreshedAt}-${randomUUID().slice(0, 8)}`;
     this.tenantIdentityIndexes.delete(input.tenantId);
+    this.classificationIndexes.delete(input.tenantId);
     this.db.exec("BEGIN");
     try {
       const normalizedRows = input.rows.map((row) => ({
@@ -2144,6 +2148,7 @@ export class IntelligenceSqliteStore {
 
   clearGraphCache(tenantId: string): void {
     this.tenantIdentityIndexes.delete(tenantId);
+    this.classificationIndexes.delete(tenantId);
     this.db.exec("BEGIN");
     try {
       this.db
@@ -2185,6 +2190,7 @@ export class IntelligenceSqliteStore {
       .map((row) => row.id);
 
     this.tenantIdentityIndexes.delete(tenantId);
+    this.classificationIndexes.delete(tenantId);
     this.db.exec("BEGIN IMMEDIATE");
     try {
       for (const table of [
@@ -2334,6 +2340,7 @@ export class IntelligenceSqliteStore {
           .all(input.tenantId, resource, input.limitPerResource) as unknown as ResourceRow[];
         parsed = fallback.map((row) => readJson<unknown>(row.raw_json, {}));
       }
+      registerTenantData(`cache:${resource}`, parsed, { graphPath: pathForResource(resource).path });
       out[resource] = parsed;
     }
     return out;
@@ -2391,6 +2398,25 @@ export class IntelligenceSqliteStore {
     return index;
   }
 
+  /** Identity inputs for classification exclude devices, so a device name cannot match itself. */
+  classificationIdentityIndex(tenantId: string): TenantValueIndex {
+    const cached = this.classificationIndexes.get(tenantId);
+    if (cached) return cached;
+    const index = new TenantValueIndex();
+    const rows = this.db.prepare(`SELECT graph_id, display_name, raw_json, resource FROM graph_resources
+      WHERE tenant_id = ? AND resource IN ('users', 'groups')`).iterate(tenantId) as
+      Iterable<{ graph_id: string; display_name: string | null; raw_json: string; resource: string }>;
+    for (const row of rows) {
+      index.add(row.graph_id);
+      index.add(row.display_name, "name");
+      const record = readJson<Record<string, unknown> | null>(row.raw_json, {});
+      if (row.resource === "users") index.add(record?.givenName ?? row.display_name?.trim().split(/\s+/, 1)[0], "name");
+      collectTenantValues(record, index);
+    }
+    this.classificationIndexes.set(tenantId, index);
+    return index;
+  }
+
   /** Tenant values that earlier turns of a conversation observed. */
   listChatTenantValues(conversationId: string): string[] {
     const rows = this.db
@@ -2442,15 +2468,19 @@ export class IntelligenceSqliteStore {
     const rows = this.db
       .prepare(sql)
       .all(...args, limit) as unknown as QueryCacheRow[];
+    const parsed = rows.map((row) => ({
+      row: readJson<unknown>(row.raw_json, {}),
+      ...(row.refreshed_at ? { refreshedAt: row.refreshed_at } : {}),
+    }));
+    registerTenantData(`cache:${input.resource}`, parsed.map(({ row }) => row), {
+      graphPath: pathForResource(input.resource).path,
+    });
     return {
       resource: input.resource,
       totalCount: rows[0]?.total_count ?? 0,
       returnedRows: rows.length,
       limit,
-      rows: rows.map((row) => ({
-        row: readJson<unknown>(row.raw_json, {}),
-        ...(row.refreshed_at ? { refreshedAt: row.refreshed_at } : {}),
-      })),
+      rows: parsed,
     };
   }
 
@@ -2471,7 +2501,9 @@ export class IntelligenceSqliteStore {
          LIMIT ?`,
       )
       .all(input.tenantId, input.thresholdIso, input.limit) as unknown as ResourceRow[];
-    return rows.map((row) => readJson<unknown>(row.raw_json, {}));
+    const parsed = rows.map((row) => readJson<unknown>(row.raw_json, {}));
+    registerTenantData("cache:managedDevices", parsed, { graphPath: pathForResource("managedDevices").path });
+    return parsed;
   }
 
   readManagedDeviceRowsForTenant(input: {

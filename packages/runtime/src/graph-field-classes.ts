@@ -1,17 +1,41 @@
 import type { DataClass } from "@openadminos/agent-sdk";
 
 // Source: docs/research/graph-field-classes.md and the decisions in docs/SPEC.md.
-// [] matches an array element. * matches one property in a documented keyed object.
+// [] matches an array element. * matches one property in a keyed object.
+// Mapped containers set an inherited class. Unknown branches start at the resource default.
+export const GRAPH_FIELD_CLASSES_VERSION = 1;
+
+export const GRAPH_TEXT_FIELDS = /^(?:notes?|groupTag|publisher|rule|redirectUris?|.*(?:description|name|url|uri|reason)|comment|summary|details|title|message|oldValue|newValue)$/i;
+export const GRAPH_DEVICE_NAME_FIELDS = /^(?:deviceName|managedDeviceName)$/i;
+
+export const GRAPH_SECURITY_RESOURCES = new Set([
+  "/identity/conditionalAccess/policies", "/identity/conditionalAccess/namedLocations",
+  "/policies/authenticationMethodsPolicy", "/policies/authenticationStrengthPolicies",
+  "/identity/conditionalAccess/authenticationStrength/policies",
+  "/policies/identitySecurityDefaultsEnforcementPolicy", "/policies/crossTenantAccessPolicy",
+  "/policies/crossTenantAccessPolicy/default", "/policies/crossTenantAccessPolicy/partners",
+  "/directoryRoles", "/directoryRoleTemplates", "/roleManagement/directory/roleDefinitions",
+  "/roleManagement/directory/roleAssignments", "/roleManagement/directory/transitiveRoleAssignments",
+  "/roleManagement/directory/roleAssignmentScheduleRequests", "/roleManagement/directory/roleEligibilityScheduleRequests",
+  "/roleManagement/directory/roleAssignmentSchedules",
+  "/roleManagement/directory/roleEligibilitySchedules", "/roleManagement/directory/roleAssignmentScheduleInstances",
+  "/roleManagement/directory/roleEligibilityScheduleInstances", "/policies/roleManagementPolicies",
+  "/policies/roleManagementPolicyAssignments", "/privilegedAccess/group/assignmentSchedules",
+  "/privilegedAccess/group/eligibilitySchedules", "/privilegedAccess/group/assignmentScheduleInstances",
+  "/privilegedAccess/group/eligibilityScheduleInstances", "/deviceManagement/intents",
+  "/deviceManagement/intents/{id}/settings", "/deviceManagement/templates",
+  "/identityProtection/policies", "/policies/identityProtectionPolicies",
+]);
 export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataClass, string>>>> = {
   "/deviceManagement/managedDevices": {
     credential: "activationLockBypassCode remoteAssistanceSessionUrl",
     identity: `
       userPrincipalName userId emailAddress enrolledByUserPrincipalName phoneNumber userDisplayName
-      managedDeviceName notes hardwareInformation.phoneNumber
+      notes hardwareInformation.phoneNumber
       hardwareInformation.sharedDeviceCachedUsers[] usersLoggedOn[].userId
     `,
     device: `
-      id deviceName azureADDeviceId easDeviceId azureActiveDirectoryDeviceId imei serialNumber
+      id deviceName managedDeviceName azureADDeviceId easDeviceId azureActiveDirectoryDeviceId imei serialNumber
       wiFiMacAddress meid iccid udid configurationManagerClientInformation ethernetMacAddress
       hardwareInformation.serialNumber hardwareInformation.imei hardwareInformation.meid
       hardwareInformation.wifiMac hardwareInformation.batterySerialNumber
@@ -70,7 +94,7 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
       externalUserStateChangeDateTime
     `,
     configuration: `
-      accountEnabled userType assignedLicenses[].skuId assignedLicenses[].disabledPlans[]
+      accountEnabled userType assignedLicenses[] assignedLicenses[].skuId assignedLicenses[].disabledPlans[]
       externalUserState passwordProfile.forceChangePasswordNextSignIn
     `,
   },
@@ -125,20 +149,19 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
       appliedConditionalAccessPolicies[].includeRulesSatisfied[].ruleSatisfied
       appliedConditionalAccessPolicies[].excludeRulesSatisfied[]
     `,
-    configuration: `
-      appliedConditionalAccessPolicies[].id appliedConditionalAccessPolicies[].displayName
+    security: `
+       appliedConditionalAccessPolicies[].id appliedConditionalAccessPolicies[].displayName
       appliedConditionalAccessPolicies[].enforcedGrantControls[]
       appliedConditionalAccessPolicies[].enforcedSessionControls[]
     `,
   },
   "/auditLogs/directoryAudits": {
     identity: `
-      initiatedBy.user.id initiatedBy.user.displayName initiatedBy.user.userPrincipalName
+      initiatedBy.user.ipAddress initiatedBy.user.id initiatedBy.user.displayName initiatedBy.user.userPrincipalName
       initiatedBy.linkableIdentifiers targetResources[].id targetResources[].displayName
       targetResources[].userPrincipalName targetResources[].modifiedProperties[].oldValue
       targetResources[].modifiedProperties[].newValue additionalDetails[].value
     `,
-    device: "initiatedBy.user.ipAddress",
     activity: `
       id category activityDisplayName activityDateTime result resultReason operationType loggedByService
       targetResources[].type targetResources[].modifiedProperties[].displayName additionalDetails[].key
@@ -150,10 +173,10 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
   },
   "/deviceManagement/auditEvents": {
     identity: `
-      actor.userPrincipalName actor.userId actor.remoteUserId resources[].modifiedProperties[].oldValue
+      actor.ipAddress actor.userPrincipalName actor.userId actor.remoteUserId resources[].modifiedProperties[].oldValue
       resources[].modifiedProperties[].newValue
     `,
-    device: "actor.ipAddress resources[].resourceId",
+    device: "resources[].resourceId",
     activity: `
       id displayName componentName activityDateTime activityType activityOperationType activityResult
       category correlationId actor.type actor.auditActorType resources[].displayName resources[].type
@@ -165,8 +188,8 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
     `,
   },
   "/identity/conditionalAccess/policies": {
-    identity: "conditions.users.includeUsers[] conditions.users.excludeUsers[]",
-    configuration: `
+    identity: "conditions.users.includeUsers[] conditions.users.excludeUsers[] conditions.users.includeGroups[] conditions.users.excludeGroups[]",
+    security: `
       id templateId displayName createdDateTime modifiedDateTime state deletedDateTime
       partialEnablementStrategy sessionControls conditions.userRiskLevels[] conditions.signInRiskLevels[]
       conditions.clientAppTypes[] conditions.locations conditions.times conditions.deviceStates
@@ -174,8 +197,7 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
       conditions.applications.includeApplications[] conditions.applications.excludeApplications[]
       conditions.applications.includeUserActions[] conditions.applications.includeAgentActions[]
       conditions.applications.includeAuthenticationContextClassReferences[]
-      conditions.applications.applicationFilter conditions.users.includeGroups[]
-      conditions.users.excludeGroups[] conditions.users.includeRoles[] conditions.users.excludeRoles[]
+      conditions.applications.applicationFilter conditions.users.includeRoles[] conditions.users.excludeRoles[]
       conditions.users.includeGuestsOrExternalUsers conditions.users.excludeGuestsOrExternalUsers
       conditions.platforms.includePlatforms[] conditions.platforms.excludePlatforms[]
       grantControls.operator grantControls.builtInControls[] grantControls.customAuthenticationFactors[]
@@ -266,10 +288,22 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
     configuration: "id displayName description createdDateTime lastModifiedDateTime featureUpdateVersion",
   },
   "/deviceManagement/intents": {
-    configuration: "id displayName description templateId lastModifiedDateTime isAssigned",
+    security: "id displayName description templateId lastModifiedDateTime isAssigned",
   },
   "/deviceManagement/groupPolicyConfigurations": {
     configuration: "id displayName description createdDateTime lastModifiedDateTime",
+  },
+  "/deviceManagement/configurationPolicies/{id}/settings": {
+    configuration: "id settingInstance",
+  },
+  "/deviceManagement/intents/{id}/settings": {
+    security: "id definitionId valueJson value",
+  },
+  "/deviceManagement/groupPolicyConfigurations/{id}/definitionValues": {
+    configuration: "id enabled configurationType definition presentationValues[]",
+  },
+  "/deviceManagement/groupPolicyConfigurations/{id}/definitionValues/{id}/presentationValues": {
+    configuration: "id value values[] presentation",
   },
   "/deviceManagement/assignmentFilters": {
     device: "rule",
@@ -304,11 +338,11 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
   "/deviceManagement/managedDeviceEncryptionStates": {
     identity: "userPrincipalName",
     device: "id deviceName",
-    configuration: "encryptionState policyDetails[].policyId policyDetails[].policyName fileVaultStates",
+    configuration: "encryptionState policyDetails[] policyDetails[].policyId policyDetails[].policyName fileVaultStates",
   },
   "/deviceManagement/troubleshootingEvents": {
     activity: `
-      id eventDateTime correlationId troubleshootingErrorDetails.context
+      id eventDateTime correlationId troubleshootingErrorDetails troubleshootingErrorDetails.context
       troubleshootingErrorDetails.failure troubleshootingErrorDetails.failureDetails
     `,
     public: `
@@ -317,7 +351,7 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
     `,
   },
   "/identity/conditionalAccess/namedLocations": {
-    configuration: "id displayName createdDateTime modifiedDateTime",
+    security: "id displayName createdDateTime modifiedDateTime isTrusted ipRanges[] countriesAndRegions[] includeUnknownCountriesAndRegions countryLookupMethod",
   },
   "/policies/authenticationMethodsPolicy": {
     identity: `
@@ -331,7 +365,7 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
       authenticationMethodConfigurations[].featureSettings.*.excludeTarget.id
       authenticationMethodConfigurations[].excludeTargets[].id
     `,
-    configuration: `
+    security: `
       id displayName description lastModifiedDateTime policyVersion policyMigrationState optOutSettings
       registrationEnforcement.authenticationMethodsRegistrationCampaign.snoozeDurationInDays
       registrationEnforcement.authenticationMethodsRegistrationCampaign.enforceRegistrationAfterAllowedSnoozes
@@ -391,13 +425,25 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
     `,
   },
   "/policies/crossTenantAccessPolicy": {
-    configuration: `
+    security: `
       id definition[] displayName applyDefaultsToDomainBasedOrganizations allowedCloudEndpoints[]
     `,
   },
   "/directoryRoles": {
-    configuration: "id",
-    public: "displayName description roleTemplateId",
+    security: "id displayName description roleTemplateId",
+  },
+  "/roleManagement/directory/roleDefinitions": {
+    security: "id displayName description templateId isBuiltIn isEnabled rolePermissions[]",
+  },
+  "/roleManagement/directory/roleAssignments": {
+    identity: "principalId principal",
+    security: "id roleDefinitionId directoryScopeId appScopeId",
+  },
+  "/policies/identitySecurityDefaultsEnforcementPolicy": {
+    security: "id displayName description isEnabled",
+  },
+  "/policies/authenticationStrengthPolicies": {
+    security: "id displayName description policyType requirementsSatisfied allowedCombinations[]",
   },
   "/administrativeUnits": {
     configuration: "id displayName description visibility",
@@ -405,7 +451,7 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
   "/applications": {
     credential: "passwordCredentials[].secretText passwordCredentials[].hint keyCredentials[].key",
     configuration: `
-      id appId displayName createdDateTime publisherDomain signInAudience tags[] description
+      passwordCredentials[] keyCredentials[] id appId displayName createdDateTime publisherDomain signInAudience tags[] description
       identifierUris[] notes serviceManagementReference appRoles[] api.requestedAccessTokenVersion
       api.acceptMappedClaims api.knownClientApplications[] api.oauth2PermissionScopes[]
       api.preAuthorizedApplications[] api.tokenEncryptionSetting.scheme
@@ -436,7 +482,7 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
   "/servicePrincipals": {
     credential: "passwordCredentials[].secretText passwordCredentials[].hint keyCredentials[].key",
     configuration: `
-      id appId displayName accountEnabled servicePrincipalType appOwnerOrganizationId
+      passwordCredentials[] keyCredentials[] id appId displayName accountEnabled servicePrincipalType appOwnerOrganizationId
       passwordCredentials[].customKeyIdentifier passwordCredentials[].endDateTime
       passwordCredentials[].keyId passwordCredentials[].startDateTime passwordCredentials[].displayName
       keyCredentials[].customKeyIdentifier keyCredentials[].endDateTime keyCredentials[].keyId

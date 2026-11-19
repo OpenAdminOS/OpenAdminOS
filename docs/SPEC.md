@@ -1752,48 +1752,72 @@ Local providers keep the same on-device data boundary.
 
 ### Data policy: data classes and classification (2026-11-18)
 
-Classification runs on this device. Each field has one class, in descending
-sensitivity.
+Classification runs on this device. Each field has one class. The classes
+below are in descending sensitivity.
 
-1. **Credential** covers secrets that grant access, including recovery keys,
-   LAPS and device account passwords, client secrets and hints, tokens, shared
-   secrets, product keys and certificate key material.
-2. **Identity** covers names, UPNs, email addresses, phone numbers, user IDs,
-   and a person's sign-in IP and location.
-3. **Device** covers device names, IDs, serial numbers, IMEI, MEID, MAC addresses
-   and private IP addresses.
-4. **Activity** covers timestamps, statuses, results and app usage without the
-   identity of the person.
-5. **Configuration** covers tenant settings without personal data.
-6. **Public** covers reference material such as Microsoft Learn, web search and
-   public MCP results.
+| Class | What it covers |
+| --- | --- |
+| Credential | Recovery keys, LAPS and device account passwords, client secrets and their hints, tokens, shared secrets, product keys and certificate key material |
+| Identity | Names, UPNs, email addresses, phone numbers, user and group IDs in security policies, sign-in locations, and sign-in and audit actor IP addresses |
+| Security | Conditional Access and named locations, authentication methods and strength policies, security defaults, security baselines, Defender, firewall, disk encryption, attack surface reduction, admin roles and assignments, PIM, cross-tenant access, and identity protection policies |
+| Device | Device names and IDs, serial numbers, IMEI, MEID, MAC addresses and private IP addresses |
+| Activity | Timestamps, statuses, results and app usage without the person's identity |
+| Configuration | Tenant settings outside the Security class |
+| Public | Web search and reference content from catalog servers explicitly marked as public |
 
-The highest sensitivity wins when a field rule and a value detector both
-apply. An unknown Graph field or resource defaults to Identity. Public
-reference results start as Public and can be raised by detection.
+Security posture can reveal how to plan an attack on a tenant. Phase A3 will
+default to masked on hosted providers and allowed on local and confidential
+providers. Phase A4 masking will replace policy names and IDs, named locations
+and their IP ranges, excluded users and groups, and role names and identifiers
+while keeping setting values readable. User and group identifiers keep their
+Identity class and secrets keep their Credential class within security objects.
 
-The [Graph field record](research/graph-field-classes.md) documents the observed
-and documented response shapes. Rules apply to the values that arrive,
-including fields Graph returns outside a requested projection. Paging and delta
-links count as Identity because continuation tokens can contain tenant values.
-Application secret hints and key material, Autopilot product keys and passwords,
-and Wi-Fi and VPN shared secrets count as Credential. Sign-in IP and location,
-Conditional Access user targets, and authentication method target IDs count as
-Identity. Free text such as descriptions, notes, publishers, assignment filter
-rules, redirect URIs, and audit old and new values can be raised by detectors.
+An unmapped Graph field or resource defaults to Identity. Mapped containers
+supply a class to unmapped descendants. An explicit child rule can specialize
+that class, with Credential and Security inheritance preserving the higher
+sensitivity. Null, empty and absent secret values do not add credential counts.
+A returned secret hint counts as Credential when it has a value. Credential
+key matching is anchored to the whole normalized key so metadata such as
+`preSharedKeyIsSet` keeps its own class.
 
-Text checks use recognizable patterns and, in Chat, the active organization's
-local index of known values. A name that the app has never seen cannot be
-detected as a name in free text. An unlabeled, opaque secret can also evade
-pattern matching. Structured field rules cover these values when their paths are
-known.
+Rules apply to response fields that actually arrive, including fields Graph
+returns outside a requested projection. Route normalization and case-insensitive
+lookup preserve original JSON Pointers. Paging and delta links count as Identity
+because continuation tokens can carry tenant values. The device name fields
+`deviceName`, `managedDeviceName` and Entra device `displayName` start as Device.
+The tenant identity index and text detectors run on all of them, so an embedded
+known person's name can raise the value to Identity. Free-text scan rules include
+descriptions, notes, group tags, publishers, assignment filter rules, redirect
+URIs and audit change values. Recognizable credentials can raise any value,
+including a public result. MCP results start as Identity unless the catalog
+marks the server as a public reference.
 
-Classification yields counts and JSON Pointer classes for scalar values, nulls
-and empty containers. In-memory prompt metadata pairs classifications with the
-existing fenced text and retains source read counts separately, since compaction
-or agent transforms can omit or reshape fields. This phase introduces no network
-requests and leaves prompts, provider selection, and sharing behavior as they
-were. Provider tiers, masking, audit decisions and UI are later phases.
+The [Graph field record](research/graph-field-classes.md) tracks observed and
+documented shapes. Revalidate the versioned field map when a Graph beta shape or
+a planner selection changes. Compare official schemas and authorized sample
+responses with the existing map, update the sanitized record and synthetic
+fixtures, run the mapped-field and cache ingestion checks, and increment the
+field map version when classifications change.
+
+A memory-only ledger registers leaf values at model-facing ingress for each
+agent run or Chat conversation. Chat retains values for up to eight recent
+conversations in memory. The host provider decorator scans final system
+and prompt text for raw and JSON-serialized values, then applies credential,
+email and tenant identity checks to the entire request. It exposes counts and
+offsets by request section and source to a host observer. Values shorter than
+six characters match only complete JSON string values. An unfamiliar name and
+an opaque unlabeled secret can evade text detection. A page that exhausts the
+classification budget records the rest of its traversal at the highest class
+already seen, with Identity as the floor. If the ledger cannot retain the
+remainder, the request observer reports a conservative span and marks the
+classification as budget exhausted.
+
+Record IDs and tenant IDs can correlate fields of one record. Phase A4 will
+treat fields that co-occur in a record at that record's highest class when it
+prepares masking. Phase A1 preserves request bytes and does not block, mask or
+reroute provider traffic. Provider routing, masking, audit decisions and UI
+land in later phases. Hosted Nova voice sends from the renderer outside
+`RunLlmApi`. Phase A3 will cover that provider path.
 
 ### Intune Chat and local intelligence
 

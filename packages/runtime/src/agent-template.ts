@@ -37,8 +37,8 @@ import {
   type ServiceId,
 } from "@openadminos/agent-sdk";
 
-import { TEMPLATE_GRAPH_DATA, PROMPT_INSTRUCTION_ROOTS, renderDeep, renderTemplate, renderPromptTemplate, type TemplateContext, type TemplateGraphData } from "./template-engine.js";
-import { countDataClasses, withPromptClassification, type ClassifiedSource } from "./data-classification.js";
+import { PROMPT_INSTRUCTION_ROOTS, renderDeep, renderTemplate, renderPromptTemplate, type TemplateContext } from "./template-engine.js";
+import { registerTenantData } from "./data-classification.js";
 import { stripTenantDataFences, withTenantDataInstructions } from "./tenant-data.js";
 import { confirmationPhraseProblem } from "./confirmation-phrase.js";
 
@@ -493,7 +493,6 @@ function makeTemplateCtx(
   settings: Record<string, unknown>,
   pipeline: PipelineState,
   ctx: RunContext,
-  graphData?: TemplateGraphData,
 ): TemplateContext {
   const instructions = {
     settings,
@@ -508,7 +507,6 @@ function makeTemplateCtx(
   return {
     ...instructions,
     [PROMPT_INSTRUCTION_ROOTS]: instructions,
-    [TEMPLATE_GRAPH_DATA]: graphData,
     ...pipeline,
   };
 }
@@ -525,12 +523,12 @@ async function runPipelineUpTo(
 ): Promise<{ pipeline: PipelineState; settings: Record<string, unknown> }> {
   const settings = resolveSettings(manifest, ctx.settings);
   const pipeline: PipelineState = {};
-  const graphData: TemplateGraphData = { reads: [], paths: new WeakMap() };
+  if (ctx.officeTask) registerTenantData("office:evidence", ctx.officeTask.evidence);
 
   for (const skill of manifest.skills) {
     if (stopBefore(skill)) break;
     const templateCtx = (): TemplateContext =>
-      makeTemplateCtx(manifest, settings, pipeline, ctx, graphData);
+      makeTemplateCtx(manifest, settings, pipeline, ctx);
 
     await ctx.step(skill.label, skill.detail, async () => {
       const output = await runSkill(skill, ctx, templateCtx);
@@ -978,7 +976,9 @@ async function runConnectorSkill(
     { connectorStepId: skill.id },
   );
   const fn = method as (args: Record<string, unknown>) => Promise<unknown>;
-  return await fn(settings.args);
+  const result = await fn(settings.args);
+  registerTenantData(`connector:${settings.connector}.${settings.capability}`, result);
+  return result;
 }
 
 function kebabToCamel(value: string): string {
@@ -990,23 +990,7 @@ async function runGraphSkill(
   ctx: RunContext,
   templateCtx: () => TemplateContext,
 ): Promise<unknown> {
-  const context = templateCtx();
-  const settings = renderDeep(skill.settings, context);
-  const graphData = context[TEMPLATE_GRAPH_DATA];
-  const classify = (path: string, data: unknown) => {
-    const counts = countDataClasses(data, { graphPath: path });
-    graphData?.reads.push({ source: `graph:${path}`, counts });
-  };
-  const rememberPath = (data: unknown): void => {
-    if (graphData && data !== null && typeof data === "object") {
-      graphData.paths.set(data, settings.path);
-      if (Array.isArray(data)) {
-        for (const row of data) {
-          if (row !== null && typeof row === "object") graphData.paths.set(row, settings.path);
-        }
-      }
-    }
-  };
+  const settings = renderDeep(skill.settings, templateCtx());
 
   if (settings.method !== "GET") {
     throw new Error(
@@ -1024,8 +1008,7 @@ async function runGraphSkill(
     (!settings.select || settings.select.length === 0)
   ) {
     const devices = await ctx.graph.listManagedDevices();
-    classify(settings.path, devices);
-    rememberPath(devices);
+    registerTenantData(`graph:${settings.path}`, devices, { graphPath: settings.path });
     ctx.log("info", `Loaded ${devices.length} managed devices.`);
     return devices as ManagedDeviceRecord[];
   }
@@ -1042,7 +1025,6 @@ async function runGraphSkill(
 
   const response = await requestGraphPages({
     graph: ctx.graph,
-    classify,
     path: settings.path,
     query: Object.keys(query).length > 0 ? query : undefined,
     headers: settings.headers,
@@ -1052,7 +1034,6 @@ async function runGraphSkill(
   // paginator returns the complete bounded collection; single-entity
   // responses (for example `GET /me`) still pass through unchanged.
   const unwrapped = unwrapGraphResponse(response);
-  rememberPath(unwrapped);
   if (Array.isArray(unwrapped)) {
     ctx.log(
       "info",
@@ -1069,7 +1050,6 @@ const MAX_GRAPH_AGENT_ITEMS = 100_000;
 
 async function requestGraphPages(input: {
   graph: RunContext["graph"];
-  classify(path: string, data: unknown): void;
   path: string;
   query?: Record<string, string>;
   headers?: Record<string, string>;
@@ -1080,7 +1060,7 @@ async function requestGraphPages(input: {
     query: input.query,
     headers: input.headers,
   });
-  input.classify(input.path, first);
+  registerTenantData(`graph:${input.path}`, first, { graphPath: input.path });
   const firstPage = graphCollectionPage(first);
   if (!firstPage) return first;
 
@@ -1105,7 +1085,7 @@ async function requestGraphPages(input: {
       query: next.query,
       headers: input.headers,
     });
-    input.classify(next.path, payload);
+    registerTenantData(`graph:${next.path}`, payload, { graphPath: next.path });
     const page = graphCollectionPage(payload);
     if (!page) {
       throw new Error(`Graph paging for ${input.path} returned a non-collection response.`);
@@ -1652,14 +1632,13 @@ async function runLlmSkill(
 
   const context = templateCtx();
   const settings = renderDeep(skill.settings, context);
-  const fenced: ClassifiedSource[] = [];
-  const completion = await ctx.llm.complete(withPromptClassification({
-    prompt: renderPromptTemplate(skill.settings.prompt, context, fenced),
+  const completion = await ctx.llm.complete({
+    prompt: renderPromptTemplate(skill.settings.prompt, context),
     system: withTenantDataInstructions(skill.settings.system
-      ? renderPromptTemplate(skill.settings.system, context, fenced) : undefined),
+      ? renderPromptTemplate(skill.settings.system, context) : undefined),
     ...(typeof settings.temperature === "number" ? { temperature: settings.temperature } : {}),
     ...(typeof settings.maxTokens === "number" ? { maxTokens: settings.maxTokens } : {}),
-  }, { fenced, reads: [...(context[TEMPLATE_GRAPH_DATA]?.reads ?? [])] }));
+  });
 
   const cleaned = cleanLlmText(stripTenantDataFences(completion.text));
   ctx.log(

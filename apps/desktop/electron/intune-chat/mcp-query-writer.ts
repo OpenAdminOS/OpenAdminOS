@@ -1,6 +1,5 @@
 import type { RunLlmApi } from "@openadminos/agent-sdk";
 import { fenceTenantData } from "@openadminos/runtime";
-import { withPromptClassification, type ClassificationOptions, type ClassifiedSource } from "@openadminos/runtime/data-classification";
 
 import { cleanMcpDescription, cleanMcpSchema } from "../mcp/host.js";
 import type { McpChatTool } from "./tools.js";
@@ -45,7 +44,6 @@ const EARLIER_RESULT_LIMIT = 20;
 
 export interface McpQueryWriterInput {
   llm: RunLlmApi;
-  identityIndex?: ClassificationOptions["identityIndex"];
   model?: string;
   signal?: AbortSignal;
   /** The admin's current question, as typed or spoken. Never earlier messages. */
@@ -65,16 +63,7 @@ export interface McpQueryWriterInput {
 
 export class McpQueryWriterError extends Error {}
 
-export function buildMcpQueryWriterPrompt(
-  input: Omit<McpQueryWriterInput, "llm" | "model" | "signal">,
-  classified?: ClassifiedSource[],
-): string {
-  const fence = (content: unknown, source: string, publicReference = false) => {
-    if (!classified) return fenceTenantData(content, source);
-    const result = fenceTenantData(content, source, { classification: { publicReference, identityIndex: input.identityIndex } });
-    classified.push({ source, classification: result.classification });
-    return result.text;
-  };
+export function buildMcpQueryWriterPrompt(input: Omit<McpQueryWriterInput, "llm" | "model" | "signal">): string {
   const question = input.question.trim();
   const cut = question.length > QUESTION_CHARS ? `${question.slice(0, QUESTION_CHARS)} [...]` : question;
   const results = input.earlierResults.slice(0, EARLIER_RESULT_LIMIT).map((item) => ({ server: item.serverName, title: item.title, ...(item.url ? { url: item.url } : {}), ...(item.id ? { id: item.id } : {}) }));
@@ -85,13 +74,13 @@ export function buildMcpQueryWriterPrompt(
     itemFilter ? `\nIn ${itemFilter.param}, the fields ${itemFilter.fields.join(" and ")} name one item: compare them only with an ID from the admin's question or an earlier result of the same server.` : "",
   ].join("");
   return [
-    `The admin's question:\n${fence(cut, "chat:admin-question")}`,
-    `Tool: ${input.tool.tool} on ${input.tool.host}. Description and params schema from the server:\n${fence({ description: cleanMcpDescription(input.tool.description), params: cleanMcpSchema(input.tool.inputSchema) ?? { type: "object" } }, `third-party:${input.tool.host}:tool`, true)}${items}`,
+    `The admin's question:\n${fenceTenantData(cut, "chat:admin-question")}`,
+    `Tool: ${input.tool.tool} on ${input.tool.host}. Description and params schema from the server:\n${fenceTenantData({ description: cleanMcpDescription(input.tool.description), params: cleanMcpSchema(input.tool.inputSchema) ?? { type: "object" } }, `third-party:${input.tool.host}:tool`)}${items}`,
     input.tool.queryHint ? `How to fill these params (from OpenAdminOS): ${input.tool.queryHint}` : "",
-    results.length > 0 ? `Earlier results in this answer:\n${fence(results, "third-party:mcp-results", true)}` : "",
-    input.sentQueries.length > 0 ? `Queries already sent in this answer, so ask something else:\n${fence(input.sentQueries, "chat:sent-queries")}` : "",
+    results.length > 0 ? `Earlier results in this answer:\n${fenceTenantData(results, "third-party:mcp-results")}` : "",
+    input.sentQueries.length > 0 ? `Queries already sent in this answer, so ask something else:\n${fenceTenantData(input.sentQueries, "chat:sent-queries")}` : "",
     input.earlierCalls && input.earlierCalls.length > 0
-      ? `Earlier calls of this tool in this answer, with how many records OpenAdminOS listed and the server's result counts. When the question needs records past them, use the tool's paging param, if it has one, to skip the records already listed:\n${fence(input.earlierCalls, "third-party:mcp-result-counts", true)}`
+      ? `Earlier calls of this tool in this answer, with how many records OpenAdminOS listed and the server's result counts. When the question needs records past them, use the tool's paging param, if it has one, to skip the records already listed:\n${fenceTenantData(input.earlierCalls, "third-party:mcp-result-counts")}`
       : "",
     "Params JSON:",
   ].filter(Boolean).join("\n\n");
@@ -100,15 +89,14 @@ export function buildMcpQueryWriterPrompt(
 /** Writes the params of one MCP call. Throws McpQueryWriterError when the reply is not one JSON object. */
 export async function writeMcpQuery(input: McpQueryWriterInput): Promise<Record<string, unknown>> {
   if (!input.question.trim()) throw new McpQueryWriterError("no admin question was given to write it from");
-  const fenced: ClassifiedSource[] = [];
-  const completion = await input.llm.complete(withPromptClassification({
+  const completion = await input.llm.complete({
     system: MCP_QUERY_WRITER_SYSTEM,
-    prompt: buildMcpQueryWriterPrompt(input, fenced),
+    prompt: buildMcpQueryWriterPrompt(input),
     ...(input.model ? { model: input.model } : {}),
     temperature: 0,
     maxTokens: 300,
     ...(input.signal ? { signal: input.signal } : {}),
-  }, { fenced, reads: [] }));
+  });
   const params = parseMcpQueryParams(completion.text);
   if (!params) throw new McpQueryWriterError("the model's reply was not one JSON object of params");
   return params;

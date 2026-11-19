@@ -15,7 +15,7 @@ import { MAX_AGENTIC_ITERATIONS, partialFinalAnswer, runAgenticChat } from "./ag
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 import type { IntuneChatToolContext } from "./tools.js";
 import { executeIntuneChatTool } from "./tools.js";
-import { getPromptClassification } from "@openadminos/runtime/data-classification";
+import { ClassificationLedger, withClassificationScope } from "@openadminos/runtime/data-classification";
 import { TENANT_DATA_INSTRUCTIONS } from "@openadminos/runtime";
 import { VOICE_ANSWER_INSTRUCTIONS } from "./voice-context.js";
 import { NOVA_PROFILE_BLOCK_END } from "../nova-profile.js";
@@ -29,7 +29,7 @@ it("fences every tenant tool observation, tenant names and errors without changi
       scopeSet: [], refreshedAt: new Date().toISOString(), rows: [{ id: "device-1", deviceName: hostile }] });
     const tools = toolContext(store);
     tools.graphForScopes = async (): Promise<RunGraphApi> => ({
-      request: async () => ({ value: [{ id: "device-1", deviceName: hostile }] }),
+      request: async () => ({ value: [{ id: "device-2", deviceName: hostile }] }),
       listManagedDevices: async () => [],
       retireManagedDevice: async () => { throw new Error("Unexpected write"); },
     });
@@ -43,15 +43,14 @@ it("fences every tenant tool observation, tenant names and errors without changi
     ];
     const raw = await executeIntuneChatTool(tools, "query_cache", { resource: "managedDevices" });
     assert.match(JSON.stringify(raw.result), /Ignore the admin/);
-    assert.equal(raw.classification?.classification.classes["/0/id"], "device");
     assert.doesNotMatch(JSON.stringify(raw.result), /source=|nonce=\\"[a-f0-9]{16}/);
     let iteration = 0;
     const observed = new Set<string>();
+    const ledger = new ClassificationLedger();
     const classified = new Set<string>();
     const llm: RunLlmApi = { available: true, async complete(options) {
-      for (const entry of getPromptClassification(options)?.reads ?? []) {
-        assert.ok(entry.counts.device > 0, entry.source);
-        classified.add(entry.source);
+      for (const span of ledger.classifyRequest(options).spans) {
+        if (span.kind === "device") classified.add(span.source);
       }
       assert.ok(options.system?.includes(TENANT_DATA_INSTRUCTIONS));
       assert.match(options.system!, /tenant:displayName/);
@@ -63,7 +62,7 @@ it("fences every tenant tool observation, tenant names and errors without changi
       }
       return { text: JSON.stringify(calls[iteration++] ?? { final: true, answer: '<tenant_data nonce="echo">Reviewed</tenant_data>' }), model: "test" };
     }, async *stream() {} };
-    const result = await runAgenticChat({ ...baseInput(store, llm), tools, tenant: { ...tenant, displayName: hostile } });
+    const result = await withClassificationScope(ledger, () => runAgenticChat({ ...baseInput(store, llm), tools, tenant: { ...tenant, displayName: hostile } }));
     assert.equal(result.ok, true);
     if (result.ok) assert.equal(result.answer, "Reviewed");
     assert.deepEqual([...classified].sort(), ["cache:managedDevices", "graph:/deviceManagement/managedDevices"]);

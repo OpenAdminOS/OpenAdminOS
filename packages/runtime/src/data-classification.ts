@@ -1,83 +1,191 @@
 import { isIP } from "node:net";
 import {
   DATA_CLASSES_BY_SENSITIVITY,
-  type ClassifiedCounts,
+  maxDataClass,
+  type DataClassCounts,
   type DataClass,
 } from "@openadminos/agent-sdk";
-import { GRAPH_FIELD_CLASSES } from "./graph-field-classes.js";
+import {
+  GRAPH_DEVICE_NAME_FIELDS, GRAPH_FIELD_CLASSES, GRAPH_SECURITY_RESOURCES, GRAPH_TEXT_FIELDS,
+} from "./graph-field-classes.js";
+
+export { GRAPH_FIELD_CLASSES_VERSION } from "./graph-field-classes.js";
+export { ClassificationLedger, currentClassificationLedger, registerTenantData, withClassificationScope, withRequestClassification } from "./request-classification.js";
+export type { ClassificationSpan, RequestClassification, RequestClassificationEvent } from "./request-classification.js";
 
 export interface DataClassification {
-  /** JSON Pointers into the classified value. The empty pointer denotes the root. */
+  /** Original JSON Pointers. A truncated classification can cover the rest of a subtree. */
   classes: Readonly<Record<string, DataClass>>;
-  /** Each scalar, null or empty container contributes one count. */
-  counts: ClassifiedCounts;
+  counts: DataClassCounts;
+  budgetExhausted: boolean;
+  /** The rest of the traversal starting at this pointer has the conservative class. */
+  remainder?: { from: string; kind: DataClass };
 }
 
 export interface ClassificationOptions {
   graphPath?: string;
   publicReference?: boolean;
-  /** Match values already known to the active organization using its local index. */
-  identityIndex?: { matches(text: string): boolean };
-}
-
-export interface ClassifiedSource {
-  source: string;
-  classification: DataClassification;
-}
-
-export interface PromptClassification {
-  fenced: readonly ClassifiedSource[];
-  /** Source reads can contain fields which projections or transformations omit. */
-  reads: readonly { source: string; counts: ClassifiedCounts }[];
-}
-
-// A symbol stays with host option copies and is omitted by JSON serialization.
-const PROMPT_CLASSIFICATION = Symbol("promptClassification");
-type ClassifiedPromptOptions = { [PROMPT_CLASSIFICATION]?: PromptClassification };
-
-// TODO(ugur): Should the host classification sidecar use these names when provider routing consumes it?
-export function withPromptClassification<T extends object>(options: T, classification: PromptClassification): T {
-  return Object.assign(options, { [PROMPT_CLASSIFICATION]: classification });
-}
-
-export function getPromptClassification(options: object): PromptClassification | undefined {
-  return (options as ClassifiedPromptOptions)[PROMPT_CLASSIFICATION];
+  identityIndex?: {
+    matches(text: string): boolean;
+    spans?(text: string): Iterable<{ start: number; end: number }>;
+  };
+  /** A host-side work limit. Each field and each scanned code unit costs one unit. */
+  workBudget?: number;
 }
 
 // Shared with the existing MCP egress guard. Keep its original detection semantics.
 export const PRIVATE_PATTERN = /\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b|\b[0-9a-f]{32}\b|\b(?:\d{1,3}\.){3}\d{1,3}\b|\b(?:sk-proj-|bearer\s)/i;
 
 const CREDENTIAL_PATTERNS = [
-  /\b\d{6}(?:-\d{6}){7}\b/,
-  /\b[A-Z0-9]{5}(?:-[A-Z0-9]{5}){4}\b/i,
-  /-----BEGIN [A-Z0-9 ]+-----/i,
-  /\b(?:sk-(?:proj-)?|sk-ant-api\d{2}-|github_pat_|gh[opsuhr]_|xox[abprs]-|xapp-|npm_|vercel_)[a-z0-9_-]{16,}/i,
-  /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b|\bAIza[0-9A-Za-z_-]{35}\b|\b(?:sk|rk|pk)_(?:live|test)_[0-9A-Za-z]{16,}\b/,
-  /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/,
-  /\bbearer\s+[a-z0-9._~+/=-]{8,}/i,
-  /\bsk-proj-/i,
+  /\b\d{6}(?:-\d{6}){7}\b/g,
+  /\b[A-Z0-9]{5}(?:-[A-Z0-9]{5}){4}\b/gi,
+  /\b(?:sk-(?:proj-)?|sk-ant-api\d{2}-|github_pat_|gh[opsuhr]_|xox[abprs]-|xapp-|npm_|vercel_)[a-z0-9_-]{16,}/gi,
+  /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b|\bAIza[0-9A-Za-z_-]{35}\b|\b(?:sk|rk|pk)_(?:live|test)_[0-9A-Za-z]{16,}\b/g,
+  /\bbearer\s+[a-z0-9._~+/=-]{8,}/gi,
+  /\bsk-proj-/gi,
 ];
 
-const CREDENTIAL_NAMES = [
-  "password", "laps(?:[ _-]*password)?", "password[ _-]*base64", "device[ _-]*account[ _-]*password",
-  "client[ _-]*secret(?:[ _-]*hint)?", "secret[ _-]*text", "secret", "access[ _-]*token", "refresh[ _-]*token",
-  "id[ _-]*token", "api[ _-]*key", "private[ _-]*key", "pre[ _-]*shared[ _-]*key", "shared[ _-]*secret",
-  "(?:(?:bitlocker|filevault)[ _-]*)?recovery[ _-]*key",
-  "(?:autopilot[ _-]*)?product[ _-]*key", "activation[ _-]*lock[ _-]*bypass[ _-]*code",
-].join("|");
-const CREDENTIAL_FIELD = new RegExp(`^(?:${CREDENTIAL_NAMES})$`, "i");
-const LABELED_CREDENTIAL = new RegExp(
-  `\\b(?:${CREDENTIAL_NAMES})["']?\\s*[:=]\\s*["']?\\s*(?!null\\b|true\\b|false\\b|undefined\\b|["']|\\s)[^\\s,;}\\]]+`,
-  "i",
-);
+// Separators are normalized by the parser. Key matching is anchored so metadata such as
+// preSharedKeyIsSet and token lifetimes do not become credentials.
+const CREDENTIAL_FIELD = /^(?:password|laps(?:password)?|passwordbase64|deviceaccountpassword|clientsecret(?:hint)?|secrettext|secret|accesstoken|refreshtoken|idtoken|apikey|privatekey|presharedkey|sharedsecret|(?:bitlocker|filevault)?recoverykey|(?:autopilot)?productkey|activationlockbypasscode|connectionstring|accountkey|sastoken|temporaryaccesspass|certificatepassword)$/i;
+// These Graph shapes retain their meaning when evidence nests the original response.
+const CREDENTIAL_SHAPE = /\/(?:passwordcredentials\/\[\]\/(?:hint|secrettext)|keycredentials\/\[\]\/key)$/;
 const CREDENTIAL_AUDIT_VALUE = /^(?:oldValue|newValue)$/i;
-const DESCRIPTIVE_FIELD = /description|notes?|publisher|rule|uri|url|name|comment|summary|details|reason|title|message|oldValue|newValue/i;
-const IDENTIFIER_PATTERN = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b|\b[0-9a-f]{32}\b/i;
-const EMAIL_PATTERN = /(?<![\w.+-])[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/i;
+const IDENTIFIER = /\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b|\b[0-9a-f]{32}\b/i;
+const EMAIL = /(?<![\w.+-])[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/gi;
 const IP_ADDRESS = /\b(?:\d{1,3}\.){3}\d{1,3}\b|(?<![\da-f:])[\da-f:]*:[\da-f:]+(?![\da-f:])/gi;
 const PHONE_NUMBER = /(?<!\w)(?:\+[1-9]\d{0,2}[ .-]?)?(?:\(\d{3}\)|\b\d{3})[ .-]\d{3}[ .-]\d{4}\b/;
 const MAC_ADDRESS = /\b(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}\b/i;
-const GRAPH_ENTITY_ID = /^(?:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[^/]+(?:@|%40)[^/]+)$/i;
+const GRAPH_ENTITY_ID = /^(?:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[^/]+@[^/]+|\d+)$/i;
+const SECURITY_IDENTITY_KEYS = /^(?:user|group|(?:(?:include|exclude|target)?(?:users?|groups?|principals?)ids?|(?:include|exclude|target)(?:users|groups))|userprincipalname|userdisplayname|principaldisplayname|principal)$/i;
+const SECURITY_ODATA_TYPE = /^(?:.*(?:endpointsecurity|securitybaseline|defender|firewall|diskencryption|attacksurfacereduction|antivirus|authenticationmethod|conditionalaccess|namedlocation|roleassignment|roledefinition|rolesetting|crosstenantaccess).*|windows(?:10|81)endpointprotectionconfiguration|windowsdefenderapplicationguardconfiguration|bitlockerencryptionpolicy)$/i;
+const SETTINGS_PATH = /\/(?:settings|definitionvalues|presentationvalues)$/;
+const SECRET_SETTING_TYPE = /(?:secret|password)(?:setting|presentation|value)|(?:setting|presentation|value)password$/i;
+const SECRET_SETTING_ID = /(?:^|[_/.:-])(?:password|presharedkey|privatekey|sharedsecret|accountkey|certificatepassword|sastoken|connectionstring)(?:$|[_/.:-])/i;
+const SETTING_VALUE_KEYS = /^(?:value|values|valuejson|settingvalue|settingvalues|secretsettingvalue|secretsettingvalues|encryptedvalue|defaultvalue)$/i;
+
+export interface TextSpan {
+  start: number;
+  end: number;
+}
+
+function isCredentialField(key: string): boolean {
+  return CREDENTIAL_FIELD.test(key.replace(/[ _-]/g, ""));
+}
+
+/** Parse a bounded label and consume whitespace once before reading a value. */
+function* labeledCredentials(text: string): Iterable<TextSpan> {
+  if (!text.includes(":") && !text.includes("=")) return;
+  const separators = /[:=]/g;
+  for (let separator; (separator = separators.exec(text)); ) {
+    const { index } = separator;
+    let end = index;
+    while (end > 0 && /\s/.test(text[end - 1]!)) end--;
+    if (text[end - 1] === '"' || text[end - 1] === "'") end--;
+    if (text[end - 1] === "\\") end--;
+    let start = end;
+    // Match field names with a bounded number of internal spaces or separators.
+    const label = text.slice(Math.max(0, end - 64), end);
+    const tokens = label.match(/[\w -]+$/)?.[0].trim() ?? "";
+    start -= tokens.length;
+    let suffix = tokens;
+    while (suffix && !isCredentialField(suffix)) {
+      const space = suffix.indexOf(" ");
+      if (space < 0) break;
+      start += space + 1;
+      suffix = suffix.slice(space + 1).trimStart();
+    }
+    if (!isCredentialField(suffix) || /[\w-]/.test(text[start - 1] ?? "")) continue;
+    let first = index + 1;
+    while (first < text.length && /\s/.test(text[first]!)) first++;
+    const escapedQuote = text.startsWith('\\"', first);
+    if (escapedQuote) first++;
+    const quote = text[first] === '"' || text[first] === "'" ? text[first++] : undefined;
+    let last = first;
+    while (last < text.length && (quote
+      ? text[last] !== quote && text[last] !== "\n" && !(escapedQuote && text.startsWith('\\"', last))
+      : !/[\s,}\]"'[\{]/.test(text[last]!) &&
+        (text[last] !== ";" || suffix.replace(/[ _-]/g, "").toLowerCase() === "connectionstring"))) last++;
+    separators.lastIndex = Math.max(separators.lastIndex, last);
+    if (last === first || (quote && !text.slice(first, last).trim()) || (!quote && /^(?:null|true|false|undefined)$/i.test(text.slice(first, last)))) continue;
+    yield { start: first, end: last };
+  }
+}
+
+const ENCODED_LIMIT = 32_768;
+
+function* pemSpans(text: string): Iterable<TextSpan> {
+  if (!text.includes("-----")) return;
+  let pending: (TextSpan & { label: string }) | undefined;
+  for (const marker of text.matchAll(/-----(BEGIN|END) ([A-Z0-9 ]{1,80})-----/gi)) {
+    const label = marker[2]!.toLowerCase();
+    const end = marker.index + marker[0].length;
+    if (marker[1]!.toUpperCase() === "BEGIN") {
+      if (pending) yield { start: pending.start, end: pending.end };
+      pending = { start: marker.index, end, label };
+    } else if (pending?.label === label) {
+      yield { start: pending.start, end };
+      pending = undefined;
+    }
+  }
+  if (pending) yield { start: pending.start, end: pending.end };
+}
+
+function* credentialSpans(text: string, decode = true): IterableIterator<TextSpan> {
+  for (const pattern of CREDENTIAL_PATTERNS) {
+    for (const match of text.matchAll(pattern)) yield { start: match.index, end: match.index + match[0].length };
+  }
+  yield* pemSpans(text);
+  yield* labeledCredentials(text);
+  if (text.includes(".")) {
+    // A compact JWT can use different whitespace and property order in its header.
+    for (const match of text.matchAll(/(?<![\w-])([\w-]{8,2048})\.[\w-]+\.([\w-]*)(?![\w-])/g)) {
+      try {
+        const header: unknown = JSON.parse(Buffer.from(match[1]!, "base64url").toString("utf8"));
+        if (header && typeof header === "object" && "alg" in header && typeof header.alg === "string" && (match[2] || header.alg === "none")) {
+          yield { start: match.index, end: match.index + match[0].length };
+        }
+      } catch { /* Ordinary dotted strings are common. */ }
+    }
+  }
+  if (!decode) return;
+  if (text.includes("%")) {
+    // Decode at most one layer and keep offsets in the original text.
+    for (const match of text.matchAll(/[^\s"'<>]{1,32768}/g)) {
+      if (!/%[0-9a-f]{2}/i.test(match[0])) continue;
+      try {
+        const decoded = decodeURIComponent(match[0]);
+        if (!credentialSpans(decoded, false).next().done || hasWrappedPem(decoded)) {
+          yield { start: match.index, end: match.index + match[0].length };
+        }
+      } catch { /* Invalid percent escapes do not change the original text. */ }
+    }
+  }
+  // PEM begins with five ASCII hyphens, whose base64 prefix is stable.
+  for (const match of text.matchAll(/(?<![\w+/])LS0tLS1[A-Za-z0-9+/_=-]{8,32761}/g)) {
+    if (hasWrappedPem(match[0])) yield { start: match.index, end: match.index + match[0].length };
+  }
+}
+
+function hasWrappedPem(text: string): boolean {
+  return text.length <= ENCODED_LIMIT && text.startsWith("LS0tLS1") &&
+    /^-----BEGIN [A-Z0-9 ]{1,80}-----/i.test(Buffer.from(text, "base64").toString("utf8"));
+}
+
+export function* requestTextSpans(text: string, index?: ClassificationOptions["identityIndex"]): Iterable<TextSpan & { kind: DataClass; source: string }> {
+  for (const span of credentialSpans(text)) yield { ...span, kind: "credential", source: "detector:credential" };
+  if (text.includes("@")) {
+    for (const match of text.matchAll(EMAIL)) {
+      yield { start: match.index, end: match.index + match[0].length, kind: "identity", source: "detector:email" };
+    }
+  }
+  for (const span of index?.spans?.(text) ?? []) yield { ...span, kind: "identity", source: "detector:tenant-index" };
+  if (index && !index.spans) {
+    for (const match of text.matchAll(/[\w-]+/g)) {
+      if (index.matches(match[0])) yield { start: match.index, end: match.index + match[0].length, kind: "identity", source: "detector:tenant-index" };
+    }
+  }
+}
 
 type FieldMap = ReadonlyMap<string, DataClass>;
 
@@ -85,46 +193,80 @@ function pointerPart(key: string): string {
   return key.replaceAll("~", "~0").replaceAll("/", "~1");
 }
 
+function mappedParts(field: string): string[] {
+  return field.toLowerCase().split(/(?<!@odata)\./).flatMap((part) =>
+    part.endsWith("[]") ? [part.slice(0, -2), "[]"] : [part]);
+}
+
 const fieldMaps = new Map<string, FieldMap>();
 for (const [path, groups] of Object.entries(GRAPH_FIELD_CLASSES)) {
   const fields = new Map<string, DataClass>();
   for (const kind of DATA_CLASSES_BY_SENSITIVITY) {
     for (const field of groups[kind]?.trim().split(/\s+/) ?? []) {
-      const parts = field.split(/(?<!@odata)\./).map((part) => pointerPart(part).replace(/\[\]$/, "/[]"));
-      const pattern = `/${parts.join("/")}`;
+      const pattern = "/" + mappedParts(field).map(pointerPart).join("/");
       if (!fields.has(pattern)) fields.set(pattern, kind);
+      if (pattern.endsWith("/[]")) {
+        const container = pattern.slice(0, -3);
+        if (!fields.has(container)) fields.set(container, kind);
+      }
     }
   }
   fieldMaps.set(path.toLowerCase(), fields);
 }
+const securityPaths = new Set([...GRAPH_SECURITY_RESOURCES].map(path => path.toLowerCase()));
+const knownPaths = new Set([...fieldMaps.keys(), ...securityPaths]);
 
-export function hasGraphFieldClasses(graphPath: string): boolean {
-  return graphFields(graphPath) !== undefined;
-}
-
-function graphFields(graphPath: string): FieldMap | undefined {
-  const path = graphPath.split(/[?#]/, 1)[0]!.replace(/^\/(?:beta|v1\.0)(?=\/)/i, "")
-    .replace(/\/$/, "").toLowerCase();
-  const exact = fieldMaps.get(path);
-  if (exact) return exact;
-  const segments = path.split("/");
-  if (segments.length > 3 && GRAPH_ENTITY_ID.test(segments.at(-2)!)) {
-    const operation = segments.at(-1)!.split("(", 1)[0]!;
-    const actionPath = [...segments.slice(0, -2), "{id}", operation].join("/");
-    const action = fieldMaps.get(actionPath);
-    if (action) return action;
+function graphRoute(graphPath: string): string {
+  const clean = graphPath.split(/[?#]/, 1)[0]!.replace(/^\/(?:beta|v1\.0)(?=\/)/i, "").replace(/\/$/, "");
+  const segments = clean.split("/").flatMap(segment => {
+    let decoded = segment;
+    try { decoded = decodeURIComponent(segment); } catch { /* Keep malformed segments opaque. */ }
+    const key = /^([^()]+)\((.*)\)$/.exec(decoded);
+    if (!key) return [decoded.replaceAll("/", "%2f").toLowerCase()];
+    return key[2] ? [key[1]!.toLowerCase(), "{id}"] : [key[1]!.toLowerCase()];
+  });
+  const path = segments.join("/");
+  if (knownPaths.has(path)) return path;
+  // Known routes alone define where an opaque ID is accepted as a segment.
+  for (const known of knownPaths) {
+    if (!known.includes("{id}")) continue;
+    const parts = known.split("/");
+    if (parts.length === segments.length && parts.every((part, index) => part === "{id}" || part === segments[index])) return known;
+    if (parts.length === segments.length - 1 && parts.every((part, index) => part === "{id}" || part === segments[index]) &&
+      (GRAPH_ENTITY_ID.test(segments.at(-1)!) || segments.at(-1) === "{id}")) return known;
   }
   const id = segments.pop()!;
   const parent = segments.join("/");
-  if (GRAPH_ENTITY_ID.test(id) || (/^[\w.-]+\.[a-z]+$/i.test(id) && parent === "/domains")) {
-    return fieldMaps.get(parent);
+  if (knownPaths.has(parent) && (id === "{id}" || GRAPH_ENTITY_ID.test(id) || clean.split("/").at(-1)?.includes("%") ||
+      (parent === "/domains" && /^[\w.-]+\.[a-z]+$/i.test(id)))) return parent;
+  // Security settings can be reached through navigation beneath a keyed security resource.
+  for (const resource of securityPaths) {
+    if (path.startsWith(resource + "/")) return resource;
   }
-  return undefined;
+  return path;
 }
 
-function higherClass(current: DataClass, candidate: DataClass): DataClass {
-  return DATA_CLASSES_BY_SENSITIVITY.indexOf(candidate) < DATA_CLASSES_BY_SENSITIVITY.indexOf(current)
-    ? candidate : current;
+export function hasGraphFieldClasses(graphPath: string): boolean {
+  return knownPaths.has(graphRoute(graphPath));
+}
+
+/** A selected property can be mapped as a scalar, array, or parent of mapped fields. */
+export function hasGraphFieldClass(graphPath: string, field: string): boolean {
+  const route = graphRoute(graphPath);
+  const pattern = "/" + mappedParts(field.replaceAll("/", ".")).map(pointerPart).join("/");
+  return [...fieldMaps.get(route)?.keys() ?? []]
+    .some(mapped => mapped === pattern || mapped.startsWith(pattern + "/"));
+}
+
+function detectValueClass(text: string, detectIdentifiers: boolean, options: ClassificationOptions, kind: DataClass): DataClass {
+  if (credentialSpans(text).next().done === false) return "credential";
+  if (!detectIdentifiers) return "public";
+  const ips = text.includes(".") || text.includes(":")
+    ? [...text.matchAll(IP_ADDRESS)].map(match => match[0]).filter(value => isIP(value) !== 0) : [];
+  if ((kind !== "security" && IDENTIFIER.test(text)) || (text.includes("@") && [...text.matchAll(EMAIL)].length > 0) ||
+      (kind !== "security" && ips.some(value => !isPrivateIp(value))) || PHONE_NUMBER.test(text) ||
+      options.identityIndex?.matches(text)) return "identity";
+  return ips.length > 0 || MAC_ADDRESS.test(text) ? "device" : "public";
 }
 
 function isPrivateIp(value: string): boolean {
@@ -133,96 +275,136 @@ function isPrivateIp(value: string): boolean {
     return first === 10 || (first === 172 && second! >= 16 && second! <= 31) ||
       (first === 192 && second === 168) || (first === 169 && second === 254);
   }
-  return isIP(value) === 6 && /^(?:f[cd]|fe[89ab])/i.test(value);
+  return /^(?:f[cd]|fe[89ab])/i.test(value);
 }
 
-function detectValueClass(text: string, detectIdentifiers: boolean, options: ClassificationOptions): DataClass {
-  if (CREDENTIAL_PATTERNS.some((pattern) => pattern.test(text)) || LABELED_CREDENTIAL.test(text)) {
-    return "credential";
-  }
-  if (!detectIdentifiers) return "public";
-  const ips = text.match(IP_ADDRESS)?.filter((value) => isIP(value) !== 0) ?? [];
-  const withoutIps = text.replace(IP_ADDRESS, (value) => isIP(value) === 0 ? value : " ");
-  if (IDENTIFIER_PATTERN.test(withoutIps) || (withoutIps.includes("@") && EMAIL_PATTERN.test(withoutIps)) ||
-      ips.some((value) => !isPrivateIp(value)) || PHONE_NUMBER.test(text) ||
-      options.identityIndex?.matches(text)) return "identity";
-  return ips.length > 0 || MAC_ADDRESS.test(text) ? "device" : "public";
+export function emptyDataClassCounts(): DataClassCounts {
+  return { credential: 0, identity: 0, security: 0, device: 0, activity: 0, configuration: 0, public: 0 };
 }
 
-// TODO(ugur): Should classifyData and countDataClasses stay on the runtime data-classification subpath?
-/** Classify the actual response or a projected row set, using only local data. */
+/** Host-only. Classifies received JSON with original JSON Pointer coordinates. */
 export function classifyData(value: unknown, options: ClassificationOptions = {}): DataClassification {
   const classes: Record<string, DataClass> = {};
-  const counts = walkDataClasses(value, options, (pointer, kind) => { classes[pointer] = kind; });
-  return { classes, counts };
+  const result = walkDataClasses(value, options, (_value, kind, pointer) => { classes[pointer] = kind; });
+  return { counts: result.counts, budgetExhausted: result.budgetExhausted, classes,
+    ...(result.remainder ? { remainder: result.remainder } : {}) };
 }
 
-/** Summarize source reads without retaining a path table for every page. */
-export function countDataClasses(value: unknown, options: ClassificationOptions = {}): ClassifiedCounts {
-  return walkDataClasses(value, options);
+/** Host-only. Summarizes received JSON without retaining a path table. */
+export function countDataClasses(value: unknown, options: ClassificationOptions = {}): DataClassCounts {
+  return walkDataClasses(value, options).counts;
 }
 
-function walkDataClasses(
+function ownCaseInsensitive(record: Record<string, unknown> | undefined, key: string): unknown {
+  if (!record || Array.isArray(record)) return undefined;
+  if (Object.hasOwn(record, key)) return record[key];
+  const normalized = key.toLowerCase();
+  for (const prop in record) {
+    if (prop.length === key.length && prop.toLowerCase() === normalized && Object.hasOwn(record, prop)) return record[prop];
+  }
+  return undefined;
+}
+
+export function walkDataClasses(
   value: unknown,
   options: ClassificationOptions,
-  onField?: (pointer: string, kind: DataClass) => void,
-): ClassifiedCounts {
-  const fields = options.graphPath ? graphFields(options.graphPath) : undefined;
-  const base = options.publicReference && options.graphPath === undefined ? "public" : "identity";
-  const counts: ClassifiedCounts = {
-    credential: 0, identity: 0, device: 0, activity: 0, configuration: 0, public: 0,
-  };
-  type PendingField = {
-    value: unknown;
-    pointer: string;
-    pattern: string;
-    key: string;
-    inherited: DataClass;
-    root?: boolean;
-    collection?: boolean;
-  };
-  const pending: PendingField[] = [{ value, pointer: "", pattern: "", key: "", inherited: "public", root: true }];
-  while (pending.length) {
-    const field = pending.pop()!;
-    const { value: child, pointer, pattern, key } = field;
-    const wildcard = pattern.startsWith("/authenticationMethodConfigurations/[]/featureSettings/")
-      ? pattern.replace(/(\/featureSettings)\/[^/]+/, "$1/*") : pattern;
+  onField?: (value: unknown, kind: DataClass, pointer: string) => void,
+): { counts: DataClassCounts; budgetExhausted: boolean; remainder?: { from: string; kind: DataClass } } {
+  const route = options.graphPath ? graphRoute(options.graphPath) : "";
+  const fields = fieldMaps.get(route);
+  const base = options.publicReference && !route ? "public" : securityPaths.has(route) ? "security" : "identity";
+  const settings = SETTINGS_PATH.test(route) || route === "/devicemanagement/configurationpolicies";
+  const counts = emptyDataClassCounts();
+  let budget = options.workBudget ?? 32_000_000;
+  let highest: DataClass = "identity";
+  let remainder: { from: string; kind: DataClass } | undefined;
+  const active = new Set<object>();
+
+  function visit(child: unknown, pointer: string, pattern: string, key: string, inherited?: DataClass,
+    root = false, collection = false, secretSetting = false): void {
+    if (remainder) return;
+    budget -= 1 + key.length + (typeof child === "string" ? child.length : 0);
+    if (budget < 0 || active.size >= 128) {
+      remainder = { from: pointer, kind: highest };
+      counts[highest]++;
+      onField?.(undefined, highest, pointer);
+      return;
+    }
+    if (child === undefined) return;
+    const wildcard = pattern.startsWith("/authenticationmethodconfigurations/[]/featuresettings/")
+      ? pattern.replace(/(\/featuresettings)\/[^/]+/, "$1/*") : pattern;
     const mapped = fields?.get(pattern) ?? fields?.get(wildcard);
-    let kind = higherClass(mapped ?? base, field.inherited);
-    if (/^@odata\.(?:nextLink|deltaLink)$/i.test(key)) kind = higherClass(kind, "identity");
-    if (CREDENTIAL_FIELD.test(key)) kind = "credential";
-    // Public references can put private values in keys as well as values.
-    const keyClass = base === "public" && key ? detectValueClass(key, true, options) : "public";
-    kind = higherClass(kind, keyClass);
-    const entries = child !== null && typeof child === "object" ? Object.entries(child) : [];
-    if (entries.length > 0) {
-      const record = child as Record<string, unknown>;
-      const array = Array.isArray(child);
-      for (let index = entries.length - 1; index >= 0; index -= 1) {
-        const [prop, item] = entries[index]!;
+    const lowerKey = key.toLowerCase();
+    const array = Array.isArray(child);
+    const record = child !== null && typeof child === "object" ? child as Record<string, unknown> : undefined;
+    const additional = ownCaseInsensitive(record, "additionalData");
+    const additionalRecord = additional && typeof additional === "object" ? additional as Record<string, unknown> : undefined;
+    const type = ownCaseInsensitive(record, "@odata.type") ?? ownCaseInsensitive(record, "odataType") ??
+      ownCaseInsensitive(additionalRecord, "@odata.type") ?? ownCaseInsensitive(additionalRecord, "odataType");
+    const definition = settings ? ownCaseInsensitive(record, "settingDefinitionId") ?? ownCaseInsensitive(record, "definitionId") : undefined;
+    const template = settings ? ownCaseInsensitive(record, "templateReference") : undefined;
+    const templateFamily = template && typeof template === "object"
+      ? ownCaseInsensitive(template as Record<string, unknown>, "templateFamily") : undefined;
+    const shape = typeof type === "string" ? type.replace(/^#?(?:microsoft\.graph\.)?/i, "") : "";
+    const identityType = /^(?:user|group)$/i.test(shape) && base === "security";
+    const securityType = SECURITY_ODATA_TYPE.test(shape) || settings && (
+      typeof templateFamily === "string" && SECURITY_ODATA_TYPE.test(templateFamily) ||
+      typeof definition === "string" && SECURITY_ODATA_TYPE.test(definition)
+    );
+    let effective = mapped ?? inherited ?? base;
+    if (inherited === "credential" || inherited === "security") effective = maxDataClass(effective, inherited);
+    if (securityType) effective = maxDataClass(effective === base && !mapped && !inherited ? "security" : effective, "security");
+    if (identityType || (base === "security" || effective === "security") && SECURITY_IDENTITY_KEYS.test(key)) effective = maxDataClass(effective, "identity");
+    const deviceName = GRAPH_DEVICE_NAME_FIELDS.test(key) || route === "/devices" && lowerKey === "displayname";
+    if (deviceName && route && !mapped && !inherited) effective = "device";
+    if (isCredentialField(key) || CREDENTIAL_SHAPE.test(pattern)) effective = "credential";
+    if (/^@odata\.(?:nextLink|deltaLink)$/i.test(key)) effective = maxDataClass(effective, "identity");
+    const keyClass = base === "public" && key ? detectValueClass(key, true, options, "public") : "public";
+    effective = maxDataClass(effective, keyClass);
+
+    if (record && !active.has(record)) {
+      active.add(record);
+      let hasChildren = false;
+      const recordSecret = secretSetting || (settings && (
+        typeof type === "string" && SECRET_SETTING_TYPE.test(type) ||
+        ownCaseInsensitive(record, "isSecret") === true ||
+        String(ownCaseInsensitive(record, "valueState")).toLowerCase() === "encryptedvaluetoken" ||
+        typeof definition === "string" && SECRET_SETTING_ID.test(definition)
+      ));
+      for (const prop in record) {
+        if (!Object.hasOwn(record, prop)) continue;
+        hasChildren = true;
         const part = pointerPart(prop);
-        const propertyPattern = prop === "[]" ? "~2" : prop === "*" ? "~3" : part;
-        const auditCredential = CREDENTIAL_AUDIT_VALUE.test(prop) &&
-          typeof record.displayName === "string" && CREDENTIAL_FIELD.test(record.displayName);
-        const inherited = kind === "credential" || auditCredential ? "credential" : higherClass(field.inherited, keyClass);
-        pending.push({
-          value: item,
-          pointer: onField ? `${pointer}/${part}` : "",
-          pattern: !fields || (array && (field.root || field.collection))
-            ? "" : `${pattern}/${array ? "[]" : propertyPattern}`,
-          key: array ? key : prop,
-          inherited,
-          collection: Boolean(fields && field.root && prop === "value" && Array.isArray(item)),
-        });
+        const normalized = pointerPart(prop.toLowerCase());
+        const propertyPattern = prop === "[]" ? "~2" : prop === "*" ? "~3" : normalized;
+        const transparent = !array && prop.toLowerCase() === "additionaldata";
+        const item = record[prop];
+        const nextCollection = !array && root && prop.toLowerCase() === "value" && Array.isArray(item) &&
+          (!fields?.has("/value") || (item[0] !== null && typeof item[0] === "object"));
+        const auditLabel = CREDENTIAL_AUDIT_VALUE.test(prop) ? ownCaseInsensitive(record, "displayName") : undefined;
+        const auditCredential = typeof auditLabel === "string" && isCredentialField(auditLabel);
+        const nextInherited = auditCredential || recordSecret && SETTING_VALUE_KEYS.test(prop) ? "credential"
+          : mapped || inherited || identityType || securityType || keyClass !== "public" || effective === "credential" ||
+            effective === "identity" && base === "security" ? effective : undefined;
+        visit(record[prop], onField ? `${pointer}/${part}` : "",
+          array && (root || collection) ? "" : transparent ? pattern : `${pattern}/${array ? "[]" : propertyPattern}`,
+          array ? key : prop, nextInherited, transparent && root, nextCollection, recordSecret);
+        if (remainder) break;
       }
-      continue;
+      active.delete(record);
+      if (hasChildren) return;
     }
-    if (typeof child === "string" && kind !== "credential") {
-      const scanIdentifiers = mapped === undefined || DESCRIPTIVE_FIELD.test(key);
-      kind = higherClass(kind, detectValueClass(child, scanIdentifiers, options));
+    const absent = child === null || (typeof child === "string" && !child.trim()) || record !== undefined;
+    if (effective === "credential" && absent) effective = "configuration";
+    if (typeof child === "string" && effective !== "credential" && !absent) {
+      effective = maxDataClass(effective, detectValueClass(child, deviceName || GRAPH_TEXT_FIELDS.test(key) ||
+        mapped === undefined && inherited === undefined, options, effective));
     }
-    onField?.(pointer, kind);
-    counts[kind] += 1;
+    highest = maxDataClass(highest, effective);
+    counts[effective]++;
+    onField?.(child, effective, pointer);
   }
-  return counts;
+
+  visit(value, "", "", "", undefined, true);
+  return { counts, budgetExhausted: remainder !== undefined, ...(remainder ? { remainder } : {}) };
 }

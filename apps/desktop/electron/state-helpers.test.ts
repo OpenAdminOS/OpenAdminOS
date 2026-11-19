@@ -1,3 +1,4 @@
+import { ClassificationLedger, withClassificationScope } from "@openadminos/runtime/data-classification";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
@@ -8,6 +9,7 @@ import {
   sanitizeSavedAppRegistrations,
   tokenCacheForPartition,
   tokenCachePartition,
+  createGraphWithLegacyDeviceClassification,
 } from "./state-helpers.js";
 import { GRAPH_CLI_CLIENT_ID, OPENADMINOS_CLIENT_ID } from "@openadminos/runtime";
 
@@ -49,22 +51,6 @@ it("complete preload passes the old page/row caps and deduplicates IDs", async (
   }} as unknown as RunGraphApi;
   const result = await fetchGraphCachePages(graph, {path:"/users"}, undefined, true);
   assert.equal(requests,12); assert.equal(result.rows.length,1201); assert.equal(result.pageLimitReached,false);
-});
-
-it("classifies cache pages before discarding paging metadata or applying a row cap", async () => {
-  let requests = 0;
-  const graph = { request: async () => {
-    requests += 1;
-    return {
-      value: [{ productKey: "fixture-one" }, { productKey: "fixture-two" }],
-      "@odata.nextLink": "https://graph.microsoft.com/beta/deviceManagement/windowsAutopilotDeviceIdentities?$skiptoken=fixture",
-    };
-  } } as unknown as RunGraphApi;
-  const result = await fetchGraphCachePages(graph, { path: "/deviceManagement/windowsAutopilotDeviceIdentities" }, undefined, false, 1);
-  assert.equal(requests, 1);
-  assert.deepEqual(result.rows, [{ productKey: "fixture-one" }]);
-  assert.equal(result.classifications[0]?.counts.credential, 2);
-  assert.equal(result.classifications[0]?.counts.identity, 1);
 });
 
 it("exactly reaching the row cap on the last page is complete", async () => {
@@ -625,4 +611,25 @@ it("a row-limited collection keeps the rows within the memory budget instead of 
   assert.ok(result.rows.length > 0 && result.rows.length < 64, `kept ${result.rows.length} rows`);
   requests = 0;
   await assert.rejects(fetchGraphCachePages(graph, {path:"/auditLogs/signIns"}, undefined, true), /128 MiB/);
+});
+
+it("registers raw legacy device pages before the adapter projects them", async () => {
+  const path = "/deviceManagement/managedDevices";
+  const requests: string[] = [];
+  const graph = createGraphWithLegacyDeviceClassification({
+    tokenProvider: async () => "synthetic-token",
+    fetchImpl: async (input) => {
+      requests.push(String(input));
+      return Response.json(requests.length === 1
+        ? { value: [{ id: "device-one", deviceName: "Workstation-01" }],
+          "@odata.nextLink": `https://graph.microsoft.com/beta${path}?$skiptoken=next` }
+        : { value: [{ id: "device-two", deviceName: "Workstation-02", activationLockBypassCode: "synthetic-credential" }] });
+    },
+  });
+  const ledger = new ClassificationLedger();
+  const devices = await withClassificationScope(ledger, () => graph.listManagedDevices());
+  assert.equal(requests.length, 2);
+  assert.doesNotMatch(JSON.stringify(devices), /synthetic-credential/);
+  assert.equal(ledger.classifyRequest({ prompt: JSON.stringify(devices) }).counts.credential, 0);
+  assert.equal(ledger.classifyRequest({ prompt: "Value synthetic-credential" }).counts.credential, 1);
 });
