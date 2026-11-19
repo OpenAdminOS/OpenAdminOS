@@ -39,6 +39,7 @@ import {
 
 import { PROMPT_INSTRUCTION_ROOTS, renderDeep, renderTemplate, renderPromptTemplate, type TemplateContext } from "./template-engine.js";
 import { stripTenantDataFences, withTenantDataInstructions } from "./tenant-data.js";
+import { compactConditionalAccessPolicies } from "./ca-compact.js";
 import { confirmationPhraseProblem } from "./confirmation-phrase.js";
 
 export class ManifestValidationError extends Error {
@@ -1161,9 +1162,11 @@ async function runTransformSkill(
       return transformSortBy(skill.id, settings, ctx);
     case "correlate-stale-devices":
       return transformCorrelateStaleDevices(skill.id, settings, ctx);
+    case "compact-conditional-access":
+      return transformCompactConditionalAccess(skill.id, settings, ctx);
     default:
       throw new Error(
-        `transform "${skill.id}": unknown kind "${String(kind)}". Supported: group-by-age, filter-by-age, count-by-field, group-by-field, sort-by, correlate-stale-devices.`,
+        `transform "${skill.id}": unknown kind "${String(kind)}". Supported: group-by-age, filter-by-age, count-by-field, group-by-field, sort-by, correlate-stale-devices, compact-conditional-access.`,
       );
   }
 }
@@ -1267,6 +1270,23 @@ interface GroupByAgeSpec {
   source: unknown;
   timestampField: string;
   groups: Array<{ name: string; inactiveDaysAtLeast: number }>;
+  /** Optional field path kept per item instead of the whole item. */
+  pick?: string;
+  /** Optional field read when `timestampField` is empty on an item. */
+  fallbackTimestampField?: string;
+}
+
+function transformCompactConditionalAccess(
+  skillId: string,
+  settings: Record<string, unknown>,
+  ctx: RunContext,
+): unknown[] {
+  if (!Array.isArray(settings.source)) {
+    throw new Error(`transform "${skillId}": compact-conditional-access expects "source" to resolve to an array.`);
+  }
+  const compact = compactConditionalAccessPolicies(settings.source);
+  ctx.log("info", `Compacted ${compact.length} Conditional Access policies for review.`);
+  return compact;
 }
 
 function transformGroupByAge(
@@ -1296,8 +1316,14 @@ function transformGroupByAge(
     result[group.name] = [];
   }
 
+  const pick = typeof spec.pick === "string" && spec.pick.length > 0 ? spec.pick : undefined;
+  const fallback =
+    typeof spec.fallbackTimestampField === "string" && spec.fallbackTimestampField.length > 0
+      ? spec.fallbackTimestampField
+      : undefined;
   for (const item of spec.source as Array<Record<string, unknown>>) {
-    const raw = readFieldPath(item, spec.timestampField);
+    let raw = readFieldPath(item, spec.timestampField);
+    if ((raw === undefined || raw === null || raw === "") && fallback) raw = readFieldPath(item, fallback);
     if (typeof raw !== "string") continue;
     const ms = new Date(raw).getTime();
     if (Number.isNaN(ms)) continue;
@@ -1305,7 +1331,7 @@ function transformGroupByAge(
 
     for (const group of ordered) {
       if (days >= group.inactiveDaysAtLeast) {
-        result[group.name]!.push(item);
+        result[group.name]!.push(pick ? readFieldPath(item, pick) ?? null : item);
         break;
       }
     }

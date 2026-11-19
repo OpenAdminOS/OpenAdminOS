@@ -6,7 +6,7 @@
 //   {{ path.to.value | filter(arg) }}
 //
 // Filters: size, total (alias for size), sample(n), default("..."), join(", "),
-// boundedJson(maxChars), upper, lower, length, type.
+// boundedJson(maxChars), counts, top(n), upper, lower, length, type.
 //
 // Type preservation: when the entire string IS a single {{ ... }} expression
 // the raw value is returned (number stays number, array stays array). When
@@ -47,6 +47,28 @@ const FILTERS: Record<string, TemplateFilter> = {
       if (envelope().length > maxChars) records.pop();
     }
     return envelope();
+  },
+  // A grouped map (bucket -> records) as bucket -> count, so a prompt can
+  // show the breakdown without carrying every record.
+  counts(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+    // fromEntries defines own properties, so a tenant value such as
+    // "__proto__" stays an ordinary key.
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, entry]) =>
+      [key, Array.isArray(entry) ? entry.length : typeof entry === "number" ? entry : 0]));
+  },
+  // The n largest buckets of a count or grouped map, with the rest summed
+  // into one "(other N values)" bucket, so a breakdown by a field with many
+  // distinct values (user, app, version) stays a bounded size.
+  top(value, n) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+    const limit = typeof n === "number" && Number.isInteger(n) && n > 0 ? n : 10;
+    const entries = Object.entries(FILTERS.counts!(value) as Record<string, number>).sort((a, b) => b[1] - a[1]);
+    if (entries.length <= limit) return Object.fromEntries(entries);
+    const kept = entries.slice(0, limit);
+    const rest = entries.slice(limit);
+    const otherTotal = rest.reduce((sum, [, count]) => sum + count, 0);
+    return Object.fromEntries([...kept, [`(other ${rest.length} values)`, otherTotal]]);
   },
   size(value) {
     if (Array.isArray(value)) return value.length;

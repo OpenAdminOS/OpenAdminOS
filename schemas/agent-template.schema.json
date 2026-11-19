@@ -304,9 +304,10 @@
                     "count-by-field",
                     "group-by-field",
                     "sort-by",
-                    "correlate-stale-devices"
+                    "correlate-stale-devices",
+                    "compact-conditional-access"
                   ],
-                  "description": "Built-in transforms. Adding more is a one-function change in @openadminos/runtime. Most transforms take a single `source` (Liquid expression resolving to an array); `correlate-stale-devices` takes `intuneSource` and `entraSource` instead."
+                  "description": "Built-in transforms. Adding more is a one-function change in @openadminos/runtime. Most transforms take a single `source` (Liquid expression resolving to an array); `correlate-stale-devices` takes `intuneSource` and `entraSource` instead. `compact-conditional-access` turns Graph Conditional Access policies into one short record each for model prompts. `group-by-age` accepts `pick` (field path kept per item instead of the item) and `fallbackTimestampField`."
                 },
                 "source": {
                   "description": "Liquid expression resolving to an array, e.g. \"{{ load_devices.output }}\". Used by all transforms except `correlate-stale-devices`."
