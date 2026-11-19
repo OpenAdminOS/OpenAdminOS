@@ -1822,9 +1822,10 @@ The model-facing ledger is a plaintext secret store in process memory. Never
 log, persist or send its contents. Runs dispose of it when they finish or are
 cancelled. Chat retains observations per completed turn for up to four turns
 in each of eight conversations, with a 15-minute maximum lifetime per ledger.
-Cancellation disposes of the active turn. Conversation deletion, disconnect
-and switching organizations release the corresponding observations. Temporary
-history evidence is disposed of after the current turn. A new process can
+Cancellation disposes of the active turn. Conversation deletion and switching
+organizations release the corresponding observations. Disconnect releases them
+when the organization is removed, even if subsequent cleanup needs a retry.
+Temporary history evidence is disposed of after the current turn. A new process can
 still scan saved conversation text, using the available detectors and cache
 index.
 
@@ -1843,7 +1844,9 @@ Credential and Identity when it has to drop lower classes. Retained evidence
 and drops are counted separately. Received data has
 a 32-million-unit work limit per classification. The request scan works in
 chunks over up to 16 million UTF-16 code units and 200,000 units of match work
-per section. Desktop provider calls yield between large scan chunks.
+per section. Each turn indexes its own match patterns, and the scanner checks
+an anchor's first code unit before looking up the full anchor. Later turns
+reuse the existing indexes. Desktop provider calls yield between large scan chunks.
 If work or retention limits leave evidence unexamined, the
 effective class is Credential, with a separate coverage-incomplete flag,
 unexamined quantities and text ranges where applicable. Observed counts and
