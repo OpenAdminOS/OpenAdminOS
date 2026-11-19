@@ -345,3 +345,14 @@ it("shows Graph advice for a stored replan failure on a required Teams connector
   render(<RunFailureRemediation run={run} />);
   expect(screen.getByText("Graph access cause unverified")).toBeInTheDocument();
 });
+
+it("explains a reasoning-only Ollama reply instead of suggesting a model pull", () => {
+  const run: RunRecord = {
+    id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [],
+    error: 'Ollama stopped "gpt-oss:20b" at the token limit while it was still reasoning, so there is no answer. Raise the token limit, shorten the request, or pick a model that answers without reasoning.',
+  };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Model reasoned without answering")).toBeInTheDocument();
+  expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
+  expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
+});

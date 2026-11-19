@@ -56,6 +56,8 @@ const EXCLUSIVE = [isLmStudioContextTooSmall, isContextLimitLookup];
  */
 const MICROSOFT_SIGN_IN_ERROR = /^(?:The (?:plan|proposal) could not be checked[^.]*\. |Nothing was applied: )?(?:AADSTS\d+|(?:interaction_required|invalid_grant|consent_required): AADSTS\d+)/;
 
+const REASONING_WITHOUT_ANSWER = /(at the token limit while it was still reasoning|returned only reasoning)/i;
+
 const SUGGESTIONS: Suggestion[] = [
   {
     match: (e) => /ollama/i.test(e) && /(not reachable|connect|refused|econnrefused)/i.test(e) && !isContextLimitLookup(e),
@@ -76,6 +78,11 @@ const SUGGESTIONS: Suggestion[] = [
     match: isLmStudioContextTooSmall,
     title: "LM Studio context too small",
     body: lmStudioContextAdvice,
+  },
+  {
+    match: (e) => /ollama/i.test(e) && REASONING_WITHOUT_ANSWER.test(e),
+    title: "Model reasoned without answering",
+    body: "The local model spent its output on reasoning and wrote no answer, so there is no report. Raise the step's maxTokens, narrow the agent's scope, or pick a model that answers without reasoning in Settings → LLM Providers, then re-run.",
   },
   {
     match: (e) =>
