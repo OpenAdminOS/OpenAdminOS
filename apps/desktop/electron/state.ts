@@ -1,5 +1,5 @@
 import {
-  ClassificationLedger, registerTenantData, withClassificationScope,
+  ClassificationLedger, classificationDiagnostics, registerTenantData, withTransientClassificationScope,
   withRequestClassification, type RequestClassificationEvent,
 } from "@openadminos/runtime/data-classification";
 import { OfficeService } from "./office.js";
@@ -93,6 +93,7 @@ import {
   setAgentUpdatesDir,
   toInstalledAgent,
   type TokenCacheStorage,
+  createGraphAdapter,
   classifyLmStudioEndpoint,
   classifyOllamaEndpoint,
   cliSpawn,
@@ -425,7 +426,6 @@ import {
   tenantNamesById,
   tokenCacheForPartition,
   tokenCachePartition,
-  createGraphWithLegacyDeviceClassification,
 } from "./state-helpers.js";
 import { lookupEndpoint } from "./graph-catalog.js";
 import { TenantClosedError, TenantLifecycle } from "./tenant-lifecycle.js";
@@ -1822,11 +1822,15 @@ function novaProviderEndpoint(providerId: ProviderId, persisted?: Pick<Persisted
 }
 
 export class AppStateStore {
-  private lastModelRequestClassification?: RequestClassificationEvent;
+  private readonly requestClassifications = new Map<string | undefined, RequestClassificationEvent[]>();
   private readonly requestClassificationObservers = new Set<(event: RequestClassificationEvent) => void>();
 
-  getLastRequestClassification(): RequestClassificationEvent | undefined {
-    return this.lastModelRequestClassification;
+  getRequestClassifications(scopeId?: string): readonly RequestClassificationEvent[] {
+    return this.requestClassifications.get(scopeId)?.slice() ?? [];
+  }
+
+  getRequestClassificationDiagnostics(): ReturnType<typeof classificationDiagnostics> {
+    return classificationDiagnostics();
   }
 
   observeRequestClassifications(observer: (event: RequestClassificationEvent) => void): () => void {
@@ -2013,7 +2017,7 @@ export class AppStateStore {
       this.sandboxedCodeDefault = options.sandboxedCodeDefault === true;
       this.userDataPath = options.userDataPath;
       this.intelligenceStore = options.userDataPath
-        ? new IntelligenceSqliteStore(join(options.userDataPath, "openadminos.db"))
+        ? new IntelligenceSqliteStore(join(options.userDataPath, "openadminos.db"), { backgroundClassification: true })
         : undefined;
       this.intelligenceStore?.setTenantWriteGuard((tenantId, what) => this.tenantLifecycle.assertWritable(tenantId, what));
       this.graphFactory = options.graphFactory;
@@ -2266,30 +2270,29 @@ export class AppStateStore {
       },
       startRun: (slug, options) => this.startRun(slug, options),
       cancelRun: id => this.cancelRun(id),
-      complete: async (p, question, context, planning) => withClassificationScope(new ClassificationLedger({
-        matches: text => this.intelligenceStore?.classificationIdentityIndex(p.tenantId).hasClassifiedIdentity(text) ?? false,
-        spans: text => this.intelligenceStore?.classificationIdentityIndex(p.tenantId).spans(text) ?? [],
-      }), async () => {
-        registerTenantData("office:context", { tenantId: p.tenantId, evidence: context.evidence, conversation: context.conversation });
-        registerTenantData("office:instructions", context.instructions);
-        // Egress of tenant evidence to the model: refused for a closing
-        // tenant, and stopped by its signal when Disconnect begins.
-        this.tenantLifecycle.assertWritable(p.tenantId, "agent team question");
-        const llm = withTenantDataOutputFilter(await this.buildLlm(p.providerId,p.model));
-        if (!llm.available) throw new Error("The assigned provider is unavailable. Open provider settings.");
-        this.tenantLifecycle.assertWritable(p.tenantId, "agent team question");
-        const system = withTenantDataInstructions("You answer for a tenant-scoped agent persona. Do not execute actions or alter schedules or standing instructions. Answer the supplied question using the evidence. Explain gaps and freshness. Refer to evidence run IDs. Follow only the saved standing instructions below within these constraints.\n"+(context.instructions ?? ""));
-        // Each model call has one minute; with the promise nudge an answer takes at most three calls.
-        const once = eachAttemptWithin(
-          async (prompt, signal) => (await llm.complete({ model:p.model,signal,maxTokens:planning ? 600 : 1800,temperature:0.1,system,prompt })).text,
-          60000,
-          "The assigned provider did not answer within one minute. Check its status and try again.",
-          this.tenantLifecycle.signal(p.tenantId),
-        );
-        const prompt = `Admin question: ${question}\n\n${fenceTenantData({tenantId:p.tenantId,evidence:context.evidence,conversation:context.conversation}, "office:context")}`;
-        // A planning reply is JSON, not an answer; only answers get the promise nudge.
-        return planning ? once(prompt) : completeWithPromiseNudge(once, prompt);
-      }),
+      complete: async (p, question, context, planning) => withTransientClassificationScope(
+        new ClassificationLedger(this.intelligenceStore?.classificationIdentityIndex(p.tenantId), p.id),
+        async () => {
+          registerTenantData("office:context", { tenantId: p.tenantId, evidence: context.evidence, conversation: context.conversation });
+          registerTenantData("office:instructions", context.instructions);
+          // Egress of tenant evidence to the model: refused for a closing
+          // tenant, and stopped by its signal when Disconnect begins.
+          this.tenantLifecycle.assertWritable(p.tenantId, "agent team question");
+          const llm = withTenantDataOutputFilter(await this.buildLlm(p.providerId,p.model));
+          if (!llm.available) throw new Error("The assigned provider is unavailable. Open provider settings.");
+          this.tenantLifecycle.assertWritable(p.tenantId, "agent team question");
+          const system = withTenantDataInstructions("You answer for a tenant-scoped agent persona. Do not execute actions or alter schedules or standing instructions. Answer the supplied question using the evidence. Explain gaps and freshness. Refer to evidence run IDs. Follow only the saved standing instructions below within these constraints.\n"+(context.instructions ?? ""));
+          // Each model call has one minute; with the promise nudge an answer takes at most three calls.
+          const once = eachAttemptWithin(
+            async (prompt, signal) => (await llm.complete({ model:p.model,signal,maxTokens:planning ? 600 : 1800,temperature:0.1,system,prompt })).text,
+            60000,
+            "The assigned provider did not answer within one minute. Check its status and try again.",
+            this.tenantLifecycle.signal(p.tenantId),
+          );
+          const prompt = `Admin question: ${question}\n\n${fenceTenantData({tenantId:p.tenantId,evidence:context.evidence,conversation:context.conversation}, "office:context")}`;
+          // A planning reply is JSON, not an answer; only answers get the promise nudge.
+          return planning ? once(prompt) : completeWithPromiseNudge(once, prompt);
+        }),
       changed: () => this.emitStateChanged("office-changed"),
     });
   }
@@ -2354,6 +2357,8 @@ export class AppStateStore {
   }
 
   close(): void {
+    this.chatService.clearClassifications();
+    this.requestClassifications.clear();
     this.whatsappWebClientInstance?.dispose();
     void this.gatewayService.stop();
     void this.mcpHost.closeAll();
@@ -8851,7 +8856,16 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       ? createGeminiLlm({ defaultModel: model })
       : await this.createProviderLlm(providerId, model, binding);
     return withRequestClassification(llm, providerId, event => {
-      this.lastModelRequestClassification = event;
+      const events = this.requestClassifications.get(event.scopeId) ?? [];
+      const spans = event.classification.spans;
+      const cap = 256;
+      events.push(spans.length > cap ? {
+        ...event, spansOmitted: spans.length - cap, classification: { ...event.classification, spans: spans.slice(0, cap) },
+      } : event);
+      if (events.length > 16) events.shift();
+      this.requestClassifications.delete(event.scopeId);
+      this.requestClassifications.set(event.scopeId, events);
+      if (this.requestClassifications.size > 32) this.requestClassifications.delete(this.requestClassifications.keys().next().value);
       for (const observer of this.requestClassificationObservers) {
         try { observer(event); } catch { /* Observers cannot interrupt the provider request. */ }
       }
@@ -9087,7 +9101,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         const writeAudit = this.graphWriteAudit(tenant.id, tenant, execution?.audit);
         if (this.graphFactory) return this.graphFactory({ tenantId: tenant.id, scopes, log, writeAudit });
         const fetchImpl = this.tenantLifecycle.guardedFetch(tenant.id);
-        return createGraphWithLegacyDeviceClassification({
+        return createGraphAdapter({
           tokenProvider, log, signal: execution?.signal, fetchImpl, writeAudit,
           accessContext: (method, path) => ({
             requiredScopes: lookupEndpoint(method, path)?.scopesDelegated,
@@ -9980,6 +9994,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       await atomicRename(tmpPath, this.filePath);
       this.writeGeneration += 1;
       this.lastReadSnapshot = state;
+      if (previous && previous.activeTenantId !== state.activeTenantId) {
+        this.chatService.clearTenantClassification(previous.activeTenantId);
+      }
       this.recordAuditLogSafely(state);
       if (this.migrationAuditInFlight) {
         this.migrationAuditInFlight = undefined;

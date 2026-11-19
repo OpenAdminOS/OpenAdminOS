@@ -9,9 +9,8 @@ import {
   sanitizeSavedAppRegistrations,
   tokenCacheForPartition,
   tokenCachePartition,
-  createGraphWithLegacyDeviceClassification,
 } from "./state-helpers.js";
-import { GRAPH_CLI_CLIENT_ID, OPENADMINOS_CLIENT_ID } from "@openadminos/runtime";
+import { createGraphAdapter, GRAPH_CLI_CLIENT_ID, OPENADMINOS_CLIENT_ID } from "@openadminos/runtime";
 
 describe("Graph cache nextLink validation", () => {
   it("keeps beta paths, query values, and caller headers", () => {
@@ -616,7 +615,7 @@ it("a row-limited collection keeps the rows within the memory budget instead of 
 it("registers raw legacy device pages before the adapter projects them", async () => {
   const path = "/deviceManagement/managedDevices";
   const requests: string[] = [];
-  const graph = createGraphWithLegacyDeviceClassification({
+  const graph = createGraphAdapter({
     tokenProvider: async () => "synthetic-token",
     fetchImpl: async (input) => {
       requests.push(String(input));

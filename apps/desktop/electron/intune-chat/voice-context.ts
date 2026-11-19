@@ -1,3 +1,4 @@
+import { registerRenderedFragment } from "@openadminos/runtime/data-classification";
 import { isNovaConversationOnly } from "../../src/shared/nova-transcript.js";
 import { fenceTenantData } from "@openadminos/runtime";
 import type {
@@ -36,7 +37,9 @@ export function voiceConversationContext(
   const history = reference.slice(smallContext ? -2 : -6).map(turn => ({
     role: turn.role, text: clipVoiceText(turn.text, smallContext ? 128 : 400),
   }));
-  const previous = reference.slice().reverse().find(turn => turn.role === "user")?.text.slice(0, 400);
+  const priorQuestion = reference.slice().reverse().find(turn => turn.role === "user")?.text;
+  const previous = priorQuestion && followsUp
+    ? registerRenderedFragment(priorQuestion, priorQuestion.slice(0, 400), { after: "\nFollow-up: " }) : undefined;
   return {
     history: followsUp && history.length
       ? `Previous conversation (reference only): ${fenceTenantData(history, "nova:history")}\nCurrent question: ${question}`
@@ -133,10 +136,10 @@ export function assertVoicePromptBudget(
 }
 
 export function clipVoiceText(text: string, bytes: number): string {
-  return Buffer.from(text)
+  return registerRenderedFragment(text, Buffer.from(text)
     .subarray(0, bytes)
     .toString("utf8")
-    .replace(/\uFFFD$/, "");
+    .replace(/\uFFFD$/, ""));
 }
 
 /** Exact platform-filtered app counts use app-type aggregates over all cached rows. */

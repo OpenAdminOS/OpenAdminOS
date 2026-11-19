@@ -386,6 +386,7 @@ export interface RunServiceHost {
 
 export class RunService {
   private readonly controllers = new Map<string, AbortController>();
+  private readonly runClassifications = new Map<string, ClassificationLedger>();
   /** The work driving each run, so a disconnect can wait for it to stop. */
   private readonly drives = new Map<string, Promise<void>>();
 
@@ -399,20 +400,23 @@ export class RunService {
    * the lease signal cancels the run and Disconnect waits for the drive.
    */
   private track(runId: string, tenantId: string | undefined, start: () => Promise<void>): void {
-    const index = () => tenantId ? this.host.intelligenceStore?.classificationIdentityIndex(tenantId) : undefined;
-    const ledger = new ClassificationLedger({
-      matches: text => index()?.hasClassifiedIdentity(text) ?? false,
-      spans: text => index()?.spans(text) ?? [],
-    });
+    const ledger = new ClassificationLedger(tenantId ? this.host.intelligenceStore?.classificationIdentityIndex(tenantId) : undefined, runId);
+    ledger.expireAfter();
+    this.runClassifications.set(runId, ledger);
     const run = () => withClassificationScope(ledger, start);
     const leased = tenantId && this.host.tenantLease
       ? this.host.tenantLease(tenantId, async (signal) => {
-          const stop = () => this.controllers.get(runId)?.abort(signal.reason);
+          const stop = () => {
+            ledger.dispose();
+            this.controllers.get(runId)?.abort(signal.reason);
+          };
           signal.addEventListener("abort", stop, { once: true });
           try { return await run(); } finally { signal.removeEventListener("abort", stop); }
         })
       : run();
     const settled = leased.catch(() => undefined).finally(() => {
+      ledger.dispose();
+      if (this.runClassifications.get(runId) === ledger) this.runClassifications.delete(runId);
       if (this.drives.get(runId) === settled) this.drives.delete(runId);
     });
     this.drives.set(runId, settled);
@@ -473,6 +477,7 @@ export class RunService {
         return run;
       }
 
+      this.runClassifications.get(runId)?.dispose();
       this.controllers.get(runId)?.abort(new Error("Run cancelled by user."));
       const finishedAt = new Date().toISOString();
       const cancelled: RunRecord = {

@@ -1,3 +1,4 @@
+import { registerRenderedFragment } from "@openadminos/runtime/data-classification";
 import { assertVoicePromptBudget, clipVoiceText, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
 import { NOVA_PROFILE_BLOCK_END } from "../nova-profile.js";
 import { MAX_PROMISE_NUDGES, looksLikeUnkeptPromise } from "./unkept-promise.js";
@@ -853,7 +854,7 @@ export function numberedMcpResults(results: readonly McpResultItem[], cites: rea
   results.forEach((item, index) => {
     const cite = cites[index]!;
     const group = groups.get(cite) ?? { title: item.title, head: `${cite} ${item.title}${item.url ? `, ${item.url}` : ""}`, excerpts: [] };
-    const excerpt = item.excerpt && item.excerpt.length > each ? `${item.excerpt.slice(0, each).trimEnd()} [...]` : item.excerpt;
+    const excerpt = item.excerpt && item.excerpt.length > each ? registerRenderedFragment(item.excerpt, `${item.excerpt.slice(0, each).trimEnd()} [...]`, { key: "excerpt" }) : item.excerpt;
     const own = item.title !== group.title ? item.title : undefined;
     if (own || excerpt) group.excerpts.push([own, excerpt].filter(Boolean).join("\n"));
     groups.set(cite, group);
@@ -1224,16 +1225,23 @@ function trimObservation(value: string, limit: number,
   catch { parsed = value; }
   let entries = 20;
   let stringLimit = Math.min(2000, Math.max(0, limit));
-  const compact = (item: unknown): unknown => {
-    if (typeof item === "string") return item.length > stringLimit ? `${item.slice(0, stringLimit)} [truncated]` : item;
-    if (Array.isArray(item)) return item.slice(0, entries).map(compact);
+  const compact = (item: unknown, register: boolean, key?: string): unknown => {
+    if (typeof item === "string") {
+      if (item.length <= stringLimit) return item;
+      const clipped = `${item.slice(0, stringLimit)} [truncated]`;
+      return register ? registerRenderedFragment(item, clipped, key ? { key } : {}) : clipped;
+    }
+    if (Array.isArray(item)) return item.slice(0, entries).map(child => compact(child, register, key));
     if (item && typeof item === "object") return Object.fromEntries(Object.entries(item)
-      .filter(([key]) => key.length <= stringLimit).slice(0, entries).map(([key, child]) => [key, compact(child)]));
+      .filter(([key]) => key.length <= stringLimit).slice(0, entries).map(([key, child]) => [key, compact(child, register, key)]));
     return item;
   };
   for (;;) {
-    const result = JSON.stringify({ _hostNotice: notice, observation: compact(parsed) });
-    if (size(result) <= limit) return result;
+    const result = JSON.stringify({ _hostNotice: notice, observation: compact(parsed, false) });
+    if (size(result) <= limit) {
+      compact(parsed, true);
+      return result;
+    }
     if (entries === 1 && stringLimit === 0) return JSON.stringify({ _hostNotice: notice });
     entries = Math.max(1, Math.floor(entries / 2));
     stringLimit = Math.floor(stringLimit / 2);

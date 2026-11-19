@@ -17,7 +17,7 @@ import type {
 import { GRAPH_CACHE_LOG_WINDOW_DAYS, graphAccessDenialFromError, graphAccessDenialText, isGraphCacheLogResource, missingServiceCopy, omittedSnapshotsCopy } from "@openadminos/agent-sdk";
 import { fenceTenantData } from "@openadminos/runtime";
 import {
-  registerTenantData, PRIVATE_PATTERN,
+  registerRenderedFragment, registerTenantData, PRIVATE_PATTERN,
 } from "@openadminos/runtime/data-classification";
 
 import { lookupEndpoint, searchEndpoints } from "../graph-catalog.js";
@@ -373,7 +373,7 @@ function factText(value: unknown): string | undefined {
     ? value.map(flat).filter(Boolean).join(value.some((entry) => entry && typeof entry === "object") ? "; " : ", ")
     : flat(value);
   if (!text) return undefined;
-  return text.length > FACT_CHARS ? `${text.slice(0, FACT_CHARS)} [...]` : text;
+  return text.length > FACT_CHARS ? registerRenderedFragment(text, `${text.slice(0, FACT_CHARS)} [...]`) : text;
 }
 
 function httpsLink(record: Record<string, unknown>, keys: readonly string[] | undefined): string | undefined {
@@ -479,7 +479,7 @@ export function parseMcpResults(text: string, call: { structured?: unknown; args
  * name with a link, as below.
  */
 export function readMcpResult(text: string, call: { structured?: unknown; args?: Record<string, unknown>; host?: string; tool?: string; format?: McpResultFormat } = {}): McpReadResult {
-  const clean = (value: string) => value.replace(/\s+/g, " ").trim().slice(0, 200);
+  const clean = (value: string) => registerRenderedFragment(value, value.replace(/\s+/g, " ").trim().slice(0, 200));
   if (!text.trim() && call.structured === undefined) return { items: [], empty: true };
   if (call.format) {
     let data = call.structured;
@@ -667,6 +667,7 @@ export interface SplashtopChatContext {
 
 /** Splashtop read tools for the prompt, with where they read from. */
 export function splashtopToolDefinitionsForPrompt(splashtop: SplashtopChatContext): string {
+  registerTenantData("organization:name", splashtop.organizationName);
   return SPLASHTOP_READ_TOOLS.filter((tool) => splashtop.tools.includes(tool.name)).map((tool) => [
     `- ${tool.name}: ${tool.description} Reads ${fenceTenantData(splashtop.organizationName, "organization:name")} from ${splashtop.host}.`,
     `  params: ${JSON.stringify(tool.params)}`,
@@ -1894,7 +1895,7 @@ function enforcePayloadCap(value: Record<string, unknown>): Record<string, unkno
   return {
     ...next,
     rows: undefined,
-    valuePreview: serialized.slice(0, GRAPH_GET_PAYLOAD_BYTE_CAP),
+    valuePreview: registerRenderedFragment(serialized, serialized.slice(0, GRAPH_GET_PAYLOAD_BYTE_CAP), { jsonPrefix: true }),
     truncated: true,
     payloadTruncated: true,
   };
@@ -1999,19 +2000,19 @@ export function summarizeToolCallForProgress(
   return "Running tool.";
 }
 
-function compactValue(value: unknown, depth = 0): unknown {
+function compactValue(value: unknown, depth = 0, field?: string): unknown {
   if (value === null || value === undefined) return value;
-  if (typeof value === "string") return value.length > 800 ? `${value.slice(0, 800)}...` : value;
+  if (typeof value === "string") return value.length > 800 ? registerRenderedFragment(value, `${value.slice(0, 800)}...`, field ? { key: field } : {}) : value;
   if (typeof value === "number" || typeof value === "boolean") return value;
   if (Array.isArray(value)) {
-    return value.slice(0, 25).map((item) => compactValue(item, depth + 1));
+    return value.slice(0, 25).map((item) => compactValue(item, depth + 1, field));
   }
   if (typeof value === "object") {
     if (depth >= 4) return "[object truncated]";
     const out: Record<string, unknown> = {};
     for (const [key, child] of Object.entries(value)) {
       if (key === "@odata.context") continue;
-      out[key] = compactValue(child, depth + 1);
+      out[key] = compactValue(child, depth + 1, key);
       if (Object.keys(out).length >= 40) {
         out.__truncatedKeys = true;
         break;

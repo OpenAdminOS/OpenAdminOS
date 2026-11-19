@@ -1,4 +1,4 @@
-import { ClassificationLedger, currentClassificationLedger, registerTenantData, withClassificationScope } from "@openadminos/runtime/data-classification";
+import { ClassificationLedger, currentClassificationLedger, registerRenderedFragment, registerTenantData, registerTransientTenantData, withClassificationScope, withTransientClassificationScope } from "@openadminos/runtime/data-classification";
 import { voiceDeviceEvidenceAnswer, voiceDeviceEvidenceIntent } from "./voice-device-evidence.js";
 import { MAX_PROMISE_NUDGES, PROMISE_REPAIR_PROMPT, completeWithPromiseNudge, looksLikeUnkeptPromise } from "./unkept-promise.js";
 import type { WebSearch } from "./web-search.js";
@@ -536,35 +536,47 @@ export function deterministicChatSystemPrompt(isLocalProvider: boolean, voice: b
 }
 
 export class IntuneChatService {
-  // Retain recent conversations for follow-up turns while bounding in-memory tenant data.
-  private readonly classificationConversations = new Map<string, { tenantId: string | undefined; ledger: ClassificationLedger }>();
+  private readonly classificationTurns = new Map<string, { tenantId: string | undefined; turns: ClassificationLedger[] }>();
+  private readonly activeClassification = new Map<ClassificationLedger, string | undefined>();
 
-  private retainConversationClassification(id: string, tenantId: string | undefined): void {
+  private useConversationClassification(id: string, tenantId: string | undefined): void {
     const ledger = currentClassificationLedger();
-    if (!ledger) return;
-    const previous = this.classificationConversations.get(id);
-    if (previous && previous.tenantId === tenantId) ledger.include(previous.ledger);
-    this.classificationConversations.delete(id);
-    this.classificationConversations.set(id, { tenantId, ledger });
-    if (this.classificationConversations.size > 8) {
-      const oldest = this.classificationConversations.keys().next().value;
-      if (oldest !== undefined) this.classificationConversations.delete(oldest);
-    }
+    if (!ledger || ledger.expired) return;
+    const previous = this.classificationTurns.get(id);
+    if (previous && previous.tenantId !== tenantId) this.releaseConversationClassification(id);
+    else for (const turn of previous?.turns ?? []) if (!turn.expired) ledger.include(turn);
+    ledger.scopeId = id;
   }
 
-  clearTenantClassification(tenantId: string): void {
-    for (const [id, entry] of this.classificationConversations) {
-      if (entry.tenantId === tenantId) this.classificationConversations.delete(id);
-    }
+  private retainCompletedClassification(message: IntuneChatMessage, tenantId: string | undefined): void {
+    const ledger = currentClassificationLedger();
+    ledger?.discardTransient();
+    if (!ledger || ledger.expired || message.status !== "completed" || ledger.scopeId !== message.conversationId) return;
+    const id = message.conversationId;
+    const previous = this.classificationTurns.get(id);
+    const turns = [...previous?.turns.filter(turn => !turn.expired) ?? [], ledger];
+    while (turns.length > CHAT_MEMORY_MAX_TURNS) turns.shift()!.dispose();
+    this.classificationTurns.delete(id);
+    this.classificationTurns.set(id, { tenantId, turns });
+    if (this.classificationTurns.size > 8) this.releaseConversationClassification(this.classificationTurns.keys().next().value!);
   }
 
-  private chatClassificationScope<T>(tenantId: string | undefined, work: () => T): T {
-    const store = this.host.requireIntelligenceStore();
-    const ledger = new ClassificationLedger(tenantId ? {
-      matches: text => store.classificationIdentityIndex(tenantId).hasClassifiedIdentity(text),
-      spans: text => store.classificationIdentityIndex(tenantId).spans(text),
-    } : undefined);
-    return withClassificationScope(ledger, work);
+  private releaseConversationClassification(id: string): void {
+    for (const turn of this.classificationTurns.get(id)?.turns ?? []) turn.dispose();
+    this.classificationTurns.delete(id);
+    for (const ledger of this.activeClassification.keys()) if (ledger.scopeId === id) ledger.dispose();
+  }
+
+  clearClassifications(): void {
+    for (const id of this.classificationTurns.keys()) this.releaseConversationClassification(id);
+    for (const ledger of this.activeClassification.keys()) ledger.dispose();
+  }
+
+  clearTenantClassification(tenantId: string | undefined): void {
+    for (const [id, entry] of this.classificationTurns) {
+      if (entry.tenantId === tenantId) this.releaseConversationClassification(id);
+    }
+    for (const [ledger, tenant] of this.activeClassification) if (tenant === tenantId) ledger.dispose();
   }
 
   private readonly preloadJobs = new Map<
@@ -639,9 +651,29 @@ export class IntuneChatService {
    * the work runs as before.
    */
   /** `leased` for a tenant send; a send with no tenant (SPEC.md 4a) has no lease to take. */
-  private leasedScope<T>(tenantId: string | undefined, signal: AbortSignal | undefined, work: (signal: AbortSignal | undefined) => Promise<T>): Promise<T> {
-    return this.chatClassificationScope(tenantId, () =>
-      tenantId ? this.leased(tenantId, signal, work) : work(signal));
+  private async leasedScope<T>(tenantId: string | undefined, signal: AbortSignal | undefined, work: (signal: AbortSignal | undefined) => Promise<T>): Promise<T> {
+    const store = this.host.requireIntelligenceStore();
+    const ledger = new ClassificationLedger(tenantId ? store.classificationIdentityIndex(tenantId) : undefined);
+    ledger.expireAfter();
+    this.activeClassification.set(ledger, tenantId);
+    const run = async (activeSignal: AbortSignal | undefined) => {
+      const dispose = () => ledger.dispose();
+      if (activeSignal?.aborted) dispose();
+      activeSignal?.addEventListener("abort", dispose, { once: true });
+      try {
+        if (tenantId) await store.waitForCacheClassification();
+        activeSignal?.throwIfAborted();
+        return await withClassificationScope(ledger, () => work(activeSignal));
+      }
+      finally { activeSignal?.removeEventListener("abort", dispose); }
+    };
+    try {
+      return await (tenantId ? this.leased(tenantId, signal, run) : run(signal));
+    } finally {
+      this.activeClassification.delete(ledger);
+      ledger.releaseHistory();
+      if (!ledger.scopeId || !this.classificationTurns.get(ledger.scopeId)?.turns.includes(ledger)) ledger.dispose();
+    }
   }
 
   private leased<T>(tenantId: string, signal: AbortSignal | undefined, work: (signal: AbortSignal | undefined) => Promise<T>): Promise<T> {
@@ -945,7 +977,7 @@ export class IntuneChatService {
     }
     await this.requireConversationAccess(conversationId);
     this.host.requireIntelligenceStore().deleteConversation(conversationId);
-    this.classificationConversations.delete(conversationId);
+    this.releaseConversationClassification(conversationId);
   }
 
   async getIntuneChatMessages(conversationId: string): Promise<IntuneChatMessage[]> {
@@ -1272,6 +1304,7 @@ export class IntuneChatService {
 
     const summary = buildMultiTenantSummary(comparisons);
     const assistantText = await this.buildMultiTenantAssistantText({
+      scopeId: job.conversationId,
       tenantIds: [activeTenant.id, ...preflight.resolvedTenantIds],
       prompt: content,
       providerId,
@@ -1434,8 +1467,8 @@ export class IntuneChatService {
     if (notes.length > 0) {
       lines.push("", "Workspace notes:");
       notes.slice(0, 12).forEach((note, index) => {
-        const content = trimForPrompt(note.content, 1400);
-        registerTenantData("workspace:note", content);
+        registerTenantData("workspace:note", note.content);
+        const content = registerRenderedFragment(note.content, trimForPrompt(note.content, 1400));
         lines.push(`${index + 1}. ${fenceTenantData(content, "workspace:note")}`);
       });
     }
@@ -1448,7 +1481,7 @@ export class IntuneChatService {
           `${index + 1}. ${fenceTenantData({
             title: entry.title, sourceType: entry.sourceType, createdAt: entry.createdAt,
             content: serialized.length <= 2800 ? entry.content : {
-              truncatedByHost: true, excerpt: trimForPrompt(serialized, 2800),
+              truncatedByHost: true, excerpt: registerRenderedFragment(serialized, trimForPrompt(serialized, 2800), { jsonPrefix: true }),
             },
           }, "workspace:evidence")}`,
         );
@@ -1735,6 +1768,7 @@ export class IntuneChatService {
   }
 
   private async buildMultiTenantAssistantText(input: {
+    scopeId?: string;
     /** Every tenant whose data is in the prompt. */
     tenantIds: readonly string[];
     prompt: string;
@@ -1745,7 +1779,7 @@ export class IntuneChatService {
     comparisons: MultiTenantChatJob["comparisons"];
   }): Promise<string> {
     const deterministic = summarizeMultiTenantResult(input.summary, input.comparisons);
-    return withClassificationScope(new ClassificationLedger(), async () => {
+    return withTransientClassificationScope(new ClassificationLedger(undefined, input.scopeId), async () => {
       registerTenantData("chat:multi-tenant-result", { summary: input.summary, tenants: input.comparisons });
       const llm = withTenantDataOutputFilter(await this.tenantLlm(input.providerId, input.model, input.tenantIds));
       if (!llm.available) return deterministic;
@@ -1842,8 +1876,8 @@ export class IntuneChatService {
   }
 
   async clearIntuneChatHistory(): Promise<LocalDataSummary> {
-    this.classificationConversations.clear();
     this.host.requireIntelligenceStore().clearChatHistory();
+    this.clearClassifications();
     return this.getLocalDataSummary();
   }
 
@@ -1987,7 +2021,7 @@ export class IntuneChatService {
         if (pageResult.pageLimitReached && !request.windowField && existing?.refreshedAt && !existing.pageLimitReached) {
           throw new Error("Refresh reached a collection limit. The previous complete snapshot was kept. Use Cache → Preload to collect all pages.");
         }
-        store.replaceGraphResources({
+        await store.replaceGraphResourcesInBatches({
           tenantId: tenant.id,
           resource,
           label: definition.label,
@@ -2000,7 +2034,7 @@ export class IntuneChatService {
             ? { tenantTotal: pageResult.totalCount }
             : {}),
           refreshedAt,
-        });
+        }, signal);
         slots[slot] = {
           resource,
           label: definition.label,
@@ -2210,11 +2244,11 @@ export class IntuneChatService {
       });
     }
 
-    this.retainConversationClassification(conversation.id, noTenant ? undefined : tenant.id);
+    this.useConversationClassification(conversation.id, noTenant ? undefined : tenant.id);
     if (!noTenant) registerTenantData("tenant:displayName", tenant.displayName);
     const history = store.listMessages(conversation.id);
     const conversationMemory = boundedConversationMemory(history);
-    registerTenantData("chat:history", conversationMemory);
+    registerTransientTenantData("chat:history", conversationMemory);
     const userMessage: IntuneChatMessage = {
       id: `msg_${randomUUID()}`,
       conversationId: conversation.id,
@@ -2545,6 +2579,7 @@ export class IntuneChatService {
       ...(assistantError ? { error: assistantError } : {}),
     };
     store.insertMessage(assistantMessage);
+    this.retainCompletedClassification(assistantMessage, noTenant ? undefined : tenant.id);
     if (toolTrace && toolTrace.length > 0) {
       this.persistToolTrace({
         conversationId: conversation.id,
@@ -2669,7 +2704,7 @@ export class IntuneChatService {
       });
     }
 
-    this.retainConversationClassification(conversation.id, noTenant ? undefined : tenant.id);
+    this.useConversationClassification(conversation.id, noTenant ? undefined : tenant.id);
     if (!noTenant) registerTenantData("tenant:displayName", tenant.displayName);
     const voiceContext = options.voice
       ? voiceConversationContext(content, input.conversationId ? store.listMessages(conversation.id) : [], providerId === "apple-foundation", options.voiceHistory)
@@ -2688,8 +2723,8 @@ export class IntuneChatService {
     const directResources = voiceDeviceEvidenceIntent(content) ? ["managedDevices" as const] : voiceResourcesForQuestion(content);
     if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
     const restriction = restrictPlannedResourcesForTenant(planned, tenant, noTenant);
-    registerTenantData("chat:history", conversationMemory);
-    if (options.voice) registerTenantData("nova:history", options.voiceHistory ?? store.listMessages(conversation.id).map(message => message.content));
+    registerTransientTenantData("chat:history", conversationMemory);
+    if (options.voice) registerTransientTenantData("nova:history", options.voiceHistory ?? store.listMessages(conversation.id).map(message => message.content));
     if (voiceProfile) registerTenantData("nova:profile", options.voiceProfile);
     const userMessage: IntuneChatMessage = {
       id: `msg_${randomUUID()}`,
@@ -3393,6 +3428,7 @@ export class IntuneChatService {
       ...(assistantError ? { error: assistantError } : {}),
     };
     store.insertMessage(assistantMessage);
+    this.retainCompletedClassification(assistantMessage, noTenant ? undefined : tenant.id);
     if (toolTrace && toolTrace.length > 0) {
       this.persistToolTrace({
         conversationId: conversation.id,

@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 
 import {
   DEFAULT_GRAPH_READ_SCOPE_NAMES,
+  type LlmOptions,
   type RunGraphApi,
   type RunLlmApi,
   type TenantRecord,
@@ -15,7 +16,7 @@ import { MAX_AGENTIC_ITERATIONS, partialFinalAnswer, runAgenticChat } from "./ag
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 import type { IntuneChatToolContext } from "./tools.js";
 import { executeIntuneChatTool } from "./tools.js";
-import { ClassificationLedger, withClassificationScope } from "@openadminos/runtime/data-classification";
+import { ClassificationLedger, withClassificationScope, withRequestClassification, type RequestClassificationEvent } from "@openadminos/runtime/data-classification";
 import { TENANT_DATA_INSTRUCTIONS } from "@openadminos/runtime";
 import { VOICE_ANSWER_INSTRUCTIONS } from "./voice-context.js";
 import { NOVA_PROFILE_BLOCK_END } from "../nova-profile.js";
@@ -67,6 +68,80 @@ it("fences every tenant tool observation, tenant names and errors without changi
     if (result.ok) assert.equal(result.answer, "Reviewed");
     assert.deepEqual([...classified].sort(), ["cache:managedDevices", "graph:/deviceManagement/managedDevices"]);
     for (const source of ["tool:list_cached_resources", "cache:managedDevices", "graph:/deviceManagement/managedDevices", "tool:refresh_resource", "tool:query_drift"]) assert.ok(observed.has(source), source);
+  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+it("classifies the exact clipped Graph script without changing either request", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "chat-classification-script-"));
+  const store = seededStore(dir);
+  const path = "/deviceManagement/deviceManagementScripts";
+  const script = Buffer.from("Write-Output synthetic fixture\n".repeat(28)).toString("base64");
+  const clip = script.slice(0, 800) + "...";
+  const run = async (classify: boolean) => {
+    const tools = toolContext(store);
+    tools.graphForScopes = async () => ({
+      request: async () => ({ value: [{ id: "test-script", scriptContent: script }] }),
+      listManagedDevices: async () => [],
+      retireManagedDevice: async () => { throw new Error("Unexpected write"); },
+    });
+    const requests: LlmOptions[] = [];
+    const events: RequestClassificationEvent[] = [];
+    const llm: RunLlmApi = { available: true, async complete(request) {
+      requests.push(request);
+      return { model: "test", text: requests.length === 1 ?
+        JSON.stringify({ tool: "graph_get", params: { path } }) :
+        JSON.stringify({ final: true, answer: "Reviewed." }) };
+    }, async *stream() {} };
+    const result = await withClassificationScope(new ClassificationLedger(), () =>
+      runAgenticChat({ ...baseInput(store, classify ? withRequestClassification(llm, "ollama", e => events.push(e)) : llm), tools }));
+    assert.equal(result.ok, true);
+    assert.ok(requests[1]?.prompt.includes(clip));
+    assert.ok(!requests[1]?.prompt.includes(script));
+    if (classify) {
+      const request = requests[1]!;
+      const spans = events[1]!.classification.spans;
+      assert.ok(spans.some(span => span.kind === "credential" && span.source === `graph:${path}` &&
+        request.prompt.slice(span.start, span.end) === clip));
+    }
+    return requests.map(request => ({ ...request,
+      system: request.system?.replace(/nonce="[a-f0-9]{16}"/g, 'nonce="fixture"'),
+      prompt: request.prompt.replace(/nonce="[a-f0-9]{16}"/g, 'nonce="fixture"')
+        .replace(/tool_[a-f0-9-]{36}/g, "fixture-tool")
+        .replace(/("durationMs": )\d+/g, "$1fixture-duration")
+        .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g, "fixture-time"),
+    }));
+  };
+  try { assert.deepEqual(await run(true), await run(false)); }
+  finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+it("classifies the fenced Splashtop organization name in the first model request", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "chat-classification-organization-"));
+  const store = seededStore(dir);
+  try {
+    const name = "Kite";
+    const ledger = new ClassificationLedger(store.classificationIdentityIndex(tenant.id));
+    assert.equal(store.classificationIdentityIndex(tenant.id).matches(name), false);
+    const events: RequestClassificationEvent[] = [];
+    let system: string | undefined;
+    const model: RunLlmApi = { available: true, async complete(request) {
+      system = request.system;
+      return { text: '{"final":true,"answer":"Ready."}', model: "test" };
+    }, async *stream() {} };
+    const tools = toolContext(store);
+    tools.splashtop = {
+      organizationName: name, host: "fixture.example", tools: ["splashtop_list_computers"],
+      async read() { assert.fail("The fixture should finish before any tool runs"); },
+    };
+    const result = await withClassificationScope(ledger, () => runAgenticChat({
+      ...baseInput(store, withRequestClassification(model, "ollama", e => events.push(e))), tools, plannedResources: [], questionKind: "mixed", smallTalk: true,
+    }));
+    assert.equal(result.ok, true);
+    assert.equal(events.length, 1);
+    const span = events[0]?.classification.spans.find(span => span.section === "system" && span.source === "organization:name");
+    assert.ok(span);
+    assert.equal(span.kind, "identity");
+    assert.equal(system?.slice(span.start, span.end), name);
   } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
 });
 
