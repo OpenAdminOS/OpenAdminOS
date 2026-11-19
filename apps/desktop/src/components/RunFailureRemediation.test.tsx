@@ -66,3 +66,14 @@ it("still matches a model that is not pulled", () => {
   expect(screen.getByText("Model not pulled")).toBeInTheDocument();
   expect(screen.queryByText("Ollama context too small")).not.toBeInTheDocument();
 });
+
+it.each([
+  "Ollama did not report the model's context limit within 5000ms at http://127.0.0.1:11434/api/show.",
+  "Ollama could not report the model's context limit: HTTP 503 at http://127.0.0.1:11434/api/show: busy",
+])("gives a failed Ollama context limit lookup its own recovery: %s", (error) => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama did not report the model's context limit")).toBeInTheDocument();
+  expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
+  expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
+});

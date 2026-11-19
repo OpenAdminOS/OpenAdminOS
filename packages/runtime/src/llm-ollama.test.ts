@@ -83,6 +83,8 @@ describe("Ollama context size", () => {
     /** Reject a request that exactly fills the context too. */
     rejectAtLimit?: boolean;
     retryRedirect?: boolean;
+    showStatus?: number;
+    resetOverflowBody?: boolean;
     showRedirect?: boolean;
     requested?: (prompt: string) => number;
     stallOverflowBody?: (res: ServerResponse) => void;
@@ -97,6 +99,11 @@ describe("Ollama context size", () => {
         const body = JSON.parse(raw) as { options?: { num_ctx?: number }; messages?: Array<{ content: string }> };
         if (req.url === "/api/show") {
           shows.push(raw);
+          if (options.showStatus) {
+            res.statusCode = options.showStatus;
+            res.end("busy");
+            return;
+          }
           if (options.showRedirect) {
             res.writeHead(307, { location: "http://example.com/api/show" });
             res.end();
@@ -115,6 +122,12 @@ describe("Ollama context size", () => {
         chats.push(numCtx === undefined ? {} : { num_ctx: numCtx });
         const available = options.limit(numCtx);
         if (requested > available || (options.rejectAtLimit && requested === available)) {
+          if (options.resetOverflowBody) {
+            res.writeHead(400, { "content-type": "application/json", "content-length": "500" });
+            res.write("{");
+            setTimeout(() => res.socket?.destroy(), 10);
+            return;
+          }
           if (options.stallOverflowBody) {
             res.writeHead(400, { "content-type": "application/json" });
             res.write("{");
@@ -301,7 +314,7 @@ describe("Ollama context size", () => {
     } });
     try {
       const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "slow", lookupTimeoutMs: 100 });
-      await assert.rejects(llm.complete({ prompt: "big" }), /did not return the model's context limit within 100ms/);
+      await assert.rejects(llm.complete({ prompt: "big" }), /did not report the model's context limit within 100ms/);
       assert.equal(fake.chats.length, 1);
     } finally {
       for (const res of open) res.destroy();
@@ -351,6 +364,43 @@ describe("Ollama context size", () => {
       const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "moved" });
       await assert.rejects(llm.complete({ prompt: "big" }), /answered with a redirect to another address/);
       assert.equal(fake.chats.length, 2);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("reports a model lookup that answers with an HTTP error", async () => {
+    const fake = await fakeOllama({ showStatus: 503, limit: (numCtx) => numCtx ?? 16384 });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "busy" });
+      await assert.rejects(llm.complete({ prompt: "big" }), /could not report the model's context limit: HTTP 503/);
+      assert.equal(fake.chats.length, 1);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("reports a connection reset while reading an error body as unreachable", async () => {
+    const fake = await fakeOllama({ resetOverflowBody: true, limit: () => 16384 });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "reset-body" });
+      await assert.rejects(llm.complete({ prompt: "big" }), /^Error: Ollama not reachable at http:\/\/127\.0\.0\.1:\d+\/api\/chat: /);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("keeps the raised context even when the caller stops reading at the last chunk", async () => {
+    const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384 });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "early-exit" });
+      for await (const chunk of llm.stream({ prompt: "big" })) {
+        if (chunk.done) break;
+      }
+      await llm.complete({ prompt: "big" });
+      assert.deepEqual(fake.chats.at(-1), { num_ctx: 45056 });
+      assert.equal(fake.chats.length, 3);
+      assert.equal(fake.shows.length, 1);
     } finally {
       await fake.close();
     }

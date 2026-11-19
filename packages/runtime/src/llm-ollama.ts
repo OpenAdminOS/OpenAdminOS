@@ -152,10 +152,8 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         if (response.ok) return "";
         try {
           return await response.text();
-        } catch {
-          const stopped = abortError();
-          if (stopped) throw stopped;
-          return "";
+        } catch (error) {
+          throw abortError() ?? new Error(`Ollama not reachable at ${url}: ${describe(error)}`);
         }
       };
       const abortError = (): Error | undefined => {
@@ -242,6 +240,12 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
             if (chunk.error) {
               throw new Error(`Ollama error: ${chunk.error}`);
             }
+            if (chunk.done && raisedCtx !== undefined) {
+              // Kept only once the stream finished cleanly, and before the
+              // caller sees the last chunk and may stop reading. Concurrent
+              // requests can raise it at once; keep the largest that worked.
+              ollamaContextOverrides.set(cacheKey, Math.max(ollamaContextOverrides.get(cacheKey) ?? 0, raisedCtx));
+            }
             if (typeof chunk.model === "string" && chunk.model.length > 0) {
               actualModel = chunk.model;
             }
@@ -267,11 +271,6 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
               };
             }
             if (chunk.done) {
-              if (raisedCtx !== undefined) {
-                // Kept only once the stream finished cleanly. Concurrent
-                // requests can raise it at once; keep the largest that worked.
-                ollamaContextOverrides.set(cacheKey, Math.max(ollamaContextOverrides.get(cacheKey) ?? 0, raisedCtx));
-              }
               // If the model never emitted visible content but did
               // produce reasoning (e.g. it hit num_predict mid-thought),
               // surface the reasoning so the agent has *something* to
@@ -478,7 +477,7 @@ export function parseContextOverflow(detail: string): { requested: number; avail
 
 /**
  * The model's maximum context length from /api/show. Undefined only when
- * Ollama answered without that metadata; a stop of the caller's signal
+ * Ollama answered successfully without that metadata; a stop of the caller's signal
  * returns undefined so the caller reports it, and a failed or timed out
  * lookup throws.
  */
@@ -492,7 +491,7 @@ async function readOllamaContextLength(
   const url = `${endpoint.replace(/\/$/, "")}/api/show`;
   const failure = (error: unknown): Error | undefined => {
     if (signal.aborted) return undefined;
-    if (timeout.aborted) return new Error(`Ollama did not return the model's context limit within ${timeoutMs}ms at ${url}.`);
+    if (timeout.aborted) return new Error(`Ollama did not report the model's context limit within ${timeoutMs}ms at ${url}.`);
     return new Error(`Ollama not reachable at ${url}: ${describe(error)}`);
   };
   let response: Response;
@@ -510,7 +509,6 @@ async function readOllamaContextLength(
     return undefined;
   }
   if (isRefusedRedirect(response, url)) throw new Error(redirectRefusedDetail("Ollama", url));
-  if (!response.ok) return undefined;
   let raw: string;
   try {
     raw = await response.text();
@@ -518,6 +516,9 @@ async function readOllamaContextLength(
     const failed = failure(error);
     if (failed) throw failed;
     return undefined;
+  }
+  if (!response.ok) {
+    throw new Error(`Ollama could not report the model's context limit: HTTP ${response.status} at ${url}: ${truncate(raw, 200)}`);
   }
   try {
     const data = JSON.parse(raw) as { model_info?: Record<string, unknown> };
