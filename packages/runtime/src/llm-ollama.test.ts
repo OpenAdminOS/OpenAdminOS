@@ -84,6 +84,7 @@ describe("Ollama context size", () => {
     rejectAtLimit?: boolean;
     retryRedirect?: boolean;
     showStatus?: number;
+    showBody?: string;
     resetOverflowBody?: boolean;
     showRedirect?: boolean;
     requested?: (prompt: string) => number;
@@ -99,6 +100,10 @@ describe("Ollama context size", () => {
         const body = JSON.parse(raw) as { options?: { num_ctx?: number }; messages?: Array<{ content: string }> };
         if (req.url === "/api/show") {
           shows.push(raw);
+          if (options.showBody !== undefined) {
+            res.end(options.showBody);
+            return;
+          }
           if (options.showStatus) {
             res.statusCode = options.showStatus;
             res.end("busy");
@@ -401,6 +406,33 @@ describe("Ollama context size", () => {
       assert.deepEqual(fake.chats.at(-1), { num_ctx: 45056 });
       assert.equal(fake.chats.length, 3);
       assert.equal(fake.shows.length, 1);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  for (const [label, showBody, message] of [
+    ["an HTML page", "<html>proxy error</html>", /the answer from http:\/\/127\.0\.0\.1:\d+\/api\/show was not JSON/],
+    ["a JSON error", JSON.stringify({ error: "model is loading" }), /answered with an error: model is loading/],
+  ] as const) {
+    it(`reports a model lookup that answers with ${label} instead of retrying without a limit`, async () => {
+      const fake = await fakeOllama({ showBody, limit: (numCtx) => numCtx ?? 16384 });
+      try {
+        const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "invalid" });
+        await assert.rejects(llm.complete({ prompt: "big" }), message);
+        assert.equal(fake.chats.length, 1);
+      } finally {
+        await fake.close();
+      }
+    });
+  }
+
+  it("retries without a cap when a valid model lookup has no context metadata", async () => {
+    const fake = await fakeOllama({ showBody: JSON.stringify({ capabilities: ["completion"] }), limit: (numCtx) => numCtx ?? 16384 });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "no-metadata" });
+      await llm.complete({ prompt: "big" });
+      assert.deepEqual(fake.chats.at(-1), { num_ctx: 45056 });
     } finally {
       await fake.close();
     }

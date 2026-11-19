@@ -22,12 +22,12 @@ const SUGGESTIONS: Suggestion[] = [
     body: "The request did not fit in the context Ollama loaded for this model. OpenAdminOS raises that context up to the model's limit when the model allows it, and the error names the limit that stopped it. Narrow the question or the agent's scope, close other apps to free memory, or pick a model with a larger context window in Settings → LLM Providers, then re-run.",
   },
   {
-    match: (e) => /ollama/i.test(e) && /context limit/i.test(e),
+    match: (e) => /ollama/i.test(e) && /context limit|\/api\/show/i.test(e),
     title: "Ollama did not report the model's context limit",
     body: "The request did not fit in the context Ollama loaded, and Ollama did not answer when OpenAdminOS asked for the model's limit before raising it. Check that Ollama is responsive with `ollama ps`, restart it if it is stuck, then re-run.",
   },
   {
-    match: (e) => /ollama/i.test(e) && /(not pulled|ollama pull)/i.test(e),
+    match: (e) => /ollama/i.test(e) && /is not pulled|no ollama model available/i.test(e),
     title: "Model not pulled",
     body: "Run `ollama pull <model>` for the model you selected in Settings → LLM Providers, then try again.",
   },

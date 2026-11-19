@@ -77,3 +77,26 @@ it.each([
   expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
   expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
 });
+
+it.each([
+  ["Ollama at http://127.0.0.1:11434/api/show answered with a redirect to another address. OpenAdminOS does not follow redirects from a model server on this device, so nothing was sent there."],
+  ["Ollama not reachable at http://127.0.0.1:11434/api/show: fetch failed"],
+])("gives a failed lookup of the model's context limit its recovery: %s", (error) => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama did not report the model's context limit")).toBeInTheDocument();
+  expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
+});
+
+it("does not read incidental `ollama pull` text as a missing model", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama could not report the model's context limit: HTTP 503 at http://127.0.0.1:11434/api/show: ollama pull is disabled during maintenance" };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama did not report the model's context limit")).toBeInTheDocument();
+  expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
+});
+
+it("matches the provider's message when no Ollama model is available", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "No Ollama model available. Pull a model with `ollama pull <model>`." };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Model not pulled")).toBeInTheDocument();
+});

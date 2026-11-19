@@ -520,13 +520,23 @@ async function readOllamaContextLength(
   if (!response.ok) {
     throw new Error(`Ollama could not report the model's context limit: HTTP ${response.status} at ${url}: ${truncate(raw, 200)}`);
   }
+  let data: unknown;
   try {
-    const data = JSON.parse(raw) as { model_info?: Record<string, unknown> };
-    for (const [key, value] of Object.entries(data.model_info ?? {})) {
-      if (key.endsWith(".context_length") && typeof value === "number" && value > 0) return value;
-    }
+    data = JSON.parse(raw);
   } catch {
-    // An answer that is not JSON has no limit to read.
+    throw new Error(`Ollama could not report the model's context limit: the answer from ${url} was not JSON: ${truncate(raw, 200)}`);
+  }
+  if (typeof data !== "object" || data === null || Array.isArray(data)) {
+    throw new Error(`Ollama could not report the model's context limit: the answer from ${url} was not a JSON object.`);
+  }
+  const answer = data as { error?: unknown; model_info?: unknown };
+  if (answer.error !== undefined) {
+    throw new Error(`Ollama could not report the model's context limit: ${url} answered with an error: ${truncate(String(answer.error), 200)}`);
+  }
+  // A valid answer without the metadata leaves the limit unknown.
+  if (typeof answer.model_info !== "object" || answer.model_info === null) return undefined;
+  for (const [key, value] of Object.entries(answer.model_info as Record<string, unknown>)) {
+    if (key.endsWith(".context_length") && typeof value === "number" && value > 0) return value;
   }
   return undefined;
 }
