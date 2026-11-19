@@ -20,7 +20,7 @@ import {
 import { checkAzureOpenAI, checkLemonade, checkLmStudio, checkOllama, lemonadeStartHint } from "./provider-detail.js";
 import { installedOnDisk, scanProviderCheck, runScanCheck } from "./model-scan.js";
 import { AppStateStore } from "./state.js";
-import { assertProviderTestGuardActive } from "../../../tests/provider-test-guard.mjs";
+import { assertProviderTestGuardActive, stubLoopbackConnectionRefused } from "../../../tests/provider-test-guard.mjs";
 import { fakeCli, gone, onlyScanProviders } from "../tests/provider-cli-fixtures.js";
 
 assertProviderTestGuardActive();
@@ -536,6 +536,7 @@ describe("startup while the first-run scan is pending (review round 2, items 2 a
     // to loopback, so neither the host's CLIs nor its environment decide
     // what the scan checks.
     const original = { ollama: process.env.OPENAGENTS_OLLAMA_URL, host: process.env.OLLAMA_HOST, lm: process.env.OPENADMINOS_LM_STUDIO_URL };
+    stubLoopbackConnectionRefused();
     process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:9";
     process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:9/v1";
     // A pinned Gemini CLI spy: any spawn writes its arguments.
@@ -1008,6 +1009,7 @@ describe("checking one provider again from Chat (PR #204 review round 3)", () =>
     await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [], firstRunScan: "pending" }));
     const original = process.env.OPENADMINOS_LM_STUDIO_URL;
     // On this device at scan time, and nothing listens there.
+    stubLoopbackConnectionRefused();
     process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:9/v1";
     const realFetch = globalThis.fetch;
     const contacted: string[] = [];
@@ -1226,6 +1228,7 @@ describe("after the first-run scan (review round 3, item 1)", () => {
     let listed = 0;
     let generation = 0;
     const original = { ollama: process.env.OPENAGENTS_OLLAMA_URL, host: process.env.OLLAMA_HOST, lm: process.env.OPENADMINOS_LM_STUDIO_URL };
+    stubLoopbackConnectionRefused();
     process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:9";
     process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:9/v1";
     const store = new AppStateStore({

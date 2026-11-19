@@ -115,6 +115,7 @@ describe("update channel preference", () => {
     const root = dir ?? (await mkdtemp(join(tmpdir(), "openadminos-update-channel-")));
     if (!dir) t.after(() => rm(root, { recursive: true, force: true }));
     const instance = new AppStateStore({
+      providerListFactory: () => [],
       filePath: join(root, "state.json"),
       tokenStore,
       statsApiUrl: "",

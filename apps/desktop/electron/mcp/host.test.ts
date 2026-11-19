@@ -2,6 +2,7 @@ import { providerCatalog } from "@openadminos/agent-sdk";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
+import { stubLoopbackConnectionRefused } from "../../../../tests/provider-test-guard.mjs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -283,12 +284,9 @@ describe("MCP host", () => {
 
   it("reports an unreachable server with the host name", async () => {
     const host = new McpHost({ clientVersion: "test", connectTimeoutMs: 2_000 });
-    const closed = createServer();
-    await new Promise<void>((resolve) => closed.listen(0, "127.0.0.1", resolve));
-    const { port } = closed.address() as AddressInfo;
-    await new Promise<void>((resolve) => closed.close(() => resolve()));
+    stubLoopbackConnectionRefused();
     try {
-      await assert.rejects(host.connect({ id: "gone", name: "Gone", url: `http://127.0.0.1:${port}/mcp` }), (error: unknown) =>
+      await assert.rejects(host.connect({ id: "gone", name: "Gone", url: "http://127.0.0.1:9/mcp" }), (error: unknown) =>
         error instanceof McpHostError && error.code === "unreachable" && /Gone could not be reached at 127\.0\.0\.1/.test(error.message));
     } finally { await host.closeAll(); }
   });
@@ -459,6 +457,7 @@ describe("MCP catalog", () => {
 
 describe("MCP installs in app state", () => {
   async function withStore(run: (store: AppStateStore, statePath: string, catalog: McpCatalogEntry[]) => Promise<void>) {
+    stubLoopbackConnectionRefused();
     const dir = await mkdtemp(join(tmpdir(), "openadminos-mcp-state-"));
     const statePath = join(dir, "state.json");
     const catalog: McpCatalogEntry[] = [

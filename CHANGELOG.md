@@ -80,7 +80,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
-- Electron and runtime tests isolate provider CLI launches and model requests from developer installations and endpoint settings.
+- Electron and runtime tests isolate provider CLI launches and loopback HTTP requests from developer installations and endpoint settings. Blocked calls fail the test run even when test or provider code catches them.
 
 - Model scan and Gemini connectivity tests use only fixture executables, so a developer's installed provider CLI cannot receive a test prompt.
 - Chat's model choice shows a provider whose check failed as Could not check with its reason and Retry, as the model scan does, instead of leaving LM Studio, Lemonade, Apple Intelligence or a hosted CLI out and showing Ollama as having no model; an endpoint outside this device that the scan did not contact shows as Not checked, without Retry; a signed-in tool that cannot answer, such as a Copilot model set by IT that the account cannot use, shows as Unavailable with the reason instead of Signed in.

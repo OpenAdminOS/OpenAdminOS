@@ -24,9 +24,13 @@ it("persists each cache denial and keeps consent, role, and licence readiness di
     },
   };
   const options = { filePath, userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => {} }, graphFactory: () => graph };
-  let store = new AppStateStore(options);
-  const stubProviders = () => { store.listProviders = async () => [{ id: "ollama", name: "Ollama", description: "Local", isLocal: true, status: "connected", models: ["test"], defaultModel: "test" }]; };
-  stubProviders();
+  const openStore = () => new AppStateStore({
+    ...options,
+    providerListFactory: () => [
+      { id: "ollama", name: "Ollama", description: "Local", isLocal: true, status: "connected", models: ["test"], defaultModel: "test" },
+    ],
+  });
+  let store = openStore();
   try {
     for (const [cause, context] of [
       ["missing-consent", { grantedScopes: [] }],
@@ -39,8 +43,7 @@ it("persists each cache denial and keeps consent, role, and licence readiness di
       assert.equal(refreshed.resources[0]?.accessDenial?.cause, cause);
       if (cause !== "missing-consent") assert.doesNotMatch(refreshed.resources[0]?.error ?? "", /reconnect/i);
       store.close();
-      store = new AppStateStore(options);
-      stubProviders();
+      store = openStore();
       const cached = (await store.getGraphCacheStatus("tenant")).resources.find(row => row.resource === "managedDevices")!;
       assert.equal(cached.accessDenial?.cause, cause);
       const preflight = await store.preflightMultiTenantIntuneChat({ prompt: "Show managed devices", tenantScope: { kind: "all" } });

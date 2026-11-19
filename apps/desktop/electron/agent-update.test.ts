@@ -62,6 +62,7 @@ describe("registry manifest integrity and update lifecycle", () => {
 
     const dir = await mkdtemp(join(tmpdir(), "openadminos-agent-update-"));
     const store = new AppStateStore({
+      providerListFactory: () => [],
       filePath: join(dir, "state.json"),
       userDataPath: dir,
       tokenStore,
@@ -135,6 +136,7 @@ describe("registry manifest integrity and update lifecycle", () => {
 
     const dir = await mkdtemp(join(tmpdir(), "openadminos-agent-digest-"));
     const store = new AppStateStore({
+      providerListFactory: () => [],
       filePath: join(dir, "state.json"),
       userDataPath: dir,
       tokenStore,
@@ -172,7 +174,7 @@ describe("Marketplace network failures (design and enterprise round)", () => {
       throw unreachable();
     };
     const dir = await mkdtemp(join(tmpdir(), "openadminos-agent-network-"));
-    const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, tokenStore, statsApiUrl: "", appVersion: "0.4.0", resolveProxy: async () => "PROXY proxy.contoso.com:8080" });
+    const store = new AppStateStore({ providerListFactory: () => [], filePath: join(dir, "state.json"), userDataPath: dir, tokenStore, statsApiUrl: "", appVersion: "0.4.0", resolveProxy: async () => "PROXY proxy.contoso.com:8080" });
     try {
       await store.setRegistrySource(source, { confirmExternalSource: true });
       await assert.rejects(

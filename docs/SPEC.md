@@ -86,10 +86,14 @@ persona instructions, model names, and prompt punctuation must remain literal ar
 No additional runtime dependency is introduced for this resolution.
 
 Electron and runtime unit tests preload a shared provider guard. Tests register
-temporary CLI fixtures and use stubbed model responses or servers they start.
+temporary CLI fixtures and use stubbed responses or HTTP servers they start.
 The guard clears inherited provider binary and endpoint overrides around each
-test and fails when a provider tries to launch an unregistered executable or
-contact a model server outside the fixtures.
+test. It blocks unregistered executable launches, model requests outside the
+fixtures, and requests to any unregistered loopback origin through Fetch and
+Node's HTTP and HTTPS clients. Tests handle redirects explicitly so each
+request is checked. A caught violation still fails the test process, including
+after the last test's teardown. Electron state tests inject a provider list
+unless they exercise discovery with guarded fixtures.
 
 ### Public roadmap
 

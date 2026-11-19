@@ -90,7 +90,9 @@ describe("interactive tenant sign-in listener", () => {
         }
         assert.ok(redirectUri);
         assert.equal((await fetch(`${redirectUri}/favicon.ico`)).status, 204);
-        await fetch(`${redirectUri}/?code=authorization-code`);
+        const callback = await fetch(`${redirectUri}/?code=authorization-code`, { redirect: "manual" });
+        assert.equal(callback.status, 302);
+        assert.equal(callback.headers.get("location"), redirectUri);
         const response = await authorization;
         request.loopbackClient!.closeServer();
         assert.equal(response.code, "authorization-code");

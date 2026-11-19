@@ -41,6 +41,7 @@ async function storeWithToken(tenant: TenantRecord, tokenScopes: string[]) {
     activeProviderId: "ollama", installedAgents: [], runs: [], activeTenantId: tenant.id, tenants: [tenant],
   }));
   const store = new AppStateStore({
+    providerListFactory: () => [],
     filePath, userDataPath: dir, statsApiUrl: "",
     tokenStore: { read: async () => "", write: async () => undefined },
   });

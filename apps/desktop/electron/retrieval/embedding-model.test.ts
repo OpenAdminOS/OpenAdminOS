@@ -1,3 +1,5 @@
+import { stubLoopbackConnectionRefused } from "../../../../tests/provider-test-guard.mjs";
+
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
@@ -87,7 +89,7 @@ describe("index auto-install is gated on the local runtime", () => {
     const { AppStateStore } = await import("../state.js");
 
     const previousEndpoint = process.env.OPENADMINOS_EMBEDDING_ENDPOINT;
-    // A loopback port nothing listens on.
+    stubLoopbackConnectionRefused();
     process.env.OPENADMINOS_EMBEDDING_ENDPOINT = "http://127.0.0.1:9";
     const dir = await mkdtemp(join(tmpdir(), "openadminos-gate-"));
     let store: InstanceType<typeof AppStateStore> | undefined;
@@ -95,6 +97,7 @@ describe("index auto-install is gated on the local runtime", () => {
       const statePath = join(dir, "state.json");
       await writeFile(statePath, JSON.stringify({ tenants: [], runs: [] }), "utf8");
       store = new AppStateStore({
+        providerListFactory: () => [],
         filePath: statePath,
         tokenStore: { read: async () => "", write: async () => undefined },
         userDataPath: dir,

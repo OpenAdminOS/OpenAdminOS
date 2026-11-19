@@ -106,6 +106,7 @@ function createStore(input: {
     message: "Linked and ready.",
   };
   return new AppStateStore({
+    providerListFactory: () => [],
     filePath: input.statePath,
     tokenStore,
     userDataPath: join(input.statePath, ".."),
@@ -318,6 +319,7 @@ describe("post-run WhatsApp delivery", () => {
       runDeliveryQueue: [connectorQueueItem("run-slack", "slack")],
     });
     const store = new AppStateStore({
+      providerListFactory: () => [],
       filePath: statePath,
       tokenStore,
       userDataPath: dir,
@@ -494,6 +496,7 @@ describe("reports of a run with no organization (review round 1)", () => {
       runDeliveryQueue: [connectorQueueItem("run-noorg", "slack")],
     });
     const store = new AppStateStore({
+      providerListFactory: () => [],
       filePath: statePath,
       tokenStore,
       userDataPath: dir,
@@ -535,7 +538,7 @@ describe("reports of a run with no organization (review round 1)", () => {
         activeTenantId: customerB.id,
         runDeliveryQueue: [{ id: `run-noorg:${connectorId}`, runId: "run-noorg", connectorId, attempts: 0, createdAt: now, nextAttemptAt: now }],
       });
-      const store = new AppStateStore({ filePath: statePath, tokenStore, userDataPath: dir, statsApiUrl: "" });
+      const store = new AppStateStore({ providerListFactory: () => [], filePath: statePath, tokenStore, userDataPath: dir, statsApiUrl: "" });
       try {
         await store.processPendingRunDeliveries();
         const state = await readJson(statePath);
@@ -562,7 +565,7 @@ describe("direct Teams and Outlook delivery of a run with no organization (Muse 
       runs: [completedRun("run-noorg")],
       tenants: [],
     });
-    const store = new AppStateStore({ filePath: statePath, tokenStore, userDataPath: dir, statsApiUrl: "" });
+    const store = new AppStateStore({ providerListFactory: () => [], filePath: statePath, tokenStore, userDataPath: dir, statsApiUrl: "" });
     const internal = (store as unknown as { runDeliveryService: {
       deliverRunToTeams(run: RunRecord): Promise<{ retryable: boolean; error?: string }>;
       deliverRunToOutlook(run: RunRecord): Promise<{ retryable: boolean; error?: string }>;
@@ -675,6 +678,7 @@ describe("delivery decision parity with the destination list (review round 4)", 
         runDeliveryQueue: [{ ...connectorQueueItem("run-parity", "slack"), id: `run-parity:${fixture.connectorId}`, connectorId: fixture.connectorId }],
       });
       const store = new AppStateStore({
+        providerListFactory: () => [],
         filePath: statePath,
         tokenStore,
         userDataPath: dir,

@@ -91,6 +91,7 @@ describe("Microsoft sign-in in the setup dialog", () => {
   it("names login.microsoftonline.com, the system proxy and the fix when sign-in cannot reach Microsoft", async () => {
     const dir = await mkdtemp(join(tmpdir(), "oaos-network-"));
     const store = new AppStateStore({
+      providerListFactory: () => [],
       filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
       resolveProxy: async () => "PROXY proxy.contoso.com:8080",
@@ -126,7 +127,7 @@ describe("the local index model download", () => {
     const dir = await mkdtemp(join(tmpdir(), "oaos-network-"));
     const { writeFile } = await import("node:fs/promises");
     await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [] }));
-    const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
+    const store = new AppStateStore({ providerListFactory: () => [], filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
     try {
       await store.autoInstallEmbeddingModel();
       const status = await store.getRetrievalStatusWithUpdates();

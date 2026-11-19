@@ -55,6 +55,9 @@ async function makeFixture(tenants: TenantRecord[], answers?: string[]) {
     },
   });
   const store = new AppStateStore({
+    providerListFactory: () => [
+      { id: "ollama", name: "Ollama", description: "Local", isLocal: true, status: "connected", models: ["mock-chat"], defaultModel: "mock-chat" },
+    ],
     filePath,
     userDataPath: dir,
     statsApiUrl: "",
@@ -72,9 +75,6 @@ async function makeFixture(tenants: TenantRecord[], answers?: string[]) {
       async *stream() { yield { delta: "", accumulated: "", done: true, model: "mock-chat" }; },
     }),
   });
-  store.listProviders = async () => [
-    { id: "ollama", name: "Ollama", description: "Local", isLocal: true, status: "connected", models: ["mock-chat"], defaultModel: "mock-chat" },
-  ];
   return {
     store,
     filePath,

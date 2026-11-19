@@ -67,6 +67,7 @@ it("preloads all pages and preserves the complete snapshot after a paging failur
     },
   } as unknown as RunGraphApi;
   const store = new AppStateStore({
+    providerListFactory: () => [],
     filePath,
     userDataPath: dir,
     statsApiUrl: "",
@@ -129,7 +130,7 @@ it('preloads incidents within their 50-row endpoint limit and follows the next p
   const filePath = join(dir, 'state.json');
   await writeFile(filePath, JSON.stringify({ activeTenantId: 'tenant-1', activeProviderId: 'ollama', tenants: [{ id: 'tenant-1', displayName: 'Test', homeAccountId: 'test', username: 'test@example.invalid', addedAt: new Date().toISOString() }], installedAgents: [], runs: [] }));
   const requests: string[] = [];
-  const store = new AppStateStore({ filePath, userDataPath: dir, statsApiUrl: '', tokenStore: { read: async () => '', write: async () => {} }, graphFactory: () => ({
+  const store = new AppStateStore({ providerListFactory: () => [], filePath, userDataPath: dir, statsApiUrl: '', tokenStore: { read: async () => '', write: async () => {} }, graphFactory: () => ({
     request: async (input: { path: string; query?: Record<string, string> }) => {
       assert.equal(input.path, '/security/incidents');
       if (Number(input.query?.$top) > 50) throw Error("The limit of '50' for Top query has been exceeded.");
@@ -188,6 +189,7 @@ it("skips cache resources outside the tenant granted set", async () => {
   );
   const graphPaths: string[] = [];
   const store = new AppStateStore({
+    providerListFactory: () => [],
     filePath,
     userDataPath: dir,
     statsApiUrl: "",
@@ -272,6 +274,7 @@ it("refresh reports resources of an unconnected service as skipped, not failed",
   );
   const graphPaths: string[] = [];
   const store = new AppStateStore({
+    providerListFactory: () => [],
     filePath,
     userDataPath: dir,
     statsApiUrl: "",
@@ -335,6 +338,7 @@ it("refresh skips alerts when only one scope of the Defender part is granted", a
   );
   const graphPaths: string[] = [];
   const store = new AppStateStore({
+    providerListFactory: () => [],
     filePath,
     userDataPath: dir,
     statsApiUrl: "",

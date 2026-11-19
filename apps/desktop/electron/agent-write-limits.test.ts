@@ -86,6 +86,7 @@ it("retains installed limits, reviews increases, and clears removed declarations
   const entry = index.agents.find(agent => agent.slug === "offboarding-agent")!;
   const parsed = parseAgentTemplate(source);
   const store = new AppStateStore({
+    providerListFactory: () => [],
     filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", appVersion: "0.7.2",
     tokenStore: { read: async () => "", write: async () => undefined, clear: async () => undefined },
   });

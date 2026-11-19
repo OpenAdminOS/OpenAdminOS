@@ -57,6 +57,7 @@ it("collects log resources as a capped recent window instead of every retained r
     },
   } as unknown as RunGraphApi;
   const store = new AppStateStore({
+    providerListFactory: () => [],
     filePath,
     userDataPath: dir,
     statsApiUrl: "",
