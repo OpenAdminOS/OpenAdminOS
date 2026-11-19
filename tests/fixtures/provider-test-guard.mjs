@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { createServer, get, request } from "node:http";
+import { Agent as HttpAgent, ClientRequest, createServer, get, request } from "node:http";
 import { get as httpsGet } from "node:https";
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, it } from "node:test";
+import { Agent as FetchAgent } from "undici";
 import { registerProviderFixtureDirectory } from "../provider-test-guard.mjs";
 
 const { PROVIDER_GUARD_CASE: scenario, PROVIDER_GUARD_ORIGIN: origin } = process.env;
@@ -67,6 +69,38 @@ if (scenario === "fetch") {
       }
     } finally {
       await rm(directory, { recursive: true, force: true });
+    }
+  });
+} else if (scenario === "route-overrides") {
+  it("rejects options that can route an approved origin elsewhere", async () => {
+    const fixture = createServer((_request, response) => response.end("fixture"));
+    await new Promise((resolve) => fixture.listen(0, "127.0.0.1", resolve));
+    const url = new URL(`http://127.0.0.1:${fixture.address().port}/health`);
+    const destination = new URL(origin);
+    const reroute = () => connect(Number(destination.port), destination.hostname);
+    const agent = new HttpAgent();
+    agent.createConnection = reroute;
+    const dispatcher = new FetchAgent({ connect: (_options, callback) => {
+      const socket = reroute();
+      socket.once("connect", () => callback(null, socket));
+      socket.once("error", callback);
+    } });
+    try {
+      for (const [key, value] of [
+        ["agent", agent],
+        ["lookup", () => assert.fail("lookup override called")],
+        ["createConnection", reroute],
+        ["socketPath", "/unregistered-provider.sock"],
+        ["_defaultAgent", agent],
+      ]) {
+        assert.throws(() => get(url, { [key]: value }), new RegExp(`Blocked node:http\\.get.*${key} override`));
+      }
+      assert.throws(() => new ClientRequest(url, { agent }), /Blocked node:http\.ClientRequest.*agent override/);
+      await assert.rejects(fetch(url, { dispatcher }), /Blocked fetch.*dispatcher override/);
+    } finally {
+      agent.destroy();
+      await dispatcher.close();
+      await new Promise((resolve) => fixture.close(resolve));
     }
   });
 } else {

@@ -205,37 +205,45 @@ function checkHttpTarget(method, url, path = url.pathname) {
   if (!fixture) throw blocked(`Blocked ${method} outside test HTTP servers: ${url.origin}${path}`);
 }
 
-function checkNodeRequest(method, protocol, args) {
+function checkedNodeRequest(method, protocol, agent, args) {
   const [input, overrides] = args;
-  const options = typeof input === "string" || input instanceof URL
+  const hasUrl = typeof input === "string" || input instanceof URL;
+  const options = hasUrl
     ? { ...urlToHttpOptions(new URL(input)), ...overrides }
-    : input ?? {};
-  if (options.socketPath) throw blocked(`Blocked ${method} outside test HTTP servers: socketPath`);
+    : { ...input };
+  const callback = hasUrl && typeof overrides !== "function" ? args[2] : overrides;
 
   // Match the connection options used by Node, including URL overrides and defaults.
   const host = urlHost(options.hostname || options.host || "localhost");
-  const agent = options.agent || (protocol === "https:" ? https.globalAgent : http.globalAgent);
   const port = options.port || options.defaultPort || agent.defaultPort || 80;
   const origin = new URL(`${options.protocol || protocol}//${host}:${port}`);
   checkHttpTarget(method, origin, String(options.path ?? "/").split("?")[0]);
+
+  for (const key of ["lookup", "createConnection", "socketPath", "_defaultAgent"]) {
+    if (options[key] != null) throw blocked(`Blocked ${method} outside test HTTP servers: ${key} override`);
+  }
+  if (options.agent != null && options.agent !== agent) {
+    throw blocked(`Blocked ${method} outside test HTTP servers: agent override`);
+  }
+  return [{ ...options, agent }, callback];
 }
 
-function guardHttp() {
+function guardHttp({ directHttpAgent, directHttpsAgent, directDispatcher }) {
   trackTestServers();
-  for (const [httpModule, protocol] of [[http, "http:"], [https, "https:"]]) {
+  for (const [httpModule, protocol, agent] of [[http, "http:", directHttpAgent], [https, "https:", directHttpsAgent]]) {
     for (const method of ["request", "get"]) {
       const original = httpModule[method];
       httpModule[method] = (...args) => {
-        checkNodeRequest(`node:${protocol.slice(0, -1)}.${method}`, protocol, args);
-        return Reflect.apply(original, httpModule, args);
+        const checked = checkedNodeRequest(`node:${protocol.slice(0, -1)}.${method}`, protocol, agent, args);
+        return Reflect.apply(original, httpModule, checked);
       };
     }
   }
 
   http.ClientRequest = new Proxy(http.ClientRequest, {
     construct(target, args, newTarget) {
-      checkNodeRequest("node:http.ClientRequest", "http:", args);
-      return Reflect.construct(target, args, newTarget);
+      const checked = checkedNodeRequest("node:http.ClientRequest", "http:", directHttpAgent, args);
+      return Reflect.construct(target, checked, newTarget);
     },
   });
 
@@ -243,10 +251,14 @@ function guardHttp() {
   globalThis.fetch = async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : input);
     checkHttpTarget("fetch", url);
+    const options = { ...init };
+    if (options.dispatcher != null && options.dispatcher !== directDispatcher) {
+      throw blocked("Blocked fetch outside test HTTP servers: dispatcher override");
+    }
     // Any redirect can lead to an unregistered origin. Explicit redirect
     // handlers can issue the next request through this guard.
-    const redirect = init?.redirect ?? (input instanceof Request ? input.redirect : "follow");
-    return fetch(input, { ...init, redirect: redirect === "follow" ? "error" : redirect });
+    const redirect = options.redirect ?? (input instanceof Request ? input.redirect : "follow");
+    return fetch(input, { ...options, dispatcher: directDispatcher, redirect: redirect === "follow" ? "error" : redirect });
   };
 }
 
@@ -275,25 +287,26 @@ function isolateProxies() {
   https.globalAgent = directHttpsAgent;
   setGlobalDispatcher(directDispatcher);
 
-  return () => {
+  function restore() {
     restoreEnvironment();
     http.globalAgent = originalHttpAgent;
     https.globalAgent = originalHttpsAgent;
     setGlobalDispatcher(originalDispatcher);
     syncBuiltinESMExports();
-  };
+  }
+  return { directHttpAgent, directHttpsAgent, directDispatcher, restore };
 }
 
 export function installProviderTestGuard() {
   if (installed) return;
   installed = true;
-  const restoreProxies = isolateProxies();
+  const direct = isolateProxies();
   guardChildren();
-  guardHttp();
+  guardHttp(direct);
   syncBuiltinESMExports();
 
   process.on("exit", () => {
-    restoreProxies();
+    direct.restore();
     if (unexpected.length === 0) return;
     process.exitCode = 1;
     writeSync(2, `Provider test guard violations:\n${unexpected.join("\n")}\n`);

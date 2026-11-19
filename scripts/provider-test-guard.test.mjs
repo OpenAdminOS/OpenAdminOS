@@ -83,6 +83,24 @@ it("blocks shell launches when the spawn argument array is omitted, undefined or
   assert.match(stdout, /Blocked spawnSync outside provider fixtures/);
 });
 
+it("rejects transport overrides for an approved origin without connecting to another listener", async () => {
+  let connections = 0;
+  const listener = createServer((_request, response) => response.end("unexpected request"));
+  listener.on("connection", () => { connections += 1; });
+  await new Promise((resolve) => listener.listen(0, "127.0.0.1", resolve));
+  try {
+    const { code, stdout, stderr } = await runFixture("route-overrides", `http://127.0.0.1:${listener.address().port}`);
+    assert.equal(code, 1, stdout + stderr);
+    assert.match(stdout, /failureType: 'hookFailed'/);
+    for (const key of ["agent", "lookup", "createConnection", "socketPath", "_defaultAgent", "dispatcher"]) {
+      assert.ok(stdout.includes(`outside test HTTP servers: ${key} override`), stdout);
+    }
+    assert.equal(connections, 0);
+  } finally {
+    await new Promise((resolve, reject) => listener.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
 it("sends approved requests directly despite inherited proxy settings and a preinstalled dispatcher", async () => {
   let connections = 0;
   const proxy = createServer((_request, response) => response.writeHead(502).end());
