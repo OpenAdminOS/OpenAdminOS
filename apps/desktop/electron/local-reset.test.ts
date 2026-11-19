@@ -143,6 +143,24 @@ describe("local reset: wipe at launch", () => {
     }
   });
 
+  it("states reasons in plain words without repeating the path", async () => {
+    const dir = await tempDir();
+    try {
+      seedDataFolder(dir);
+      const fs: LocalResetFileSystem = {
+        ...failingFileSystem(() => false),
+        remove: (path) => {
+          if (path.endsWith("logs")) throw Object.assign(new Error(`ENOTEMPTY: directory not empty, rmdir '${path}'`), { code: "ENOTEMPTY" });
+          rmSync(path, { recursive: true, force: true });
+        },
+      };
+      const report = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", home: dir, env: {}, fs });
+      assert.deepEqual(report?.failed, [{ item: "logs", reason: "something inside it could not be removed" }]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("resumes after an interrupted wipe and finishes on the next launch", async () => {
     const dir = await tempDir();
     try {

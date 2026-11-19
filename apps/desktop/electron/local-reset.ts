@@ -370,12 +370,17 @@ function removeMacosKeychainItem(run: (file: string, args: string[]) => CommandR
   warnings.push({ item, reason: "more items with this name are still in the Keychain" });
 }
 
+/** File system codes in plain words. The item already names the path, so reasons never repeat it. */
+const FILE_ERROR_REASONS: Record<string, string> = {
+  EBUSY: "the file is in use by another program or cannot be changed",
+  EPERM: "the file is in use by another program or cannot be changed",
+  EACCES: "this account is not allowed to remove it",
+  ENOTEMPTY: "something inside it could not be removed",
+  EROFS: "the disk is read-only",
+};
+
 function reasonOf(cause: unknown): string {
-  if (cause && typeof cause === "object" && "code" in cause) {
-    const code = (cause as NodeJS.ErrnoException).code;
-    if (code === "EBUSY" || code === "EPERM" || code === "EACCES") {
-      return "the file is in use by another program or cannot be changed";
-    }
-  }
+  const code = cause && typeof cause === "object" && "code" in cause ? (cause as NodeJS.ErrnoException).code : undefined;
+  if (code) return FILE_ERROR_REASONS[code] ?? `it could not be removed (${code})`;
   return cause instanceof Error ? cause.message : String(cause);
 }
