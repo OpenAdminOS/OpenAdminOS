@@ -121,3 +121,16 @@ it("does not read incidental `is not pulled` text as a missing model", () => {
   render(<RunFailureRemediation run={run} />);
   expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
 });
+
+it.each([
+  "Ollama not reachable at http://127.0.0.1:11434/api/show: fetch failed",
+  "Ollama could not report the model's context limit: HTTP 401 at http://127.0.0.1:11434/api/show: unauthorized",
+  "Ollama could not report the model's context limit: http://127.0.0.1:11434/api/show answered with an error: invalid model name",
+])("shows only the lookup playbook for a failed context limit lookup: %s", (error) => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama did not report the model's context limit")).toBeInTheDocument();
+  for (const title of ["Ollama isn't running", "Tenant token expired", "Manifest validation failed", "Request timed out", "Model not pulled"]) {
+    expect(screen.queryByText(title)).not.toBeInTheDocument();
+  }
+});

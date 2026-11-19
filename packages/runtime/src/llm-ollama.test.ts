@@ -424,6 +424,7 @@ describe("Ollama context size", () => {
   for (const [label, showBody, message] of [
     ["an HTML page", "<html>proxy error</html>", /the answer from http:\/\/127\.0\.0\.1:\d+\/api\/show was not JSON/],
     ["a JSON error", JSON.stringify({ error: "model is loading" }), /answered with an error: model is loading/],
+    ["JSON that is not an object", "[]", /the answer from http:\/\/127\.0\.0\.1:\d+\/api\/show was not a JSON object/],
   ] as const) {
     it(`reports a model lookup that answers with ${label} instead of retrying without a limit`, async () => {
       const fake = await fakeOllama({ showBody, limit: (numCtx) => numCtx ?? 16384 });
