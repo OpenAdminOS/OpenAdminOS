@@ -2415,6 +2415,84 @@ summarized in chunks before a final summary. Local embeddings can be added later
 for free-text policy retrieval, but the first implementation should work without
 embedding infrastructure.
 
+#### Model fit: when the local model cannot do a request (2026-11-19)
+
+Decided by the maintainer on 2026-11-19: Chat may run a request with a hosted
+provider when the local model is a poor fit for it, but only after a notice
+inside Chat that says what happens and where data goes, and an explicit accept.
+Never silently and never preselected. This keeps the admin in the loop and
+helps with cost. Design: mockup 36 (`docs/mockups/36-model-fit.html`; 35 is
+taken by the personal agent mockup in PR #207).
+
+Signals. Only a provider on this device gets the offer.
+- The prompt does not fit the context window. Today this is the provider's own
+  error: the Ollama adapter's "context size too small" message with the tokens
+  needed and the limit (PR #211), Ollama's HTTP 400 ("request (N tokens) exceeds
+  the available context size (L tokens)"), llama.cpp's
+  `exceed_context_size_error` (LM Studio, Lemonade) and Apple Foundation's
+  context error. A typed runtime failure (`kind` or `code`
+  `context-too-small`, with needed and limit numbers) is read by its shape, so
+  the runtime's prompt fit check slots in without a second estimator.
+- The investigation failed on this local model often enough that Chat stops
+  trying it (the in-memory repeated-failure counter); the answer still comes
+  from cached data and carries the offer.
+- A thinking-only answer that ran out of budget, once the runtime reports it as
+  its own typed reason (`thinking-only`). There is no text guessing for it.
+
+The notice replaces the generic error above the composer. It says why in
+plain numbers where known ("This request needs about 40,652 tokens. OpenAdmin
+8B is set to 16,384."), that nothing was sent elsewhere, and lists choices as
+separate buttons with none focused or highlighted: each configured and ready
+hosted provider with its production location label (`providerDataLocation`)
+and a cost note that says where the cost lands (the app knows no plan or
+price); up to two installed local models with a larger parameter count in
+their name, marked as on this device and not checked against the request
+size; Split the question (the question goes back to the composer with a
+hint); and Keep on the local model, which leaves "Kept on <model>. Nothing was
+sent. Narrow the question ... then send again." Providers the managed policy
+does not allow are not in the provider list, so they are never offered; when
+the policy allows no hosted provider the notice says so, and with none set up
+it links to Settings, Providers.
+
+Accept step. A hosted choice opens the hosted send confirmation in a
+per-request form: it names the provider, where data goes with the detail
+line, the model, what is sent, what stays and the cost; it says the next
+message goes to the local model again; it has no remember box and Enter does
+not send, only the Send button does. Approval is per request in v1: a
+remembered "do not ask again" for that provider never covers it.
+A local choice sends at once, since nothing leaves the device.
+
+Host checks (`apps/desktop/electron/intune-chat/model-fit.ts`). The renderer
+sends `modelOverride` on `SendIntuneChatMessageInput` with the chosen provider
+and model and the local provider and model it replaces. The service refuses it
+unless the active provider is that local one with that model, the chosen
+provider is listed and ready and lists the model, and a hosted one comes with a
+`hostedProviderConsent` for it that is not a remembered one; the usual consent
+check (age, tenant, model) and `buildLlm`'s policy check then apply as for any
+hosted send, and the consent is audited. The override changes nothing
+persistent: the next send uses the active provider. Nova and the non-streaming
+send refuse an override. Masking from the data policy (PR #209 onward) applies
+to this send like any hosted send, since it goes through the same model choke
+point; no masking exists on main yet.
+
+After. The stored answer carries `switchedFrom` (the provider and model it
+replaced and why) and shows "Answered by <location label> for this request
+only. Chat is back on <model>." A failed answer carries `modelFit` with the
+reason and numbers, kept in the answer metadata.
+
+Agent runs. A run that failed on a local provider with a context failure shows
+the same notice on the run page ("Run again with"). Choosing a provider opens
+the run review with that provider and model, which is the run's accept step:
+it names where prompts go and says "<model> could not fit the last run, so
+this run uses <provider>. This run only: the agent keeps its model for later
+runs." Start run starts the agent with `providerId` and `model` for that run
+only. A write agent still stops at the diff and its typed confirmation. Team
+runs keep their own review in Agent Team.
+
+Open questions (TODO(ugur) in code): a "remember for this conversation"
+option; reading each local model's context length so only models that can
+take the request are offered; whether hosted rows should show a cost estimate.
+
 #### Agents as skills
 
 Installed agents expose routing metadata derived from their manifests: name,
