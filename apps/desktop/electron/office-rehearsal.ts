@@ -190,30 +190,31 @@ export async function runOfficeRehearsal(
       `document.querySelector('.team-office')?.dataset.motion==='off'`,
     );
     await frame(join(outputDir, "office-high-contrast.png"));
+    // Set the media baseline explicitly so the visibility check is independent
+    // of the reduced-motion case and the host's accessibility preferences.
+    await window.webContents.debugger.sendCommand("Emulation.setEmulatedMedia", {
+      media: "screen",
+      features: [
+        { name: "prefers-reduced-motion", value: "no-preference" },
+        { name: "forced-colors", value: "none" },
+      ],
+    });
+    await reload();
+    await wait(`document.querySelector('.team-office')?.dataset.motion==='on'`);
+    // Restore normal visibility events for the window hide and show checks.
+    window.webContents.setBackgroundThrottling(true);
+    window.hide();
+    await wait(
+      `document.hidden && document.querySelector('.team-office')?.dataset.motion==='off'`,
+    );
+    window.show();
+    await wait(
+      `!document.hidden && document.querySelector('.team-office')?.dataset.motion==='on'`,
+    );
   } finally {
+    window.webContents.setBackgroundThrottling(false);
     window.webContents.debugger.detach();
   }
-  // Reset media emulation first so reduced motion cannot mask a broken
-  // visibility listener. Prove running -> hidden -> running independently.
-  await reload();
-  await wait(`document.querySelector('.team-office')?.dataset.motion==='on'`);
-  // Electron intentionally keeps document.visibilityState visible when background
-  // throttling is disabled for screenshots. Restore production behavior here.
-  window.webContents.setBackgroundThrottling(true);
-  window.hide();
-  await wait(
-    `document.hidden && document.querySelector('.team-office')?.dataset.motion==='off'`,
-  );
-  const hiddenMotion = await evaluate<string>(
-    `document.querySelector('.team-office').dataset.motion`,
-  );
-  if (hiddenMotion !== "off")
-    throw new Error("Hidden window kept ambient motion running");
-  window.show();
-  await wait(
-    `!document.hidden && document.querySelector('.team-office')?.dataset.motion==='on'`,
-  );
-  window.webContents.setBackgroundThrottling(false);
   await writeFile(
     join(outputDir, "office-performance.json"),
     JSON.stringify(
@@ -224,7 +225,7 @@ export async function runOfficeRehearsal(
           : "Animation-frame samples unavailable; no FPS claim.",
         recordingFrames: frames,
         environment: `Electron on ${process.platform}; record desktop/session context separately`,
-        hiddenMotion,
+      hiddenMotion: "off",
         resumedMotion: "on",
         zoom200Overflow: overflow,
       },
