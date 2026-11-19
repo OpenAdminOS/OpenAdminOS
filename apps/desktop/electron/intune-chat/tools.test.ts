@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
 
 import {
@@ -63,7 +64,7 @@ it("recognizes a cached user's first name inside a device name and resolves type
     store.replaceGraphResources({ ...common, resource: "managedDevices", label: "Devices",
       rows: [{ id: "workstation-01", deviceName }, { id: "workstation-02", deviceName: "Desk computer" }] });
     const index = store.classificationIdentityIndex(tenantId);
-    const ledger = new ClassificationLedger({ matches: text => index.hasClassifiedIdentity(text), spans: text => index.spans(text) });
+    const ledger = new ClassificationLedger(index);
     const read = withClassificationScope(ledger, () => store.queryGraphCache({ tenantId, resource: "managedDevices" }));
     const prompt = JSON.stringify(read.rows);
     const system = `Compare ${knownId} with ${unknownId}`;
@@ -71,7 +72,62 @@ it("recognizes a cached user's first name inside a device name and resolves type
     assert.ok(spans.some(span => span.kind === "identity" && span.source === "cache:managedDevices" &&
       prompt.slice(span.start, span.end) === deviceName));
     assert.ok(spans.some(span => span.kind === "device" && prompt.slice(span.start, span.end) === "Desk computer"));
-    assert.deepEqual(spans.filter(span => span.section === "system").map(span => system.slice(span.start, span.end)), [knownId]);
+    assert.deepEqual(spans.filter(span => span.section === "system").map(span => system.slice(span.start, span.end)), [knownId, unknownId]);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("reuses versioned cache metadata on reopen and backfills rows from older versions", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-cache-classification-version-"));
+  const path = join(dir, "openadminos.db");
+  const tenantId = "fixture-tenant";
+  const resource = "applications";
+  const row = { id: "fixture-app", passwordCredentials: [{ hint: "Jz7" }] };
+  let store = new IntelligenceSqliteStore(path);
+  try {
+    store.replaceGraphResources({ tenantId, resource, label: "Applications", scopeSet: [],
+      refreshedAt: "2026-11-18T00:00:00.000Z", rows: [row] });
+    store.close();
+    const db = new DatabaseSync(path);
+    try {
+      const record = db.prepare("SELECT classification_json FROM graph_resources").get();
+      assert.match(String(record?.classification_json), /"hint","credential"/);
+      assert.doesNotMatch(String(record?.classification_json), /Jz7/);
+      db.exec("UPDATE graph_resources SET classification_json = NULL");
+    } finally { db.close(); }
+    store = new IntelligenceSqliteStore(path, { backgroundClassification: true });
+    await store.waitForCacheClassification();
+    const ledger = new ClassificationLedger();
+    const result = withClassificationScope(ledger, () => store.queryGraphCache({ tenantId, resource }));
+    assert.deepEqual(result.rows[0]?.row, row);
+    const request = ledger.classifyRequest({ prompt: JSON.stringify(row) });
+    assert.equal(request.coverageIncomplete, false);
+    assert.equal(request.counts.credential, 1);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("keeps the previous rows and identity index when batched preparation is cancelled", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-cache-classification-cancel-"));
+  const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+  try {
+    const snapshot = { tenantId: "tenant-1", resource: "users" as const, label: "Users",
+      scopeSet: [], refreshedAt: "2026-11-18T00:00:00.000Z" };
+    const original = { id: "old-user", displayName: "Synthea Fixture" };
+    store.replaceGraphResources({ ...snapshot, rows: [original] });
+    const abort = new AbortController();
+    const rows = Array.from({ length: 300 }, (_, i) => ({ id: `new-user-${i}`, displayName: `Replacement ${i}` }));
+    const refresh = store.replaceGraphResourcesInBatches({ ...snapshot, rows }, abort.signal);
+    queueMicrotask(() => abort.abort(new Error("Cancelled fixture refresh")));
+    await assert.rejects(refresh, /Cancelled fixture refresh/);
+    assert.deepEqual(store.queryGraphCache(snapshot).rows.map(entry => entry.row), [original]);
+    const identities = store.classificationIdentityIndex(snapshot.tenantId);
+    assert.equal(identities.matches(original.displayName), true);
+    assert.equal(identities.matches("Replacement 1"), false);
   } finally {
     store.close();
     await rm(dir, { recursive: true, force: true });

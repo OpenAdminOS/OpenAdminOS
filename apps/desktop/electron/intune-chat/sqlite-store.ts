@@ -2,8 +2,10 @@ import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
+import { setImmediate as yieldToMain } from "node:timers/promises";
 import { collectTenantValues, TenantValueIndex } from "./tenant-values.js";
-import { registerTenantData } from "@openadminos/runtime/data-classification";
+import { currentClassificationLedger, GRAPH_FIELD_CLASSES_VERSION, registerClassifiedValues, type ClassificationOptions } from "@openadminos/runtime/data-classification";
+import { describeCacheRow, readCacheClassification } from "./cache-classification.js";
 import { pathForResource } from "./planner.js";
 import { GRAPH_CACHE_LOG_RESOURCES } from "@openadminos/agent-sdk";
 
@@ -13,6 +15,7 @@ const TENANT_IDENTITY_RESOURCES = [
   "signIns", "directoryAudits", "intuneAuditEvents", "managedDeviceEncryptionStates", "troubleshootingEvents",
   "domains", "administrativeUnits", "namedLocations",
 ] as const;
+const identityResources = new Set<GraphCacheResourceKind>(TENANT_IDENTITY_RESOURCES);
 import type {
   ChatInvestigationMode,
   ChatInvestigationSettings,
@@ -91,6 +94,7 @@ interface ResourceStatusRow {
 
 interface ResourceRow {
   raw_json: string;
+  classification_json?: string | null;
   refreshed_at?: string;
 }
 
@@ -117,6 +121,26 @@ interface NormalizedGraphResourceRow {
   rawJson: string;
   normalized: NormalizedGraphObject;
 }
+
+interface GraphResourceSnapshot {
+  tenantId: string;
+  resource: GraphCacheResourceKind;
+  label: string;
+  scopeSet: string[];
+  rows: unknown[];
+  pageCount?: number;
+  pageLimitReached?: boolean;
+  tenantTotal?: number;
+  refreshedAt: string;
+}
+
+interface PreparedGraphResources {
+  rows: Array<NormalizedGraphResourceRow & { classification: string }>;
+  egressIndex?: TenantValueIndex;
+  firstNames?: TenantValueIndex;
+}
+
+const CLASSIFICATION_BATCH_ROWS = 256;
 
 interface DriftSnapshotRow {
   id: string;
@@ -150,10 +174,6 @@ interface DriftBaselineRow {
   status: "active" | "retired";
   created_at: string;
   retired_at: string | null;
-}
-
-interface QueryCacheRow extends ResourceRow {
-  total_count: number;
 }
 
 interface SettingRow {
@@ -409,12 +429,16 @@ export class IntelligenceSqliteStore {
   // resource. A refresh whose fetch started before that moment holds
   // pre-write rows, so its completion must not clear the stale marker.
   private readonly graphInvalidatedAt = new Map<string, string>();
-  // Identity values of the cached rows per tenant, built on the first MCP
-  // call and dropped whenever that tenant's cache changes.
+  // Resource indexes change when their snapshot changes.
   private readonly tenantIdentityIndexes = new Map<string, TenantValueIndex>();
-  private readonly classificationIndexes = new Map<string, TenantValueIndex>();
+  private readonly tenantIdentityShards = new Map<string, Map<GraphCacheResourceKind, TenantValueIndex>>();
+  private readonly classificationIndexes = new Map<string, Map<GraphCacheResourceKind, TenantValueIndex>>();
+  private cacheClassificationReady = false;
+  private classificationInitialization?: Promise<void>;
+  private closed = false;
+  private readonly cacheCleared = new Map<string, number>();
 
-  constructor(dbPath: string) {
+  constructor(dbPath: string, options: { backgroundClassification?: boolean } = {}) {
     const root = dirname(dbPath);
     mkdirSync(root, { recursive: true, mode: 0o700 });
     chmodSync(root, 0o700);
@@ -430,9 +454,18 @@ export class IntelligenceSqliteStore {
       if (existsSync(sidecar)) chmodSync(sidecar, 0o600);
     }
     this.migrate();
+    if (options.backgroundClassification) {
+      this.classificationInitialization = this.initializeCacheClassification();
+    } else {
+      for (const _batch of this.cacheClassificationBatches()) { /* Drain synchronously for standalone callers. */ }
+    }
   }
 
   close(): void {
+    this.closed = true;
+    this.classificationIndexes.clear();
+    this.tenantIdentityIndexes.clear();
+    this.tenantIdentityShards.clear();
     this.db.close();
   }
 
@@ -738,28 +771,63 @@ export class IntelligenceSqliteStore {
       );
   }
 
-  replaceGraphResources(input: {
-    tenantId: string;
-    resource: GraphCacheResourceKind;
-    label: string;
-    scopeSet: string[];
-    rows: unknown[];
-    pageCount?: number;
-    pageLimitReached?: boolean;
-    tenantTotal?: number;
-    refreshedAt: string;
-  }): void {
+  replaceGraphResources(input: GraphResourceSnapshot): void {
+    const result = this.prepareGraphResources(input);
+    while (true) {
+      const batch = result.next();
+      if (batch.done) {
+        this.writeGraphResources(input, batch.value);
+        return;
+      }
+    }
+  }
+
+  async replaceGraphResourcesInBatches(input: GraphResourceSnapshot, signal?: AbortSignal): Promise<void> {
+    const cacheGeneration = this.cacheCleared.get(input.tenantId);
+    await this.waitForCacheClassification();
+    const prepared = this.prepareGraphResources(input);
+    while (true) {
+      signal?.throwIfAborted();
+      const batch = prepared.next();
+      if (batch.done) {
+        if (this.cacheCleared.get(input.tenantId) !== cacheGeneration) {
+          throw new Error("The cache was cleared during this refresh. Run the refresh again.");
+        }
+        this.writeGraphResources(input, batch.value);
+        return;
+      }
+      await yieldToMain();
+    }
+  }
+
+  private *prepareGraphResources(input: GraphResourceSnapshot): Generator<void, PreparedGraphResources> {
+    this.assertTenantWritable(input.tenantId, "graph cache");
+    const egressIndex = identityResources.has(input.resource) ? new TenantValueIndex() : undefined;
+    const identityResource = input.resource === "users" || input.resource === "groups";
+    const firstNames = input.resource === "users" ? new TenantValueIndex() : undefined;
+    const graphPath = pathForResource(input.resource).path;
+    const identityIndex = this.classificationIdentityIndex(input.tenantId);
+    const rows: PreparedGraphResources["rows"] = [];
+    for (const row of input.rows) {
+      const rawJson = JSON.stringify(row) ?? "null";
+      const normalized = normalizeGraphObject(row);
+      if (egressIndex) addCacheIdentity(egressIndex, normalized.graphId, normalized.displayName, row);
+      if (firstNames) addUserFirstName(firstNames, input.resource, normalized.displayName, row);
+      rows.push({ row, rawJson, normalized, classification: describeCacheRow(readJson<unknown>(rawJson, null), {
+        graphPath, ...(identityResource ? {} : { identityIndex }),
+      }) });
+      if (rows.length % CLASSIFICATION_BATCH_ROWS === 0) yield;
+    }
+    return { rows, ...(egressIndex ? { egressIndex } : {}), ...(firstNames ? { firstNames } : {}) };
+  }
+
+  private writeGraphResources(
+    input: GraphResourceSnapshot, { rows: normalizedRows, egressIndex, firstNames }: PreparedGraphResources,
+  ): void {
     this.assertTenantWritable(input.tenantId, "graph cache");
     const snapshotId = `${input.resource}-${input.refreshedAt}-${randomUUID().slice(0, 8)}`;
-    this.tenantIdentityIndexes.delete(input.tenantId);
-    this.classificationIndexes.delete(input.tenantId);
     this.db.exec("BEGIN");
     try {
-      const normalizedRows = input.rows.map((row) => ({
-        row,
-        rawJson: JSON.stringify(row) ?? "null",
-        normalized: normalizeGraphObject(row),
-      }));
       if (DRIFT_TRACKED_RESOURCES.has(input.resource)) {
         this.captureDriftSnapshot({
           tenantId: input.tenantId,
@@ -780,9 +848,9 @@ export class IntelligenceSqliteStore {
         `INSERT INTO graph_resources (
           tenant_id, resource, graph_id, snapshot_id, raw_json, search_text,
           display_name, user_principal_name, operating_system, compliance_state,
-          last_seen_at, refreshed_at
+          last_seen_at, refreshed_at, classification_json
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       for (const entry of normalizedRows) {
         insert.run(
@@ -798,6 +866,7 @@ export class IntelligenceSqliteStore {
           entry.normalized.complianceState,
           entry.normalized.lastSeenAt,
           input.refreshedAt,
+          entry.classification,
         );
       }
       // A refresh that started before a write invalidation fetched
@@ -846,6 +915,11 @@ export class IntelligenceSqliteStore {
           input.tenantTotal ?? null,
         );
       this.db.exec("COMMIT");
+      if (egressIndex) {
+        this.setIdentityShard(this.tenantIdentityShards, input.tenantId, input.resource, egressIndex);
+        this.tenantIdentityIndexes.delete(input.tenantId);
+      }
+      if (firstNames) this.setIdentityShard(this.classificationIndexes, input.tenantId, input.resource, firstNames);
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
@@ -2147,8 +2221,6 @@ export class IntelligenceSqliteStore {
   }
 
   clearGraphCache(tenantId: string): void {
-    this.tenantIdentityIndexes.delete(tenantId);
-    this.classificationIndexes.delete(tenantId);
     this.db.exec("BEGIN");
     try {
       this.db
@@ -2162,6 +2234,10 @@ export class IntelligenceSqliteStore {
       this.db.exec("ROLLBACK");
       throw error;
     }
+    this.cacheCleared.set(tenantId, (this.cacheCleared.get(tenantId) ?? 0) + 1);
+    this.tenantIdentityIndexes.delete(tenantId);
+    this.classificationIndexes.delete(tenantId);
+    this.tenantIdentityShards.delete(tenantId);
   }
 
   purgeTenant(tenantId: string): void {
@@ -2189,8 +2265,10 @@ export class IntelligenceSqliteStore {
       .filter((row) => readJson<string[]>(row.resolved_tenant_ids_json, []).includes(tenantId))
       .map((row) => row.id);
 
+    this.cacheCleared.set(tenantId, (this.cacheCleared.get(tenantId) ?? 0) + 1);
     this.tenantIdentityIndexes.delete(tenantId);
     this.classificationIndexes.delete(tenantId);
+    this.tenantIdentityShards.delete(tenantId);
     this.db.exec("BEGIN IMMEDIATE");
     try {
       for (const table of [
@@ -2318,29 +2396,28 @@ export class IntelligenceSqliteStore {
         where.push("search_text LIKE ?");
         args.push(`%${term}%`);
       }
-      const rows = this.db
+      let rows = this.db
         .prepare(
-          `SELECT raw_json
+          `SELECT raw_json, classification_json
            FROM graph_resources
            WHERE ${where.join(" AND ")}
            ORDER BY COALESCE(last_seen_at, refreshed_at) DESC
            LIMIT ?`,
         )
         .all(...args, input.limitPerResource) as unknown as ResourceRow[];
-      let parsed = rows.map((row) => readJson<unknown>(row.raw_json, {}));
-      if (parsed.length === 0 && terms.length > 0) {
-        const fallback = this.db
+      if (rows.length === 0 && terms.length > 0) {
+        rows = this.db
           .prepare(
-            `SELECT raw_json
+            `SELECT raw_json, classification_json
              FROM graph_resources
              WHERE tenant_id = ? AND resource = ?
              ORDER BY COALESCE(last_seen_at, refreshed_at) DESC
              LIMIT ?`,
           )
           .all(input.tenantId, resource, input.limitPerResource) as unknown as ResourceRow[];
-        parsed = fallback.map((row) => readJson<unknown>(row.raw_json, {}));
       }
-      registerTenantData(`cache:${resource}`, parsed, { graphPath: pathForResource(resource).path });
+      const parsed = rows.map(row => readJson<unknown>(row.raw_json, {}));
+      registerCacheRows(resource, rows, parsed);
       out[resource] = parsed;
     }
     return out;
@@ -2387,34 +2464,121 @@ export class IntelligenceSqliteStore {
 
   /**
    * The identity values of the cache as one index, built once per tenant
-   * and rebuilt after the tenant's cache changes. Callers must not add to it.
+   * and backed by resource snapshots. Callers must not add to it.
    */
   tenantIdentityValues(tenantId: string): TenantValueIndex {
+    if (!this.cacheClassificationReady) {
+      const index = new TenantValueIndex();
+      this.collectTenantIdentityValues(tenantId, index);
+      return index;
+    }
     const cached = this.tenantIdentityIndexes.get(tenantId);
     if (cached) return cached;
-    const index = new TenantValueIndex();
-    this.collectTenantIdentityValues(tenantId, index);
+    const index = new TenantValueIndex([...this.tenantIdentityShards.get(tenantId)?.values() ?? []]);
     this.tenantIdentityIndexes.set(tenantId, index);
     return index;
   }
 
-  /** Identity inputs for classification exclude devices, so a device name cannot match itself. */
-  classificationIdentityIndex(tenantId: string): TenantValueIndex {
-    const cached = this.classificationIndexes.get(tenantId);
-    if (cached) return cached;
-    const index = new TenantValueIndex();
-    const rows = this.db.prepare(`SELECT graph_id, display_name, raw_json, resource FROM graph_resources
-      WHERE tenant_id = ? AND resource IN ('users', 'groups')`).iterate(tenantId) as
-      Iterable<{ graph_id: string; display_name: string | null; raw_json: string; resource: string }>;
-    for (const row of rows) {
-      index.add(row.graph_id);
-      index.add(row.display_name, "name");
-      const record = readJson<Record<string, unknown> | null>(row.raw_json, {});
-      if (row.resource === "users") index.add(record?.givenName ?? row.display_name?.trim().split(/\s+/, 1)[0], "name");
-      collectTenantValues(record, index);
+  /** User and group snapshots are separate so changing either leaves the other index intact. */
+  classificationIdentityIndex(tenantId: string): NonNullable<ClassificationOptions["identityIndex"]> {
+    const indexes = this.classificationIndexes;
+    const cache = this.tenantIdentityShards;
+    function* shards(): Iterable<TenantValueIndex> {
+      const resources = cache.get(tenantId);
+      for (const resource of ["users", "groups"] as const) {
+        const index = resources?.get(resource);
+        if (index) yield index;
+      }
+      yield* indexes.get(tenantId)?.values() ?? [];
     }
-    this.classificationIndexes.set(tenantId, index);
-    return index;
+    return {
+      matches: text => !TenantValueIndex.spansFor(text, shards()).next().done,
+      spans: text => TenantValueIndex.spansFor(text, shards()),
+      isComplete: () => this.cacheClassificationReady,
+    };
+  }
+
+  private setIdentityShard(
+    indexes: Map<string, Map<GraphCacheResourceKind, TenantValueIndex>>,
+    tenantId: string, resource: GraphCacheResourceKind, index: TenantValueIndex,
+  ): void {
+    let shards = indexes.get(tenantId);
+    if (!shards) indexes.set(tenantId, shards = new Map());
+    shards.set(resource, index);
+  }
+
+  waitForCacheClassification(): Promise<void> | undefined {
+    return this.classificationInitialization;
+  }
+
+  private async initializeCacheClassification(): Promise<void> {
+    try {
+      await yieldToMain();
+      if (this.closed) return;
+      for (const _batch of this.cacheClassificationBatches()) {
+        await yieldToMain();
+        if (this.closed) return;
+      }
+    } catch {
+      // Requests still run. The classifier reports incomplete coverage,
+      // and the existing egress guard reads its index directly from SQLite.
+    }
+  }
+
+  private *cacheClassificationBatches(): Generator<void> {
+    const placeholders = TENANT_IDENTITY_RESOURCES.map(() => "?").join(", ");
+    const select = this.db.prepare(`SELECT rowid, tenant_id, resource, graph_id, display_name, raw_json
+      FROM graph_resources WHERE rowid > ? AND resource IN (${placeholders}) ORDER BY rowid LIMIT ?`);
+    let cursor = 0;
+    for (;;) {
+      const rows = select.all(cursor, ...TENANT_IDENTITY_RESOURCES, CLASSIFICATION_BATCH_ROWS) as
+        unknown as Array<CachedGraphResourceRow & { tenant_id: string; rowid: number }>;
+      if (!rows.length) break;
+      for (const row of rows) {
+        cursor = row.rowid;
+        let index = this.tenantIdentityShards.get(row.tenant_id)?.get(row.resource);
+        if (!index) this.setIdentityShard(this.tenantIdentityShards, row.tenant_id, row.resource, index = new TenantValueIndex());
+        const parsed = readJson<unknown>(row.raw_json, null);
+        addCacheIdentity(index, row.graph_id, row.display_name, parsed);
+        if (row.resource !== "users") continue;
+        let firstNames = this.classificationIndexes.get(row.tenant_id)?.get(row.resource);
+        if (!firstNames) this.setIdentityShard(this.classificationIndexes, row.tenant_id, row.resource, firstNames = new TenantValueIndex());
+        addUserFirstName(firstNames, row.resource, row.display_name, parsed);
+      }
+      yield;
+    }
+    yield* this.backfillCacheClassifications();
+    this.cacheClassificationReady = true;
+  }
+
+  private *backfillCacheClassifications(): Generator<void> {
+    const prefix = `[${GRAPH_FIELD_CLASSES_VERSION},%`;
+    const select = this.db.prepare(`SELECT rowid, tenant_id, resource, raw_json FROM graph_resources
+      WHERE rowid > ? AND (classification_json IS NULL OR classification_json NOT LIKE ?)
+      ORDER BY rowid LIMIT ?`);
+    const update = this.db.prepare("UPDATE graph_resources SET classification_json = ? WHERE rowid = ?");
+    let cursor = 0;
+    for (;;) {
+      const rows = select.all(cursor, prefix, CLASSIFICATION_BATCH_ROWS) as unknown as Array<CachedGraphResourceRow & { tenant_id: string; rowid: number }>;
+      if (!rows.length) return;
+      this.db.exec("BEGIN");
+      try {
+        for (const row of rows) {
+          const graphPath = pathForResource(row.resource)?.path;
+          const identityIndex = this.classificationIdentityIndex(row.tenant_id);
+          update.run(describeCacheRow(readJson<unknown>(row.raw_json, null), {
+            ...(graphPath ? { graphPath } : {}),
+            ...(row.resource === "users" || row.resource === "groups" ? {} : { identityIndex }),
+          }), row.rowid);
+          cursor = row.rowid;
+        }
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+      yield;
+    }
   }
 
   /** Tenant values that earlier turns of a conversation observed. */
@@ -2459,25 +2623,30 @@ export class IntelligenceSqliteStore {
       ? graphCacheFieldSql(input.sort.field)
       : "COALESCE(last_seen_at, refreshed_at)";
     const sortDirection = input.sort?.direction === "asc" ? "ASC" : "DESC";
+    // Rank lightweight row IDs first. Do not put large raw rows and sidecars
+    // in the temporary sort table for the entire resource snapshot.
     const sql = `
-      SELECT raw_json, refreshed_at, COUNT(*) OVER () AS total_count
+      SELECT rowid, COUNT(*) OVER () AS total_count
       FROM graph_resources
       WHERE ${where.join(" AND ")}
       ORDER BY ${sortField} ${sortDirection}
       LIMIT ?`;
-    const rows = this.db
+    const selected = this.db
       .prepare(sql)
-      .all(...args, limit) as unknown as QueryCacheRow[];
+      .all(...args, limit) as unknown as Array<{ rowid: number; total_count: number }>;
+    const details = this.db.prepare(`SELECT rowid, raw_json, classification_json, refreshed_at
+      FROM graph_resources WHERE rowid IN (SELECT value FROM json_each(?))`)
+      .all(JSON.stringify(selected.map(row => row.rowid))) as unknown as Array<ResourceRow & { rowid: number }>;
+    const byId = new Map(details.map(row => [row.rowid, row]));
+    const rows = selected.map(row => byId.get(row.rowid)!);
     const parsed = rows.map((row) => ({
       row: readJson<unknown>(row.raw_json, {}),
       ...(row.refreshed_at ? { refreshedAt: row.refreshed_at } : {}),
     }));
-    registerTenantData(`cache:${input.resource}`, parsed.map(({ row }) => row), {
-      graphPath: pathForResource(input.resource).path,
-    });
+    registerCacheRows(input.resource, rows, parsed.map(({ row }) => row));
     return {
       resource: input.resource,
-      totalCount: rows[0]?.total_count ?? 0,
+      totalCount: selected[0]?.total_count ?? 0,
       returnedRows: rows.length,
       limit,
       rows: parsed,
@@ -2491,7 +2660,7 @@ export class IntelligenceSqliteStore {
   }): unknown[] {
     const rows = this.db
       .prepare(
-        `SELECT raw_json
+        `SELECT raw_json, classification_json
          FROM graph_resources
          WHERE tenant_id = ?
            AND resource = 'managedDevices'
@@ -2502,7 +2671,7 @@ export class IntelligenceSqliteStore {
       )
       .all(input.tenantId, input.thresholdIso, input.limit) as unknown as ResourceRow[];
     const parsed = rows.map((row) => readJson<unknown>(row.raw_json, {}));
-    registerTenantData("cache:managedDevices", parsed, { graphPath: pathForResource("managedDevices").path });
+    registerCacheRows("managedDevices", rows, parsed);
     return parsed;
   }
 
@@ -3851,6 +4020,7 @@ export class IntelligenceSqliteStore {
          VALUES (2, 'tenant-drift-snapshots', ?)`,
       )
       .run(new Date().toISOString());
+    ensureColumn(this.db, "graph_resources", "classification_json", "TEXT");
     ensureColumn(this.db, "graph_cache_status", "page_count", "INTEGER NOT NULL DEFAULT 0");
     // Tenant-wide total reported by Graph via $count, which can exceed
     // the number of rows the cache holds.
@@ -4643,6 +4813,29 @@ function graphCacheFieldSql(field: string): string {
     throw new Error(`Unsupported cache field: ${field}`);
   }
   return `json_extract(raw_json, '$.${normalized}')`;
+}
+
+function addCacheIdentity(index: TenantValueIndex, id: string, name: string | null, row: unknown): void {
+  index.add(id);
+  index.add(name, "name");
+  collectTenantValues(row, index);
+}
+
+function addUserFirstName(index: TenantValueIndex, resource: GraphCacheResourceKind, name: string | null, row: unknown): void {
+  const record = row as Record<string, unknown> | null;
+  if (resource === "users") index.add(record?.givenName ?? name?.trim().split(/\s+/, 1)[0], "name");
+}
+
+function registerCacheRows(resource: GraphCacheResourceKind, rows: readonly ResourceRow[], parsed: readonly unknown[]): void {
+  if (!rows.length) return;
+  const source = `cache:${resource}`;
+  if (!currentClassificationLedger()) {
+    registerClassifiedValues(source, { fields: [], incomplete: false });
+    return;
+  }
+  for (let index = 0; index < rows.length; index++) {
+    registerClassifiedValues(source, readCacheClassification(parsed[index], rows[index]?.classification_json));
+  }
 }
 
 function ensureColumn(

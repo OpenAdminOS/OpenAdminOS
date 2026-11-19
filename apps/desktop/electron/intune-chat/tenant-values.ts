@@ -77,8 +77,8 @@ const COMPACT_IDENTIFIER_MIN = 8;
  * removed: their digits are indexed as one token, and runs of numeric
  * tokens in the query are joined the same way. Sequences are bucketed by
  * their first token: a query is scanned once and, at each token, compared
- * only with the values starting with that token. Cost depends on the query
- * length and bucket size, not on how many values exist, so there is no cap.
+ * using direct lookups of the known sequence lengths for that token. The
+ * value count does not increase the number of lookups per token.
  * Identifiers of 8 or more characters (MAC addresses, serials) are also
  * kept with separators removed and matched against every run of
  * consecutive query tokens joined, so "A1B2C3 D4E5F6" matches
@@ -86,13 +86,16 @@ const COMPACT_IDENTIFIER_MIN = 8;
  */
 export class TenantValueIndex {
   private readonly longestSequence = new Map<string, number>();
-  private readonly buckets = new Map<string, Map<string, string[]>>();
+  private readonly buckets = new Map<string, Set<string>>();
   private readonly compact = new Set<string>();
+  private readonly compactPrefixes = new Set<string>();
   private compactMaxLength = 0;
   private count = 0;
 
+  constructor(private readonly parts: readonly TenantValueIndex[] = []) {}
+
   get size(): number {
-    return this.count;
+    return this.parts.reduce((count, part) => count + part.size, this.count);
   }
 
   add(value: unknown, kind: TenantValueKind = "identifier"): void {
@@ -106,6 +109,7 @@ export class TenantValueIndex {
     const compact = tokens.join("");
     if (kind === "identifier" && compact.length >= COMPACT_IDENTIFIER_MIN) {
       this.compact.add(compact);
+      for (let length = 1; length <= 4; length++) this.compactPrefixes.add(compact.slice(0, length));
       this.compactMaxLength = Math.max(this.compactMaxLength, compact.length);
     }
   }
@@ -116,23 +120,32 @@ export class TenantValueIndex {
 
   /** Normalized values, for storage; adding them again yields the same index or a stricter one. */
   values(): string[] {
-    return [...this.buckets.values()].flatMap((bucket) => [...bucket.keys()]);
+    return [...new Set([...this.buckets.values()].flatMap(bucket => [...bucket.keys()]).concat(this.parts.flatMap(part => part.values())))];
   }
 
   /** Whether any indexed value appears as a token sequence in the text. */
   matches(text: string): boolean {
     const tokens = normalizeTokens(text);
-    return this.matchesTokens(tokens) || this.matchesTokens(joinNumericRuns(tokens)) || this.matchesCompact(tokens);
+    const numeric = joinNumericRuns(tokens);
+    return this.matchesNormalized(tokens, numeric);
   }
 
-  hasClassifiedIdentity(text: string): boolean {
-    return !this.spans(text).next().done;
+  private matchesNormalized(tokens: readonly string[], numeric: readonly string[]): boolean {
+    return this.matchesTokens(tokens) || this.matchesTokens(numeric) || this.matchesCompact(tokens) ||
+      this.parts.some(part => part.matchesNormalized(tokens, numeric));
   }
 
   /** Source offsets for policy classification. Egress keeps its existing matcher. */
-  *spans(text: string): IterableIterator<{ start: number; end: number }> {
-    const tokens = [...text.matchAll(/[\p{L}\p{N}\p{M}\p{Cf}]+/gu)].flatMap(match =>
-      normalizeTokens(match[0]).map(token => ({ token, start: match.index, end: match.index + match[0].length })));
+  static *spansFor(text: string, indexes: Iterable<TenantValueIndex>): IterableIterator<{ start: number; end: number }> {
+    let tokens: IndexedToken[] | undefined;
+    for (const index of indexes) {
+      if (!index.count) continue;
+      tokens ??= toIndexedTokens(text);
+      yield* index.tokenSpans(tokens);
+    }
+  }
+
+  private *tokenSpans(tokens: readonly IndexedToken[]): IterableIterator<{ start: number; end: number }> {
     for (let first = 0; first < tokens.length; first++) {
       const start = tokens[first]!;
       const bucket = this.buckets.get(start.token);
@@ -144,6 +157,7 @@ export class TenantValueIndex {
           if (bucket.has(sequence)) yield { start: start.start, end: tokens[last]!.end };
         }
       }
+      if (!this.compactPrefixes.has(start.token.slice(0, 4))) continue;
       let joined = "";
       for (let last = first; last < tokens.length; last++) {
         const end = tokens[last]!;
@@ -170,9 +184,9 @@ export class TenantValueIndex {
   private insert(tokens: string[]): void {
     const key = tokens.join(" ");
     let bucket = this.buckets.get(tokens[0]!);
-    if (!bucket) this.buckets.set(tokens[0]!, (bucket = new Map()));
+    if (!bucket) this.buckets.set(tokens[0]!, (bucket = new Set()));
     if (!bucket.has(key)) {
-      bucket.set(key, tokens);
+      bucket.add(key);
       this.longestSequence.set(tokens[0]!, Math.max(this.longestSequence.get(tokens[0]!) ?? 0, tokens.length));
       this.count += 1;
     }
@@ -182,12 +196,33 @@ export class TenantValueIndex {
     for (let index = 0; index < tokens.length; index += 1) {
       const bucket = this.buckets.get(tokens[index]!);
       if (!bucket) continue;
-      for (const sequence of bucket.values()) {
-        if (index + sequence.length <= tokens.length && sequence.every((token, offset) => tokens[index + offset] === token)) return true;
+      let sequence = "";
+      const limit = Math.min(tokens.length, index + (this.longestSequence.get(tokens[index]!) ?? 0));
+      for (let end = index; end < limit; end++) {
+        sequence += (end === index ? "" : " ") + tokens[end]!;
+        if (bucket.has(sequence)) return true;
       }
     }
     return false;
   }
+}
+
+interface IndexedToken {
+  token: string;
+  start: number;
+  end: number;
+}
+
+function toIndexedTokens(text: string): IndexedToken[] {
+  const tokens: IndexedToken[] = [];
+  for (const match of text.matchAll(/[\p{L}\p{N}\p{M}\p{Cf}]+/gu)) {
+    const start = match.index;
+    const end = start + match[0].length;
+    for (const token of /^[a-z0-9]+$/i.test(match[0]) ? [match[0].toLowerCase()] : normalizeTokens(match[0])) {
+      tokens.push({ token, start, end });
+    }
+  }
+  return tokens;
 }
 
 /** "call 555 123 4567" becomes "call 5551234567". */
