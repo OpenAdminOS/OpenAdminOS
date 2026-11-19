@@ -1,11 +1,27 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { createServer } from "node:net";
+import { promisify } from "node:util";
 
 const modelPorts = [
   ["Ollama", 11434],
   ["LM Studio", 1234],
   ["Lemonade", 13305],
 ];
+const execFileAsync = promisify(execFile);
+
+async function hasDarwinListener(port) {
+  if (process.platform !== "darwin") return false;
+  // macOS can bind a specific address even when a wildcard listener already
+  // serves that port. Avoid intercepting connections to an existing service.
+  try {
+    await execFileAsync("/usr/sbin/lsof", ["-nP", "-a", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"]);
+    return true;
+  } catch (error) {
+    if (error.code === 1 && !error.stderr) return false;
+    throw error;
+  }
+}
 
 function listen(server, port, host) {
   return new Promise((resolve, reject) => {
@@ -41,6 +57,10 @@ export async function isolateSmokeProviders() {
   const checked = [];
   try {
     for (const [provider, port] of modelPorts) {
+      if (await hasDarwinListener(port)) {
+        console.log(`[smoke:providers] Skipping ${provider} port ${port} because the port is in use.`);
+        continue;
+      }
       for (const host of ["127.0.0.1", "::1"]) {
         const label = `${provider} on ${host} port ${port}`;
         const server = createServer((socket) => {
