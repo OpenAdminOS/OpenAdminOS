@@ -431,6 +431,18 @@
     .trvcap { font-size: var(--text-xs); color: var(--color-text-muted); margin: 0 0 8px; }
     .namerr { display: block; margin-top: 6px; font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-danger); }
     .namerr[hidden] { display: none; }
+    /* Round 6: re-review after a definition change, grant and service availability */
+    .trv .chg { display: grid; gap: 2px; margin-top: 6px; padding: 6px 8px; border-radius: 6px; background: var(--color-code-bg); font-size: var(--text-xs); line-height: var(--lh-xs); }
+    .trv .chg .k { color: var(--color-text-muted); margin-right: 6px; }
+    .trv .chg .was { color: var(--color-text-muted); }
+    .trv .chg .now { color: var(--color-text); }
+    .trv .chg mark { background: var(--color-warning-soft); color: inherit; border-radius: 3px; padding: 0 2px; }
+    .trv .ann.chgd { color: var(--color-warning); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-warning) 40%, transparent); }
+    .trv .same { display: block; padding: 8px 12px; font-size: var(--text-xs); color: var(--color-text-muted); }
+    .needs .st { text-align: right; white-space: normal; }
+    .missing .why { list-style: none; margin: 8px 0 0; padding: 0; font-size: var(--text-sm); line-height: var(--lh-sm); color: var(--color-text-soft); }
+    .missing .why li { display: grid; grid-template-columns: minmax(0, 1fr); padding: 6px 0; border-top: 1px solid var(--color-border-soft); }
+    .missing .why b { font-weight: 500; color: var(--color-text); }
   </style>
 </head>
 <body>
@@ -607,7 +619,7 @@
         </div>
       </div>
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:24px 0 8px">
-        <p class="trvcap" style="margin:0">The same grants in Contoso Retail, an organization where Entra is not connected</p>
+        <p class="trvcap" style="margin:0">The same grants in Contoso Retail, an organization where Entra is not connected. Use the switch here and the Read switch in the frame.</p>
         <span class="seg" role="group" aria-label="Entra in Contoso Retail" id="entraseg">
           <button type="button" data-entra="off" aria-pressed="true">Entra not connected</button>
           <button type="button" data-entra="on" aria-pressed="false">Entra connected</button>
@@ -623,32 +635,29 @@
               <div class="page-head"><div><h1>Access</h1><p>A granted tool is offered only while the service it reads is connected in the active organization. Grants stay as you set them.</p></div></div>
               <div class="grp">
                 <h3>Connectors <span>Contoso Retail</span></h3>
-                <div class="grant one"><span class="ic" data-s="intune">M</span><div><div class="nm">Microsoft 365</div><div class="ds">Read granted, with your sign-in</div><div class="svcs" id="svcs"><span data-on>Intune connected</span><span id="svc-entra">Entra not connected</span><span>Defender not connected</span></div></div><span class="tg"><span class="lab">Read</span><button class="sw" role="switch" aria-checked="true" aria-label="Read Microsoft 365 in Contoso Retail"></button></span></div>
+                <div class="grant one"><span class="ic" data-s="intune">M</span><div><div class="nm">Microsoft 365</div><div class="ds" id="m365read-ds">Read granted, with your sign-in</div><div class="svcs" id="svcs"><span data-on>Intune connected</span><span id="svc-entra">Entra not connected</span><span>Defender not connected</span></div></div><span class="tg"><span class="lab">Read</span><button class="sw" role="switch" aria-checked="true" aria-label="Read Microsoft 365 in Contoso Retail" id="m365read"></button></span></div>
               </div>
               <div class="grp">
                 <h3>Skills in this organization</h3>
-                <ul class="needs" id="needs">
-                  <li data-state="missing" data-needs="entra"><span><span class="n">Stale device triage</span><span class="d">graph_get on managedDevices, signIns and windowsAutopilotDeviceIdentities. Needs Intune and Entra.</span></span><span class="st"></span></li>
-                  <li data-state="missing" data-needs="entra"><span><span class="n">Conditional Access gaps</span><span class="d">graph_get on conditionalAccessPolicies. Needs Entra.</span></span><span class="st"></span></li>
-                  <li data-state="ok"><span><span class="n">Morning compliance check</span><span class="d">graph_get on managedDevices and deviceCompliancePolicies. Needs Intune.</span></span><span class="st"></span></li>
-                </ul>
+                <ul class="needs" id="needs"></ul>
                 <div class="block missing" data-t="blocked" id="missing">
                   <span class="glyph" data-t="blocked"><svg><use href="#i-plug"/></svg></span>
                   <div>
-                    <h3>2 granted skills are not offered in Contoso Retail: Entra is not connected here</h3>
-                    <p>Stale device triage reads Entra sign-ins, and Conditional Access gaps reads Conditional Access policies. Entra is not connected in Contoso Retail, so <span data-name>Nova</span> does not offer these skills here, and a call to an Entra resource from any skill, check or Chat is refused. Your grants stay on, and the skills are offered again once Entra is connected, or in an organization where it is.</p>
-                    <div class="acts"><button class="bt primary" type="button" id="connect-entra">Connect Entra in Contoso Retail</button><button class="bt secondary" type="button">Switch organization</button></div>
+                    <h3 id="missing-t"></h3>
+                    <p id="missing-p"></p>
+                    <ul class="why" id="missing-why"></ul>
+                    <div class="acts" id="missing-acts"></div>
                   </div>
                 </div>
-                <p class="xs muted" id="entra-ok" hidden style="margin-top:10px">Entra is connected in Contoso Retail. Every granted skill in this organization is offered.</p>
+                <p class="xs muted" id="entra-ok" hidden style="margin-top:10px">Microsoft 365 Read is on and Entra is connected in Contoso Retail. Every granted skill in this organization is offered.</p>
               </div>
             </div></div>
           </div>
         </div>
       </div>
       <ul class="notes">
-        <li>A grant is not enough on its own. A tool, skill or check is offered, and a call goes through, only while its grant is on and the service it reads is connected in the active organization, as the hard rule on organizations requires. Both are checked when tools are offered and again at the call.</li>
-        <li>A missing service is shown where the grant lives, with the two ways out: connect the service in this organization, or switch to one where it is connected. The grant itself is never turned off by it. Use the switch above the frame to see the state after Entra is connected.</li>
+        <li>A granted skill is offered only when both are available: every grant it uses (here Microsoft 365 Read, which its graph_get calls need) and every service it reads, connected in the active organization, as the hard rule on organizations requires. Both are checked when tools are offered and again at the call, from Chat, a skill or a scheduled check.</li>
+        <li>Each skill row says which of the two stops it, and the notice under the list names each cause with its own recovery: turn the grant on, or connect the service (or switch to an organization where it is connected). With Read off and Entra connected, the notice offers only Turn on Microsoft 365 Read; with Read on and Entra missing, only the Entra recovery; with both, both. A missing service never turns a grant off, and turning a grant off never disconnects a service.</li>
       </ul>
       <div class="two" style="margin-top:16px">
         <div style="display:grid;gap:8px;align-content:start">
@@ -665,7 +674,7 @@
           </div>
         </div>
         <div style="display:grid;gap:8px;align-content:start">
-          <p class="trvcap">The same review after you approve four tools</p>
+          <p class="trvcap">The same review after you approve the tools that only read</p>
           <div class="win" style="min-height:0">
             <div class="dialog" role="dialog" aria-labelledby="tr-t-after" style="width:100%;box-shadow:none;border-radius:12px">
               <header><span class="xs muted">Step 2 of 2, tools.contoso.example</span><h2 id="tr-t-after">Which tools may <span data-name>Nova</span> use?</h2></header>
@@ -683,8 +692,30 @@
         <li>A tool the server labels as a change is disabled from the start and cannot be approved at all; its row says why. Both frames are live: check and uncheck tools to see the count and the button follow.</li>
         <li>Decided in round 4: approval needs a read-only label and no documented write behavior. The app flags a tool whose name or description describes saving, changing, sending or deleting, such as <code>export_report</code>, which saves a report on the server; a flagged tool is disabled in every review state with the reason under its name, whatever its read-only label. The flag is a check the app makes, not a promise about the server: a write the description does not mention cannot be detected, which is why approval stays a human decision.</li>
         <li>A tool that is not approved is never offered to the model. The approval is checked again at every call, whether it comes from Chat, a skill or a scheduled check, so a skill that names <code>mcp__policy-settings__export_report</code> cannot use it.</li>
-        <li>When the server later adds or relabels a tool, the new tool stays off until the admin reviews it here. The review can be reopened from the server's row in Access; approving a tool later is the same step.</li>
+        <li>When the server later adds a tool, the new tool stays off until the admin reviews it here. The review can be reopened from the server's row in Access; approving a tool later is the same step.</li>
       </ul>
+      <div class="two" style="margin-top:16px">
+        <div style="display:grid;gap:8px;align-content:start">
+          <p class="trvcap">A week later the server changed three approved tools under the same ids: the review reopens</p>
+          <div class="win" style="min-height:0">
+            <div class="dialog" role="dialog" aria-labelledby="tr-t-re" style="width:100%;box-shadow:none;border-radius:12px">
+              <header><span class="xs muted">Policy settings reference, tools.contoso.example</span><h2 id="tr-t-re">Review 3 changed tools</h2></header>
+              <div class="body">
+                <p>On 19 November the server changed the definition of 3 tools you approved on 12 November. Their approval no longer applies: <span data-name>Nova</span> does not offer them, and every call to them is refused, from Chat, skills and scheduled checks, until you approve them again here. A tool whose new definition says it saves, changes, sends or deletes cannot be approved.</p>
+                <ul class="trv" data-trv="rereview"></ul>
+              </div>
+              <footer><span class="xs muted trv-count" aria-live="polite" style="margin-right:auto"></span><button class="bt ghost" type="button">Later</button><button class="bt primary trv-ok" type="button"></button></footer>
+            </div>
+          </div>
+        </div>
+        <ul class="notes" style="margin-top:20px">
+          <li>An approval belongs to the exact definition the admin saw: the tool's name, description, input schema and annotations, under the same id. The app compares the definition the server lists with the approved one before it offers a tool and again at every call; any difference sets the tool back to review, unchecked, and it is neither offered nor callable until the admin approves it again.</li>
+          <li><code>get_setting</code> is the case to read first: an approved read tool whose description changed and still only reads. It returns to review with the old and new description side by side, unchecked, and can be approved again.</li>
+          <li>A change in the input schema counts the same way, as <code>list_baselines</code> shows with its new parameter.</li>
+          <li>When the new definition describes saving, changing, sending or deleting, as <code>compare_baselines</code> now does, the tool is flagged and cannot be approved, the same check as at add time.</li>
+          <li>Unchanged approved tools keep their approval. The server's row in Access reads "1 approved, 3 changed and waiting for review" with a Review changes button, and the status strip keeps naming the host while any approved tool is offered.</li>
+        </ul>
+      </div>
       <ul class="notes">
         <li>The strip is derived from the grants: it names the host of every server switched on, and drops a host the moment its switch goes off. Try it on the MCP switches. When the full list does not fit the space next to the organization, the strip keeps the first host visible with a count of the rest, such as "learn.microsoft.com +2"; pressing it lists every host with the disclosure of what they receive.</li>
         <li>Decided, the honest boundary for remote MCP servers, catalog or added by URL: each request is written by the query writer from SPEC (Marketplace MCP, query writer boundary) from the admin's question and the tool's schema, with every value the app recognizes as tenant data removed, and the egress check runs on what it writes. Text the app cannot recognize, such as an internal project name, can still reach the server. The grant copy says this in those words, the strip names the host whenever the server's tools are offered, and the admin can turn the server off.</li>
@@ -1183,7 +1214,7 @@ identities with graph_get. Nothing else.
       document.getElementById("skillpick").hidden = !open;
     });
 
-    // Tool review: it opens with nothing approved; a tool labelled as a change cannot be approved.
+    // Tool review: it opens with nothing approved; a tool labelled as a change, or one that documents a write, cannot be approved.
     const TOOLS = [
       ["search_settings", "Searches setting names and descriptions", "ro"],
       ["get_setting", "Returns one setting with its allowed values", "ro"],
@@ -1193,49 +1224,104 @@ identities with graph_get. Nothing else.
       ["apply_setting", "Changes a setting. The server says so, and a tool that changes data cannot be approved; changes go through agents and diff confirmation.", "change"],
     ];
     const APPROVED_AFTER = ["search_settings", "get_setting", "list_baselines", "compare_baselines"];
+    // Definitions the server changed after approval, under the same ids. Any change sends the tool back to review.
+    const CHANGED = [
+      { t: "get_setting", what: "Description changed", was: "Returns one setting with its allowed values", now: "Returns one setting with its allowed values <mark>and the Microsoft Learn link that documents it</mark>", kind: "ro" },
+      { t: "list_baselines", what: "Input changed", was: "Input: <code>platform</code>", now: "Input: <code>platform</code>, <mark><code>include_deprecated</code></mark>", kind: "ro" },
+      { t: "compare_baselines", what: "Description changed", was: "Compares two baseline versions", now: "Compares two baseline versions <mark>and saves the comparison on the server</mark>", kind: "writes" },
+    ];
+    const toolRow = (key, t, d, kind, on, extra = "") => {
+      const change = kind === "change", writes = kind === "writes", off = change || writes;
+      const why = `trv-why-${key}-${t}`;
+      const flag = writes ? `<span class="flag">Its description ${key === "rereview" ? "now " : ""}says it saves on the server, so it cannot be approved, whatever its read-only label.</span>` : "";
+      const chg = extra ? `<span class="ann chgd">${extra}</span>` : "";
+      const anns = writes || extra ? `<span class="anns">${chg}<span class="ann">Labelled read-only</span>${writes ? '<span class="ann warn">Describes saving</span>' : ""}</span>` : `<span class="ann${change ? " warn" : ""}">${change ? "Labelled as a change" : "Labelled read-only"}</span>`;
+      return `<li ${off ? "data-off" : ""}><label><input type="checkbox" ${on ? "checked" : ""} ${off ? `disabled aria-disabled="true" aria-describedby="${why}"` : ""}><span><code>mcp__policy-settings__${t}</code><span class="d" ${off ? `id="${why}"` : ""}>${d}${flag}</span></span>${anns}</label></li>`;
+    };
+    const NUM = ["No", "One", "Two", "Three", "Four", "Five", "Six"];
     document.querySelectorAll("[data-trv]").forEach((trv) => {
       const key = trv.dataset.trv;
-      trv.innerHTML = TOOLS.map(([t, d, kind]) => {
-        // A tool labelled as a change, or one whose description documents a write, cannot be approved.
-        const change = kind === "change", writes = kind === "writes", off = change || writes;
-        const why = `trv-why-${key}-${t}`;
-        const on = key === "after" && APPROVED_AFTER.includes(t);
-        const flag = writes ? `<span class="flag">Its description says it saves on the server, so it cannot be approved, whatever its read-only label.</span>` : "";
-        const anns = writes ? `<span class="anns"><span class="ann">Labelled read-only</span><span class="ann warn">Describes saving</span></span>` : `<span class="ann${change ? " warn" : ""}">${change ? "Labelled as a change" : "Labelled read-only"}</span>`;
-        return `<li ${off ? "data-off" : ""}><label><input type="checkbox" ${on ? "checked" : ""} ${off ? `disabled aria-disabled="true" aria-describedby="${why}"` : ""}><span><code>mcp__policy-settings__${t}</code><span class="d" ${off ? `id="${why}"` : ""}>${d}${flag}</span></span>${anns}</label></li>`;
-      }).join("");
+      if (key === "rereview") {
+        trv.innerHTML = CHANGED.map((c) => toolRow(key, c.t, `<span class="chg"><span class="was"><span class="k">Approved</span>${c.was}</span><span class="now"><span class="k">Now</span>${c.now}</span></span>`, c.kind, false, c.what)).join("")
+          + '<li><span class="same">Unchanged and still approved: <code>mcp__policy-settings__search_settings</code></span></li>';
+      } else {
+        trv.innerHTML = TOOLS.map(([t, d, kind]) => toolRow(key, t, d, kind, key === "after" && APPROVED_AFTER.includes(t))).join("");
+      }
       const dialog = trv.closest(".dialog");
+      const intro = dialog.querySelector(".body > p");
       const sync = () => {
         const boxes = [...trv.querySelectorAll("input")];
         const ok = boxes.filter((b) => b.checked).length;
-        dialog.querySelector(".trv-count").textContent = ok ? `${ok} approved, ${boxes.length - ok} never offered` : `None approved, ${boxes.length} never offered`;
         const btn = dialog.querySelector(".trv-ok");
-        btn.textContent = ok ? `Add server with ${ok} ${ok === 1 ? "tool" : "tools"}` : "Approve a tool to add the server";
-        btn.disabled = !ok;
-        trv.querySelectorAll("li").forEach((li) => { li.dataset.state = li.querySelector("input").checked ? "on" : "off"; });
+        if (key === "rereview") {
+          dialog.querySelector(".trv-count").textContent = `${ok} approved again, ${boxes.length - ok} stay off`;
+          btn.textContent = ok ? `Save, ${ok} approved again` : "Save, all stay off";
+        } else {
+          dialog.querySelector(".trv-count").textContent = ok ? `${ok} approved, ${boxes.length - ok} never offered` : `None approved, ${boxes.length} never offered`;
+          btn.textContent = ok ? `Add server with ${ok} ${ok === 1 ? "tool" : "tools"}` : "Approve a tool to add the server";
+          btn.disabled = !ok;
+        }
+        // The second frame describes the state after selection, so its intro follows the live count.
+        if (key === "after") intro.textContent = `${ok ? `You approved ${NUM[ok].toLowerCase()} ${ok === 1 ? "tool" : "tools"} that only ${ok === 1 ? "reads" : "read"}.` : "No tool is approved, so the server cannot be added yet."} export_report and apply_setting cannot be approved: one says in its description that it saves on the server, the other is labelled as a change. Only approved tools are offered, and every call is checked against this list, including calls from skills and scheduled checks.`;
+        trv.querySelectorAll("li").forEach((li) => { const i = li.querySelector("input"); if (i) li.dataset.state = i.checked ? "on" : "off"; });
       };
       trv.addEventListener("change", sync);
       sync();
     });
-    // The second frame describes the state after selection, so its intro says so.
-    document.querySelector('[data-trv="after"]').closest(".body").querySelector("p").textContent = "You approved the four tools that only read. export_report and apply_setting cannot be approved: one says in its description that it saves on the server, the other is labelled as a change. Only approved tools are offered, and every call is checked against this list, including calls from skills and scheduled checks.";
 
-    // Access in an organization where a service is missing: a granted skill is offered only while its services are connected.
-    function setEntra(on) {
-      document.querySelectorAll("#entraseg button").forEach((b) => b.setAttribute("aria-pressed", String((b.dataset.entra === "on") === on)));
+    // Access in an organization where a service is missing: a granted skill is offered only while its grants are on
+    // and its services are connected in the active organization. Each cause gets its own recovery.
+    const CONTOSO = { entra: false };
+    const SKILLS_HERE = [
+      { n: "Stale device triage", d: "graph_get on managedDevices, signIns and windowsAutopilotDeviceIdentities. Uses Microsoft 365 Read; reads Intune and Entra.", svc: ["entra"] },
+      { n: "Conditional Access gaps", d: "graph_get on conditionalAccessPolicies. Uses Microsoft 365 Read; reads Entra.", svc: ["entra"] },
+      { n: "Morning compliance check", d: "graph_get on managedDevices and deviceCompliancePolicies. Uses Microsoft 365 Read; reads Intune.", svc: [] },
+    ];
+    const readOn = () => document.getElementById("m365read").getAttribute("aria-checked") === "true";
+    function renderAccess() {
+      const read = readOn(), entra = CONTOSO.entra;
+      document.querySelectorAll("#entraseg button").forEach((b) => b.setAttribute("aria-pressed", String((b.dataset.entra === "on") === entra)));
       const svc = document.getElementById("svc-entra");
-      svc.textContent = on ? "Entra connected" : "Entra not connected";
-      on ? svc.setAttribute("data-on", "") : svc.removeAttribute("data-on");
-      document.querySelectorAll("#needs li").forEach((li) => {
-        if (li.dataset.needs) li.dataset.state = on ? "ok" : "missing";
-        li.querySelector(".st").textContent = li.dataset.state === "ok" ? "Granted, offered" : "Granted, not offered here";
-      });
-      document.getElementById("missing").hidden = on;
-      document.getElementById("entra-ok").hidden = !on;
+      svc.textContent = entra ? "Entra connected" : "Entra not connected";
+      entra ? svc.setAttribute("data-on", "") : svc.removeAttribute("data-on");
+      document.getElementById("m365read-ds").textContent = read ? "Read granted, with your sign-in" : "Read off. Skills and Chat cannot read Microsoft 365 in Contoso Retail.";
+      const causes = (sk) => [!read ? "Microsoft 365 Read is off" : "", sk.svc.includes("entra") && !entra ? "Entra not connected" : ""].filter(Boolean);
+      document.getElementById("needs").innerHTML = SKILLS_HERE.map((sk) => {
+        const c = causes(sk);
+        return `<li data-state="${c.length ? "missing" : "ok"}"><span><span class="n">${sk.n}</span><span class="d">${sk.d}</span></span><span class="st">${c.length ? `Granted, not offered: ${c.join(", ").replace("Microsoft 365 Read is off", "Read is off")}` : "Granted, offered"}</span></li>`;
+      }).join("");
+      const blocked = SKILLS_HERE.filter((sk) => causes(sk).length);
+      const needEntra = SKILLS_HERE.filter((sk) => sk.svc.includes("entra") && !entra);
+      const box = document.getElementById("missing");
+      box.hidden = !blocked.length;
+      document.getElementById("entra-ok").hidden = !!blocked.length;
+      if (!blocked.length) return;
+      const why = [!read && "Microsoft 365 Read is off", needEntra.length && "Entra is not connected here"].filter(Boolean);
+      const n = blocked.length;
+      document.getElementById("missing-t").textContent = `${n} granted ${n === 1 ? "skill is" : "skills are"} not offered in Contoso Retail: ${why.join(", and ")}`;
+      document.getElementById("missing-p").innerHTML = `A skill is offered only while every grant it uses is on and every service it reads is connected in the active organization. A call from a skill, a check or Chat that needs what is missing is refused.`;
+      const items = [];
+      const acts = [];
+      if (!read) {
+        items.push(`<li><span><b>Turn on Microsoft 365 Read.</b> ${SKILLS_HERE.map((x) => x.n).join(", ").replace(/, ([^,]*)$/, " and $1")} read Microsoft 365 through this grant, so none of them runs while it is off.</span></li>`);
+        acts.push('<button class="bt primary" type="button" data-fix="read">Turn on Microsoft 365 Read</button>');
+      }
+      if (needEntra.length) {
+        items.push(`<li><span><b>Connect Entra in Contoso Retail.</b> ${needEntra.map((x) => x.n).join(" and ")} read Entra, which is not connected in this organization. Or switch to an organization where it is.</span></li>`);
+        acts.push(`<button class="bt ${read ? "primary" : "secondary"}" type="button" data-fix="entra">Connect Entra in Contoso Retail</button>`, '<button class="bt secondary" type="button">Switch organization</button>');
+      }
+      document.getElementById("missing-why").innerHTML = items.join("");
+      document.getElementById("missing-acts").innerHTML = acts.join("");
     }
-    document.getElementById("entraseg").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setEntra(b.dataset.entra === "on"); });
-    document.getElementById("connect-entra").addEventListener("click", () => setEntra(true));
-    setEntra(false);
+    document.getElementById("entraseg").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { CONTOSO.entra = b.dataset.entra === "on"; renderAccess(); } });
+    document.getElementById("m365read").addEventListener("click", renderAccess);
+    document.getElementById("missing-acts").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-fix]"); if (!b) return;
+      if (b.dataset.fix === "read") document.getElementById("m365read").setAttribute("aria-checked", "true");
+      if (b.dataset.fix === "entra") CONTOSO.entra = true;
+      renderAccess();
+    });
+    renderAccess();
 
     // Skill detail tabs
     document.querySelectorAll(".tabs").forEach((t) => t.addEventListener("click", (e) => {
