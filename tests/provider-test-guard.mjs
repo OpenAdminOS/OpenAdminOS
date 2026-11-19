@@ -1,3 +1,6 @@
+// Catch accidental access to real providers from test and app code, including
+// missing stubs, inherited environment settings and fallback paths. This guard
+// is not a sandbox against test code written to evade it.
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
 import { realpathSync, writeSync } from "node:fs";
@@ -97,32 +100,49 @@ function blocked(message) {
 
 function guardCommand(method, call, receiver, args) {
   const [command, second, third] = args;
-  const argv = Array.isArray(second) ? second : [];
-  const options = (Array.isArray(second) ? third : second) ?? {};
   const node = realAbsolutePath(process.execPath);
   const failure = () => blocked(`Blocked ${method} outside provider fixtures: ${command}`);
 
   // These APIs always invoke a shell, which would interpret the command and arguments.
-  if (method === "exec" || method === "execSync" || options.shell) throw failure();
+  if (method === "exec" || method === "execSync") throw failure();
+
+  // Node treats an options object in slot two differently from null or
+  // undefined, which leave the options in slot three. Keep the native
+  // callback overloads for execFile and its promisified variant.
+  const optionsInSecond = second != null && typeof second === "object" && !Array.isArray(second);
+  const argv = Array.isArray(second) ? [...second] : second == null || optionsInSecond ? [] : second;
+  const effectiveOptions = optionsInSecond ? second : third;
+  const options = effectiveOptions != null && typeof effectiveOptions === "object" && !Array.isArray(effectiveOptions)
+    ? { ...effectiveOptions }
+    : effectiveOptions;
+  const normalized = method === "execFile" && typeof second === "function"
+    ? [command, second]
+    : method === "execFile"
+      ? [command, argv, options, optionsInSecond ? third : args[3]]
+      : [command, argv, options];
+
+  // Shell scripts in fixture directories run directly via their shebang.
+  // No fixture is registered for shell command interpretation.
+  if (options?.shell) throw failure();
 
   if (method === "fork") {
-    if (!isFixture(command) || (options.execPath && realAbsolutePath(options.execPath) !== node) ||
-        options.execArgv?.length) throw failure();
+    if (!isFixture(command) || (options?.execPath && realAbsolutePath(options.execPath) !== node) ||
+        options?.execArgv?.length) throw failure();
     return Reflect.apply(call, receiver, [command, argv, { ...options, execArgv: [] }]);
   }
 
   // An empty command reaches Node's native parameter validation without launching anything.
-  if (command === "") return Reflect.apply(call, receiver, args);
+  if (command === "") return Reflect.apply(call, receiver, normalized);
   const helper = process.platform === "win32" && systemHelpers.get(command);
   if (helper) {
     // Use the system copy even when the test or developer has a different executable on PATH.
     const executable = join(process.env.SystemRoot || "C:\\Windows", "System32", helper);
-    return Reflect.apply(call, receiver, [executable, ...args.slice(1)]);
+    return Reflect.apply(call, receiver, [executable, ...normalized.slice(1)]);
   }
 
-  const allowed = node && realAbsolutePath(command) === node ? isFixture(argv[0]) : isFixture(command);
+  const allowed = node && realAbsolutePath(command) === node ? Array.isArray(argv) && isFixture(argv[0]) : isFixture(command);
   if (!allowed) throw failure();
-  const result = Reflect.apply(call, receiver, args);
+  const result = Reflect.apply(call, receiver, normalized);
   if (method === "spawn" && fixtureSpawnObservers.size > 0) {
     const path = realAbsolutePath(command);
     const observe = fixtureSpawnObservers.get(path);

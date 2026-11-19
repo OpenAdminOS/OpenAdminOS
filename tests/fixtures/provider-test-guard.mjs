@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, get, request } from "node:http";
 import { get as httpsGet } from "node:https";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { after, it } from "node:test";
+import { registerProviderFixtureDirectory } from "../provider-test-guard.mjs";
 
 const { PROVIDER_GUARD_CASE: scenario, PROVIDER_GUARD_ORIGIN: origin } = process.env;
 
@@ -38,6 +43,31 @@ if (scenario === "fetch") {
   after(() => {
     assert.throws(() => spawnSync(process.execPath, ["--version"]), /Blocked spawnSync outside provider fixtures/);
     process.exitCode = 0;
+  });
+} else if (scenario === "spawn-options" || scenario === "spawn-shell") {
+  it("checks the same effective options that Node receives", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "provider-guard-spawn-"));
+    try {
+      const fixture = join(directory, "cli");
+      await writeFile(fixture, '#!/bin/sh\nexit "${FIXTURE_EXIT_CODE:-0}"\n', { mode: 0o755 });
+      registerProviderFixtureDirectory(directory);
+
+      if (scenario === "spawn-shell") {
+        const options = { shell: true };
+        for (const args of [[options], [undefined, options], [null, options]]) {
+          assert.throws(() => spawn(fixture, ...args), /Blocked spawn outside provider fixtures/);
+          assert.throws(() => spawnSync(fixture, ...args), /Blocked spawnSync outside provider fixtures/);
+        }
+      } else if (process.platform !== "win32") {
+        const options = { env: { FIXTURE_EXIT_CODE: "23" } };
+        for (const args of [[options], [undefined, options], [null, options]]) {
+          assert.deepEqual(await once(spawn(fixture, ...args), "exit"), [23, null]);
+          assert.equal(spawnSync(fixture, ...args).status, 23);
+        }
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 } else {
   it("allows requests to its own listening test server", async () => {

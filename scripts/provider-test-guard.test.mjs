@@ -69,6 +69,20 @@ it("allows fetch and node:http requests to a server the test starts", async () =
   assert.match(stdout, /^# pass 1$/m);
 });
 
+it("preserves spawn options when the argument array is omitted, undefined or null", async () => {
+  const { code, stdout, stderr } = await runFixture("spawn-options", "");
+  assert.equal(code, 0, stdout + stderr);
+  assert.match(stdout, /^# pass 1$/m);
+});
+
+it("blocks shell launches when the spawn argument array is omitted, undefined or null", async () => {
+  const { code, stdout, stderr } = await runFixture("spawn-shell", "");
+  assert.equal(code, 1, stdout + stderr);
+  assert.match(stdout, /failureType: 'hookFailed'/);
+  assert.match(stdout, /Blocked spawn outside provider fixtures/);
+  assert.match(stdout, /Blocked spawnSync outside provider fixtures/);
+});
+
 it("sends approved requests directly despite inherited proxy settings and a preinstalled dispatcher", async () => {
   let connections = 0;
   const proxy = createServer((_request, response) => response.writeHead(502).end());
