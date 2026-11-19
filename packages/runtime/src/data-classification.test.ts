@@ -328,6 +328,13 @@ test("short ledger values match complete JSON string values across the request o
   assert.deepEqual(credential, [{ section: "system", start: 8, end: 13, kind: "credential", source: "graph:/applications" }]);
   const escaped = JSON.stringify({ excerpt: JSON.stringify({ hint: "abc" }, null, 2) });
   assert.equal(ledger.classifyRequest({ prompt: escaped }).counts.credential, 1);
+  const fenced = fenceTenantData(JSON.stringify("abc"), "fixture");
+  assert.equal(ledger.classifyRequest({ prompt: `Example:\n${fenced}\nExplain.` }).counts.credential, 1);
+  assert.equal(ledger.classifyRequest({ prompt: fenced.replace(/nonce="[0-9a-f]+">$/, 'nonce="wrong">') }).counts.credential, 0);
+  const shortName = "\u{10400}\u{10401}\u{10402}";
+  ledger.register("fixture-user", { displayName: shortName }, { graphPath: "/users" });
+  assert.equal(ledger.classifyRequest({ prompt: shortName }).counts.identity, 0);
+  assert.equal(ledger.classifyRequest({ prompt: JSON.stringify(shortName) }).counts.identity, 1);
 });
 
 test("nested application evidence keeps credential shapes without an original Graph route", () => {

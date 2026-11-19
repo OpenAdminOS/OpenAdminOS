@@ -86,6 +86,13 @@ function wholeMatch(mode: MatchMode, text: string, start: number, end: number): 
     else if (escaped && text[after] === "\\" && /[nrt]/.test(text[after + 1] ?? "")) after += 2;
     else break;
   }
+  if (!escaped && text[before] === ">" && text.startsWith("</tenant_data ", after)) {
+    const opening = text.lastIndexOf("<", before);
+    if (opening >= 0 && text.startsWith("<tenant_data ", opening)) {
+      const nonce = / nonce="([0-9a-f]{16})">$/.exec(text.slice(opening, before + 1))?.[1];
+      if (nonce) return text.startsWith(`</tenant_data nonce="${nonce}">`, after);
+    }
+  }
   return (before < 0 || /[:[,]/.test(text[before]!)) && (after === text.length || /[,}\]]/.test(text[after]!));
 }
 
@@ -118,9 +125,10 @@ export class ClassificationLedger {
         if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") return;
         if (typeof value === "string" && !value.trim()) return;
         const serialized = JSON.stringify(value);
+        const shortString = typeof value === "string" && value.length < 12 && [...value].length < 6;
         if (typeof value !== "string") {
           this.add({ text: serialized, mode: "jsonScalar", kind, source });
-        } else if (value.length < 12 && [...value].length < 6) {
+        } else if (shortString) {
           this.add({ text: serialized, mode: "jsonString", kind, source });
           this.add({ text: fenceEscapes(serialized), mode: "jsonString", kind, source });
           const escaped = JSON.stringify(serialized).slice(1, -1);
@@ -133,7 +141,7 @@ export class ClassificationLedger {
           }
         }
         // A typed directory user remains identifiable in later readings and requests.
-        if (kind === "identity" && typeof value === "string" && value.length >= 6 &&
+        if (kind === "identity" && typeof value === "string" && !shortString &&
             (/\/(?:userdisplayname|userprincipalname|username|userid|givenname|surname)$/i.test(pointer) ||
               directoryUser && /\/(?:id|displayname|mail)$/i.test(pointer))) {
           this.add({ text: value.toLowerCase(), mode: "word", kind, source }, true);
