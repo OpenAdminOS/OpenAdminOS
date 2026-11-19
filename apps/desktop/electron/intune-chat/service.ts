@@ -940,12 +940,12 @@ export class IntuneChatService {
   }
 
   async deleteIntuneChatConversation(conversationId: string): Promise<void> {
-    this.classificationConversations.delete(conversationId);
     if (!conversationId.trim()) {
       throw new Error("Conversation id is required.");
     }
     await this.requireConversationAccess(conversationId);
     this.host.requireIntelligenceStore().deleteConversation(conversationId);
+    this.classificationConversations.delete(conversationId);
   }
 
   async getIntuneChatMessages(conversationId: string): Promise<IntuneChatMessage[]> {
