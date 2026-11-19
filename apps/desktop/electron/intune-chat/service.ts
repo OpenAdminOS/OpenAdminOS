@@ -127,7 +127,21 @@ import {
   updateJobTenantProgress,
 } from "../state-helpers.js";
 import { IntelligenceSqliteStore, type HostedProviderConsentAuditRecord } from "./sqlite-store.js";
-import { runAgenticChat, type RunAgenticChatInput } from "./agentic-loop.js";
+import { runAgenticChat, type AgenticFailureReason, type RunAgenticChatInput } from "./agentic-loop.js";
+import {
+  chatResultContextFor,
+  COMPUTED_ANSWER_NOTICE,
+  computedResultForModel,
+  computeStructuredResult,
+  followUpPlanningText,
+  hostCallsForQuery,
+  planStructuredQuery,
+  readChatResultContext,
+  reconcileWithComputed,
+  type ChatResultContext,
+  type ComputedResult,
+  type StructuredQuery,
+} from "./structured-question.js";
 import {
   GRAPH_CACHE_RESOURCES,
   buildAnswerPack,
@@ -2137,12 +2151,6 @@ export class IntuneChatService {
           : {}),
       });
     }
-    const planned = planChatContext(content);
-    const directResources = voiceDeviceEvidenceIntent(content)
-      ? ["managedDevices" as const]
-      : voiceResourcesForQuestion(content);
-    if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
-    const restriction = restrictPlannedResourcesForTenant(planned, tenant, noTenant);
     const now = new Date().toISOString();
 
     let conversation = input.conversationId
@@ -2169,6 +2177,15 @@ export class IntuneChatService {
 
     const history = store.listMessages(conversation.id);
     const conversationMemory = boundedConversationMemory(history);
+    const followUp = noTenant ? undefined : this.followUpContext(store, conversation.id, tenant.id, history);
+    const planned = planChatContext(followUpPlanningText(content, followUp?.previousQuestion));
+    const directResources = voiceDeviceEvidenceIntent(content)
+      ? ["managedDevices" as const]
+      : voiceResourcesForQuestion(content);
+    if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
+    const structured = followUp && !planned.hasWriteIntent ? planStructuredQuery({ question: content, generatedAt: now, ...(followUp.result ? { previous: followUp.result } : {}), store, tenantId: tenant.id }) : undefined;
+    if (structured) planned.resources = [structured.resource];
+    const restriction = restrictPlannedResourcesForTenant(planned, tenant, noTenant);
     const userMessage: IntuneChatMessage = {
       id: `msg_${randomUUID()}`,
       conversationId: conversation.id,
@@ -2242,6 +2259,7 @@ export class IntuneChatService {
     const answerGeneratedAt = new Date().toISOString();
     const readPack = () => ({
       cacheStatus: store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
+      computed: this.computeStructured(store, tenant.id, structured, answerGeneratedAt),
       rows: readPlannedChatRows(store, {
         tenantId: tenant.id,
         question: content,
@@ -2263,7 +2281,7 @@ export class IntuneChatService {
         planned.resources,
       ),
     });
-    let { cacheStatus, rows, packCacheStatus, packAggregates } = readPack();
+    let { cacheStatus, rows, packCacheStatus, packAggregates, computed } = readPack();
     // As in the streaming path: a tool-loop run refreshes once the kind
     // needs it, and a fallback answers from the pack read right after.
     // A failed refresh shows on its step; the evidence guard and the
@@ -2278,7 +2296,7 @@ export class IntuneChatService {
       if (!lazyRefresh) return;
       answerPlan.settleKind();
       if (answerPlan.sources.kind !== "docs") await loadTenantData();
-      ({ cacheStatus, rows, packCacheStatus, packAggregates } = lazyPack ?? readPack());
+      ({ cacheStatus, rows, packCacheStatus, packAggregates, computed } = lazyPack ?? readPack());
     };
     const agentSuggestions = matchAgentsToQuestion(content, persisted.installedAgents);
 
@@ -2338,6 +2356,7 @@ export class IntuneChatService {
           hasWriteIntent: false,
           agentSuggestions,
           generatedAt: answerGeneratedAt,
+          ...(computed ? { computed } : {}),
           limits: chatBudget.answerPackLimits,
         });
         // A tenant question is answered from tenant data; the local docs index is not searched for it.
@@ -2361,6 +2380,13 @@ export class IntuneChatService {
           return completion.text.trim();
         }, buildAnswerPrompt(answerPack, documentation));
         finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0 });
+        if (provider?.isLocal === true) {
+          const checked = reconcileWithComputed(content, computed);
+          if (checked.replaced) {
+            engineNotice = [engineNotice, COMPUTED_ANSWER_NOTICE].filter(Boolean).join(" ");
+            return { content: checked.answer, model };
+          }
+        }
         return {
           content,
           model,
@@ -2387,9 +2413,16 @@ export class IntuneChatService {
             const toolSteps = toolStepHooks(steps, mcp.mcp, answerModel.providerName);
             const indexLater = indexWaits(answerPlan.sources, lazyRefresh);
             const documentation = indexLater || answerPlan.sources.kind === "tenant" ? [] : await this.searchDocsIndex(modelQuestion, steps);
+            const localChat = provider?.isLocal === true && investigationSettings.mode === "auto";
+            if (localChat && structured && lazyRefresh) {
+              await loadTenantData();
+              ({ computed } = lazyPack ?? readPack());
+            }
             const agentic = await this.rememberingTenantValues(conversation.id, tenantObservations, async () => runAgenticChat({
               question: modelQuestion,
               adminQuestion: content,
+              ...(localChat ? { budget: "compact" as const } : {}),
+              ...(localChat && structured && computed ? { hostCalls: hostCallsForQuery(structured), hostFacts: { source: `cache:${computed.resource}`, content: { computedByHost: computedResultForModel(computed) } } } : {}),
               ...(newConversationTitle ? { askTitle: true } : {}),
               modelStep: modelStepHooks(steps, answerModel, mcp.mcp),
               documentation,
@@ -2415,9 +2448,16 @@ export class IntuneChatService {
             }));
             responseModel = agentic.model ?? responseModel;
             toolTrace = agentic.toolTrace;
-            if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok);
+            if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok, agentic.ok ? undefined : agentic.failureReason);
             if (agentic.ok) {
               assistantContent = agentic.answer;
+              if (localChat) {
+                const checked = reconcileWithComputed(agentic.answer, computed);
+                if (checked.replaced) {
+                  assistantContent = checked.answer;
+                  engineNotice = COMPUTED_ANSWER_NOTICE;
+                }
+              }
               modelFollowUps = agentic.followUps ?? [];
               modelTitle = agentic.title;
               documentationSources = agentic.documentationSources ?? [];
@@ -2507,6 +2547,8 @@ export class IntuneChatService {
       });
     }
     store.touchConversation(conversation.id, this.answeredChatTitle(conversation.id, newConversationTitle, modelTitle), assistantMessage.createdAt);
+    // The next question can narrow this answer's computed result; any other answer clears it.
+    if (followUp) store.setChatResultContext(conversation.id, answered ? chatResultContextFor(computed, { tenantId: tenant.id, question: content, computedAt: assistantMessage.createdAt }) : undefined, assistantMessage.createdAt);
 
     if (!noTenant) {
       await this.maybeCreateSelfTrainingSuggestionFromChat({
@@ -2636,9 +2678,13 @@ export class IntuneChatService {
     const smallVoiceModel = providerId === "apple-foundation";
     const voiceProfile = options.voice && options.voiceProfile ? novaProfilePromptBlock({ ...options.voiceProfile, byteLimit: novaReasoningProfileByteLimit(providerId) }) : "";
     const voiceByteLimit = smallVoiceModel ? 3000 : VOICE_PROMPT_BYTE_LIMIT + Buffer.byteLength(voiceProfile) + (voiceProfile ? Buffer.byteLength(NOVA_PROFILE_BLOCK_END) + 2 : 0);
-    const planned = planChatContext(voiceContext?.planningQuestion ?? content);
+    const followUp = options.voice || noTenant ? undefined : this.followUpContext(store, conversation.id, tenant.id, history);
+    const planned = planChatContext(voiceContext?.planningQuestion ?? followUpPlanningText(content, followUp?.previousQuestion));
     const directResources = voiceDeviceEvidenceIntent(content) ? ["managedDevices" as const] : voiceResourcesForQuestion(content);
     if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
+    const structured = followUp && !planned.hasWriteIntent ? planStructuredQuery({ question: content, generatedAt: now, ...(followUp.result ? { previous: followUp.result } : {}), store, tenantId: tenant.id }) : undefined;
+    // Code answers this question exactly from one resource; nothing else is planned or refreshed for it.
+    if (structured) planned.resources = [structured.resource];
     const restriction = restrictPlannedResourcesForTenant(planned, tenant, noTenant);
     const userMessage: IntuneChatMessage = {
       id: `msg_${randomUUID()}`,
@@ -2888,6 +2934,7 @@ export class IntuneChatService {
     const answerGeneratedAt = new Date().toISOString();
     const readPack = () => ({
       cacheStatus: store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
+      computed: this.computeStructured(store, tenant.id, structured, answerGeneratedAt),
       rows: readPlannedChatRows(store, {
         tenantId: tenant.id,
         question: voiceContext?.planningQuestion ?? content,
@@ -2909,7 +2956,7 @@ export class IntuneChatService {
         planned.resources,
       ),
     });
-    let { cacheStatus, rows, packCacheStatus, packAggregates } = readPack();
+    let { cacheStatus, rows, packCacheStatus, packAggregates, computed } = readPack();
     // A tool-loop run refreshes once the kind needs it. As on the
     // deterministic path, a fallback answers from the pack read right
     // after that refresh, not from data a tool refreshed later.
@@ -2929,7 +2976,7 @@ export class IntuneChatService {
       if (!lazyRefresh) return;
       answerPlan?.settleKind();
       if (answerPlan?.sources.kind !== "docs") await loadTenantData();
-      ({ cacheStatus, rows, packCacheStatus, packAggregates } = lazyPack ?? readPack());
+      ({ cacheStatus, rows, packCacheStatus, packAggregates, computed } = lazyPack ?? readPack());
     };
     const agentSuggestions = matchAgentsToQuestion(content, persisted.installedAgents);
     let assistantContent = "";
@@ -3012,6 +3059,7 @@ export class IntuneChatService {
           hasWriteIntent: false,
           agentSuggestions,
           generatedAt: answerGeneratedAt,
+          ...(computed ? { computed } : {}),
           limits: chatBudget.answerPackLimits,
         });
         const system = deterministicChatSystemPrompt(provider?.isLocal === true, Boolean(options.voice), voiceProfile);
@@ -3054,6 +3102,13 @@ export class IntuneChatService {
           attemptPrompt = repaired;
         }
         assistantContent = relabelUnverifiedLearn(assistantContent.trim(), false);
+        if (provider?.isLocal === true && !isCancelled()) {
+          const checked = reconcileWithComputed(assistantContent, computed);
+          if (checked.replaced) {
+            assistantContent = checked.answer;
+            engineNotice = [engineNotice, COMPUTED_ANSWER_NOTICE].filter(Boolean).join(" ");
+          }
+        }
         emitDelta(assistantContent, "");
         finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0, failed: isCancelled() });
       };
@@ -3091,9 +3146,18 @@ export class IntuneChatService {
             const documentation = options.voice
               ? options.webSearch ? [] : await this.retrieveDocumentationSafely(modelQuestion)
               : indexLater || answerPlan?.sources.kind === "tenant" ? [] : await this.searchDocsIndex(modelQuestion, steps);
+            // In auto mode a local model in Chat gets the compact budget and, for a question code can count,
+            // the counts first. Always investigative keeps the full loop the admin chose.
+            const localChat = provider?.isLocal === true && !options.voice && investigationSettings.mode === "auto";
+            if (localChat && structured && lazyRefresh) {
+              await loadTenantData();
+              ({ computed } = lazyPack ?? readPack());
+            }
             const agentic = await this.rememberingTenantValues(conversation.id, tenantObservations, async () => runAgenticChat({
               question: modelQuestion,
               adminQuestion: content,
+              ...(localChat ? { budget: "compact" as const } : {}),
+              ...(localChat && structured && computed ? { hostCalls: hostCallsForQuery(structured), hostFacts: { source: `cache:${computed.resource}`, content: { computedByHost: computedResultForModel(computed) } } } : {}),
               ...(newConversationTitle ? { askTitle: true } : {}),
               modelStep: modelStepHooks(steps, answerModel, mcp.mcp),
               documentation,
@@ -3172,8 +3236,15 @@ export class IntuneChatService {
             }));
             responseModel = agentic.model ?? responseModel;
             toolTrace = agentic.toolTrace;
-            if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok);
+            if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok, agentic.ok ? undefined : agentic.failureReason);
             if (agentic.ok) {
+              if (localChat) {
+                const checked = reconcileWithComputed(agentic.answer, computed);
+                if (checked.replaced) {
+                  agentic.answer = checked.answer;
+                  engineNotice = COMPUTED_ANSWER_NOTICE;
+                }
+              }
               modelFollowUps = agentic.followUps ?? [];
               modelTitle = agentic.title;
               documentationSources = agentic.documentationSources ?? [];
@@ -3350,6 +3421,8 @@ export class IntuneChatService {
       });
     }
     store.touchConversation(conversation.id, this.answeredChatTitle(conversation.id, newConversationTitle, modelTitle), assistantMessage.createdAt);
+    // The next question can narrow this answer's computed result; any other answer clears it.
+    if (followUp) store.setChatResultContext(conversation.id, answered ? chatResultContextFor(computed, { tenantId: tenant.id, question: content, computedAt: assistantMessage.createdAt }) : undefined, assistantMessage.createdAt);
 
     if (!noTenant) {
       await this.maybeCreateSelfTrainingSuggestionFromChat({
@@ -3392,6 +3465,22 @@ export class IntuneChatService {
     }
     return result;
     });
+  }
+
+  /**
+   * The previous question of a conversation and the structured result of
+   * its answer, when that answer was the last one and counted devices.
+   */
+  private followUpContext(store: IntelligenceSqliteStore, conversationId: string, tenantId: string, history: readonly IntuneChatMessage[]): { previousQuestion?: string; result?: ChatResultContext } {
+    const previousQuestion = [...history].reverse().find((message) => message.role === "user" && message.status === "completed")?.content;
+    const result = readChatResultContext(store, conversationId, tenantId);
+    return { ...(previousQuestion ? { previousQuestion } : {}), ...(result ? { result } : {}) };
+  }
+
+  /** Exact counts for a structured question, from the cache as it is now. */
+  private computeStructured(store: IntelligenceSqliteStore, tenantId: string, query: StructuredQuery | undefined, generatedAt: string): ComputedResult | undefined {
+    if (!query) return undefined;
+    return computeStructuredResult({ store, tenantId, query, cacheStatus: store.getGraphCacheStatus(tenantId, [...GRAPH_CACHE_RESOURCES]), generatedAt });
   }
 
   /**
@@ -3948,6 +4037,20 @@ export class IntuneChatService {
  */
 const AGENTIC_FAILURE_LIMIT = 2;
 const agenticFailuresByModel = new Map<string, number>();
+/** What went wrong on the last failed tool-loop answer per model, for an honest notice. */
+const agenticLastFailureByModel = new Map<string, AgenticFailureReason>();
+
+/** Plain words for what a model did on its failed turns. */
+const FAILURE_WORDS: Record<AgenticFailureReason, string> = {
+  malformed: "it did not return a valid tool request",
+  "thinking-only": "it returned only its reasoning and no answer",
+  "context-too-small": "the question and its data did not fit its context window",
+  "iteration-cap": "it did not finish its plan",
+  "no-evidence": "it answered without checking tenant data",
+  "empty-answer": "it returned an empty answer",
+  unfinished: "it described a lookup without finishing it",
+  "provider-unavailable": "it was not available",
+};
 
 function agenticModelKey(providerId: string, model: string | undefined): string {
   return `${providerId}::${model ?? "default"}`;
@@ -3957,13 +4060,17 @@ export function recordAgenticOutcome(
   providerId: string,
   model: string | undefined,
   ok: boolean,
+  failure?: AgenticFailureReason,
 ): void {
   const key = agenticModelKey(providerId, model);
   if (ok) {
     agenticFailuresByModel.delete(key);
+    agenticLastFailureByModel.delete(key);
     return;
   }
   agenticFailuresByModel.set(key, (agenticFailuresByModel.get(key) ?? 0) + 1);
+  if (failure) agenticLastFailureByModel.set(key, failure);
+  else agenticLastFailureByModel.delete(key);
 }
 
 function agenticModelHasFailedRepeatedly(
@@ -4107,10 +4214,13 @@ function resolveAgenticCapability(input: {
   const observedModel =
     input.model ?? input.provider?.defaultModel ?? input.provider?.models?.[0];
   if (agenticModelHasFailedRepeatedly(input.providerId, observedModel)) {
+    const key = agenticModelKey(input.providerId, observedModel);
+    const failures = agenticFailuresByModel.get(key) ?? AGENTIC_FAILURE_LIMIT;
+    const last = agenticLastFailureByModel.get(key);
     return {
       enabled: false,
       reason: "capability-fallback",
-      notice: `Deterministic retrieval: ${observedModel ?? input.providerId} did not hold the investigative format, so this answer skips it.`,
+      notice: `Answered from cached data without the tool loop: ${observedModel ?? input.providerId} did not complete its last ${failures} tool-loop answers${last ? `; on the last one ${FAILURE_WORDS[last]}` : ""}. Chat skips the tool loop for this model until OpenAdminOS restarts or another model is selected.`,
     };
   }
   if (input.provider?.isLocal === false) {

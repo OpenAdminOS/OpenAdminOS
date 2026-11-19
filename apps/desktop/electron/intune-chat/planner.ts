@@ -11,6 +11,7 @@ import type {
   TenantRecord,
 } from "@openadminos/agent-sdk";
 import type { GraphCacheResourceDefinition } from "./sqlite-store.js";
+import { computedResultForModel, type ComputedResult } from "./structured-question.js";
 
 const SCOPES = {
   managedDevices: ["DeviceManagementManagedDevices.Read.All"],
@@ -721,8 +722,13 @@ export function planChatContext(question: string): PlannedChatContext {
     for (const item of items) resources.add(item);
   };
 
+  // Intune is the authoritative device inventory. Entra device objects
+  // join only when the question is about the directory, registration or
+  // stale-device cleanup: planning both for every "device" let the
+  // deterministic answer list unmanaged Entra devices as noncompliant.
   if (matchesAny(lower, ["device", "intune", "stale", "sync", "retire", "offboard", "os", "windows", "macos", "ios", "android", "linux", "chrome", "ownership", "serial", "manufacturer", "model", "last check", "last seen", "primary user"])) {
-    add("managedDevices", "entraDevices");
+    add("managedDevices");
+    if (asksAboutEntraDevices(lower)) add("entraDevices");
   }
   if (matchesAny(lower, ["overview", "summary", "summarize", "fleet", "tenant health", "health summary", "most stale", "inventory count"])) {
     add("managedDeviceOverview");
@@ -1702,6 +1708,11 @@ export function matchAgentsToQuestion(
   }));
 }
 
+/** Whether a device question is about Entra device objects rather than only the Intune inventory. */
+export function asksAboutEntraDevices(lowerQuestion: string): boolean {
+  return matchesAny(lowerQuestion, ["entra", "azure ad", "aad", "directory", "registered", "registration", "hybrid", "joined", "join type", "trust type", "unmanaged", "not managed", "device object", "stale", "retire", "retirement", "offboard", "inactive", "last sign-in", "sign-in", "signed in", "duplicate", "deleted", "device records"]);
+}
+
 export function buildAnswerPack(input: {
   question: string;
   tenant: TenantRecord;
@@ -1721,6 +1732,11 @@ export function buildAnswerPack(input: {
   hasWriteIntent: boolean;
   agentSuggestions: IntuneChatAgentSuggestion[];
   generatedAt?: string;
+  /**
+   * Counts and the filtered list computed in code for this question. Its
+   * resource carries no sample rows: the model states these facts.
+   */
+  computed?: ComputedResult;
   limits?: {
     maxRowsReadPerResource?: number;
     maxSampleRowsPerResource?: number;
@@ -1738,7 +1754,8 @@ export function buildAnswerPack(input: {
     .filter((status) => Object.prototype.hasOwnProperty.call(input.rows, status.resource))
     .map((status) => {
       const selectedRows = input.rows[status.resource] ?? [];
-      const sampleRows = selectedRows
+      const coveredByComputed = input.computed?.resource === status.resource;
+      const sampleRows = coveredByComputed ? [] : selectedRows
         .slice(0, maxSampleRowsPerResource)
         .map(compactGraphObject);
       const aggregate = input.aggregates?.[status.resource];
@@ -1762,6 +1779,7 @@ export function buildAnswerPack(input: {
         refreshedAt: status.refreshedAt,
         lastError: status.lastError,
         sampleRows,
+        ...(coveredByComputed ? { sampleRowsNote: "No sample rows: computedResult holds the exact counts and the matching rows for this resource." } : {}),
         // SQL aggregates count every cached row; the fallback below
         // counts selectedRows only. breakdownsCoverAllCachedRows says
         // which one this block carries.
@@ -1779,6 +1797,7 @@ export function buildAnswerPack(input: {
         entraTier: input.tenant.entraTier ?? "unknown",
       },
       writeIntentDetected: input.hasWriteIntent,
+      ...(input.computed ? { computedResult: computedResultForModel(input.computed) } : {}),
       agentSuggestions:
         maxAgentSuggestions === undefined
           ? input.agentSuggestions
@@ -1797,8 +1816,9 @@ export function buildAnswerPack(input: {
         rule: "SQLite/Graph filtering selects bounded evidence first; deterministic filters may preselect rows before sampling. cachedRows may be larger than selectedRows, and omittedCachedRows is intentionally not sent as raw data.",
       },
       resources: resourceBlocks,
-      instruction:
-        "Answer only from these resources. If evidence is missing, say what needs to be refreshed or connected. Do not invent tenant state.",
+      instruction: input.computed
+        ? "computedResult is authoritative: it was computed in code over every cached row. State its facts, numbers and listed names exactly, in the order given, and answer every part of the question from it. Do not count sample rows, do not add devices it does not list, and do not give reasons it does not state. Where it says the data does not hold something, say so plainly. Use the other resources only for what computedResult does not cover."
+        : "Answer only from these resources. If evidence is missing, say what needs to be refreshed or connected. Do not invent tenant state.",
     },
     null,
     2,

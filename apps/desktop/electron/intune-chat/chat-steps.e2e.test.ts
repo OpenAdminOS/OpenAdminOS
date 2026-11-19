@@ -435,14 +435,14 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       await store.setChatInvestigationMode("always-deterministic");
       script(["I'll check that now.", "2 of the 5 Macs are noncompliant."]);
       let before = prompts.length;
-      const repaired = (await store.streamIntuneChatMessage({ content: "Which of our macOS devices are noncompliant?" }, () => {})).assistantMessage;
+      const repaired = (await store.streamIntuneChatMessage({ content: "Which of our macOS devices need attention?" }, () => {})).assistantMessage;
       assert.equal(repaired.content, "2 of the 5 Macs are noncompliant.");
       assert.equal(prompts.length - before, 2);
       assert.match(prompts.at(-1)!.prompt, /Your previous reply:\nI'll check that now\./);
 
       script(["Let me look into it.", "One moment, I'm checking.", "I'll check that now.", "unused"]);
       before = prompts.length;
-      const kept = (await store.streamIntuneChatMessage({ content: "Which of our Windows devices are noncompliant?" }, () => {})).assistantMessage;
+      const kept = (await store.streamIntuneChatMessage({ content: "Which of our Windows devices need attention?" }, () => {})).assistantMessage;
       assert.equal(prompts.length - before, 3);
       assert.equal(kept.content, "I'll check that now.");
 
@@ -459,14 +459,14 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       await store.setChatInvestigationMode("always-deterministic");
       script(["I'll check that now.", "2 of the 5 Macs are noncompliant."]);
       let before = prompts.length;
-      const repaired = (await store.sendIntuneChatMessage({ content: "Which of our macOS devices are noncompliant?" })).assistantMessage;
+      const repaired = (await store.sendIntuneChatMessage({ content: "Which of our macOS devices need attention?" })).assistantMessage;
       assert.equal(repaired.content, "2 of the 5 Macs are noncompliant.");
       assert.equal(prompts.length - before, 2);
       assert.match(prompts.at(-1)!.prompt, /Your previous reply:\nI'll check that now\./);
 
       script(["Let me look into it.", "One moment, I'm checking.", "I'll check that now.", "unused"]);
       before = prompts.length;
-      const kept = (await store.sendIntuneChatMessage({ content: "Which of our Windows devices are noncompliant?" })).assistantMessage;
+      const kept = (await store.sendIntuneChatMessage({ content: "Which of our Windows devices need attention?" })).assistantMessage;
       assert.equal(prompts.length - before, 3);
       assert.equal(kept.content, "I'll check that now.");
 
@@ -578,6 +578,8 @@ describe("Chat steps, sources and follow-ups end to end", () => {
 
   it("falls back to the keyword kind when the model gives none, and never treats an ambiguous tenant question as docs-only", async () => {
     await withHarness(async ({ store, prompts, script }) => {
+      // The full investigative loop: auto mode gives a local model the compact budget and host-computed counts.
+      await store.setChatInvestigationMode("always-agentic");
       // A missing kind gets one repair; an invalid one counts as missing, then the keyword kind decides.
       script([{ final: true, answer: "There are none." }, { kind: "documentation", final: true, answer: "There are none." }, { tool: "query_cache", params: { resource: "managedDevices", where: { complianceState: "noncompliant" } } }, { final: true, answer: "2 devices are noncompliant." }]);
       const message = (await store.sendIntuneChatMessage({ content: "What are the noncompliant devices?" })).assistantMessage;
@@ -632,13 +634,16 @@ describe("Chat steps, sources and follow-ups end to end", () => {
 
   it("treats a model docs label as mixed when the question mentions the tenant", async () => {
     await withHarness(async ({ store, graphPaths, prompts, script }) => {
+      // The full investigative loop: auto mode gives a local model the compact budget and host-computed counts.
+      await store.setChatInvestigationMode("always-agentic");
       script([
         { kind: "docs", sources: ["microsoft-learn"], tool: learnTool, params: { query: "Intune device enrollment" } },
         { final: true, answer: "Microsoft Learn describes enrollment [1]." },
         { tool: "query_cache", params: { resource: "managedDevices", limit: 25 } },
         { final: true, answer: "Microsoft Learn describes enrollment [1]. 9 of your devices are enrolled." },
       ]);
-      const message = (await store.sendIntuneChatMessage({ content: "What do the docs say about our devices?" })).assistantMessage;
+      // Entra registration plans the uncached Entra devices, so the mixed kind has a refresh to run.
+      const message = (await store.sendIntuneChatMessage({ content: "What do the docs say about our devices and their Entra registration?" })).assistantMessage;
       assert.equal(message.questionKind, "mixed");
       assert.match(classifiedAs(message.steps)!, /^Treated as docs and tenant: the question mentions your tenant\. Sources: /);
       // The refresh the mixed kind needs runs after the model step that decided it.
@@ -772,6 +777,8 @@ describe("Chat steps, sources and follow-ups end to end", () => {
 
   it("refreshes, asks Learn and still requires tenant evidence for a mixed tenant question", async () => {
     await withHarness(async ({ store, cache, graphPaths, prompts, script }) => {
+      // The full investigative loop: auto mode gives a local model the compact budget and host-computed counts.
+      await store.setChatInvestigationMode("always-agentic");
       script([
         { kind: "mixed", sources: ["microsoft-learn"], tool: learnTool, params: { query: "Intune noncompliant macOS device remediation" } },
         { final: true, answer: "Microsoft Learn recommends checking the compliance policy [1]." },
@@ -804,12 +811,15 @@ describe("Chat steps, sources and follow-ups end to end", () => {
     const note = "Not included in this answer: Defender alerts and Defender incidents. Defender is not connected for this tenant. Add it in Connections.";
     for (const send of ["sendIntuneChatMessage", "streamIntuneChatMessage"] as const) {
       await withHarness(async ({ store, graphPaths, script }) => {
+      // The full investigative loop: auto mode gives a local model the compact budget and host-computed counts.
+      await store.setChatInvestigationMode("always-agentic");
         script([
           { kind: "tenant", sources: [], tool: "query_cache", params: { resource: "managedDevices", limit: 25 } },
           { final: true, answer: "9 devices are cached." },
         ]);
         const deltas: string[] = [];
-        const input = { content: "Show devices with security alerts" };
+        // Entra registration plans the uncached Entra devices, so the lazy refresh has work to do.
+        const input = { content: "Show devices with security alerts and their Entra registration" };
         const result = send === "sendIntuneChatMessage"
           ? await store.sendIntuneChatMessage(input)
           : await store.streamIntuneChatMessage(input, (event: IntuneChatStreamEvent) => { if (event.type === "delta") deltas.push(event.content); });

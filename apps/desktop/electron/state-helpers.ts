@@ -55,6 +55,7 @@ import {
   staleManagedDeviceSyncThresholdDays,
   thresholdIsoDaysBefore,
 } from "./intune-chat/planner.js";
+import { deviceRowFilters, QUESTION_WORDS } from "./intune-chat/structured-question.js";
 import { withAgentCompatibility } from "./agent-draft-helpers.js";
 
 
@@ -946,11 +947,15 @@ export function readPlannedChatRows(
     limitPerResource: number;
   },
 ): Record<GraphCacheResourceKind, unknown[]> {
+  // OS and compliance state named in the question filter the device rows on their fields.
+  const deviceFilters = deviceRowFilters(input.question);
   const rows = store.readGraphRows({
     tenantId: input.tenantId,
     resources: input.resources,
-    searchTerms: input.searchTerms,
+    // Question words ("how", "many", "compliant") match nothing a row is named for; ANDed as text they only emptied the match.
+    searchTerms: input.searchTerms.filter((term) => !QUESTION_WORDS.has(term)),
     limitPerResource: input.limitPerResource,
+    ...(deviceFilters.length > 0 ? { filters: { managedDevices: deviceFilters } } : {}),
   });
   const staleSyncDays = staleManagedDeviceSyncThresholdDays(input.question);
   if (staleSyncDays !== undefined && input.resources.includes("managedDevices")) {
@@ -1473,6 +1478,7 @@ export function resourcesFromToolTrace(
     const params = (entry.params ?? {}) as Record<string, unknown>;
     if (
       entry.tool === "query_cache" ||
+      entry.tool === "count_cached" ||
       entry.tool === "refresh_resource" ||
       entry.tool === "query_drift"
     ) {
