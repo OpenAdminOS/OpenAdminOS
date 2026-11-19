@@ -86,6 +86,7 @@ describe("Ollama context size", () => {
     showStatus?: number;
     showBody?: string;
     resetOverflowBody?: boolean;
+    retryMemoryError?: "http" | "stream";
     showRedirect?: boolean;
     requested?: (prompt: string) => number;
     stallOverflowBody?: (res: ServerResponse) => void;
@@ -141,6 +142,15 @@ describe("Ollama context size", () => {
           }
           res.statusCode = 400;
           res.end(overflow(requested, options.limit(numCtx)));
+          return;
+        }
+        if (numCtx !== undefined && options.retryMemoryError === "http") {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: "model requires more system memory (24.1 GiB) than is available (12.0 GiB)" }));
+          return;
+        }
+        if (numCtx !== undefined && options.retryMemoryError === "stream") {
+          res.end(`${JSON.stringify({ error: "unable to load full model on GPU" })}\n`);
           return;
         }
         if (numCtx !== undefined && options.retryRedirect) {
@@ -460,4 +470,22 @@ describe("Ollama context size", () => {
       await fake.close();
     }
   });
+
+  for (const mode of ["http", "stream"] as const) {
+    it(`reports a memory failure on the retry (${mode}) with both context sizes`, async () => {
+      const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384, retryMemoryError: mode });
+      try {
+        const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "heavy" });
+        await assert.rejects(
+          llm.complete({ prompt: "big" }),
+          /^Error: Ollama context size too small: This request needs 40,652 tokens of context, but Ollama could not load heavy with 45,056, usually because free memory ran out\. Ollama said: /,
+        );
+        assert.equal(fake.chats.length, 2);
+        await assert.rejects(llm.complete({ prompt: "big" }));
+        assert.deepEqual(fake.chats.at(-2), {});
+      } finally {
+        await fake.close();
+      }
+    });
+  }
 });

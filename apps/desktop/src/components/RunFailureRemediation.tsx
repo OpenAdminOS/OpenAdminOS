@@ -49,7 +49,7 @@ const SUGGESTIONS: Suggestion[] = [
     body: "The provider was still producing output when it reached the limit for one request. Narrow the agent's scope or pick a faster model, then re-run. To allow longer requests, set `OPENADMINOS_CLAUDE_CODE_TIMEOUT_MS` or `OPENADMINOS_CODEX_TIMEOUT_MS` higher, in milliseconds, and restart the app.",
   },
   {
-    match: (e) => /timed out|timeout|aborted/i.test(e),
+    match: (e) => /timed out|timeout|aborted/i.test(e) && !/\/api\/show/i.test(e),
     title: "Request timed out",
     body: "The LLM or Microsoft Graph took longer than expected. Try a smaller model, narrow the agent's scope, or check your network.",
   },

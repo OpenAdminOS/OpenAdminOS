@@ -106,6 +106,14 @@ it("treats the overall deadline during the context limit lookup as a lookup fail
   render(<RunFailureRemediation run={run} />);
   expect(screen.getByText("Ollama did not report the model's context limit")).toBeInTheDocument();
   expect(screen.queryByText("Ollama generation timed out")).not.toBeInTheDocument();
+  expect(screen.queryByText("Request timed out")).not.toBeInTheDocument();
+});
+
+it("gives a memory failure on the context retry the context playbook", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama context size too small: This request needs 40,652 tokens of context, but Ollama could not load gpt-oss:20b with 45,056, usually because free memory ran out. Ollama said: model requires more system memory (24.1 GiB) than is available (12.0 GiB)" };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama context too small")).toBeInTheDocument();
+  expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
 });
 
 it("does not read incidental `is not pulled` text as a missing model", () => {

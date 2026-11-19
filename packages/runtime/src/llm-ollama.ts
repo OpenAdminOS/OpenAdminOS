@@ -165,6 +165,8 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
 
       let response: Response;
       let raisedCtx: number | undefined;
+      // Set while the retry runs, so a memory failure can name both sizes.
+      let retry: { requested: number; numCtx: number } | undefined;
       try {
         let numCtx = ollamaContextOverrides.get(cacheKey);
 
@@ -184,12 +186,16 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
             throw new Error(contextTooSmallMessage(model, overflow.requested, modelMax, true));
           }
           numCtx = modelMax === undefined ? wanted : Math.min(wanted, modelMax);
+          retry = { requested: overflow.requested, numCtx };
           response = await send(numCtx);
           detail = await errorDetail(response);
           const retryOverflow = response.status === 400 ? parseContextOverflow(detail) : undefined;
           if (retryOverflow) {
             const atModelLimit = modelMax !== undefined && retryOverflow.available >= modelMax;
             throw new Error(contextTooSmallMessage(model, retryOverflow.requested, retryOverflow.available, atModelLimit));
+          }
+          if (!response.ok && isOllamaMemoryError(detail)) {
+            throw new Error(contextMemoryMessage(model, overflow.requested, numCtx, detail));
           }
           if (response.ok) raisedCtx = numCtx;
         }
@@ -239,6 +245,11 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
               continue;
             }
             if (chunk.error) {
+              // Ollama can accept the retry and then fail to load the model
+              // with the larger context.
+              if (retry && accumulated.length === 0 && isOllamaMemoryError(errorText(chunk.error))) {
+                throw new Error(contextMemoryMessage(model, retry.requested, retry.numCtx, errorText(chunk.error)));
+              }
               throw new Error(`Ollama error: ${chunk.error}`);
             }
             if (chunk.done && raisedCtx !== undefined) {
@@ -550,6 +561,15 @@ function errorText(value: unknown): string {
   } catch {
     return "an unreadable error";
   }
+}
+
+/** Ollama's wording when it cannot fit a model and its context in memory. */
+function isOllamaMemoryError(detail: string): boolean {
+  return /requires more system memory|unable to load full model|out of memory|insufficient memory|failed to allocate|cannot allocate|allocation failed/i.test(detail);
+}
+
+function contextMemoryMessage(model: string, requested: number, numCtx: number, detail: string): string {
+  return `Ollama context size too small: This request needs ${requested.toLocaleString("en-US")} tokens of context, but Ollama could not load ${model} with ${numCtx.toLocaleString("en-US")}, usually because free memory ran out. Ollama said: ${truncate(detail, 200)}`;
 }
 
 function contextTooSmallMessage(model: string, requested: number, limit: number, modelLimit: boolean): string {
