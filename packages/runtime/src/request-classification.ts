@@ -13,7 +13,11 @@ export interface ClassificationSpan extends TextSpan {
 
 interface UnexaminedRange extends TextSpan {
   section: ClassificationSpan["section"];
-  reason: "text-limit" | "match-limit" | "failure";
+  reason: "text-limit" | "match-limit" | "history-evidence-unavailable" | "failure";
+}
+
+interface HistoryReplay extends TextSpan {
+  ledger: ClassificationLedger | undefined;
 }
 
 export interface RequestClassification {
@@ -223,6 +227,8 @@ export class ClassificationLedger {
   private readonly anchors: Array<AnchorIndex | undefined> = [];
   private readonly foldedAnchors: Array<AnchorIndex | undefined> = [];
   private readonly fences = new Map<string, { value: Scalar; evidence: Evidence }>();
+  private readonly historyFences = new Map<string, { length: number; replays: readonly HistoryReplay[] }>();
+  private readonly historyReplays = new Map<string, readonly HistoryReplay[]>();
   private prior: readonly ClassificationLedger[] = [];
   private transient?: ClassificationLedger;
   private remaining = VALUE_BUDGET;
@@ -253,6 +259,8 @@ export class ClassificationLedger {
     this.anchors.length = 0;
     this.foldedAnchors.length = 0;
     this.fences.clear();
+    this.historyFences.clear();
+    this.historyReplays.clear();
     this.prior = [];
     this.discardTransient();
   }
@@ -262,7 +270,15 @@ export class ClassificationLedger {
     if (previous !== this && !this.prior.includes(previous)) this.prior = [...this.prior, previous];
   }
 
-  releaseHistory(): void { this.prior = []; }
+  releaseHistory(): void {
+    this.prior = [];
+    this.historyFences.clear();
+    this.historyReplays.clear();
+  }
+
+  registerHistoryReplay(text: string, replays: readonly HistoryReplay[]): void {
+    if (!this.disposed) this.historyReplays.set(text, replays);
+  }
 
   discardTransient(): void {
     this.transient?.dispose();
@@ -304,6 +320,17 @@ export class ClassificationLedger {
   private recordRendering(original: unknown, fragment: Scalar, provenance: RenderProvenance): void {
     if (this.disposed || (typeof original !== "string" && typeof original !== "number" && typeof original !== "boolean")) return;
     if (typeof fragment === "string" && !fragment.trim()) return;
+    if (provenance.fence && typeof original === "string" && typeof fragment === "string") {
+      const replays = this.historyReplays.get(original);
+      if (replays) this.historyFences.set(provenance.fence, {
+        length: fragment.length,
+        replays: replays.map(({ start, end, ledger }) => ({
+          start: fenceEscapes(original.slice(0, start)).length,
+          end: fenceEscapes(original.slice(0, end)).length,
+          ledger,
+        })),
+      });
+    }
     let best: Evidence | undefined;
     let owner: ClassificationLedger = this;
     const key = provenance.key?.toLowerCase();
@@ -582,10 +609,20 @@ export class ClassificationLedger {
           found.set(key, { section, start, end, kind, source, ...(maskRole ? { maskRole } : {}), ...(authoritative ? { authoritative } : {}) });
         }
       };
-      if (retained.some(ledger => ledger.fences.size)) {
+      if (this.historyFences.size || retained.some(ledger => ledger.fences.size)) {
         for (const marker of text.matchAll(/<tenant_data [^<>\n]* nonce="([0-9a-f]{16})">/g)) {
           const start = marker.index + marker[0].length + 1;
           if (text[start - 1] !== "\n") continue;
+          const history = this.historyFences.get(marker[1]!);
+          const close = '\n</tenant_data nonce="' + marker[1] + '">';
+          if (history && original.startsWith(close, start + history.length)) {
+            for (const replay of history.replays) {
+              const end = Math.min(text.length, start + replay.end);
+              if ((!replay.ledger || replay.ledger.expired) && start + replay.start < end) {
+                ranges.push({ section, start: start + replay.start, end, reason: "history-evidence-unavailable" });
+              }
+            }
+          }
           for (const ledger of retained) {
             const entry = ledger.fences.get(marker[1]!);
             if (!entry) continue;

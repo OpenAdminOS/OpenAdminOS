@@ -536,7 +536,10 @@ export function deterministicChatSystemPrompt(isLocalProvider: boolean, voice: b
 }
 
 export class IntuneChatService {
-  private readonly classificationTurns = new Map<string, { tenantId: string | undefined; turns: ClassificationLedger[] }>();
+  private readonly classificationTurns = new Map<string, {
+    tenantId: string | undefined;
+    turns: Array<{ assistantId: string; ledger: ClassificationLedger }>;
+  }>();
   private readonly activeClassification = new Map<ClassificationLedger, string | undefined>();
 
   private useConversationClassification(id: string, tenantId: string | undefined): void {
@@ -544,8 +547,19 @@ export class IntuneChatService {
     if (!ledger || ledger.expired) return;
     const previous = this.classificationTurns.get(id);
     if (previous && previous.tenantId !== tenantId) this.releaseConversationClassification(id);
-    else for (const turn of previous?.turns ?? []) if (!turn.expired) ledger.include(turn);
+    else for (const turn of previous?.turns ?? []) if (!turn.ledger.expired) ledger.include(turn.ledger);
     ledger.scopeId = id;
+  }
+
+  private classifiedConversationMemory(id: string, history: readonly IntuneChatMessage[]): string | undefined {
+    const retained = this.classificationTurns.get(id)?.turns;
+    const replays: Parameters<ClassificationLedger["registerHistoryReplay"]>[1][number][] = [];
+    const memory = boundedConversationMemory(history, (assistantId, start, end) => {
+      const ledger = retained?.find(turn => turn.assistantId === assistantId)?.ledger;
+      replays.push({ start, end, ledger });
+    });
+    if (memory) currentClassificationLedger()?.registerHistoryReplay(memory, replays);
+    return memory;
   }
 
   private retainCompletedClassification(message: IntuneChatMessage, tenantId: string | undefined): void {
@@ -554,15 +568,15 @@ export class IntuneChatService {
     if (!ledger || ledger.expired || message.status !== "completed" || ledger.scopeId !== message.conversationId) return;
     const id = message.conversationId;
     const previous = this.classificationTurns.get(id);
-    const turns = [...previous?.turns.filter(turn => !turn.expired) ?? [], ledger];
-    while (turns.length > CHAT_MEMORY_MAX_TURNS) turns.shift()!.dispose();
+    const turns = [...previous?.turns.filter(turn => !turn.ledger.expired) ?? [], { assistantId: message.id, ledger }];
+    while (turns.length > CHAT_MEMORY_MAX_TURNS) turns.shift()!.ledger.dispose();
     this.classificationTurns.delete(id);
     this.classificationTurns.set(id, { tenantId, turns });
     if (this.classificationTurns.size > 8) this.releaseConversationClassification(this.classificationTurns.keys().next().value!);
   }
 
   private releaseConversationClassification(id: string): void {
-    for (const turn of this.classificationTurns.get(id)?.turns ?? []) turn.dispose();
+    for (const turn of this.classificationTurns.get(id)?.turns ?? []) turn.ledger.dispose();
     this.classificationTurns.delete(id);
     for (const ledger of this.activeClassification.keys()) if (ledger.scopeId === id) ledger.dispose();
   }
@@ -672,7 +686,7 @@ export class IntuneChatService {
     } finally {
       this.activeClassification.delete(ledger);
       ledger.releaseHistory();
-      if (!ledger.scopeId || !this.classificationTurns.get(ledger.scopeId)?.turns.includes(ledger)) ledger.dispose();
+      if (!ledger.scopeId || !this.classificationTurns.get(ledger.scopeId)?.turns.some(turn => turn.ledger === ledger)) ledger.dispose();
     }
   }
 
@@ -2247,7 +2261,7 @@ export class IntuneChatService {
     this.useConversationClassification(conversation.id, noTenant ? undefined : tenant.id);
     if (!noTenant) registerTenantData("tenant:displayName", tenant.displayName);
     const history = store.listMessages(conversation.id);
-    const conversationMemory = boundedConversationMemory(history);
+    const conversationMemory = this.classifiedConversationMemory(conversation.id, history);
     registerTransientTenantData("chat:history", conversationMemory);
     const userMessage: IntuneChatMessage = {
       id: `msg_${randomUUID()}`,
@@ -2712,7 +2726,7 @@ export class IntuneChatService {
     const history = options.voice ? [] : store.listMessages(conversation.id);
     const conversationMemory = options.voice
       ? undefined
-      : boundedConversationMemory(history);
+      : this.classifiedConversationMemory(conversation.id, history);
     // The profile has its own room: on a full-size model it is added to the
     // room for the question and its evidence; a small on-device model keeps
     // its total and gives the profile a part of it.

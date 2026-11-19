@@ -1415,6 +1415,7 @@ const CHAT_MEMORY_MAX_MESSAGE_CHARS = 1000;
  */
 export function boundedConversationMemory(
   messages: readonly IntuneChatMessage[],
+  onReplay?: (assistantId: string, start: number, end: number) => void,
 ): string | undefined {
   // Build turns first. Filtering messages individually kept the user
   // prompts of failed or cancelled exchanges (user rows stay
@@ -1461,9 +1462,14 @@ export function boundedConversationMemory(
     }
   }
   const joined = windowed.map(turn => turn.text).join("\n");
-  return joined.length > CHAT_MEMORY_MAX_CHARS
-    ? joined.slice(joined.length - CHAT_MEMORY_MAX_CHARS)
-    : joined;
+  const cut = Math.max(0, joined.length - CHAT_MEMORY_MAX_CHARS);
+  let start = 0;
+  for (const turn of windowed) {
+    const end = start + turn.text.length;
+    if (end > cut) onReplay?.(turn.assistant.id, Math.max(0, start - cut), end - cut);
+    start = end + 1;
+  }
+  return joined.slice(cut);
 }
 
 /**

@@ -12,6 +12,7 @@ import type {
   RunRecord,
 } from "@openadminos/agent-sdk";
 import { createQueuedRun, executePlan } from "@openadminos/runtime";
+import { currentClassificationLedger } from "@openadminos/runtime/data-classification";
 
 import {
   PLAN_REVALIDATION_MODEL_COPY,
@@ -98,7 +99,7 @@ const guest = (id: string): Guest => ({ id, displayName: id, days: 91, departmen
  */
 async function confirmAfter(
   change: (guests: Guest[]) => Guest[] | Error,
-  options: { withModel?: boolean; cancelDuringReplan?: boolean; applyHost?: { buildLlm?: Error; buildGraph?: Error } } = {},
+  options: { withModel?: boolean; cancelDuringReplan?: boolean; beforeLaterPage?: () => void; applyHost?: { buildLlm?: Error; buildGraph?: Error } } = {},
 ) {
   const dir = await mkdtemp(join(tmpdir(), "plan-revalidation-"));
   try {
@@ -122,11 +123,21 @@ async function confirmAfter(
     let readError: Error | undefined;
     const reads: GraphRequestInput[] = [];
     const writes: GraphRequestInput[] = [];
+    let tracked = false;
+    let laterPageClassified = false;
     const graph: RunGraphApi = {
       request: async (request) => {
         if (request.method === "GET") {
           reads.push(request);
           if (readError) throw readError;
+          if (tracked && options.beforeLaterPage) {
+            if (!request.query?.$skiptoken) {
+              return { value: [], "@odata.nextLink": "https://graph.microsoft.com/beta/users?$skiptoken=fixture" };
+            }
+            options.beforeLaterPage();
+            return { value: structuredClone(guests), hint: "q7z",
+              passwordCredentials: [{ hint: "q7z" }] };
+          }
           return { value: structuredClone(guests) };
         }
         writes.push(request);
@@ -149,6 +160,11 @@ async function confirmAfter(
           },
           async *stream() {
             modelCalls += 1;
+            if (tracked && options.beforeLaterPage) {
+              laterPageClassified = currentClassificationLedger()?.classifyRequest({
+                prompt: '{"hint":"q7z"}',
+              }).counts.credential === 1;
+            }
             yield { delta: "Reviewed.", accumulated: "Reviewed.", done: true, model: "model-1", tokenUsage: CALL_USAGE };
             // The second call is the replan's: the admin cancels right after it.
             if (options.cancelDuringReplan && modelCalls === 2) await service.cancelRun(runId);
@@ -214,15 +230,24 @@ async function confirmAfter(
     if (changed instanceof Error) readError = changed;
     else guests = changed;
     service = new RunService(host as unknown as RunServiceHost);
+    tracked = true;
     await service.confirmRun(planned.id, planned.plan!.confirmationPhrase);
     await done;
-    return { run: state.runs[0]!, writes, revalidationReads: reads.length - readsWhenPlanned, modelCalls };
+    return { run: state.runs[0]!, writes, revalidationReads: reads.length - readsWhenPlanned, modelCalls, laterPageClassified };
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 }
 
 describe("write plans are checked against the tenant before apply", () => {
+  it("registers a later Graph page after a live run passes fifteen minutes", async t => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const result = await confirmAfter(guests => guests, {
+      withModel: true, beforeLaterPage: () => t.mock.timers.tick(15 * 60_000 + 1),
+    });
+    assert.equal(result.revalidationReads, 2, result.run.error);
+    assert.equal(result.laterPageClassified, true);
+  });
   it("applies a plan the tenant still gives", async () => {
     const { run, writes, revalidationReads } = await confirmAfter((guests) => guests);
     assert.equal(revalidationReads, 1, "the plan is read again before apply");

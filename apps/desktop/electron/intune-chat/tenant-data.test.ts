@@ -286,3 +286,30 @@ test("Chat observations expire with the four-turn window and stay scoped to thei
     assert.equal(get(id).classification.counts.credential, 0);
   } finally { await f.close(); }
 });
+
+test("a replayed Chat turn whose credential evidence expired has incomplete coverage", async t => {
+  const f = await fixture({
+    respond: (_request, index) => {
+      if (!index) currentClassificationLedger()?.register("fixture", { hint: "q7z" }, { graphPath: "/applications/app/addPassword" });
+      return index ? "Reviewed." : "The hint was q7z.";
+    },
+  });
+  try {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const first = await f.store.streamIntuneChatMessage({ content: "Explain device compliance." }, () => {});
+    t.mock.timers.tick(15 * 60_000);
+    await f.store.streamIntuneChatMessage({
+      conversationId: first.conversation.id, content: "Explain that result.",
+    }, () => {});
+    const { classification } = f.store.getRequestClassifications(first.conversation.id).at(-1)!;
+    const request = f.prompts.at(-1)!;
+    assert.match(request.prompt, /The hint was q7z/);
+    assert.equal(classification.counts.credential, 0);
+    assert.equal(classification.coverageIncomplete, true);
+    assert.equal(classification.effectiveClass, "credential");
+    const missing = classification.unexamined.ranges.filter(range => range.reason === "history-evidence-unavailable");
+    assert.deepEqual(missing.map(range => request.prompt.slice(range.start, range.end)), [
+      "User: Explain device compliance.\nAssistant: The hint was q7z.",
+    ]);
+  } finally { await f.close(); }
+});

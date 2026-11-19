@@ -401,7 +401,6 @@ export class RunService {
    */
   private track(runId: string, tenantId: string | undefined, start: () => Promise<void>): void {
     const ledger = new ClassificationLedger(tenantId ? this.host.intelligenceStore?.classificationIdentityIndex(tenantId) : undefined, runId);
-    ledger.expireAfter();
     this.runClassifications.set(runId, ledger);
     const run = () => withClassificationScope(ledger, start);
     const leased = tenantId && this.host.tenantLease
@@ -1659,7 +1658,10 @@ export class RunService {
       .filter((run) => run.origin === "splashtop-change" && run.splashtop?.organizationId === organizationId)
       .filter((run) => run.status === "running" || run.status === "queued" || this.drives.has(run.id))
       .map((run) => run.id);
-    for (const runId of runIds) this.controllers.get(runId)?.abort(new Error(reason));
+    for (const runId of runIds) {
+      this.runClassifications.get(runId)?.dispose();
+      this.controllers.get(runId)?.abort(new Error(reason));
+    }
     await Promise.all(runIds.map((runId) => this.drives.get(runId) ?? Promise.resolve()));
   }
 
