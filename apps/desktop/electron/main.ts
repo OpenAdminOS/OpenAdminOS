@@ -4,6 +4,14 @@ import { NovaService } from "./nova.js";
 import { NOVA_SESSION_CONTEXT_ENDED_REASON, NOVA_SESSION_ENDED_REASON } from "../src/shared/nova-session.js";
 import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
 import { officeFullscreen } from "./office-fullscreen.js";
+import {
+  LocalResetRequestError,
+  MANAGED_POLICY_FILE,
+  requestLocalReset,
+  runPendingLocalReset,
+  writeLocalResetMarker,
+} from "./local-reset.js";
+import type { LocalResetInfo, LocalResetReport } from "@openadminos/agent-sdk";
 import { runOfficeRehearsal } from "./office-rehearsal.js";
 import { runOfficeSmoke } from "./office-smoke.js";
 import { captureLandingShots } from "./landing-capture.js";
@@ -318,6 +326,14 @@ const activeNotifications = new Set<Notification>();
 // doesn't hammer GitHub. Manual refreshes from Agent Hub don't update
 // this because the user explicitly asked for a fresh fetch.
 let lastBackgroundRefreshAt = 0;
+/** The reset that ran at this launch, if any. An incomplete one keeps the app closed. */
+let localResetReport: LocalResetReport | undefined;
+let localResetReportDismissed = false;
+/** Set once a reset was requested in this session: the app restarts and takes no second request. */
+let localResetRequested = false;
+const LOCAL_RESET_INCOMPLETE_ROUTE = "/reset-incomplete";
+/** How long the stores get to stop before the restart after a reset request. */
+const LOCAL_RESET_SHUTDOWN_MS = 3_000;
 
 function debugStartupLog(message: string, detail?: unknown): void {
   if (!debugStartup) return;
@@ -5328,6 +5344,163 @@ function createMenuBarCompanionForInteractiveLaunch(): void {
   }
 }
 
+/** Phase 2 of Reset OpenAdminOS, at the top of the main script. See local-reset.ts. */
+function runLocalResetAtLaunch(): LocalResetReport | undefined {
+  const userDataDir = app.getPath("userData");
+  try {
+    const report = runPendingLocalReset({
+      userDataDir,
+      packaged: app.isPackaged,
+      platform: process.platform,
+      home: app.getPath("home"),
+      env: process.env,
+      // The LaunchAgent label and task name are per user, shared with any
+      // other copy, so only an installed build removes them.
+      removeScheduler: () => {
+        if (process.platform === "darwin") removeMacosLaunchAgent();
+        else if (process.platform === "win32") removeWindowsSchedulerTask();
+      },
+    });
+    if (report) {
+      console.info("[local-reset] reset ran at launch", {
+        status: report.status,
+        failed: report.failed.map((entry) => entry.item),
+        warnings: report.warnings.map((entry) => entry.item),
+      });
+    }
+    return report;
+  } catch (error) {
+    console.error("[local-reset] reset at launch failed", error);
+    return {
+      status: "incomplete",
+      finishedAt: new Date().toISOString(),
+      dataFolder: userDataDir,
+      failed: [{ item: userDataDir, reason: error instanceof Error ? error.message : String(error) }],
+      warnings: [],
+    };
+  }
+}
+
+/** After a completed reset: the menu bar login item needs a ready app to change. */
+function finishLocalResetAfterReady(report: LocalResetReport): void {
+  if (process.platform !== "darwin" || !app.isPackaged) return;
+  try {
+    if (getCompanionLaunchSettings().enabled) setCompanionLaunchEnabled(false);
+  } catch (error) {
+    report.warnings.push({
+      item: "Menu bar login item",
+      reason: `${error instanceof Error ? error.message : String(error)}. Turn it off in System Settings, General, Login Items.`,
+    });
+  }
+}
+
+function localResetInfo(): LocalResetInfo {
+  const dataFolder = app.getPath("userData");
+  return {
+    dataFolder,
+    packaged: app.isPackaged,
+    platform: process.platform === "darwin" ? "macos" : process.platform === "win32" ? "windows" : "linux",
+    policyFilePresent: existsSync(join(dataFolder, MANAGED_POLICY_FILE)),
+  };
+}
+
+/** Restart without the background or menu bar launch flags, so the next launch opens the window. */
+function relaunchInteractive(): void {
+  app.relaunch({
+    args: process.argv.slice(1).filter((arg) => arg !== BACKGROUND_SCHEDULER_ARG && arg !== MENU_BAR_ARG),
+  });
+  app.exit(0);
+}
+
+/** Phase 1 of Reset OpenAdminOS. Resolves once the restart is scheduled. */
+async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
+  if (localResetRequested) {
+    throw new LocalResetRequestError("A reset is already in progress. OpenAdminOS restarts in a moment.");
+  }
+  localResetRequested = true;
+  try {
+    await requestLocalReset(confirmation, {
+      checkReady: async () => {
+        const blocker = await store.localResetBlocker();
+        if (blocker) throw new LocalResetRequestError(blocker);
+      },
+      writeMarker: (marker) => writeLocalResetMarker(app.getPath("userData"), marker),
+      forgetSignIns: () => store.forgetAllSignIns(),
+      disableScheduler: async () => {
+        // A development build never registered the per-user scheduler; the
+        // installed app's registration is not its to remove.
+        if (!app.isPackaged) return;
+        if (process.platform === "darwin") removeMacosLaunchAgent();
+        else if (process.platform === "win32") removeWindowsSchedulerTask();
+      },
+      disableLoginItem: async () => {
+        if (process.platform !== "darwin" || !app.isPackaged) return;
+        if (getCompanionLaunchSettings().enabled) setCompanionLaunchEnabled(false);
+      },
+    });
+  } catch (error) {
+    localResetRequested = false;
+    throw error;
+  }
+  console.info("[local-reset] reset requested; restarting");
+  // The reply reaches the window first, so it can say that the app restarts.
+  setTimeout(() => {
+    void store
+      .shutdown(LOCAL_RESET_SHUTDOWN_MS)
+      .catch((error: unknown) => console.warn("[local-reset] stopping background work failed", error))
+      .finally(relaunchInteractive);
+  }, 500);
+}
+
+/** Registered in both launch modes: the reset-incomplete window uses them without a store. */
+function registerLocalResetIpcHandlers(): void {
+  ipcMain.handle("openadminos:get-local-reset-info", handleTrusted(() => localResetInfo()));
+  ipcMain.handle(
+    "openadminos:reset-openadminos",
+    handleTrusted((_event, confirmation: unknown) => {
+      if (localResetReport?.status === "incomplete") {
+        throw new LocalResetRequestError("The earlier reset has not finished. Choose Try again.");
+      }
+      return resetOpenAdminOS(confirmation);
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:get-local-reset-report",
+    handleTrusted(() =>
+      localResetReport && (localResetReport.status === "incomplete" || !localResetReportDismissed)
+        ? localResetReport
+        : null,
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:dismiss-local-reset-report",
+    handleTrusted(() => {
+      if (localResetReport?.status === "completed") localResetReportDismissed = true;
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:retry-local-reset",
+    handleTrusted(() => {
+      if (localResetReport?.status !== "incomplete") return;
+      relaunchInteractive();
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:show-local-reset-data-folder",
+    handleTrusted(async () => {
+      const failure = await shell.openPath(app.getPath("userData"));
+      if (failure) throw new Error(`The data folder could not be opened: ${failure}`);
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:quit-after-incomplete-reset",
+    handleTrusted(() => {
+      if (localResetReport?.status !== "incomplete") return;
+      app.exit(0);
+    }),
+  );
+}
+
 function registerIpcHandlers() {
   ipcMain.handle("openadminos:set-appearance", handleTrusted((_event, theme: unknown) => {
     const appearance = parseNativeAppearance(
@@ -6881,7 +7054,20 @@ if (!gotLock) {
   debugStartupLog("quitting because single instance lock was not acquired");
   app.quit();
 } else {
+  // A pending Reset OpenAdminOS empties the data folder now: after the
+  // single-instance lock, before Chromium reads Local State and before any
+  // store, session or safeStorage use.
+  localResetReport = runLocalResetAtLaunch();
   app.on("second-instance", (_event, argv) => {
+    if (localResetReport?.status === "incomplete") {
+      if (argv.includes(BACKGROUND_SCHEDULER_ARG)) return;
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        showDockForInteractiveSession();
+        mainWindow.show();
+        mainWindow.focus();
+      }
+      return;
+    }
     if (argv.includes(BACKGROUND_SCHEDULER_ARG)) {
       void store?.fireDueSchedules();
       void store?.fireDueNovaFollowUps();
@@ -6924,6 +7110,23 @@ if (!gotLock) {
         // Non-fatal: dock icon is cosmetic in dev.
       }
     }
+
+    registerLocalResetIpcHandlers();
+    if (localResetReport?.status === "incomplete") {
+      // The app stays closed until the reset finishes, so old data is never
+      // mixed with new. A background wake only waits for the next launch.
+      if (isBackgroundSchedulerLaunch) {
+        app.exit(0);
+        return;
+      }
+      showDockForInteractiveSession();
+      installSecurityGuards();
+      // Nothing else runs in this mode, so closing the window quits, on macOS too.
+      app.on("window-all-closed", () => app.quit());
+      void createWindow({ show: true, route: LOCAL_RESET_INCOMPLETE_ROUTE });
+      return;
+    }
+    if (localResetReport?.status === "completed") finishLocalResetAfterReady(localResetReport);
 
     const userDataDir = app.getPath("userData");
     const tokenStore = new SafeStorageTokenCacheStore(join(userDataDir, DEFAULT_TOKEN_CACHE_FILE));

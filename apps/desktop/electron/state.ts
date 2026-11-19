@@ -2342,6 +2342,76 @@ export class AppStateStore {
     this.auditLog.close();
   }
 
+  /**
+   * Reset OpenAdminOS waits while a confirmed change is being applied, so a
+   * restart never cuts an apply off halfway.
+   */
+  async localResetBlocker(): Promise<string | undefined> {
+    const persisted = await this.read();
+    const applying = persisted.runs.find((run) => run.status === "running" && run.confirmedAt);
+    if (!applying) return undefined;
+    const name = persisted.installedAgents.find((agent) => agent.slug === applying.agentSlug)?.name ?? "A write run";
+    return `${name} is applying a confirmed change. Wait for it to finish, then reset. Nothing was removed.`;
+  }
+
+  /**
+   * Reset OpenAdminOS, phase 1: removes the Microsoft sign-in of every
+   * tenant, and of every disconnect whose cleanup is still pending, from the
+   * token caches. The token files are deleted with the data folder at the
+   * next launch; this makes the sign-ins unusable now. Returns the sign-ins
+   * that could not be removed.
+   */
+  async forgetAllSignIns(): Promise<{ item: string; reason: string }[]> {
+    const persisted = await this.read();
+    const signIns = [
+      ...persisted.tenants
+        .filter((tenant) => !isLegacySampleTenant(tenant) && tenant.homeAccountId)
+        .map((tenant) => ({ name: tenant.displayName, appRegistration: tenant.appRegistration, homeAccountId: tenant.homeAccountId })),
+      ...(persisted.tenantRemovals ?? [])
+        .filter((removal) => removal.kind !== "sample" && removal.homeAccountId)
+        .map((removal) => ({ name: removal.displayName, appRegistration: removal.appRegistration, homeAccountId: removal.homeAccountId! })),
+    ];
+    const problems: { item: string; reason: string }[] = [];
+    for (const signIn of signIns) {
+      try {
+        await this.removeCachedAccount(signIn.appRegistration, signIn.homeAccountId);
+      } catch (cause) {
+        problems.push({ item: `Microsoft sign-in for ${signIn.name}`, reason: errorText(cause) });
+      }
+    }
+    return problems;
+  }
+
+  /**
+   * Stops background services and closes the databases before a restart,
+   * waiting at most `boundMs` for the gateway and MCP servers, so the next
+   * launch can delete the files.
+   */
+  async shutdown(boundMs: number): Promise<void> {
+    this.whatsappWebClientInstance?.dispose();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        Promise.allSettled([this.gatewayService.stop(), this.mcpHost.closeAll()]),
+        new Promise<void>((resolve) => { timer = setTimeout(resolve, boundMs); }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+    for (const close of [
+      () => this.officeServiceInstance?.close(),
+      () => this.intelligenceStore?.close(),
+      () => this.novaStoresInstance?.db.close(),
+      () => this.auditLog.close(),
+    ]) {
+      try {
+        close();
+      } catch (cause) {
+        console.warn(`[local-reset] a store did not close: ${errorText(cause)}`);
+      }
+    }
+  }
+
   private agentUpdatesRoot(): string | undefined {
     return this.userDataPath ? join(this.userDataPath, "agent-updates") : undefined;
   }
