@@ -1,8 +1,9 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { setImmediate as yieldToMain } from "node:timers/promises";
 import { DATA_CLASSES_BY_SENSITIVITY, maxDataClass, type DataClass, type DataClassCounts, type LlmOptions, type ProviderId, type RunLlmApi } from "@openadminos/agent-sdk";
 import { emptyDataClassCounts, labeledCredentials, requestTextSpans, walkDataClasses, type ClassificationOptions, type TextSpan } from "./data-classification.js";
 import { GRAPH_FIELD_CLASSES_VERSION, type SecurityMaskRole } from "./graph-field-classes.js";
+import { ClassificationSlice, requestWorker, type ClassificationWorker } from "./classification-worker-client.js";
+import { TenantValueIndex, type TenantMatchEntry } from "./tenant-value-index.js";
 
 export interface ClassificationSpan extends TextSpan {
   section: "system" | "prompt";
@@ -19,6 +20,8 @@ interface UnexaminedRange extends TextSpan {
 interface HistoryReplay extends TextSpan {
   ledger: ClassificationLedger | undefined;
 }
+
+type HistoryFences = ReadonlyMap<string, { length: number; replays: readonly TextSpan[] }>;
 
 export interface RequestClassification {
   counts: DataClassCounts;
@@ -107,6 +110,44 @@ interface MatchPattern {
 }
 
 type AnchorIndex = Map<number, Map<string, Set<MatchPattern>>>;
+type RequestText = Pick<LlmOptions, "system" | "prompt">;
+type EncodedText = { buffer: ArrayBuffer; length: number };
+type Fence = { body: string; evidence: Evidence };
+type ScanState = {
+  retained: readonly ClassificationLedger[];
+  historyFences: HistoryFences;
+  dropped: number;
+  registrations: number;
+  incomplete: boolean;
+  identityIndex: ClassificationOptions["identityIndex"];
+};
+
+export type WorkerValue = [Scalar, ValueEntry | undefined, Array<[string, Fence]>];
+type TransferableString = string | ArrayBuffer;
+type TransferablePattern = Omit<MatchPattern, "entry" | "text" | "before" | "after"> & {
+  text: TransferableString;
+  before?: TransferableString;
+  after?: TransferableString;
+};
+export interface WorkerLargeValue {
+  value: TransferableString | number | boolean;
+  entry?: Omit<ValueEntry, "patterns">;
+  patterns: TransferablePattern[];
+  fences: Array<[string, { body: TransferableString; evidence: Evidence }]>;
+}
+export interface WorkerScan {
+  type: "scan";
+  sections: Record<ClassificationSpan["section"], EncodedText | undefined>;
+  ledgers: number[];
+  shards: number[];
+  state: Pick<ScanState, "historyFences" | "dropped" | "registrations" | "incomplete">;
+}
+
+export interface WorkerResult {
+  classification: Omit<RequestClassification, "spans">;
+  offsets: Int32Array;
+  sources: string[];
+}
 
 const VALUE_BUDGET = 2_000_000;
 export const REQUEST_CLASSIFICATION_MAX_SECTION = 16_000_000;
@@ -114,6 +155,8 @@ const TEXT_CHUNK = 128_000;
 const DETECTOR_OVERLAP = 32_768;
 const MATCH_BUDGET = 200_000;
 const ANCHOR_WIDTH = 8;
+const MAIN_SCAN_LIMIT = 512;
+const SYNC_BATCH_UNITS = 16_384;
 export const CLASSIFICATION_TTL_MS = 15 * 60_000;
 
 function fenceEscapes(text: string): string {
@@ -221,13 +264,114 @@ function classification(
     } };
 }
 
+async function encodeSection(text: string | undefined, slice: ClassificationSlice, max = REQUEST_CLASSIFICATION_MAX_SECTION): Promise<EncodedText | undefined> {
+  if (!text?.length) return undefined;
+  const limit = Math.min(text.length, max);
+  const buffer = new ArrayBuffer(limit * 2);
+  const bytes = Buffer.from(buffer);
+  // Preserve individual UTF-16 code units, including lone surrogates.
+  for (let start = 0; start < limit; start += SYNC_BATCH_UNITS) {
+    const end = Math.min(start + SYNC_BATCH_UNITS, limit);
+    bytes.write(text.slice(start, end), start * 2, (end - start) * 2, "utf16le");
+    if (slice.elapsed) await slice.yield();
+  }
+  return { buffer, length: text.length };
+}
+
+/** Ship long strings out of line so a single large value cannot stall a batch. */
+async function encodeLargeValue([value, entry, fences]: WorkerValue, slice: ClassificationSlice):
+  Promise<{ value: WorkerLargeValue; buffers: ArrayBuffer[] }> {
+  const encoded = new Map<string, ArrayBuffer>();
+  const encode = async (text: string): Promise<TransferableString> => {
+    if (text.length < SYNC_BATCH_UNITS) return text;
+    let buffer = encoded.get(text);
+    if (!buffer) {
+      buffer = (await encodeSection(text, slice, text.length))!.buffer;
+      encoded.set(text, buffer);
+    }
+    return buffer;
+  };
+  const packed: WorkerLargeValue = {
+    value: typeof value === "string" ? await encode(value) : value, patterns: [], fences: [],
+  };
+  if (entry) {
+    const { patterns, ...metadata } = entry;
+    packed.entry = metadata;
+    for (const { text, offset, anchor, mode, before, after } of patterns) {
+      packed.patterns.push({ text: await encode(text), offset, anchor, mode,
+        ...(before === undefined ? {} : { before: await encode(before) }),
+        ...(after === undefined ? {} : { after: await encode(after) }),
+      });
+    }
+    for (const [nonce, { body, evidence }] of fences) {
+      packed.fences.push([nonce, { body: await encode(body), evidence }]);
+      if (slice.elapsed) await slice.yield();
+    }
+  }
+  return { value: packed, buffers: [...encoded.values()] };
+}
+
+export function decodeWorkerLargeValue(packed: WorkerLargeValue): WorkerValue {
+  const decoded = new Map<ArrayBuffer, string>();
+  const decode = (text: TransferableString): string => {
+    if (typeof text === "string") return text;
+    let value = decoded.get(text);
+    if (value === undefined) {
+      value = Buffer.from(text).toString("utf16le");
+      decoded.set(text, value);
+    }
+    return value;
+  };
+  const value = packed.value instanceof ArrayBuffer ? decode(packed.value) : packed.value;
+  const entry = packed.entry && { ...packed.entry, patterns: [] as MatchPattern[] };
+  if (entry) for (const { text, before, after, ...pattern } of packed.patterns) {
+    entry.patterns.push({ ...pattern, text: decode(text), entry,
+      ...(before === undefined ? {} : { before: decode(before) }),
+      ...(after === undefined ? {} : { after: decode(after) }),
+    });
+  }
+  return [value, entry, packed.fences.map(([nonce, { body, evidence }]) => [nonce, { body: decode(body), evidence }])];
+}
+
+function packWorkerResult(spans: readonly ClassificationSpan[], classification: WorkerResult["classification"]): WorkerResult {
+  const offsets = new Int32Array(spans.length * 6);
+  const sources = new Map<string, number>();
+  let offset = 0;
+  for (const span of spans) {
+    if (!sources.has(span.source)) sources.set(span.source, sources.size);
+    offsets[offset++] = span.start;
+    offsets[offset++] = span.end;
+    offsets[offset++] = span.section === "system" ? 0 : 1;
+    offsets[offset++] = DATA_CLASSES_BY_SENSITIVITY.indexOf(span.kind);
+    offsets[offset++] = sources.get(span.source)!;
+    offsets[offset++] = span.maskRole === "nameOrIdentifier" ? 1 : span.maskRole === "setting" ? 2 : 0;
+  }
+  return { classification, offsets, sources: [...sources.keys()] };
+}
+
+async function unpackWorkerResult({ classification, offsets, sources }: WorkerResult): Promise<RequestClassification> {
+  const spans: ClassificationSpan[] = [];
+  const slice = new ClassificationSlice();
+  for (let at = 0; at < offsets.length; at += 6) {
+    const role = offsets[at + 5];
+    spans.push({ start: offsets[at]!, end: offsets[at + 1]!,
+      section: offsets[at + 2] ? "prompt" : "system",
+      kind: DATA_CLASSES_BY_SENSITIVITY[offsets[at + 3]!]!,
+      source: sources[offsets[at + 4]!]!,
+      ...(role ? { maskRole: role === 1 ? "nameOrIdentifier" : "setting" } : {}),
+    });
+    if (at % (6 * 128) === 0 && slice.elapsed) await slice.yield();
+  }
+  return { ...classification, spans };
+}
+
 /** Memory-only plaintext evidence. Each ledger owns one turn or run. */
 export class ClassificationLedger {
   private readonly values = new Map<Scalar, ValueEntry>();
   private readonly byClass = new Map(DATA_CLASSES_BY_SENSITIVITY.map(kind => [kind, new Set<Scalar>()]));
   private readonly anchors: Array<AnchorIndex | undefined> = [];
   private readonly foldedAnchors: Array<AnchorIndex | undefined> = [];
-  private readonly fences = new Map<string, { value: Scalar; evidence: Evidence }>();
+  private readonly fences = new Map<string, Fence>();
   private readonly historyFences = new Map<string, { length: number; replays: readonly HistoryReplay[] }>();
   private readonly historyReplays = new Map<string, readonly HistoryReplay[]>();
   private prior: readonly ClassificationLedger[] = [];
@@ -237,6 +381,7 @@ export class ClassificationLedger {
   private incompleteRegistrations = 0;
   private disposed = false;
   private expiry?: ReturnType<typeof setTimeout>;
+  private workerState?: { client: ClassificationWorker; id: number; dirty: Set<Scalar>; mirrored: Set<Scalar> };
   scopeId: string | undefined;
 
   constructor(private readonly identityIndex?: ClassificationOptions["identityIndex"], scopeId?: string) {
@@ -260,6 +405,10 @@ export class ClassificationLedger {
     this.anchors.length = 0;
     this.foldedAnchors.length = 0;
     this.fences.clear();
+    if (this.workerState) {
+      this.workerState.client.drop(this, this.workerState.id);
+      delete this.workerState;
+    }
     this.historyFences.clear();
     this.historyReplays.clear();
     this.prior = [];
@@ -354,12 +503,14 @@ export class ClassificationLedger {
       if (entry && owner.reserve(64, entry.kind)) {
         entry.cost += 64;
         (entry.fenceIds ??= new Set()).add(provenance.fence);
-        owner.fences.set(provenance.fence, { value: original, evidence: best });
+        owner.fences.set(provenance.fence, { body: fragment, evidence: best });
+        owner.workerState?.dirty.add(original);
       }
     } else if (provenance.before || provenance.after) {
       const entry = owner.add(fragment, best, true);
       if (!entry) return;
       owner.indexContext(entry, String(fragment), provenance);
+      owner.workerState?.dirty.add(fragment);
     } else {
       owner.add(fragment, best);
     }
@@ -409,6 +560,8 @@ export class ClassificationLedger {
   }
 
   private remove(value: Scalar, entry: ValueEntry): void {
+    if (this.workerState?.mirrored.has(value)) this.workerState.dirty.add(value);
+    else this.workerState?.dirty.delete(value);
     this.values.delete(value);
     this.byClass.get(entry.kind)!.delete(value);
     for (const nonce of entry.fenceIds ?? []) this.fences.delete(nonce);
@@ -444,6 +597,7 @@ export class ClassificationLedger {
         entry.kind = evidence.kind;
       }
       if (!contextOnly) this.indexValue(entry, value, evidence);
+      this.workerState?.dirty.add(value);
       return entry;
     }
     const scalarText = String(value);
@@ -454,6 +608,7 @@ export class ClassificationLedger {
     this.byClass.get(evidence.kind)!.add(value);
 
     if (!contextOnly) this.indexValue(entry, value, evidence);
+    this.workerState?.dirty.add(value);
     return entry;
   }
 
@@ -527,6 +682,29 @@ export class ClassificationLedger {
     entry.patterns.push(pattern);
   }
 
+  /** Install the sender's exact entry and anchors without rebuilding earlier entries. */
+  applyWorkerValues(values: WorkerValue[]): void {
+    for (const [value, entry, fences] of values) {
+      const previous = this.values.get(value);
+      if (previous) this.remove(value, previous);
+      if (!entry) continue;
+      this.values.set(value, entry);
+      this.byClass.get(entry.kind)!.add(value);
+      for (const pattern of entry.patterns) {
+        const { anchor, mode } = pattern;
+        const indexes = mode === "folded" ? this.foldedAnchors : this.anchors;
+        const prefixes = indexes[anchor.length] ??= new Map();
+        const first = anchor.charCodeAt(0);
+        let buckets = prefixes.get(first);
+        if (!buckets) prefixes.set(first, buckets = new Map());
+        let bucket = buckets.get(anchor);
+        if (!bucket) buckets.set(anchor, bucket = new Set());
+        bucket.add(pattern);
+      }
+      for (const [nonce, fence] of fences) this.fences.set(nonce, fence);
+    }
+  }
+
   private scan(
     anchors: ClassificationLedger["anchors"], text: string, from: number, to: number, work: { remaining: number },
     emit: (span: TextSpan, evidence: Evidence, authoritative?: boolean) => void,
@@ -569,28 +747,159 @@ export class ClassificationLedger {
     return true;
   }
 
-  classifyRequest(request: Pick<LlmOptions, "system" | "prompt">): RequestClassification {
-    const chunks = this.classifyRequestChunks(request);
-    for (let result = chunks.next(); ; result = chunks.next()) if (result.done) return result.value;
-  }
-
-  async classifyLargeRequest(request: Pick<LlmOptions, "system" | "prompt">): Promise<RequestClassification> {
-    const chunks = this.classifyRequestChunks(request);
-    for (let result = chunks.next(); ; result = chunks.next()) {
-      if (result.done) return result.value;
-      await yieldToMain();
+  private scanState(): ScanState {
+    const retained = [this, ...(this.transient ? [this.transient] : []), ...this.prior].filter(ledger => !ledger.disposed);
+    const historyFences = new Map<string, { length: number; replays: TextSpan[] }>();
+    for (const [nonce, { length, replays }] of this.historyFences) {
+      const missing = replays.filter(({ ledger }) => !ledger || ledger.expired).map(({ start, end }) => ({ start, end }));
+      if (missing.length) historyFences.set(nonce, { length, replays: missing });
     }
+    return { retained, historyFences,
+      dropped: this.dropped + (this.transient?.dropped ?? 0),
+      registrations: this.incompleteRegistrations + (this.transient?.incompleteRegistrations ?? 0),
+      incomplete: this.disposed || this.identityIndex?.isComplete?.() === false,
+      identityIndex: this.disposed ? undefined : this.identityIndex,
+    };
   }
 
-  private *classifyRequestChunks(request: Pick<LlmOptions, "system" | "prompt">): Generator<void, RequestClassification> {
+  classifyRequest(request: RequestText): RequestClassification {
+    return this.scanRequest(request, this.scanState());
+  }
+
+  async classifyProviderRequest(request: RequestText & Pick<LlmOptions, "signal">): Promise<RequestClassification> {
+    const length = (request.system?.length ?? 0) + request.prompt.length;
+    const ledgerUnits = (ledger: ClassificationLedger) => ledger.disposed ? 0 : VALUE_BUDGET - ledger.remaining;
+    const retainedUnits = ledgerUnits(this) + (this.transient ? ledgerUnits(this.transient) : 0) +
+      this.prior.reduce((sum, ledger) => sum + ledgerUnits(ledger), 0);
+    // No arbitrary-sized lookup or folding work enters the main-thread path.
+    if (length <= MAIN_SCAN_LIMIT && retainedUnits <= 4_096 && !this.identityIndex?.workerShards) {
+      const slice = new ClassificationSlice();
+      const result = this.classifyRequest(request);
+      if (slice.elapsed) await slice.yield();
+      return result;
+    }
+    return this.classifyLargeRequest(request, request.signal);
+  }
+
+  private async syncLedger(client: ClassificationWorker, slice: ClassificationSlice): Promise<number> {
+    const initial = this.workerState?.client !== client;
+    const state = initial ? { client, id: client.id(this), dirty: new Set<Scalar>(), mirrored: new Set<Scalar>() } : this.workerState!;
+    this.workerState = state;
+    const syncValues = async (keys: Iterable<Scalar>) => {
+      let batch: WorkerValue[] = [];
+      let units = 0;
+      for (const value of keys) {
+        if (this.disposed) break;
+        const entry = this.values.get(value);
+        if (entry) state.mirrored.add(value);
+        else state.mirrored.delete(value);
+        const fences = Array.from(entry?.fenceIds ?? [], nonce => [nonce, this.fences.get(nonce)!] satisfies [string, Fence]);
+        const item: WorkerValue = [value, entry, fences];
+        const cost = (entry?.cost ?? (typeof value === "string" ? value.length : 0)) + 48;
+        if (cost >= SYNC_BATCH_UNITS) {
+          const encoded = await encodeLargeValue(item, slice);
+          if (this.disposed) break;
+          client.post({ type: "large-value", id: state.id, value: encoded.value }, encoded.buffers);
+        } else {
+          batch.push(item);
+          units += cost;
+        }
+        if (units >= SYNC_BATCH_UNITS || slice.elapsed) {
+          client.post({ type: "values", id: state.id, values: batch });
+          batch = [];
+          units = 0;
+          if (slice.elapsed) await slice.yield();
+        }
+      }
+      if (batch.length && !this.disposed) client.post({ type: "values", id: state.id, values: batch });
+    };
+    if (initial) await syncValues(this.values.keys());
+    // Mutations can occur while a synchronization slice yields. Send only
+    // changes and removals before using the mirror again.
+    while (state.dirty.size && !this.disposed) {
+      const dirty = state.dirty;
+      state.dirty = new Set();
+      await syncValues(dirty);
+    }
+    return state.id;
+  }
+
+  async classifyLargeRequest(request: RequestText, signal?: AbortSignal): Promise<RequestClassification> {
+    const wasDisposed = this.disposed;
+    const result = await requestWorker().run(async client => {
+      const slice = new ClassificationSlice();
+      const sections = { system: await encodeSection(request.system, slice), prompt: await encodeSection(request.prompt, slice) };
+      const transfers = Object.values(sections).flatMap(section => section ? [section.buffer] : []);
+      const { retained, identityIndex, ...state } = this.scanState();
+      const ledgers: number[] = [];
+      for (const ledger of retained) {
+        const id = await ledger.syncLedger(client, slice);
+        if (!ledger.disposed) ledgers.push(id);
+      }
+      const shards: number[] = [];
+      for (const shard of identityIndex?.workerShards?.() ?? []) {
+        let id = client.shards.get(shard);
+        if (id === undefined) {
+          id = client.id(shard);
+          client.shards.set(shard, id);
+          let entries: TenantMatchEntry[] = [];
+          let units = 0;
+          for (const entry of shard.workerEntries()) {
+            if (client.shards.get(shard) !== id) break;
+            entries.push(entry);
+            units += entry[1].length + 24;
+            if (units >= SYNC_BATCH_UNITS || slice.elapsed) {
+              client.post({ type: "identity", id, entries });
+              entries = [];
+              units = 0;
+              if (slice.elapsed) await slice.yield();
+            }
+          }
+          if (entries.length && client.shards.get(shard) === id) client.post({ type: "identity", id, entries });
+        }
+        shards.push(id);
+      }
+      // Resample expiry after asynchronous synchronization. Disposed mirrors
+      // have already been dropped; history will mark their replay ranges.
+      const latest = this.scanState();
+      return {
+        message: { type: "scan", sections, ledgers, shards, state: {
+          ...state, historyFences: latest.historyFences,
+          incomplete: latest.incomplete || Boolean(identityIndex && !identityIndex.workerShards),
+        } },
+        transfers,
+      };
+    }, signal);
+    const classification = await unpackWorkerResult(result);
+    if (!wasDisposed && this.disposed) throw new Error("Request classification evidence was released.");
+    return classification;
+  }
+
+  static scanInWorker(message: WorkerScan, ledgers: Map<number, ClassificationLedger>, shards: Map<number, TenantValueIndex>): WorkerResult {
+    const { system, prompt } = message.sections;
+    const retained = message.ledgers.flatMap(id => ledgers.get(id) ?? []);
+    const indexes = message.shards.flatMap(id => shards.get(id) ?? []);
+    const identityIndex = indexes.length ? {
+      matches: (text: string) => !TenantValueIndex.spansFor(text, indexes).next().done,
+      spans: (text: string) => TenantValueIndex.spansFor(text, indexes),
+    } : undefined;
+    const { spans, ...classification } = new ClassificationLedger().scanRequest({
+      system: system && Buffer.from(system.buffer).toString("utf16le"),
+      prompt: prompt ? Buffer.from(prompt.buffer).toString("utf16le") : "",
+    }, { ...message.state, retained, identityIndex }, { system: system?.length ?? 0, prompt: prompt?.length ?? 0 });
+    return packWorkerResult(spans, classification);
+  }
+
+  private scanRequest(request: RequestText, state: ScanState, fullLengths?: Record<ClassificationSpan["section"], number>): RequestClassification {
     const spans: ClassificationSpan[] = [];
     const ranges: UnexaminedRange[] = [];
-    const retained = [this, ...(this.transient ? [this.transient] : []), ...this.prior].filter(ledger => !ledger.disposed);
+    const { retained, historyFences, identityIndex } = state;
     for (const section of ["system", "prompt"] as const) {
       const original = request[section];
       if (!original) continue;
       const text = original.slice(0, REQUEST_CLASSIFICATION_MAX_SECTION);
-      if (text.length < original.length) ranges.push({ section, start: text.length, end: original.length, reason: "text-limit" });
+      const fullLength = fullLengths?.[section] ?? original.length;
+      if (text.length < fullLength) ranges.push({ section, start: text.length, end: fullLength, reason: "text-limit" });
       const found = new Map<string, ClassificationSpan & { authoritative?: boolean }>();
       const work = { remaining: MATCH_BUDGET };
       let fields: ReturnType<typeof jsonFields> | undefined;
@@ -610,16 +919,16 @@ export class ClassificationLedger {
           found.set(key, { section, start, end, kind, source, ...(maskRole ? { maskRole } : {}), ...(authoritative ? { authoritative } : {}) });
         }
       };
-      if (this.historyFences.size || retained.some(ledger => ledger.fences.size)) {
+      if (historyFences.size || retained.some(ledger => ledger.fences.size)) {
         for (const marker of text.matchAll(/<tenant_data [^<>\n]* nonce="([0-9a-f]{16})">/g)) {
           const start = marker.index + marker[0].length + 1;
           if (text[start - 1] !== "\n") continue;
-          const history = this.historyFences.get(marker[1]!);
+          const history = historyFences.get(marker[1]!);
           const close = '\n</tenant_data nonce="' + marker[1] + '">';
           if (history && original.startsWith(close, start + history.length)) {
             for (const replay of history.replays) {
               const end = Math.min(text.length, start + replay.end);
-              if ((!replay.ledger || replay.ledger.expired) && start + replay.start < end) {
+              if (start + replay.start < end) {
                 ranges.push({ section, start: start + replay.start, end, reason: "history-evidence-unavailable" });
               }
             }
@@ -627,7 +936,7 @@ export class ClassificationLedger {
           for (const ledger of retained) {
             const entry = ledger.fences.get(marker[1]!);
             if (!entry) continue;
-            const body = fenceEscapes(String(entry.value));
+            const { body } = entry;
             const end = start + body.length;
             if (text.startsWith(body, start) && text.startsWith(`\n</tenant_data nonce="${marker[1]}">`, end)) {
               collect({ start, end }, entry.evidence, true);
@@ -647,7 +956,6 @@ export class ClassificationLedger {
       }
       for (let from = 0; from < text.length; from += TEXT_CHUNK) {
         if (work.remaining < 0) break;
-        if (from > 0) yield;
         const to = Math.min(text.length, from + TEXT_CHUNK);
         if (retained.some(ledger => !ledger.scan(ledger.anchors, text, from, to, work, collect, fieldAt) ||
             folded !== undefined && !ledger.scan(ledger.foldedAnchors, folded, from, to, work, collect))) {
@@ -657,7 +965,7 @@ export class ClassificationLedger {
         // Keep original offsets and look across chunk edges for bounded detectors.
         const begin = Math.max(0, from - DETECTOR_OVERLAP);
         const end = Math.min(text.length, to + DETECTOR_OVERLAP);
-        for (const match of requestTextSpans(text.slice(begin, end), this.disposed ? undefined : this.identityIndex)) {
+        for (const match of requestTextSpans(text.slice(begin, end), identityIndex)) {
           const start = match.start + begin;
           if (start < from || start >= to) continue;
           if (--work.remaining < 0) break;
@@ -672,8 +980,7 @@ export class ClassificationLedger {
       for (const { authoritative: _, ...span } of ordered) spans.push(span);
     }
     return classification(spans, ranges, retained.reduce((sum, ledger) => sum + ledger.values.size, 0),
-      this.dropped + (this.transient?.dropped ?? 0), this.incompleteRegistrations + (this.transient?.incompleteRegistrations ?? 0),
-      this.disposed || this.identityIndex?.isComplete?.() === false);
+      state.dropped, state.registrations, state.incomplete);
   }
 }
 
@@ -744,8 +1051,7 @@ export function withRequestClassification(
     let failed = false;
     try {
       const active = ledger ?? new ClassificationLedger();
-      result = Math.max(request.system?.length ?? 0, request.prompt.length) > TEXT_CHUNK
-        ? await active.classifyLargeRequest(request) : active.classifyRequest(request);
+      result = await active.classifyProviderRequest(request);
     } catch {
       failed = true;
       const ranges: UnexaminedRange[] = [];

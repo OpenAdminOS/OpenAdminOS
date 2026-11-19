@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { setImmediate as yieldToMain } from "node:timers/promises";
 import { collectTenantValues, TenantValueIndex } from "./tenant-values.js";
-import { currentClassificationLedger, GRAPH_FIELD_CLASSES_VERSION, registerClassifiedValues, type ClassificationOptions } from "@openadminos/runtime/data-classification";
+import { currentClassificationLedger, GRAPH_FIELD_CLASSES_VERSION, registerClassifiedValues, releaseClassificationIdentityShard, type ClassificationOptions } from "@openadminos/runtime/data-classification";
 import { describeCacheRow, readCacheClassification } from "./cache-classification.js";
 import { pathForResource } from "./planner.js";
 import { GRAPH_CACHE_LOG_RESOURCES } from "@openadminos/agent-sdk";
@@ -463,9 +463,10 @@ export class IntelligenceSqliteStore {
 
   close(): void {
     this.closed = true;
-    this.classificationIndexes.clear();
+    for (const tenantId of new Set([...this.classificationIndexes.keys(), ...this.tenantIdentityShards.keys()])) {
+      this.releaseIdentityShards(tenantId);
+    }
     this.tenantIdentityIndexes.clear();
-    this.tenantIdentityShards.clear();
     this.db.close();
   }
 
@@ -2236,8 +2237,7 @@ export class IntelligenceSqliteStore {
     }
     this.cacheCleared.set(tenantId, (this.cacheCleared.get(tenantId) ?? 0) + 1);
     this.tenantIdentityIndexes.delete(tenantId);
-    this.classificationIndexes.delete(tenantId);
-    this.tenantIdentityShards.delete(tenantId);
+    this.releaseIdentityShards(tenantId);
   }
 
   purgeTenant(tenantId: string): void {
@@ -2267,8 +2267,7 @@ export class IntelligenceSqliteStore {
 
     this.cacheCleared.set(tenantId, (this.cacheCleared.get(tenantId) ?? 0) + 1);
     this.tenantIdentityIndexes.delete(tenantId);
-    this.classificationIndexes.delete(tenantId);
-    this.tenantIdentityShards.delete(tenantId);
+    this.releaseIdentityShards(tenantId);
     this.db.exec("BEGIN IMMEDIATE");
     try {
       for (const table of [
@@ -2495,6 +2494,7 @@ export class IntelligenceSqliteStore {
       matches: text => !TenantValueIndex.spansFor(text, shards()).next().done,
       spans: text => TenantValueIndex.spansFor(text, shards()),
       isComplete: () => this.cacheClassificationReady,
+      workerShards: shards,
     };
   }
 
@@ -2504,7 +2504,16 @@ export class IntelligenceSqliteStore {
   ): void {
     let shards = indexes.get(tenantId);
     if (!shards) indexes.set(tenantId, shards = new Map());
+    const previous = shards.get(resource);
+    if (previous && previous !== index) releaseClassificationIdentityShard(previous);
     shards.set(resource, index);
+  }
+
+  private releaseIdentityShards(tenantId: string): void {
+    for (const indexes of [this.classificationIndexes, this.tenantIdentityShards]) {
+      for (const shard of indexes.get(tenantId)?.values() ?? []) releaseClassificationIdentityShard(shard);
+      indexes.delete(tenantId);
+    }
   }
 
   waitForCacheClassification(): Promise<void> | undefined {

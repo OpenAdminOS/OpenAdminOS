@@ -8,6 +8,8 @@ import { GRAPH_CLASSIFICATION_FIXTURES } from "./graph-classification.fixtures.j
 import { fenceTenantData } from "./tenant-data.js";
 import { renderPromptTemplate } from "./template-engine.js";
 import { REQUEST_CLASSIFICATION_MAX_SECTION } from "./request-classification.js";
+import { ClassificationWorker } from "./classification-worker-client.js";
+import { TenantValueIndex } from "./tenant-value-index.js";
 import { agentTemplateToRegistrySummary, parseAgentTemplate } from "./agent-template.js";
 
 for (const [graphPath, [field, value, expected]] of Object.entries(GRAPH_CLASSIFICATION_FIXTURES)) {
@@ -626,4 +628,81 @@ test("credential labels and values can be separated by whitespace across scan ch
   assert.equal(result.counts.credential, 1);
   assert.equal(result.spans[0]?.start, prompt.length - value.length);
   assert.equal(result.spans[0]?.end, prompt.length);
+});
+
+test("worker keeps scoped matcher changes and returns offsets for the unchanged UTF-16 request", async () => {
+  const shard = new TenantValueIndex();
+  shard.add("Aymeric Ouellet", "name");
+  const identityIndex = {
+    matches: (text: string) => shard.matches(text),
+    spans: (text: string) => TenantValueIndex.spansFor(text, [shard]),
+    workerShards: () => [shard],
+  };
+  const previous = new ClassificationLedger();
+  previous.register("fixture:prior", { hint: "q7z" }, { graphPath: "/applications/app/addPassword" });
+  const current = new ClassificationLedger(identityIndex);
+  current.include(previous);
+  const request = { system: "\ud800\n", prompt: " ".repeat(4000) +
+    '😀 Aymeric Ouellet {"hint":"q7z","name":"display-fixture"}' };
+  try {
+    assert.deepEqual(await current.classifyLargeRequest(request), current.classifyRequest(request));
+    current.register("fixture:current", { name: "display-fixture" });
+    assert.deepEqual(await current.classifyLargeRequest(request), current.classifyRequest(request));
+    previous.dispose();
+    const updated = await current.classifyLargeRequest(request);
+    assert.deepEqual(updated, current.classifyRequest(request));
+    assert.equal(updated.counts.credential, 0);
+    assert.ok(updated.spans.some(span => span.source === "detector:tenant-index" &&
+      request.prompt.slice(span.start, span.end) === "Aymeric Ouellet"));
+  } finally {
+    current.dispose();
+    previous.dispose();
+  }
+});
+
+test("worker timeout reports incomplete coverage and still calls the provider with the original options", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let markSent!: () => void;
+  const sent = new Promise<void>(resolve => { markSent = resolve; });
+  const post = ClassificationWorker.prototype.post;
+  t.mock.method(ClassificationWorker.prototype, "post", function (
+    this: ClassificationWorker, ...args: Parameters<ClassificationWorker["post"]>
+  ) {
+    if (args[0].type === "scan") markSent();
+    else post.apply(this, args);
+  });
+  const request = { prompt: " ".repeat(4000) + "password=q7z" };
+  const events: RequestClassificationEvent[] = [];
+  const model = withRequestClassification({
+    available: true,
+    async complete(options) {
+      assert.equal(options, request);
+      return { text: "complete", model: "fixture" };
+    },
+    async *stream() { throw new Error("Unused"); },
+  }, "ollama", event => events.push(event));
+  const completion = model.complete(request);
+  await sent;
+  t.mock.timers.tick(3_000);
+  assert.equal((await completion).text, "complete");
+  assert.equal(events[0]?.failed, true);
+  assert.equal(events[0]?.classification.coverageIncomplete, true);
+  assert.equal(events[0]?.classification.effectiveClass, "credential");
+  assert.equal(events[0]?.classification.counts.credential, 0);
+});
+
+test("worker preserves long fenced evidence and can remove its mirror", async () => {
+  const ledger = new ClassificationLedger();
+  const value = "q".repeat(24_000) + " 17";
+  ledger.register("fixture:long", { secretText: value });
+  const body = withClassificationScope(ledger, () => fenceTenantData(value, "fixture:long"));
+  const request = { prompt: body };
+  try {
+    const result = await ledger.classifyLargeRequest(request);
+    assert.deepEqual(result, ledger.classifyRequest(request));
+    assert.ok(result.spans.some(span => span.kind === "credential" && body.slice(span.start, span.end) === value));
+  } finally {
+    ledger.dispose();
+  }
+  assert.equal((await ledger.classifyLargeRequest(request)).counts.credential, 0);
 });

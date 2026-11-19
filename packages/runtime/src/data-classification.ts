@@ -1,4 +1,5 @@
 import { isIP } from "node:net";
+import type { TenantValueIndex } from "./tenant-value-index.js";
 import {
   DATA_CLASSES_BY_SENSITIVITY,
   maxDataClass,
@@ -11,6 +12,7 @@ import {
 } from "./graph-field-classes.js";
 
 export { GRAPH_FIELD_CLASSES_VERSION } from "./graph-field-classes.js";
+export { releaseClassificationIdentityShard } from "./classification-worker-client.js";
 export { ClassificationLedger, currentClassificationLedger, classificationDiagnostics, collectClassifiedValues, registerClassifiedValues, registerRenderedFragment, registerTenantData, registerTransientTenantData, withTransientClassificationScope, withClassificationScope, withRequestClassification } from "./request-classification.js";
 export type { ClassifiedValues, ClassificationSpan, RequestClassification, RequestClassificationEvent } from "./request-classification.js";
 
@@ -31,6 +33,8 @@ export interface ClassificationOptions {
     matches(text: string): boolean;
     spans?(text: string): Iterable<{ start: number; end: number }>;
     isComplete?(): boolean;
+    /** Immutable resource snapshots with normalized entries for the request worker. */
+    workerShards?(): Iterable<TenantValueIndex>;
   };
   /** A host-side work limit. Each field and each scanned code unit costs one unit. */
   workBudget?: number;
