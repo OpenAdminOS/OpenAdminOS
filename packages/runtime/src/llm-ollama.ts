@@ -21,9 +21,8 @@ interface OllamaChatChunk {
     content?: string;
     /**
      * Ollama 0.10+ emits reasoning-model chain-of-thought in this
-     * separate field. We capture it so the Reasoning tab can show it
-     * and so we can fall back to using it as the answer if the model
-     * exhausts its token budget inside the reasoning phase.
+     * separate field. It is never used as the answer; it only tells us
+     * the model reasoned without writing one.
      */
     thinking?: string;
   };
@@ -134,12 +133,11 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         messages,
         stream: true,
         // Ask Ollama to skip reasoning-model "thinking" mode and have
-        // the model produce its answer directly. For reasoning models
-        // (deepseek-r1, qwen-qwq, gpt-oss, etc.) this prevents the
-        // model from spending its entire token budget inside a hidden
-        // chain-of-thought and emitting empty `message.content`. For
-        // non-reasoning models the flag is silently ignored.
-        think: false,
+        // the model produce its answer directly, so the model does not
+        // spend its token budget inside a hidden chain-of-thought.
+        // gpt-oss ignores `false` and always reasons, so it gets the
+        // lowest effort level instead.
+        think: ollamaThinkSetting(model),
       };
       const optionsPayload: Record<string, number> = {};
       if (typeof opts.temperature === "number") {
@@ -351,11 +349,8 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
             }
             const tokenUsage = extractTokenUsage(chunk);
             const delta = chunk.message?.content ?? "";
-            // Capture reasoning-model chain-of-thought separately. We
-            // don't yield this as content (the renderer surfaces it via
-            // the runtime's thinking hook on the accumulated stream),
-            // but we keep it around so we can fall back to it if the
-            // model never produced visible content.
+            // Track reasoning-model chain-of-thought separately so a
+            // reply with reasoning and no answer fails with that cause.
             const reasoningDelta = chunk.message?.thinking ?? "";
             if (reasoningDelta.length > 0) {
               reasoningOnly += reasoningDelta;
@@ -371,21 +366,11 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
               };
             }
             if (chunk.done) {
-              // If the model never emitted visible content but did
-              // produce reasoning (e.g. it hit num_predict mid-thought),
-              // surface the reasoning so the agent has *something* to
-              // work with. The cleanLlmText filter in the runtime will
-              // re-strip <think> tags if the model also wrapped output.
-              if (delta.length === 0 && accumulated.length === 0 && reasoningOnly.length > 0) {
-                accumulated = reasoningOnly;
-                yield {
-                  delta: reasoningOnly,
-                  accumulated,
-                  done: true,
-                  model: actualModel,
-                  ...(tokenUsage ? { tokenUsage } : {}),
-                };
-              } else if (delta.length === 0) {
+              // Reasoning is not an answer, so it is never returned as one.
+              if (accumulated.trim().length === 0 && reasoningOnly.trim().length > 0) {
+                throw new Error(reasoningWithoutAnswerMessage(actualModel, chunk.done_reason));
+              }
+              if (delta.length === 0) {
                 yield {
                   delta: "",
                   accumulated,
@@ -405,6 +390,22 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       }
     },
   };
+}
+
+/**
+ * Ollama's `think` value for a model. gpt-oss cannot turn reasoning off and
+ * ignores `false`, so it gets the lowest effort level.
+ */
+export function ollamaThinkSetting(model: string): false | "low" {
+  return /(^|\/)gpt-oss([:-]|$)/i.test(model) ? "low" : false;
+}
+
+/** The failure for a reply that has reasoning and no answer. */
+export function reasoningWithoutAnswerMessage(model: string, doneReason: string | undefined): string {
+  return doneReason === "length"
+    ? `Ollama stopped "${model}" at the token limit while it was still reasoning, so there is no answer. ` +
+        "Raise the token limit, shorten the request, or pick a model that answers without reasoning."
+    : `Ollama returned only reasoning from "${model}" and no answer. Retry, or pick a model that answers without reasoning.`;
 }
 
 export function resolveOllamaEndpoint(endpoint?: string): string {

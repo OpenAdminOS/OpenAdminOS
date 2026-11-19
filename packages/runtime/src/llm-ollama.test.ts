@@ -5,7 +5,7 @@ import { getEventListeners } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import { classifyOllamaEndpoint, createOllamaLlm, ollamaEndpointOverride, ollamaHostEndpoint, parseContextOverflow } from "./llm-ollama.js";
+import { classifyOllamaEndpoint, createOllamaLlm, ollamaEndpointOverride, ollamaHostEndpoint, ollamaThinkSetting, parseContextOverflow } from "./llm-ollama.js";
 
 describe("classifyOllamaEndpoint", () => {
   it("treats loopback and Unix socket endpoints as local", () => {
@@ -1084,4 +1084,81 @@ describe("Ollama context size", () => {
       }
     });
   }
+});
+
+describe("Ollama reasoning models", () => {
+  async function fakeChat(lines: object[]) {
+    const bodies: Array<{ think?: unknown }> = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/chat") bodies.push(JSON.parse(raw) as { think?: unknown });
+        res.end(lines.map((line) => `${JSON.stringify(line)}\n`).join(""));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    return { endpoint, bodies, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
+  }
+  const thinking = (text: string) => ({ model: "gpt-oss:20b", message: { content: "", thinking: text }, done: false });
+
+  it("asks gpt-oss for low reasoning and every other model for none", () => {
+    for (const model of ["gpt-oss:20b", "gpt-oss", "gpt-oss-safeguard:20b", "hf.co/openai/gpt-oss:120b"]) {
+      assert.equal(ollamaThinkSetting(model), "low", model);
+    }
+    for (const model of ["qwen3:8b", "my-gpt-oss-finetune:latest"]) {
+      assert.equal(ollamaThinkSetting(model), false, model);
+    }
+  });
+
+  it("sends the think setting and returns only the answer, not the reasoning", async () => {
+    const fake = await fakeChat([
+      thinking("We need to produce a report."),
+      { model: "gpt-oss:20b", message: { content: "# Report" }, done: true, eval_count: 5 },
+    ]);
+    try {
+      const result = await createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss:20b" }).complete({ prompt: "p" });
+      assert.equal(result.text, "# Report");
+      assert.equal(fake.bodies[0]?.think, "low");
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("fails, without yielding the reasoning, when the token limit ends the reply mid-reasoning", async () => {
+    const fake = await fakeChat([
+      thinking("We need to produce a concise report. Must not invent policies."),
+      { model: "gpt-oss:20b", message: { content: "" }, done: true, done_reason: "length", eval_count: 1100 },
+    ]);
+    try {
+      const seen: string[] = [];
+      await assert.rejects(
+        (async () => {
+          for await (const chunk of createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss:20b" }).stream({ prompt: "p" })) {
+            seen.push(chunk.accumulated);
+          }
+        })(),
+        /stopped "gpt-oss:20b" at the token limit while it was still reasoning, so there is no answer/,
+      );
+      assert.deepEqual(seen, []);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("fails when a reply that stopped normally has reasoning and no answer", async () => {
+    const fake = await fakeChat([
+      thinking("Thinking about it."),
+      { model: "gpt-oss:20b", message: { content: "\n" }, done: true, done_reason: "stop", eval_count: 4 },
+    ]);
+    try {
+      await assert.rejects(
+        createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss:20b" }).complete({ prompt: "p" }),
+        /returned only reasoning from "gpt-oss:20b" and no answer/,
+      );
+    } finally {
+      await fake.close();
+    }
+  });
 });
