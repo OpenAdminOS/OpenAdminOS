@@ -17,7 +17,12 @@ const SUGGESTIONS: Suggestion[] = [
     body: "Start it from a terminal with `ollama serve`, confirm it's reachable at http://127.0.0.1:11434, then re-run.",
   },
   {
-    match: (e) => /ollama/i.test(e) && /(not pulled|pull|model)/i.test(e),
+    match: (e) => /ollama/i.test(e) && /context size/i.test(e),
+    title: "Request larger than the model's context",
+    body: "The prompt did not fit in the local model's context window. OpenAdminOS already asks Ollama for as much context as the model supports. Narrow the question or the agent's scope, close other apps to free memory, or pick a model with a larger context window in Settings → LLM Providers, then re-run.",
+  },
+  {
+    match: (e) => /ollama/i.test(e) && /(not pulled|ollama pull)/i.test(e),
     title: "Model not pulled",
     body: "Run `ollama pull <model>` for the model you selected in Settings → LLM Providers, then try again.",
   },
