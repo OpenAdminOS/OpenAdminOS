@@ -559,3 +559,20 @@ test("stream captures the call scope and failed classification still calls the p
     unscopedRequests: diagnostics.unscopedRequests + 1,
   });
 });
+
+test("serialized field provenance follows every array element across nesting and formatting", () => {
+  const ledger = new ClassificationLedger();
+  const countries = { countriesAndRegions: ["US", "DE", "FR"] };
+  ledger.register("graph:locations", countries, { graphPath: "/identity/conditionalAccess/namedLocations" });
+  const nested = { outer: [{ countriesAndRegions: [["US"], ["DE", ["FR"]]] }] };
+  for (const data of [countries, nested]) {
+    for (const indent of [undefined, 2]) {
+      const json = JSON.stringify(data, null, indent);
+      for (const prompt of [json, JSON.stringify({ serialized: json })]) {
+        const result = ledger.classifyRequest({ prompt });
+        assert.equal(result.counts.security, 3, prompt);
+        assert.deepEqual(result.spans.filter(span => span.kind === "security").map(span => prompt.slice(span.start, span.end)), ["US", "DE", "FR"]);
+      }
+    }
+  }
+});

@@ -149,13 +149,51 @@ function matchMode(value: Scalar, kind: DataClass): MatchMode {
   return "text";
 }
 
-function fieldEvidence(text: string, start: number, end: number, fields: ReadonlyMap<string, Evidence>): Evidence | undefined {
-  // The value pattern includes quotes for strings. Accept a JSON property or the
-  // same property serialized inside a JSON string. Bounded context avoids rescans.
-  const left = /(?:^|[{,](?:\s|\\[nrt])*)\\?"([^"\\]{1,160})\\?"\s*:(?:\s|\\[nrt])*(?:\[(?:\s|\\[nrt])*)*$/
-    .exec(text.slice(Math.max(0, start - 256), start));
-  if (!left || !/^(?:\s|\\[nrt])*[,}\]]/.test(text.slice(end, end + 64))) return undefined;
-  return fields.get(left[1]!.toLowerCase());
+/** Index JSON value tokens once, keeping their nearest property through arrays. */
+function jsonFields(text: string): ReadonlyMap<number, { key: string; end: number }> {
+  const fields = new Map<number, { key: string; end: number }>();
+  for (const escaped of [false, true]) {
+    const tokens = escaped
+      ? /(?<!\\)\\"(?:\\\\(?:\\["\\]|[^"\\])|[^"\\])*\\"|[{}\[\]:,]|true|false|null|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g
+      : /(?<!\\)"(?:[^"\\]|\\.)*"|[{}\[\]:,]|true|false|null|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g;
+    const whitespace = escaped ? /^(?:\s|\\[nrt])*$/ : /^\s*$/;
+    const delimiter = escaped ? /(?:\s|\\[nrt])*[,}\]]/y : /\s*[,}\]]/y;
+    const stack: Array<{ array: boolean; key?: string; expectsValue: boolean }> = [];
+    let previousEnd = 0;
+    for (const match of text.matchAll(tokens)) {
+      const value = match[0];
+      const start = match.index;
+      const end = start + value.length;
+      if (stack.length && !whitespace.test(text.slice(previousEnd, start))) stack.length = 0;
+      previousEnd = end;
+      const frame = stack.at(-1);
+      if (value === "{" || value === "[") {
+        if (frame && !frame.expectsValue) stack.length = 0;
+        else if (frame) frame.expectsValue = false;
+        const key = value === "[" ? frame?.key : undefined;
+        stack.push({ array: value === "[", ...(key === undefined ? {} : { key }), expectsValue: value === "[" });
+      } else if (!frame) {
+        continue;
+      } else if (value === (frame.array ? "]" : "}")) {
+        stack.pop();
+      } else if (value === ",") {
+        frame.expectsValue = frame.array;
+        if (!frame.array) delete frame.key;
+      } else if (value === ":" && !frame.array && frame.key !== undefined) {
+        frame.expectsValue = true;
+      } else if (frame.expectsValue && value !== ":" && value !== "]" && value !== "}") {
+        delimiter.lastIndex = end;
+        if (frame.key !== undefined && delimiter.test(text)) fields.set(start, { key: frame.key, end });
+        frame.expectsValue = false;
+      } else if (!frame.array && frame.key === undefined && value.startsWith(escaped ? '\\"' : '"')) {
+        const quoteWidth = escaped ? 2 : 1;
+        frame.key = value.slice(quoteWidth, -quoteWidth).toLowerCase();
+      } else {
+        stack.length = 0;
+      }
+    }
+  }
+  return fields;
 }
 
 function preferEvidence(previous: Evidence | undefined, next: Evidence): boolean {
@@ -464,6 +502,7 @@ export class ClassificationLedger {
   private scan(
     anchors: ClassificationLedger["anchors"], text: string, from: number, to: number, work: { remaining: number },
     emit: (span: TextSpan, evidence: Evidence, authoritative?: boolean) => void,
+    fieldAt?: (start: number, end: number) => string | undefined,
   ): boolean {
     for (let width = 1; width < anchors.length; width++) {
       const prefixes = anchors[width];
@@ -489,7 +528,8 @@ export class ClassificationLedger {
           if ((mode === "word" || mode === "folded") && (!wordBoundary(text, start - 1) || !wordBoundary(text, end))) continue;
           if (mode === "context" && (before && (start < before.length || !text.startsWith(before, start - before.length)) ||
               after && !text.startsWith(after, end))) continue;
-          const evidence = mode === "field" ? fieldEvidence(text, start, end, entry.fields) : entry.best;
+          const field = mode === "field" ? fieldAt?.(start, end) : undefined;
+          const evidence = mode === "field" ? (field === undefined ? undefined : entry.fields.get(field)) : entry.best;
           if (evidence) {
             // String quotes are syntax, separate from the value to be masked.
             const quoteWidth = mode === "field" ? value.startsWith('\\"') ? 2 : value.startsWith('"') ? 1 : 0 : 0;
@@ -525,6 +565,11 @@ export class ClassificationLedger {
       if (text.length < original.length) ranges.push({ section, start: text.length, end: original.length, reason: "text-limit" });
       const found = new Map<string, ClassificationSpan & { authoritative?: boolean }>();
       const work = { remaining: MATCH_BUDGET };
+      let fields: ReturnType<typeof jsonFields> | undefined;
+      const fieldAt = (start: number, end: number) => {
+        const field = (fields ??= jsonFields(text)).get(start);
+        return field?.end === end ? field.key : undefined;
+      };
       const collect = ({ start, end }: TextSpan, evidence: Evidence, authoritative = false) => {
         const { kind, source, maskRole } = evidence;
         const key = `${start}:${end}`;
@@ -556,7 +601,7 @@ export class ClassificationLedger {
       for (let from = 0; from < text.length; from += TEXT_CHUNK) {
         if (from > 0) yield;
         const to = Math.min(text.length, from + TEXT_CHUNK);
-        if (retained.some(ledger => !ledger.scan(ledger.anchors, text, from, to, work, collect) ||
+        if (retained.some(ledger => !ledger.scan(ledger.anchors, text, from, to, work, collect, fieldAt) ||
             folded !== undefined && !ledger.scan(ledger.foldedAnchors, folded, from, to, work, collect))) {
           ranges.push({ section, start: from, end: text.length, reason: "match-limit" });
           break;
