@@ -141,3 +141,13 @@ it("does not show the missing-model playbook for a lookup error that quotes it",
   expect(screen.getByText("Ollama did not report the model's context limit")).toBeInTheDocument();
   expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
 });
+
+it("shows only the lookup playbook for an HTTP 403 from the lookup, even with a stored Graph denial", () => {
+  const error = "Ollama could not report the model's context limit: HTTP 403 at http://127.0.0.1:11434/api/show: Forbidden";
+  const accessDenial = classifyGraphAccessDenied({});
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error, accessDenial };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama did not report the model's context limit")).toBeInTheDocument();
+  expect(screen.queryByText(accessDenial.title)).not.toBeInTheDocument();
+  expect(screen.queryByText("Graph access cause unverified")).not.toBeInTheDocument();
+});

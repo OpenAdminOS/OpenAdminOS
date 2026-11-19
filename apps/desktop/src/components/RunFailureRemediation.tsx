@@ -77,8 +77,13 @@ const SUGGESTIONS: Suggestion[] = [
 export function RunFailureRemediation({ run }: { run: RunRecord }) {
   const openReportIssue = useReportIssue();
   if (run.status !== "failed" || !run.error) return null;
-  const matched = SUGGESTIONS.filter((suggestion) => suggestion.match(run.error!));
-  const accessDenial = run.accessDenial ?? graphAccessDenialFromError(run.error);
+  // A failed lookup of the Ollama model's context limit has one cause and
+  // one recovery; its HTTP status (for example 403) is not a Graph denial.
+  const lookup = isContextLimitLookup(run.error);
+  const matched = lookup
+    ? SUGGESTIONS.filter((suggestion) => suggestion.match === isContextLimitLookup)
+    : SUGGESTIONS.filter((suggestion) => suggestion.match(run.error!));
+  const accessDenial = lookup ? undefined : run.accessDenial ?? graphAccessDenialFromError(run.error);
   if (accessDenial) {
     matched.unshift({ match: () => true, title: accessDenial.title, body: `${accessDenial.message} ${accessDenial.recovery}` });
   }
