@@ -196,26 +196,29 @@ describe("multi-tenant Chat and connected services", () => {
   });
 
   it("disposes summary evidence when Stop is pressed while the provider is still running", async () => {
-    const entered = Promise.withResolvers<void>();
-    const release = Promise.withResolvers<void>();
+    let markEntered!: () => void;
+    let unblock!: () => void;
+    const entered = new Promise<void>(resolve => { markEntered = resolve; });
+    const release = new Promise<void>(resolve => { unblock = resolve; });
     const controller = new AbortController();
     let ledger: ClassificationLedger | undefined;
     const fixture = await makeFixture([tenant("contoso", "Contoso"), tenant("fabrikam", "Fabrikam")], ["Reviewed."], async () => {
       ledger = currentClassificationLedger();
-      entered.resolve();
-      await release.promise;
+      markEntered();
+      await release;
     });
     const run = fixture.store.runMultiTenantIntuneChat({ prompt: PROMPT, tenantScope: { kind: "all" } },
       undefined, { signal: controller.signal });
     const stopped = assert.rejects(run, /Multi-tenant chat run stopped/);
     try {
-      await Promise.race([entered.promise, run]);
-      assert.ok(ledger?.scopeId?.startsWith("mtjob_"));
+      await Promise.race([entered, run]);
+      assert.ok(ledger);
+      assert.match(ledger.scopeId ?? "", /^mtjob_/);
       assert.equal(ledger.expired, false);
       controller.abort();
       assert.equal(ledger.expired, true);
     } finally {
-      release.resolve();
+      unblock();
       try { await stopped; } finally { await fixture.close(); }
     }
   });
