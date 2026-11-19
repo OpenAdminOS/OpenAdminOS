@@ -9,6 +9,7 @@ import { isAbsolute, join, relative, sep } from "node:path";
 import { afterEach, beforeEach } from "node:test";
 import { urlToHttpOptions } from "node:url";
 import { promisify } from "node:util";
+import { Agent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
 
 const overrides = [
   "OPENADMINOS_CLAUDE_CODE_BINARY",
@@ -23,16 +24,15 @@ const overrides = [
   "OPENADMINOS_EMBEDDING_ENDPOINT",
 ];
 
+const proxyKeys = ["NODE_USE_ENV_PROXY", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"];
+const proxyOverrides = [...proxyKeys, ...proxyKeys.map((key) => key.toLowerCase())];
 const directories = new Set();
 const servers = new Map();
 const refusedOrigins = new Set();
+const liveMcpOrigins = new Set();
 const unexpected = [];
 let reported = 0;
 let installed = false;
-// Ports cover any request to the default model addresses. Paths also cover
-// provider calls to configured ports and remote model endpoints.
-const modelPorts = new Set(["11434", "1234", "13305"]);
-const modelPath = /\/(?:api\/(?:tags|show|chat|pull|embed|embeddings)|models|chat\/completions|embeddings)\/?$/;
 const systemHelpers = new Map([["where.exe", "where.exe"], ["taskkill", "taskkill.exe"]]);
 
 export function assertProviderTestGuardActive() {
@@ -48,6 +48,14 @@ export function stubLoopbackConnectionRefused() {
   assertProviderTestGuardActive();
   // Simulate a stopped service without assuming port 9 is free on this machine.
   refusedOrigins.add("http://127.0.0.1:9");
+}
+
+export function allowLiveMcpOrigin(endpoint) {
+  assertProviderTestGuardActive();
+  assert.equal(process.env.OPENADMINOS_LIVE_MCP, "1", "Set OPENADMINOS_LIVE_MCP=1 to run live MCP probes.");
+  const url = new URL(endpoint);
+  assert.equal(url.protocol, "https:", "Live MCP probes must declare an HTTPS origin.");
+  liveMcpOrigins.add(url.origin);
 }
 
 function realAbsolutePath(path) {
@@ -136,18 +144,12 @@ function urlHost(host) {
   return host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
 }
 
-function isLoopback(hostname) {
-  return hostname === "localhost" || hostname === "localhost." || hostname === "[::1]" ||
-    /^127(?:\.\d+){3}$/.test(hostname) ||
-    /^\[::ffff:7f[\da-f]{2}:/.test(hostname);
-}
-
 function checkHttpTarget(method, url, path = url.pathname) {
   if (refusedOrigins.has(url.origin)) {
     const cause = Object.assign(new Error("Connection refused"), { code: "ECONNREFUSED" });
     throw method === "fetch" ? new TypeError("fetch failed", { cause }) : cause;
   }
-  if (!isLoopback(url.hostname) && !modelPorts.has(url.port) && !modelPath.test(path)) return;
+  if (liveMcpOrigins.has(url.origin)) return;
 
   const fixture = [...servers].some(([server, { protocol, host }]) => {
     const address = server.address();
@@ -165,7 +167,7 @@ function checkNodeRequest(method, protocol, args) {
   const options = typeof input === "string" || input instanceof URL
     ? { ...urlToHttpOptions(new URL(input)), ...overrides }
     : input ?? {};
-  if (options.socketPath) return;
+  if (options.socketPath) throw blocked(`Blocked ${method} outside test HTTP servers: socketPath`);
 
   // Match the connection options used by Node, including URL overrides and defaults.
   const host = urlHost(options.hostname || options.host || "localhost");
@@ -205,33 +207,66 @@ function guardHttp() {
   };
 }
 
+function clearEnvironment(keys) {
+  // Snapshot every value first because environment keys are case-insensitive on Windows.
+  const saved = keys.map((key) => [key, process.env[key]]);
+  for (const [key] of saved) delete process.env[key];
+  return () => {
+    for (const [key, value] of saved) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  };
+}
+
+function isolateProxies() {
+  const restoreEnvironment = clearEnvironment(proxyOverrides);
+  const originalHttpAgent = http.globalAgent;
+  const originalHttpsAgent = https.globalAgent;
+  const originalDispatcher = getGlobalDispatcher();
+  // Node can have already configured its agents and Fetch dispatcher at startup.
+  const directHttpAgent = new http.Agent({ keepAlive: true });
+  const directHttpsAgent = new https.Agent({ keepAlive: true });
+  const directDispatcher = new Agent();
+  http.globalAgent = directHttpAgent;
+  https.globalAgent = directHttpsAgent;
+  setGlobalDispatcher(directDispatcher);
+
+  return () => {
+    restoreEnvironment();
+    http.globalAgent = originalHttpAgent;
+    https.globalAgent = originalHttpsAgent;
+    setGlobalDispatcher(originalDispatcher);
+    syncBuiltinESMExports();
+  };
+}
+
 export function installProviderTestGuard() {
   if (installed) return;
   installed = true;
+  const restoreProxies = isolateProxies();
   guardChildren();
   guardHttp();
   syncBuiltinESMExports();
 
   process.on("exit", () => {
+    restoreProxies();
     if (unexpected.length === 0) return;
     process.exitCode = 1;
     writeSync(2, `Provider test guard violations:\n${unexpected.join("\n")}\n`);
   });
 
-  let saved;
+  let restoreOverrides;
   const guardedFetch = globalThis.fetch;
   beforeEach(() => {
-    saved = overrides.map((key) => [key, process.env[key]]);
-    for (const [key] of saved) delete process.env[key];
+    restoreOverrides = clearEnvironment(overrides);
   });
 
   afterEach(() => {
-    for (const [key, value] of saved) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
+    restoreOverrides();
     directories.clear();
     refusedOrigins.clear();
+    liveMcpOrigins.clear();
     globalThis.fetch = guardedFetch;
     // Provider probes can catch blocked calls and report a provider as unavailable.
     const violations = unexpected.slice(reported);

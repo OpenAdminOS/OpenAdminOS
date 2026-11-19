@@ -20,6 +20,19 @@ if (scenario === "fetch") {
     assert.throws(() => httpsGet("https://example.com/v1/audio/speech", { hostname: "::1", port: new URL(origin).port }),
       /Blocked node:https\.get outside test HTTP servers: https:\/\/\[::1\]/);
   });
+} else if (scenario === "alias") {
+  it("blocks an unregistered alias before it can resolve to loopback", () => {
+    const lookup = (_host, _options, callback) => callback(null, "127.0.0.1", 4);
+    assert.throws(() => request({ hostname: "localhost.localdomain", port: new URL(origin).port, family: 4, lookup }),
+      /Blocked node:http\.request outside test HTTP servers: http:\/\/localhost\.localdomain/);
+  });
+} else if (scenario === "external") {
+  it("blocks an unregistered external host regardless of HTTP client", async () => {
+    await assert.rejects(fetch(origin), /Blocked fetch outside test HTTP servers: https:\/\/external\.example/);
+    assert.throws(() => get(origin.replace("https:", "http:")),
+      /Blocked node:http\.get outside test HTTP servers: http:\/\/external\.example/);
+    assert.throws(() => httpsGet(origin), /Blocked node:https\.get outside test HTTP servers: https:\/\/external\.example/);
+  });
 } else if (scenario === "late") {
   it("passes before teardown", () => {});
   after(() => {
@@ -28,6 +41,11 @@ if (scenario === "fetch") {
   });
 } else {
   it("allows requests to its own listening test server", async () => {
+    if (scenario === "proxy") {
+      const { assertProxiesIsolated, assertProxiesRestored } = await import("./provider-test-proxy.mjs");
+      assertProxiesIsolated();
+      process.on("exit", assertProxiesRestored);
+    }
     const server = createServer((_request, response) => response.end("fixture"));
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     const url = `http://127.0.0.1:${server.address().port}/health`;

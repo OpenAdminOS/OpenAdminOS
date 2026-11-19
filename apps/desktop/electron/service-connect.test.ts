@@ -68,7 +68,12 @@ async function makeFixture(options: {
 }
 
 describe("connecting by service part", () => {
-  it("requests exactly the baseline plus the Intune part scopes for Intune only", async () => {
+  it("requests exactly the baseline plus the Intune part scopes for Intune only", async (t) => {
+    const guardedFetch = globalThis.fetch;
+    t.mock.method(globalThis, "fetch", (input: Parameters<typeof fetch>[0], init?: RequestInit) =>
+      String(input) === `${G}beta/subscribedSkus`
+        ? Promise.resolve(Response.json({ value: [] }))
+        : guardedFetch(input, init));
     const fixture = await makeFixture({ returnedScopes: (requested) => requested });
     try {
       await fixture.store.connectTenant({ partIds: partIdsFor(["intune"]) });
