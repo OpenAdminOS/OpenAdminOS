@@ -679,10 +679,19 @@ export function withClassificationScope<T>(ledger: ClassificationLedger, work: (
   return scopes.run(ledger, work);
 }
 
-export async function withTransientClassificationScope<T>(ledger: ClassificationLedger, work: () => Promise<T>): Promise<T> {
+export async function withTransientClassificationScope<T>(
+  ledger: ClassificationLedger, work: () => Promise<T>, signal?: AbortSignal,
+): Promise<T> {
   ledger.expireAfter();
-  try { return await withClassificationScope(ledger, work); }
-  finally { ledger.dispose(); }
+  const dispose = () => ledger.dispose();
+  signal?.addEventListener("abort", dispose, { once: true });
+  try {
+    signal?.throwIfAborted();
+    return await withClassificationScope(ledger, work);
+  } finally {
+    signal?.removeEventListener("abort", dispose);
+    dispose();
+  }
 }
 
 export function currentClassificationLedger(): ClassificationLedger | undefined {

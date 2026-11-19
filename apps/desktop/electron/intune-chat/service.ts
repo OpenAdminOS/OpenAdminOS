@@ -739,11 +739,11 @@ export class IntuneChatService {
   }
 
   /** Lease every tenant a multi-tenant job reads or writes for. */
-  private leasedAll<T>(tenantIds: readonly string[], work: () => Promise<T>): Promise<T> {
+  private leasedAll<T>(tenantIds: readonly string[], work: (signal?: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<T> {
     const unique = [...new Set(tenantIds)];
-    const step = (index: number): Promise<T> =>
-      index >= unique.length ? work() : this.leased(unique[index]!, undefined, () => step(index + 1));
-    return step(0);
+    const step = (index: number, activeSignal?: AbortSignal): Promise<T> =>
+      index >= unique.length ? work(activeSignal) : this.leased(unique[index]!, activeSignal, next => step(index + 1, next));
+    return step(0, signal);
   }
 
   /** Stop a tenant's preload and wait until it has stopped writing. */
@@ -1071,7 +1071,7 @@ export class IntuneChatService {
     const activeTenant = this.host.resolveTenant(persisted);
     // The job runs under the lease of every tenant it reads or writes for,
     // so Disconnect of any of them refuses, stops and drains it.
-    return this.leasedAll([activeTenant.id, ...preflight.resolvedTenantIds], async () => {
+    return this.leasedAll([activeTenant.id, ...preflight.resolvedTenantIds], async signal => {
     const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
     const providerId = provider.id;
     this.requireHostedBatchConsent(input.hostedProviderConsent, preflight, provider, providerId);
@@ -1127,7 +1127,7 @@ export class IntuneChatService {
       onEvent?.({ type: eventType, job });
     };
     const assertNotCancelled = () => {
-      if (options.signal?.aborted !== true) return;
+      if (!signal?.aborted) return;
       job = {
         ...job,
         status: "cancelled",
@@ -1215,7 +1215,7 @@ export class IntuneChatService {
         });
         persistJob();
       } catch (error) {
-        if (options.signal?.aborted === true) {
+        if (signal?.aborted) {
           throw error;
         }
         const message = error instanceof Error ? error.message : String(error);
@@ -1318,7 +1318,8 @@ export class IntuneChatService {
 
     const summary = buildMultiTenantSummary(comparisons);
     const assistantText = await this.buildMultiTenantAssistantText({
-      scopeId: job.conversationId,
+      scopeId: jobId,
+      signal,
       tenantIds: [activeTenant.id, ...preflight.resolvedTenantIds],
       prompt: content,
       providerId,
@@ -1327,6 +1328,7 @@ export class IntuneChatService {
       summary,
       comparisons,
     });
+    assertNotCancelled();
     const exportDossierMarkdown = buildMultiTenantDossierMarkdown({
       prompt: content,
       providerName: preflight.providerName,
@@ -1406,7 +1408,7 @@ export class IntuneChatService {
     };
     onEvent?.({ type: "completed", result });
     return result;
-    });
+    }, options.signal);
   }
 
   async streamMultiTenantIntuneChat(
@@ -1782,7 +1784,8 @@ export class IntuneChatService {
   }
 
   private async buildMultiTenantAssistantText(input: {
-    scopeId?: string;
+    scopeId: string;
+    signal?: AbortSignal;
     /** Every tenant whose data is in the prompt. */
     tenantIds: readonly string[];
     prompt: string;
@@ -1816,6 +1819,7 @@ export class IntuneChatService {
         const text = await completeWithPromiseNudge(async (attempt) => (await llm.complete({
           system,
           prompt: attempt,
+          ...(input.signal ? { signal: input.signal } : {}),
           ...(input.model ? { model: input.model } : {}),
           temperature: 0.2,
           maxTokens: 700,
@@ -1825,7 +1829,7 @@ export class IntuneChatService {
         const message = error instanceof Error ? error.message : String(error);
         return `${deterministic}\n\nThe selected LLM provider failed while summarizing this multi-tenant result. ${message}`;
       }
-    });
+    }, input.signal);
   }
 
   async getGraphCacheStatus(tenantId?: string): Promise<GraphCacheStatus> {
