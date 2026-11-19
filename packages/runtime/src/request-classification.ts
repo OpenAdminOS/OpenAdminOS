@@ -102,6 +102,8 @@ interface MatchPattern {
   after?: string;
 }
 
+type AnchorIndex = Map<number, Map<string, Set<MatchPattern>>>;
+
 const VALUE_BUDGET = 2_000_000;
 export const REQUEST_CLASSIFICATION_MAX_SECTION = 16_000_000;
 const TEXT_CHUNK = 128_000;
@@ -180,8 +182,8 @@ function classification(
 export class ClassificationLedger {
   private readonly values = new Map<Scalar, ValueEntry>();
   private readonly byClass = new Map(DATA_CLASSES_BY_SENSITIVITY.map(kind => [kind, new Set<Scalar>()]));
-  private readonly anchors: Array<Map<string, Set<MatchPattern>> | undefined> = [];
-  private readonly foldedAnchors: Array<Map<string, Set<MatchPattern>> | undefined> = [];
+  private readonly anchors: Array<AnchorIndex | undefined> = [];
+  private readonly foldedAnchors: Array<AnchorIndex | undefined> = [];
   private readonly fences = new Map<string, { value: Scalar; evidence: Evidence }>();
   private prior: readonly ClassificationLedger[] = [];
   private transient?: ClassificationLedger;
@@ -345,10 +347,13 @@ export class ClassificationLedger {
     this.byClass.get(entry.kind)!.delete(value);
     for (const nonce of entry.fenceIds ?? []) this.fences.delete(nonce);
     for (const pattern of entry.patterns) {
-      const buckets = (pattern.mode === "folded" ? this.foldedAnchors : this.anchors)[pattern.anchor.length]!;
+      const prefixes = (pattern.mode === "folded" ? this.foldedAnchors : this.anchors)[pattern.anchor.length]!;
+      const first = pattern.anchor.charCodeAt(0);
+      const buckets = prefixes.get(first)!;
       const bucket = buckets.get(pattern.anchor)!;
       bucket.delete(pattern);
       if (!bucket.size) buckets.delete(pattern.anchor);
+      if (!buckets.size) prefixes.delete(first);
     }
     this.remaining += entry.cost;
     this.dropped++;
@@ -432,17 +437,20 @@ export class ClassificationLedger {
       pattern.before === provenance?.before && pattern.after === provenance?.after)) return;
     const width = Math.min(text.length, ANCHOR_WIDTH);
     const indexes = mode === "folded" ? this.foldedAnchors : this.anchors;
-    const buckets = indexes[width] ??= new Map();
+    const prefixes = indexes[width] ??= new Map();
     let offset = 0;
     let anchor = text.slice(0, width);
-    let load = buckets.get(anchor)?.size ?? 0;
+    let load = prefixes.get(anchor.charCodeAt(0))?.get(anchor)?.size ?? 0;
     // Select a sparse anchor, even for values with the same long prefix.
     const step = Math.max(width, Math.floor(text.length / 16));
     for (let position = step; load && position + width <= text.length; position += step) {
       const candidate = text.slice(position, position + width);
-      const size = buckets.get(candidate)?.size ?? 0;
+      const size = prefixes.get(candidate.charCodeAt(0))?.get(candidate)?.size ?? 0;
       if (size < load) { anchor = candidate; offset = position; load = size; }
     }
+    const first = anchor.charCodeAt(0);
+    let buckets = prefixes.get(first);
+    if (!buckets) prefixes.set(first, buckets = new Map());
     let bucket = buckets.get(anchor);
     if (!bucket) buckets.set(anchor, bucket = new Set());
     const pattern: MatchPattern = { text, offset, anchor, mode, entry,
@@ -458,9 +466,13 @@ export class ClassificationLedger {
     emit: (span: TextSpan, evidence: Evidence, authoritative?: boolean) => void,
   ): boolean {
     for (let width = 1; width < anchors.length; width++) {
-      const buckets = anchors[width];
-      if (!buckets?.size) continue;
+      const prefixes = anchors[width];
+      if (!prefixes?.size) continue;
       for (let at = from; at < to && at + width <= text.length; at++) {
+        // Most offsets cannot start an anchor. Avoid substring allocation
+        // and hashing unless the index contains that first code unit.
+        const buckets = prefixes.get(text.charCodeAt(at));
+        if (!buckets) continue;
         const bucket = buckets.get(text.slice(at, at + width));
         if (!bucket) continue;
         for (const { text: value, offset, mode, entry, before, after } of bucket) {
