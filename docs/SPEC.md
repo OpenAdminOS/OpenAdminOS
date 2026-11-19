@@ -1775,7 +1775,9 @@ Identity class and secrets keep their Credential class within security objects.
 An unmapped Graph field or resource defaults to Identity. Mapped containers
 supply a class to unmapped descendants. An explicit child rule can specialize
 that class, with Credential and Security inheritance preserving the higher
-sensitivity. Null, empty and absent secret values do not add credential counts.
+sensitivity. Settings Catalog, intent and Group Policy values use their setting
+metadata, including metadata in `additionalData`, to identify secrets.
+Null, empty and absent secret values do not add credential counts.
 A returned secret hint counts as Credential when it has a value. Credential
 key matching is anchored to the whole normalized key so metadata such as
 `preSharedKeyIsSet` keeps its own class.
@@ -1798,6 +1800,10 @@ a planner selection changes. Compare official schemas and authorized sample
 responses with the existing map, update the sanitized record and synthetic
 fixtures, run the mapped-field and cache ingestion checks, and increment the
 field map version when classifications change.
+
+The SDK exposes `DataClass`, `DATA_CLASSES_BY_SENSITIVITY`, `DataClassCounts`,
+`highestDataClass` and `maxDataClass`. `classifyData` and `countDataClasses` are
+host-only APIs on `@openadminos/runtime/data-classification`.
 
 A memory-only ledger registers leaf values at model-facing ingress for each
 agent run or Chat conversation. Chat retains values for up to eight recent

@@ -239,12 +239,34 @@ test("security objects classify principal and credential values at their higher 
       { "/ipRanges/0/cidrAddress": "security", "/countriesAndRegions/0": "security" }],
     ["/roleManagement/directory/roleAssignments", { principalId: "opaque-id", roleDefinitionId: "role-1" },
       { "/principalId": "identity", "/roleDefinitionId": "security" }],
+    ["/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests?$filter=groupId", {
+      value: [{ principalId: "fixture-principal", groupId: "fixture-group", accessId: "member", status: "Provisioned" }],
+    }, { "/value/0/principalId": "identity", "/value/0/groupId": "identity", "/value/0/accessId": "security", "/value/0/status": "security" }],
     ["/deviceManagement/configurationPolicies", { name: "Firewall policy", templateReference: { templateFamily: "endpointSecurityFirewall" }, futureField: true },
       { "/name": "security", "/templateReference/templateFamily": "security", "/futureField": "security" }],
     ["/deviceManagement/deviceConfigurations", { "@odata.type": "microsoft.graph.windows10EndpointProtectionConfiguration", displayName: "Security posture", preSharedKey: "fixture" },
       { "/@odata.type": "security", "/displayName": "security", "/preSharedKey": "credential" }],
   ];
   for (const [graphPath, payload, expected] of tests) assert.deepEqual(classifyData(payload, { graphPath }).classes, expected);
+});
+
+test("classifies expanded settings and applies secret metadata from additionalData to sibling values", () => {
+  const catalog = classifyData({ settings: [
+    { settingInstance: { simpleSettingValue: { value: "plain setting" } } },
+    { settingInstance: { AdditionalData: { SettingDefinitionId: "device_policy_password" },
+      simpleSettingValue: { value: "opaque" } } },
+    { settingInstance: { simpleSettingValue: { AdditionalData: { ValueState: "EncryptedValueToken" }, StringValue: "opaque" } } },
+  ] }, { graphPath: "/deviceManagement/configurationPolicies?$expand=settings" });
+  assert.equal(catalog.classes["/settings/0/settingInstance/simpleSettingValue/value"], "configuration");
+  assert.equal(catalog.classes["/settings/1/settingInstance/simpleSettingValue/value"], "credential");
+  assert.equal(catalog.classes["/settings/2/settingInstance/simpleSettingValue/StringValue"], "credential");
+
+  const group = classifyData({ definitionValues: [{ presentationValues: [
+    { "@odata.type": "#microsoft.graph.groupPolicyPresentationValueText", value: "plain setting" },
+    { AdditionalData: { IsSecret: true }, value: "opaque" },
+  ] }] }, { graphPath: "/deviceManagement/groupPolicyConfigurations?$expand=definitionValues" });
+  assert.equal(group.classes["/definitionValues/0/presentationValues/0/value"], "configuration");
+  assert.equal(group.classes["/definitionValues/0/presentationValues/1/value"], "credential");
 });
 
 test("audit actor IPs and all device naming paths classify consistently", () => {

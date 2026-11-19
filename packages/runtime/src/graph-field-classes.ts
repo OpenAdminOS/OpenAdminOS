@@ -3,7 +3,7 @@ import type { DataClass } from "@openadminos/agent-sdk";
 // Source: docs/research/graph-field-classes.md and the decisions in docs/SPEC.md.
 // [] matches an array element. * matches one property in a keyed object.
 // Mapped containers set an inherited class. Unknown branches start at the resource default.
-export const GRAPH_FIELD_CLASSES_VERSION = 1;
+export const GRAPH_FIELD_CLASSES_VERSION = 2;
 
 export const GRAPH_TEXT_FIELDS = /^(?:notes?|groupTag|publisher|rule|redirectUris?|.*(?:description|name|url|uri|reason)|comment|summary|details|title|message|oldValue|newValue)$/i;
 export const GRAPH_DEVICE_NAME_FIELDS = /^(?:deviceName|managedDeviceName)$/i;
@@ -20,9 +20,7 @@ export const GRAPH_SECURITY_RESOURCES = new Set([
   "/roleManagement/directory/roleAssignmentSchedules",
   "/roleManagement/directory/roleEligibilitySchedules", "/roleManagement/directory/roleAssignmentScheduleInstances",
   "/roleManagement/directory/roleEligibilityScheduleInstances", "/policies/roleManagementPolicies",
-  "/policies/roleManagementPolicyAssignments", "/privilegedAccess/group/assignmentSchedules",
-  "/privilegedAccess/group/eligibilitySchedules", "/privilegedAccess/group/assignmentScheduleInstances",
-  "/privilegedAccess/group/eligibilityScheduleInstances", "/deviceManagement/intents",
+  "/policies/roleManagementPolicyAssignments", "/identityGovernance/privilegedAccess/group", "/deviceManagement/intents",
   "/deviceManagement/intents/{id}/settings", "/deviceManagement/templates",
   "/identityProtection/policies", "/policies/identityProtectionPolicies",
 ]);
@@ -126,7 +124,7 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
   "/deviceManagement/configurationPolicies": {
     configuration: `
       id name description platforms technologies createdDateTime lastModifiedDateTime settingCount
-      isAssigned
+      isAssigned settings[]
     `,
   },
   "/auditLogs/signIns": {
@@ -291,7 +289,7 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
     security: "id displayName description templateId lastModifiedDateTime isAssigned",
   },
   "/deviceManagement/groupPolicyConfigurations": {
-    configuration: "id displayName description createdDateTime lastModifiedDateTime",
+    configuration: "id displayName description createdDateTime lastModifiedDateTime definitionValues[]",
   },
   "/deviceManagement/configurationPolicies/{id}/settings": {
     configuration: "id settingInstance",

@@ -59,10 +59,10 @@ const MAC_ADDRESS = /\b(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}\b/i;
 const GRAPH_ENTITY_ID = /^(?:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[^/]+@[^/]+|\d+)$/i;
 const SECURITY_IDENTITY_KEYS = /^(?:user|group|(?:(?:include|exclude|target)?(?:users?|groups?|principals?)ids?|(?:include|exclude|target)(?:users|groups))|userprincipalname|userdisplayname|principaldisplayname|principal)$/i;
 const SECURITY_ODATA_TYPE = /^(?:.*(?:endpointsecurity|securitybaseline|defender|firewall|diskencryption|attacksurfacereduction|antivirus|authenticationmethod|conditionalaccess|namedlocation|roleassignment|roledefinition|rolesetting|crosstenantaccess).*|windows(?:10|81)endpointprotectionconfiguration|windowsdefenderapplicationguardconfiguration|bitlockerencryptionpolicy)$/i;
-const SETTINGS_PATH = /\/(?:settings|definitionvalues|presentationvalues)$/;
+const SETTINGS_PATH = /^(?:\/devicemanagement\/(?:configurationpolicies|intents|grouppolicyconfigurations)$)|\/(?:settings|definitionvalues|presentationvalues)$/;
 const SECRET_SETTING_TYPE = /(?:secret|password)(?:setting|presentation|value)|(?:setting|presentation|value)password$/i;
 const SECRET_SETTING_ID = /(?:^|[_/.:-])(?:password|presharedkey|privatekey|sharedsecret|accountkey|certificatepassword|sastoken|connectionstring)(?:$|[_/.:-])/i;
-const SETTING_VALUE_KEYS = /^(?:value|values|valuejson|settingvalue|settingvalues|secretsettingvalue|secretsettingvalues|encryptedvalue|defaultvalue)$/i;
+const SETTING_VALUE_KEYS = /^(?:value|values|valuejson|stringvalue|settingvalue|settingvalues|secretsettingvalue|secretsettingvalues|encryptedvalue|defaultvalue)$/i;
 
 export interface TextSpan {
   start: number;
@@ -305,6 +305,10 @@ function ownCaseInsensitive(record: Record<string, unknown> | undefined, key: st
   return undefined;
 }
 
+function graphProperty(record: Record<string, unknown> | undefined, additional: Record<string, unknown> | undefined, key: string): unknown {
+  return ownCaseInsensitive(record, key) ?? ownCaseInsensitive(additional, key);
+}
+
 export function walkDataClasses(
   value: unknown,
   options: ClassificationOptions,
@@ -313,7 +317,7 @@ export function walkDataClasses(
   const route = options.graphPath ? graphRoute(options.graphPath) : "";
   const fields = fieldMaps.get(route);
   const base = options.publicReference && !route ? "public" : securityPaths.has(route) ? "security" : "identity";
-  const settings = SETTINGS_PATH.test(route) || route === "/devicemanagement/configurationpolicies";
+  const settings = SETTINGS_PATH.test(route);
   const counts = emptyDataClassCounts();
   let budget = options.workBudget ?? 32_000_000;
   let remainder: { from: string; kind: DataClass } | undefined;
@@ -339,10 +343,10 @@ export function walkDataClasses(
     const record = child !== null && typeof child === "object" ? child as Record<string, unknown> : undefined;
     const additional = ownCaseInsensitive(record, "additionalData");
     const additionalRecord = additional && typeof additional === "object" ? additional as Record<string, unknown> : undefined;
-    const type = ownCaseInsensitive(record, "@odata.type") ?? ownCaseInsensitive(record, "odataType") ??
-      ownCaseInsensitive(additionalRecord, "@odata.type") ?? ownCaseInsensitive(additionalRecord, "odataType");
-    const definition = settings ? ownCaseInsensitive(record, "settingDefinitionId") ?? ownCaseInsensitive(record, "definitionId") : undefined;
-    const template = settings ? ownCaseInsensitive(record, "templateReference") : undefined;
+    const type = graphProperty(record, additionalRecord, "@odata.type") ?? graphProperty(record, additionalRecord, "odataType");
+    const definition = settings ? graphProperty(record, additionalRecord, "settingDefinitionId") ??
+      graphProperty(record, additionalRecord, "definitionId") : undefined;
+    const template = settings ? graphProperty(record, additionalRecord, "templateReference") : undefined;
     const templateFamily = template && typeof template === "object"
       ? ownCaseInsensitive(template as Record<string, unknown>, "templateFamily") : undefined;
     const shape = typeof type === "string" ? type.replace(/^#?(?:microsoft\.graph\.)?/i, "") : "";
@@ -365,10 +369,11 @@ export function walkDataClasses(
     if (record && !active.has(record)) {
       active.add(record);
       let hasChildren = false;
+      const valueState = settings ? graphProperty(record, additionalRecord, "valueState") : undefined;
       const recordSecret = secretSetting || (settings && (
         typeof type === "string" && SECRET_SETTING_TYPE.test(type) ||
-        ownCaseInsensitive(record, "isSecret") === true ||
-        String(ownCaseInsensitive(record, "valueState")).toLowerCase() === "encryptedvaluetoken" ||
+        graphProperty(record, additionalRecord, "isSecret") === true ||
+        typeof valueState === "string" && valueState.toLowerCase() === "encryptedvaluetoken" ||
         typeof definition === "string" && SECRET_SETTING_ID.test(definition)
       ));
       for (const prop in record) {

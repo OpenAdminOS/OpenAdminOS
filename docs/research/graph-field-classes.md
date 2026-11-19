@@ -14,6 +14,11 @@ No secret values are reproduced. Values are replaced by their type; for credenti
 
 ## Endpoints
 
+### PIM for Groups and expanded policy settings
+
+- PIM for Groups schedules and requests under `/identityGovernance/privilegedAccess/group` use Security for policy values and Identity for `principalId` and `groupId`. The endpoint is documented and has a synthetic fixture with `<principal ID>` and `<group ID>` placeholders. [Microsoft Graph PIM for Groups schema](https://learn.microsoft.com/en-us/graph/api/resources/privilegedaccessgroup?view=graph-rest-1.0)
+- Settings Catalog secret setting types and the `encryptedValueToken` state mark `<setting value>` as Credential, including when the metadata is carried in `additionalData`. Expanded Configuration Policies and Group Policy definitions have synthetic coverage. [Microsoft Graph Intune settings schemas](https://learn.microsoft.com/en-us/graph/utcm-intune-resources)
+
 ### managedDevices (cache and agents $select)
 
 - Path: `/deviceManagement/managedDevices`
@@ -1755,5 +1760,5 @@ Fields on endpoints the app does not read today but chat tools could reach:
 - Device data inside configuration: an assignment filter `rule` named a specific device; app registration `publicClient.redirectUris[]` held private LAN IP addresses.
 - Credential metadata inside activity: directory audit `modifiedProperties` for service principal creation carried `Credential` entries (`KeyStoreId`, `KeyGroupId`, no secret). Other audit types can carry raw values, so audit free text needs a content scan.
 - `applications.passwordCredentials[].hint` is easy to miss: it is returned on every list read and is part of the secret.
-- Sign-in `ipAddress` maps to device by the brief, but it is the person's public IP and comes with city-level coordinates; identity may be the safer class for sign-in logs.
+- Sign-in IP addresses and audit actor IP addresses are Identity because they identify the person's activity.
 - authorizationPolicy is a one-item collection on beta, not a bare singleton.
