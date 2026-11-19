@@ -15,18 +15,21 @@ built on top of them are planned separately.
   and is configured with access to MCP servers, skills and connectors.
 - Scope: all of it, each phase with user docs, a SPEC section and a CHANGELOG line.
 - Default rules: mask on hosted, as in the table below.
-- Hosted voice: tenant data the app sends to the voice model is masked, and the
-  voice model speaks roles ("the user", "the device"); the text transcript shows
-  the real values. What the admin says aloud is not gated (see round 4).
+- Hosted voice: the voice model speaks roles ("the user", "the device") where a
+  value is masked, and the text transcript shows the real values. Round 4 of
+  the design review refined which tenant data is masked: voice context follows
+  the data policy rules like any hosted call. Spoken input is covered by the
+  proposal of 2026-11-19 below.
 - Skills use the open SKILL.md format, with import and export.
 - Proactive work: recurring read-only checks and a daily brief per organization,
   each confirmed on a card and capped.
 
 **Decisions (Ugur, 2026-11-18, design review of mockups 34 and 35)**
 - Field reclassification in Settings only moves a field to a class higher in
-  the order. On every tier the reclassified field keeps the masking coverage of
-  both its original and its new class, so a reclassification can never weaken
-  any tier, including against IT-set rules: a configuration value covered by an
+  the order. On every tier the reclassified field applies the strictest action
+  of every class it has ever held, its mapped class and every later pick (as
+  corrected in round 4), so a reclassification can never weaken any tier,
+  including against IT-set rules: a configuration value covered by an
   IT Mask rule stays masked after moving to Security, even though Security
   normally leaves setting values readable. The classify dialog and the field
   list show the applied coverage per tier, and after a change the list shows
@@ -88,22 +91,24 @@ built on top of them are planned separately.
   detectors, at the one place every provider call is built. Routing and
   masking act on that scan. Text or fields the scan cannot examine within its
   work budget are counted as unexamined, with `credential` as their effective
-  class, and the scan reports that the budget ran out.
+  class, and the scan reports that the budget ran out. Their action on a tier
+  is the strictest action of any class on that tier (round 4).
 - The credential promise, in every place it appears: values the app
   recognizes as credentials never reach a hosted model in clear text. A secret
   written into a free-text field in a form the app does not recognize can
   still be sent. On Confidential, `credential` defaults to Mask; Allow is
   possible only after the confirmation dialog, and IT can lock it.
 
+**Proposed 2026-11-19, pending confirmation (agent lead, not yet confirmed by Ugur)**
+- Hosted voice is honest about its boundary. What the admin says aloud goes to
+  the hosted voice provider as audio and is not gated by data policy. The
+  hosted voice strip says so ("hears what you say"), and so do the data policy
+  notes and docs. Voice on this device is the way to keep spoken words under
+  data policy: the words are transcribed on the device, then the text goes
+  through the same request scan as a typed question before any hosted
+  reasoning call.
+
 **Decisions (Ugur, 2026-11-19, round 4 of the design review)**
-- Hosted voice is honest about its boundary. Masking and blocking apply to
-  tenant data the app sends to the hosted voice model. What the admin says
-  aloud goes to the hosted voice provider as audio and is not gated by data
-  policy. The hosted voice strip says so ("Hosted voice · OpenAI · hears what
-  you say · tenant data masked"), and so do the data policy notes and docs.
-  Voice on this device is the way to keep spoken words under data policy: the
-  words are transcribed on the device, then the text goes through the same
-  request scan as a typed question before any hosted reasoning call.
 - Confirmations that loosen `security` name what masking replaces (policy
   names, named locations, IP ranges, excluded users and groups, role names)
   and state that setting values go to the hosted model in clear text.
@@ -113,6 +118,38 @@ built on top of them are planned separately.
 - A blocked request offers only models whose tier permits every class in the
   request. When every applicable rule is locked by IT, the block names the
   rule owner (policy file and keys) instead of offering a switch or a change.
+
+**Review findings adopted (2026-11-19, round 4 of the design review)**
+- Successive reclassifications: a field's effective action per tier is the
+  strictest across every class it has ever held, its mapped class and every
+  later pick, never only the original and the latest. A field moved from
+  `configuration` to `security` to `identity`, with Security on Hosted set to
+  Block, stays Blocked on Hosted.
+- Voice context: tenant data the app sends to the hosted voice model goes
+  through the same request scan and follows the same rules as any hosted call,
+  class by class; it is not all masked. The hosted voice strip is derived from
+  the live rules like the other strips ("Hosted voice · OpenAI · hears what you
+  say · identities, security names and devices masked" with the defaults). When
+  a rule blocks a context transfer, the voice session continues without that
+  context and says what was withheld.
+- Unexamined content: evidence the scan could not examine is reported as
+  `credential`, and its action on a tier is the strictest action of any class
+  on that tier, so a Block anywhere on the tier withholds the call. The
+  withheld call has a designed recovery: a smaller question, or a local model
+  when no Local rule is Block.
+- Credential Block to Mask has its own text in the direct-change and reset
+  dialogs: calls that were blocked can now leave the device, recognized
+  credentials are replaced one way, and a secret in free text in a form the app
+  does not recognize may still be sent.
+- MCP tool review: approval requires a read-only annotation and no documented
+  write behavior. The app flags tools whose description describes saving,
+  changing, sending or deleting (such as an `export_report` that saves a
+  report on the server), and a flagged tool cannot be approved in any review
+  state, whatever its annotation.
+- Access: a granted tool is offered and callable only while the service it
+  uses is connected in the active organization. Access shows the missing
+  service with its recovery (connect the service, or switch organization), and
+  the grant itself stays on.
 
 ## Why
 
@@ -177,8 +214,9 @@ Classes act through the request ledger (as in PR #209): values are classified
 by field when they arrive and registered in memory for the run or Chat
 conversation, and the final request is scanned against them and the detectors
 just before each model call. Routing and masking act on that scan. Evidence the
-scan could not examine within its budget counts as unexamined, and its
-effective class is `credential`.
+scan could not examine within its budget counts as unexamined and is reported
+as `credential`. Its action on a tier is the strictest action of any class on
+that tier, so a Block anywhere on the tier withholds the call.
 
 Default rules (decided 2026-11-18):
 
@@ -201,8 +239,9 @@ Allow there is possible only after the confirmation dialog, and IT can lock it.
 Loosening from Settings asks for confirmation first, and never applies to a rule
 IT locked; a reset that mixes tightening and loosening applies nothing until the
 admin accepts. In Settings a field moves only to a class higher in the order,
-and on each tier it keeps the masking coverage of both its original and its new
-class. A less sensitive class comes from the IT policy file.
+and on each tier it applies the strictest action of every class it has ever
+held: its mapped class and every later pick. A less sensitive class comes from
+the IT policy file.
 
 ## Track A: Data policy
 
@@ -232,8 +271,13 @@ class. A less sensitive class comes from the IT policy file.
       prompt, including the admin's own words) is scanned against the ledger
       and the detectors, at the one place every provider call is built.
 - [ ] When the scan runs out of its work budget, the text and fields it did not
-      examine count as unexamined with `credential` as their effective class,
-      and the scan flags the budget exhaustion.
+      examine count as unexamined and are reported as `credential`, and the
+      scan flags the budget exhaustion. Their action on a tier is the strictest
+      action of any class on that tier, so a Block anywhere on the tier
+      withholds the call.
+- [ ] A reclassified field records every class it has held. Its action per
+      tier is the strictest across all of them, never only the mapped class
+      and the latest pick.
 - [ ] Fenced tenant content carries its classes and counts.
 - [ ] Field names verified against real responses in the lab tenant with Lokka.
 
@@ -246,12 +290,22 @@ class. A less sensitive class comes from the IT policy file.
    classed `security`, and a value from the ledger typed back by the admin is
    found by the scan of the final request.
 4. An unmapped field is classed `identity`, and a test proves it.
-5. A reclassified field keeps the masking coverage of both classes on every
-   tier, including against an IT-locked rule: a configuration value under an
-   IT Mask rule stays fully masked after moving to `security` (test).
-6. A scan that exhausts its budget reports the unexamined data with
-   `credential` as its effective class (test).
-7. Every field mapping was checked against a live Graph response in the lab
+5. A reclassified field keeps the strictest coverage of every class it has
+   held on every tier, including against an IT-locked rule: a configuration
+   value under an IT Mask rule stays fully masked after moving to `security`
+   (test).
+6. Two successive moves (regression test): a field mapped as `configuration`,
+   moved to `security`, then to `identity`, with Security on Hosted set to
+   Block, is Blocked on Hosted. A calculation from only the mapped class and
+   the latest pick would give Mask, and the test fails on it.
+7. A scan that exhausts its budget reports the unexamined data as `credential`
+   (test).
+8. Unexamined data takes the strictest action of any class on the tier
+   (test, the Confidential case): Credential on Confidential set to Allow
+   after the confirmation dialog, Identity on Confidential set to Block, and a
+   request with an unexamined tail. The call is withheld, although the
+   credential rule alone would allow it.
+9. Every field mapping was checked against a live Graph response in the lab
    tenant, and the record lists the calls.
 
 ### Phase A2: Provider tiers
@@ -273,16 +327,29 @@ class. A less sensitive class comes from the IT policy file.
       applied in `buildLlm`, so agent runs, Chat, Office, drafts, follow-ups
       and the Nova command all pass through it.
 - [ ] Hosted voice gets its own gate in `nova.ts` and the renderer for tenant
-      data the app sends to the voice model: it is masked or blocked by the
-      rules, the voice model speaks roles, and the transcript shows real
-      values. What the admin says aloud goes to the hosted voice provider as
-      audio and is not gated; the hosted voice strip ("hears what you say"),
-      the Data policy settings and the docs say so. Voice on this device keeps
+      data the app sends to the voice model as context: it goes through the
+      same request scan and follows the same rules as any hosted call, class
+      by class (masked, blocked or sent as is). The voice model speaks roles
+      where a value is masked, and the transcript shows real values. When a
+      rule blocks a context transfer, the session continues without that
+      context and the voice model and the transcript say what was withheld.
+      The hosted voice strip and its popover are derived from the live rules
+      like the other strips. What the admin says aloud goes to the hosted
+      voice provider as audio and is not gated (proposed 2026-11-19, pending
+      confirmation); the hosted voice strip ("hears what you say"), the Data
+      policy settings and the docs say so. Voice on this device keeps
       spoken words under data policy: they are transcribed on the device and
       the text goes through the same request scan before any hosted reasoning
       call.
 - [ ] Settings > Data policy and a managed configuration key `dataPolicy`
       (schema, parser, record sanitizer, audit mapping, both docs copies).
+      Credential Block to Mask has its own text in the direct-change and reset
+      dialogs: calls that were blocked can now leave the device, recognized
+      credentials are replaced one way, and a secret in free text in a form
+      the app does not recognize may still be sent.
+- [ ] A call withheld because part of the request could not be examined has a
+      designed state (mockup 34, F) that suggests a smaller question, and a
+      local model only when no Local rule is Block.
 - [ ] Agent manifests declare `descriptor.dataClasses`, derived when absent, with
       a qa-graph check and the JSON Schema updated in the same commit. Agent
       details show what an agent reads. Preflight refuses a run the policy would
@@ -292,10 +359,12 @@ class. A less sensitive class comes from the IT policy file.
 **Acceptance criteria:**
 1. A test per path (agent run, Chat deterministic, Chat streaming, agentic loop,
    Office, follow-up) shows a blocked class never reaches the model.
-2. A test proves tenant data the app sends to hosted voice is masked, and a
-   blocked class is not sent to it. The docs and the hosted voice strip state
-   that spoken input is not gated in hosted voice; a renderer test asserts
-   the strip copy.
+2. A test proves voice context goes through the same request scan and rules
+   as a hosted call: a masked class reaches the voice model as tokens, an
+   allowed class as is, and a blocked class is withheld while the session
+   continues and says what was withheld. The docs and the hosted voice strip
+   state that spoken input is not gated in hosted voice; a renderer test
+   asserts that the strip copy is derived from the rules.
 3. A test proves text from voice on this device goes through the request scan
    before a hosted reasoning call.
 4. A blocked prompt shows a designed error that names the class and offers
@@ -305,6 +374,10 @@ class. A less sensitive class comes from the IT policy file.
    instead of offering a switch or a change.
 5. An IT-locked rule cannot be changed in Settings or over IPC.
 6. `npm run qa` passes with `dataClasses` on every bundled agent.
+7. The Credential Block to Mask dialog, direct and in a reset, shows its own
+   text (renderer test asserts the sentences).
+8. A call withheld for unexamined data shows the designed state and never
+   offers a model whose tier has a Block rule.
 
 ### Phase A4: Masking
 
@@ -375,10 +448,20 @@ class. A less sensitive class comes from the IT policy file.
       agents, skills and web search, enforced when tools are offered and again
       at the call. IT lock keys for each, with a per-skill switch that shows
       its lock reason when IT turned a skill off.
+- [ ] The contract: a tool is offered and callable only while its grant is on
+      and the service it uses is connected in the active organization. A
+      granted skill or tool that needs a missing service (for example a device
+      triage skill with a Graph grant in an organization where Entra is not
+      connected) is not offered there, and Access shows the missing service
+      with its recovery: connect the service, or switch organization. The
+      grant stays on.
 
 **Acceptance criteria:**
 1. A server or connector without a grant is neither offered nor callable.
 2. The status strip names only the hosts the agent is granted.
+3. A granted tool whose service is not connected in the active organization
+   is neither offered nor callable, from Chat, a skill or a scheduled check
+   (test), and Access shows the designed missing-service state.
 
 ### Phase B4: Skills
 
@@ -412,7 +495,11 @@ class. A less sensitive class comes from the IT policy file.
       off.
 - [ ] A tool review at add time. Only tools the admin approves as read-only
       are allowed; the tool's read-only annotation is shown but not trusted on
-      its own, and a tool annotated as a change cannot be approved. The
+      its own, and a tool annotated as a change cannot be approved. Approval
+      requires a read-only annotation and no documented write behavior: the
+      app flags tools whose name or description describes saving, changing,
+      sending or deleting, and a flagged tool cannot be approved in any review
+      state, with the reason shown in its row. The
       approval is enforced at every call, including calls from skills and
       scheduled checks. A tool that is not approved, or added by the server
       later and not yet reviewed, is never offered.
@@ -428,6 +515,9 @@ class. A less sensitive class comes from the IT policy file.
    boundary statement.
 4. A tool the admin did not approve is neither offered nor callable, from Chat,
    a skill or a scheduled check (test per path).
+5. A tool annotated read-only whose description says it saves on the server
+   (`export_report`) is flagged and cannot be approved, in the first review
+   and when the review is reopened (test).
 
 ### Phase B6: Learning
 
@@ -500,8 +590,9 @@ class. A less sensitive class comes from the IT policy file.
 
 1. ~~Default rules~~ mask on hosted (2026-11-18).
 2. ~~Hosted voice with masking~~ speak roles, real values in the transcript
-   (2026-11-18); spoken words are not gated in hosted voice, local voice keeps
-   them under data policy (2026-11-19).
+   (2026-11-18); voice context follows the data policy rules (round 4,
+   2026-11-19). Proposed 2026-11-19, pending confirmation: spoken words are
+   not gated in hosted voice, local voice keeps them under data policy.
 3. ~~Skill format~~ SKILL.md (2026-11-18).
 4. One personal agent now, several profiles later (proposal).
 5. Local stdio MCP servers (proposal: not in the first version).
