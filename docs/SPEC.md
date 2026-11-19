@@ -467,7 +467,10 @@ reached by address, so its certificate must cover the address. Any other host
 name is refused. Retrieval connects directly, with its own HTTP agent per request,
 never through the global fetch or HTTP agents, which send to an environment proxy
 when `NODE_USE_ENV_PROXY` is set: a loopback address missing from `NO_PROXY`
-would otherwise reach the proxy, question included. Settings never runs Check for index and an index install at
+would otherwise reach the proxy, question included. Like fetch, it decodes a
+gzip, deflate or br answer and fails a connection that sends nothing for 5
+minutes, before the answer or while it arrives, so a stalled model download ends
+with its reason in Settings. Settings never runs Check for index and an index install at
 once, so neither reply replaces the other's. A query vector is scaled before
 scoring, so a huge but finite one cannot overflow and rank every passage as 0. A connection reset reads as a failed request with its
 code, not as a stopped Ollama. A vector with an entry that is not a finite

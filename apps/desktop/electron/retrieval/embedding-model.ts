@@ -86,6 +86,17 @@ export async function pullEmbeddingModel(
   model: string = DEFAULT_INDEX_EMBEDDING_MODEL,
   fetchImpl: typeof fetch = loopbackTransport.fetch,
 ): Promise<void> {
+  try {
+    await pullOnce(endpoint, model, fetchImpl);
+  } catch (error) {
+    if (error instanceof Error && error.name === "TimeoutError") {
+      throw new Error(`Ollama stopped answering while downloading ${model}. Check that Ollama is running and can reach its registry, then restart OpenAdminOS to try again.`, { cause: error });
+    }
+    throw error;
+  }
+}
+
+async function pullOnce(endpoint: string, model: string, fetchImpl: typeof fetch): Promise<void> {
   const { response, url } = await fetchLoopback(endpoint, "/api/pull", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -94,7 +105,11 @@ export async function pullEmbeddingModel(
   if (isRefusedRedirect(response, url)) throw new Error(redirectRefusedDetail("Ollama", url));
   // Ollama reports a failed download in the body, often with HTTP 500:
   // read it first, so the reason (an unreachable registry, a proxy) is kept.
-  const payload = (await response.json().catch(() => undefined)) as
+  // Only a body that is not JSON is skipped: a read that fails or stalls is the pull failing.
+  const payload = (await response.json().catch((error: unknown) => {
+    if (error instanceof SyntaxError) return undefined;
+    throw error;
+  })) as
     | { status?: string; error?: string }
     | undefined;
   if (payload?.error) {

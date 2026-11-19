@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, globalAgent as httpGlobalAgent, type Server } from "node:http";
 import { describe, it } from "node:test";
+import { brotliCompressSync, deflateSync, gzipSync } from "node:zlib";
 
 import { AppStateStore } from "../state.js";
 import { embeddingModelState, pullEmbeddingModel } from "./embedding-model.js";
@@ -256,6 +257,57 @@ describe("local documentation retrieval never follows a redirect from this devic
     await pullEmbeddingModel(endpoint);
     assert.equal(proxied, 1);
     assert.equal(hits, 3);
+  });
+
+  it("decodes a compressed answer as fetch did, for the embedding, the model check and a failed pull (PR #206 review round 7)", async (t) => {
+    const answers: Record<string, { status: number; body: unknown }> = {
+      "/api/embed": { status: 200, body: { embeddings: [[0.1]] } },
+      "/api/tags": { status: 200, body: { models: [{ name: "nomic-embed-text:latest" }] } },
+      "/api/pull": { status: 500, body: { error: "pull model manifest: registry unreachable" } },
+    };
+    let encodings = ["gzip", "deflate", "br"];
+    const server = createServer((request, response) => {
+      const encoding = encodings[0]!;
+      const answer = answers[request.url ?? ""]!;
+      const raw = Buffer.from(JSON.stringify(answer.body));
+      const packed = encoding === "gzip" ? gzipSync(raw) : encoding === "deflate" ? deflateSync(raw) : brotliCompressSync(raw);
+      response.writeHead(answer.status, { "content-type": "application/json", "content-encoding": encoding, "content-length": packed.length }).end(packed);
+    });
+    await listen(server);
+    t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+    const endpoint = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    for (; encodings.length > 0; encodings = encodings.slice(1)) {
+      assert.deepEqual(await ollamaEmbedQuery(endpoint)("test"), [0.1], encodings[0]);
+      assert.deepEqual(await embeddingModelState(endpoint), { ollamaReachable: true, installed: true }, encodings[0]);
+      await assert.rejects(pullEmbeddingModel(endpoint), /Ollama pull failed: pull model manifest: registry unreachable/, encodings[0]);
+    }
+  });
+
+  it("fails a model pull that stalls before its answer or while sending it, with the reason (PR #206 review round 7)", { timeout: 10_000 }, async (t) => {
+    let mode: "before" | "during" = "before";
+    const server = createServer((_request, response) => {
+      if (mode === "during") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.write("{");
+      }
+      // Otherwise nothing: no headers at all.
+    });
+    await listen(server);
+    t.after(() => {
+      server.closeAllConnections();
+      return new Promise<void>((resolve) => server.close(() => resolve()));
+    });
+    const previous = loopbackTransport.idleTimeoutMs;
+    loopbackTransport.idleTimeoutMs = 100;
+    t.after(() => {
+      loopbackTransport.idleTimeoutMs = previous;
+    });
+    const endpoint = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    const stopped = /Ollama stopped answering while downloading nomic-embed-text\. Check that Ollama is running and can reach its registry, then restart OpenAdminOS to try again\.$/;
+    await assert.rejects(pullEmbeddingModel(endpoint), stopped);
+    mode = "during";
+    await assert.rejects(pullEmbeddingModel(endpoint), stopped);
+    assert.equal(previous, 300_000);
   });
 
   it("searches the documentation at the same endpoint Settings checks, also when OLLAMA_HOST moved Ollama (PR #206 review round 1)", async (t) => {
