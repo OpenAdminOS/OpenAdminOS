@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { isolateSmokeProviders, terminateSmokeChild } from "./smoke-provider-isolation.mjs";
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const viteBin = resolve(
   dirname(fileURLToPath(import.meta.resolve("vite/package.json"))),
@@ -20,8 +22,7 @@ const receivedSupportIssues = [];
 let renderer;
 let electron;
 let supportServer;
-const electronEnv = { ...process.env };
-delete electronEnv.ELECTRON_RUN_AS_NODE;
+let providerIsolation;
 
 try {
   supportServer = createServer(async (req, res) => {
@@ -60,6 +61,7 @@ try {
   pipeProcess(renderer, "renderer");
   await waitForHttp(rendererUrl, 20_000);
 
+  providerIsolation = await isolateSmokeProviders();
   const electronArgs = ["apps/desktop"];
   // Linux CI containers cannot install Electron's helper as root-owned setuid.
   // This flag is confined to the synthetic smoke process, never the packaged app.
@@ -67,7 +69,7 @@ try {
   electron = spawn(resolve(root, "node_modules/.bin/electron"), electronArgs, {
     cwd: root,
     env: {
-      ...electronEnv,
+      ...providerIsolation.env,
       VITE_DEV_SERVER_URL: rendererUrl,
       OPENADMINOS_REPORT_ISSUE_SMOKE: "1",
       OPENADMINOS_REPORT_ISSUE_SMOKE_USER_DATA: userDataDir,
@@ -128,15 +130,16 @@ try {
   if (parsedBundle.privacy?.publicIssueSubmissionRequiresConfirmation !== true) {
     throw new Error("Diagnostics bundle did not declare confirmation-required submission.");
   }
-  console.log("[smoke:report-issue] passed");
 } finally {
-  if (electron && electron.exitCode === null) electron.kill("SIGTERM");
-  if (renderer && renderer.exitCode === null) renderer.kill("SIGTERM");
-  if (supportServer) {
-    await closeServer(supportServer);
+  try {
+    await Promise.all([terminateSmokeChild(electron), terminateSmokeChild(renderer)]);
+    if (supportServer) await closeServer(supportServer);
+    await rm(userDataDir, { recursive: true, force: true });
+  } finally {
+    await providerIsolation?.close();
   }
-  await rm(userDataDir, { recursive: true, force: true });
 }
+console.log("[smoke:report-issue] passed");
 
 function pipeProcess(child, label) {
   child.stdout?.on("data", (chunk) => {

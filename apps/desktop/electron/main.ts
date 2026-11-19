@@ -470,6 +470,7 @@ function seedIntuneChatSmokeState(userDataDir: string): void {
         ],
         activeTenantId: "smoke-tenant",
         registryInstallCountsEnabled: false,
+        retrievalAutoInstall: false,
       },
       null,
       2,
@@ -531,6 +532,7 @@ function seedReportIssueSmokeState(userDataDir: string): void {
         ],
         activeTenantId: "report-smoke-tenant",
         registryInstallCountsEnabled: false,
+        retrievalAutoInstall: false,
       },
       null,
       2,
@@ -670,6 +672,7 @@ function seedScreenshotCaptureState(userDataDir: string): void {
         ],
         activeTenantId: isWebsiteCapture ? "contoso-tenant" : "contoso-demo-tenant",
         registryInstallCountsEnabled: false,
+        retrievalAutoInstall: false,
       },
       null,
       2,
@@ -977,7 +980,7 @@ function createIntuneChatSmokeLlm(): RunLlmApi {
   };
 }
 
-function createIntuneChatSmokeProviders(): ProviderSummary[] {
+function createSmokeProviders(model = smokeModelName): ProviderSummary[] {
   return providerCatalog.map((provider) =>
     provider.id === "ollama"
       ? {
@@ -987,8 +990,8 @@ function createIntuneChatSmokeProviders(): ProviderSummary[] {
           detail: isLandingCapture
             ? "Running on http://localhost:11434"
             : "Deterministic local provider fixture for Electron smoke tests.",
-          models: [smokeModelName],
-          defaultModel: smokeModelName,
+          models: [model],
+          defaultModel: model,
         }
       : { ...provider },
   );
@@ -6965,7 +6968,7 @@ if (!gotLock) {
     // provider or the public references. Smoke and capture launches use
     // their fixtures, never a policy on the machine that runs them.
     const managedPolicy =
-      isFirstRunCapture || isIntuneChatSmokeLaunch || isScreenshotCaptureLaunch
+      isIntuneChatSmokeLaunch || isReportIssueSmokeLaunch || isScreenshotCaptureLaunch
         ? undefined
         : await loadManagedPolicy({
             paths: resolveManagedPolicyPaths({ packaged: app.isPackaged }),
@@ -7039,8 +7042,10 @@ if (!gotLock) {
         ? {
             graphFactory: () => createIntuneChatSmokeGraph(),
             llmFactory: () => createIntuneChatSmokeLlm(),
-            providerListFactory: () => createIntuneChatSmokeProviders(),
+            providerListFactory: () => createSmokeProviders(),
           }
+        : isReportIssueSmokeLaunch
+        ? { providerListFactory: () => createSmokeProviders("report-smoke-model") }
         : {}),
     });
     // The policy's provider, model and registration are in state before the window reads it.

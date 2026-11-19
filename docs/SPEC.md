@@ -2397,6 +2397,10 @@ The fixture injects deterministic local-provider readiness plus Graph and LLM
 adapters, so it never depends on Ollama or another provider being installed on
 the CI host. It does not replace a final live-tenant pilot run, but it guards the
 desktop path without requiring tenant credentials in CI or local automation.
+The Intune Chat, Office, and Report Issue smoke profiles disable retrieval and
+embedding auto-install. The smoke runners route local model endpoints to a
+fixture and assert zero connections on each available default model port.
+The runners report any port checks they skip because the port is already in use.
 The v0.3 release gate also includes `npm run screenshots`, a dev-only Electron
 capture harness gated by `OPENADMINOS_SCREENSHOT_CAPTURE=1` and `!app.isPackaged`.
 It seeds a Contoso Demo tenant with an `.invalid` admin address, a local Ollama

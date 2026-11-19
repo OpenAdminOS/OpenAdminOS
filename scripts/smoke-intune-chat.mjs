@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { isolateSmokeProviders, terminateSmokeChild } from "./smoke-provider-isolation.mjs";
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const viteBin = resolve(
   dirname(fileURLToPath(import.meta.resolve("vite/package.json"))),
@@ -14,8 +16,7 @@ const rendererUrl = `http://127.0.0.1:${port}`;
 const userDataDir = await mkdtemp(join(tmpdir(), "openadminos-intune-chat-smoke-"));
 let renderer;
 let electron;
-const electronEnv = { ...process.env };
-delete electronEnv.ELECTRON_RUN_AS_NODE;
+let providerIsolation;
 
 try {
   renderer = spawn(
@@ -30,6 +31,7 @@ try {
   pipeProcess(renderer, "renderer");
   await waitForHttp(rendererUrl, 20_000);
 
+  providerIsolation = await isolateSmokeProviders();
   const electronArgs = ["apps/desktop"];
   // Linux CI containers cannot install Electron's helper as root-owned setuid.
   // This flag is confined to the synthetic smoke process, never the packaged app.
@@ -37,7 +39,7 @@ try {
   electron = spawn(resolve(root, "node_modules/.bin/electron"), electronArgs, {
     cwd: root,
     env: {
-      ...electronEnv,
+      ...providerIsolation.env,
       VITE_DEV_SERVER_URL: rendererUrl,
       OPENADMINOS_INTUNE_CHAT_SMOKE: "1",
       OPENADMINOS_INTUNE_CHAT_SMOKE_USER_DATA: userDataDir,
@@ -50,12 +52,15 @@ try {
   if (code !== 0) {
     throw new Error(`Electron Intune Chat smoke exited with code ${code}.`);
   }
-  console.log("[smoke:intune-chat] passed");
 } finally {
-  await terminateChild(electron);
-  await terminateChild(renderer);
-  await removeTempDir(userDataDir);
+  try {
+    await Promise.all([terminateSmokeChild(electron), terminateSmokeChild(renderer)]);
+    await removeTempDir(userDataDir);
+  } finally {
+    await providerIsolation?.close();
+  }
 }
+console.log("[smoke:intune-chat] passed");
 
 function pipeProcess(child, label) {
   child.stdout?.on("data", (chunk) => {
@@ -94,21 +99,6 @@ function waitForExit(child, timeoutMs) {
       clearTimeout(timeout);
       rejectExit(error);
     });
-  });
-}
-
-function terminateChild(child) {
-  if (!child || child.exitCode !== null) return Promise.resolve();
-  return new Promise((resolveTerminate) => {
-    const timeout = setTimeout(() => {
-      if (child.exitCode === null) child.kill("SIGKILL");
-      resolveTerminate();
-    }, 2_000);
-    child.once("exit", () => {
-      clearTimeout(timeout);
-      resolveTerminate();
-    });
-    child.kill("SIGTERM");
   });
 }
 
