@@ -324,6 +324,9 @@
     .pcard .why { margin-top: 8px; font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text-muted); }
     .pcard .acts { display: flex; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--color-border-soft); background: var(--color-code-bg); flex-wrap: wrap; align-items: center; }
     .pcard .acts .r { margin-left: auto; font-size: var(--text-xs); color: var(--color-text-muted); }
+    .pcard .msg { padding: 8px 10px; border-radius: var(--radius-md); background: var(--color-code-bg); box-shadow: inset 0 0 0 1px var(--color-border-soft); color: var(--color-text); white-space: pre-wrap; overflow-wrap: anywhere; }
+    .pcard .sendres .sendmsg { font-size: var(--text-sm); color: var(--color-text); }
+    .pcard .sendres[hidden], .pcard .acts[hidden] { display: none; }
     .kv { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 0 12px; margin-top: 10px; font-size: var(--text-sm); }
     .kv dt, .kv dd { margin: 0; padding: 6px 0; border-top: 1px solid var(--color-border-soft); }
     .kv dt { color: var(--color-text-muted); }
@@ -376,6 +379,8 @@
     .hostpop li { padding: 5px 0; border-top: 1px solid var(--color-border-soft); display: grid; gap: 0; }
     .hostpop li b { font-weight: 500; color: var(--color-warning); overflow-wrap: anywhere; }
     .hostpop li span { font-size: var(--text-xs); color: var(--color-text-muted); }
+    .hostpop ul.held { margin-top: 4px; }
+    .hostpop ul.held li b { color: var(--color-text); }
     .limit { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 8px; margin: 4px 0 10px; padding: 10px 12px; border-radius: var(--radius-md); background: var(--color-code-bg); font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text-soft); }
     .limit svg { width: 13px; height: 13px; margin-top: 3px; color: var(--color-warning); }
     .skillpick { grid-column: 2 / -1; margin: 8px 0 2px; border-radius: var(--radius-md); box-shadow: inset 0 0 0 1px var(--color-border-soft); }
@@ -549,7 +554,7 @@
         <li>Decided: a name is 1 to 24 characters of letters, digits, spaces and hyphens. A name that reads as OpenAdminOS or Microsoft is refused, with the reason under the field, and the previous name stays. Clearing the field puts Nova back. Try "Microsoft Helper" or "Nova@" in the field.</li>
         <li>Decided: new policy keys keep the <code>nova</code> prefix, consistent with <code>novaInstructions</code> and <code>novaCapabilities</code>, so <code>novaPersona.language</code> here. Internal ids, the audit types <code>nova.*</code> and the policy keys keep the old name after a rename; the admin never sees them.</li>
         <li>A rename is a configuration audit event. When IT locks the name, the nameplate shows the name without the dashed underline and a lock line under it, like Language here. Locked options are disabled, so they are skipped by Tab, and each points to the lock line that names the key.</li>
-        <li>The strip in this frame names the tool hosts, not "No data leaves this device": servers are granted in B, so their tools are offered and queries go to those hosts. It is computed from the switches in B.</li>
+        <li>The strip in this frame names the tool hosts, not "No data leaves this device": servers are granted in B and their approved tools are offered, so queries go to those hosts. It is computed from the tools offered under the grants in B, not from the switches alone.</li>
         <li>The persona feeds typed Chat as well as voice (Phase B2), so the sample is a Chat answer, not a voice line.</li>
       </ul>
     </section>
@@ -574,8 +579,8 @@
                 <div class="grant one"><span class="ic"><svg><use href="#i-book"/></svg></span><div><div class="nm">Splashtop Docs</div><div class="ds">Reference server at <span class="host">support-splashtopbusiness.splashtop.com</span>. Not on your IT department's list, so it is off.</div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="false" disabled aria-disabled="true" aria-describedby="lock-mcp" aria-label="Use Splashtop Docs, set by IT" data-host="support-splashtopbusiness.splashtop.com"></button></span>
                   <span class="lockline" id="lock-mcp"><svg><use href="#i-lock"/></svg><span>Locked. Set by your IT department in policy.json, <code>allowedPublicReferences</code></span></span></div>
                 <div class="grant one"><span class="ic"><svg><use href="#i-plug"/></svg></span><div><div class="nm">Policy settings reference</div><div class="ds">Added by you on 12 November. Remote server at <span class="host">tools.contoso.example</span>. 4 of its 6 tools approved as read-only; the other 2 cannot be approved and are never offered. Receives queries with recognized tenant data removed.</div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="true" aria-label="Use Policy settings reference" data-host="tools.contoso.example"></button></span></div>
-                <div class="grant one"><span class="ic"><svg><use href="#i-plug"/></svg></span><div><div class="nm">KQL reference</div><div class="ds">Reference server at <span class="host">kql.contoso.example</span>. Receives queries with recognized tenant data removed.</div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="true" aria-label="Use KQL reference" data-host="kql.contoso.example"></button></span></div>
-                <p class="limit"><svg><use href="#i-globe"/></svg><span>What a server receives: a query written from your question, with every value the app recognizes as tenant data removed. Text the app cannot recognize, such as an internal project name, can still reach the server. While a server is on, the status strip names its host; turn it off here to stop that.</span></p>
+                <div class="grant one"><span class="ic"><svg><use href="#i-plug"/></svg></span><div><div class="nm">KQL reference</div><div class="ds">Added by you on 5 November. Remote server at <span class="host">kql.contoso.example</span>. Both approved tools changed on the server and wait for your review, so none is offered and the status strip leaves out this host. The grant stays on. <button class="bt ghost sm" type="button" style="height:22px;padding:0 6px">Review 2 changed tools</button></div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="true" aria-label="Use KQL reference" data-host="kql.contoso.example" data-offered="0" data-held="Both approved tools changed on the server and wait for your review in Access."></button></span></div>
+                <p class="limit"><svg><use href="#i-globe"/></svg><span>What a server receives: a query written from your question, with every value the app recognizes as tenant data removed. Text the app cannot recognize, such as an internal project name, can still reach the server. While any of a server's tools is offered, the status strip names its host; turn the server off here to stop that.</span></p>
                 <div style="padding:10px 0 0;border-top:1px solid var(--color-border-soft)"><button class="bt secondary sm" type="button">Add a server by URL</button> <span class="xs muted" style="margin-left:8px">Only servers your IT department lists can be added.</span></div>
               </div>
 
@@ -717,13 +722,54 @@
         </ul>
       </div>
       <ul class="notes">
-        <li>The strip is derived from the grants: it names the host of every server switched on, and drops a host the moment its switch goes off. Try it on the MCP switches. When the full list does not fit the space next to the organization, the strip keeps the first host visible with a count of the rest, such as "learn.microsoft.com +2"; pressing it lists every host with the disclosure of what they receive.</li>
+        <li>The strip is derived from the tools actually offered, not from the server switches: it names the host of every server whose approved tools are offered, and drops a host the moment its switch goes off or its last approved tool goes back to review. Try it on the MCP switches. When the full list does not fit the space next to the organization, the strip keeps the first host visible with a count of the rest, such as "learn.microsoft.com +1"; pressing it lists every host with the disclosure of what they receive.</li>
+        <li>KQL reference shows the case where every approved tool on an enabled server is back in review. Its grant stays on, so approving the changed tools brings it back without turning anything on again, but none of its tools is offered, so the strip leaves out kql.contoso.example. The strip popover names the server under "Granted, no tools offered" with the reason, so the admin is not left wondering why a switched-on server is missing.</li>
         <li>Decided, the honest boundary for remote MCP servers, catalog or added by URL: each request is written by the query writer from SPEC (Marketplace MCP, query writer boundary) from the admin's question and the tool's schema, with every value the app recognizes as tenant data removed, and the egress check runs on what it writes. Text the app cannot recognize, such as an internal project name, can still reach the server. The grant copy says this in those words, the strip names the host whenever the server's tools are offered, and the admin can turn the server off.</li>
         <li>Decided: every connector send is confirmed message by message. A send is only ever proposed by the agent on a card that shows the exact message and channel; there is no "allow further sends" option, and skills can never use a send tool.</li>
         <li>Microsoft 365 has no Send switch: changes to a tenant are never a connector send. The cell says so in words instead of showing a disabled switch.</li>
         <li>Every grant type has a managed state: MCP server (<code>allowedPublicReferences</code>), connector read (<code>novaCapabilities.connectorReads</code>), connector send (<code>novaCapabilities.connectorSends</code>), agent (<code>novaCapabilities.startAgents</code>, here as a list of agents), skill (<code>novaCapabilities.skills</code>) and web search (<code>novaCapabilities.webSearch</code>). Locked switches are disabled, keep their state visible and point to the line that names the key. <code>connectorReads</code> and <code>skills</code> are new keys, and <code>startAgents</code> gains a list form like <code>connectorSends</code>.</li>
         <li>Choose opens the skill chooser in place. Each skill has its own switch; one that IT turned off keeps its switch, disabled, with the lock line under it naming the key, and stays in the library.</li>
         <li>Below 600 px of content width the column heads go and each switch carries its own label.</li>
+      </ul>
+
+      <h3 id="b-send" style="margin:32px 0 6px;font-size:var(--text-base);font-weight:500">Sending to Teams: the confirmation card</h3>
+      <p>With Send to Teams granted, <span data-name>Nova</span> can propose a message but never posts one on its own. The card shows the exact text that will be posted, where it goes and for which organization. Nothing is sent until Confirm, and each message gets its own card.</p>
+      <div class="win">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="shell">
+          <aside class="side" data-side="chat"></aside>
+          <div class="appmain">
+            <div class="topbar" data-top="tools"></div>
+            <div class="page"><div class="chat">
+              <div class="q">Post the compliance numbers to the rollout channel so the team sees them before standup.</div>
+              <div class="ans">
+                <div class="who"><span class="mini" data-initial>N</span><span><span data-name>Nova</span> with Ollama, Woodgrove Bank</span></div>
+                <div class="body">Here is the message I would post. Check the text and the channel, then confirm.</div>
+              </div>
+              <div class="pcard" id="sendcard">
+                <div class="top"><svg width="14" height="14"><use href="#i-teams"/></svg><span class="kind">Send to Teams</span><span>Proposed by <span data-name>Nova</span>, not sent</span></div>
+                <div class="in">
+                  <h3>Post this message?</h3>
+                  <dl class="kv">
+                    <dt>Message</dt><dd><div class="msg">Compliance this morning: 12 devices out of compliance for 7 days, 3 more than Monday. All 12 are on the Windows baseline 24H2. I will bring the list to standup.</div></dd>
+                    <dt>To</dt><dd>Endpoint Engineering team, Rollouts channel</dd>
+                    <dt>Organization</dt><dd>Woodgrove Bank</dd>
+                    <dt>Posted as</dt><dd>admin@woodgrove.example</dd>
+                  </dl>
+                  <p class="why">Every message is confirmed on its own. Confirming this one does not allow the next, and a skill can never send.</p>
+                </div>
+                <div class="acts" data-send="ask"><button class="bt primary sm" type="button" data-send-act="confirm">Confirm</button><button class="bt ghost sm" type="button" data-send-act="cancel">Cancel</button><span class="r">Exact text, as it will appear in Teams</span></div>
+                <div class="acts sendres" data-send="done" role="status" hidden><span class="sendmsg"></span><button class="bt ghost sm" type="button" data-send-act="reset" style="margin-left:auto">Show the card again</button></div>
+              </div>
+            </div></div>
+          </div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>The card names the exact message text, the destination as the team and the channel, the organization the send goes to and the account it posts as. The text is what Teams will show; editing it means asking <span data-name>Nova</span> for a new card.</li>
+        <li>Confirm posts this one message and the card records it. Cancel posts nothing and says so. Try both; "Show the card again" resets the frame.</li>
+        <li>There is no "allow further sends" option. A second message, even to the same channel a minute later, gets its own card and its own Confirm.</li>
+        <li>The card only appears while Send to Teams is granted and Teams is connected in the active organization. Without the grant, <span data-name>Nova</span> gives the text in the answer for the admin to post.</li>
       </ul>
     </section>
 
@@ -1095,18 +1141,27 @@ identities with graph_get. Nothing else.
         <a href="#"><span class="mini" data-initial>N</span><span data-name>Nova</span></a></nav>
         <div class="side-foot" ${current === "settings" ? "data-current" : ""}><span class="av">A</span><div class="who">admin@woodgrove.example<span>4 organizations</span></div><svg width="14" height="14" style="margin-left:auto;flex:none;color:var(--color-text-muted)"><use href="#i-gear"/></svg></div>`;
     });
-    // The strip is derived from the effective grants: every MCP server switched on in B adds its host.
-    const grantedHosts = () => [...document.querySelectorAll(".sw[data-host]")].filter((s) => s.getAttribute("aria-checked") === "true").map((s) => s.dataset.host);
+    // The strip is derived from the tools actually offered: a server switched on in B adds its host only while
+    // at least one of its approved tools is offered. A server whose approved tools are all back in review keeps
+    // its grant, stays out of the strip, and is named in the popover with the reason.
+    const grantedServers = () => [...document.querySelectorAll(".sw[data-host]")].filter((s) => s.getAttribute("aria-checked") === "true");
+    const offeredHosts = () => grantedServers().filter((s) => s.dataset.offered !== "0").map((s) => s.dataset.host);
+    const heldServers = () => grantedServers().filter((s) => s.dataset.offered === "0").map((s) => ({ host: s.dataset.host, name: s.getAttribute("aria-label").replace(/^Use /, ""), why: s.dataset.held }));
     let popSeq = 0;
     // Long form while it fits next to the organization; otherwise the first host stays visible with a +N count.
-    function stripHtml(hosts, model = "Ollama") {
-      if (!hosts.length) return `<span class="boundary" data-where="local"><span class="pip"></span>Local · ${model} · No data leaves this device</span>`;
+    function stripHtml(hosts, model = "Ollama", held = []) {
       const id = `hosts-${++popSeq}`;
+      const heldHtml = held.length ? `<p class="xs muted" style="margin-top:10px">Granted, no tools offered</p><ul class="held">${held.map((h) => `<li><b>${h.name}, ${h.host}</b><span>Not in the strip. ${h.why} The grant stays on.</span></li>`).join("")}</ul>` : "";
+      if (!hosts.length) {
+        if (!held.length) return `<span class="boundary" data-where="local"><span class="pip"></span>Local · ${model} · No data leaves this device</span>`;
+        return `<button type="button" class="boundary" data-where="local" aria-expanded="false" aria-controls="${id}"><span class="pip"></span>Local · ${model} · No data leaves this device</button>
+        <div class="hostpop" id="${id}" role="dialog" aria-label="Tool hosts" hidden><h4>No data leaves this device</h4><p class="xs muted">No tool that sends queries to another host is offered in this conversation.</p>${heldHtml}</div>`;
+      }
       const n = hosts.length;
       const label = `Local · ${model} · queries to ${hosts.join(", ")}`;
       const more = n > 1 ? `<span>+${n - 1}</span>` : "";
       return `<button type="button" class="boundary" data-where="local" data-fit="full" aria-expanded="false" aria-controls="${id}" aria-label="${label}. Show tool hosts"><span class="pip"></span>Local · ${model}<span class="leaves"><span class="bw">· queries to ${hosts.join(", ")}</span><span class="bs"><span>· queries to</span><span class="first">${hosts[0]}</span>${more}</span></span></button>
-        <div class="hostpop" id="${id}" role="dialog" aria-label="Tool hosts" hidden><h4>The model runs on this device</h4><p class="xs muted">Tools granted in Access send queries to these ${n === 1 ? "host" : n + " hosts"}, written from your question with every value the app recognizes as tenant data removed. Text it cannot recognize, such as an internal project name, can still be sent.</p><ul>${hosts.map((h) => `<li><b>${h}</b><span>Recognized tenant data removed</span></li>`).join("")}</ul><p class="xs muted">Turn a server off in Access and its host leaves this list.</p></div>`;
+        <div class="hostpop" id="${id}" role="dialog" aria-label="Tool hosts" hidden><h4>The model runs on this device</h4><p class="xs muted">Tools offered under your grants in Access send queries to these ${n === 1 ? "host" : n + " hosts"}, written from your question with every value the app recognizes as tenant data removed. Text it cannot recognize, such as an internal project name, can still be sent.</p><ul>${hosts.map((h) => `<li><b>${h}</b><span>Recognized tenant data removed</span></li>`).join("")}</ul>${heldHtml}<p class="xs muted">Turn a server off in Access and its host leaves this list.</p></div>`;
     }
     function fitStrip(b) {
       if (!b || !b.dataset.fit) return;
@@ -1117,14 +1172,14 @@ identities with graph_get. Nothing else.
     new ResizeObserver(fitAll).observe(document.body);
     document.fonts && document.fonts.ready.then(fitAll);
     function renderStrips() {
-      const hosts = grantedHosts();
+      const hosts = offeredHosts(), held = heldServers();
       document.querySelectorAll('[data-top="tools"]').forEach((el) => {
         el.querySelectorAll(".boundary, .hostpop").forEach((x) => x.remove());
-        el.insertAdjacentHTML("beforeend", stripHtml(hosts, el.dataset.model));
+        el.insertAdjacentHTML("beforeend", stripHtml(hosts, el.dataset.model, held));
       });
       fitAll();
       const sw = document.querySelectorAll(".sw[data-host]");
-      document.getElementById("mcpcount").textContent = `${hosts.length} of ${sw.length} on`;
+      document.getElementById("mcpcount").textContent = `${grantedServers().length} of ${sw.length} on`;
     }
     document.querySelectorAll("[data-top]").forEach((el) => {
       const [ini, org] = el.dataset.org === "fabrikam" ? ["FA", "Fabrikam"] : el.dataset.org === "contoso" ? ["CR", "Contoso Retail"] : ["WB", "Woodgrove Bank"];
@@ -1333,6 +1388,22 @@ identities with graph_get. Nothing else.
 
     applyName();
     renderStrips();
+    // Teams send card: Confirm posts this one message, Cancel posts nothing. Each message has its own card.
+    (() => {
+      const card = document.getElementById("sendcard");
+      if (!card) return;
+      const ask = card.querySelector('[data-send="ask"]'), done = card.querySelector('[data-send="done"]'), msg = done.querySelector(".sendmsg"), state = card.querySelector(".top span:last-child"), h = card.querySelector("h3");
+      card.addEventListener("click", (e) => {
+        const b = e.target.closest("[data-send-act]");
+        if (!b) return;
+        const a = b.dataset.sendAct;
+        if (a === "reset") { h.textContent = "Post this message?"; ask.hidden = false; done.hidden = true; state.innerHTML = 'Proposed by <span data-name>' + document.querySelector("[data-name]").textContent + '</span>, not sent'; ask.querySelector("button").focus(); return; }
+        msg.textContent = a === "confirm" ? "Posted to Endpoint Engineering, Rollouts, at 08:42. The next message needs its own confirmation." : "Not sent. Nothing was posted to Teams.";
+        state.textContent = a === "confirm" ? "Sent at 08:42" : "Cancelled, not sent";
+        h.textContent = a === "confirm" ? "Message posted" : "Message not posted";
+        ask.hidden = true; done.hidden = false; done.querySelector("button").focus();
+      });
+    })();
   </script>
 </body>
 </html>
