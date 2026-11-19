@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { classifyGraphAccessDenied, type RunRecord } from "@openadminos/agent-sdk";
+import { classifyGraphAccessDenied, contextTooSmallMessage, type ContextTooSmallFailure, type RunRecord } from "@openadminos/agent-sdk";
 import { RunFailureRemediation } from "./RunFailureRemediation";
 
 vi.mock("./ReportIssueModal", () => ({ useReportIssue: () => vi.fn() }));
@@ -47,4 +47,22 @@ it.each([
   expect(screen.getByText(title)).toBeInTheDocument();
   expect(screen.queryByText("Request timed out")).not.toBeInTheDocument();
   expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
+});
+
+it("gives a prompt that does not fit the model its own recovery from the typed reason", () => {
+  const failureReason: ContextTooSmallFailure = {
+    code: "context-too-small", promptTokens: 40_120, answerTokens: 1_100, neededTokens: 41_220, limitTokens: 16_384,
+    model: "openadminos/openadmin-8b:latest",
+  };
+  const run: RunRecord = {
+    id: "run", agentSlug: "conditional-access-explainer", status: "failed", queuedAt: "2026-11-19T00:00:00Z",
+    steps: [], logs: [], error: contextTooSmallMessage(failureReason), failureReason,
+  };
+  const { container } = render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Prompt larger than the model's context")).toBeInTheDocument();
+  expect(container.textContent).toContain("41,220 tokens of context and openadminos/openadmin-8b:latest accepts 16,384");
+  expect(container.textContent).toContain("switch to a hosted provider");
+  expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
+  expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
+  expect(container.textContent).not.toContain("!");
 });

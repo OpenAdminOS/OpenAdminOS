@@ -2,7 +2,7 @@ import { IconWarning } from "./icons";
 import { Button } from "./Button";
 import { useReportIssue } from "./ReportIssueModal";
 import type { RunRecord } from "../shared/openAdminOS";
-import { graphAccessDenialFromError } from "@openadminos/agent-sdk";
+import { graphAccessDenialFromError, type ContextTooSmallFailure } from "@openadminos/agent-sdk";
 
 interface Suggestion {
   match: (error: string) => boolean;
@@ -58,10 +58,27 @@ const SUGGESTIONS: Suggestion[] = [
   },
 ];
 
+/** Recovery for a request that did not fit the model, read from the typed reason. */
+function contextTooSmallSuggestion(failure: ContextTooSmallFailure): Suggestion {
+  const tokens = (value: number) => value.toLocaleString("en-US");
+  const model = failure.model ?? "The selected model";
+  return {
+    match: () => true,
+    title: "Prompt larger than the model's context",
+    body:
+      `This run needs about ${tokens(failure.neededTokens)} tokens of context and ${model} accepts ${tokens(failure.limitTokens)}, ` +
+      "so OpenAdminOS stopped before sending anything. Pick a local model with a larger context window in Settings → LLM Providers, " +
+      "switch to a hosted provider (the prompt then leaves this device), or run the agent against a narrower scope, then re-run.",
+  };
+}
+
 export function RunFailureRemediation({ run }: { run: RunRecord }) {
   const openReportIssue = useReportIssue();
   if (run.status !== "failed" || !run.error) return null;
-  const matched = SUGGESTIONS.filter((suggestion) => suggestion.match(run.error!));
+  // A typed reason is exact, so it replaces the message-based guesses.
+  const matched = run.failureReason?.code === "context-too-small"
+    ? [contextTooSmallSuggestion(run.failureReason)]
+    : SUGGESTIONS.filter((suggestion) => suggestion.match(run.error!));
   const accessDenial = run.accessDenial ?? graphAccessDenialFromError(run.error);
   if (accessDenial) {
     matched.unshift({ match: () => true, title: accessDenial.title, body: `${accessDenial.message} ${accessDenial.recovery}` });
