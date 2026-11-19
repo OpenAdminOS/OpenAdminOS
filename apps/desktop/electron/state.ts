@@ -4504,7 +4504,9 @@ export class AppStateStore {
         system:
           "Connectivity smoke test. Reply with exactly: OPENADMINOS_PROVIDER_OK",
         prompt: "Reply with exactly: OPENADMINOS_PROVIDER_OK",
-        maxTokens: 24,
+        // Room for models that always reason first (gpt-oss at low effort
+        // uses about 20 tokens here) to also write the reply.
+        maxTokens: 64,
       });
       const normalized = completion.text.trim();
       const ok = normalized.includes("OPENADMINOS_PROVIDER_OK");
