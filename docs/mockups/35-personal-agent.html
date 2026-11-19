@@ -373,6 +373,33 @@
     .hostpop li { padding: 5px 0; border-top: 1px solid var(--color-border-soft); display: grid; gap: 0; }
     .hostpop li b { font-weight: 500; color: var(--color-warning); overflow-wrap: anywhere; }
     .hostpop li span { font-size: var(--text-xs); color: var(--color-text-muted); }
+    .limit { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 8px; margin: 4px 0 10px; padding: 10px 12px; border-radius: var(--radius-md); background: var(--color-code-bg); font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text-soft); }
+    .limit svg { width: 13px; height: 13px; margin-top: 3px; color: var(--color-warning); }
+    .skillpick { grid-column: 2 / -1; margin: 8px 0 2px; border-radius: var(--radius-md); box-shadow: inset 0 0 0 1px var(--color-border-soft); }
+    .skillpick[hidden] { display: none; }
+    .skillpick .sp { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; align-items: center; padding: 8px 12px; }
+    .skillpick .sp + .sp { border-top: 1px solid var(--color-border-soft); }
+    .skillpick .n { display: block; font-size: var(--text-sm); font-weight: 500; }
+    .skillpick .d { display: block; font-size: var(--text-xs); color: var(--color-text-muted); }
+    .skillpick .sp[data-locked] .n { color: var(--color-text-muted); }
+    .skillpick .lockline { grid-column: 1 / -1; }
+    .tools .tsub { display: block; font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text-muted); }
+    .dialog { border-radius: var(--radius-xl); background: var(--color-bg-elevated); }
+    .dialog header { padding: 18px 22px 0; }
+    .dialog header h2 { margin: 2px 0 0; font-size: var(--text-md); line-height: var(--lh-md); font-weight: 500; }
+    .dialog .body { padding: 8px 22px 4px; font-size: var(--text-sm); line-height: var(--lh-sm); color: var(--color-text-soft); }
+    .dialog footer { display: flex; align-items: center; gap: 8px; padding: 14px 22px 18px; flex-wrap: wrap; }
+    .trv { list-style: none; margin: 12px 0 0; padding: 0; border-radius: var(--radius-md); box-shadow: inset 0 0 0 1px var(--color-border-soft); }
+    .trv li + li { border-top: 1px solid var(--color-border-soft); }
+    .trv label { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 2px 10px; align-items: start; padding: 9px 12px; cursor: pointer; color: var(--color-text); }
+    .trv input { margin: 3px 0 0; accent-color: var(--color-accent); }
+    .trv code { overflow-wrap: anywhere; }
+    .trv .d { display: block; font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text-muted); }
+    .trv .ann { font-size: 11px; line-height: 18px; padding: 0 6px; border-radius: 5px; color: var(--color-text-soft); box-shadow: inset 0 0 0 1px var(--color-border); white-space: nowrap; }
+    .trv .ann.warn { color: var(--color-danger); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-danger) 35%, transparent); }
+    .trv li[data-state="off"] code { color: var(--color-text-muted); text-decoration: line-through; text-decoration-color: var(--color-text-faint); }
+    .trv li[data-off] label { cursor: not-allowed; }
+    @container (max-width: 520px) { .trv label { grid-template-columns: 16px minmax(0, 1fr); } .trv .ann { grid-column: 2; justify-self: start; } }
     .namerr { display: block; margin-top: 6px; font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-danger); }
     .namerr[hidden] { display: none; }
   </style>
@@ -478,10 +505,10 @@
         </div>
       </div>
       <ul class="notes">
-        <li>Decided: a name is 1 to 24 characters of letters, digits, spaces and hyphens. A name that reads as OpenAdminOS or Microsoft is refused, with the reason under the field, and the previous name stays. Clearing the field puts Nova back. Try "Microsoft Helper" or "Nova!" in the field.</li>
+        <li>Decided: a name is 1 to 24 characters of letters, digits, spaces and hyphens. A name that reads as OpenAdminOS or Microsoft is refused, with the reason under the field, and the previous name stays. Clearing the field puts Nova back. Try "Microsoft Helper" or "Nova@" in the field.</li>
         <li>Decided: new policy keys keep the <code>nova</code> prefix, consistent with <code>novaInstructions</code> and <code>novaCapabilities</code>, so <code>novaPersona.language</code> here. Internal ids, the audit types <code>nova.*</code> and the policy keys keep the old name after a rename; the admin never sees them.</li>
         <li>A rename is a configuration audit event. When IT locks the name, the nameplate shows the name without the dashed underline and a lock line under it, like Language here. Locked options are disabled, so they are skipped by Tab, and each points to the lock line that names the key.</li>
-        <li>The strip in this frame names the tool hosts, not "No data leaves this device": servers are granted in B, so their tools are offered and public queries go to those hosts. It is computed from the switches in B.</li>
+        <li>The strip in this frame names the tool hosts, not "No data leaves this device": servers are granted in B, so their tools are offered and queries go to those hosts. It is computed from the switches in B.</li>
         <li>The persona feeds typed Chat as well as voice (Phase B2), so the sample is a Chat answer, not a voice line.</li>
       </ul>
     </section>
@@ -502,11 +529,12 @@
               <div class="grp">
                 <h3>MCP servers <span id="mcpcount">3 of 4 on</span></h3>
                 <div class="colh"><span></span><span></span><span>Use</span><span></span></div>
-                <div class="grant one"><span class="ic"><svg><use href="#i-book"/></svg></span><div><div class="nm">Microsoft Learn</div><div class="ds">Public reference. Receives public queries only, at <span class="host">learn.microsoft.com</span></div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="true" aria-label="Use Microsoft Learn" data-host="learn.microsoft.com"></button></span></div>
-                <div class="grant one"><span class="ic"><svg><use href="#i-book"/></svg></span><div><div class="nm">Splashtop Docs</div><div class="ds">Public reference at <span class="host">support-splashtopbusiness.splashtop.com</span>. Not on your IT department's list, so it is off.</div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="false" disabled aria-disabled="true" aria-describedby="lock-mcp" aria-label="Use Splashtop Docs, set by IT" data-host="support-splashtopbusiness.splashtop.com"></button></span>
+                <div class="grant one"><span class="ic"><svg><use href="#i-book"/></svg></span><div><div class="nm">Microsoft Learn</div><div class="ds">Reference server at <span class="host">learn.microsoft.com</span>. Receives queries with recognized tenant data removed.</div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="true" aria-label="Use Microsoft Learn" data-host="learn.microsoft.com"></button></span></div>
+                <div class="grant one"><span class="ic"><svg><use href="#i-book"/></svg></span><div><div class="nm">Splashtop Docs</div><div class="ds">Reference server at <span class="host">support-splashtopbusiness.splashtop.com</span>. Not on your IT department's list, so it is off.</div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="false" disabled aria-disabled="true" aria-describedby="lock-mcp" aria-label="Use Splashtop Docs, set by IT" data-host="support-splashtopbusiness.splashtop.com"></button></span>
                   <span class="lockline" id="lock-mcp"><svg><use href="#i-lock"/></svg><span>Locked. Set by your IT department in policy.json, <code>allowedPublicReferences</code></span></span></div>
-                <div class="grant one"><span class="ic"><svg><use href="#i-plug"/></svg></span><div><div class="nm">Policy settings reference</div><div class="ds">Added by you on 12 November. Remote server at <span class="host">tools.contoso.example</span>, 6 tools reviewed. It receives public queries only, written without tenant data. Tenant data and the context of an answer never go into its requests.</div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="true" aria-label="Use Policy settings reference" data-host="tools.contoso.example"></button></span></div>
-                <div class="grant one"><span class="ic"><svg><use href="#i-plug"/></svg></span><div><div class="nm">KQL reference</div><div class="ds">Public reference. Receives public queries only, at <span class="host">kql.contoso.example</span></div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="true" aria-label="Use KQL reference" data-host="kql.contoso.example"></button></span></div>
+                <div class="grant one"><span class="ic"><svg><use href="#i-plug"/></svg></span><div><div class="nm">Policy settings reference</div><div class="ds">Added by you on 12 November. Remote server at <span class="host">tools.contoso.example</span>. 4 of its 6 tools approved as read-only; the other 2 are never offered. Receives queries with recognized tenant data removed.</div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="true" aria-label="Use Policy settings reference" data-host="tools.contoso.example"></button></span></div>
+                <div class="grant one"><span class="ic"><svg><use href="#i-plug"/></svg></span><div><div class="nm">KQL reference</div><div class="ds">Reference server at <span class="host">kql.contoso.example</span>. Receives queries with recognized tenant data removed.</div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="true" aria-label="Use KQL reference" data-host="kql.contoso.example"></button></span></div>
+                <p class="limit"><svg><use href="#i-globe"/></svg><span>What a server receives: a query written from your question, with every value the app recognizes as tenant data removed. Text the app cannot recognize, such as an internal project name, can still reach the server. While a server is on, the status strip names its host; turn it off here to stop that.</span></p>
                 <div style="padding:10px 0 0;border-top:1px solid var(--color-border-soft)"><button class="bt secondary sm" type="button">Add a server by URL</button> <span class="xs muted" style="margin-left:8px">Only servers your IT department lists can be added.</span></div>
               </div>
 
@@ -530,8 +558,16 @@
 
               <div class="grp">
                 <h3>Skills and the web</h3>
-                <div class="grant one"><span class="ic"><svg><use href="#i-skill"/></svg></span><div><div class="nm">Skills</div><div class="ds">5 of 6 skills in the library. A skill uses only read tools granted on this page; send tools are never available to skills.</div></div><button class="bt ghost sm" type="button" style="justify-self:center">Choose</button>
-                  <span class="lockline" id="lock-skill"><svg><use href="#i-lock"/></svg><span>Teams summary style is turned off by your IT department in policy.json, <code>novaCapabilities.skills</code></span></span></div>
+                <div class="grant one"><span class="ic"><svg><use href="#i-skill"/></svg></span><div><div class="nm">Skills</div><div class="ds"><span id="skillcount">5 of 6</span> skills in the library. A skill uses only read tools granted on this page; send tools are never available to skills.</div></div><button class="bt ghost sm" type="button" style="justify-self:center" id="skillbtn" aria-expanded="true" aria-controls="skillpick">Choose</button>
+                  <div class="skillpick" id="skillpick">
+                    <div class="sp"><span><span class="n">Stale device triage</span><span class="d">This device, v3</span></span><button class="sw" role="switch" aria-checked="true" aria-label="Use Stale device triage" data-skill></button></div>
+                    <div class="sp"><span><span class="n">Morning compliance check</span><span class="d">This device, v4</span></span><button class="sw" role="switch" aria-checked="true" aria-label="Use Morning compliance check" data-skill></button></div>
+                    <div class="sp"><span><span class="n">Autopilot failure triage</span><span class="d">Imported, v2</span></span><button class="sw" role="switch" aria-checked="true" aria-label="Use Autopilot failure triage" data-skill></button></div>
+                    <div class="sp"><span><span class="n">Licence reclaim shortlist</span><span class="d">Woodgrove Bank, v2</span></span><button class="sw" role="switch" aria-checked="true" aria-label="Use Licence reclaim shortlist" data-skill></button></div>
+                    <div class="sp"><span><span class="n">Conditional Access gaps</span><span class="d">This device, v1</span></span><button class="sw" role="switch" aria-checked="true" aria-label="Use Conditional Access gaps" data-skill></button></div>
+                    <div class="sp" data-locked><span><span class="n">Teams summary style</span><span class="d">This device, v1</span></span><button class="sw" role="switch" aria-checked="false" disabled aria-disabled="true" aria-describedby="lock-skill" aria-label="Use Teams summary style, set by IT" data-skill></button>
+                      <span class="lockline" id="lock-skill"><svg><use href="#i-lock"/></svg><span>Locked off. Set by your IT department in policy.json, <code>novaCapabilities.skills</code></span></span></div>
+                  </div></div>
                 <div class="grant one"><span class="ic"><svg><use href="#i-globe"/></svg></span><div><div class="nm">Web search</div><div class="ds">Off. Search words would go to the search provider.</div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="false" disabled aria-disabled="true" aria-describedby="lock-web" aria-label="Web search, set by IT"></button></span>
                   <span class="lockline" id="lock-web"><svg><use href="#i-lock"/></svg><span>Locked. Set by your IT department in policy.json, <code>novaCapabilities.webSearch</code></span></span></div>
               </div>
@@ -541,12 +577,41 @@
           </div>
         </div>
       </div>
+      <div class="two" style="margin-top:16px">
+        <div style="display:grid;gap:12px;align-content:start">
+          <p class="cardcap" style="margin:0">Add a server by URL, the tool review</p>
+          <div class="win" style="min-height:0">
+            <div class="dialog" role="dialog" aria-labelledby="tr-t" style="width:100%;box-shadow:none;border-radius:12px">
+              <header><span class="xs muted">Step 2 of 2, tools.contoso.example</span><h2 id="tr-t">Which tools may <span data-name>Nova</span> use?</h2></header>
+              <div class="body">
+                <p>The server offers 6 tools. Approve only tools that read. The server's own read-only label is shown, but it does not approve a tool: a tool you leave unapproved is never offered, and every call is checked against this list, including calls from skills and scheduled checks.</p>
+                <ul class="trv" id="trv">
+                  <li><label><input type="checkbox" checked><span><code>mcp__policy-settings__search_settings</code><span class="d">Searches setting names and descriptions</span></span><span class="ann">Labelled read-only</span></label></li>
+                  <li><label><input type="checkbox" checked><span><code>mcp__policy-settings__get_setting</code><span class="d">Returns one setting with its allowed values</span></span><span class="ann">Labelled read-only</span></label></li>
+                  <li><label><input type="checkbox" checked><span><code>mcp__policy-settings__list_baselines</code><span class="d">Lists security baseline versions</span></span><span class="ann">Labelled read-only</span></label></li>
+                  <li><label><input type="checkbox" checked><span><code>mcp__policy-settings__compare_baselines</code><span class="d">Compares two baseline versions</span></span><span class="ann">Labelled read-only</span></label></li>
+                  <li><label><input type="checkbox"><span><code>mcp__policy-settings__export_report</code><span class="d">Saves a report on the server and returns a link. Labelled read-only, but it stores what it is sent, so you left it unapproved.</span></span><span class="ann">Labelled read-only</span></label></li>
+                  <li data-off><label><input type="checkbox" disabled aria-disabled="true" aria-describedby="trv-why"><span><code>mcp__policy-settings__apply_setting</code><span class="d" id="trv-why">Changes a setting. The server says so, and a tool that changes data cannot be approved; changes go through agents and diff confirmation.</span></span><span class="ann warn">Labelled as a change</span></label></li>
+                </ul>
+              </div>
+              <footer><span class="xs muted" id="trv-count" aria-live="polite" style="margin-right:auto"></span><button class="bt ghost" type="button">Back</button><button class="bt primary" type="button" id="trv-ok"></button></footer>
+            </div>
+          </div>
+        </div>
+        <ul class="notes" style="margin-top:22px">
+          <li>Decided: in the first version a user-added server offers only the tools the admin approves as read-only at add time. The tool's read-only label from the server is shown in each row but never approves a tool on its own.</li>
+          <li>A tool that is not approved is never offered to the model. The approval is checked again at every call, whether it comes from Chat, a skill or a scheduled check, so a skill that names <code>mcp__policy-settings__export_report</code> cannot use it.</li>
+          <li>A tool the server labels as a change cannot be approved at all. When the server later adds or relabels a tool, the new tool stays off until the admin reviews it here.</li>
+          <li>The review can be reopened from the server's row in Access; approving a tool later is the same step.</li>
+        </ul>
+      </div>
       <ul class="notes">
         <li>The strip is derived from the grants: it names the host of every server switched on, and drops a host the moment its switch goes off. Try it on the MCP switches. In a narrow window the strip shows the count, and pressing it lists every host.</li>
-        <li>Remote MCP servers, catalog or added by URL, receive public queries only. The query writer from SPEC (Marketplace MCP, query writer boundary) writes each request from the admin's current question and the tool's schema; tenant data, earlier answers and the answer's context never go into it, and the egress check runs on what it writes.</li>
+        <li>Decided, the honest boundary for remote MCP servers, catalog or added by URL: each request is written by the query writer from SPEC (Marketplace MCP, query writer boundary) from the admin's question and the tool's schema, with every value the app recognizes as tenant data removed, and the egress check runs on what it writes. Text the app cannot recognize, such as an internal project name, can still reach the server. The grant copy says this in those words, the strip names the host whenever the server's tools are offered, and the admin can turn the server off.</li>
         <li>Decided: every connector send is confirmed message by message. A send is only ever proposed by the agent on a card that shows the exact message and channel; there is no "allow further sends" option, and skills can never use a send tool.</li>
         <li>Microsoft 365 has no Send switch: changes to a tenant are never a connector send. The cell says so in words instead of showing a disabled switch.</li>
         <li>Every grant type has a managed state: MCP server (<code>allowedPublicReferences</code>), connector read (<code>novaCapabilities.connectorReads</code>), connector send (<code>novaCapabilities.connectorSends</code>), agent (<code>novaCapabilities.startAgents</code>, here as a list of agents), skill (<code>novaCapabilities.skills</code>) and web search (<code>novaCapabilities.webSearch</code>). Locked switches are disabled, keep their state visible and point to the line that names the key. <code>connectorReads</code> and <code>skills</code> are new keys, and <code>startAgents</code> gains a list form like <code>connectorSends</code>.</li>
+        <li>Choose opens the skill chooser in place. Each skill has its own switch; one that IT turned off keeps its switch, disabled, with the lock line under it naming the key, and stays in the library.</li>
         <li>Below 600 px of content width the column heads go and each switch carries its own label.</li>
       </ul>
     </section>
@@ -591,12 +656,10 @@
                     </ol>
                     <div class="tools">
                       <span class="xs muted" style="border-top:0">Tools it may use</span><span class="xs muted" style="border-top:0;text-align:right">With <span data-name>Nova</span>'s access</span>
-                      <code>graph.read managedDevices</code><span class="ok">Granted</span>
-                      <code>graph.read signIns</code><span class="ok">Granted</span>
-                      <code>graph.read windowsAutopilotDeviceIdentities</code><span class="ok">Granted</span>
+                      <span><code>graph_get</code><span class="tsub">Limited to managedDevices, signIns and windowsAutopilotDeviceIdentities, from the skill's metadata</span></span><span class="ok">Granted, reads only</span>
                       <code>mcp__microsoft-learn__microsoft_docs_search</code><span class="ok">Granted</span>
                     </div>
-                    <p class="xs muted" style="margin-top:12px">Skills read; they never change a tenant and never send. A tool that names a change, such as <code>devices.retire</code>, is removed on import and refused on save. A send tool, such as <code>teams.send</code>, is kept in the file but never available to a skill, whatever Access grants. Sends are only ever proposed by <span data-name>Nova</span> on a card you confirm message by message.</p>
+                    <p class="xs muted" style="margin-top:12px">Skills read; they never change a tenant and never send. A tool that names a change, such as <code>graph_post</code>, is removed on import and refused on save. A send tool, such as <code>teams_send</code>, is kept in the file but never available to a skill, whatever Access grants. Sends are only ever proposed by <span data-name>Nova</span> on a card you confirm message by message.</p>
                   </div>
                   <div class="tabpane" data-pane="md" hidden>
 <pre class="src"><span class="fm">---</span>
@@ -604,15 +667,17 @@
 <span class="k">description:</span> Sorts Intune devices that stopped checking in into
   replaced, lost and asleep. Use when asked about inactive, stale or
   missing devices, or before any retire or wipe is discussed.
-<span class="k">allowed-tools:</span> graph.read managedDevices, graph.read signIns,
-  graph.read windowsAutopilotDeviceIdentities,
-  mcp__microsoft-learn__microsoft_docs_search
+<span class="k">allowed-tools:</span> graph_get mcp__microsoft-learn__microsoft_docs_search
 <span class="k">metadata:</span>
   <span class="k">version:</span> "3"
-  <span class="k">scope:</span> device
+  <span class="k">openadminos-scope:</span> device
+  <span class="k">openadminos-graph-resources:</span> managedDevices signIns windowsAutopilotDeviceIdentities
 <span class="fm">---</span>
 
 <span class="h"># Stale device triage</span>
+
+Read Intune managed devices, Entra sign-ins and Autopilot device
+identities with graph_get. Nothing else.
 
 1. List devices with no check-in for the number of days asked, 30 if none.
 2. For each primary user, look for a sign-in from another device in the
@@ -640,21 +705,22 @@
           <div class="top"><svg width="14" height="14"><use href="#i-down"/></svg><span class="kind">Import review</span><span>intune-app-triage/SKILL.md</span></div>
           <div class="in">
             <h3>Import App install triage</h3>
-            <p>The file is valid SKILL.md. Two of its tools need attention before it is saved.</p>
+            <p>The file is valid SKILL.md. Three of its tools need attention before it is saved.</p>
             <div class="tools">
-              <code>graph.read mobileAppInstallStatuses</code><span class="ok">Granted</span>
+              <code>graph_get</code><span class="ok">Granted, reads only</span>
               <code>find-inactive-devices</code><span class="ok">Agent, granted</span>
-              <code>servicenow.send</code><span class="off">A send, never available to skills</span>
-              <code>apps.assign</code><span class="no">A change, removed</span>
+              <code>mcp__policy-settings__export_report</code><span class="off">Not approved on its server, never offered</span>
+              <code>servicenow_send</code><span class="off">A send, never available to skills</span>
+              <code>graph_post</code><span class="no">A change, removed</span>
             </div>
-            <p class="why" style="margin-top:8px">The skill is kept. <code>servicenow.send</code> stays in the file so an export round-trips, but it is unavailable to this skill even if Access grants ServiceNow sends.</p>
+            <p class="why" style="margin-top:8px">The skill is kept. <code>servicenow_send</code> and <code>mcp__policy-settings__export_report</code> stay in the file so an export round-trips, but this skill cannot use them: a send is never available to skills, and an MCP tool is offered only after its approval on the server.</p>
           </div>
-          <div class="acts"><button class="bt primary sm" type="button">Import without apps.assign</button><button class="bt ghost sm" type="button">Cancel</button><span class="r">Saved for this device</span></div>
+          <div class="acts"><button class="bt primary sm" type="button">Import without graph_post</button><button class="bt ghost sm" type="button">Cancel</button><span class="r">Saved for this device</span></div>
         </div>
         <ul class="notes" style="margin-top:0">
-          <li>Imports accept a SKILL.md file or a folder that holds one. Export writes the same format, with the version in <code>metadata</code>.</li>
+          <li>Imports accept a SKILL.md file or a folder that holds one. Export writes the same format, with the version and the app's own keys in <code>metadata</code>.</li>
           <li>A tool outside the grants in B is kept in the file but never offered. A tool that changes a tenant is removed on import, and the card says which. A send tool is kept but marked unavailable to skills regardless of grants; only the agent itself proposes a send, on a card confirmed message by message.</li>
-          <li>Decided: in <code>allowed-tools</code>, MCP tools are written <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>, as Chat offers them, and agents by their slug, such as <code>find-inactive-devices</code>.</li>
+          <li>Decided: <code>allowed-tools</code> is the standard space-delimited list of tool ids: <code>graph_get</code>, MCP tools as <code>mcp__&lt;server&gt;__&lt;tool&gt;</code> the way Chat offers them, and agents by their slug, such as <code>find-inactive-devices</code>. Which Graph resources a skill reads is not part of a tool id. It goes in the instructions and in the namespaced key <code>openadminos-graph-resources</code> under <code>metadata</code>, and the app limits <code>graph_get</code> to that list.</li>
           <li>Scope is This device or one organization. An organization skill only loads while that organization is active.</li>
           <li>A skill that is not granted, or that IT turned off, stays in the library, dimmed, so it is not lost.</li>
         </ul>
@@ -685,7 +751,7 @@
                   <dl class="kv">
                     <dt>Name</dt><dd>Stale device triage</dd>
                     <dt>Steps</dt><dd>List devices without a check-in. Leave out kiosks. Look for a sign-in from another device. Group as replaced, lost, asleep.</dd>
-                    <dt>Tools</dt><dd><code>graph.read managedDevices</code>, <code>graph.read signIns</code></dd>
+                    <dt>Tools</dt><dd><code>graph_get</code> on managedDevices and signIns</dd>
                     <dt>Scope</dt><dd>This device, all organizations</dd>
                   </dl>
                 </div>
@@ -773,7 +839,7 @@
             <div class="chk"><div class="nm">Expiring app secrets <span class="ro">Read-only</span></div><div class="ds skip"><span class="st">Missed Sunday at 06:30:</span> the app was closed. Not run late; the next run is tomorrow at 06:30.</div><div class="a"><button class="bt ghost sm" type="button">Run now</button><button class="bt ghost sm" type="button">Stop</button></div></div>
             <div class="chk"><div class="nm">New global administrators <span class="ro">Read-only</span></div><div class="ds">Daily at 06:30. Last run found 0.</div><div class="a"><button class="bt ghost sm" type="button">Stop</button></div></div>
             <div class="orgh"><span class="av">CO</span><h3>Contoso</h3><span class="r">1 of 5 checks</span></div>
-            <div class="chk"><div class="nm">Stale devices <span class="ro">Read-only</span></div><div class="ds skip"><span class="st">Skipped today at 07:00:</span> Contoso was not the active organization. It runs at the next time Contoso is active.</div><div class="a"><button class="bt secondary sm" type="button">Switch to Contoso</button></div></div>
+            <div class="chk"><div class="nm">Stale devices <span class="ro">Read-only</span></div><div class="ds skip"><span class="st">Skipped today at 07:00:</span> Contoso was not the active organization. It runs at the next scheduled time when Contoso is active and its services are connected. Switching to Contoso does not run it.</div><div class="a"><button class="bt ghost sm" type="button">Stop</button></div></div>
             <div class="orgh"><span class="av">TT</span><h3>Tailspin Toys</h3><span class="r">1 of 5 checks</span></div>
             <div class="chk"><div class="nm">Unassigned Autopilot devices <span class="ro">Read-only</span></div><div class="ds skip"><span class="st">Skipped today at 07:30:</span> the sign-in for Tailspin Toys expired yesterday. Sign in again; restarting asks you to confirm.</div><div class="a"><button class="bt secondary sm" type="button">Sign in</button></div></div>
             <div class="orgh"><span class="av">FA</span><h3>Fabrikam</h3><span class="r">Stopped</span></div>
@@ -839,6 +905,7 @@
         <li>A check never runs a write step. A finding that calls for a change becomes a Plan button, which starts the normal write flow on this device.</li>
         <li>The active organization is in the frame's top bar, as everywhere. A run whose organization is not the active one, or is disconnected or has an expired sign-in, does not start; the list says which and why, with the one action that fixes it.</li>
         <li>Decided: checks run while the app is open. A run missed while it was closed is listed as missed and never caught up silently; Run now is the admin's choice.</li>
+        <li>A check skipped because its organization was not active runs at its next scheduled time when that organization is active and its services are connected. Switching organizations never replays it, which is why Contoso's row offers no switch.</li>
         <li>Decided: the daily brief does not count against the 5 recurring checks. Woodgrove Bank has the brief and 3 checks, so its meter reads 3 of 5.</li>
         <li>Starting a check, turning on the brief and restarting after a reconnect each need an explicit click on a card. Reconnecting alone restarts nothing.</li>
         <li>The cap is shown as a small meter beside each organization and on the card that adds a check, so nobody learns about it from an error.</li>
@@ -884,9 +951,9 @@
       if (!hosts.length) return '<span class="boundary" data-where="local"><span class="pip"></span>Local · Ollama · No data leaves this device</span>';
       const id = `hosts-${++popSeq}`;
       const n = hosts.length;
-      const label = `Local · Ollama · public queries to ${hosts.join(", ")}`;
-      return `<button type="button" class="boundary" data-where="local" aria-expanded="false" aria-controls="${id}" aria-label="${label}. Show tool hosts"><span class="pip"></span>Local · Ollama<span class="leaves"><span class="bw">· public queries to ${hosts.join(", ")}</span><span class="bs">· ${n} tool ${n === 1 ? "host" : "hosts"}</span></span></button>
-        <div class="hostpop" id="${id}" role="dialog" aria-label="Tool hosts" hidden><h4>The model runs on this device</h4><p class="xs muted">Tools granted in Access send public queries, written without tenant data, to:</p><ul>${hosts.map((h) => `<li><b>${h}</b><span>Public queries only</span></li>`).join("")}</ul><p class="xs muted">Turn a server off in Access and its host leaves this list.</p></div>`;
+      const label = `Local · Ollama · queries to ${hosts.join(", ")}`;
+      return `<button type="button" class="boundary" data-where="local" aria-expanded="false" aria-controls="${id}" aria-label="${label}. Show tool hosts"><span class="pip"></span>Local · Ollama<span class="leaves"><span class="bw">· queries to ${hosts.join(", ")}</span><span class="bs">· ${n} tool ${n === 1 ? "host" : "hosts"}</span></span></button>
+        <div class="hostpop" id="${id}" role="dialog" aria-label="Tool hosts" hidden><h4>The model runs on this device</h4><p class="xs muted">Tools granted in Access send queries to these hosts, written from your question with every value the app recognizes as tenant data removed. Text it cannot recognize, such as an internal project name, can still be sent.</p><ul>${hosts.map((h) => `<li><b>${h}</b><span>Recognized tenant data removed</span></li>`).join("")}</ul><p class="xs muted">Turn a server off in Access and its host leaves this list.</p></div>`;
     }
     function renderStrips() {
       const hosts = grantedHosts();
@@ -973,7 +1040,31 @@
       if (s.disabled) return;
       s.setAttribute("aria-checked", String(s.getAttribute("aria-checked") !== "true"));
       if (s.dataset.host) renderStrips();
+      if ("skill" in s.dataset) {
+        const all = document.querySelectorAll(".sw[data-skill]");
+        document.getElementById("skillcount").textContent = `${[...all].filter((x) => x.getAttribute("aria-checked") === "true").length} of ${all.length}`;
+      }
     }));
+    const skillBtn = document.getElementById("skillbtn");
+    skillBtn.addEventListener("click", () => {
+      const open = skillBtn.getAttribute("aria-expanded") !== "true";
+      skillBtn.setAttribute("aria-expanded", String(open));
+      document.getElementById("skillpick").hidden = !open;
+    });
+
+    // Tool review: only approved tools are offered; a tool labelled as a change cannot be approved.
+    const trv = document.getElementById("trv");
+    const trvSync = () => {
+      const boxes = [...trv.querySelectorAll("input")];
+      const ok = boxes.filter((b) => b.checked).length;
+      document.getElementById("trv-count").textContent = `${ok} approved, ${boxes.length - ok} never offered`;
+      const btn = document.getElementById("trv-ok");
+      btn.textContent = ok ? `Add server with ${ok} ${ok === 1 ? "tool" : "tools"}` : "Approve a tool to add the server";
+      btn.disabled = !ok;
+      trv.querySelectorAll("li").forEach((li) => { li.dataset.state = li.querySelector("input").checked ? "on" : "off"; });
+    };
+    trv.addEventListener("change", trvSync);
+    trvSync();
 
     // Skill detail tabs
     document.querySelectorAll(".tabs").forEach((t) => t.addEventListener("click", (e) => {
