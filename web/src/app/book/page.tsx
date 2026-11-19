@@ -29,7 +29,7 @@ const CALLS = [
     id: "demo",
     meta: "30 minutes · Free · Microsoft Teams",
     title: "Book a demo",
-    text: "A walkthrough of OpenAdminOS with the maintainer. Bring your questions and your use case.",
+    text: "A walkthrough of OpenAdminOS with us. Bring your questions and your use case.",
     points: [
       "Agents answering questions about a Microsoft 365 tenant",
       "How write agents pause for approval before any change",
@@ -79,7 +79,7 @@ export default function BookPage() {
         tone="clay"
         eyebrow="Book a call"
         title="See it run, or leave with your own agent."
-        description="Two free calls with the maintainer. A short demo of the app, or a longer session where we build an agent for one of your tasks together."
+        description="Two free calls with us. A short demo of the app, or a longer session where we build an agent for one of your tasks together."
       />
 
       <div className="mt-12 grid gap-6 md:grid-cols-2">
