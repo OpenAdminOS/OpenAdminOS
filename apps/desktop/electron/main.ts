@@ -3193,6 +3193,9 @@ function notificationBodyForRun(run: RunRecord): string {
 async function refreshRegistryInBackground(
   trigger: "startup" | "interval" | "focus",
 ): Promise<void> {
+  // CI smoke runs use local agents and the seeded Office registry cache.
+  if (isIntuneChatSmokeLaunch || isReportIssueSmokeLaunch ||
+      (isScreenshotCaptureLaunch && process.env.OPENADMINOS_OFFICE_SMOKE === "1")) return;
   lastBackgroundRefreshAt = Date.now();
   try {
     const result = await store.initRegistry();

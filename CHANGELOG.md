@@ -81,7 +81,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Fixed
 
 - Electron and runtime tests isolate provider CLI launches and HTTP requests from developer installations, endpoints, and proxies. HTTP requires a test fixture or an explicitly allowed origin in an opt-in live MCP probe. Blocked calls fail the test run even when code catches them.
-- Electron smoke tests disable background model downloads and verify that startup leaves local model services untouched.
+- Electron smoke tests disable background model downloads and block accidental provider launches and unregistered HTTP requests from the Electron main process, including when real model servers are already running.
 
 - Model scan and Gemini connectivity tests use only fixture executables, so a developer's installed provider CLI cannot receive a test prompt.
 - Chat's model choice shows a provider whose check failed as Could not check with its reason and Retry, as the model scan does, instead of leaving LM Studio, Lemonade, Apple Intelligence or a hosted CLI out and showing Ollama as having no model; an endpoint outside this device that the scan did not contact shows as Not checked, without Retry; a signed-in tool that cannot answer, such as a Copilot model set by IT that the account cannot use, shows as Unavailable with the reason instead of Signed in.

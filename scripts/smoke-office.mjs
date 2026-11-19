@@ -35,7 +35,7 @@ try {
   pipeProcess(renderer, "renderer");
   await waitForHttp(rendererUrl, 20_000);
 
-  providerIsolation = await isolateSmokeProviders();
+  providerIsolation = await isolateSmokeProviders(rendererUrl);
   const electronArgs = ["apps/desktop"];
   // Linux CI containers cannot install Electron's helper as root-owned setuid.
   // This flag is confined to the synthetic capture process, never the packaged app.

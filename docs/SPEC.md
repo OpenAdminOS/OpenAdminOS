@@ -98,6 +98,13 @@ A caught violation still fails the test process, including after the last
 test's teardown. Electron state tests use a shared fixture that supplies a
 stub provider list unless they exercise discovery with guarded fixtures.
 
+The CI smoke scripts preload the same guard in the development Electron
+main process before importing the app. The guard allows Node HTTP and
+Fetch requests only to loopback origins supplied by the harness for that
+run. The harness checks a per-run file for startup confirmation and any
+blocked attempts, including errors caught by the app. The preload lives
+in the repository's smoke tooling, outside the packaged app.
+
 ### Public roadmap
 
 The public roadmap is the `/roadmap` page of the Next.js app in `web/`, served at the root of `roadmap.openadminos.com` by a host rewrite in `web/next.config.js` (the same pattern as the docs host). Other page paths on that host redirect to the main site, and `/roadmap` on the main site redirects to the roadmap host. The page lists ordered stages without dates, release numbers or pricing; every item has a public GitHub issue. Stage content lives in `web/src/app/roadmap/stages.ts`.

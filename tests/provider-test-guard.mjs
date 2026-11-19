@@ -34,7 +34,9 @@ const fixtureSpawnObservers = new Map();
 const servers = new Map();
 const refusedOrigins = new Set();
 const liveMcpOrigins = new Set();
+const smokeOrigins = new Set();
 const unexpected = [];
+let recordViolation;
 let reported = 0;
 let installed = false;
 const systemHelpers = new Map([["where.exe", "where.exe"], ["taskkill", "taskkill.exe"]]);
@@ -91,6 +93,7 @@ function isFixture(path) {
 
 function blocked(message) {
   unexpected.push(message);
+  recordViolation?.(message);
   process.exitCode = 1;
   return new Error(message);
 }
@@ -189,7 +192,7 @@ function checkHttpTarget(method, url, path = url.pathname) {
     const cause = Object.assign(new Error("Connection refused"), { code: "ECONNREFUSED" });
     throw method === "fetch" ? new TypeError("fetch failed", { cause }) : cause;
   }
-  if (liveMcpOrigins.has(url.origin)) return;
+  if (liveMcpOrigins.has(url.origin) || smokeOrigins.has(url.origin)) return;
 
   const fixture = [...servers].some(([server, { protocol, host, ipv6Only }]) => {
     const address = server.address();
@@ -227,7 +230,6 @@ function checkedNodeRequest(method, protocol, agent, args) {
 }
 
 function guardHttp({ directHttpAgent, directHttpsAgent, directDispatcher }) {
-  trackTestServers();
   for (const [httpModule, protocol, agent] of [[http, "http:", directHttpAgent], [https, "https:", directHttpsAgent]]) {
     for (const method of ["request", "get"]) {
       const original = httpModule[method];
@@ -295,8 +297,7 @@ function isolateProxies() {
   return { directHttpAgent, directHttpsAgent, directDispatcher, restore };
 }
 
-export function installProviderTestGuard() {
-  if (installed) return;
+function installGuard() {
   installed = true;
   const direct = isolateProxies();
   guardChildren();
@@ -309,6 +310,24 @@ export function installProviderTestGuard() {
     process.exitCode = 1;
     writeSync(2, `Provider test guard violations:\n${unexpected.join("\n")}\n`);
   });
+}
+
+export function installSmokeProviderGuard({ origins, onBlocked }) {
+  assert.ok(!installed, "The provider guard is already installed.");
+  for (const origin of origins) {
+    const url = new URL(origin);
+    assert.equal(url.protocol, "http:");
+    assert.equal(url.hostname, "127.0.0.1");
+    smokeOrigins.add(url.origin);
+  }
+  recordViolation = onBlocked;
+  installGuard();
+}
+
+export function installProviderTestGuard() {
+  if (installed) return;
+  installGuard();
+  trackTestServers();
 
   let restoreOverrides;
   const guardedFetch = globalThis.fetch;
