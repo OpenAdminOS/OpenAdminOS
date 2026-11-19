@@ -423,6 +423,17 @@ test("Graph credential route aliases preserve response classes", () => {
   }
 });
 
+for (const path of ["/deviceManagement/comanagedDevices", "/me/managedDevices", "/users/fixture-user/managedDevices"]) {
+  test(`classifies managed device fields through ${path}`, () => {
+    const row = { activationLockBypassCode: "opaque", deviceName: "workstation", operatingSystem: "Windows" };
+    const expected = { "/activationLockBypassCode": "credential", "/deviceName": "device", "/operatingSystem": "configuration" };
+    const graphPath = `/beta${path}`;
+    assert.deepEqual(classifyData({ value: [row] }, { graphPath }).classes,
+      Object.fromEntries(Object.entries(expected).map(([key, kind]) => [`/value/0${key}`, kind])));
+    assert.deepEqual(classifyData(row, { graphPath: `${graphPath}/fixture-device?$select=deviceName` }).classes, expected);
+  });
+}
+
 test("security fields retain distinct mask roles and principals retain identity", () => {
   for (const graphPath of ["/policies/authorizationPolicy", "/deviceManagement/deviceCompliancePolicies"]) {
     const result = classifyData({ displayName: "Tenant policy", blocked: true, groupId: "group-1" }, { graphPath });
