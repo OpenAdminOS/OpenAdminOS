@@ -116,7 +116,7 @@ it("gives the overall deadline during a streaming answer the Ollama generation p
   expect(screen.queryByText("Ollama did not report the model's context limit")).not.toBeInTheDocument();
 });
 
-it.each(["/api/showroom", "/api/show.v1", "/api/show-1"])("does not read an endpoint prefix %s as the context limit lookup", (prefix) => {
+it.each(["/api/showroom", "/api/show.v1", "/api/show-1", "/api/show staging"])("does not read an endpoint prefix %s as the context limit lookup", (prefix) => {
   const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: `Ollama timed out after 180000ms at http://127.0.0.1:8080${prefix}/api/chat.` };
   render(<RunFailureRemediation run={run} />);
   expect(screen.getByText("Ollama generation timed out")).toBeInTheDocument();
