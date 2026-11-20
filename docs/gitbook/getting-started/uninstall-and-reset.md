@@ -76,14 +76,30 @@ A few details:
   finished only by the installed app; a development build that opens the same
   folder first shows **Reset did not finish** and leaves it alone.
 
+## Before removing files by hand
+
+Removing folders by hand skips the checks the in-app reset makes. Check first,
+and stop if any of these applies:
+
+- The data folder or a cache folder is a link, or something is mounted at it
+  or inside it. Removing through it would delete files wherever it points.
+  On macOS check with `ls -ld <folder>` and `mount | grep -i openadmin`; on
+  Linux with `ls -ld <folder>` and `findmnt -R <folder>`. Unmount first, or
+  remove only the link itself. The Windows script below checks for links.
+- `policy.json` in the data folder is a link (`ls -l` shows an arrow; on
+  Windows the script stops on it). Removing the other files can break the IT
+  policy; ask whoever manages the device first.
+
 ## Uninstall on macOS
 
 1. Reset OpenAdminOS in the app as described above, then quit it, including
    the menu bar companion.
 2. Drag OpenAdminOS from Applications to the Bin.
 
-To remove everything by hand instead, quit OpenAdminOS and run these commands
-in Terminal before you install or open it again. Delete the Keychain item
+To remove everything by hand instead, make the checks in
+[Before removing files by hand](#before-removing-files-by-hand), quit
+OpenAdminOS and run these commands in Terminal before you install or open it
+again. Delete the Keychain item
 before the next launch: a new install that finds the old key can read any
 token files that are still there.
 
@@ -115,18 +131,27 @@ General > Login Items** if it is still listed.
    **Uninstall**.
 
 The uninstaller removes the app but keeps its data, and an update never
-removes it. To remove everything by hand instead, quit OpenAdminOS and run
-this in PowerShell:
+removes it. To remove everything by hand instead, make the checks in
+[Before removing files by hand](#before-removing-files-by-hand) and quit
+OpenAdminOS.
+
+The scheduled task has the same name for every account on the machine. Check
+whose it is first, and delete it only if **Run As User** is your account:
 
 ```powershell
+schtasks /Query /TN "OpenAdminOS Scheduler" /V /FO LIST
 schtasks /Delete /TN "OpenAdminOS Scheduler" /F
+```
 
+Then run this in PowerShell:
+
+```powershell
 # Removes a folder's contents without following links: a junction or
-# symbolic link is removed as a link (cmd rmdir), never entered.
+# symbolic link is removed as a link, never entered.
 function Remove-OpenAdminOSContents([string]$Path, [string[]]$Keep = @()) {
   Get-ChildItem -LiteralPath $Path -Force | Where-Object { $Keep -notcontains $_.Name } | ForEach-Object {
     if ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-      if ($_.PSIsContainer) { cmd /c rmdir "$($_.FullName)" } else { Remove-Item -LiteralPath $_.FullName -Force }
+      if ($_.PSIsContainer) { [IO.Directory]::Delete($_.FullName, $false) } else { Remove-Item -LiteralPath $_.FullName -Force }
     } elseif ($_.PSIsContainer) {
       Remove-OpenAdminOSContents $_.FullName
       Remove-Item -LiteralPath $_.FullName -Force
@@ -136,30 +161,41 @@ function Remove-OpenAdminOSContents([string]$Path, [string[]]$Keep = @()) {
   }
 }
 
-foreach ($folder in @("$env:APPDATA\OpenAdminOS", "$env:LOCALAPPDATA\@openadminosdesktop-updater")) {
-  $item = Get-Item -LiteralPath $folder -Force -ErrorAction SilentlyContinue
-  if (-not $item) { continue }
-  if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-    "$folder is a link to $($item.Target). Check that folder before removing anything in it."
-  } else {
-    Remove-OpenAdminOSContents $folder -Keep @("policy.json")
+$data = "$env:APPDATA\OpenAdminOS"
+$cache = "$env:LOCALAPPDATA\@openadminosdesktop-updater"
+$policy = Get-Item -LiteralPath "$data\policy.json" -Force -ErrorAction SilentlyContinue
+if ($policy -and ($policy.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+  "policy.json is a link to $($policy.Target). Ask whoever manages this device before removing anything."
+} else {
+  foreach ($folder in @($data, $cache)) {
+    $item = Get-Item -LiteralPath $folder -Force -ErrorAction SilentlyContinue
+    if (-not $item) { continue }
+    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+      "$folder is a link to $($item.Target). Check that folder before removing anything in it."
+    } elseif ($folder -eq $data) {
+      Remove-OpenAdminOSContents $folder -Keep @("policy.json")
+    } else {
+      Remove-OpenAdminOSContents $folder
+    }
   }
 }
 ```
 
-The script keeps `policy.json`, the IT policy file. It stops at a data or
-cache folder that is a junction or link, because removing through it would
-delete files wherever it points, and it removes links inside the folders as
-links, without entering them. If no one manages the device and the folder is
-not a link, you can remove the whole `%APPDATA%\OpenAdminOS` folder. The
-encryption key that protects the sign-ins is in that folder (`Local State`),
-so removing the folder also makes any copied token files unreadable.
+The script keeps `policy.json`, the IT policy file, and stops when it is a
+link. It stops at a data or cache folder that is a junction or link, because
+removing through it would delete files wherever it points, and it removes
+links inside the folders as links, without entering them. If no one manages
+the device and the folder is not a link, you can remove the whole
+`%APPDATA%\OpenAdminOS` folder. The encryption key that protects the sign-ins
+is in that folder (`Local State`), so removing the folder also makes any
+copied token files unreadable.
 
 ## Uninstall on Linux
 
 Remove the package (`sudo apt remove openadminos`, your package manager, or
-the AppImage file), then remove `~/.config/OpenAdminOS` and
-`~/.cache/@openadminosdesktop-updater`. The key that protects the sign-ins is
+the AppImage file). Then make the checks in
+[Before removing files by hand](#before-removing-files-by-hand) and remove
+`~/.config/OpenAdminOS` and `~/.cache/@openadminosdesktop-updater`. The key that protects the sign-ins is
 kept by your keyring (GNOME Keyring or KWallet). Neither the in-app reset nor
 removing the package deletes it: remove the OpenAdminOS entry with your
 keyring tool if you want it gone. Without the token files it protects nothing.
