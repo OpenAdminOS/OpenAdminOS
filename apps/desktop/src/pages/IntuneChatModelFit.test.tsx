@@ -223,7 +223,8 @@ describe("IntuneChat model fit (mockup 36)", () => {
           type: "started",
           conversation,
           userMessage: { id: "user-x", conversationId: conversation.id, role: "user", content: input.content, status: "completed", createdAt: conversation.createdAt },
-          assistantMessage: { id: "assistant-x", conversationId: conversation.id, role: "assistant", content: "", status: "streaming", createdAt: conversation.createdAt, providerId: "openai", model: "gpt-5" },
+          assistantMessage: { id: "assistant-x", conversationId: conversation.id, role: "assistant", content: "", status: "streaming", createdAt: conversation.createdAt, providerId: "openai", model: "gpt-5",
+            switchedFrom: { providerId: "ollama", model: "llama3.1", reason: "context-too-small", toOnDevice: false } },
           cacheStatus: { tenantId, resources: [] },
         });
         throw new Error("The connection to Chat was lost while answering.");
