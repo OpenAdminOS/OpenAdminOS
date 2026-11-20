@@ -141,7 +141,7 @@ export interface OllamaRequestContextInput {
  */
 export async function ollamaRequestNumCtx(
   input: OllamaRequestContextInput,
-): Promise<{ numCtx: number; neededTokens: number } | undefined> {
+): Promise<{ numCtx: number; neededTokens: number } | { dropKept: true } | undefined> {
   // The same count as the run's size check, chat template tokens included.
   const { neededTokens } = checkPromptFit({
     ...(input.system ? { system: input.system } : {}),
@@ -157,7 +157,13 @@ export async function ollamaRequestNumCtx(
   const timeoutMs = input.timeoutMs ?? LOOKUP_TIMEOUT_MS;
   const base = input.endpoint.replace(/\/$/, "");
   const show = await readShow(fetchImpl, base, input.model, timeoutMs, input.signal);
-  if (show.pinnedNumCtx !== undefined) return undefined;
+  if (show.pinnedNumCtx !== undefined) {
+    // A kept size below the pin (from before the model was created again
+    // with a pin) would override it: Ollama applies a request's num_ctx over
+    // the Modelfile. Drop it so the pin applies. A kept size at or above the
+    // pin, raised for an earlier overflow, stays.
+    return input.currentNumCtx !== undefined && input.currentNumCtx < show.pinnedNumCtx ? { dropKept: true } : undefined;
+  }
   const loaded = parseOllamaLoadedContext(await readJson(fetchImpl, `${base}/api/ps`, { method: "GET" }, timeoutMs, input.signal), input.model) ?? 0;
   if (input.currentNumCtx !== undefined && input.currentNumCtx >= neededTokens && loaded <= input.currentNumCtx) return undefined;
   let target = 4096;
