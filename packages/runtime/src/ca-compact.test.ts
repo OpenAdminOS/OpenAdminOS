@@ -120,8 +120,21 @@ describe("compactConditionalAccessPolicy", () => {
     assert.deepEqual(record.users, { include: { users: "None" } });
   });
 
+  it("tells two workload identity policies with null users apart", () => {
+    const policy = (ids: string[]) => compactConditionalAccessPolicy({
+      displayName: "Block service principals", state: "enabled",
+      conditions: { users: null, clientApplications: { includeServicePrincipals: ids } },
+      grantControls: { operator: "OR", builtInControls: ["block"] },
+    }, NOW);
+    const one = policy(["sp-1"]);
+    const all = policy(["ServicePrincipalsInMyTenant"]);
+    assert.equal(one.users, undefined);
+    assert.deepEqual(one.workloadIdentities, { include: "1 service principal" });
+    assert.deepEqual(all.workloadIdentities, { include: "ServicePrincipalsInMyTenant" });
+  });
+
     it("survives malformed input", () => {
-    assert.deepEqual(compactConditionalAccessPolicy(null, NOW), { name: "(unnamed policy)", state: "unknown", users: { include: {} } });
+    assert.deepEqual(compactConditionalAccessPolicy(null, NOW), { name: "(unnamed policy)", state: "unknown" });
   });
 });
 
@@ -176,5 +189,12 @@ describe("count-by-field with array values", () => {
     assert.deepEqual((named.result as { counts: unknown }).counts, { "(none)": 2, high: 1, "high,medium": 1 });
     const unnamed = await runAgentTemplate(manifest(""), ctx);
     assert.deepEqual((unnamed.result as { counts: unknown }).counts, { "": 2, high: 1, "high,medium": 1 });
+  });
+});
+
+describe("bucket lookups", () => {
+  it("reads a parenthesized bucket exactly, and zero when it is absent", () => {
+    assert.equal(renderTemplate("{{ g.output.(unset) | size }}", { g: { output: { "(unset)": [1, 2, 3], US: [1] } } }), 3);
+    assert.equal(renderTemplate("{{ g.output.(unset) | size }}", { g: { output: { US: [1] } } }), 0);
   });
 });

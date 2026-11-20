@@ -28,7 +28,10 @@ export interface SandboxBrokerAgentPolicy {
 export interface SandboxBroker {
   handle(request: SandboxBrokerRequest): Promise<SandboxBrokerResponse>;
   getWritePlan(): WritePlan | undefined;
-  /** The last model request refused because it did not fit the context window. */
+  /**
+   * A model request refused because it did not fit the context window, when
+   * it is the latest broker failure and no model request succeeded after it.
+   */
   getContextFailure(): ContextTooSmallFailure | undefined;
 }
 
@@ -70,8 +73,12 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
         switch (request.method) {
           case "graph.request":
             return ok(id, await handleGraphRequest(input, request.params));
-          case "llm.complete":
-            return ok(id, await handleLlmRequest(input, request.params));
+          case "llm.complete": {
+            const completion = await handleLlmRequest(input, request.params);
+            // The script recovered from an earlier refusal, so it no longer explains a failure.
+            contextFailure = undefined;
+            return ok(id, completion);
+          }
           case "connector.invoke":
             return ok(id, await handleConnectorRequest(input, request.params));
           case "write.plan":
@@ -92,7 +99,8 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
             );
         }
       } catch (error) {
-        contextFailure = contextTooSmallFromError(error) ?? contextFailure;
+        // Only the latest broker failure can explain how the script ended.
+        contextFailure = contextTooSmallFromError(error);
         return failure(id, error);
       }
     },

@@ -49,7 +49,7 @@ const APP_NAMES: Record<string, string> = {
 };
 
 /** Special values Graph uses in include and exclude lists. */
-const KEYWORDS = new Set(["All", "None", "GuestsOrExternalUsers", "Office365", "MicrosoftAdminPortals", "AllTrusted"]);
+const KEYWORDS = new Set(["All", "None", "GuestsOrExternalUsers", "Office365", "MicrosoftAdminPortals", "AllTrusted", "ServicePrincipalsInMyTenant"]);
 
 type Json = Record<string, unknown>;
 
@@ -250,7 +250,10 @@ export function compactConditionalAccessPolicy(policy: unknown, now = Date.now()
   };
   const age = ageDays(record, now);
   if (age !== undefined) out.modifiedDaysAgo = age;
-  out.users = compactUsers(asRecord(conditions.users));
+  const users = compactUsers(asRecord(conditions.users));
+  // A workload identity policy has no user scope; an empty one would read as
+  // "no users" next to the service principals it really targets.
+  if (Object.keys(users.include as Json).length || users.exclude) out.users = users;
   const apps = compactApplications(asRecord(conditions.applications));
   if (apps) out.apps = apps;
   const clientAppTypes = asStrings(conditions.clientAppTypes).filter((type) => type !== "all");

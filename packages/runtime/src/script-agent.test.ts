@@ -197,6 +197,27 @@ definition:
     assert.deepEqual(brokerAnswer && !brokerAnswer.ok ? brokerAnswer.error.detail : undefined, failure);
   });
 
+    it("does not blame a recovered size refusal for a later failure", async () => {
+    const { createSandboxBroker } = await import("./sandbox-broker.js");
+    const failure = { code: "context-too-small" as const, promptTokens: 2, answerTokens: 1, neededTokens: 3, limitTokens: 2 };
+    let calls = 0;
+    const ctx = fakeRunContext();
+    ctx.llm = { ...ctx.llm, complete: async () => {
+      calls += 1;
+      if (calls === 1) throw new ContextTooSmallError(failure);
+      return { text: "ok", model: "test-model" };
+    } };
+    const broker = createSandboxBroker({ agent: { slug: "script-auditor", mode: "read", scopes: [], graphOperations: [], connectors: [] }, ctx });
+    await broker.handle({ id: "a", method: "llm.complete", params: { prompt: "big" } });
+    assert.deepEqual(broker.getContextFailure(), failure);
+    await broker.handle({ id: "b", method: "llm.complete", params: { prompt: "small" } });
+    assert.equal(broker.getContextFailure(), undefined);
+    await broker.handle({ id: "c", method: "llm.complete", params: { prompt: "big again" } });
+    calls = 0;
+    await broker.handle({ id: "d", method: "graph.request", params: { method: "GET", path: "/not/declared" } });
+    assert.equal(broker.getContextFailure(), undefined);
+  });
+
     it("refuses direct template-module conversion for script agents", () => {
     const manifest = parseAgentTemplate(`
 descriptor:
