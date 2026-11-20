@@ -5648,8 +5648,9 @@ function relaunchAppImage(appImage: string, args: string[], extractAndRun: boole
   }
   // It waits for this process, and in extract-and-run also for the AppImage
   // runtime that started it, which removes the extracted copy once this
-  // process is gone, so the new runtime does not reuse a folder being removed.
-  const script = 'pids="$1"; shift; i=0; for p in $pids; do while kill -0 "$p" 2>/dev/null && [ "$i" -lt 300 ]; do sleep 0.2; i=$((i+1)); done; done; exec "$@"';
+  // process is gone, so the new runtime does not reuse a folder being
+  // removed. Each gets its own minute at most.
+  const script = 'pids="$1"; shift; for p in $pids; do i=0; while kill -0 "$p" 2>/dev/null && [ "$i" -lt 300 ]; do sleep 0.2; i=$((i+1)); done; done; exec "$@"';
   const env = { ...process.env, ...(extractAndRun ? { APPIMAGE_EXTRACT_AND_RUN: "1" } : {}) };
   try {
     const pids = appImageHandoffWaitPids(extractAndRun, process.pid, process.ppid).join(" ");
