@@ -1825,6 +1825,9 @@ function novaProviderEndpoint(providerId: ProviderId, persisted?: Pick<Persisted
  * reads its list on every request and refuses cloud models, and Apple
  * Foundation runs only on this Mac.
  */
+// The other local providers need no read here because the provider list the
+// caller just took (`listProviders()` per send or run start) already decides
+// whether their endpoint is on this device.
 async function verifyOnDeviceModel(providerId: ProviderId, model: string | undefined): Promise<boolean> {
   if (providerId === "ollama") return model ? ollamaModelIsOnDevice(model) : false;
   return providerId === "lm-studio" || providerId === "lemonade" || providerId === "apple-foundation";

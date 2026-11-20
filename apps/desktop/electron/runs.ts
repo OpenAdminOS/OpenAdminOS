@@ -687,8 +687,14 @@ export class RunService {
       }
 
       // A model fit rerun on a model on this device is admitted only after a fresh check that it runs here.
-      if (options.requireOnDeviceModel && (activeProvider?.isLocal !== true || !(await this.host.verifyOnDeviceModel?.(providerId, model)))) {
-        throw new Error(`OpenAdminOS could not confirm that ${model ?? activeProvider?.name ?? providerId} runs on this device, so the run did not start. Choose another model, or a hosted provider.`);
+      if (options.requireOnDeviceModel) {
+        if (activeProvider?.isLocal !== true || !(await this.host.verifyOnDeviceModel?.(providerId, model))) {
+          throw new Error(`OpenAdminOS could not confirm that ${model ?? activeProvider?.name ?? providerId} runs on this device, so the run did not start. Choose another model, or a hosted provider.`);
+        }
+        // The check reads the network; the organization this start was admitted for must still be active.
+        if ((await this.host.read()).activeTenantId !== persisted.activeTenantId) {
+          throw new OrganizationBoundaryError("The active organization changed while this run was starting, so it did not start. Review it again.");
+        }
       }
 
       if (options.retryOfRunId && activeProvider?.isLocal !== true) {
