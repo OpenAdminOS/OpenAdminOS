@@ -54,6 +54,7 @@ it("does not store a Graph denial for an HTTP 403 from a model server, a vendor 
     "LM Studio responded with HTTP 403 at http://127.0.0.1:1234/v1/chat/completions: forbidden",
     "Anthropic API returned 403 Forbidden: permission_error",
     "MCP server \"tickets\" responded with HTTP 403: forbidden",
+    "Ollama could not report the model's context limit: HTTP 403 at http://127.0.0.1:11434/api/show: Forbidden by the Microsoft Graph lab proxy",
   ]) {
     const result = await runFailingWith(new Error(message));
     assert.equal(result.status, "failed");
@@ -66,4 +67,13 @@ it("stores the Graph denial for a Graph 403", async () => {
   assert.equal(result.status, "failed");
   assert.equal(result.accessDenial?.cause, "missing-consent");
   assert.equal(result.accessDenial?.title, "Graph consent required");
+  assert.equal(result.accessDenial?.source, "microsoft-graph");
+});
+
+it("stores the Graph denial when an agent wraps the Graph error as its cause", async () => {
+  const cause = new GraphAccessDeniedError({ method: "GET", path: "/users", requiredScopes: ["User.Read.All"], grantedScopes: [] });
+  const result = await runFailingWith(new Error("Listing users failed.", { cause }));
+  assert.equal(result.error, "Listing users failed.");
+  assert.equal(result.accessDenial?.cause, "missing-consent");
+  assert.equal(result.accessDenial?.source, "microsoft-graph");
 });

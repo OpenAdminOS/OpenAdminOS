@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { classifyGraphAccessDenied, errorComesFromGraph, GraphAccessDeniedError, graphAccessDenialFromError, graphAccessDenialText } from "@openadminos/agent-sdk";
+import { classifyGraphAccessDenied, errorComesFromGraph, GraphAccessDeniedError, graphAccessDenialFromError, graphAccessDenialText, storedGraphAccessDenial } from "@openadminos/agent-sdk";
 
 describe("Graph access denial classification", () => {
   const users = { path: "/users", requiredScopes: ["User.Read.All"] };
@@ -95,6 +95,11 @@ describe("Graph access denial classification", () => {
       assert.match(raw, new RegExp(code));
     }
     assert.equal(graphAccessDenialFromError("Microsoft Graph rejected the request (HTTP 403). The signed-in admin lacks the required Teams scopes.")?.cause, "unknown");
+    assert.equal(graphAccessDenialFromError("Microsoft Graph rejected the Outlook request (HTTP 403). The signed-in admin lacks Mail.Send.")?.cause, "unknown");
+    assert.equal(graphAccessDenialFromError("Microsoft Graph answered /subscribedSkus with HTTP 403.")?.cause, "unknown");
+    assert.equal(graphAccessDenialFromError("Graph responded with HTTP 404 for https://graph.microsoft.com/v1.0/users/x: {}"), undefined);
+    assert.equal(graphAccessDenialFromError('Graph responded with HTTP 403 for https://graph.microsoft.com/beta/auditLogs/signIns: {"error":{"code":"Authentication_RequestFromNonPremiumTenantOrB2CTenant"}}', { path: "/auditLogs/signIns" })?.cause, "missing-licence");
+    assert.equal(classifyGraphAccessDenied({}).source, "microsoft-graph");
     // A stored denial's own text still reads as a Graph error.
     const stored = graphAccessDenialText(classifyGraphAccessDenied({ ...users, grantedScopes: [] }));
     assert.equal(errorComesFromGraph(stored), true);
@@ -115,11 +120,25 @@ describe("Graph access denial classification", () => {
       "Azure OpenAI responded with HTTP 403 for https://contoso.openai.azure.com/openai/deployments/gpt: {\"error\":{\"code\":\"PermissionDenied\"}}",
       "MCP server \"tickets\" responded with HTTP 403: forbidden",
       "Splashtop refused this request (HTTP 403) at my.splashtop.com.",
+      // A provider error that appends a response body quoting Graph.
+      "Ollama could not report the model's context limit: HTTP 403 at http://127.0.0.1:11434/api/show: Forbidden by the Microsoft Graph lab proxy",
+      "MCP server \"tickets\" responded with HTTP 403: Graph responded with HTTP 403 for https://graph.microsoft.com/v1.0/users",
+      "Proxy answered HTTP 403 for https://graph.microsoft.com.example.org/v1.0/users",
     ]) {
       assert.equal(errorComesFromGraph(raw), false, raw);
       assert.equal(graphAccessDenialFromError(raw), undefined, raw);
       assert.equal(graphAccessDenialFromError(new Error(raw), { path: "/users", requiredScopes: ["User.Read.All"] }), undefined, raw);
     }
+  });
+
+  it("keeps a stored denial only when it was classified from a Graph error", () => {
+    const current = classifyGraphAccessDenied({ ...users, grantedScopes: [] });
+    const { source: _source, ...legacy } = current;
+    const ollama = "Ollama responded with HTTP 403 at http://127.0.0.1:11434/api/chat: Forbidden";
+    assert.equal(storedGraphAccessDenial(current, "Listing users failed."), current);
+    assert.equal(storedGraphAccessDenial(legacy, ollama), undefined);
+    assert.equal(storedGraphAccessDenial(legacy, graphAccessDenialText(legacy)), legacy);
+    assert.equal(storedGraphAccessDenial(undefined, graphAccessDenialText(legacy)), undefined);
   });
 
   it("never recommends a read-only role for a write action", () => {
