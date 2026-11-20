@@ -1473,6 +1473,7 @@ identities with graph_get. Nothing else.
         <li>The notice appears once, as the first line of a conversation whose model gets a shortened profile, and never between answers. Its first sentence is the wording voice uses today, so the two read the same; the second sentence counts what was left out for this conversation.</li>
         <li>What this model received lists the parts by name and size, never the text of a note, and a model that gets the whole profile shows no notice.</li>
         <li>Data policy applies to the profile block like any other part of the prompt: a note that names a user is masked on a hosted model.</li>
+        <li>Decided in round 23: a cut never splits a value data policy classified. When the end of the organization instructions or the standing instructions falls inside a policy name, a person's name, a device name or an identifier, the whole value is left out instead of a prefix of it, and the notice adds a sentence such as "The organization instructions were cut before a security value, which was left out whole." It names the part and the class, never the value. The text that stays keeps the classes the whole profile gave it, and the request is still checked in full before it is sent, in typed Chat and in hosted voice alike (plan, B2).</li>
       </ul>
     </section>
 
