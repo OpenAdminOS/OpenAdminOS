@@ -16,8 +16,12 @@ interface Suggestion {
  */
 const ownText = (e: string) => e.split("Ollama said:")[0] ?? e;
 
-/** A failed lookup of the model's context limit has its own playbook only. */
-const isContextLimitLookup = (e: string) => /ollama/i.test(e) && /context limit|\/api\/show/i.test(e);
+/**
+ * A failed lookup of the model's context limit has its own playbook only.
+ * The runtime names the lookup URL followed by a final ".", by ": " or by " answered ", so an
+ * endpoint prefix such as `/api/showroom` or `/api/show.v1` in front of `/api/chat` is not read as the lookup.
+ */
+const isContextLimitLookup = (e: string) => /ollama/i.test(e) && /context limit|\/api\/show(?=\.$|:\s| answered )/i.test(e);
 
 const SUGGESTIONS: Suggestion[] = [
   {
