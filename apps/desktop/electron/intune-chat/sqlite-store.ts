@@ -8,9 +8,9 @@ import {
   addCacheIdentity, addUserFirstName, ClassificationSlice, classifyCacheRows, currentClassificationLedger,
   GRAPH_FIELD_CLASSES_VERSION, prepareCacheClassification, registerClassifiedValues,
   ClassificationWorkerRetiredError, clearTenantClassificationLedgers, releaseClassificationIdentityShard, retireClassificationWorker,
-  type CacheClassificationResult, type ClassificationOptions,
+  type CacheClassificationResult, type ClassificationOptions, type ClassifiedValues,
 } from "@openadminos/runtime/data-classification";
-import { describeCacheRow, readCacheClassification } from "./cache-classification.js";
+import { describeCacheRow, cacheClassificationFields } from "./cache-classification.js";
 import { pathForResource } from "./planner.js";
 import { GRAPH_CACHE_LOG_RESOURCES } from "@openadminos/agent-sdk";
 
@@ -2802,6 +2802,7 @@ export class IntelligenceSqliteStore {
     filters?: GraphCacheQueryPredicate[];
     sort?: { field: string; direction?: "asc" | "desc" };
     limit?: number;
+    projectRow?: (row: unknown) => unknown;
   }): GraphCacheQueryResult {
     const limit = Math.max(1, Math.min(50, Math.floor(input.limit ?? 25)));
     const where: string[] = ["tenant_id = ?", "resource = ?"];
@@ -2837,13 +2838,15 @@ export class IntelligenceSqliteStore {
       row: readJson<unknown>(row.raw_json, {}),
       ...(row.refreshed_at ? { refreshedAt: row.refreshed_at } : {}),
     }));
-    registerCacheRows(input.resource, rows, parsed.map(({ row }) => row));
+    const originals = parsed.map(entry => entry.row);
+    const projected = input.projectRow ? parsed.map(entry => ({ ...entry, row: input.projectRow!(entry.row) })) : parsed;
+    registerCacheRows(input.resource, rows, projected.map(entry => entry.row), originals);
     return {
       resource: input.resource,
       totalCount: selected[0]?.total_count ?? 0,
       returnedRows: rows.length,
       limit,
-      rows: parsed,
+      rows: projected,
     };
   }
 
@@ -5018,16 +5021,37 @@ function cacheClassificationRow({ rawJson, normalized }: NormalizedGraphResource
   return { rawJson, graphId: normalized.graphId, displayName: normalized.displayName };
 }
 
-function registerCacheRows(resource: GraphCacheResourceKind, rows: readonly ResourceRow[], parsed: readonly unknown[]): void {
+function registerCacheRows(
+  resource: GraphCacheResourceKind, rows: readonly ResourceRow[], parsed: readonly unknown[], originals = parsed,
+): void {
   if (!rows.length) return;
   const source = `cache:${resource}`;
-  if (!currentClassificationLedger()) {
+  const ledger = currentClassificationLedger();
+  if (!ledger) {
     registerClassifiedValues(source, { fields: [], incomplete: false });
     return;
   }
-  for (let index = 0; index < rows.length; index++) {
-    registerClassifiedValues(source, readCacheClassification(parsed[index], rows[index]?.classification_json));
-  }
+  void ledger.scheduleRegistration(async signal => {
+    const slice = new ClassificationSlice();
+    for (let index = 0; index < rows.length; index++) {
+      signal.throwIfAborted();
+      const fields = cacheClassificationFields(parsed[index], rows[index]?.classification_json, originals[index]);
+      let batch: Array<ClassifiedValues["fields"][number]> = [];
+      let next = fields.next();
+      while (!next.done) {
+        if (next.value) batch.push(next.value);
+        if (batch.length >= 16 || slice.elapsed) {
+          ledger.registerClassified(source, { fields: batch, incomplete: false });
+          batch = [];
+          if (slice.elapsed) await slice.yield();
+          signal.throwIfAborted();
+        }
+        next = fields.next();
+      }
+      ledger.registerClassified(source, { fields: batch, incomplete: next.value });
+      if (slice.elapsed) await slice.yield();
+    }
+  });
 }
 
 function ensureColumn(

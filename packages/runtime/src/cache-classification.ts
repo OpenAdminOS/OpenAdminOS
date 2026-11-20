@@ -22,18 +22,43 @@ export function describeCacheRow(row: unknown, options: ClassificationOptions): 
   }
 }
 
-export function readCacheClassification(row: unknown, encoded: string | null | undefined): ClassifiedValues {
+// A single JSON parse is indivisible. Skip legacy or unusually large sidecars
+// before parsing and let the request report incomplete coverage.
+const MAX_READ_SIDECAR_UNITS = 128 * 1024;
+
+export function* cacheClassificationFields(
+  row: unknown, encoded: string | null | undefined, original = row,
+): Generator<ClassifiedValues["fields"][number] | undefined, boolean> {
+  if (!encoded || encoded.length > MAX_READ_SIDECAR_UNITS) return true;
   try {
-    const [version, incomplete, fields] = JSON.parse(encoded ?? "null") as RowClassification;
-    if (version !== GRAPH_FIELD_CLASSES_VERSION) return { fields: [], incomplete: true };
-    return { incomplete, fields: fields.flatMap(([path, key, kind, maskRole]) => {
-      let value = row;
-      for (const part of path) value = (value as Record<string, unknown>)[part];
-      return typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? [{ value, key, kind, ...(maskRole ? { maskRole } : {}) }] : [];
-    }) };
+    const [version, incomplete, fields] = JSON.parse(encoded) as RowClassification;
+    if (version !== GRAPH_FIELD_CLASSES_VERSION) return true;
+    for (const [path, key, kind, maskRole] of fields) {
+      const value = fieldAt(row, path);
+      if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
+        yield undefined;
+        continue;
+      }
+      const source = row === original ? value : fieldAt(original, path);
+      // Ignore fields removed or replaced by projection. A clipped string
+      // keeps the original type and is matched using only the emitted prefix.
+      yield source === value || typeof value === "string" && typeof source === "string" &&
+        value.endsWith("...") && source.startsWith(value.slice(0, -3))
+        ? { value, key, kind, ...(maskRole ? { maskRole } : {}) } : undefined;
+    }
+    return incomplete;
   } catch {
-    return { fields: [], incomplete: true };
+    return true;
   }
+}
+
+function fieldAt(row: unknown, path: readonly string[]): unknown {
+  let value = row;
+  for (const part of path) {
+    if (!value || typeof value !== "object" || !Object.hasOwn(value, part)) return undefined;
+    value = (value as Record<string, unknown>)[part];
+  }
+  return value;
 }
 
 export interface CacheClassificationRow {

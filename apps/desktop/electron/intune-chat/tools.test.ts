@@ -42,6 +42,7 @@ for (const { resource, label } of GRAPH_CACHE_RESOURCES) {
       const result = withClassificationScope(ledger, () => store.queryGraphCache({ tenantId: "tenant-1", resource }));
       assert.deepEqual(result.rows[0]?.row, row);
       const prompt = JSON.stringify(result.rows[0]?.row);
+      await ledger.waitForObservations();
       const spans = ledger.classifyRequest({ prompt }).spans;
       assert.ok(spans.some(span => span.source === `cache:${resource}` && span.kind === kind &&
         prompt.slice(span.start, span.end).includes(String(value))), resource);
@@ -70,6 +71,7 @@ it("recognizes a cached user's first name inside a device name and resolves type
     const read = withClassificationScope(ledger, () => store.queryGraphCache({ tenantId, resource: "managedDevices" }));
     const prompt = JSON.stringify(read.rows);
     const system = `Compare ${knownId} with ${unknownId}`;
+    await ledger.waitForObservations();
     const spans = ledger.classifyRequest({ system, prompt }).spans;
     assert.ok(spans.some(span => span.kind === "identity" && span.source === "cache:managedDevices" &&
       prompt.slice(span.start, span.end) === deviceName));
@@ -184,6 +186,7 @@ it("reuses versioned cache metadata on reopen and backfills rows from older vers
     const ledger = new ClassificationLedger();
     const result = withClassificationScope(ledger, () => store.queryGraphCache({ tenantId, resource }));
     assert.deepEqual(result.rows[0]?.row, row);
+    await ledger.waitForObservations();
     const request = ledger.classifyRequest({ prompt: JSON.stringify(row) });
     assert.equal(request.coverageIncomplete, false);
     assert.equal(request.counts.credential, 1);
@@ -236,6 +239,45 @@ it("backfills a stale Secure Score page through bounded worker jobs", async t =>
       assert.deepEqual(fields.at(-1), [["controlScores", "241", "description"], "description", "public"]);
     } finally { check.close(); }
   } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("defers registration of 50 Secure Score sidecars and retains only projected fields", async t => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-score-cache-read-"));
+  const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+  const ledger = new ClassificationLedger();
+  try {
+    const tenantId = "tenant-1";
+    const resource = "secureScores";
+    const description = "a synthetic control description ".repeat(7);
+    store.replaceGraphResources({ tenantId, resource, label: "Secure Score", scopeSet: [],
+      refreshedAt: "2026-11-18T00:00:00.000Z",
+      rows: Array.from({ length: 50 }, (_, i) => ({
+        id: `score-${i}`, controlScores: Array.from({ length: 242 }, (_, j) => ({
+          controlName: `control-${j}`, description,
+        })),
+      })),
+    });
+    const seen: unknown[] = [];
+    const register = ledger.registerClassified.bind(ledger);
+    t.mock.method(ledger, "registerClassified", (...args: Parameters<typeof ledger.registerClassified>) => {
+      seen.push(...args[1].fields.map(field => field.key));
+      register(...args);
+    });
+    const response = withClassificationScope(ledger, () => store.queryGraphCache({
+      tenantId, resource, limit: 50, projectRow: row => ({ id: (row as { id: string }).id }),
+    }));
+    assert.equal(response.rows.length, 50);
+    assert.equal(seen.length, 0);
+    const prompt = JSON.stringify(response.rows);
+    assert.equal(ledger.classifyRequest({ prompt }).coverageIncomplete, true);
+    await ledger.waitForObservations();
+    assert.deepEqual(seen, Array<string>(50).fill("id"));
+    assert.equal(ledger.classifyRequest({ prompt }).coverageIncomplete, false);
+  } finally {
+    ledger.dispose();
     store.close();
     await rm(dir, { recursive: true, force: true });
   }
@@ -305,6 +347,7 @@ it("prepares fresh cache sidecars and identity indexes in the local worker", asy
     const ledger = new ClassificationLedger();
     const result = withClassificationScope(ledger, () => store.queryGraphCache({ ...common, resource }));
     assert.deepEqual(result.rows.map(entry => entry.row), [row]);
+    await ledger.waitForObservations();
     const { counts, coverageIncomplete } = ledger.classifyRequest({ prompt: JSON.stringify(row) });
     assert.equal(counts.identity, 1);
     assert.equal(counts.credential, 1);

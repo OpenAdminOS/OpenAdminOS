@@ -1,1 +1,1 @@
-export { describeCacheRow, readCacheClassification } from "@openadminos/runtime/data-classification";
+export { describeCacheRow, cacheClassificationFields } from "@openadminos/runtime/data-classification";

@@ -1361,6 +1361,9 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
     filters,
     sort,
     limit: Math.min(limit, QUERY_CACHE_ROW_CAP),
+    projectRow: row => compactValue(selectedFields && row && typeof row === "object"
+      ? Object.fromEntries(selectedFields.filter(field => Object.hasOwn(row, field))
+        .map(field => [field, (row as Record<string, unknown>)[field]])) : row),
   });
   // A query returning nothing is the most misread result in the whole
   // tool surface: models reported "the tenant has no managed devices"
@@ -1409,7 +1412,7 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
     ...(emptyHint ?? {}),
     rows: result.rows.map((entry) => ({
       refreshedAt: entry.refreshedAt,
-      row: compactValue(selectedFields && entry.row && typeof entry.row === 'object' ? Object.fromEntries(selectedFields.filter(field => Object.hasOwn(entry.row as object, field)).map(field => [field, (entry.row as Record<string, unknown>)[field]])) : entry.row),
+      row: entry.row,
     })),
   };
 }
