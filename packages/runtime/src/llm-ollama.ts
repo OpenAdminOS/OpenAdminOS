@@ -198,7 +198,10 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         let detail = await errorDetail(response);
         const overflow = response.status === 400 ? parseContextOverflow(detail) : undefined;
         if (overflow) {
-          forgetCachedCtx();
+          // Less room than the kept size asked for means Ollama can no longer
+          // give it. Otherwise the prompt grew; the kept size stays unless
+          // the retry below fails too.
+          if (cachedCtx !== undefined && overflow.available < cachedCtx) forgetCachedCtx();
           // The first request's budget ends here; the lookup has its own.
           clearTimeout(timer);
           // Ollama sizes the context from its own default and free memory,
@@ -217,10 +220,12 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           detail = await errorDetail(response);
           const retryOverflow = response.status === 400 ? parseContextOverflow(detail) : undefined;
           if (retryOverflow) {
+            forgetCachedCtx();
             const atModelLimit = modelMax !== undefined && retryOverflow.available >= modelMax;
             throw new Error(contextTooSmallMessage(model, retryOverflow.requested, retryOverflow.available, atModelLimit));
           }
           if (!response.ok && isOllamaMemoryError(detail)) {
+            forgetCachedCtx();
             throw new Error(contextMemoryMessage(model, overflow.requested, numCtx, detail));
           }
           if (response.ok) raisedCtx = numCtx;
@@ -289,11 +294,11 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
               // with the larger context.
               const text = errorText(chunk.error);
               if (isOllamaMemoryError(text)) {
+                forgetCachedCtx();
                 if (retry && accumulated.length === 0) {
                   throw new Error(contextMemoryMessage(model, retry.requested, retry.numCtx, text));
                 }
-                if (cachedCtx !== undefined) {
-                  forgetCachedCtx();
+                if (!retry && cachedCtx !== undefined) {
                   throw new Error(cachedContextMemoryMessage(model, cachedCtx, text, accumulated.length > 0));
                 }
               }

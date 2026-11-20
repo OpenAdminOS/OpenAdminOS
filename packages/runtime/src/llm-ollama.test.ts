@@ -506,10 +506,10 @@ describe("Ollama context size", () => {
   });
 
   it("gives the retry a fresh timeout instead of what the first request left", async () => {
-    // Each request takes 100ms of a 150ms budget; together they take 200ms.
-    const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384, delayOverflowMs: 100, delayRetryMs: () => 100 });
+    // Each request takes 150ms of a 250ms budget; together they take 300ms.
+    const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384, delayOverflowMs: 150, delayRetryMs: () => 150 });
     try {
-      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "slow-machine", timeoutMs: 150 });
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "slow-machine", timeoutMs: 250 });
       assert.equal((await llm.complete({ prompt: "big" })).text, "ok");
       assert.deepEqual(fake.chats, [{}, { num_ctx: 45056 }]);
     } finally {
@@ -651,6 +651,41 @@ describe("Ollama context size", () => {
       assert.deepEqual(fake.chats.at(-1), {});
     } finally {
       await fake.close();
+    }
+  });
+
+  it("keeps the kept context when a larger prompt is beyond the model's limit", async () => {
+    const fake = await fakeOllama({ modelMax: 65536, limit: (numCtx) => numCtx ?? 16384 });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "kept-too-big" });
+      await llm.complete({ prompt: "big" });
+      fake.options.requested = (prompt) => (prompt === "huge" ? 80000 : 40652);
+      await assert.rejects(llm.complete({ prompt: "huge" }), /needs 80,000 tokens of context, but kept-too-big supports at most 65,536/);
+      await llm.complete({ prompt: "big" });
+      assert.deepEqual(fake.chats.at(-1), { num_ctx: 45056 });
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("keeps the kept context when the user stops the retry for a larger prompt", async () => {
+    const stop = new AbortController();
+    const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384 });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "kept-stopped" });
+      await llm.complete({ prompt: "big" });
+      fake.options.requested = (prompt) => (prompt === "huge" ? 80000 : 40652);
+      fake.options.delayRetryMs = (prompt) => (prompt === "huge" ? 2000 : 0);
+      fake.options.onRetry = () => {
+        if (fake.chats.length === 4) stop.abort();
+      };
+      await assert.rejects(llm.complete({ prompt: "huge", signal: stop.signal }), /^Error: Ollama request stopped by user\.$/);
+      assert.deepEqual(fake.chats.at(-1), { num_ctx: 84992 });
+      fake.options.onRetry = undefined;
+      await llm.complete({ prompt: "big" });
+      assert.deepEqual(fake.chats.at(-1), { num_ctx: 45056 });
+    } finally {
+      fake.close().catch(() => {});
     }
   });
 
