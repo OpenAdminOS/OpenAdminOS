@@ -8910,6 +8910,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     if (binding) {
       const persistedForEndpoint = providerId === "azure-openai" ? await this.read() : undefined;
       requireBound(binding.scope === "model-fit" ? modelFitProviderEndpoint(providerId, persistedForEndpoint) : novaProviderEndpoint(providerId, persistedForEndpoint));
+      // An Azure OpenAI request goes to the configured deployment, so a model fit request for the
+      // deployment the admin reviewed is refused when another one is configured now.
+      if (binding.scope === "model-fit" && persistedForEndpoint && model !== undefined && model.trim() !== this.azureOpenAIConfigFromState(persistedForEndpoint).deployment.trim()) {
+        throw new ProviderEndpointChangedError();
+      }
     }
     if (this.llmFactory) {
       // Test seam only: it returns before the in-branch endpoint comparison
@@ -8975,6 +8980,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         return noopLlm;
       }
       requireBound(`${options.endpoint.trim().replace(/\/$/, "")}#${options.deployment.trim()}`);
+      if (binding?.scope === "model-fit" && model !== undefined && model.trim() !== options.deployment.trim()) throw new ProviderEndpointChangedError();
       return createAzureOpenAiLlm(options);
     }
     return noopLlm;
