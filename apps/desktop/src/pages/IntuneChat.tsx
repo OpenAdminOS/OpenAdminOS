@@ -1121,7 +1121,8 @@ function IntuneChatContent() {
             if (modelFit && offerId) {
               // The question stays the draft of the conversation it failed in, so it is in the
               // composer once that conversation opens, and decline does not need to put it back.
-              if (event.type === "failed") writeChatDraft(event.result.conversation.id, content);
+              // A different draft the admin kept stays the stored draft too.
+              if (event.type === "failed" && !keepDraft) writeChatDraft(event.result.conversation.id, content);
               setModelFitOffer({
                 issue: { ...modelFit, offerId },
                 assistantMessageId: event.result.assistantMessage.id,

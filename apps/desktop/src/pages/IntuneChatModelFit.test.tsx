@@ -172,6 +172,22 @@ describe("IntuneChat model fit (mockup 36)", () => {
     expect(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel })).toHaveValue("List devices by owner.");
   });
 
+  it("does not say the request went anywhere when the host refuses the retry", async () => {
+    const bridge = fitBridge();
+    const stream = bridge.streamIntuneChatMessage;
+    bridge.streamIntuneChatMessage = vi.fn<OpenAdminOSApi["streamIntuneChatMessage"]>(async (input, onEvent, options) => {
+      if (input.modelOverride) throw new Error("Codex's settings changed after you chose it, so nothing was sent. Choose it again to review where the request goes.");
+      return stream(input, onEvent, options);
+    });
+    const { user, notice } = await sendTooLarge(bridge);
+    await user.click(within(notice).getByRole("button", { name: "Run with Codex" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "Run this request with Codex?" })).getByRole("button", { name: "Send through Codex" }));
+    await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledTimes(2));
+    await screen.findByText(/settings changed after you chose it, so nothing was sent/);
+    expect(screen.queryByText("Sent to")).toBeNull();
+    expect(screen.queryByText("Sending to")).toBeNull();
+  });
+
   it("asks for the accept even when hosted sends to Codex were remembered for this tenant", async () => {
     window.localStorage.setItem(`openadminos:intune-chat-hosted-consent:v1:${tenantId}:openai`, "true");
     const bridge = fitBridge();
