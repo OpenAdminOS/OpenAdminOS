@@ -35,7 +35,7 @@ export const MODEL_FIT_COPY = {
     if (issue.neededTokens && issue.limitTokens && issue.limitIsMemory) {
       return `${what} needs about ${tokens(issue.neededTokens)} tokens. ${model} could not load with ${tokens(issue.limitTokens)} on this device, usually because free memory ran out.`;
     }
-    if (issue.neededTokens && issue.limitTokens && issue.neededTokens < issue.limitTokens) {
+    if (issue.neededTokens && issue.limitTokens && issue.neededTokens <= issue.limitTokens) {
       // The count is the prompt alone (Apple Foundation): it fits, but leaves no room for an answer.
       return `${what} uses about ${tokens(issue.neededTokens)} of the ${tokens(issue.limitTokens)} tokens ${model} ${limitVerb}, which leaves too little room for an answer.`;
     }

@@ -35,7 +35,8 @@ function positive(value: unknown): number | undefined {
 function typedIssue(error: unknown, depth = 0): Omit<ModelFitIssue, "providerId" | "model"> | undefined {
   if (!error || typeof error !== "object" || depth > 4) return undefined;
   const outer = error as Record<string, unknown>;
-  const record = outer.failure && typeof outer.failure === "object" ? { ...(outer.failure as Record<string, unknown>), code: outer.code ?? (outer.failure as Record<string, unknown>).code } : outer;
+  // The failure record's own code wins over a wrapper's ("agent-failed" around "context-too-small").
+  const record = outer.failure && typeof outer.failure === "object" ? { ...(outer.failure as Record<string, unknown>), code: (outer.failure as Record<string, unknown>).code ?? outer.code } : outer;
   const reason = [record.kind, record.code, record.reason].find(
     (value): value is ModelFitReason => typeof value === "string" && (FIT_REASONS as readonly string[]).includes(value),
   );
@@ -122,7 +123,9 @@ function contextIssueFromText(text: string): Omit<ModelFitIssue, "providerId" | 
     return { reason: "context-too-small", ...(neededTokens ? { neededTokens } : {}), ...(limitTokens ? { limitTokens } : {}) };
   }
   // llama.cpp server, which LM Studio and Lemonade run.
-  if (/exceed_context_size_error|exceeds the available context size/i.test(text)) {
+  // Its error body (an `exceed_context_size_error` type, or the `n_ctx` count) is required, so a
+  // sentence that only mentions a context size does not raise the notice.
+  if (/exceed_context_size_error/i.test(text) || (/exceeds the available context size/i.test(text) && /"n_ctx"\s*:/.test(text))) {
     const neededTokens = count(/"n_prompt_tokens"\s*:\s*(\d+)/.exec(text)?.[1]);
     const limitTokens = count(/"n_ctx"\s*:\s*(\d+)/.exec(text)?.[1]);
     return { reason: "context-too-small", ...(neededTokens ? { neededTokens } : {}), ...(limitTokens ? { limitTokens } : {}) };
