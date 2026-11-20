@@ -506,12 +506,14 @@ on message text. The message names the size needed, the limit, that nothing
 was sent, and the ways out: a larger local model, a hosted provider, or a
 narrower scope.
 
-Agent prompts carry summaries, not inventories. The Conditional Access
-explainer sends one compact record per policy (`compact-conditional-access`
-transform: scope as counts or `All`, built-in role names, conditions, grant
-and session controls) and policy names in its age groups, so 100 policies
-need about 14,000 estimated tokens (about 11,000 real) with an 1,100 token
-answer and fit a 16k local model; about 120 fit by the estimate. Grouped
+Agent prompts carry summaries, not inventories. The runtime's
+`compact-conditional-access` transform turns each Conditional Access policy
+into one short record (scope as counts or `All`, built-in role names,
+conditions, grant and session controls), and `group-by-age` can keep names
+only (`pick`). The explainer manifest that uses them (1.2.0) ships in a
+follow-up change; with it, 100 policies need about 14,000 estimated tokens
+(about 11,000 real) with an 1,100 token answer and fit a 16k local model, and
+about 120 fit by the estimate. Grouped
 records reach prompts only as counts (`count-by-field` steps), and breakdowns
 by high-cardinality fields keep their largest buckets (the `top` setting of
 `count-by-field`, which moves them under `top` with `otherValues` and
@@ -525,25 +527,22 @@ limit. The typed reason survives write revalidation (as
 the error's `cause`) and sandboxed script agents (the broker answers
 `context-too-small` and the script run fails with the typed error).
 
-A bundled manifest that needs a runtime feature older apps do not have sets
-`minAppVersion` to the first build that has it, because released apps fetch
-registry manifests from main. Nightlies of the next release compare as that
-release, so a feature that lands between nightlies takes a nightly minimum.
-Only the Conditional Access explainer needs one
-(`0.7.3-nightly.20261120040000`, a stamp after the last nightly without the
-`compact-conditional-access` transform); every other agent changed here runs
-on its old minimum. `appVersionSatisfies` reads a nightly minimum exactly:
-earlier nightlies of that release are refused, later ones and the stable
-release are accepted. Released apps compare it with `compareSemver`, which also
-refuses 0.7.2 and the earlier nightlies. From this release on, an installed
-agent's own manifest decides whether it runs, and the registry entry only
-decides whether its update can be installed (`updateAvailable.supported`).
-Released apps still take the registry entry's minimum for the installed copy,
-so after the merge a 0.7.2 app shows its installed Conditional Access explainer
-as needing an app update. A nightly built from main after the stamp but before
-this change merges would still accept the new manifest. A build from source
-reports 0.7.2 until the version bump and shows the explainer as needing an
-update.
+A bundled manifest that needs a runtime feature older apps do not have ships
+in two steps, because released apps fetch registry manifests from main and
+take the registry entry's `minAppVersion` even for a copy already installed.
+First the runtime ships while the registry still serves the old manifest.
+Then the manifest follows with `minAppVersion` set to the first published
+build that has the runtime, normally a nightly such as
+`0.7.3-nightly.<stamp>`, so no build without it can accept the manifest.
+Nightlies compare as their release under `compareSemver`; `appVersionSatisfies`
+reads a nightly minimum exactly (earlier nightlies of that release refused,
+later ones and the stable release accepted), and released apps refuse it with
+`compareSemver` too. A 0.7.2 app that has the agent installed then shows it as
+needing an app update. From this release on, an installed agent's own
+manifest decides whether it runs, and the registry entry only decides whether
+its update can be installed (`updateAvailable.supported`). Agents that can be
+bounded with steps every app version has (`count-by-field`, and its `top`
+setting, which older apps ignore) keep their old minimum and ship at once.
 
 Per-agent model overrides are required: an agent's manifest can specify a preferred model and the user can override it.
 
