@@ -83,8 +83,11 @@ interface LmStudioContextInfo {
  */
 async function readLmStudioContext(endpoint: string, model: string, signal?: AbortSignal): Promise<LmStudioContextInfo> {
   const trimmed = endpoint.trim().replace(/\/+$/, "");
-  if (!/\/v1$/i.test(trimmed)) return {};
-  const base = trimmed.slice(0, -"/v1".length);
+  // The OpenAI-compatible base (`/v1`) or the REST v0 base (`/api/v0`), which
+  // also serves chat completions.
+  const suffix = /\/api\/v0$/i.test(trimmed) ? "/api/v0" : /\/v1$/i.test(trimmed) ? "/v1" : undefined;
+  if (suffix === undefined) return {};
+  const base = trimmed.slice(0, -suffix.length);
   const controller = new AbortController();
   const abort = () => controller.abort();
   if (signal?.aborted) return {};

@@ -526,6 +526,22 @@ describe("LM Studio context length too small", () => {
 
   // A synthetic stream: LM Studio issue #2256 shows these counts only in its
   // own log, so this checks the parsing when a server does send them.
+  it("reads the sizes for an endpoint on LM Studio's REST v0 base", async () => {
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url === "/api/v1/models") return sendJson(res, 404, { error: "Unexpected endpoint" });
+      if (req.url === "/api/v0/models/qwen3-8b") return sendJson(res, 200, { id: "qwen3-8b", state: "loaded", loaded_context_length: 4096, max_context_length: 32768 });
+      assert.equal(req.url, "/api/v0/chat/completions");
+      sendJson(res, 400, { error: { message: NEW_OVERFLOW } });
+    });
+    try {
+      const endpoint = server.endpoint.replace(/\/v1$/, "/api/v0");
+      const llm = createLmStudioLlm({ endpoint, defaultModel: "qwen3-8b" });
+      await assert.rejects(llm.complete({ prompt: "big" }), /does not fit in the 4,096 tokens of context qwen3-8b is loaded with in LM Studio\. Raise Context Length \(qwen3-8b supports up to 32,768\)/);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("reads the counts from an error sent inside the stream", async () => {
     const server = await fakeLmStudio((req, res) => {
       if (req.url === "/api/v1/models") return sendJson(res, 200, v1Models("qwen3-8b", 8192, 32768));
