@@ -655,6 +655,16 @@
           <div class="pop" role="dialog" aria-label="Where voice goes, session start withheld" data-voicepop="credhosted"></div>
           <p class="xs muted" style="margin:4px 0 -4px">Credential and Security were Block when both transfers were withheld, and are Mask now: each withheld transfer keeps its own recovery</p>
           <div class="pop" role="dialog" aria-label="Where voice goes, two withheld transfers after the rules were loosened" data-voicepop="defaults" data-recorded="credsec"></div>
+          <p class="xs muted" style="margin:4px 0 -4px">Hosted voice did not start: the check of the rebuilt start did not finish</p>
+          <div class="block" data-t="blocked">
+            <span class="glyph" data-t="blocked"><svg><use href="#i-stop"/></svg></span>
+            <div>
+              <h3>Hosted voice did not start</h3>
+              <p>Identity on Hosted is Block, and the start request named you by your greeting name. The app rebuilt the start without your greeting name and without your profile, then checked the rest again, but that check did not finish: the tenant index was still loading after the switch to Woodgrove Bank. A start that was not checked in full is never sent, so the call did not open. Nothing was sent to OpenAI, and no audio left this device.</p>
+              <div class="acts"><button class="bt primary sm" type="button">Start the call again</button><button class="bt secondary sm" type="button">Use voice on this device</button></div>
+              <p class="xs muted" style="margin-top:10px">Start the call again checks the whole start request again before anything is sent. Voice on this device turns your words into text here, and the text gets the same check as a typed question. When the rescan finishes and still finds blocked content, the state names the part it could not leave out and offers Change the rule instead of Start the call again, or names policy.json when IT set the rule.</p>
+            </div>
+          </div>
         </div>
       <ul class="notes" style="margin-top:0">
         <li>Clicking the strip opens the popover on the left. It is built from the effective rules by the same function as the strip, so it lists what each class does now, with a lock where IT set the rule. Try it on the strip in A after changing a cell. Public data is not amber: it came from outside the tenant.</li>
@@ -667,8 +677,9 @@
         <li>Tenant data the app sends to the hosted voice model as context goes through the same request scan and the same rules as any hosted call, so the voice strip is drawn by the same function as every other hosted strip and names the same masked classes: with the defaults, "identities, security names and devices masked". Where a value is masked the voice model says "the user" and "the device"; the transcript on screen restores identity, device and security names and identifiers, while activity, configuration and credential placeholders stay masked there too.</li>
         <li>Ollama or LM Studio at an address on another machine is Hosted: data policy applies the Hosted column, and the strip names the host instead of a vendor, "Hosted · Ollama on gpu-01.woodgrove.example". The frame below shows the same state in Connections and in Chat.</li>
         <li>The voice popover is built by one function, here and on the live strip in A, from two inputs: the context transfers of the current call as recorded, and the rules in force now. Each transfer keeps the decision made when it was sent (sent, masked with its count, or withheld) and what the voice model said then. The rules in force now drive only the strip, the dashed preview of what the next transfer would do ("Next transfer under current rules, a preview"), the rule per class, and the recovery for withheld context.</li>
-        <li>The first transfer is the session start request: the profile block that nova.ts sends when the OpenAI session opens, with your standing instructions and confirmed notes. It goes through the same request scan and rules as every later transfer and is listed as its own line. In this call one confirmed note holds a BitLocker recovery key, so the line says it reached OpenAI as [CREDENTIAL], one way.</li>
-        <li>Decided 2026-11-19: with Credential on Hosted set to Block, the whole session start transfer is withheld and the call opens without the profile, as in the seventh popover. The line and the notice say the call opened without the profile, never that it was sent. Its recovery is Change the rule: the profile is not a question, so there is no local model to ask. The maintainer chose the whole profile block over leaving out single notes.</li>
+        <li>The first transfer is the session start request. Decided in round 21: the check reads the complete instructions nova.ts would send when the OpenAI session opens, not only the profile block: the fixed lines with the organization name, the tenant id and your greeting name, the provider and model names, and the profile block with your standing instructions and confirmed notes. It goes through the same request scan and rules as every later transfer and is listed as its own line. In this call one confirmed note holds a BitLocker recovery key, so the line says it reached OpenAI as [CREDENTIAL], one way.</li>
+        <li>When a rule blocks a class anywhere in the start request, the app rebuilds it without the blocked parts: the profile block whole when it carries a blocked class (decided 2026-11-19, the maintainer chose the whole block over single notes), and the organization name, tenant id or greeting name replaced by neutral wording where the rule covers the class the check gave them, so the voice model still knows a tenant is connected and does not greet by name. The rebuilt start is checked again in full before the call opens. In the seventh popover Credential on Hosted is Block: the call opened without the profile, and the line and the notice say so, never that it was sent. Its recovery is Change the rule: the profile is not a question, so there is no local model to ask. In this call the check gave the organization name and tenant id no class a rule covers, so they stayed as they were.</li>
+        <li>When the second check still finds blocked content, or does not finish on the whole text, the call does not open, as in the last block: nothing is sent to OpenAI and no audio leaves this device. The block says why. A check that did not finish offers Start the call again; blocked content the app could not leave out offers Change the rule, or names policy.json when IT set it. Voice on this device is offered in both. With an empty profile and Identity on Hosted at Block, a check of the profile block alone would find nothing and send your greeting name; the check of the whole request finds it.</li>
         <li>Changing a rule during a call never rewrites a past transfer. The fourth popover was recorded under the defaults and opened after Security on Hosted was set to Block: the 09:43 transfer still reads "Sent, 10 values masked", the preview reads "Would be withheld", and a line says context already sent stays as recorded. Data policy cannot recall what OpenAI received.</li>
         <li>A voice strip names a blocked class as withheld context, not as blocked: with Security on Hosted set to Block it reads "security context withheld", because the session goes on and only that context stays on this device.</li>
         <li>The withheld notice comes from the recorded decision on one transfer, not from the rules in force now: at 09:43 the app was about to send 6 Conditional Access policies, Security was Block on Hosted, so that transfer was withheld and the notice names it, the class that withheld it and what the voice model said at the time. A rule that no transfer in the call has hit shows no notice. The transcript records the same line.</li>
@@ -1021,13 +1032,13 @@
               <p class="xs muted" style="margin-top:10px">Write the search words opens an empty search for you to describe the setting in public terms; tenant data is removed again before it is sent. Answer without searching lets Ollama answer from the tenant data on this device. Switching models and changing a rule are not offered: every web search goes to OpenAI, and no rule lets tenant data into a search.</p>
             </div>
           </div>
-          <p class="xs muted" style="margin-top:8px">Withheld by the data policy check, with public words left</p>
+          <p class="xs muted" style="margin-top:8px">Withheld by the data policy check, with public words left (scan budget set low, as in the tests)</p>
           <div class="block" data-t="blocked">
             <span class="glyph" data-t="blocked"><svg><use href="#i-stop"/></svg></span>
             <div>
               <h3>This web search was not sent: part of it could not be examined</h3>
-              <p>You pasted a long excerpt of a public install log, copied from a Microsoft community thread, into your question, and Nova kept it after the search words. After tenant data was removed, public words were left, but the excerpt was longer than this device examines before a call, and 3,800 characters were not examined. Text that was not examined is reported as credential and gets the strictest rule any class has on Hosted. Activity on Hosted is Block, so the search was withheld. No request was made to OpenAI.</p>
-              <div class="swords"><span class="h">Search words, kept on this device</span>Win32 app not detected after install Windows 11 24H2 <span class="wh">3,800 characters of the pasted log excerpt, not examined</span></div>
+              <p>You pasted an excerpt of a public install log, copied from a Microsoft community thread, into your question, and Nova kept it after the search words: 642 characters in all, within the 1,000 character limit for a search. After tenant data was removed, public words were left, but the check ran out of its work budget inside the excerpt, and its last 410 characters were not examined. Text that was not examined is reported as credential and gets the strictest rule any class has on Hosted. Activity on Hosted is Block, so the search was withheld. No request was made to OpenAI.</p>
+              <div class="swords"><span class="h">Search words, kept on this device</span>Win32 app not detected after install Windows 11 24H2 <span class="muted">178 characters of the pasted log excerpt, examined</span> <span class="wh">410 characters of the pasted log excerpt, not examined</span></div>
               <div class="acts"><button class="bt primary sm" type="button">Shorten the search</button><button class="bt secondary sm" type="button">Answer without searching</button></div>
               <p class="xs muted" style="margin-top:10px">Shorten the search opens the search words without the excerpt, checked again before they are sent. Answer without searching lets Ollama answer from the tenant data on this device. A local model is not offered: every web search goes to OpenAI.</p>
             </div>
@@ -1041,6 +1052,26 @@
               <div class="swords"><span class="h">Search words, kept on this device</span><span class="wh">WGB Expenses</span> not detected after install 24H2</div>
               <div class="acts"><button class="bt primary sm" type="button">Write the search words</button><button class="bt secondary sm" type="button">Answer without searching</button></div>
               <p class="xs muted" style="margin-top:10px">Write the search words opens the search for you to describe the problem in public terms, and every check runs again before it is sent. Answer without searching lets Ollama answer from the tenant data on this device.</p>
+            </div>
+          </div>
+          <p class="xs muted" style="margin-top:8px">The final check of the search words did not finish</p>
+          <div class="block" data-t="blocked">
+            <span class="glyph" data-t="blocked"><svg><use href="#i-stop"/></svg></span>
+            <div>
+              <h3>This web search was not sent: the last check of the search words did not finish</h3>
+              <p>The earlier checks left these words unchanged, but the last check of the exact words that would be sent did not finish: the tenant index was still loading after the switch to Woodgrove Bank. Words that were not checked in full are never sent, whatever your rules on Hosted allow. No request was made to OpenAI.</p>
+              <div class="swords"><span class="h">Search words, kept on this device</span>Win32 app not detected after install Windows 11 24H2 file version detection rule</div>
+              <div class="acts"><button class="bt primary sm" type="button">Shorten the search</button><button class="bt secondary sm" type="button">Answer without searching</button></div>
+              <p class="xs muted" style="margin-top:10px">Shorten the search opens the search words to edit, and every check runs again in full before they are sent. Answer without searching lets Ollama answer from the tenant data on this device.</p>
+            </div>
+          </div>
+          <p class="xs muted" style="margin-top:8px">Longer than 1,000 characters after every check</p>
+          <div class="block" data-t="blocked">
+            <span class="glyph" data-t="blocked"><svg><use href="#i-stop"/></svg></span>
+            <div>
+              <h3>This web search was not sent: the search words are 1,180 characters, and the limit is 1,000</h3>
+              <p>Every check passed, and 1,180 characters of search words were left to send. A web search sends at most 1,000 characters. The app does not cut the words after the last check, since what is sent must be exactly what was checked, so nothing was sent. No request was made to OpenAI.</p>
+              <div class="acts"><button class="bt primary sm" type="button">Shorten the search</button><button class="bt secondary sm" type="button">Answer without searching</button></div>
             </div>
           </div>
           <p class="xs muted" style="margin-top:8px">Hosted voice, the same boundary</p>
@@ -1067,8 +1098,10 @@
         <li>Decided in round 18: the boundary holds on the final outbound query, after the Hosted gate, in this order. The app removes every value it recognizes as tenant data, the Hosted gate checks what remains, then every placeholder is removed from the result: a stale one with no mapping, such as <code>[USER_2]</code> from an earlier masked answer, and any token the gate produced, such as <code>[CREDENTIAL]</code> for an unexamined tail it masked (round 19 below). Only then does the app check whether meaningful words are left (round 20 below adds one last check of the exact words).</li>
         <li>Decided in round 19: the first removal takes out everything the app recognizes as tenant data: values from this conversation, matches in the tenant index and matches of the value checks (email addresses, GUIDs, IP addresses, serial numbers and credential patterns), whatever the rules on Hosted allow. An email address only the check recognizes is removed even with Identity on Hosted at Allow. After the Hosted gate, a final check removes any recognized value still present, also under Allow, before placeholders are removed and the app checks for meaningful words.</li>
         <li>Decided in round 19: the answer line lists the tenant lookup and the writing of the search words as separate steps. The writer gets public inputs only, the question and public terms, never the cache results, so the app name removed in the first frame comes from the admin's question.</li>
-        <li>When the gate blocks what remains, the search is withheld with its reason, as in the third block: here the admin pasted a long public log excerpt into the question, the scan ran out of its budget, unexamined text gets the strictest rule on Hosted, and Activity on Hosted is Block. The excerpt is public text from the admin, not tenant evidence: the search words are written from public inputs only. Recovery offers a shorter search, checked again, or an answer without searching.</li>
+        <li>When the gate blocks what remains, the search is withheld with its reason, as in the third block: here the admin pasted a public log excerpt into the question, the scan ran out of its budget, unexamined text gets the strictest rule on Hosted, and Activity on Hosted is Block. The excerpt is public text from the admin, not tenant evidence: the search words are written from public inputs only. Recovery offers a shorter search, checked again, or an answer without searching. The excerpt stays within the 1,000 character limit, and the block shows the check with a low work budget, as the tests set it, so a search within the limit runs out of it.</li>
         <li>Decided in round 20: the last step before sending scans the exact words that would be sent with every check once more: values from this conversation, the tenant index and the value checks. Removing a placeholder can join a value the earlier checks could not see, as <code>WGB Expen[USER_2]ses</code> becomes WGB Expenses. When anything is recognized, the search is not sent, as in the fourth block, and the words are never edited again after that check, so what is sent is exactly what was checked.</li>
+        <li>Decided in round 21: the last check needs every check to finish on the whole of the exact words, values from this conversation, the tenant index and the value checks. When any of them does not finish, because its budget ran out, it timed out or it failed, the search is not sent, as in the fifth block, whatever the rules on Hosted allow: a check that did not finish is never read as one that found nothing. Recovery offers a shorter search and an answer without searching.</li>
+        <li>Decided in round 21: the 1,000 character limit applies to the words that would be sent, after every check, as the seventh and last step, not to the words Nova first wrote. A search that is longer before tenant data is removed can still be sent. Words over the limit are not cut, since that would change them after the last check; the search is not sent, as in the sixth block, and the recovery is a shorter search or an answer without searching.</li>
         <li>The answer line shows the search words as sent, with each removed value struck through, and lists the local work, the removal and the request. The removal is listed as local work because it runs on this device before anything is sent.</li>
         <li>When nothing meaningful remains, the search is not sent and the block says so. Recovery offers only what works: writing the search words in public terms, checked again before they are sent, or an answer without searching. A local model is not offered, because no model on this device searches the web.</li>
         <li>The strip in this frame names OpenAI for web search, though the chat model is Ollama: "No data leaves this device" is never shown while search is offered (B). With Claude Code reasoning, the search still goes to OpenAI, and the block names both.</li>
@@ -1243,7 +1276,7 @@
         </div>
       </div>
       <ul class="notes">
-        <li>Decided in round 13: each saved Chat message stores its classification evidence in the local database: the offset and length of every value the ledger found in it with every class that applied to it (refined in rounds 14 and 15 below), and the field map revision that classed them (made the effective revision in round 16 below). It is no new copy of the values beyond the message text already saved. Disconnecting the organization and deleting the conversation remove the evidence with the messages.</li>
+        <li>Decided in round 13: each saved Chat message stores its classification evidence in the local database: the offset and length of every value the ledger found in it with every class that applied to it (refined in rounds 14 and 15 below), the offset and length of every part the check did not examine within its budget (added in round 21), and the field map revision that classed them (made the effective revision in round 16 below). It is no new copy of the values beyond the message text already saved. On reopening, the parts that were not examined take the strictest rule any class has on the tier, like any text the check did not examine, even when the rest of the message is classified from its record, and a message whose skipped parts could not be stored counts as not examined as a whole. Disconnecting the organization and deleting the conversation remove the evidence with the messages.</li>
         <li>Reopening rebuilds the ledger from the stored evidence before the follow-up is built, and the scan of the final request still runs over the history, so a class can only rise. An answer that named a Conditional Access policy since renamed in the tenant keeps that name as security: with Security on Hosted at Block, the name is withheld, as the blocked prompt in E shows.</li>
         <li>A message with no stored evidence, saved by an earlier version or with evidence that cannot be read, counts as not examined, the same rule as a request the check ran out of time on. With a Block on the tier, it is withheld and the follow-up waits for the admin: sent without the history it depends on, it would get a confident wrong answer. With Mask as the strictest rule, it is masked one way and the answer says so.</li>
         <li>Ask without the earlier answers sends the new question alone, with no saved history in the request. The local model is offered only when no rule on Local is Block, as in the withheld calls above.</li>
@@ -1511,9 +1544,10 @@
         <button class="bt secondary sm" type="button">Data policy settings</button>`;
     }
     // Context the app sends to the hosted voice model during a call. Each transfer carries values of some classes.
-    // The first transfer is the session start request: the profile block nova.ts sends when the OpenAI session opens.
+    // The first transfer is the session start request: the complete instructions nova.ts would send when the OpenAI
+    // session opens, the fixed lines with the organization name, tenant id and greeting name, and the profile block.
     const VOICE_CALL = [
-      { at: "09:40", start: true, what: "Session start: your profile, 3 standing instructions, 5 confirmed notes", body: "Your profile, 3 standing instructions and 5 confirmed notes", carries: { identity: 2, configuration: 3, credential: 1 }, detail: "One confirmed note holds a BitLocker recovery key." },
+      { at: "09:40", start: true, what: "Session start: app instructions, your greeting name, your profile", body: "The app's instructions with the organization name, tenant id and your greeting name, and your profile with 3 standing instructions and 5 confirmed notes", carries: { identity: 3, configuration: 3, credential: 1 }, greeting: "identity", profile: { identity: 2, configuration: 3, credential: 1 }, detail: "One confirmed note holds a BitLocker recovery key." },
       { at: "09:41", what: "38 finance devices", ask: "which finance devices have not checked in", carries: { device: 38, identity: 31, activity: 38, configuration: 12 } },
       { at: "09:42", what: "214 sign-ins", ask: "who signed in from outside Germany", carries: { activity: 214, identity: 38 } },
       { at: "09:43", what: "6 Conditional Access policies", ask: "which policies exclude the break-glass admins", carries: { security: 6, identity: 4, configuration: 9 } },
@@ -1526,6 +1560,14 @@
       const withheldBy = ids.filter((c) => r[c].hosted === "block");
       const masked = ids.filter((c) => r[c].hosted === "mask");
       return { ids, withheldBy, masked, sent: !withheldBy.length, maskedValues: masked.reduce((n, c) => n + t.carries[c], 0) };
+    }
+    // A blocked class in the session start leaves out the parts that carry it: the profile block whole, and the greeting
+    // name replaced by neutral wording. The rest is scanned again in full before the call opens.
+    function startLeftOut(t, classes) {
+      const parts = [];
+      if (Object.keys(t.profile).some((c) => classes.includes(c))) parts.push("your profile");
+      if (classes.includes(t.greeting)) parts.push("your greeting name");
+      return parts;
     }
     const sameDecision = (a, b) => a.sent === b.sent && a.maskedValues === b.maskedValues && a.withheldBy.join() === b.withheldBy.join();
     // A call as the app records it: each transfer keeps the decision made under the rules in force when it was sent,
@@ -1549,7 +1591,7 @@
         const now = joinList(d.withheldBy.map((c) => `${clsName(c)} is ${capAct(r[c].hosted)}`));
         return t.start ? {
           acts: ['<button class="bt primary sm" type="button">Send the profile now</button>'],
-          text: `${now} on Hosted now, and no rule blocks a class the profile carries. Send it now and the app sends the profile to OpenAI under the current rules.`,
+          text: `${now} on Hosted now, and no rule blocks a class the session start carries. Send it now and the app sends ${joinList(startLeftOut(t, d.withheldBy))} to OpenAI under the current rules, checked again first.`,
           say: "",
         } : {
           acts: ['<button class="bt primary sm" type="button">Ask again</button>'],
@@ -1566,11 +1608,14 @@
       const names = joinList(still.map((c) => clsName(c).toLowerCase()));
       // The profile is not a question, so a withheld session start has no local model to ask: the recovery is the rule.
       const lockedStart = still.every((c) => CLASSES.find((x) => x.id === c).locked);
-      if (t.start) return {
-        acts: lockedStart ? [] : ['<button class="bt primary sm" type="button">Change the rule</button>'],
-        text: `${moved}${joinList(still.map(clsName))} ${isAre(still)} Block on Hosted, so every hosted voice call opens without the profile while it carries ${names} data.${lockedStart ? " Your IT department set this rule in policy.json. Ask IT to change it." : ""}`,
-        say: "I'll answer without your standing instructions and notes.",
-      };
+      if (t.start) {
+        const parts = startLeftOut(t, still);
+        return {
+          acts: lockedStart ? [] : ['<button class="bt primary sm" type="button">Change the rule</button>'],
+          text: `${moved}${joinList(still.map(clsName))} ${isAre(still)} Block on Hosted, so every hosted voice call opens without ${joinList(parts)} while ${parts.length === 1 ? "it carries" : "they carry"} ${names} data.${lockedStart ? " Your IT department set this rule in policy.json. Ask IT to change it." : ""}`,
+          say: parts.includes("your profile") ? "I'll answer without your standing instructions and notes." : "",
+        };
+      }
       if (!localBlocks.length) return {
         acts: ['<button class="bt primary sm" type="button">Ask in Chat with Ollama</button>', lockedAll ? "" : '<button class="bt ghost sm" type="button">Change the rule</button>'],
         text: `${moved}Ollama with gpt-oss:20b is ready on this device, and your rules on Local allow every class this context carries.`,
@@ -1593,8 +1638,11 @@
     // A past transfer shows the decision recorded when it was sent, never one computed from the rules in force now.
     function transferLine(t) {
       let more = t.detail || "";
-      if (t.detail && t.carries.credential) more += t.d.sent ? " It reached OpenAI as [CREDENTIAL], one way, and is never restored." : " The call opened without the profile, so none of it reached OpenAI.";
-      return `<dt><span class="tt">${t.at}</span>${t.what}</dt>${decisionDd(t.d)}${more ? `<dd class="txn">${more}</dd>` : ""}`;
+      const parts = t.start && !t.d.sent ? startLeftOut(t, t.d.withheldBy) : [];
+      if (t.detail && t.carries.credential) more += t.d.sent ? " It reached OpenAI as [CREDENTIAL], one way, and is never restored." : ` The app rebuilt the start without ${joinList(parts)}, checked the rest again in full, and the call opened with it, so none of ${joinList(parts)} reached OpenAI.`;
+      // A session start with a blocked class opens with the rescanned rest, so its line says what it opened without.
+      const dd = parts.length ? `<dd class="bk">Opened without ${joinList(parts)}, ${joinList(t.d.withheldBy.map(clsName))} ${wasWere(t.d.withheldBy)} Block</dd>` : decisionDd(t.d);
+      return `<dt><span class="tt">${t.at}</span>${t.what}</dt>${dd}${more ? `<dd class="txn">${more}</dd>` : ""}`;
     }
     function voicePopInner(r, call = recordCall(r)) {
       // Every transfer withheld in this call gets its own notice, newest first, from its recorded decision.
@@ -1606,8 +1654,9 @@
         const names = joinList(d.withheldBy.map((c) => clsName(c).toLowerCase()));
         const rule = `${joinList(d.withheldBy.map(clsName))} ${wasWere(d.withheldBy)} Block on Hosted at ${last.at}`;
         // A withheld session start never went out: the call opened without the profile.
+        const parts = last.start ? startLeftOut(last, d.withheldBy) : [];
         const body = last.start
-          ? `<b>Session start context withheld at ${last.at}</b>${last.body}. ${rule}, so the call opened without the profile and the app sent none of it to OpenAI. The voice model said so:<q>The app withheld your profile from this call. ${last.said}</q>`
+          ? `<b>Session start at ${last.at} opened without ${joinList(parts)}</b>${last.body}. ${rule}, so the app rebuilt the start without ${joinList(parts)}, checked the rest again in full, and the call opened without ${parts.length === 1 ? "it" : "them"}. The app sent none of ${joinList(parts)} to OpenAI. The voice model said so:<q>The app withheld ${joinList(parts)} from this call. ${last.said}</q>`
           : `<b>Context withheld at ${last.at}</b>${last.what}, for "${last.ask}". ${rule}, so the app sent none of this context to OpenAI. The call went on without it, and the voice model said so:<q>I can't use the ${names} data for that in this call. ${last.said}</q>`;
         note = `<div class="withheld" role="status">${body}<span class="rec">${rec.text}</span>${rec.acts.join("") ? `<span class="acts">${rec.acts.join("")}</span>` : ""}</div>`;
         return note;
