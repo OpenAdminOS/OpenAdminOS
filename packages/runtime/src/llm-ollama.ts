@@ -255,6 +255,20 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           if (cachedCtx !== undefined) return new Error(cachedContextMemoryMessage(model, cachedCtx, text, answering));
           return undefined;
         }
+        if (counted && opts.enforceContextWindow) {
+          // An agent run gets the typed reason for an overflow Ollama reports
+          // after the retry or mid-stream, as for one found before sending.
+          const answerTokens = opts.maxTokens ?? DEFAULT_ANSWER_RESERVE_TOKENS;
+          return new ContextTooSmallError({
+            code: "context-too-small",
+            promptTokens: counted.requested,
+            answerTokens,
+            neededTokens: counted.requested + answerTokens,
+            limitTokens: counted.available,
+            model,
+            sentToProvider: true,
+          });
+        }
         if (counted) {
           const atModelLimit = modelMax !== undefined && counted.available >= modelMax;
           if (!atModelLimit && sent !== undefined && counted.available >= sent) {
