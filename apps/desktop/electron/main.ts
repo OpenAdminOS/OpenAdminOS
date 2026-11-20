@@ -5538,7 +5538,14 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
       forgetSignIns: async () => {
         // Sign-out rewrites the token caches; a cache that is a link would
         // be rewritten wherever it points. The wipe removes the link only.
-        const linked = localResetLinkCheck(app.getPath("userData")).linkedTokenCaches;
+        const check = localResetLinkCheck(app.getPath("userData"));
+        if (check.scanFailed) {
+          return [{
+            item: "Microsoft sign-ins",
+            reason: "not removed from the token caches, because the data folder could not be listed to check them. The token files are removed with the data folder",
+          }];
+        }
+        const linked = check.linkedTokenCaches;
         if (linked.length > 0) {
           return [{
             item: "Microsoft sign-ins",
@@ -7226,9 +7233,27 @@ if (!gotLock) {
   // was taken.
   if (localResetReport?.status === "incomplete") {
     try {
-      app.setPath("userData", mkdtempSync(join(tmpdir(), "openadminos-reset-recovery-")));
+      const recoveryProfile = mkdtempSync(join(tmpdir(), "openadminos-reset-recovery-"));
+      app.setPath("userData", recoveryProfile);
+      app.on("will-quit", () => rmSync(recoveryProfile, { recursive: true, force: true }));
     } catch (error) {
-      console.warn("[local-reset] the recovery window could not get its own profile", error);
+      // Without its own profile the window would write into the folder the
+      // reset could not empty. No window can show yet, so this one notice is
+      // native, and the launch stops.
+      console.error("[local-reset] the recovery window could not get its own profile", error);
+      dialog.showErrorBox(
+        "Reset did not finish",
+        [
+          `The reset of this device has not finished, and OpenAdminOS could not create a temporary folder to show what is left (${error instanceof Error ? error.message : String(error)}). OpenAdminOS does not open until the reset finishes.`,
+          "",
+          "Not finished:",
+          ...localResetReport.failed.map((entry) => `${entry.item}: ${entry.reason}`),
+          "",
+          "Uninstall and reset in the OpenAdminOS docs describes what to do. Then open OpenAdminOS again.",
+        ].join("\n"),
+      );
+      localResetYielding = true;
+      app.exit(1);
     }
   }
   app.on("second-instance", (_event, argv) => {
