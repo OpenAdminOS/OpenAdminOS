@@ -391,6 +391,10 @@
     .calls .tm { color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
     .calls .sent { color: var(--color-warning); }
     .calls .not { color: var(--color-danger); font-weight: 500; }
+    .calls .loc { color: var(--color-success); }
+    .swords { margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-md); background: var(--color-code-bg); font-size: var(--text-sm); line-height: var(--lh-sm); color: var(--color-text); overflow-wrap: anywhere; }
+    .swords .h { display: block; margin-bottom: 4px; font-size: var(--text-xs); color: var(--color-text-muted); }
+    .swords .wh { padding: 0 3px; border-radius: 4px; color: var(--color-danger); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-danger) 45%, transparent); }
     .pickst { font-size: var(--text-xs); color: var(--color-text-muted); }
     .uf .det { grid-column: 1 / -1; font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text); display: flex; gap: 8px; align-items: flex-start; margin-top: 2px; }
     .uf .det .hx { margin-top: 3px; }
@@ -520,7 +524,7 @@
   <main class="doc">
     <header>
       <h1>Data policy decides what each model may see, and when masking applies, the answer says what was hidden.</h1>
-      <p>Seven data classes, three provider tiers, three actions. Rules apply on this device before every model call: agent runs, Chat, Office, drafts, follow-ups and Nova. A masked identity, device or security name or identifier is replaced by a token for the call and restored on the way back, so the admin reads real names while a hosted model sees placeholders. Every other masked value is replaced one way: a credential stays [CREDENTIAL], and masked activity or configuration stays a placeholder, in the answer, the transcript and tool parameters. Check the frames at 1280 and 900 px, in both themes. Click any cell in A to change a rule; the sample line redraws. A stricter action applies at once, a looser one asks first.</p>
+      <p>Seven data classes, three provider tiers, three actions. Rules apply on this device before every model call: agent runs, Chat, Office, drafts, follow-ups, Nova, hosted voice context and web search. A masked identity, device or security name or identifier is replaced by a token for the call and restored on the way back, so the admin reads real names while a hosted model sees placeholders. Every other masked value is replaced one way: a credential stays [CREDENTIAL], and masked activity or configuration stays a placeholder, in the answer, the transcript and tool parameters. Check the frames at 1280 and 900 px, in both themes. Click any cell in A to change a rule; the sample line redraws. A stricter action applies at once, a looser one asks first.</p>
     </header>
 
     <!-- A: Settings -->
@@ -647,7 +651,7 @@
         </div>
       <ul class="notes" style="margin-top:0">
         <li>Clicking the strip opens the popover on the left. It is built from the effective rules by the same function as the strip, so it lists what each class does now, with a lock where IT set the rule. Try it on the strip in A after changing a cell. Public data is not amber: it came from outside the tenant.</li>
-        <li>Every hosted strip on this page, in A and in the app frames, is computed from the rules by one function, so the long form and the narrow count always name the same classes, a blocked credential included. Security shows as "security names": the settings of a security object still go to the model.</li>
+        <li>Every hosted strip on this page, in A and in the app frames, is computed from the rules by one function, so the long form and the narrow count always name the same classes, a blocked credential included. Security shows as "security names masked" under Mask, because the settings of a security object still go to the model, and as "security blocked" under Block, because nothing of the object goes. The reopened conversation in F uses the same words in its composer.</li>
         <li>The strip picks its form by the space it has, not by the window width: the long form while it fits next to the organization, the count when it would be cut. The catalogue above shows both forms side by side.</li>
         <li>"Only recognized credentials masked" names the effective policy: every class but credentials is allowed on hosted. It is the only hosted strip without a hatch, so a policy that hides almost nothing looks different from one that hides names and devices. The words say what is still masked, since recognized credentials never reach a hosted model in clear text.</li>
         <li>The Confidential strip appears only once a provider has passed attestation (Track C), and until then no frame in the app shows it. It still says "leaves this device" in words: an attested enclave is not this device, and the admin should never read the lock as "local". It is outlined in amber like hosted, without the fill.</li>
@@ -965,6 +969,61 @@
         <li>Decided in round 10: the planning call is listed as "Your question, checked by data policy", never as carrying no tenant data. The admin's own words go through the same request scan as everything else, and the line records what the scan did: here the user name typed into the question was identity, masked as <code>[USER_1]</code> under Identity on Hosted, or "No sensitive values found" when the scan found none.</li>
         <li>For an agent, the preflight refuses before any read, so that block alone can say "nothing was read" and "no call was sent".</li>
       </ul>
+      <h3 id="e-search" style="margin:32px 0 6px;font-size:var(--text-base);font-weight:500">A web search the rules block</h3>
+      <p>Web search sends the search words to an OpenAI model with the Nova key, whichever model is reasoning, so it is a hosted request and passes the same check as any other call that leaves this device. Here Security on Hosted is Block, Nova reasons with Ollama on this device, and the search it wrote names a Conditional Access policy.</p>
+      <div class="two">
+        <div class="win">
+          <div class="lights"><i></i><i></i><i></i></div>
+          <div class="appmain">
+            <div class="topbar" data-local="secblock" style="padding-left:84px"></div>
+            <div class="page"><div class="chat" style="padding-left:24px;padding-right:24px">
+              <div class="q">Why does WGB Finance MFA keep asking Outlook on iOS to sign in every hour? Check the current Microsoft docs.</div>
+              <div class="ans">
+                <div class="who"><svg width="14" height="14"><use href="#oa"/></svg>Nova with Ollama on this device, web search with OpenAI</div>
+                <div class="block" data-t="blocked">
+                  <span class="glyph" data-t="blocked"><svg><use href="#i-stop"/></svg></span>
+                  <div>
+                    <h3>This web search was not sent: its search words name security data, which your data policy blocks for hosted models</h3>
+                    <p>Nova wrote a web search to check the current documentation. Web search sends the search words to OpenAI, a hosted model, so data policy checks them like any hosted call. They name the Conditional Access policy WGB Finance MFA, which is security data, and the rule for Security on Hosted is Block. No request was made to OpenAI.</p>
+                    <div class="swords"><span class="h">Search words, kept on this device</span><span class="wh">WGB Finance MFA</span> Conditional Access sign-in frequency Outlook for iOS asks to sign in every hour</div>
+                    <ul class="calls" aria-label="Calls for this question">
+                      <li><span class="tm">09:52:10</span><span class="loc">Local</span><span>Ollama read the policy from the Woodgrove Bank cache and wrote the search. Nothing left this device.</span></li>
+                      <li><span class="tm">09:52:12</span><span class="not">Not sent</span><span>Web search with OpenAI. Security is blocked on Hosted.</span></li>
+                    </ul>
+                    <div class="acts"><button class="bt primary" type="button">Search without the name</button><button class="bt secondary" type="button">Answer without searching</button><button class="bt ghost" type="button">Change the rule</button></div>
+                    <p class="xs muted" style="margin-top:10px">Search without the name opens the search words without WGB Finance MFA for you to edit, and they are checked again before they are sent. Answer without searching lets Ollama answer from the tenant data on this device, without current documentation. Switching models is not offered: every web search goes to OpenAI.</p>
+                  </div>
+                </div>
+              </div>
+            </div></div>
+          </div>
+        </div>
+        <div style="display:grid;gap:12px">
+          <p class="xs muted">Hosted voice, the same rule</p>
+          <div class="block" data-t="blocked">
+            <span class="glyph" data-t="blocked"><svg><use href="#i-stop"/></svg></span>
+            <div>
+              <h3>Nova did not search the web: the search words name security data</h3>
+              <p>You said the policy name aloud. Hosted voice hears what you say, and those spoken words are not checked. The search request is text this app sends to OpenAI, so it is checked, and Security on Hosted is Block: no request was made. Nova said: "I can't search with that policy name. I can search for the sign-in frequency setting instead."</p>
+              <div class="acts"><button class="bt secondary sm" type="button">Search without the name</button><button class="bt ghost sm" type="button">Change the rule</button></div>
+            </div>
+          </div>
+          <p class="xs muted" style="margin-top:8px">Security on Hosted at Mask, with Claude Code reasoning</p>
+          <div class="block">
+            <span class="glyph" data-t="mask"><svg><use href="#i-q"/></svg></span>
+            <div>
+              <h3>Searched with 1 security name masked</h3>
+              <p>Claude Code saw the policy as <code>[CA_POLICY_1]</code> and wrote the search with that token. The name was restored into the search on this device, then masked again by the check before the request, so OpenAI received <code>[CA_POLICY_1]</code>, never the name. The results describe the setting, not your policy.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <ul class="notes" aria-label="Notes on web search">
+        <li>Decided in round 16: every model request that leaves the device passes one Hosted gate: provider calls, hosted voice context and the web search request. The check runs on the final search words, after any name restored into the tool's parameters, just before the request. A search it blocks makes no network request.</li>
+        <li>The block shows the search words on this device with the withheld value marked, names the class, the policy it came from and the rule, and lists the local work that ran before it.</li>
+        <li>Recovery offers only what works: the search words without the withheld value, checked again before they are sent; an answer without searching; or Change the rule. A local model is not offered, because no model on this device searches the web.</li>
+        <li>Under Mask the search goes out with the token in place of the name. A restored name never reaches the search request in clear text.</li>
+      </ul>
     </section>
 
     <!-- F: Could not classify, and loosening -->
@@ -1080,7 +1139,7 @@
       </ul>
 
       <h3 id="f-reopen" style="margin:32px 0 6px;font-size:var(--text-base);font-weight:500">A conversation reopened after a restart</h3>
-      <p>Each saved Chat message keeps its classification next to it on this device: where each recognized value sits in the text and every class that applied to it, from its field and from the value checks, not a second copy of the value. Reopening a conversation rebuilds the ledger from that record before any follow-up, so a policy name that is no longer in the tenant index is still known as security. A message saved without that record could hold anything, so it counts as not examined. So does every message whose record was made before an update that raised the class of any field, whether or not the message used that field: the record cannot show that none of its values came from the raised field, so the saved classification can no longer be used.</p>
+      <p>Each saved Chat message keeps its classification next to it on this device: where each recognized value sits in the text, every class that applied to it, from its field and from the value checks, and the field map revision in force, not a second copy of the value. Reopening a conversation rebuilds the ledger from that record before any follow-up, so a policy name that is no longer in the tenant index is still known as security. A message saved without that record could hold anything, so it counts as not examined. So does every message whose record was made before any change that raised the class of a field, whether an app update to the field map, a move in Settings or a mapping in the IT policy file, and whether or not the message used that field: the record cannot show that none of its values came from the raised field, so the saved classification can no longer be used.</p>
       <div class="win">
         <div class="lights"><i></i><i></i><i></i></div>
         <div class="shell">
@@ -1096,12 +1155,12 @@
                   <div class="body"><p>Three Finance laptops report BitLocker off: WGB-LT-0412, WGB-LT-0388 and WGB-LT-0291. Two of them have not checked in since October.</p></div>
                 </div>
                 <p class="histtag"><span class="hx"></span>No stored classification. Counts as not examined.</p>
-                <div class="q">Which sign-ins came from outside our named locations?</div>
+                <div class="q">Which configuration profiles do those laptops get?</div>
                 <div class="ans">
-                  <div class="who"><svg width="14" height="14"><use href="#oa"/></svg>Nova with Claude Code, 15 November, classified under field map 41</div>
-                  <div class="body"><p>Two of those laptops signed in from outside Woodgrove HQ and Woodgrove Branch Offices this week, both through a home network in Leeds.</p></div>
+                  <div class="who"><svg width="14" height="14"><use href="#oa"/></svg>Nova with Ollama on this device, 15 November, classified under field map revision 41</div>
+                  <div class="body"><p>Two profiles: Windows baseline 24H2 and Finance VPN. The Finance VPN description says it pairs with the Conditional Access policy WGB Finance MFA.</p></div>
                 </div>
-                <p class="histtag"><span class="hx"></span>Stored classification from field map 41. Field map 42 has since raised sign-in network locations from activity to security, so this saved classification can no longer be used. Counts as not examined.</p>
+                <p class="histtag"><span class="hx"></span><span>Stored classification from field map revision 41. On 17 November you raised <code>deviceConfigurations: description</code> from configuration to security in Settings, which made revision 42, so this saved classification can no longer be used. Counts as not examined.</span></p>
               </div>
               <div class="q">Which of those checked in this week?</div>
               <div class="ans">
@@ -1109,17 +1168,17 @@
                   <span class="glyph" data-t="blocked"><svg><use href="#i-q"/></svg></span>
                   <div>
                     <h3>Your earlier answers were left out: 4 messages could not be classified</h3>
-                    <p>The question and answer from 12 November were saved before this app stored a classification with each message. The question and answer from 15 November were classified under field map 41, and field map 42 has since raised sign-in network locations from activity to security, so their saved classification can no longer be used: any record made before field map 42 counts as not examined, and here the named locations it calls activity are security now. All 4 count as not examined and take the strictest rule any class has on Hosted. Security on Hosted is Block, so they were not sent to Claude Code, although the examined part of this follow-up holds only device, identity and activity data, and your follow-up was not sent without them: it depends on them. The 4 other messages were classified from their stored record.</p>
+                    <p>The question and answer from 12 November were saved before this app stored a classification with each message. The question and answer from 15 November were classified under field map revision 41. On 17 November you raised profile descriptions from configuration to security in Settings, which made revision 42, so their saved classification can no longer be used: any record made before a class was raised, by an app update, in Settings or in the IT policy file, counts as not examined, and here the answer quotes a profile description, which is security now. All 4 count as not examined and take the strictest rule any class has on Hosted. Security on Hosted is Block, so they were not sent to Claude Code, although the examined part of this follow-up holds only device, identity and activity data, and your follow-up was not sent without them: it depends on them. The 4 other messages were classified from their stored record.</p>
                     <ul class="calls" aria-label="Model calls for this question">
                       <li><span class="tm">09:21:04</span><span class="sent">Sent</span><span>Planning the question. Your question, checked by data policy. No sensitive values found.</span></li>
-                      <li><span class="tm">09:21:06</span><span class="not">Not sent</span><span>Follow-up with 8 earlier messages. 4 not examined: 2 without a record, 2 classified before field map 42; Security is Block on Hosted.</span></li>
+                      <li><span class="tm">09:21:06</span><span class="not">Not sent</span><span>Follow-up with 8 earlier messages. 4 not examined: 2 without a record, 2 classified before revision 42; Security is Block on Hosted.</span></li>
                     </ul>
                     <div class="acts"><button class="bt primary" type="button">Ask without the earlier answers</button><button class="bt secondary" type="button">Switch to a local model</button></div>
                     <p class="xs muted" style="margin-top:10px">Without the earlier answers, only your new question goes to Claude Code, with none of this conversation's history, so name the devices you mean. Ollama with gpt-oss:20b is ready on this device, and no rule on Local is Block, so the follow-up can be answered there with the whole conversation.</p>
                   </div>
                 </div>
               </div>
-              <div class="composer">Ask a follow-up<span class="r"><span class="hx"></span>Claude Code, identities and devices masked, security names blocked</span></div>
+              <div class="composer">Ask a follow-up<span class="r"><span class="hx"></span>Claude Code, identities and devices masked, security blocked</span></div>
             </div></div>
           </div>
         </div>
@@ -1129,19 +1188,20 @@
         <span class="glyph" data-t="mask"><svg><use href="#i-q"/></svg></span>
         <div>
           <h3>4 earlier messages could not be classified and were masked one way</h3>
-          <p>The question and answer from 12 November have no stored classification, and the pair from 15 November was classified before field map 42 raised sign-in network locations to security, so all 4 count as not examined and take the strictest rule any class has on Hosted. With your rules that is Mask: they were masked one way before the call to Claude Code and are never restored. This answer could not use them.</p>
+          <p>The question and answer from 12 November have no stored classification, and the pair from 15 November was classified before revision 42 raised profile descriptions to security in Settings, so all 4 count as not examined and take the strictest rule any class has on Hosted. With your rules that is Mask: they were masked one way before the call to Claude Code and are never restored. This answer could not use them.</p>
           <div class="acts"><button class="bt secondary sm" type="button">Ask with a local model</button></div>
         </div>
       </div>
       <ul class="notes">
-        <li>Decided in round 13: each saved Chat message stores its classification evidence in the local database: the offset and length of every value the ledger found in it with every class that applied to it (refined in rounds 14 and 15 below), and the field map version that classed them. It is no new copy of the values beyond the message text already saved. Disconnecting the organization and deleting the conversation remove the evidence with the messages.</li>
+        <li>Decided in round 13: each saved Chat message stores its classification evidence in the local database: the offset and length of every value the ledger found in it with every class that applied to it (refined in rounds 14 and 15 below), and the field map revision that classed them (made the effective revision in round 16 below). It is no new copy of the values beyond the message text already saved. Disconnecting the organization and deleting the conversation remove the evidence with the messages.</li>
         <li>Reopening rebuilds the ledger from the stored evidence before the follow-up is built, and the scan of the final request still runs over the history, so a class can only rise. An answer that named a Conditional Access policy since renamed in the tenant keeps that name as security: with Security on Hosted at Block, the name is withheld, as the blocked prompt in E shows.</li>
         <li>A message with no stored evidence, saved by an earlier version or with evidence that cannot be read, counts as not examined, the same rule as a request the check ran out of time on. With a Block on the tier, it is withheld and the follow-up waits for the admin: sent without the history it depends on, it would get a confident wrong answer. With Mask as the strictest rule, it is masked one way and the answer says so.</li>
         <li>Ask without the earlier answers sends the new question alone, with no saved history in the request. The local model is offered only when no rule on Local is Block, as in the withheld calls above.</li>
         <li>The marker under each saved message without a usable record stays in the conversation, so the admin sees which messages are affected before asking again.</li>
         <li>Decided in round 14: each stored span keeps the list of every class its field had held when the message was saved (the mapped class and every later pick), not one class (widened in round 15 below to the value checks' classes), and reopening takes the strictest action across that whole list under the rules in force now. A field moved from configuration to security to identity, with a value saved in a local answer and later gone from the tenant index, is still withheld from a hosted follow-up after a restart when Security on Hosted is Block.</li>
-        <li>A record made under a field map older than a map change that raised any class counts as not examined, like a message with no record, whichever fields the message used, because its stored classes may be lower than a field's class now. The marker under the message names the change, here field map 42 raising sign-in network locations from activity to security. A record under a map whose later changes raised nothing is used as stored.</li>
+        <li>A record made under a field map revision older than a change that raised any class counts as not examined, like a message with no record, whichever fields the message used, because its stored classes may be lower than a field's class now. The marker under the message names the change, here revision 42, the move of profile descriptions from configuration to security in Settings on 17 November. A record whose revision is still current, or whose later changes raised nothing, is used as stored.</li>
         <li>Decided in round 15: the stored set also holds every class a value check assigned when the message was saved, a tenant index match or a credential or identifier pattern, next to its field's classes. A person's display name in a configuration field, recognized by the tenant index as identity, keeps identity after a restart once the name has left the index: with Identity on Hosted at Mask it is masked, at Block it is withheld, and it is never sent in clear text.</li>
+        <li>Decided in round 16: the revision is that of the effective field map, the one the app applies, not the version it ships. It changes whenever any source raises a class: an app update to the shipped map, a move in Settings, or a mapping in the IT policy file (<code>dataPolicy.fieldClasses</code>). A change that raises nothing leaves it as it is. The 15 November answer above was saved while profile descriptions were configuration; the move to security in Settings made revision 42, and after a restart, with WGB Finance MFA gone from the tenant index, the hosted follow-up is withheld under Security Block. A check of the shipped map alone would see no change and send the name as configuration.</li>
       </ul>
     </section>
 
@@ -1277,7 +1337,7 @@
     const CLASSES = [
       { id: "credential", name: "Credential", sens: 6, strip: "credentials", ex: "BitLocker and FileVault keys, LAPS passwords, client secrets, tokens" },
       { id: "identity", name: "Identity", sens: 5, strip: "identities", ex: "Names, UPNs, email addresses, phone numbers, user ids", locked: "dataPolicy.rules.identity" },
-      { id: "security", name: "Security", sens: 4, strip: "security names", ex: "Conditional Access and named locations, authentication methods, baselines, admin roles, PIM" },
+      { id: "security", name: "Security", sens: 4, strip: "security names", stripBlock: "security", ex: "Conditional Access and named locations, authentication methods, baselines, admin roles, PIM" },
       { id: "device", name: "Device", sens: 3, strip: "devices", ex: "Device names, serial numbers, IMEI, MAC and IP addresses", locked: "dataPolicy.rules.device", overridden: "Your own setting, Allow on Hosted from 3 November, is not applied: a setting here never loosens a rule IT set." },
       { id: "activity", name: "Activity", sens: 2, strip: "activity", ex: "Sign-in times and locations, audit entries, app usage" },
       { id: "configuration", name: "Configuration", sens: 1, strip: "configuration", ex: "Policy and group names, settings, app names, compliance rules" },
@@ -1301,8 +1361,10 @@
     const joinList = (xs) => xs.length < 3 ? xs.join(" and ") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
     // Masked credentials are never named: no rule sends them in clear text. Blocked ones are.
     // Voice context withholds a transfer instead of refusing a call, so a voice strip names blocked classes as withheld context.
+    // Masking a security object hides its names only; a block keeps the whole object back, so the label drops "names".
+    const stripName = (c, act) => act === "block" && c.stripBlock ? c.stripBlock : c.strip;
     function stripHtml(r, form = "both", label = "Hosted · Claude Code", popId = "", voice = false) {
-      const named = (act) => CLASSES.filter((c) => c.strip && r[c.id].hosted === act && !(c.id === "credential" && act === "mask")).map((c) => c.strip);
+      const named = (act) => CLASSES.filter((c) => c.strip && r[c.id].hosted === act && !(c.id === "credential" && act === "mask")).map((c) => stripName(c, act));
       const m = named("mask");
       const b = voice ? CLASSES.filter((c) => r[c.id].hosted === "block").map((c) => c.name.toLowerCase()) : named("block");
       const pick = (full, short) => form === "full" ? full : form === "short" ? short : `<span class="bw">${full}</span><span class="bs">${short}</span>`;
@@ -1501,7 +1563,7 @@
     document.querySelectorAll("[data-top]").forEach(drawTop);
     // The local strip names Local rules that mask or block, from the same rules.
     function localStrip(r) {
-      const m = CLASSES.filter((c) => r[c.id].local === "mask").map((c) => c.strip), b = CLASSES.filter((c) => r[c.id].local === "block").map((c) => c.strip);
+      const m = CLASSES.filter((c) => r[c.id].local === "mask").map((c) => stripName(c, "mask")), b = CLASSES.filter((c) => r[c.id].local === "block").map((c) => stripName(c, "block"));
       return `<span class="boundary" data-where="local"><span class="pip"></span>Local · Ollama · No data leaves this device${m.length ? ` ·<span class="mask"><span class="hx"></span>${joinList(m)} masked</span>` : ""}${b.length ? ` ·<span class="blk">${joinList(b)} blocked</span>` : ""}</span>`;
     }
     document.querySelectorAll("[data-local]").forEach((el) => { el.innerHTML = orgchip + localStrip(STRIP_RULES[el.dataset.local]); });
