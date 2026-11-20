@@ -1753,6 +1753,7 @@ export class RunService {
       summary: `${agent.name} failed: ${message}`,
       error: message,
       ...(accessDenial ? { accessDenial } : {}),
+      graphDenialChecked: true,
     });
   }
 

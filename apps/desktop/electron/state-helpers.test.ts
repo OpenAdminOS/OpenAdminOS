@@ -622,6 +622,9 @@ describe("scheduled run failure text", () => {
     assert.equal(humanizeScheduledRunError(graphAccessDenialText(stored), stored), graphAccessDenialText(stored));
     assert.match(humanizeScheduledRunError("Graph responded with HTTP 403 for https://graph.microsoft.com/v1.0/users: {\"error\":{\"code\":\"Forbidden\"}}"), /Graph access|Microsoft Graph denied access/);
     assert.match(humanizeScheduledRunError("Graph request failed (https://graph.microsoft.com/v1.0/users): fetch failed"), /Check network or VPN connectivity/);
+    // A failure classified from its typed error is not read from its text.
+    const adapterWording = "Graph responded with HTTP 403 for https://graph.microsoft.com/v1.0/users: forbidden";
+    assert.equal(humanizeScheduledRunError(adapterWording, undefined, true), adapterWording);
   });
 
   it("ignores a stored Graph denial for a 403 that did not come from Microsoft Graph", () => {

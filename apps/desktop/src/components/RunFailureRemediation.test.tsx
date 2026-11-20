@@ -198,3 +198,21 @@ it("shows only the lookup playbook for an HTTP 403 from the lookup, even with a 
   expect(screen.queryByText(accessDenial.title)).not.toBeInTheDocument();
   expect(screen.queryByText("Graph access cause unverified")).not.toBeInTheDocument();
 });
+
+it("does not read Graph advice from the text of a failure classified from its typed error", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], graphDenialChecked: true, error: "Graph responded with HTTP 403 for https://graph.microsoft.com/v1.0/users: forbidden" };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.queryByText("Graph access cause unverified")).not.toBeInTheDocument();
+});
+
+it.each([
+  ["Ollama responded with HTTP 403 at http://127.0.0.1:11434/api/chat: Unauthorized", false],
+  ["Anthropic API returned 401 Unauthorized: invalid x-api-key", false],
+  ["Graph responded with HTTP 401 for https://graph.microsoft.com/v1.0/users: {\"error\":{\"code\":\"InvalidAuthenticationToken\"}}", true],
+  ["AADSTS65001 interaction_required: consent is needed", true],
+])("gives tenant sign-in advice only for a tenant sign-in failure: %s", (error, tenant) => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
+  render(<RunFailureRemediation run={run} />);
+  if (tenant) expect(screen.getByText("Tenant token expired")).toBeInTheDocument();
+  else expect(screen.queryByText("Tenant token expired")).not.toBeInTheDocument();
+});

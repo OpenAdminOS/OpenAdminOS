@@ -2,7 +2,7 @@ import { IconWarning } from "./icons";
 import { Button } from "./Button";
 import { useReportIssue } from "./ReportIssueModal";
 import type { RunRecord } from "../shared/openAdminOS";
-import { graphAccessDenialFromStoredText, storedGraphAccessDenial } from "@openadminos/agent-sdk";
+import { errorComesFromGraph, graphAccessDenialFromStoredText, storedGraphAccessDenial } from "@openadminos/agent-sdk";
 
 interface Suggestion {
   match: (error: string) => boolean;
@@ -62,7 +62,9 @@ const SUGGESTIONS: Suggestion[] = [
     body: "The LLM or Microsoft Graph took longer than expected. Try a smaller model, narrow the agent's scope, or check your network.",
   },
   {
-    match: (e) => /401|unauthor|expired token|interaction_required/i.test(e) && !isContextLimitLookup(e),
+    // A 401 or "unauthorized" counts only from Graph; a model server or vendor
+    // API that answers 401 or 403 Unauthorized is not a tenant sign-in.
+    match: (e) => (/expired token|interaction_required/i.test(e) || (errorComesFromGraph(e) && /401|unauthor/i.test(e))) && !isContextLimitLookup(e),
     title: "Tenant token expired",
     body: "Disconnect and reconnect the tenant from Connections. MSAL caches a refresh token but Graph can revoke it independently.",
   },
@@ -90,9 +92,11 @@ export function RunFailureRemediation({ run }: { run: RunRecord }) {
   // Only a Graph error gets Graph recovery advice. Runs stored by earlier
   // versions can carry an accessDenial for a 403 from a model server, a
   // vendor API, or an MCP server; that stored value is ignored.
-  // A run stored without a denial is read from its message, as Graph code
-  // wrote it before denials were stored.
-  const accessDenial = storedGraphAccessDenial(run.accessDenial, run.error) ?? graphAccessDenialFromStoredText(run.error);
+  // A failure classified from its typed error is never read from its text;
+  // a run stored by an earlier version is read from its message, as Graph
+  // code wrote it before denials were stored.
+  const accessDenial = storedGraphAccessDenial(run.accessDenial, run.error)
+    ?? (run.graphDenialChecked ? undefined : graphAccessDenialFromStoredText(run.error));
   if (accessDenial) {
     matched.unshift({ match: () => true, title: accessDenial.title, body: `${accessDenial.message} ${accessDenial.recovery}` });
   }

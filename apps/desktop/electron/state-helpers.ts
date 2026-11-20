@@ -122,14 +122,18 @@ export function withoutMisclassifiedGraphDenial(run: RunRecord): RunRecord {
     : rest;
 }
 
-export function humanizeScheduledRunError(message: string, accessDenial?: GraphAccessDenial): string {
+/**
+ * `checked` is true when the failure was classified from its typed error, so
+ * its text is not read for a Graph denial.
+ */
+export function humanizeScheduledRunError(message: string, accessDenial?: GraphAccessDenial, checked = false): string {
   const raw = message.trim();
   const lower = raw.toLowerCase();
   // A denial stored by an earlier version for a 403 that did not come from
   // Microsoft Graph (a model server, a vendor API, an MCP server) is ignored.
   const storedDenial = storedGraphAccessDenial(accessDenial, raw);
   if (storedDenial) return graphAccessDenialText(storedDenial);
-  const unknownDenial = graphAccessDenialFromStoredText(raw);
+  const unknownDenial = checked ? undefined : graphAccessDenialFromStoredText(raw);
   if (unknownDenial) return graphAccessDenialText(unknownDenial);
   // Only a message that Graph code wrote gets Graph advice; a provider error
   // can quote "Graph request failed" in a body it appends.
