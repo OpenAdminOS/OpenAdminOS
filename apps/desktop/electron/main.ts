@@ -43,13 +43,13 @@ import {
   type LoginItemSettingsOptions,
   type MenuItemConstructorOptions,
 } from "electron";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { arch as osArch, release as osRelease } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { dirname, join, win32 } from "node:path";
+import { dirname, join, resolve, win32 } from "node:path";
 import { AppStateStore, TENANT_CLOSING_REASON } from "./state.js";
 import { loadManagedPolicy, resolveManagedPolicyPaths } from "./managed-policy.js";
 import { MCP_CATALOG } from "./mcp/catalog.js";
@@ -5452,7 +5452,11 @@ function macosLaunchAgentLoaded(): "loaded" | "absent" | "unknown" {
 
 /** Turns the menu bar login item off and throws when macOS still reports it on. */
 function disableCompanionLoginItemForReset(): void {
-  if (!getCompanionLaunchSettings().enabled) return;
+  const settings = getCompanionLaunchSettings();
+  if (!settings.supported) {
+    throw new Error(`macOS did not report whether it is on (${settings.detail}). Check System Settings, General, Login Items`);
+  }
+  if (!settings.enabled) return;
   if (setCompanionLaunchEnabled(false).enabled) {
     throw new Error("macOS still lists it as on. Turn it off in System Settings, General, Login Items");
   }
@@ -5470,9 +5474,31 @@ function localResetInfo(): LocalResetInfo {
 
 /** Restart without the background or menu bar launch flags, so the next launch opens the window. */
 function relaunchInteractive(): void {
+  if (process.platform === "darwin" && app.isPackaged && isBackgroundSchedulerLaunch) {
+    relaunchOutsideLaunchAgent();
+    return;
+  }
   app.relaunch({
     args: process.argv.slice(1).filter((arg) => arg !== BACKGROUND_SCHEDULER_ARG && arg !== MENU_BAR_ARG),
   });
+  app.exit(0);
+}
+
+/**
+ * A process the LaunchAgent started is in that job's process group, and
+ * launchd kills the group when the job ends, so Electron's relaunch helper
+ * would die with it. A detached shell (its own session and group) waits for
+ * this process to exit, at most a minute, then opens the app through
+ * LaunchServices as an interactive launch.
+ */
+function relaunchOutsideLaunchAgent(): void {
+  const bundle = resolve(process.execPath, "..", "..", "..");
+  const script = 'i=0; while kill -0 "$0" 2>/dev/null && [ "$i" -lt 300 ]; do sleep 0.2; i=$((i+1)); done; exec /usr/bin/open "$1"';
+  try {
+    spawn("/bin/sh", ["-c", script, String(process.pid), bundle], { detached: true, stdio: "ignore" }).unref();
+  } catch (error) {
+    console.warn("[local-reset] could not start the app again after the reset request; it resets at the next launch", error);
+  }
   app.exit(0);
 }
 
@@ -7093,15 +7119,18 @@ function registerIpcHandlers() {
 // runs or resumes a reset: on macOS it is the LaunchAgent's own job, which
 // the reset unloads, so it exits and leaves the reset to an interactive
 // launch, and it never touches the scheduler registration meanwhile.
-const pendingLocalResetBuild: "installed" | "development" | "unknown" | undefined = (() => {
+function pendingLocalResetBuildNow(): "installed" | "development" | "unknown" | undefined {
   try {
     const marker = readLocalResetMarker(app.getPath("userData"));
     return marker ? marker.build ?? "unknown" : undefined;
   } catch {
     return undefined;
   }
-})();
+}
+/** Read again under the lock below; that reading drives the wipe and the cleanup after it. */
+let pendingLocalResetBuild = pendingLocalResetBuildNow();
 const yieldToPendingLocalReset = Boolean(pendingLocalResetBuild && isBackgroundSchedulerLaunch);
+let localResetYielding = yieldToPendingLocalReset;
 if (yieldToPendingLocalReset) {
   console.info("[local-reset] a reset is pending; the scheduler wake leaves it to an interactive launch");
   app.exit(0);
@@ -7148,7 +7177,17 @@ if (!gotLock) {
   // single-instance lock, before Chromium reads Local State and before any
   // store, session or safeStorage use.
   // app.exit does not stop this script, so a yielding wake skips the wipe too.
-  if (!yieldToPendingLocalReset) localResetReport = runLocalResetAtLaunch();
+  // A marker committed after the first reading, while another process still
+  // held the lock, is caught by reading it again here.
+  if (!localResetYielding) {
+    pendingLocalResetBuild = pendingLocalResetBuildNow();
+    if (pendingLocalResetBuild && isBackgroundSchedulerLaunch) {
+      localResetYielding = true;
+      console.info("[local-reset] a reset is pending; the scheduler wake leaves it to an interactive launch");
+      app.exit(0);
+    }
+  }
+  if (!localResetYielding) localResetReport = runLocalResetAtLaunch();
   app.on("second-instance", (_event, argv) => {
     if (localResetReport?.status === "incomplete") {
       if (argv.includes(BACKGROUND_SCHEDULER_ARG)) return;
@@ -7203,7 +7242,7 @@ if (!gotLock) {
       }
     }
 
-    if (yieldToPendingLocalReset) return;
+    if (localResetYielding) return;
     registerStorelessIpcHandlers();
     if (localResetReport?.status === "incomplete") {
       // The app stays closed until the reset finishes, so old data is never
