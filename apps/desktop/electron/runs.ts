@@ -16,6 +16,7 @@ import {
   agentCallsNoServiceApi,
   agentServiceIds,
   formatServiceList,
+  graphAccessDenialFromError,
   organizationForTenant,
   serviceById,
   invalidAgentManifestCopy,
@@ -26,6 +27,7 @@ import {
   resolveRunModel,
   runInitiator,
   type AgentSummary,
+  type GraphAccessDenial,
   type IntuneChatMessage,
   type ProviderId,
   type ProviderSummary,
@@ -240,6 +242,14 @@ export function readOnlyRevalidationTransport(
  * Graph sign-in or a connector failing for the replan: nothing was
  * written, so the error says so unless it already does.
  */
+/** A plan that could not be checked again keeps the Graph denial of that check. */
+class PlanCheckFailedError extends Error {
+  constructor(message: string, readonly accessDenial: GraphAccessDenial | undefined) {
+    super(message);
+    this.name = "PlanCheckFailedError";
+  }
+}
+
 function notAppliedError(error: unknown): unknown {
   const message = error instanceof Error ? error.message : String(error);
   if (/nothing was applied/i.test(message)) return error;
@@ -1441,9 +1451,9 @@ export class RunService {
       });
       controller.signal.throwIfAborted();
       if (fresh.status === "failed" || !fresh.plan) {
-        throw new Error(kind === "office"
+        throw new PlanCheckFailedError(kind === "office"
           ? `The proposal could not be checked against the tenant before applying, so nothing was applied. ${fresh.error ?? "Run the assignment again."}`
-          : `The plan could not be checked against the tenant before applying, so nothing was applied. ${fresh.error ?? "Select Run again to review a fresh plan."}`);
+          : `The plan could not be checked against the tenant before applying, so nothing was applied. ${fresh.error ?? "Select Run again to review a fresh plan."}`, fresh.accessDenial);
       }
       const change = planChangeSinceReview(input.plan, fresh.plan);
       if (change.changed) throw new Error(planChangedSinceReviewCopy(change, kind, { usesModel: (fresh.usage?.calls ?? 0) > 0 }));
@@ -1734,6 +1744,7 @@ export class RunService {
     error: unknown,
   ): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
+    const accessDenial = (error instanceof PlanCheckFailedError ? error.accessDenial : undefined) ?? graphAccessDenialFromError(error);
     const finishedAt = new Date().toISOString();
     await this.persistRunSnapshot({
       ...run,
@@ -1741,6 +1752,7 @@ export class RunService {
       finishedAt,
       summary: `${agent.name} failed: ${message}`,
       error: message,
+      ...(accessDenial ? { accessDenial } : {}),
     });
   }
 
