@@ -130,7 +130,8 @@ export function humanizeScheduledRunError(message: string, accessDenial?: GraphA
   const raw = message.trim();
   const lower = raw.toLowerCase();
   // A denial stored by an earlier version for a 403 that did not come from
-  // Microsoft Graph (a model server, a vendor API, an MCP server) is ignored.
+  // Microsoft Graph (a model server, a vendor API, an MCP server, or a
+  // "403 MiB" in what Ollama said) is ignored.
   const storedDenial = storedGraphAccessDenial(accessDenial, raw);
   if (storedDenial) return graphAccessDenialText(storedDenial);
   const unknownDenial = checked ? undefined : graphAccessDenialFromStoredText(raw);

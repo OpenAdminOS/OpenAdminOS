@@ -5,11 +5,13 @@ import {
   canonicalClientId,
   graphCacheRequestFromNextLink,
   humanizeMsalError,
+  humanizeScheduledRunError,
   sanitizeSavedAppRegistrations,
   tokenCacheForPartition,
   tokenCachePartition,
 } from "./state-helpers.js";
 import { GRAPH_CLI_CLIENT_ID, OPENADMINOS_CLIENT_ID } from "@openadminos/runtime";
+import { classifyGraphAccessDenied, graphAccessDenialText } from "@openadminos/agent-sdk";
 
 describe("Graph cache nextLink validation", () => {
   it("keeps beta paths, query values, and caller headers", () => {
@@ -611,8 +613,8 @@ it("a row-limited collection keeps the rows within the memory budget instead of 
   await assert.rejects(fetchGraphCachePages(graph, {path:"/auditLogs/signIns"}, undefined, true), /128 MiB/);
 });
 
-import { humanizeScheduledRunError, withoutMisclassifiedGraphDenial } from "./state-helpers.js";
-import { classifyGraphAccessDenied, graphAccessDenialText, type RunRecord } from "@openadminos/agent-sdk";
+import { withoutMisclassifiedGraphDenial } from "./state-helpers.js";
+import type { RunRecord } from "@openadminos/agent-sdk";
 
 describe("scheduled run failure text", () => {
   // As earlier versions stored it, before denials carried their source.
@@ -667,5 +669,31 @@ describe("stored runs with a Graph denial for a non-Graph error", () => {
     const current = classifyGraphAccessDenied({ path: "/users", requiredScopes: ["User.Read.All"], grantedScopes: [] });
     const wrapped: RunRecord = { ...base, error: "Listing users failed.", accessDenial: current };
     assert.equal(withoutMisclassifiedGraphDenial(wrapped), wrapped);
+  });
+});
+
+describe("humanizeScheduledRunError", () => {
+  it("keeps an Ollama memory failure that mentions 403 MiB instead of calling it a Graph denial", () => {
+    const message = "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. Ollama said: cudaMalloc failed: out of memory (403 MiB)";
+    const text = humanizeScheduledRunError(message);
+    assert.ok(text.startsWith("Ollama could not load gpt-oss:20b"), text);
+    assert.doesNotMatch(text, /Graph/);
+  });
+
+  it("ignores a Graph denial an older build saved from what Ollama said", () => {
+    const message = "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. Ollama said: cudaMalloc failed: out of memory (403 MiB)";
+    // Older builds stored denials without a source.
+    const { source: _source, ...saved } = classifyGraphAccessDenied({});
+    const text = humanizeScheduledRunError(message, saved);
+    assert.ok(text.startsWith("Ollama could not load gpt-oss:20b"), text);
+  });
+
+  it("keeps a stored Graph denial for an error that is not Ollama's", () => {
+    const denial = classifyGraphAccessDenied({});
+    assert.equal(humanizeScheduledRunError("Graph responded with HTTP 403 for GET /users", denial), graphAccessDenialText(denial));
+  });
+
+  it("still reads a Graph 403 in the app's own words", () => {
+    assert.match(humanizeScheduledRunError("Graph responded with HTTP 403 for https://graph.microsoft.com/v1.0/users: reconnect to grant scopes"), /Graph/);
   });
 });

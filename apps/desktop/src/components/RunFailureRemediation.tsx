@@ -7,8 +7,15 @@ import { errorComesFromGraph, graphAccessDenialFromStoredText, storedGraphAccess
 interface Suggestion {
   match: (error: string) => boolean;
   title: string;
-  body: string;
+  /** Fixed advice, or advice read from the error when it carries the specifics. */
+  body: string | ((error: string) => string);
 }
+
+/**
+ * The app's own text of an error. What Ollama said, quoted after "Ollama said:",
+ * can contain words such as "context limit" or "invalid" that would pick an unrelated playbook.
+ */
+const ownText = (e: string) => e.split("Ollama said:")[0] ?? e;
 
 /**
  * A failed lookup of the model's context limit has its own playbook only.
@@ -16,6 +23,30 @@ interface Suggestion {
  * endpoint prefix such as `/api/showroom` or `/api/show.v1` in front of `/api/chat` is not read as the lookup.
  */
 const isContextLimitLookup = (e: string) => /ollama/i.test(e) && /context limit|\/api\/show(?=\.$|:\s| answered )/i.test(e);
+
+/**
+ * LM Studio's context error from the runtime. It quotes LM Studio and token
+ * counts, so no other playbook and no Graph denial is read from its text.
+ */
+const LM_STUDIO_CONTEXT_PREFIX = "LM Studio context length too small:";
+const isLmStudioContextTooSmall = (e: string) => e.includes(LM_STUDIO_CONTEXT_PREFIX);
+
+/**
+ * The sizes and the reload steps from the runtime's LM Studio context
+ * error, without LM Studio's own text. The run header truncates the error,
+ * so the playbook repeats what the admin needs to act on.
+ */
+function lmStudioContextAdvice(error: string): string {
+  const start = error.indexOf(LM_STUDIO_CONTEXT_PREFIX) + LM_STUDIO_CONTEXT_PREFIX.length;
+  const end = error.indexOf(" LM Studio said:", start);
+  const advice = error.slice(start, end === -1 ? undefined : end).trim();
+  return advice.length > 0
+    ? advice
+    : "LM Studio sets a model's context length when the model is loaded, and this request did not fit. In LM Studio, raise Context Length in the model's load settings and reload the model, then re-run.";
+}
+
+/** Errors with one cause and one recovery: only their own playbook is shown. */
+const EXCLUSIVE = [isLmStudioContextTooSmall, isContextLimitLookup];
 
 const SUGGESTIONS: Suggestion[] = [
   {
@@ -32,6 +63,11 @@ const SUGGESTIONS: Suggestion[] = [
     match: isContextLimitLookup,
     title: "Ollama did not report the model's context limit",
     body: "The request did not fit in the context Ollama loaded, and Ollama did not answer when OpenAdminOS asked for the model's limit before raising it. Check that Ollama is responsive with `ollama ps`, restart it if it is stuck, then re-run.",
+  },
+  {
+    match: isLmStudioContextTooSmall,
+    title: "LM Studio context too small",
+    body: lmStudioContextAdvice,
   },
   {
     match: (e) =>
@@ -88,20 +124,24 @@ const SUGGESTIONS: Suggestion[] = [
 export function RunFailureRemediation({ run }: { run: RunRecord }) {
   const openReportIssue = useReportIssue();
   if (run.status !== "failed" || !run.error) return null;
-  // A failed lookup of the Ollama model's context limit has one cause and
-  // one recovery.
-  const lookup = isContextLimitLookup(run.error);
-  const matched = lookup
-    ? SUGGESTIONS.filter((suggestion) => suggestion.match === isContextLimitLookup)
-    : SUGGESTIONS.filter((suggestion) => suggestion.match(run.error!));
+  // A failed lookup of the Ollama model's context limit and an LM Studio
+  // context error each have one cause and one recovery; an HTTP status or a
+  // number in their text (for example 403) is not a Graph denial.
+  const own = ownText(run.error);
+  const exclusive = EXCLUSIVE.find((match) => match(own));
+  const matched = exclusive
+    ? SUGGESTIONS.filter((suggestion) => suggestion.match === exclusive)
+    : SUGGESTIONS.filter((suggestion) => suggestion.match(own));
   // Only a Graph error gets Graph recovery advice. Runs stored by earlier
   // versions can carry an accessDenial for a 403 from a model server, a
-  // vendor API, or an MCP server; that stored value is ignored.
-  // A failure classified from its typed error is never read from its text;
-  // a run stored by an earlier version is read from its message, as Graph
-  // code wrote it before denials were stored.
-  const accessDenial = storedGraphAccessDenial(run.accessDenial, run.error)
-    ?? (run.graphDenialChecked ? undefined : graphAccessDenialFromStoredText(run.error));
+  // vendor API, or an MCP server, for example a "403 MiB" in what Ollama
+  // said; that stored value is ignored. A failure classified from its typed
+  // error is never read from its text; a run stored by an earlier version is
+  // read from its message, as Graph code wrote it before denials were stored.
+  const accessDenial = exclusive
+    ? undefined
+    : storedGraphAccessDenial(run.accessDenial, run.error)
+      ?? (run.graphDenialChecked ? undefined : graphAccessDenialFromStoredText(run.error));
   if (accessDenial) {
     matched.unshift({ match: () => true, title: accessDenial.title, body: `${accessDenial.message} ${accessDenial.recovery}` });
   }
@@ -140,7 +180,7 @@ export function RunFailureRemediation({ run }: { run: RunRecord }) {
                     {suggestion.title}
                   </div>
                   <p className="mt-1 text-sm leading-relaxed text-[var(--color-text-soft)]">
-                    {suggestion.body}
+                    {typeof suggestion.body === "function" ? suggestion.body(run.error!) : suggestion.body}
                   </p>
                 </div>
               ))}

@@ -55,6 +55,8 @@ it("does not store a Graph denial for an HTTP 403 from a model server, a vendor 
     "Anthropic API returned 403 Forbidden: permission_error",
     "MCP server \"tickets\" responded with HTTP 403: forbidden",
     "Ollama could not report the model's context limit: HTTP 403 at http://127.0.0.1:11434/api/show: Forbidden by the Microsoft Graph lab proxy",
+    // A "403 MiB" in what Ollama said.
+    "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. The next request starts from Ollama's default context size. Ollama said: cudaMalloc failed: out of memory (403 MiB)",
     // A provider that passes a gateway's text through, worded like the Graph adapter.
     "Graph responded with HTTP 403 for https://graph.microsoft.com/v1.0/users: forbidden",
   ]) {
