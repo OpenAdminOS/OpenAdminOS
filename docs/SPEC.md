@@ -1840,7 +1840,9 @@ pending removals out of startup indexing. Temporary history evidence is
 disposed of after the current turn. Chat and desktop Nova reasoning mark
 replayed ranges incomplete if the original observations were dropped, expired
 or otherwise unavailable. Text detectors and the cache index still identify
-evidence in the replay.
+evidence in the replay. A short Credential value that matches replayed text
+without its original field or rendering provenance marks that matching range
+incomplete.
 
 The decorator scans final system and prompt text for raw and JSON-serialized
 values and recognizes credential and identifier patterns, including UPNs,

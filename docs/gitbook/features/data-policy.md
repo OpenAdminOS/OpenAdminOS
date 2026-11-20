@@ -44,7 +44,9 @@ cancelled. Temporary Chat observations are kept on this device
 for up to four completed turns in each of eight conversations, with a
 15-minute maximum lifetime. A saved turn included in a follow-up in Chat or
 desktop Nova reasoning has incomplete coverage if its original observations
-were dropped, expired or are otherwise unavailable. Cancelling a turn clears
+were dropped, expired or are otherwise unavailable. A short credential such
+as an application secret hint can also leave a range incomplete when a
+follow-up repeats it outside its original field. Cancelling a turn clears
 its active observations. Deleting the conversation or switching organizations
 also releases associated observations. Disconnect clears the organization's
 classification observations, identity indexes and local classification

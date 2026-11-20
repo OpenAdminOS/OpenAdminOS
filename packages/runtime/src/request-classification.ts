@@ -15,14 +15,15 @@ export interface ClassificationSpan extends TextSpan {
 
 interface UnexaminedRange extends TextSpan {
   section: ClassificationSpan["section"];
-  reason: "text-limit" | "match-limit" | "history-evidence-unavailable" | "failure";
+  reason: "text-limit" | "match-limit" | "history-evidence-unavailable" | "history-provenance-unavailable" | "failure";
 }
 
 interface HistoryReplay extends TextSpan {
   ledger: ClassificationLedger | undefined;
 }
 
-type HistoryFences = ReadonlyMap<string, { length: number; replays: readonly TextSpan[] }>;
+type ReplayRange = TextSpan & { incomplete: boolean };
+type HistoryFences = ReadonlyMap<string, { length: number; replays: readonly ReplayRange[] }>;
 
 export interface RequestClassification {
   counts: DataClassCounts;
@@ -99,7 +100,7 @@ interface ValueEntry {
   fenceIds?: Set<string>;
   cost: number;
 }
-type MatchMode = "text" | "word" | "field" | "context" | "folded";
+type MatchMode = "text" | "word" | "field" | "context" | "folded" | "replay";
 interface MatchPattern {
   text: string;
   offset: number;
@@ -685,6 +686,13 @@ export class ClassificationLedger {
       }
       entry.mode = mode;
     }
+    if (mode === "field" && entry.kind === "credential" && typeof value === "string" &&
+        value.length <= 22 && [...value].length < 12 && !entry.patterns.some(pattern => pattern.mode === "replay")) {
+      const escaped = JSON.stringify(value).slice(1, -1);
+      for (const text of new Set([value, escaped, fenceEscapes(value), fenceEscapes(escaped)])) {
+        this.index(entry, text, "replay");
+      }
+    }
     if (!entry.folded && typeof value === "string" && evidence.kind === "identity" &&
         /^(?:userdisplayname|userprincipalname|username|userid|givenname|surname|displayname|mail)$/.test(evidence.key) &&
         !/^(?:the|and|windows|default|administrator|admin|unknown|none|true|false)$/i.test(value) &&
@@ -789,6 +797,7 @@ export class ClassificationLedger {
     index: ScanIndex, text: string, from: number, to: number, work: { remaining: number },
     emit: (span: TextSpan, evidence: Evidence, authoritative?: boolean) => void,
     fieldAt?: (start: number, end: number) => string | undefined,
+    replayAt?: (start: number, end: number) => void,
   ): boolean {
     for (let at = from; at < to; at++) {
       const first = text.charCodeAt(at);
@@ -811,6 +820,7 @@ export class ClassificationLedger {
         if (!matched) continue;
         for (const bucket of matched) {
           for (const { text: value, offset, mode, entry, before, after } of bucket) {
+            if (mode === "replay" && !replayAt) continue;
             if (--work.remaining < 0) return false;
             const start = at - offset;
             const end = start + value.length;
@@ -821,9 +831,13 @@ export class ClassificationLedger {
               if (work.remaining < 0) return false;
             }
             if (!text.startsWith(value, start)) continue;
-            if ((mode === "word" || mode === "folded") && (!wordBoundary(text, start - 1) || !wordBoundary(text, end))) continue;
+            if ((mode === "word" || mode === "folded" || mode === "replay") && (!wordBoundary(text, start - 1) || !wordBoundary(text, end))) continue;
             if (mode === "context" && (before && (start < before.length || !text.startsWith(before, start - before.length)) ||
                 after && !text.startsWith(after, end))) continue;
+            if (mode === "replay") {
+              replayAt?.(start, end);
+              continue;
+            }
             const field = mode === "field" ? fieldAt?.(start, end) : undefined;
             const evidence = mode === "field" ? (field === undefined ? undefined : entry.fields.get(field)) : entry.best;
             if (evidence) {
@@ -840,10 +854,11 @@ export class ClassificationLedger {
 
   private scanState(): ScanState {
     const retained = [this, ...(this.transient ? [this.transient] : []), ...this.prior].filter(ledger => !ledger.disposed);
-    const historyFences = new Map<string, { length: number; replays: TextSpan[] }>();
+    const historyFences = new Map<string, { length: number; replays: ReplayRange[] }>();
     for (const [nonce, { length, replays }] of this.historyFences) {
-      const missing = replays.filter(({ ledger }) => !ledger || ledger.replayEvidenceIncomplete).map(({ start, end }) => ({ start, end }));
-      if (missing.length) historyFences.set(nonce, { length, replays: missing });
+      historyFences.set(nonce, { length, replays: replays.map(({ start, end, ledger }) => ({
+        start, end, incomplete: !ledger || ledger.replayEvidenceIncomplete,
+      })) });
     }
     return { retained, historyFences,
       dropped: this.dropped + (this.transient?.dropped ?? 0),
@@ -995,6 +1010,7 @@ export class ClassificationLedger {
           found.set(key, { section, start, end, kind, source, ...(maskRole ? { maskRole } : {}), ...(authoritative ? { authoritative } : {}) });
         }
       };
+      const preservedReplays: TextSpan[] = [];
       if (historyFences.size || retained.some(ledger => ledger.fences.size)) {
         for (const marker of text.matchAll(/<tenant_data [^<>\n]* nonce="([0-9a-f]{16})">/g)) {
           const start = marker.index + marker[0].length + 1;
@@ -1004,8 +1020,12 @@ export class ClassificationLedger {
           if (history && original.startsWith(close, start + history.length)) {
             for (const replay of history.replays) {
               const end = Math.min(text.length, start + replay.end);
-              if (start + replay.start < end) {
-                ranges.push({ section, start: start + replay.start, end, reason: "history-evidence-unavailable" });
+              const replayStart = start + replay.start;
+              if (replayStart >= end) continue;
+              if (replay.incomplete) {
+                ranges.push({ section, start: replayStart, end, reason: "history-evidence-unavailable" });
+              } else {
+                preservedReplays.push({ start: replayStart, end });
               }
             }
           }
@@ -1020,10 +1040,16 @@ export class ClassificationLedger {
           }
         }
       }
+      const ambiguous = new Map<string, TextSpan>();
+      const replayAt = preservedReplays.length ? (start: number, end: number) => {
+        if (preservedReplays.some(replay => replay.start <= start && end <= replay.end)) {
+          ambiguous.set(`${start}:${end}`, { start, end });
+        }
+      } : undefined;
       const folded = foldedIndex ? foldIdentity(text) : undefined;
       for (let from = 0; from < text.length; from += TEXT_CHUNK) {
         const to = Math.min(text.length, from + TEXT_CHUNK);
-        if (!this.scan(rawIndex, text, from, to, work, collect, fieldAt) ||
+        if (!this.scan(rawIndex, text, from, to, work, collect, fieldAt, replayAt) ||
             foldedIndex && folded !== undefined && !this.scan(foldedIndex, folded, from, to, work, collect)) {
           // The section-wide detector pass has not examined any of this text.
           ranges.push({ section, start: 0, end: text.length, reason: "match-limit" });
@@ -1038,6 +1064,9 @@ export class ClassificationLedger {
           break;
         }
         collect(match, { kind: match.kind, source: match.source, key: "" });
+      }
+      for (const [key, span] of ambiguous) {
+        if (found.get(key)?.kind !== "credential") ranges.push({ section, ...span, reason: "history-provenance-unavailable" });
       }
       const ordered = [...found.values()].sort((a, b) => a.start - b.start || a.end - b.end);
       for (const { authoritative: _, ...span } of ordered) spans.push(span);

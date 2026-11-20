@@ -64,9 +64,10 @@ async function fixture(options: {
   });
   const waitForClassifications = async () => {
     while (observations.length < prompts.length) {
-      const { promise, resolve } = Promise.withResolvers<void>();
-      listeners.add(resolve);
-      try { await promise; } finally { listeners.delete(resolve); }
+      await new Promise<void>(resolve => {
+        const ready = () => { listeners.delete(ready); resolve(); };
+        listeners.add(ready);
+      });
     }
   };
   return { dir, filePath, store, prompts, waitForClassifications, close: async () => { store.close(); await rm(dir, { recursive: true, force: true }); } };
@@ -422,3 +423,37 @@ test("Graph diagnostics retain only static source labels, expire, and clear on D
     assert.deepEqual(read(), []);
   } finally { await f.close(); }
 });
+
+for (const voice of [false, true]) {
+  test(`replayed short Graph credential hint has incomplete coverage in ${voice ? "Nova" : "Chat"}`, async () => {
+    const hint = "qzt";
+    const path = "/applications";
+    const f = await fixture({
+      graphResult: route => ({ value: route === path ? [{ id: "fixture-app", passwordCredentials: [{ hint }] }] : [] }),
+      respond: (_request, i) => i === 0
+        ? JSON.stringify({ kind: "tenant", tool: "graph_get", params: { path } })
+        : i === 1 ? JSON.stringify({ final: true, answer: `The hint was ${hint}.` }) : "Reviewed.",
+    });
+    try {
+      await f.store.setChatInvestigationMode("always-agentic");
+      const first = await f.store.streamIntuneChatMessage({ content: "Which application registrations need review?" }, () => {});
+      const id = first.conversation.id;
+      assert.match(first.assistantMessage.content, /The hint was qzt/);
+      await f.waitForClassifications();
+      assert.ok(f.store.getRequestClassifications(id).some(event => event.classification.counts.credential > 0 && !event.classification.coverageIncomplete));
+      await f.store.setChatInvestigationMode("always-deterministic");
+      const before = f.prompts.length;
+      await f.store.streamIntuneChatMessage({ content: "Explain that result.", conversationId: id }, () => {}, { voice });
+      assert.ok(f.prompts.length > before);
+      await f.waitForClassifications();
+      const { classification } = f.store.getRequestClassifications(id).at(-1)!;
+      assert.match(f.prompts.at(-1)!.prompt, /The hint was qzt/);
+      assert.equal(classification.counts.credential, 0);
+      assert.equal(classification.coverageIncomplete, true);
+      assert.equal(classification.effectiveClass, "credential");
+      const request = f.prompts.at(-1)!;
+      assert.ok(classification.unexamined.ranges.some(range => range.reason === "history-provenance-unavailable" &&
+        request.prompt.slice(range.start, range.end) === hint));
+    } finally { await f.close(); }
+  });
+}

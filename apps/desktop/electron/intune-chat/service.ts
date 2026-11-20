@@ -568,7 +568,14 @@ export class IntuneChatService {
     const id = message.conversationId;
     const previous = this.classificationTurns.get(id);
     const turns = [...previous?.turns.filter(turn => !turn.ledger.expired) ?? [], { assistantId: message.id, ledger }];
-    while (turns.length > CHAT_MEMORY_MAX_TURNS) turns.shift()!.ledger.dispose();
+    if (turns.length > CHAT_MEMORY_MAX_TURNS) {
+      const evicted = turns.shift()!.ledger;
+      this.activeClassification.set(evicted, tenantId);
+      void ledger.waitForObservations().then(() => {
+        evicted.dispose();
+        this.activeClassification.delete(evicted);
+      });
+    }
     this.classificationTurns.delete(id);
     this.classificationTurns.set(id, { tenantId, turns });
     if (this.classificationTurns.size > 8) this.releaseConversationClassification(this.classificationTurns.keys().next().value!);

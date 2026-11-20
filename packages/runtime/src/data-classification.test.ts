@@ -525,7 +525,8 @@ test("the provider observer receives each method's scoped result without extendi
 
 test("stream captures the call scope and failed classification still calls the provider", async () => {
   const events: RequestClassificationEvent[] = [];
-  const { promise: unscoped, resolve: observedUnscoped } = Promise.withResolvers<void>();
+  let observedUnscoped!: () => void;
+  const unscoped = new Promise<void>(resolve => { observedUnscoped = resolve; });
   const request = { prompt: '{"hint":"abc"}' };
   const scoped = new ClassificationLedger(undefined, "fixture-run");
   scoped.register("graph:/applications", { passwordCredentials: [{ hint: "abc" }] }, { graphPath: "/applications" });
