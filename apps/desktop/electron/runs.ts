@@ -1846,6 +1846,8 @@ export class RunService {
     await this.host.serialize(async () => {
       const persisted = await this.host.read();
       const previous = persisted.runs.find((existing) => existing.id === run.id);
+      // A later snapshot of the same failure keeps the fit issue confirmed when it failed.
+      if (run.status === "failed" && !run.modelFit && previous?.modelFit && previous.error === run.error) run = { ...run, modelFit: previous.modelFit };
       // A run deleted with its disconnected tenant never comes back from a
       // late snapshot, and its report is never delivered.
       if (!previous && run.tenantId && this.host.tenantWritable && !this.host.tenantWritable(run.tenantId)) return;

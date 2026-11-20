@@ -464,8 +464,11 @@ it('records a fit issue on a failed run only after confirming its model ran on t
   await h.host.write({ ...h.state(), runs: [failed('r1'), failed('r2')] });
   await h.service.persistRunSnapshot(failed('r1'));
   assert.deepEqual(h.state().runs.find((run) => run.id === 'r1')?.modelFit, { reason: 'context-too-small', neededTokens: 40652, limitTokens: 16384, providerId: 'ollama', model: 'gpt-oss:20b' });
-  // The alias is remote-backed when the run fails: nothing is offered.
+  // A later snapshot of the same failure, with Ollama no longer answering, keeps the confirmed issue.
   onDevice = false;
+  await h.service.persistRunSnapshot(failed('r1'));
+  assert.equal(h.state().runs.find((run) => run.id === 'r1')?.modelFit?.reason, 'context-too-small');
+  // The alias is remote-backed when the run fails: nothing is offered.
   await h.service.persistRunSnapshot(failed('r2'));
   assert.equal(h.state().runs.find((run) => run.id === 'r2')?.modelFit, undefined);
 });
