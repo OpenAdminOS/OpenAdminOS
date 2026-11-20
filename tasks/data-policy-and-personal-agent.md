@@ -330,7 +330,8 @@ built on top of them are planned separately.
   voice context and the Nova web search request, whose final query to
   OpenAI is scanned with any value A4 restored into the tool's parameters.
   A blocked query makes no network request and shows the designed blocked
-  state (mockup 34, E). Any future path that sends text to a hosted model
+  state (mockup 34, E). Round 17 adds that a web search query never carries
+  tenant data: recognized values are removed before the scan. Any future path that sends text to a hosted model
   uses the same gate, and a test fails when a module calls a hosted model
   endpoint outside it (A3).
 - Evidence is versioned by the effective field map revision, which changes
@@ -346,6 +347,26 @@ built on top of them are planned separately.
 - Mockup 35: the readable definition checks `required` against own
   properties and renders structured enum values with the path-aware
   renderer; renaming the agent updates accessible labels too.
+
+**Review findings adopted (2026-11-20, round 17 of the design review)**
+- Web search keeps the public research boundary of SPEC.md (outbound
+  queries are public research) on top of the Hosted gate: a web search
+  query never carries tenant data of any class, whatever the rules allow.
+  The query is written from public inputs only. Every value the app
+  recognizes as tenant data (any class, configuration included, such as an
+  internal app name from the cache) is removed before sending; when nothing
+  meaningful remains, the search is not sent and the designed state says
+  so. Text the app cannot recognize can still reach the search provider,
+  stated as honestly as the remote MCP boundary. The Hosted gate still
+  applies to whatever remains. Whenever web search is offered, the status
+  strip names its destination (OpenAI), also when the chat model is local,
+  so "No data leaves this device" is never shown while search is offered
+  (A3, mockup 34, B and E).
+- `nova.ts` and the renderer call the same Hosted gate for hosted voice
+  context; they do not have a gate of their own (A3).
+- Mockup 35: the comparison marks changes at array element paths (for
+  example `inputSchema.enum[0]`) in the raw view, and at object and array
+  nodes in the readable view.
 
 ## Why
 
@@ -380,7 +401,8 @@ moment it arrives.
   `PRIVATE_PATTERN` in `intune-chat/tools.ts` detects emails, GUIDs, IPs and
   credential prefixes. Nothing swaps values for tokens yet.
 - Hosted Nova voice sends context from the renderer to OpenAI over the data
-  channel, outside `RunLlmApi`. It needs its own gate.
+  channel, outside `RunLlmApi`. It must call the same Hosted gate as every
+  other hosted request.
 - Nova: the name is hard-coded in about eight groups of prompts and copy. The
   profile and notes reach voice only, not typed Chat. MCP servers come from a
   fixed catalog and are enabled device-wide. There are no user skills and no
@@ -591,19 +613,34 @@ the IT policy file.
         Nova command all pass through it;
       - hosted voice context, the session start included (next item);
       - the Nova web search request (`intune-chat/web-search.ts`, which calls
-        an OpenAI model directly with the Nova key). The gate scans the final
-        query sent to OpenAI, including any value A4 restored into the tool's
-        parameters, just before the request is made. A masked value goes out
-        as its token, never as the restored value. A query the rules block
-        makes no network request at all, and Chat shows the designed blocked
-        state (mockup 34, E, "A web search the rules block"); switching to a
-        local model is not offered, since web search always goes to OpenAI.
+        an OpenAI model directly with the Nova key). Web search keeps the
+        public research boundary (SPEC.md: outbound queries are public
+        research) on top of the gate: a query never carries tenant data of
+        any class, whatever the rules on Hosted allow. The query is written
+        from public inputs only. Just before the request, every value the
+        app recognizes as tenant data in the final query (any class,
+        configuration included, such as an internal app name from the
+        cache, and any value A4 restored into the tool's parameters) is
+        removed, never masked as a token, and so is a one-way placeholder
+        left in the query. When nothing meaningful remains,
+        the search is not sent, no network request is made, and Chat shows
+        the designed state (mockup 34, E, "Web search without tenant data").
+        Text the app cannot recognize, such as an internal project name it
+        has never seen, can still reach the search provider; the web search
+        copy and the docs say so, as the remote MCP boundary does. The
+        Hosted gate still applies to whatever remains, so unexamined text
+        follows its rule and a blocked remainder makes no network request.
+        Switching to a local model is not offered, since web search always
+        goes to OpenAI. Whenever web search is offered, the status strip
+        names its destination ("Web search · OpenAI"), also when the chat
+        model is local, so "No data leaves this device" is never shown
+        while search is offered (mockup 34, B and E).
       Any future path that sends text to a hosted model must go through the
       same gate. A test enforces it: it fails when a module outside the gate
       calls a hosted model endpoint (a hosted provider SDK, a vendor CLI, or
       a request to a hosted model host such as `api.openai.com`).
-- [ ] Hosted voice gets its own gate in `nova.ts` and the renderer for tenant
-      data the app sends to the voice model as context: it goes through the
+- [ ] `nova.ts` and the renderer call the same Hosted gate for tenant data
+      the app sends to the voice model as context: it goes through the
       same request scan and follows the same rules as any hosted call, class
       by class (masked, blocked or sent as is). The first transfer is the
       session start request: the profile block with standing instructions and
@@ -770,15 +807,22 @@ the IT policy file.
    A check of the shipped field map version alone would find it unchanged
    and send the name as configuration, and the test fails on it. The same
    test with the raise made in the IT policy file gives the same result.
-16. Web search regression test: with Security on Hosted at Block, Nova
-   answers with a local model and writes a web search query that holds the
-   name of a Conditional Access policy. The fake request function receives
-   no call, nothing is sent to `api.openai.com`, and Chat shows the designed
-   blocked state with its recovery. With hosted reasoning and Security on
-   Hosted at Mask, a query the model wrote with `[CA_POLICY_1]`, restored to
-   the name in the tool parameter by A4, reaches the fake as
-   `[CA_POLICY_1]`, never as the name. A gate only in `buildLlm` would send
-   the name, and the test fails on it.
+16. Web search regression test: Ollama is selected, Configuration on
+   Hosted is Allow, and the question names the tenant's internal app WGB
+   Expenses from the cache. Nova writes a web search query that holds the
+   app name: the fake request function receives the query without WGB
+   Expenses, and the app name never reaches the search request, although
+   the rule would allow configuration on Hosted. A query that holds only
+   the name of a Conditional Access policy leaves nothing meaningful once
+   the name is removed: the fake receives no call, nothing is sent to
+   `api.openai.com`, and Chat shows the designed state. With hosted
+   reasoning and Security on Hosted at Mask, a query the model wrote with
+   `[CA_POLICY_1]`, restored to the name in the tool parameter by A4,
+   reaches the fake with neither the name nor the token. A gate only in
+   `buildLlm`, or a search that follows the Hosted rules alone, would send
+   the app name, and the test fails on it. A renderer test asserts that
+   the strip names OpenAI for web search while it is offered with a local
+   chat model and never reads "No data leaves this device" then.
 17. Gate coverage test: a test lists every module that calls a hosted model
    endpoint and fails when one of them sends without the Hosted gate,
    including a new module added later.
