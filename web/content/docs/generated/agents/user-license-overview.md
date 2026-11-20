@@ -19,9 +19,9 @@ Reviews tenant user licensing hygiene by usage location, account state, and assi
 | Category | `apps` |
 | Required Entra tier | `free` |
 | Preferred model | `llama3.1:8b` |
-| Minimum app version | `0.7.3-nightly.20261120040000` |
+| Minimum app version | `0.1.0` |
 | Author | OpenAdminOS · verified |
-| Last changed | 2026-11-19 · `43c4add2` |
+| Last changed | 2026-11-19 · `e247d496` |
 
 ## Execution
 
