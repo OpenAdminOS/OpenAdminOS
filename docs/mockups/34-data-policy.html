@@ -978,14 +978,14 @@
         <li>For an agent, the preflight refuses before any read, so that block alone can say "nothing was read" and "no call was sent".</li>
       </ul>
       <h3 id="e-search" style="margin:32px 0 6px;font-size:var(--text-base);font-weight:500">Web search without tenant data</h3>
-      <p>Web search sends the search words to an OpenAI model with the Nova key, whichever model is reasoning. The search words are public research: they never carry tenant data of any class, whatever the rules allow. Here Nova reasons with Ollama on this device, Configuration on Hosted is Allow (the default), and the question names the internal app WGB Expenses from the cache. The app removes the name before the search is sent.</p>
+      <p>Web search sends the search words to an OpenAI model with the Nova key, whichever model is reasoning. The search words are public research: they never carry tenant data of any class, whatever the rules allow. Here Nova reasons with Ollama on this device, Configuration on Hosted is Allow (the default), and the question names the internal app WGB Expenses, which is in the cache. Looking the app up in the tenant and writing the search are separate steps: Ollama answers from the cache on this device, and the search words are written from public inputs only, your question and public terms, never the cache results. Your question names the app, so the app removes the name before the search is sent.</p>
       <div class="two">
         <div class="win">
           <div class="lights"><i></i><i></i><i></i></div>
           <div class="appmain">
             <div class="topbar" data-local="defaults" data-search style="padding-left:84px"></div>
             <div class="page"><div class="chat" style="padding-left:24px;padding-right:24px">
-              <div class="q">Why does WGB Expenses fail to install on the devices that moved to Windows 11 24H2? Check the current Microsoft docs.</div>
+              <div class="q">Why is WGB Expenses reported as not detected after install on the devices that moved to Windows 11 24H2? Check the current Microsoft docs.</div>
               <div class="ans">
                 <div class="who"><svg width="14" height="14"><use href="#oa"/></svg>Nova with Ollama on this device, web search with OpenAI</div>
                 <div class="body">
@@ -996,9 +996,11 @@
                   <div class="inner">
                     <div class="swords"><span class="h">Search words sent to OpenAI</span><span class="rm">WGB Expenses</span> Win32 app not detected after install Windows 11 24H2 file version detection rule</div>
                     <ul class="calls" aria-label="Calls for this question">
-                      <li><span class="tm">09:52:10</span><span class="loc">Local</span><span>Ollama read the app from the Woodgrove Bank cache and wrote the search. Nothing left this device.</span></li>
-                      <li><span class="tm">09:52:11</span><span class="loc">Local</span><span>Removed 1 configuration value, the app name, from the search words. Configuration on Hosted is Allow, but a web search never carries tenant data.</span></li>
-                      <li><span class="tm">09:52:12</span><span class="sent">Sent</span><span>Web search with OpenAI, with the search words above. The data policy check found no other tenant data.</span></li>
+                      <li><span class="tm">09:52:10</span><span class="loc">Local</span><span>Tenant lookup. Ollama answered from the Woodgrove Bank cache: WGB Expenses, its detection rule and the 14 failed installs. Nothing left this device.</span></li>
+                      <li><span class="tm">09:52:11</span><span class="loc">Local</span><span>Search words written from public inputs only: your question and public terms, not the cache results. Your question names the app, so the draft held WGB Expenses.</span></li>
+                      <li><span class="tm">09:52:11</span><span class="loc">Local</span><span>Removed 1 configuration value, the app name from your question. Configuration on Hosted is Allow, but a web search never carries tenant data.</span></li>
+                      <li><span class="tm">09:52:12</span><span class="loc">Local</span><span>Data policy check and final check: no other tenant data and no placeholders left.</span></li>
+                      <li><span class="tm">09:52:12</span><span class="sent">Sent</span><span>Web search with OpenAI, with the search words above.</span></li>
                     </ul>
                     <p class="xs muted" style="margin-top:10px">The app removes every value it recognizes as tenant data. Text it cannot recognize, such as a project name it has never seen, can still reach OpenAI in a search.</p>
                   </div>
@@ -1051,7 +1053,9 @@
       </div>
       <ul class="notes" aria-label="Notes on web search">
         <li>Decided in round 17: web search keeps the public research boundary on top of the Hosted gate. Search words are written from public inputs only, and every value the app recognizes as tenant data, of any class and configuration included, is removed before sending, whatever the rules on Hosted allow. Text the app cannot recognize can still reach OpenAI, and the answer line says so, as the remote MCP boundary does.</li>
-        <li>Decided in round 18: the boundary holds on the final outbound query, after the Hosted gate, in this order. The app removes every value it recognizes as tenant data, the Hosted gate checks what remains, then every placeholder is removed from the result: a stale one with no mapping, such as <code>[USER_2]</code> from an earlier masked answer, and any token the gate produced, such as <code>[CREDENTIAL]</code> for a recovery key a detector found. Only then does the app check whether meaningful words are left.</li>
+        <li>Decided in round 18: the boundary holds on the final outbound query, after the Hosted gate, in this order. The app removes every value it recognizes as tenant data, the Hosted gate checks what remains, then every placeholder is removed from the result: a stale one with no mapping, such as <code>[USER_2]</code> from an earlier masked answer, and any token the gate produced, such as <code>[CREDENTIAL]</code> for an unexamined tail it masked (round 19 below). Only then does the app check whether meaningful words are left.</li>
+        <li>Decided in round 19: the first removal takes out everything the app recognizes as tenant data: values from this conversation, matches in the tenant index and matches of the value checks (email addresses, GUIDs, IP addresses, serial numbers and credential patterns), whatever the rules on Hosted allow. An email address only the check recognizes is removed even with Identity on Hosted at Allow. After the Hosted gate, a final check removes any recognized value still present, also under Allow, before placeholders are removed and the app checks for meaningful words.</li>
+        <li>Decided in round 19: the answer line lists the tenant lookup and the writing of the search words as separate steps. The writer gets public inputs only, the question and public terms, never the cache results, so the app name removed in the first frame comes from the admin's question.</li>
         <li>When the gate blocks what remains, the search is withheld with its reason, as in the third block: here the scan ran out of its budget, unexamined text gets the strictest rule on Hosted, and Activity on Hosted is Block. Recovery offers a shorter search, checked again, or an answer without searching.</li>
         <li>The answer line shows the search words as sent, with each removed value struck through, and lists the local work, the removal and the request. The removal is listed as local work because it runs on this device before anything is sent.</li>
         <li>When nothing meaningful remains, the search is not sent and the block says so. Recovery offers only what works: writing the search words in public terms, checked again before they are sent, or an answer without searching. A local model is not offered, because no model on this device searches the web.</li>
@@ -1235,6 +1239,53 @@
         <li>A record made under a field map revision older than a change that raised any class counts as not examined, like a message with no record, whichever fields the message used, because its stored classes may be lower than a field's class now. The marker under the message names the change, here revision 42, the move of profile descriptions from configuration to security in Settings on 17 November. A record whose revision is still current, or whose later changes raised nothing, is used as stored.</li>
         <li>Decided in round 15: the stored set also holds every class a value check assigned when the message was saved, a tenant index match or a credential or identifier pattern, next to its field's classes. A person's display name in a configuration field, recognized by the tenant index as identity, keeps identity after a restart once the name has left the index: with Identity on Hosted at Mask it is masked, at Block it is withheld, and it is never sent in clear text.</li>
         <li>Decided in round 16: the revision is that of the effective field map, the one the app applies, not the version it ships. It changes whenever any source raises a class: an app update to the shipped map, a move in Settings, or a mapping in the IT policy file (<code>dataPolicy.fieldClasses</code>). A change that raises nothing leaves it as it is. The 15 November answer above was saved while profile descriptions were configuration; the move to security in Settings made revision 42, and after a restart, with WGB Finance MFA gone from the tenant index, the hosted follow-up is withheld under Security Block. A check of the shipped map alone would see no change and send the name as configuration.</li>
+      </ul>
+
+      <h3 id="f-open" style="margin:32px 0 6px;font-size:var(--text-base);font-weight:500">A follow-up in a conversation that stayed open</h3>
+      <p>The same check runs without a restart. Before every follow-up, the app compares the values this conversation holds in memory with the field map revision in force. A value that came from a field is classified again from that field and keeps every class it held. A value with no field behind it, such as an address the IP check found in your own words, cannot be classified again, so after a raise it counts as not examined.</p>
+      <div class="win">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="shell">
+          <aside class="side" data-side="chat"></aside>
+          <div class="appmain">
+            <div class="topbar" data-top="secblock"></div>
+            <div class="page"><div class="chat">
+              <p class="reopen"><span>Open since 09:40 today, no restart.</span><span class="r">Field map revision 43 since 10:12: you raised <code>groups: description</code> from configuration to security in Settings</span></p>
+              <div class="hist" aria-label="Earlier messages in this conversation">
+                <div class="q">Which groups are excluded from MFA for the finance team? Sign-ins from 203.0.113.24 keep skipping MFA.</div>
+                <p class="histtag"><span class="hx"></span><span>203.0.113.24 was found by the IP address check in your question, with no field behind it. Classified under revision 42, it cannot be classified again under 43, so it counts as not examined.</span></p>
+                <div class="ans">
+                  <div class="who"><svg width="14" height="14"><use href="#oa"/></svg>Nova with Ollama on this device, 09:41, classified under field map revision 42</div>
+                  <div class="body"><p>Two groups are excluded from the finance MFA policy: Finance Break Glass and Finance Travel. The Finance Travel description says its members sign in from hotel networks, and the sign-ins from 203.0.113.24 are all from members of that group.</p></div>
+                </div>
+                <p class="histtag"><span class="hx"></span><span>The Finance Travel description came from <code>groups: description</code>. Classified again from that field under revision 43: configuration and security.</span></p>
+              </div>
+              <div class="q">Which of those sign-ins happened this week?</div>
+              <div class="ans">
+                <div class="block" data-t="blocked">
+                  <span class="glyph" data-t="blocked"><svg><use href="#i-q"/></svg></span>
+                  <div>
+                    <h3>Your follow-up was not sent: an earlier value could no longer be classified</h3>
+                    <p>At 10:12 you raised group descriptions from configuration to security in Settings, which made field map revision 43. This conversation stayed open, so before the follow-up the app checked the values it holds against revision 43. The Finance Travel description came from <code>groups: description</code> and was classified again from that field: it is security now. The address 203.0.113.24 you typed at 09:41 was found by the IP address check, with no field behind it, so it cannot be classified again under revision 43 and counts as not examined, which takes the strictest rule any class has on Hosted. Security on Hosted is Block, so neither was sent to Claude Code, and your follow-up was not sent without them: it depends on them.</p>
+                    <ul class="calls" aria-label="Model calls for this follow-up">
+                      <li><span class="tm">10:14:02</span><span class="sent">Sent</span><span>Planning the question. Your question, checked by data policy. No sensitive values found.</span></li>
+                      <li><span class="tm">10:14:03</span><span class="loc">Local</span><span>Checked 2 earlier messages against revision 43: 1 value classified again from its field, 1 value without a field path not examined.</span></li>
+                      <li><span class="tm">10:14:03</span><span class="not">Not sent</span><span>Follow-up with 2 earlier messages. 1 security value and 1 value not examined; Security is Block on Hosted.</span></li>
+                    </ul>
+                    <div class="acts"><button class="bt primary" type="button">Ask without the earlier answers</button><button class="bt secondary" type="button">Switch to a local model</button></div>
+                    <p class="xs muted" style="margin-top:10px">Without the earlier answers, only your new question goes to Claude Code, checked under revision 43, so name the address and the group again if you need them: typed now, the address is classified as device data and masked on Hosted, and the group name follows its current class. Ollama with gpt-oss:20b is ready on this device, and no rule on Local is Block, so the follow-up can be answered there with the whole conversation.</p>
+                  </div>
+                </div>
+              </div>
+              <div class="composer">Ask a follow-up<span class="r"><span class="hx"></span>Claude Code, identities and devices masked, security blocked</span></div>
+            </div></div>
+          </div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>Decided in round 18: the revision check runs before every request, also for the values an open conversation holds in memory, not only for history rebuilt after a restart. A follow-up never uses a class from before a raise because the conversation stayed open.</li>
+        <li>Decided in round 19: a value that came from a field is classified again from its field path and adds the field's current classes to the ones it held. A value with no field path, here an address the IP check found in the admin's question, cannot be classified again, so it counts as not examined and takes the strictest rule any class has on Hosted. The marker under each earlier message says which of the two happened.</li>
+        <li>Recovery is the same as for a reopened conversation: Ask without the earlier answers sends the new question alone, checked under the revision in force, and a local model is offered only when no rule on Local is Block. With no Block on Hosted, the value without a field path is masked one way and the follow-up says so.</li>
       </ul>
     </section>
 
