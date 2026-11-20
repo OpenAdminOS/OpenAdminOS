@@ -237,6 +237,13 @@ the installed app's scheduler, login item or caches.
   keeps the folder's device and inode and stops before the progress record
   and the marker removal if they change. Also: a failed `defaults read`
   warns, the chmod test is POSIX only.
+- Review round 19: Claude and Muse no blocking; Sol accepted the "Folders
+  above" reasoning and found two blocking: a folder swapped in the middle of
+  the removal loop (fixed: identity checked before every removal) and a
+  marker restored or roamed with a copy of the folder (fixed: the marker is
+  bound to the folder's device and inode). Muse lows: gateway proposals
+  counted, a test for an unconfirmed `defaults read`, the notice lifetime
+  documented.
 - Process lesson: twice I edited the tree while a reviewer was reading it;
   parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the

@@ -2548,6 +2548,13 @@ Mockup: `docs/mockups/34-local-reset.html`.
   Chromium's wait for a second launch, except the Windows task list (15
   seconds), which reads every task; a wipe killed by a second launch resumes
   from the marker.
+- **Marker bound to its folder.** The marker records the data folder's
+  device and inode when it is written, and the launch wipe runs only for
+  that same folder: a copy restored or roamed to another device carries the
+  marker but not the identity, so it stops with nothing removed and asks for
+  a fresh reset there. The post-reset notice is kept in memory for that
+  launch only; quitting before reading it loses its warnings (the log keeps
+  them).
 - **Folders above** the data folder or a cache are not checked (decided in
   review round 18, after round 17 had added it): whatever `~/Library`,
   `~/.config` or `%APPDATA%` resolve to, the OpenAdminOS folder at its real
@@ -2561,8 +2568,9 @@ Mockup: `docs/mockups/34-local-reset.html`.
   them. The folder counts as a link when its path has `.` or `..` segments,
   when its real location is not its real parent plus its own name (so
   `link/` is caught too; compared by device and inode, so letter case does
-  not matter; each marker write checks again, and the launch wipe stops if
-  the folder is swapped for another while it runs), when it or any folder inside it is on another device (a
+  not matter; each marker write checks again, and the launch wipe checks
+  the folder's identity before every removal and write and stops if it was
+  swapped for another), when it or any folder inside it is on another device (a
   mounted volume or disk image; a folder that cannot be read counts too),
   or, on Linux, when a mount sits at or inside it (a bind mount; an
   unreadable mount table counts too). Cache folders outside the data folder
