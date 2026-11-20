@@ -342,6 +342,8 @@ const activeNotifications = new Set<Notification>();
 let lastBackgroundRefreshAt = 0;
 /** The reset that ran at this launch, if any. An incomplete one keeps the app closed. */
 let localResetReport: LocalResetReport | undefined;
+/** The data folder a completed wipe at this launch emptied, for the login item step after ready. */
+let localResetWipedFolder: LocalResetFolderIdentity | undefined;
 let localResetReportDismissed = false;
 /** Set once a reset was requested in this session: the app restarts and takes no second request. */
 let localResetRequested = false;
@@ -5421,6 +5423,7 @@ function runLocalResetAtLaunch(): LocalResetReport | undefined {
       // other copy, so only an installed build removes them.
       removeScheduler: removeSchedulerRegistration,
     });
+    if (report?.status === "completed") localResetWipedFolder = localResetFolderIdentity(userDataDir);
     if (report) {
       console.info("[local-reset] reset ran at launch", {
         status: report.status,
@@ -5449,6 +5452,13 @@ function finishLocalResetAfterReady(report: LocalResetReport): void {
   // that warning, or clears it when it now succeeds.
   const others = report.warnings.filter((warning) => warning.item !== "Menu bar login item");
   try {
+    // Only while the data folder is still the one the wipe emptied, with no
+    // profile data back in it: a profile restored meanwhile keeps its login item.
+    const userDataDir = app.getPath("userData");
+    const now = localResetFolderIdentity(userDataDir);
+    if (!localResetWipedFolder || !now || !sameSessionFolder(localResetWipedFolder, now) || existsSync(join(userDataDir, "state.json"))) {
+      throw new Error("left on, because the data folder is no longer the one the reset emptied");
+    }
     disableCompanionLoginItemForReset();
     report.warnings = others;
   } catch (error) {
