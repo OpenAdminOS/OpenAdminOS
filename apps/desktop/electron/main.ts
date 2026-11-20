@@ -10,6 +10,7 @@ import {
   localResetLinkCheck,
   MANAGED_POLICY_FILE,
   localResetPolicyProblem,
+  windowsTaskBelongsToThisAccount,
   readLocalResetMarker,
   requestLocalReset,
   runPendingLocalReset,
@@ -5386,9 +5387,9 @@ function showNoticeBeforeReady(title: string, text: string): void {
   ];
   for (const [tool, args] of tools) {
     const result = spawnSync(tool, args, { stdio: "ignore", timeout: 600_000 });
-    // Shown and closed. A dialog left open past the bound was shown too, so
-    // no second one follows; a missing tool or no display tries the next.
-    if (result.status === 0) return;
+    // The tool ran, so the notice was shown, however it was closed; a dialog
+    // left open past the bound was shown too. Only a missing tool tries the next.
+    if (result.status !== null) return;
     if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT") return;
   }
 }
@@ -5463,6 +5464,12 @@ function removeSchedulerRegistration(): void {
     // language, so any answer that is not a timeout counts: a per-user task
     // its own user cannot read is not a case this app creates.
     if (windowsSchedulerTaskPresence() === "absent") return;
+    const xml = windowsSchedulerTaskXml();
+    if (!windowsTaskBelongsToThisAccount(xml === undefined ? undefined : windowsTaskBinary(xml), process.execPath, app.getPath("home"))) {
+      throw new Error(
+        `the scheduled task ${WINDOWS_SCHEDULER_TASK} runs a copy of OpenAdminOS outside this account's profile, so it may belong to another account and was left in place. Check it in Task Scheduler`,
+      );
+    }
     removeWindowsSchedulerTask();
     const after = windowsSchedulerTaskPresence();
     if (after !== "absent") {
