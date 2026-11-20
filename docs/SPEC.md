@@ -2658,8 +2658,10 @@ than the reviewed one, and an on-device rerun needs a model named. An open
 accept step closes unsent, with a line saying why, when its provider stops
 being a choice (the offer stays) or when the organization or model changes
 (the offer goes and focus returns to the composer). A retry the host refuses
-before any model call shows its choices again, since the refusal says to
-choose again. A multi-tenant review
+before the send starts shows its choices again, once, since the refusal says
+to choose again. A prompt that did not fit a local model whose size cannot be
+read from its name (Apple Foundation, a custom alias) is offered the sized
+models on this device. A multi-tenant review
 withdraws an open offer, and a new offer replaces earlier ones for the same
 conversation.
 An Azure OpenAI model fit request is refused when the deployment configured
