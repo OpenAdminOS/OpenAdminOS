@@ -319,8 +319,12 @@ export function modelFitChoices(input: {
   }
   // The main process already left out what the policy does not allow; this
   // only says so when the policy is the reason nothing hosted is offered.
+  // Policy is why nothing hosted is offered when it allows no hosted provider, or when a ready hosted
+  // provider's only model came from a policy lock (allowed, not reported): only IT can change either.
   const hostedBlockedByPolicy =
-    hosted.length === 0 && [...HOSTED_PROVIDER_IDS].every((id) => !managedProviderAllowed(input.managedPolicy, id));
+    hosted.length === 0 &&
+    ([...HOSTED_PROVIDER_IDS].every((id) => !managedProviderAllowed(input.managedPolicy, id)) ||
+      providers.some((provider) => !provider.isLocal && HOSTED_PROVIDER_IDS.has(provider.id) && provider.id !== issue.providerId && isProviderReady(provider) && provider.modelsFromPolicy === true));
   return { hosted, local: local.slice(0, 2), hostedBlockedByPolicy };
 }
 

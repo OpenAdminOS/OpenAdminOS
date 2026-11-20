@@ -268,7 +268,10 @@ describe("Model fit: the per-request override", () => {
     assert.deepEqual(modelFitChoices({ issue: { reason: "context-too-small", providerId: "ollama", model: LOCAL_MODEL }, providers: [ollama, unpinned] }).hosted, []);
     // A model the managed policy put in an empty list is allowed, not reported, so it is not offered or accepted.
     const policyOnly: ProviderSummary = { ...claude, models: ["claude-sonnet-5-5"], defaultModel: "claude-sonnet-5-5", modelsFromPolicy: true };
-    assert.deepEqual(modelFitChoices({ issue: { reason: "context-too-small", providerId: "ollama", model: LOCAL_MODEL }, providers: [ollama, policyOnly] }).hosted, []);
+    const policyChoices = modelFitChoices({ issue: { reason: "context-too-small", providerId: "ollama", model: LOCAL_MODEL }, providers: [ollama, policyOnly] });
+    assert.deepEqual(policyChoices.hosted, []);
+    // The notice names the policy as the reason, not an unready provider.
+    assert.equal(policyChoices.hostedBlockedByPolicy, true);
     assert.throws(
       () => resolveChatTurnProvider({ ...base, providers: [ollama, policyOnly], override, consent: freshConsent("anthropic", "claude-sonnet-5-5") }),
       /does not report a model yet/,
