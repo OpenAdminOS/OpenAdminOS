@@ -1015,7 +1015,7 @@
                   <p>12 of the 14 failed installs are on devices that moved to 24H2 this month, and all 12 report that the app was not detected after install. The current Microsoft documentation on Win32 app detection rules says a file version rule must match the version the installer writes. WGB Expenses checks for 4.2.0, and the 24H2 devices have 4.2.1.</p>
                 </div>
                 <details class="masknote" open>
-                  <summary><svg width="14" height="14" aria-hidden="true" style="color:var(--color-warning)"><use href="#i-globe"/></svg><span>Searched without tenant data: 1 app name removed</span><svg class="chev"><use href="#i-chev"/></svg></summary>
+                  <summary><svg width="14" height="14" aria-hidden="true" style="color:var(--color-warning)"><use href="#i-globe"/></svg><span>Searched with OpenAI · 1 recognized app name removed</span><svg class="chev"><use href="#i-chev"/></svg></summary>
                   <div class="inner">
                     <div class="swords"><span class="h">Search words sent to OpenAI</span><span class="rm">WGB Expenses</span> Win32 app not detected after install Windows 11 24H2 file version detection rule</div>
                     <ul class="calls" aria-label="Calls for this question">
@@ -1098,7 +1098,7 @@
           <div class="block">
             <span class="glyph"><svg><use href="#i-globe"/></svg></span>
             <div>
-              <h3>Searched with OpenAI without tenant data: 1 security name removed</h3>
+              <h3>Searched with OpenAI · 1 recognized security name removed</h3>
               <p>Claude Code reasons, and the search goes to OpenAI with the Nova key. Claude Code saw the policy as <code>[CA_POLICY_1]</code> and wrote the search with that token. The name was restored into the tool's parameters on this device, as in every tool call, then removed with the other tenant data before the request, so OpenAI received neither the name nor the token. The results describe the setting, not your policy.</p>
               <div class="swords"><span class="h">Search words sent to OpenAI</span><span class="rm">WGB Finance MFA</span> Conditional Access policy require MFA exclude emergency access accounts</div>
             </div>
@@ -1114,6 +1114,7 @@
         <li>Decided in round 20: the last step before sending scans the exact words that would be sent with every check once more: values from this conversation, the tenant index and the value checks. Removing a placeholder can join a value the earlier checks could not see, as <code>WGB Expen[USER_2]ses</code> becomes WGB Expenses. When anything is recognized, the search is not sent, as in the fourth block, and the words are never edited again after that check, so what is sent is exactly what was checked.</li>
         <li>Decided in round 21: the last check needs every check to finish on the whole of the exact words, values from this conversation, the tenant index and the value checks. When any of them does not finish, because its budget ran out, it timed out or it failed, the search is not sent, as in the fifth block, whatever the rules on Hosted allow: a check that did not finish is never read as one that found nothing. Recovery offers a shorter search and an answer without searching.</li>
         <li>Decided in round 21: the 1,000 character limit applies to the words that would be sent, after every check, as the seventh and last step, not to the words Nova first wrote. A search that is longer before tenant data is removed can still be sent. Words over the limit are not cut, since that would change them after the last check; the search is not sent, as in the sixth block, and the recovery is a shorter search or an answer without searching.</li>
+        <li>A sent search is labeled with what the app did, "Searched with OpenAI · 1 recognized app name removed", never "without tenant data": text the app cannot recognize can still reach OpenAI.</li>
         <li>The answer line shows the search words as sent, with each removed value struck through, and lists the local work, the removal and the request. The removal is listed as local work because it runs on this device before anything is sent.</li>
         <li>When nothing meaningful remains, the search is not sent and the block says so. Recovery offers only what works: writing the search words in public terms, checked again before they are sent, or an answer without searching. A local model is not offered, because no model on this device searches the web.</li>
         <li>The strip in this frame names OpenAI for web search, though the chat model is Ollama: "No data leaves this device" is never shown while search is offered (B). With Claude Code reasoning, the search still goes to OpenAI, and the block names both.</li>
