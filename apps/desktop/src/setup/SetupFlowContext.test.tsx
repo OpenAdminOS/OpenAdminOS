@@ -185,7 +185,8 @@ describe("contextual tenant setup", () => {
         returnTo: "/runs/run-1",
       }),
     );
-    const bridge = makeMockBridge({}, createMockAppState({ activeProviderId: "ollama" }));
+    const recheckProvider = vi.fn(async () => undefined);
+    const bridge = makeMockBridge({ recheckProvider }, createMockAppState({ activeProviderId: "ollama" }));
     renderWithAppState(<div>App content</div>, { route: "/chat", bridge });
 
     await screen.findByRole("heading", { name: "Pick an LLM provider" });
@@ -194,6 +195,8 @@ describe("contextual tenant setup", () => {
     expect(readPendingIntent()).toMatchObject({ kind: "agent-run", providerId: "openai" });
     expect(readPendingIntent()).not.toHaveProperty("model");
     expect(bridge.setActiveProvider).not.toHaveBeenCalled();
+    // The pick still gets the full check selecting a provider runs.
+    expect(recheckProvider).toHaveBeenCalledWith("openai");
   });
 
   it("treats a configured Azure provider at available as ready, matching the host", async () => {

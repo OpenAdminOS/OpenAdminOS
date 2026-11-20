@@ -280,6 +280,24 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
     setStage("permissions");
   }, []);
 
+  const recheckOneRunProvider = useCallback(
+    async (id: ProviderId) => {
+      await window.openAdminOS?.recheckProvider?.(id);
+      await refresh();
+    },
+    [refresh],
+  );
+
+  const recheckProviders = useCallback(async () => {
+    try {
+      setError(null);
+      if (isOneRunProviderIntent(intent) && intent.providerId) await recheckOneRunProvider(intent.providerId);
+      else await refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  }, [intent, recheckOneRunProvider, refresh]);
+
   const selectProvider = useCallback(
     async (id: ProviderId) => {
       try {
@@ -291,14 +309,18 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
           return next;
         });
         // A run that moves off a local model that could not fit it is for that run only:
-        // the replacement stays on the run and the active provider is left as it was.
-        if (isOneRunProviderIntent(intent)) return;
+        // the replacement stays on the run and the active provider is left as it was. It still
+        // gets the full check selecting a provider runs, so a cached result does not hold it back.
+        if (isOneRunProviderIntent(intent)) {
+          await recheckOneRunProvider(id);
+          return;
+        }
         await setActiveProvider(id);
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : String(caught));
       }
     },
-    [intent, setActiveProvider],
+    [intent, recheckOneRunProvider, setActiveProvider],
   );
 
   const resume = useCallback(() => {
@@ -373,7 +395,7 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
         onTryAgain={() => void tryAgain()}
         onEditSignIn={editSignIn}
         onSelectProvider={(id) => void selectProvider(id)}
-        onRecheckProviders={refresh}
+        onRecheckProviders={recheckProviders}
         onResume={resume}
       />
     </SetupFlowContext.Provider>
