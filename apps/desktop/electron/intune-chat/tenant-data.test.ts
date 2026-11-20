@@ -313,3 +313,38 @@ test("a replayed Chat turn whose credential evidence expired has incomplete cove
     ]);
   } finally { await f.close(); }
 });
+
+for (const voice of [false, true]) {
+  test(`replayed ${voice ? "Nova" : "Chat"} history marks ranges whose live ledger lost credential evidence`, async () => {
+    let prior: ClassificationLedger | undefined;
+    const f = await fixture({
+      respond: (_request, index) => {
+        if (!index) {
+          prior = currentClassificationLedger();
+          prior?.registerClassified("fixture", {
+            fields: [{ value: "z".repeat(2_000_001), kind: "credential", key: "secretText" }],
+            incomplete: false,
+          });
+        }
+        return index ? "Reviewed." : "The hint was q7z.";
+      },
+    });
+    try {
+      const first = await f.store.streamIntuneChatMessage({ content: "Explain device compliance." }, () => {});
+      assert.equal(prior?.expired, false);
+      assert.equal(prior?.classifyRequest({ prompt: "" }).droppedValues, 1);
+      await f.store.streamIntuneChatMessage({
+        conversationId: first.conversation.id, content: "Explain that result.",
+      }, () => {}, { voice });
+      const { classification } = f.store.getRequestClassifications(first.conversation.id).at(-1)!;
+      const { prompt } = f.prompts.at(-1)!;
+      const missing = classification.unexamined.ranges.filter(range => range.reason === "history-evidence-unavailable");
+      assert.deepEqual(missing.map(range => prompt.slice(range.start, range.end)), voice
+        ? ['{"role":"user","text":"Explain device compliance."}', '{"role":"assistant","text":"The hint was q7z."}']
+        : ["User: Explain device compliance.\nAssistant: The hint was q7z."]);
+      assert.equal(classification.droppedValues, 0);
+      assert.equal(classification.coverageIncomplete, true);
+      assert.equal(classification.effectiveClass, "credential");
+    } finally { await f.close(); }
+  });
+}

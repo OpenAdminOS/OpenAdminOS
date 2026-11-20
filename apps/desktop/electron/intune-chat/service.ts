@@ -2725,7 +2725,8 @@ export class IntuneChatService {
     this.useConversationClassification(conversation.id, noTenant ? undefined : tenant.id);
     if (!noTenant) registerTenantData("tenant:displayName", tenant.displayName);
     const voiceContext = options.voice
-      ? voiceConversationContext(content, input.conversationId ? store.listMessages(conversation.id) : [], providerId === "apple-foundation", options.voiceHistory)
+      ? voiceConversationContext(content, input.conversationId ? store.listMessages(conversation.id) : [], providerId === "apple-foundation", options.voiceHistory,
+        assistantId => this.classificationTurns.get(conversation.id)?.turns.find(turn => turn.assistantId === assistantId)?.ledger)
       : undefined;
     const history = options.voice ? [] : store.listMessages(conversation.id);
     const conversationMemory = options.voice

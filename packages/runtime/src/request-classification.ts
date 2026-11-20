@@ -385,6 +385,7 @@ export class ClassificationLedger {
   private dropped = 0;
   private incompleteRegistrations = 0;
   private disposed = false;
+  private discardedIncompleteEvidence = false;
   private expiry?: ReturnType<typeof setTimeout>;
   private workerState?: { client: ClassificationWorker; id: number; dirty: Set<Scalar>; mirrored: Set<Scalar> };
   scopeId: string | undefined;
@@ -435,7 +436,13 @@ export class ClassificationLedger {
     if (!this.disposed) this.historyReplays.set(text, replays);
   }
 
+  private get replayEvidenceIncomplete(): boolean {
+    return this.disposed || this.dropped > 0 || this.incompleteRegistrations > 0 ||
+      this.discardedIncompleteEvidence || this.transient?.replayEvidenceIncomplete === true;
+  }
+
   discardTransient(): void {
+    this.discardedIncompleteEvidence ||= this.transient?.replayEvidenceIncomplete === true;
     this.transient?.dispose();
     delete this.transient;
   }
@@ -791,7 +798,7 @@ export class ClassificationLedger {
     const retained = [this, ...(this.transient ? [this.transient] : []), ...this.prior].filter(ledger => !ledger.disposed);
     const historyFences = new Map<string, { length: number; replays: TextSpan[] }>();
     for (const [nonce, { length, replays }] of this.historyFences) {
-      const missing = replays.filter(({ ledger }) => !ledger || ledger.expired).map(({ start, end }) => ({ start, end }));
+      const missing = replays.filter(({ ledger }) => !ledger || ledger.replayEvidenceIncomplete).map(({ start, end }) => ({ start, end }));
       if (missing.length) historyFences.set(nonce, { length, replays: missing });
     }
     return { retained, historyFences,

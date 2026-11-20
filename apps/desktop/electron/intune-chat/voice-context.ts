@@ -1,4 +1,4 @@
-import { registerRenderedFragment, registerTransientTenantData } from "@openadminos/runtime/data-classification";
+import { currentClassificationLedger, registerRenderedFragment, registerTransientTenantData, type ClassificationLedger } from "@openadminos/runtime/data-classification";
 import { isNovaConversationOnly } from "../../src/shared/nova-transcript.js";
 import { fenceTenantData } from "@openadminos/runtime";
 import type {
@@ -17,6 +17,7 @@ export function voiceConversationContext(
   messages: IntuneChatMessage[],
   smallContext = false,
   spokenHistory: NovaConversationTurn[] = [],
+  ledgerForAssistant?: (id: string) => ClassificationLedger | undefined,
 ) {
   const recent = messages
     .filter(
@@ -28,23 +29,41 @@ export function voiceConversationContext(
   const followsUp =
     /\b(they|it|its|them|those|these|their|that|why|what about|how about|which ones)\b/i.test(question) ||
     /^(?:yes|no|only|and|but|actually|instead|in|for|with|without)\b/i.test(question.trim());
-  const reference: NovaConversationTurn[] = [];
+  const saved = recent.map((message, i) => ({
+    role: message.role as "user" | "assistant",
+    text: message.content,
+    assistantId: message.role === "assistant" ? message.id : recent[i + 1]?.role === "assistant" ? recent[i + 1]?.id : undefined,
+  }));
+  const reference: Array<NovaConversationTurn & { assistantId?: string | undefined }> = [];
   let conversational = false;
-  for (const turn of [...recent.map(m => ({ role: m.role as "user" | "assistant", text: m.content })), ...spokenHistory]) {
+  for (const turn of [...saved, ...spokenHistory]) {
     if (turn.role === "user") conversational = isNovaConversationOnly(turn.text);
     if (!conversational) reference.push(turn);
   }
   const selected = reference.slice(smallContext ? -2 : -6);
-  if (followsUp) registerTransientTenantData("nova:history", selected);
+  if (followsUp) registerTransientTenantData("nova:history", selected.map(({ role, text }) => ({ role, text })));
   const history = selected.map(turn => ({
     role: turn.role, text: clipVoiceText(turn.text, smallContext ? 128 : 400),
   }));
+  let historyJson: string | undefined;
+  if (followsUp && history.length) {
+    const encoded = history.map(turn => JSON.stringify(turn));
+    historyJson = `[${encoded.join(",")}]`;
+    let start = 1;
+    currentClassificationLedger()?.registerHistoryReplay(historyJson, encoded.map((turn, i) => {
+      const assistantId = selected[i]?.assistantId;
+      const end = start + turn.length;
+      const replay = { start, end, ledger: assistantId ? ledgerForAssistant?.(assistantId) : undefined };
+      start = end + 1;
+      return replay;
+    }));
+  }
   const priorQuestion = reference.slice().reverse().find(turn => turn.role === "user")?.text;
   const previous = priorQuestion && followsUp
     ? registerRenderedFragment(priorQuestion, priorQuestion.slice(0, 400), { after: "\nFollow-up: " }) : undefined;
   return {
-    history: followsUp && history.length
-      ? `Previous conversation (reference only): ${fenceTenantData(history, "nova:history")}\nCurrent question: ${question}`
+    history: historyJson
+      ? `Previous conversation (reference only): ${fenceTenantData(historyJson, "nova:history")}\nCurrent question: ${question}`
       : question,
     planningQuestion: previous && followsUp ? `${previous}\nFollow-up: ${question}` : question,
   };
