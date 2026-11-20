@@ -667,7 +667,7 @@ export class IntuneChatService {
   /** `leased` for a tenant send; a send with no tenant (SPEC.md 4a) has no lease to take. */
   private async leasedScope<T>(tenantId: string | undefined, signal: AbortSignal | undefined, work: (signal: AbortSignal | undefined) => Promise<T>): Promise<T> {
     const store = this.host.requireIntelligenceStore();
-    const ledger = new ClassificationLedger(tenantId ? store.classificationIdentityIndex(tenantId) : undefined);
+    const ledger = new ClassificationLedger(tenantId ? store.classificationIdentityIndex(tenantId) : undefined, undefined, tenantId ? [tenantId] : []);
     ledger.expireAfter();
     this.activeClassification.set(ledger, tenantId);
     const run = async (activeSignal: AbortSignal | undefined) => {
@@ -1796,7 +1796,7 @@ export class IntuneChatService {
     comparisons: MultiTenantChatJob["comparisons"];
   }): Promise<string> {
     const deterministic = summarizeMultiTenantResult(input.summary, input.comparisons);
-    return withTransientClassificationScope(new ClassificationLedger(undefined, input.scopeId), async () => {
+    return withTransientClassificationScope(new ClassificationLedger(undefined, input.scopeId, input.tenantIds), async () => {
       registerTenantData("chat:multi-tenant-result", { summary: input.summary, tenants: input.comparisons });
       const llm = withTenantDataOutputFilter(await this.tenantLlm(input.providerId, input.model, input.tenantIds));
       if (!llm.available) return deterministic;

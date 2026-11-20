@@ -400,7 +400,7 @@ export class RunService {
    * the lease signal cancels the run and Disconnect waits for the drive.
    */
   private track(runId: string, tenantId: string | undefined, start: () => Promise<void>): void {
-    const ledger = new ClassificationLedger(tenantId ? this.host.intelligenceStore?.classificationIdentityIndex(tenantId) : undefined, runId);
+    const ledger = new ClassificationLedger(tenantId ? this.host.intelligenceStore?.classificationIdentityIndex(tenantId) : undefined, runId, tenantId ? [tenantId] : []);
     this.runClassifications.set(runId, ledger);
     const run = () => withClassificationScope(ledger, start);
     const leased = tenantId && this.host.tenantLease

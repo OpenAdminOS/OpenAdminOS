@@ -1,5 +1,5 @@
 import {
-  ClassificationLedger, classificationDiagnostics, registerTenantData, withTransientClassificationScope,
+  CLASSIFICATION_TTL_MS, ClassificationLedger, classificationDiagnostics, registerTenantData, withTransientClassificationScope,
   withRequestClassification, type RequestClassificationEvent,
 } from "@openadminos/runtime/data-classification";
 import { OfficeService } from "./office.js";
@@ -1822,11 +1822,37 @@ function novaProviderEndpoint(providerId: ProviderId, persisted?: Pick<Persisted
 }
 
 export class AppStateStore {
-  private readonly requestClassifications = new Map<string | undefined, RequestClassificationEvent[]>();
+  private readonly requestClassifications = new Map<string | undefined, Array<{
+    event: RequestClassificationEvent;
+    tenantIds: readonly string[];
+    expiresAt: number;
+  }>>();
+  private classificationDiagnosticsExpiry?: ReturnType<typeof setTimeout>;
+  private classificationDiagnosticsClosed = false;
   private readonly requestClassificationObservers = new Set<(event: RequestClassificationEvent) => void>();
 
   getRequestClassifications(scopeId?: string): readonly RequestClassificationEvent[] {
-    return this.requestClassifications.get(scopeId)?.slice() ?? [];
+    this.pruneRequestClassifications();
+    return this.requestClassifications.get(scopeId)?.map(record => record.event) ?? [];
+  }
+
+  private pruneRequestClassifications(removedTenant?: string): void {
+    const now = Date.now();
+    let next = Infinity;
+    for (const [scope, records] of this.requestClassifications) {
+      const kept = records.filter(record => record.expiresAt > now &&
+        (removedTenant === undefined || !record.tenantIds.includes(removedTenant)));
+      if (!kept.length) this.requestClassifications.delete(scope);
+      else {
+        this.requestClassifications.set(scope, kept);
+        next = Math.min(next, kept[0]!.expiresAt);
+      }
+    }
+    clearTimeout(this.classificationDiagnosticsExpiry);
+    this.classificationDiagnosticsExpiry = Number.isFinite(next)
+      ? setTimeout(() => this.pruneRequestClassifications(), next - now)
+      : undefined;
+    this.classificationDiagnosticsExpiry?.unref();
   }
 
   getRequestClassificationDiagnostics(): ReturnType<typeof classificationDiagnostics> {
@@ -2273,7 +2299,7 @@ export class AppStateStore {
       startRun: (slug, options) => this.startRun(slug, options),
       cancelRun: id => this.cancelRun(id),
       complete: async (p, question, context, planning) => withTransientClassificationScope(
-        new ClassificationLedger(this.intelligenceStore?.classificationIdentityIndex(p.tenantId), p.id),
+        new ClassificationLedger(this.intelligenceStore?.classificationIdentityIndex(p.tenantId), p.id, [p.tenantId]),
         async () => {
           registerTenantData("office:context", { tenantId: p.tenantId, evidence: context.evidence, conversation: context.conversation });
           registerTenantData("office:instructions", context.instructions);
@@ -2360,6 +2386,8 @@ export class AppStateStore {
 
   close(): void {
     this.chatService.clearClassifications();
+    this.classificationDiagnosticsClosed = true;
+    clearTimeout(this.classificationDiagnosticsExpiry);
     this.requestClassifications.clear();
     this.whatsappWebClientInstance?.dispose();
     void this.gatewayService.stop();
@@ -8678,6 +8706,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       }
       this.chatService.clearTenantClassification(id);
       this.intelligenceStore?.disconnectClassification(id);
+      this.pruneRequestClassifications(id);
     });
     // A license check of the removed connection saves nothing.
     this.supersedeTenantCheck(id, "disconnected");
@@ -8859,17 +8888,20 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const llm = probe && providerId === "gemini"
       ? createGeminiLlm({ defaultModel: model })
       : await this.createProviderLlm(providerId, model, binding);
-    return withRequestClassification(llm, providerId, event => {
+    return withRequestClassification(llm, providerId, (event, tenantIds) => {
+      if (this.classificationDiagnosticsClosed || tenantIds.some(id => !this.tenantLifecycle.isWritable(id))) return;
       const events = this.requestClassifications.get(event.scopeId) ?? [];
       const spans = event.classification.spans;
       const cap = 256;
-      events.push(spans.length > cap ? {
+      const retained = spans.length > cap ? {
         ...event, spansOmitted: spans.length - cap, classification: { ...event.classification, spans: spans.slice(0, cap) },
-      } : event);
+      } : event;
+      events.push({ event: retained, tenantIds, expiresAt: Date.now() + CLASSIFICATION_TTL_MS });
       if (events.length > 16) events.shift();
       this.requestClassifications.delete(event.scopeId);
       this.requestClassifications.set(event.scopeId, events);
       if (this.requestClassifications.size > 32) this.requestClassifications.delete(this.requestClassifications.keys().next().value);
+      if (!this.classificationDiagnosticsExpiry) this.pruneRequestClassifications();
       for (const observer of this.requestClassificationObservers) {
         try { observer(event); } catch { /* Observers cannot interrupt the provider request. */ }
       }

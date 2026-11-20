@@ -13,7 +13,7 @@ import {
 
 export { GRAPH_FIELD_CLASSES_VERSION } from "./graph-field-classes.js";
 export { releaseClassificationIdentityShard } from "./classification-worker-client.js";
-export { ClassificationLedger, currentClassificationLedger, classificationDiagnostics, collectClassifiedValues, registerClassifiedValues, registerRenderedFragment, registerTenantData, registerTransientTenantData, withTransientClassificationScope, withClassificationScope, withRequestClassification } from "./request-classification.js";
+export { CLASSIFICATION_TTL_MS, ClassificationLedger, currentClassificationLedger, classificationDiagnostics, collectClassifiedValues, registerClassifiedValues, registerRenderedFragment, registerTenantData, registerTransientTenantData, withTransientClassificationScope, withClassificationScope, withRequestClassification } from "./request-classification.js";
 export type { ClassifiedValues, ClassificationSpan, RequestClassification, RequestClassificationEvent } from "./request-classification.js";
 
 export interface DataClassification {
@@ -281,6 +281,16 @@ function graphRoute(graphPath: string): string {
     if (path.startsWith(resource + "/")) return resource;
   }
   return path;
+}
+
+const graphSourceRoutes = new Map([
+  ...Object.keys(GRAPH_FIELD_CLASSES), ...GRAPH_SECURITY_RESOURCES, ...Object.values(GRAPH_ROUTE_ALIASES),
+].map(route => [route.toLowerCase(), route]));
+
+/** Diagnostic labels may only contain static routes from the field map. */
+export function graphClassificationSource(path: string): string {
+  const route = graphSourceRoutes.get(graphRoute(path));
+  return route ? `graph:${route}` : "graph:other";
 }
 
 export function hasGraphFieldClasses(graphPath: string): boolean {

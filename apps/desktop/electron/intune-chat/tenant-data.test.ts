@@ -369,3 +369,33 @@ for (const voice of [false, true]) {
     } finally { await f.close(); }
   });
 }
+
+test("Graph diagnostics retain only static source labels, expire, and clear on Disconnect", async t => {
+  const upn = "zelena@example.invalid";
+  const id = "09402f57-e92f-49de-b557-cd633f27b322";
+  const deviceName = "Zelena-Workstation-271";
+  const routes = [`/users/${upn}`, `/users/${id}`, `/deviceManagement/managedDevices/${deviceName}`];
+  const f = await fixture({
+    graphResult: path => routes.includes(path) ? { id, userPrincipalName: upn, deviceName } : { value: [] },
+    respond: (_request, index) => index < routes.length
+      ? JSON.stringify({ kind: "tenant", tool: "graph_get", params: { path: routes[index] } })
+      : '{"final":true,"answer":"Reviewed."}',
+  });
+  try {
+    t.mock.timers.enable({ apis: ["Date", "setTimeout"] });
+    await f.store.setChatInvestigationMode("always-agentic");
+    const { conversation } = await f.store.streamIntuneChatMessage({ content: "Review the tenant's configuration." }, () => {});
+    const read = () => f.store.getRequestClassifications(conversation.id);
+    const events = read();
+    assert.ok(events.some(event => event.classification.spans.some(span => span.source === "graph:/users")));
+    const diagnostics = JSON.stringify(events);
+    for (const value of [upn, id, deviceName]) assert.equal(diagnostics.includes(value), false);
+    t.mock.timers.tick(15 * 60_000);
+    assert.deepEqual(read(), []);
+    await f.store.setChatInvestigationMode("always-deterministic");
+    await f.store.streamIntuneChatMessage({ conversationId: conversation.id, content: "Explain that result." }, () => {});
+    assert.ok(read().length > 0);
+    await f.store.disconnectTenant("tenant-a");
+    assert.deepEqual(read(), []);
+  } finally { await f.close(); }
+});

@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { DATA_CLASSES_BY_SENSITIVITY, maxDataClass, type DataClass, type DataClassCounts, type LlmOptions, type ProviderId, type RunLlmApi } from "@openadminos/agent-sdk";
-import { emptyDataClassCounts, requestTextSpans, walkDataClasses, type ClassificationOptions, type TextSpan } from "./data-classification.js";
+import { emptyDataClassCounts, graphClassificationSource, requestTextSpans, walkDataClasses, type ClassificationOptions, type TextSpan } from "./data-classification.js";
 import { GRAPH_FIELD_CLASSES_VERSION, type SecurityMaskRole } from "./graph-field-classes.js";
 import { ClassificationSlice, requestWorker, type ClassificationWorker } from "./classification-worker-client.js";
 import { TenantValueIndex, type TenantMatchEntry } from "./tenant-value-index.js";
@@ -390,7 +390,10 @@ export class ClassificationLedger {
   private workerState?: { client: ClassificationWorker; id: number; dirty: Set<Scalar>; mirrored: Set<Scalar> };
   scopeId: string | undefined;
 
-  constructor(private readonly identityIndex?: ClassificationOptions["identityIndex"], scopeId?: string) {
+  constructor(
+    private readonly identityIndex?: ClassificationOptions["identityIndex"], scopeId?: string,
+    readonly tenantIds: readonly string[] = [],
+  ) {
     this.scopeId = scopeId;
   }
 
@@ -457,7 +460,7 @@ export class ClassificationLedger {
     if (this.disposed) return;
     try {
       const identityIndex = options.identityIndex ?? this.identityIndex;
-      this.registerClassified(source, collectClassifiedValues(data, { ...options, ...(identityIndex ? { identityIndex } : {}) }));
+      this.registerClassified(source.startsWith("graph:") && options.graphPath ? graphClassificationSource(options.graphPath) : source, collectClassifiedValues(data, { ...options, ...(identityIndex ? { identityIndex } : {}) }));
     } catch {
       this.incompleteRegistrations++;
     }
@@ -1088,7 +1091,7 @@ export function registerRenderedFragment<T extends Scalar>(original: unknown, fr
 export function withRequestClassification(
   llm: RunLlmApi,
   providerId: ProviderId,
-  observe: (event: RequestClassificationEvent) => void,
+  observe: (event: RequestClassificationEvent, tenantIds: readonly string[]) => void,
 ): RunLlmApi {
   const classify = async (ledger: ClassificationLedger | undefined, method: RequestClassificationEvent["method"], request: LlmOptions) => {
     if (!llm.available) return;
@@ -1110,7 +1113,7 @@ export function withRequestClassification(
     try {
       observe({ providerId, method, fieldMapVersion: GRAPH_FIELD_CLASSES_VERSION, timestamp: new Date().toISOString(),
         ...(ledger?.scopeId ? { scopeId: ledger.scopeId } : {}), scopePresent: ledger !== undefined,
-        failed, classification: result });
+        failed, classification: result }, ledger?.tenantIds ?? []);
     } catch { /* Development observers cannot change provider behavior. */ }
   };
   return {
