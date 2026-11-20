@@ -13,7 +13,8 @@ import type {
   RunLlmApi,
 } from "@openadminos/agent-sdk";
 
-import { classifyModelFitFailure, isOllamaCloudModel, modelFitChoices, modelSizeBillions } from "../../src/shared/model-fit.js";
+import { classifyModelFitFailure, isOllamaCloudModel, isPlaceholderModel, modelFitChoices, modelSizeBillions } from "../../src/shared/model-fit.js";
+import { GEMINI_DEFAULT_MODEL } from "@openadminos/runtime";
 import { MODEL_FIT_OFFER_TTL_MS, ModelFitOffers, ModelOverrideError, chatModelFitFailure, guardModelFitLlm, loopFailureIssue, repeatedFailureIssue, resolveChatTurnProvider, type ModelFitOffer } from "./model-fit.js";
 import { IntuneChatService, type ChatServiceHost } from "./service.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
@@ -256,6 +257,8 @@ describe("Model fit: the per-request override", () => {
       /does not report a model yet/,
     );
     assert.deepEqual(modelFitChoices({ issue: { reason: "context-too-small", providerId: "ollama", model: LOCAL_MODEL }, providers: [ollama, unpinned] }).hosted, []);
+    // The placeholder is the Gemini adapter's own no `--model` value.
+    assert.equal(isPlaceholderModel(GEMINI_DEFAULT_MODEL), true);
     // A CLI default placeholder is not a model: the CLI could answer with another one.
     const gemini: ProviderSummary = { ...claude, id: "gemini", name: "Gemini CLI", models: ["gemini-default"], defaultModel: "gemini-default" };
     assert.deepEqual(modelFitChoices({ issue: { reason: "context-too-small", providerId: "ollama", model: LOCAL_MODEL }, providers: [ollama, gemini] }).hosted, []);
