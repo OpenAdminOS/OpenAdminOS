@@ -2632,9 +2632,14 @@ lists keeps Start disabled, and the review says so; the host refuses it too. Whe
 provider picked there stays on that run: setup does not change the active
 provider for a model fit rerun or for Run for real of a model fit dry run, and
 checks the picked provider in full the way selecting it does. A run resumed
-from setup opens only its own review. A hosted provider that reports no model
-is not offered, its review does not start, and the host refuses a model fit
-rerun or request on it without a model, since the approval names one model.
+from setup opens only its own review, and setup moves on from a provider
+picked for one run only once its full check is done. A hosted provider that
+reports no model, or only a CLI default placeholder such as Gemini's
+`gemini-default`, is not offered; its review does not start, Try again waits
+for the same thing as Start, and the host refuses a hosted model fit rerun (or
+Run for real of one) unless it names a model the provider lists now, since the
+approval names one model. Run for real of a model fit dry run goes only where
+its dry run planned; a different endpoint after setup refuses it.
 An Azure OpenAI model fit request is refused when the deployment configured
 now is not the one the admin reviewed.
 Run for real of a model fit dry run keeps the on-device requirement and the
