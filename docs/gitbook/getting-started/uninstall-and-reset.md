@@ -100,8 +100,10 @@ rm -rf ~/Library/Caches/@openadminosdesktop-updater \
 
 Then remove the data folder `~/Library/Application Support/OpenAdminOS`. If
 your device is managed and the folder holds `policy.json`, remove everything
-except that file. Commands that report that an item does not exist can be
-ignored. Turn off **OpenAdminOS Menu Bar Helper** in **System Settings >
+except that file. If `ls -ld` shows the folder as a link (an arrow to
+another place), remove only the link with `rm`, without a trailing slash,
+and check the folder it points to before removing anything there. Commands
+that report that an item does not exist can be ignored. Turn off **OpenAdminOS Menu Bar Helper** in **System Settings >
 General > Login Items** if it is still listed.
 
 ## Uninstall on Windows
@@ -117,11 +119,22 @@ this in PowerShell:
 ```powershell
 schtasks /Delete /TN "OpenAdminOS Scheduler" /F
 Remove-Item -Recurse -Force "$env:LOCALAPPDATA\@openadminosdesktop-updater"
-Get-ChildItem "$env:APPDATA\OpenAdminOS" -Exclude policy.json | Remove-Item -Recurse -Force
+$data = Get-Item "$env:APPDATA\OpenAdminOS"
+if ($data.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+  "The data folder is a link to $($data.Target). Check that folder before removing anything in it."
+} else {
+  Get-ChildItem $data.FullName -Exclude policy.json |
+    Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } |
+    Remove-Item -Recurse -Force
+}
 ```
 
-The last line keeps `policy.json`, the IT policy file. If no one manages the
-device, you can remove the whole `%APPDATA%\OpenAdminOS` folder. The
+The script keeps `policy.json`, the IT policy file. It stops when the data
+folder is a junction or link, because removing through it would delete files
+wherever it points, and it skips links inside the folder for the same reason;
+remove those links with `cmd /c rmdir "<path>"`, which removes the link only.
+If no one manages the device and the folder is not a link, you can remove
+the whole `%APPDATA%\OpenAdminOS` folder. The
 encryption key that protects the sign-ins is in that folder (`Local State`),
 so removing the folder also makes any copied token files unreadable.
 
