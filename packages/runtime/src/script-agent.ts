@@ -181,10 +181,13 @@ async function runScriptAgent(
         }
 
         if (sandboxResult.exitCode !== 0) {
-          // A script that stopped because its model request did not fit
-          // fails with the typed reason, not with its own stack trace.
+          // A script that ended on a refused model request (its error names
+          // the refusal) fails with the typed reason, not its stack trace.
+          // A script that caught the refusal and failed later keeps its error.
           const tooLarge = broker.getContextFailure();
-          if (tooLarge) throw new ContextTooSmallError(tooLarge);
+          if (tooLarge && /context-too-small|tokens of context/i.test(sandboxResult.stderr)) {
+            throw new ContextTooSmallError(tooLarge);
+          }
           const detail = sandboxResult.stderr.trim() || `exit code ${sandboxResult.exitCode}`;
           throw new Error(
             `MXC script agent "${manifest.descriptor.id}" failed: ${truncate(detail, 600)}`,
