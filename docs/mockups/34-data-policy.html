@@ -1080,7 +1080,7 @@
       </ul>
 
       <h3 id="f-reopen" style="margin:32px 0 6px;font-size:var(--text-base);font-weight:500">A conversation reopened after a restart</h3>
-      <p>Each saved Chat message keeps its classification next to it on this device: where each recognized value sits in the text and its class, not a second copy of the value. Reopening a conversation rebuilds the ledger from that record before any follow-up, so a policy name that is no longer in the tenant index is still known as security. A message saved without that record could hold anything, so it counts as not examined.</p>
+      <p>Each saved Chat message keeps its classification next to it on this device: where each recognized value sits in the text and its class, not a second copy of the value. Reopening a conversation rebuilds the ledger from that record before any follow-up, so a policy name that is no longer in the tenant index is still known as security. A message saved without that record could hold anything, so it counts as not examined. So does a message whose record was made before an update raised the class of a field it used: a value the record calls activity may be security now, so the saved classification can no longer be used.</p>
       <div class="win">
         <div class="lights"><i></i><i></i><i></i></div>
         <div class="shell">
@@ -1088,7 +1088,7 @@
           <div class="appmain">
             <div class="topbar" data-top="secblock"></div>
             <div class="page"><div class="chat">
-              <p class="reopen"><span>Reopened today at 09:20. Saved 12 to 18 November.</span><span class="r">8 earlier messages, 6 with a stored classification, 2 without</span></p>
+              <p class="reopen"><span>Reopened today at 09:20. Saved 12 to 18 November.</span><span class="r">8 earlier messages: 4 classified from their stored record, 2 without a record, 2 classified before a class was raised</span></p>
               <div class="hist" aria-label="Earlier messages">
                 <div class="q">Which finance laptops still have BitLocker off?</div>
                 <div class="ans">
@@ -1096,17 +1096,23 @@
                   <div class="body"><p>Three Finance laptops report BitLocker off: WGB-LT-0412, WGB-LT-0388 and WGB-LT-0291. Two of them have not checked in since October.</p></div>
                 </div>
                 <p class="histtag"><span class="hx"></span>No stored classification. Counts as not examined.</p>
+                <div class="q">Which sign-ins came from outside our named locations?</div>
+                <div class="ans">
+                  <div class="who"><svg width="14" height="14"><use href="#oa"/></svg>Nova with Claude Code, 15 November, classified under field map 41</div>
+                  <div class="body"><p>Two of those laptops signed in from outside Woodgrove HQ and Woodgrove Branch Offices this week, both through a home network in Leeds.</p></div>
+                </div>
+                <p class="histtag"><span class="hx"></span>Stored classification from field map 41. Field map 42 has since raised sign-in network locations from activity to security, so this saved classification can no longer be used. Counts as not examined.</p>
               </div>
               <div class="q">Which of those checked in this week?</div>
               <div class="ans">
                 <div class="block" data-t="blocked">
                   <span class="glyph" data-t="blocked"><svg><use href="#i-q"/></svg></span>
                   <div>
-                    <h3>Your earlier answers were left out: 2 messages could not be classified</h3>
-                    <p>The question and answer from 12 November were saved before this app stored a classification with each message, so they count as not examined and take the strictest rule any class has on Hosted. Security on Hosted is Block, so they were not sent to Claude Code, although the examined part of this follow-up holds only device, identity and activity data, and your follow-up was not sent without them: it depends on them. The 6 later messages were classified from their stored record.</p>
+                    <h3>Your earlier answers were left out: 4 messages could not be classified</h3>
+                    <p>The question and answer from 12 November were saved before this app stored a classification with each message. The question and answer from 15 November were classified under field map 41, and field map 42 has since raised sign-in network locations from activity to security, so their saved classification can no longer be used: the named locations it calls activity are security now. All 4 count as not examined and take the strictest rule any class has on Hosted. Security on Hosted is Block, so they were not sent to Claude Code, although the examined part of this follow-up holds only device, identity and activity data, and your follow-up was not sent without them: it depends on them. The 4 other messages were classified from their stored record.</p>
                     <ul class="calls" aria-label="Model calls for this question">
                       <li><span class="tm">09:21:04</span><span class="sent">Sent</span><span>Planning the question. Your question, checked by data policy. No sensitive values found.</span></li>
-                      <li><span class="tm">09:21:06</span><span class="not">Not sent</span><span>Follow-up with 8 earlier messages. 2 not examined; Security is Block on Hosted.</span></li>
+                      <li><span class="tm">09:21:06</span><span class="not">Not sent</span><span>Follow-up with 8 earlier messages. 4 not examined: 2 without a record, 2 classified before field map 42; Security is Block on Hosted.</span></li>
                     </ul>
                     <div class="acts"><button class="bt primary" type="button">Ask without the earlier answers</button><button class="bt secondary" type="button">Switch to a local model</button></div>
                     <p class="xs muted" style="margin-top:10px">Without the earlier answers, only your new question goes to Claude Code, with none of this conversation's history, so name the devices you mean. Ollama with gpt-oss:20b is ready on this device, and no rule on Local is Block, so the follow-up can be answered there with the whole conversation.</p>
@@ -1122,8 +1128,8 @@
       <div class="block" style="margin-top:8px">
         <span class="glyph" data-t="mask"><svg><use href="#i-q"/></svg></span>
         <div>
-          <h3>2 earlier messages could not be classified and were masked one way</h3>
-          <p>The question and answer from 12 November have no stored classification, so they count as not examined and take the strictest rule any class has on Hosted. With your rules that is Mask: they were masked one way before the call to Claude Code and are never restored. This answer could not use them.</p>
+          <h3>4 earlier messages could not be classified and were masked one way</h3>
+          <p>The question and answer from 12 November have no stored classification, and the pair from 15 November was classified before field map 42 raised sign-in network locations to security, so all 4 count as not examined and take the strictest rule any class has on Hosted. With your rules that is Mask: they were masked one way before the call to Claude Code and are never restored. This answer could not use them.</p>
           <div class="acts"><button class="bt secondary sm" type="button">Ask with a local model</button></div>
         </div>
       </div>
@@ -1132,7 +1138,9 @@
         <li>Reopening rebuilds the ledger from the stored evidence before the follow-up is built, and the scan of the final request still runs over the history, so a class can only rise. An answer that named a Conditional Access policy since renamed in the tenant keeps that name as security: with Security on Hosted at Block, the name is withheld, as the blocked prompt in E shows.</li>
         <li>A message with no stored evidence, saved by an earlier version or with evidence that cannot be read, counts as not examined, the same rule as a request the check ran out of time on. With a Block on the tier, it is withheld and the follow-up waits for the admin: sent without the history it depends on, it would get a confident wrong answer. With Mask as the strictest rule, it is masked one way and the answer says so.</li>
         <li>Ask without the earlier answers sends the new question alone, with no saved history in the request. The local model is offered only when no rule on Local is Block, as in the withheld calls above.</li>
-        <li>The marker under each saved message without a record stays in the conversation, so the admin sees which messages are affected before asking again.</li>
+        <li>The marker under each saved message without a usable record stays in the conversation, so the admin sees which messages are affected before asking again.</li>
+        <li>Decided in round 14: each stored span keeps the list of every class its field had held when the message was saved (the mapped class and every later pick), not one class, and reopening takes the strictest action across that whole list under the rules in force now. A field moved from configuration to security to identity, with a value saved in a local answer and later gone from the tenant index, is still withheld from a hosted follow-up after a restart when Security on Hosted is Block.</li>
+        <li>A record made under a field map older than a map change that raised any class counts as not examined, like a message with no record, because its stored classes may be lower than the field's class now. The marker under the message names the change, here field map 42 raising sign-in network locations from activity to security. A record under a map whose later changes raised nothing is used as stored.</li>
       </ul>
     </section>
 
