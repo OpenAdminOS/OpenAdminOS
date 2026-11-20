@@ -39,6 +39,8 @@ export const LOCAL_RESET_COPY = {
   revokeLink: "How to revoke access in Entra",
   revokeUrl: "https://docs.openadminos.com/trust-model/authentication#disconnecting-and-revoking",
   restartNote: "OpenAdminOS closes and opens again at first run.",
+  infoFailed: "What the reset removes on this device could not be loaded, so Reset stays off.",
+  infoRetry: "Try again",
   phraseLabel: `Type ${LOCAL_RESET_PHRASE} to confirm`,
   phrasePlaceholder: "Type the phrase to enable Reset",
   action: "Reset and restart",

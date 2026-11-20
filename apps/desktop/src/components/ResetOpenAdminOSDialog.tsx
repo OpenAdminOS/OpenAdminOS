@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "./Button";
 import { Modal, ModalHeader } from "./Modal";
@@ -21,25 +21,41 @@ export function ResetOpenAdminOSDialog({ open, onClose }: { open: boolean; onClo
   const [typed, setTyped] = useState("");
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [infoFailed, setInfoFailed] = useState(false);
+
+  // Reset stays off until the dialog can say exactly what goes, so the
+  // admin never confirms a list that left out the Keychain or the scheduler.
+  const loadInfo = useCallback((isCancelled: () => boolean = () => false) => {
+    setInfoFailed(false);
+    const request = window.openAdminOS?.getLocalResetInfo?.();
+    if (!request) {
+      setInfoFailed(true);
+      return;
+    }
+    void request
+      .then((next) => {
+        if (!isCancelled()) setInfo(next);
+      })
+      .catch(() => {
+        if (!isCancelled()) setInfoFailed(true);
+      });
+  }, []);
 
   useEffect(() => {
     if (!open) return;
     setTyped("");
     setError(null);
     setPhase("idle");
+    setInfo(undefined);
     let cancelled = false;
-    void window.openAdminOS?.getLocalResetInfo?.()
-      .then((next) => {
-        if (!cancelled) setInfo(next);
-      })
-      .catch(() => undefined);
+    loadInfo(() => cancelled);
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, loadInfo]);
 
   const busy = phase !== "idle";
-  const armed = typed === LOCAL_RESET_PHRASE;
+  const armed = typed === LOCAL_RESET_PHRASE && info !== undefined;
   const close = () => {
     if (!busy) onClose();
   };
@@ -132,6 +148,17 @@ export function ResetOpenAdminOSDialog({ open, onClose }: { open: boolean; onClo
           />
         </div>
 
+        {infoFailed ? (
+          <div
+            role="alert"
+            className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25"
+          >
+            {LOCAL_RESET_COPY.infoFailed}{" "}
+            <button type="button" className="underline underline-offset-2" onClick={() => loadInfo()}>
+              {LOCAL_RESET_COPY.infoRetry}
+            </button>
+          </div>
+        ) : null}
         {phase === "resetting" ? (
           <p role="status" className="text-sm text-[var(--color-text-muted)]">{LOCAL_RESET_COPY.progress}</p>
         ) : phase === "restarting" ? (

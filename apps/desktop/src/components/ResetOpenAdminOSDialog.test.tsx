@@ -8,6 +8,7 @@ import { installMockBridge, makeMockBridge, renderRoute } from "../test/test-uti
 import { ResetOpenAdminOSDialog } from "./ResetOpenAdminOSDialog";
 
 const PHRASE = "RESET OPENADMINOS";
+const DATA_FOLDER = "/Users/admin/Library/Application Support/OpenAdminOS";
 
 function renderDialog(overrides: Parameters<typeof makeMockBridge>[0] = {}) {
   const bridge = installMockBridge(makeMockBridge(overrides));
@@ -53,7 +54,8 @@ describe("Reset OpenAdminOS dialog", () => {
 
   it("keeps Reset disabled until the exact phrase is typed", async () => {
     const { bridge, user } = renderDialog();
-    const input = await screen.findByLabelText(`Type ${PHRASE} to confirm`);
+    await screen.findByText(DATA_FOLDER);
+    const input = screen.getByLabelText(`Type ${PHRASE} to confirm`);
     const button = screen.getByRole("button", { name: "Reset and restart" });
     expect(button).toBeDisabled();
     for (const wrong of ["reset openadminos", "RESET OPENADMIN", `${PHRASE} `, ` ${PHRASE}`]) {
@@ -68,9 +70,24 @@ describe("Reset OpenAdminOS dialog", () => {
     expect(button).toBeEnabled();
   });
 
+  it("keeps Reset off until it can say what is removed, and loads it again on Try again", async () => {
+    const getLocalResetInfo = vi.fn()
+      .mockRejectedValueOnce(new Error("Error invoking remote method 'openadminos:get-local-reset-info': Error: gone"))
+      .mockResolvedValue({ dataFolder: "/data", packaged: true, platform: "macos" as const, policyFilePresent: false });
+    const { user } = renderDialog({ getLocalResetInfo });
+    expect(await screen.findByRole("alert")).toHaveTextContent("could not be loaded, so Reset stays off");
+    await user.type(screen.getByLabelText(`Type ${PHRASE} to confirm`), PHRASE);
+    expect(screen.getByRole("button", { name: "Reset and restart" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("/data")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reset and restart" })).toBeEnabled();
+  });
+
   it("sends the phrase and shows that the app restarts", async () => {
     const { bridge, user } = renderDialog();
-    await user.type(await screen.findByLabelText(`Type ${PHRASE} to confirm`), PHRASE);
+    await screen.findByText(DATA_FOLDER);
+    await user.type(screen.getByLabelText(`Type ${PHRASE} to confirm`), PHRASE);
     await user.click(screen.getByRole("button", { name: "Reset and restart" }));
     expect(bridge.resetOpenAdminOS).toHaveBeenCalledWith(PHRASE);
     expect(await screen.findByText(/Reset started. OpenAdminOS is closing/)).toBeInTheDocument();
@@ -84,7 +101,8 @@ describe("Reset OpenAdminOS dialog", () => {
         throw new Error("Error invoking remote method 'openadminos:reset-openadminos': LocalResetRequestError: Stale device cleanup is applying a confirmed change. Wait for it to finish, then reset. Nothing was removed.");
       }),
     });
-    await user.type(await screen.findByLabelText(`Type ${PHRASE} to confirm`), PHRASE);
+    await screen.findByText(DATA_FOLDER);
+    await user.type(screen.getByLabelText(`Type ${PHRASE} to confirm`), PHRASE);
     await user.click(screen.getByRole("button", { name: "Reset and restart" }));
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Stale device cleanup is applying a confirmed change. Wait for it to finish, then reset. Nothing was removed.");
