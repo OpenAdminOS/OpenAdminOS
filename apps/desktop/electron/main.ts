@@ -7129,7 +7129,9 @@ if (app.isPackaged && !isBackgroundSchedulerLaunch && !pendingLocalResetBuild) {
   }
 }
 
-const gotLock = app.requestSingleInstanceLock();
+// A yielding scheduler wake does not take the lock either, so the
+// interactive launch that finishes the reset never loses it to that wake.
+const gotLock = yieldToPendingLocalReset ? false : app.requestSingleInstanceLock();
 debugStartupLog("single instance lock", {
   gotLock,
   argv: process.argv,
@@ -7432,7 +7434,8 @@ if (!gotLock) {
     // Avoid accumulating ticks while a provider probe or queue operation is slow.
     let officeTickPending = false;
     const tickOffice = async () => {
-      if (officeTickPending) return;
+      // After a reset request the stores are closing; nothing new starts.
+      if (officeTickPending || localResetRequested) return;
       officeTickPending = true;
       try {
         await store.tickOffice();
@@ -7447,6 +7450,7 @@ if (!gotLock) {
     setInterval(() => { void tickOffice(); }, 2_000);
     const SCHEDULER_TICK_MS = 60_000;
     setInterval(() => {
+      if (localResetRequested) return;
       void store.fireDueSchedules();
       void store.fireDueNovaFollowUps();
       void store.refreshDueGraphCaches();
