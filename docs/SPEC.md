@@ -2457,10 +2457,17 @@ it links to Settings, Providers.
 Accept step. A hosted choice opens the hosted send confirmation in a
 per-request form: it names the provider, where data goes with the detail
 line, the model, what is sent, what stays and the cost; it says the next
-message goes to the local model again; it has no remember box and Enter does
-not send, only the Send button does. Approval is per request in v1: a
+message goes to the local model again; it shows the exact question that is
+sent, has no remember box, and Enter does not send, only the Send button
+does. Editing the composer or the attachments while it is open closes it
+unsent with a line that says so. Approval is per request in v1: a
 remembered "do not ask again" for that provider never covers it.
-A local choice sends at once, since nothing leaves the device.
+A local choice sends at once, since nothing leaves the device, but only
+after a fresh check that the model runs here: the host reads Ollama's
+`/api/tags` again (model metadata only; nothing is loaded) and refuses a
+model that is no longer listed or is now remote-backed, or when the list
+cannot be read. A model fit acceptance (`modelFitOfferId`) is refused on an
+ordinary send and on the non-streaming send.
 
 Host checks (`apps/desktop/electron/intune-chat/model-fit.ts`). A failed
 answer that may be run again carries a host-issued, single-use `offerId`,
@@ -2496,7 +2503,8 @@ helper also reserves room for the answer, so a prompt below the total reads
 for an answer."
 
 After. The stored answer carries `switchedFrom` (the provider and model it
-replaced and why) and shows "Answered by <location label> for this request
+replaced, why, and whether the provider that took it was on this device when
+it was sent, so later settings cannot relabel it) and shows "Answered by <location label> for this request
 only. Chat is back on <model>." A failed answer carries `modelFit` with the
 reason and numbers, kept in the answer metadata.
 
@@ -2509,7 +2517,8 @@ runs." Start run starts the agent with `providerId` and `model` for that run
 only, pinned to the organization the review showed (`tenantId`), or with
 `expectNoTenant` when it showed none, so an organization switch before the
 host admits the run refuses it instead of running elsewhere. A failed dry run
-stays a dry run. A write agent still stops at the diff and its typed confirmation. Team
+stays a dry run. A larger local model passes `requireOnDeviceModel`, so the
+host makes the same fresh check before it admits the run. A write agent still stops at the diff and its typed confirmation. Team
 runs keep their own review in Agent Team.
 
 Open questions (TODO(ugur) in code): a "remember for this conversation"
