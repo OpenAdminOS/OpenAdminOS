@@ -2348,6 +2348,8 @@ export class AppStateStore {
    */
   /** Set once Reset OpenAdminOS has started: no confirmed change starts before the restart. */
   private localResetStarted = false;
+  /** Confirmations accepted but not yet recorded as an applying run. */
+  private confirmationsInFlight = 0;
 
   /**
    * Checks that no confirmed change is applying and, when none is, stops new
@@ -2355,8 +2357,12 @@ export class AppStateStore {
    * reset does not go ahead.
    */
   async beginLocalReset(): Promise<string | undefined> {
+    // Set first, so no confirmation starts while the runs are read; one that
+    // already started is counted and waited for by the admin, not cut off.
     this.localResetStarted = true;
-    const blocker = await this.localResetBlocker();
+    const blocker = this.confirmationsInFlight > 0
+      ? "A change is being confirmed. Wait for it to finish, then reset. Nothing was removed."
+      : await this.localResetBlocker();
     if (blocker) this.localResetStarted = false;
     return blocker;
   }
@@ -8900,7 +8906,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     if (this.localResetStarted) {
       throw new Error("OpenAdminOS is resetting and restarts in a moment. Nothing was applied.");
     }
-    return this.runService.confirmRun(runId, phrase, boundary);
+    this.confirmationsInFlight += 1;
+    try {
+      return await this.runService.confirmRun(runId, phrase, boundary);
+    } finally {
+      this.confirmationsInFlight -= 1;
+    }
   }
 
   async rejectRun(runId: string): Promise<RunRecord> {
