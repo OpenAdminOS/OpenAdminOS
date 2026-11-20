@@ -446,7 +446,25 @@
     .trv .ann.chgd { color: var(--color-warning); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-warning) 40%, transparent); }
     .trv .same { display: block; padding: 8px 12px; font-size: var(--text-xs); color: var(--color-text-muted); }
     /* Round 10: every row opens the full definition the admin approves */
-    .trv .defrow { padding: 0 12px 8px 38px; margin-top: -4px; }
+    .trv .defrow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; padding: 0 12px 8px 38px; margin-top: -4px; }
+    .trv .hs { font-size: 11px; line-height: 18px; color: var(--color-text-muted); }
+    .trv .hs code { color: var(--color-text-soft); }
+    .trvep { margin: 2px 0 0; overflow-wrap: anywhere; }
+    .trv .def .hash { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+    .trv .def .hash .hk { color: var(--color-text-muted); }
+    .trv .def .hash .hfull { order: 3; flex: 1 1 100%; min-width: 0; font: 11px/16px var(--font-mono); word-break: break-all; }
+    .trv .def .hash .hn { order: 4; flex: 1 1 100%; color: var(--color-text-muted); }
+    .trv .cp { border: 0; background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-border); border-radius: 5px; padding: 0 6px; font: inherit; font-size: 11px; line-height: 18px; color: var(--color-text-soft); cursor: pointer; }
+    .trv .cp:hover { color: var(--color-text); }
+    .trv .cp:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+    .trv .def .cmph { margin: 0 0 8px; color: var(--color-text-muted); }
+    .trv .def .cmpw { container-type: inline-size; }
+    .trv .def .cmpg { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .trv .def .cmpg > section { min-width: 0; padding: 8px; border-radius: 6px; box-shadow: inset 0 0 0 1px var(--color-border-soft); }
+    .trv .def .cmpg h5 { margin: 0 0 6px; font-size: var(--text-xs); line-height: var(--lh-xs); font-weight: 500; color: var(--color-text); }
+    .trv .def mark.was { background: color-mix(in srgb, var(--color-text-muted) 20%, transparent); color: inherit; border-radius: 3px; padding: 0 2px; }
+    @container (max-width: 640px) { .trv .def .cmpg dl { grid-template-columns: minmax(0, 1fr); gap: 0; } .trv .def .cmpg dd { margin-bottom: 4px; } }
+    @container (max-width: 380px) { .trv .def .cmpg { grid-template-columns: minmax(0, 1fr); } }
     .trv .deft { display: inline-flex; align-items: center; gap: 4px; border: 0; background: none; padding: 2px 0; font: inherit; font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text-soft); cursor: pointer; border-radius: 4px; }
     .trv .deft:hover { color: var(--color-text); }
     .trv .deft:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
@@ -637,7 +655,7 @@
                 <div class="grant one"><span class="ic"><svg><use href="#i-book"/></svg></span><div><div class="nm">Microsoft Learn</div><div class="ds">Reference server at <span class="host">learn.microsoft.com</span>. Receives queries with recognized tenant data removed.</div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="true" aria-label="Use Microsoft Learn" data-host="learn.microsoft.com"></button></span></div>
                 <div class="grant one"><span class="ic"><svg><use href="#i-book"/></svg></span><div><div class="nm">Splashtop Docs</div><div class="ds">Reference server at <span class="host">support-splashtopbusiness.splashtop.com</span>. Not on your IT department's list, so it is off.</div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="false" disabled aria-disabled="true" aria-describedby="lock-mcp" aria-label="Use Splashtop Docs, set by IT" data-host="support-splashtopbusiness.splashtop.com"></button></span>
                   <span class="lockline" id="lock-mcp"><svg><use href="#i-lock"/></svg><span>Locked. Set by your IT department in policy.json, <code>allowedPublicReferences</code></span></span></div>
-                <div class="grant one"><span class="ic"><svg><use href="#i-plug"/></svg></span><div><div class="nm">Policy settings reference</div><div class="ds">Added by you on 12 November. Remote server at <span class="host">tools.contoso.example</span>. 6 of its 10 tools approved as read-only; the other 4 cannot be approved and are never offered. Receives queries with recognized tenant data removed.</div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="true" aria-label="Use Policy settings reference" data-host="tools.contoso.example"></button></span></div>
+                <div class="grant one"><span class="ic"><svg><use href="#i-plug"/></svg></span><div><div class="nm">Policy settings reference</div><div class="ds">Added by you on 12 November. Remote server at <span class="host">tools.contoso.example</span>. 6 of its 11 tools approved as read-only; the other 5 cannot be approved and are never offered. Receives queries with recognized tenant data removed.</div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="true" aria-label="Use Policy settings reference" data-host="tools.contoso.example"></button></span></div>
                 <div class="grant one"><span class="ic"><svg><use href="#i-plug"/></svg></span><div><div class="nm">KQL reference</div><div class="ds">Added by you on 5 November. Remote server at <span class="host">kql.contoso.example</span>. Both approved tools changed on the server and wait for your review, so none is offered and the status strip leaves out this host. The grant stays on. <button class="bt ghost sm" type="button" style="height:22px;padding:0 6px">Review 2 changed tools</button></div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="true" aria-label="Use KQL reference" data-host="kql.contoso.example" data-offered="0" data-held="Both approved tools changed on the server and wait for your review in Access."></button></span></div>
                 <p class="limit"><svg><use href="#i-globe"/></svg><span>What a server receives: a query written from your question, with every value the app recognizes as tenant data removed. Text the app cannot recognize, such as an internal project name, can still reach the server. While any of a server's tools is offered, the status strip names its host; turn the server off here to stop that.</span></p>
                 <div style="padding:10px 0 0;border-top:1px solid var(--color-border-soft)"><button class="bt secondary sm" type="button" id="add-open">Add a server by URL</button> <span class="xs muted" style="margin-left:8px">Only servers your IT department lists can be added.</span></div>
@@ -726,9 +744,10 @@
       <h3 id="b-add" style="margin:32px 0 6px;font-size:var(--text-base);font-weight:500">Adding a server by URL</h3>
       <p>Step 1 takes the address and how the app signs in to the server, checks the host against your IT department's list before anything connects, and says what the server will receive. Step 2 is the tool review.</p>
       <div class="tsend">
-        <p class="trvcap" style="margin:0">The address is checked as you type. Try one IT lists, or one it does not.</p>
+        <p class="trvcap" style="margin:0">The address is checked as you type. Try either address IT lists, or one it does not, then Continue: step 2 follows the address.</p>
         <span class="seg" role="group" aria-label="Server address to try" id="addseg">
           <button type="button" data-url="https://tools.contoso.example/mcp" aria-pressed="true">Listed by IT</button>
+          <button type="button" data-url="https://docs.contoso.example/mcp" aria-pressed="false">Another listed server</button>
           <button type="button" data-url="https://mcp.fabrikam-tools.example/v1" aria-pressed="false">Not listed</button>
         </span>
       </div>
@@ -785,31 +804,31 @@
           <li>The allowlist check runs on the host as the address is typed and again when Continue is pressed, before any request. A host that is not listed gets the refusal in place of the disclosure, Continue stays disabled, and nothing is sent to the server. An address that is not https is refused the same way, with its own reason.</li>
           <li>Three ways to authenticate: none, a header with a secret, or the server's own sign-in. A header secret and a sign-in token go to the keychain on this device and only to that host; neither is written to a settings file, an export or a run log.</li>
           <li>The disclosure says what the server receives in the words of the grant copy in Access: listing its tools sends the credential chosen here and nothing from the tenant or the conversation, and each call sends a query with recognized tenant data removed, while text the app cannot recognize can still reach it. It follows the authentication choice.</li>
-          <li>Continue connects, lists the server's tools and opens step 2, the tool review below, with nothing approved.</li>
+          <li>Continue connects to exactly this address, lists its tools and opens step 2, the tool review below, with every tool unchecked. Step 2 names the host from this address and shows the full address it listed. Change the address here and step 2 is cleared until Continue lists the new one; press Continue again and the review starts unchecked again. An approval belongs to the endpoint it was given for and never carries over to another, even for a tool with the same name and definition.</li>
           <li><code>allowedMcpServers</code> is a proposed key name (open question in the plan). The Access frame above opens this step from Add a server by URL.</li>
         </ul>
       </div>
       <div class="two" style="margin-top:16px">
         <div style="display:grid;gap:8px;align-content:start">
-          <p class="trvcap">Add a server by URL: the tool review as it opens, nothing approved</p>
+          <p class="trvcap">Add a server by URL: step 2, the tool review of the address in step 1 as it opens, nothing approved</p>
           <div class="win" style="min-height:0">
             <div class="dialog" role="dialog" aria-labelledby="tr-t-open" style="width:100%;box-shadow:none;border-radius:12px">
-              <header><span class="xs muted">Step 2 of 2, tools.contoso.example</span><h2 id="tr-t-open">Which tools may <span data-name>Nova</span> use?</h2></header>
+              <header><span class="xs muted" data-open-host>Step 2 of 2, tools.contoso.example</span><h2 id="tr-t-open">Which tools may <span data-name>Nova</span> use?</h2><p class="xs muted trvep" data-open-ep>Tools listed by <code>https://tools.contoso.example/mcp</code></p></header>
               <div class="body">
-                <p>The server offers 10 tools, and none is approved yet. Approve only tools that read, and open a tool to read its full definition, readable and as raw JSON: that whole object is what you approve. A tool can be approved only when the server labels it read-only (<code>readOnlyHint: true</code>), and that label alone never approves it. The app reads every string in the definition, keys included, from the title and description through every nested schema property to the annotations, and a tool that describes saving, changing, sending or deleting anywhere in it cannot be approved. A tool you leave unapproved is never offered, and every call is checked against this list, including calls from skills and scheduled checks.</p>
+                <p><span data-open-lead>The server offers 11 tools, and none is approved yet.</span> Approve only tools that read, and open a tool to read its full definition, readable and as raw JSON: that whole object is what you approve, at this address only. A tool can be approved only when the server labels it read-only (<code>readOnlyHint: true</code>), and that label alone never approves it. The app reads every string in the definition, keys included, from the title and description through every nested schema property to the annotations, and a tool that describes a write anywhere in it, such as saving, editing, sending or deleting, cannot be approved. A tool you leave unapproved is never offered, and every call is checked against this list, including calls from skills and scheduled checks.</p>
                 <ul class="trv" data-trv="open"></ul>
               </div>
-              <footer><span class="xs muted trv-count" aria-live="polite" style="margin-right:auto"></span><button class="bt ghost" type="button">Back</button><button class="bt primary trv-ok" type="button"></button></footer>
+              <footer><span class="xs muted trv-count" aria-live="polite" style="margin-right:auto"></span><button class="bt ghost" type="button" id="tr-open-back">Back</button><button class="bt primary trv-ok" type="button"></button></footer>
             </div>
           </div>
         </div>
         <div style="display:grid;gap:8px;align-content:start">
-          <p class="trvcap">The same review after you approve the tools that only read</p>
+          <p class="trvcap">The review of tools.contoso.example after you approve the tools that only read</p>
           <div class="win" style="min-height:0">
             <div class="dialog" role="dialog" aria-labelledby="tr-t-after" style="width:100%;box-shadow:none;border-radius:12px">
               <header><span class="xs muted">Step 2 of 2, tools.contoso.example</span><h2 id="tr-t-after">Which tools may <span data-name>Nova</span> use?</h2></header>
               <div class="body">
-                <p>The server offers 10 tools, and none is approved yet. Approve only tools that read. The server's own read-only label is shown, but it does not approve a tool: a tool you leave unapproved is never offered, and every call is checked against this list, including calls from skills and scheduled checks.</p>
+                <p>The server offers 11 tools, and none is approved yet. Approve only tools that read. The server's own read-only label is shown, but it does not approve a tool: a tool you leave unapproved is never offered, and every call is checked against this list, including calls from skills and scheduled checks.</p>
                 <ul class="trv" data-trv="after"></ul>
               </div>
               <footer><span class="xs muted trv-count" aria-live="polite" style="margin-right:auto"></span><button class="bt ghost" type="button">Back</button><button class="bt primary trv-ok" type="button"></button></footer>
@@ -824,32 +843,36 @@
         <li>Decided in round 4: approval needs a read-only label and no documented write behavior. The app flags a tool whose definition describes saving, changing, sending or deleting, such as <code>export_report</code>, which saves a report on the server; a flagged tool is disabled in every review state with the reason under its name, whatever its read-only label. The flag is a check the app makes, not a promise about the server: a write the definition does not mention cannot be detected, which is why approval stays a human decision.</li>
         <li>Decided in round 11: the admin approves the complete tool object the server lists, not a projection of it. Every row opens with Full definition: a readable view (name, title, description, input and output schemas with every nested property, type, description and allowed value, every annotation including <code>annotations.title</code>, and any other field such as <code>_meta</code>) and, next to it, the raw JSON of the whole object, with the words the write check matched marked in both.</li>
         <li>The write check walks the whole object and reads every string in it, keys included, at every depth: names, titles, descriptions, nested schema properties, enum values and annotations. <code>baseline_versions</code>, whose name and description only read, is flagged by its title, "List and apply baselines", and by the value <code>apply</code> at <code>inputSchema.properties.mode.enum[1]</code>; the reason names each path.</li>
-        <li>The approval is bound to a SHA-256 hash of the canonical form of the whole object: keys sorted at every level, as in RFC 8785, serialized and hashed. The raw view shows exactly that form. Before a tool is offered and again at every call, the app hashes the object the server lists now; any difference anywhere, a nested schema property, <code>annotations.title</code>, <code>_meta</code> or a field the app does not know, invalidates the approval.</li>
+        <li>Decided in round 12: <code>tenant_setting</code> is labelled read-only (<code>readOnlyHint: true</code>), but its description says "Edits the selected tenant setting", so it is flagged and cannot be approved in the first review. The label never outweighs a write the definition documents.</li>
+        <li>The approval is bound to the JCS SHA-256 hash of the whole object: the object in the RFC 8785 JSON Canonicalization Scheme (JCS), then SHA-256 over its UTF-8 bytes. JCS sorts object keys by UTF-16 code units at every level and writes numbers and strings in its own fixed form. The raw view prints that order. <code>search_settings</code> carries <code>_meta</code> keys "10" and "2", and "10" comes first, as JCS requires. Before a tool is offered and again at every call, the app hashes the object the server lists now; any difference anywhere, a nested schema property, <code>annotations.title</code>, <code>_meta</code> or a field the app does not know, invalidates the approval. Each row shows the short form of the hash; the definition shows the full hash with Copy.</li>
+        <li>The write check and the hash on this page are scripts that illustrate the plan, which governs (B5, Your own MCP servers). The write check here matches a short word list: save, change, send, delete, edit, update, modify, set, write, create, assign, remove, revoke and similar words. The implementation treats any write the definition documents as disqualifying, whatever words it uses and whatever its read-only label says. The hash here is a small JCS serializer and SHA-256, the same rule the plan names.</li>
         <li>A tool that is not approved is never offered to the model. The approval is checked again at every call, whether it comes from Chat, a skill or a scheduled check, so a skill that names <code>mcp__policy-settings__export_report</code> cannot use it.</li>
         <li>When the server later adds a tool, the new tool stays off until the admin reviews it here. The review can be reopened from the server's row in Access; approving a tool later is the same step.</li>
       </ul>
-      <div class="two" style="margin-top:16px">
+      <div style="margin-top:16px">
         <div style="display:grid;gap:8px;align-content:start">
-          <p class="trvcap">A week later the server changed three approved tools under the same ids: the review reopens</p>
+          <p class="trvcap">A week later the server changed five approved tools under the same ids: the review reopens</p>
           <div class="win" style="min-height:0">
             <div class="dialog" role="dialog" aria-labelledby="tr-t-re" style="width:100%;box-shadow:none;border-radius:12px">
               <header><span class="xs muted">Policy settings reference, tools.contoso.example</span><h2 id="tr-t-re">Review 5 changed tools</h2></header>
               <div class="body">
-                <p>On 19 November the server changed the definition of 5 tools you approved on 12 November. Each approval was bound to a hash of the whole object the server listed, and the objects listed now hash differently, so their approval no longer applies: <span data-name>Nova</span> does not offer them, and every call to them is refused, from Chat, skills and scheduled checks, until you approve them again here. A tool whose new definition says it saves, changes, sends or deletes anywhere, a nested schema property or an annotation included, cannot be approved.</p>
+                <p>On 19 November the server changed the definition of 5 tools you approved on 12 November. Each approval was bound to the JCS SHA-256 hash of the whole object the server listed (RFC 8785 canonical form, then SHA-256 over its UTF-8 bytes), and the objects listed now hash differently, so their approval no longer applies: <span data-name>Nova</span> does not offer them, and every call to them is refused, from Chat, skills and scheduled checks, until you approve them again here. Open a tool to compare the object you approved with the object listed now, both complete and side by side, each with its full hash. A tool whose new definition describes a write anywhere, a nested schema property or an annotation included, cannot be approved.</p>
                 <ul class="trv" data-trv="rereview"></ul>
               </div>
               <footer><span class="xs muted trv-count" aria-live="polite" style="margin-right:auto"></span><button class="bt ghost" type="button">Later</button><button class="bt primary trv-ok" type="button"></button></footer>
             </div>
           </div>
         </div>
-        <ul class="notes" style="margin-top:20px">
-          <li>An approval belongs to the exact object the admin saw, bound to a SHA-256 hash of its canonical form, every field and every nested property, under the same id. The app hashes the object the server lists before it offers a tool and again at every call; any difference sets the tool back to review, unchecked, and it is neither offered nor callable until the admin approves it again. Each changed row opens the full new definition, readable and raw, with the changed part marked and both hashes.</li>
+        <ul class="notes">
+          <li>An approval belongs to the exact object the admin saw at that endpoint, bound to its JCS SHA-256 hash, every field and every nested property, under the same id. The app hashes the object the server lists before it offers a tool and again at every call; any difference sets the tool back to review, unchecked, and it is neither offered nor callable until the admin approves it again.</li>
+          <li>Decided in round 12: each changed row shows the short form of both hashes, and Compare definitions opens the complete previously approved object next to the complete object listed now, each readable and as raw JSON, with the changed part marked and the full hash under each with Copy. Below about 380 px of width the two stack, approved first.</li>
           <li><code>get_setting</code> is the case to read first: an approved read tool whose description changed and still only reads. It returns to review with the old and new description side by side, unchecked, and can be approved again.</li>
           <li>A change in the input schema counts the same way, and the write check reads the parameters too: <code>list_baselines</code> gained <code>apply_to_tenant</code>, described as assigning a baseline, so it cannot be approved although its name and description still read as read-only. A parameter that only reads, such as a filter, returns the tool to review and it can be approved again, like <code>get_setting</code>.</li>
           <li>When the new definition describes saving, changing, sending or deleting, as <code>compare_baselines</code> now does, the tool is flagged and cannot be approved, the same check as at add time.</li>
           <li>A change confined to the annotations counts too: only <code>annotations.title</code> of <code>get_baseline</code> changed, to "Apply baselines". The hash differs, so it is back in review, and the write check reads annotations, so it is flagged and cannot be approved.</li>
           <li>A change deep in a schema counts the same: only <code>inputSchema.properties.filter.properties.category.description</code> of <code>search_settings</code> changed, and it still only reads. The hash differs, so the tool is back in review, unchecked, and can be approved again.</li>
           <li>Unchanged approved tools keep their approval. The server's row in Access reads "1 approved, 5 changed and waiting for review" with a Review changes button, and the status strip keeps naming the host while any approved tool is offered.</li>
+          <li>As in the first review, the hashes and the write check here are computed by an illustrative script; the plan's rules govern, and the illustration follows them.</li>
         </ul>
       </div>
       <ul class="notes">
@@ -1481,7 +1504,8 @@ identities with graph_get. Nothing else.
         inputSchema: obj({ query: S("string", "Words to look for in setting names and descriptions"),
           filter: S("object", "Narrows the results", { properties: { platform: S("string", "Limits results to one platform", { enum: ["windows10", "macOS", "iOS", "android"] }), category: S("string", "Category id") } }) }, ["query"]),
         outputSchema: obj({ settings: S("array", "Matching settings with their ids", { items: obj({ id: S("string"), name: S("string") }) }) }),
-        annotations: { title: "Search settings", readOnlyHint: true, openWorldHint: false }, _meta: { "contoso.example/catalog": "2026-11" } },
+        annotations: { title: "Search settings", readOnlyHint: true, openWorldHint: false },
+        _meta: { "contoso.example/catalog": "2026-11", "contoso.example/pageSizes": { "2": "Smallest page", "10": "Default page" } } },
       { name: "get_setting", title: "Get setting", description: "Returns one setting with its allowed values",
         inputSchema: obj({ id: S("string", "Setting id from search_settings") }, ["id"]),
         outputSchema: obj({ setting: S("object", "The setting, its allowed values and its default") }),
@@ -1502,6 +1526,9 @@ identities with graph_get. Nothing else.
       { name: "baseline_versions", title: "List and apply baselines", description: "Returns baseline versions for a platform",
         inputSchema: obj({ platform: S("string", "Platform to list versions for"), mode: S("string", "What to do with the versions", { enum: ["list", "apply"] }) }),
         annotations: { title: "Baseline versions", readOnlyHint: true, openWorldHint: false } },
+      { name: "tenant_setting", title: "Tenant setting", description: "Edits the selected tenant setting.",
+        inputSchema: obj({ id: S("string", "Setting id from search_settings") }, ["id"]),
+        annotations: { title: "Tenant setting", readOnlyHint: true, openWorldHint: false } },
       { name: "list_categories", title: "List categories", description: "Lists setting categories",
         inputSchema: obj({}) },
       { name: "export_report", title: "Export report", description: "Saves a report on the server and returns a link.",
@@ -1512,6 +1539,28 @@ identities with graph_get. Nothing else.
         inputSchema: obj({ id: S("string", "Setting id"), value: S("string", "New value") }, ["id", "value"]),
         annotations: { title: "Apply setting", readOnlyHint: false, destructiveHint: true } },
     ];
+    // Other servers IT lists, so step 2 can show that it reviews the endpoint entered in step 1.
+    const DOCS_TOOLS = [
+      { name: "search_articles", title: "Search articles", description: "Searches the Contoso admin handbook by keyword.",
+        inputSchema: obj({ query: S("string", "Words to look for") }, ["query"]), annotations: { title: "Search articles", readOnlyHint: true, openWorldHint: false } },
+      { name: "get_article", title: "Get article", description: "Returns one handbook article as Markdown.",
+        inputSchema: obj({ id: S("string", "Article id from search_articles") }, ["id"]), annotations: { title: "Get article", readOnlyHint: true, openWorldHint: false } },
+      { name: "list_sections", title: "List sections", description: "Lists the sections of the handbook.",
+        inputSchema: obj({}), annotations: { title: "List sections", readOnlyHint: true, openWorldHint: false } },
+      { name: "suggest_edit", title: "Suggest edit", description: "Proposes an edit to an article and sends it to the handbook owners.",
+        inputSchema: obj({ id: S("string", "Article id"), text: S("string", "Proposed text") }, ["id", "text"]), annotations: { title: "Suggest edit", readOnlyHint: true, openWorldHint: true } },
+    ];
+    const KQL_TOOLS = [
+      { name: "search_tables", title: "Search tables", description: "Searches KQL table names and descriptions.",
+        inputSchema: obj({ query: S("string", "Words to look for") }, ["query"]), annotations: { title: "Search tables", readOnlyHint: true, openWorldHint: false } },
+      { name: "get_table", title: "Get table", description: "Returns one table with its columns and types.",
+        inputSchema: obj({ table: S("string", "Table name") }, ["table"]), annotations: { title: "Get table", readOnlyHint: true, openWorldHint: false } },
+    ];
+    const SERVERS = {
+      "tools.contoso.example": { slug: "policy-settings", tools: TOOLS },
+      "docs.contoso.example": { slug: "contoso-docs", tools: DOCS_TOOLS },
+      "kql.contoso.example": { slug: "kql-reference", tools: KQL_TOOLS },
+    };
     const APPROVED_AFTER = ["search_settings", "get_setting", "get_baseline", "list_platforms", "list_baselines", "compare_baselines"];
     const byName = (n) => TOOLS.find((x) => x.name === n);
     // A copy of an approved definition with one value changed at a path, the way the server lists it a week later.
@@ -1537,8 +1586,11 @@ identities with graph_get. Nothing else.
     ];
     const UNCHANGED = APPROVED_AFTER.filter((n) => !CHANGED.some((c) => c.t === n));
     // The write check: every string in the definition, keys included, at every depth, word by word
-    // (names split on underscores and camel case).
-    const WRITE_WORDS = new Set("save saves saved saving apply applies applied applying assign assigns assigned assigning change changes changing send sends sending delete deletes deleting remove removes removing update updates updating write writes writing create creates creating modify modifies set sets".split(" "));
+    // (names split on underscores and camel case). Illustrative: this word list stands in for the rule in the plan (B5),
+    // which treats any write the definition documents as disqualifying, whatever its words and whatever the read-only label.
+    // "setting" is left out because it is the noun this catalog is about.
+    const WRITE_STEMS = "save saves saved saving|apply applies applied applying|assign assigns assigned assigning|unassign unassigns unassigned|change changes changed changing|send sends sent sending|delete deletes deleted deleting|remove removes removed removing|update updates updated updating|edit edits edited editing|modify modifies modified modifying|set sets|reset resets|write writes wrote written writing|overwrite overwrites overwritten|create creates created creating|insert inserts inserted|add adds added adding|revoke revokes revoked revoking|grant grants granted granting|enable enables enabled enabling|disable disables disabled disabling|rename renames renamed|move moves moved moving|replace replaces replaced replacing|patch patches patched|upload uploads uploaded|publish publishes published|submit submits submitted|store stores stored storing|restore restores restored|install installs installed|uninstall uninstalls uninstalled|deploy deploys deployed|wipe wipes wiped|retire retires retired|purge purges purged|erase erases erased";
+    const WRITE_WORDS = new Set(WRITE_STEMS.split(/[| ]/));
     const TOKEN = /[A-Z]?[a-z]+|[A-Z]+(?![a-z])/g;
     const words = (s) => (String(s).match(TOKEN) || []).map((w) => w.toLowerCase());
     function writeCheck(def) {
@@ -1552,12 +1604,28 @@ identities with graph_get. Nothing else.
       walk(def, "");
       return found;
     }
-    // Canonical form: keys sorted at every level, as in RFC 8785. The hash and the raw view use the same form.
-    const sortDeep = (v) => Array.isArray(v) ? v.map(sortDeep) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortDeep(v[k])])) : v;
-    const canon = (def) => JSON.stringify(sortDeep(def));
+    // RFC 8785 JSON Canonicalization Scheme (JCS), written out member by member. It never rebuilds an object for
+    // JSON.stringify, because an engine lists integer-like keys first ("2" before "10"), while JCS sorts object keys by
+    // UTF-16 code units and emits them in that order, so "10" comes before "2". Numbers use the ECMAScript number
+    // serialization JCS names (JSON.stringify of a finite number, -0 as 0); strings use the JSON string escaping JCS
+    // names, and a lone surrogate is refused, as I-JSON requires. With an indent it prints the same order for reading;
+    // the hash is always taken over the compact form. Illustrative: the plan's rule (B5) governs.
+    const LONE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    const byUnits = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+    function jcs(v, ind = "", lvl = 0) {
+      if (v === null || typeof v === "boolean") return String(v);
+      if (typeof v === "number") { if (!Number.isFinite(v)) throw new TypeError("JCS: numbers must be finite"); return JSON.stringify(v); }
+      if (typeof v === "string") { if (LONE.test(v)) throw new TypeError("JCS: lone surrogate"); return JSON.stringify(v); }
+      const nl = ind ? "\n" + ind.repeat(lvl + 1) : "", end = ind ? "\n" + ind.repeat(lvl) : "", sep = ind ? ": " : ":";
+      if (Array.isArray(v)) return v.length ? `[${v.map((x) => nl + jcs(x, ind, lvl + 1)).join(",")}${end}]` : "[]";
+      if (typeof v !== "object") throw new TypeError("JCS: not a JSON value");
+      const keys = Object.keys(v).sort(byUnits);
+      return keys.length ? `{${keys.map((k) => nl + jcs(k) + sep + jcs(v[k], ind, lvl + 1)).join(",")}${end}}` : "{}";
+    }
+    // The hash an approval binds to: SHA-256 over the UTF-8 bytes of the compact JCS form.
     async function digest(def) {
       if (!(window.crypto && crypto.subtle)) return "";
-      const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canon(def)));
+      const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(jcs(def)));
       return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
     }
     const label = (def) => (def.annotations && def.annotations.readOnlyHint === true ? "ro" : def.annotations && def.annotations.readOnlyHint === false ? "change" : "none");
@@ -1566,9 +1634,10 @@ identities with graph_get. Nothing else.
     const hl = (s) => esc(s).replace(TOKEN, (w) => (WRITE_WORDS.has(w.toLowerCase()) ? `<mark class="hit">${w}</mark>` : w));
     const listFound = (f) => f.map((x) => `"${x.w.join('", "')}" in ${x.key ? "the key " : ""}<code>${x.where}</code>`).join(", and ");
     const noLabelWhy = (def) => (def.annotations ? "its annotations have no <code>readOnlyHint</code>" : "it sent no annotations");
-    function defHtml(id, def, found, mark = {}) {
-      const lab = label(def);
-      const mk = (path, html) => (mark.path !== path ? html : mark.frag ? html.replace(hl(mark.frag), `<mark class="new">${hl(mark.frag)}</mark>`) : `<mark class="new">${html}</mark>`);
+    // The readable view and the raw JSON of one complete tool object. mark names the changed path in a re-review.
+    function defBody(def, mark = {}, slot = "now") {
+      const cls = mark.cls || "new";
+      const mk = (path, html) => (mark.path !== path ? html : mark.frag ? html.replace(hl(mark.frag), `<mark class="${cls}">${hl(mark.frag)}</mark>`) : `<mark class="${cls}">${html}</mark>`);
       const props = (schema, base) => {
         const entries = Object.entries((schema && schema.properties) || {});
         if (!entries.length) return "";
@@ -1577,22 +1646,17 @@ identities with graph_get. Nothing else.
           const path = `${base}.properties.${n}`;
           const nested = p.properties ? props(p, path) : p.items && p.items.properties ? props(p.items, `${path}.items`) : "";
           const ty = p.type === "array" && p.items ? `array of ${p.items.type}` : p.type;
-          const nm = mark.path === path ? `<mark class="new"><code>${hl(n)}</code></mark>` : `<code>${hl(n)}</code>`;
+          const nm = mark.path === path ? `<mark class="${cls}"><code>${hl(n)}</code></mark>` : `<code>${hl(n)}</code>`;
           return (`<li>${nm}<span class="ty">${ty}${req.includes(n) ? ", required" : ""}</span>${p.description ? `<span class="ds">${mk(`${path}.description`, hl(p.description))}</span>` : ""}${p.enum ? `<span class="ds ev">Values: ${p.enum.map((v) => `<code>${hl(v)}</code>`).join("")}</span>` : ""}${nested}</li>`);
         }).join("")}</ul>`;
       };
       const ann = def.annotations
         ? Object.entries(def.annotations).map(([k, v]) => mk(`annotations.${k}`, `<code>${k}: ${typeof v === "string" ? `"${hl(v)}"` : v}</code>`)).join(" ")
-          + (lab === "none" ? '<span class="ds warn">No <code>readOnlyHint</code>. The protocol reads a missing <code>readOnlyHint</code> as false.</span>' : "")
+          + (label(def) === "none" ? '<span class="ds warn">No <code>readOnlyHint</code>. The protocol reads a missing <code>readOnlyHint</code> as false.</span>' : "")
         : '<span class="warn">None sent. The protocol reads a missing <code>readOnlyHint</code> as false.</span>';
       const known = ["name", "title", "description", "inputSchema", "outputSchema", "annotations"];
       const other = Object.keys(def).filter((k) => !known.includes(k));
-      const checks = [];
-      if (lab === "change") checks.push(`<p class="wc bad">The server labels this tool as a change (<code>readOnlyHint: false</code>), so it cannot be approved. Changes go through agents and diff confirmation.</p>`);
-      if (lab === "none") checks.push(`<p class="wc bad">No read-only label from the server: ${noLabelWhy(def)}. A tool is approvable only with <code>readOnlyHint: true</code>, so this one cannot be approved.</p>`);
-      if (found.length) checks.push(`<p class="wc bad">Write check: found ${listFound(found)}. A tool that describes saving, changing, sending or deleting anywhere in its definition cannot be approved.</p>`);
-      if (!checks.length) checks.push(`<p class="wc">Write check: no string in the definition, keys and annotations included, describes saving, changing, sending or deleting. The check reads what the server wrote; a write it does not mention cannot be detected, so read the definition before you approve.</p>`);
-      return `<div class="def" id="${id}" hidden><dl>
+      return `<dl>
         <dt>Name</dt><dd><code>${hl(def.name)}</code></dd>
         <dt>Title</dt><dd>${def.title ? mk("title", hl(def.title)) : "None"}</dd>
         <dt>Description</dt><dd>${def.description ? mk("description", hl(def.description)) : "None"}</dd>
@@ -1600,11 +1664,33 @@ identities with graph_get. Nothing else.
         <dt>Output</dt><dd>${def.outputSchema ? props(def.outputSchema, "outputSchema") || "An object with no listed properties" : "No output schema"}</dd>
         <dt>Annotations</dt><dd>${ann}</dd>
         <dt>Other fields</dt><dd>${other.length ? other.map((k) => `<code>${esc(k)}</code>`).join(" ") + ", shown in the raw JSON below" : "None"}</dd>
-        <dt>Definition hash</dt><dd class="hash">Shown when the review opens</dd>
-      </dl><p class="rawh">Raw JSON, the whole object the server lists, in the canonical form that is hashed (keys sorted at every level)</p><pre class="raw" tabindex="0" aria-label="Raw JSON of ${def.name}">${hl(JSON.stringify(sortDeep(def), null, 2))}</pre>${checks.join("")}</div>`;
+        <dt>Definition hash</dt><dd class="hash" data-slot="${slot}">Computed when the review opens</dd>
+      </dl><p class="rawh">Raw JSON of the whole object ${slot === "was" ? "as you approved it" : "the server lists"}, in RFC 8785 (JCS) order: keys sorted by UTF-16 code units at every level. The hash is SHA-256 over the UTF-8 bytes of the compact JCS form; the line breaks here are only for reading.</p><pre class="raw" tabindex="0" aria-label="Raw JSON of ${esc(def.name)}${slot === "was" ? ", as approved" : ""}">${hl(jcs(def, "  "))}</pre>`;
     }
-    const short = (h) => (h ? `<code>sha256 ${h.slice(0, 8)}…${h.slice(-4)}</code>` : "Shown when the review opens");
+    // What blocks approval, said under the object.
+    function defChecks(def, found) {
+      const lab = label(def);
+      const checks = [];
+      if (lab === "change") checks.push(`<p class="wc bad">The server labels this tool as a change (<code>readOnlyHint: false</code>), so it cannot be approved. Changes go through agents and diff confirmation.</p>`);
+      if (lab === "none") checks.push(`<p class="wc bad">No read-only label from the server: ${noLabelWhy(def)}. A tool is approvable only with <code>readOnlyHint: true</code>, so this one cannot be approved.</p>`);
+      if (found.length) checks.push(`<p class="wc bad">Write check: found ${listFound(found)}. A tool that describes a write anywhere in its definition, such as saving, editing, sending or deleting, cannot be approved.</p>`);
+      if (!checks.length) checks.push(`<p class="wc">Write check: no string in the definition, keys and annotations included, describes a write. The check reads what the server wrote; a write it does not mention cannot be detected, so read the definition before you approve.</p>`);
+      return checks.join("");
+    }
+    // First review: one object. Re-review: the approved object and the object listed now, both complete, side by side.
+    const defHtml = (id, def, found) => `<div class="def" id="${id}" hidden>${defBody(def)}${defChecks(def, found)}</div>`;
+    const defCmpHtml = (id, old, def, found, mark = {}) => `<div class="def cmp" id="${id}" hidden>`
+      + `<p class="cmph">Both objects in full, side by side: the one you approved on 12 November and the one the server lists now. The changed part is marked in each.</p>`
+      + `<div class="cmpw"><div class="cmpg">`
+      + `<section aria-label="Approved on 12 November"><h5>Approved on 12 November</h5>${defBody(old, mark.frag ? {} : { path: mark.path, cls: "was" }, "was")}</section>`
+      + `<section aria-label="Listed now"><h5>Listed now, 19 November</h5>${defBody(def, mark, "now")}</section>`
+      + `</div></div>${defChecks(def, found)}</div>`;
+    const short = (h) => `<code>${h.slice(0, 8)}…${h.slice(-4)}</code>`;
+    const fullHash = (h, note = "") => (h
+      ? `<span class="hk">JCS SHA-256</span><code class="hfull">${h}</code><button class="cp" type="button" data-copy="${h}">Copy</button>${note ? `<span class="hn">${note}</span>` : ""}`
+      : "This browser cannot compute SHA-256 on this page.");
     const toolRow = (key, def, on, opts = {}) => {
+      const slug = opts.slug || "policy-settings";
       const t = def.name, lab = label(def);
       const found = writeCheck(def);
       const writes = found.length > 0, off = lab !== "ro" || writes;
@@ -1618,34 +1704,86 @@ identities with graph_get. Nothing else.
       const chg = opts.what ? `<span class="ann chgd">${opts.what}</span>` : "";
       const anns = writes || opts.what ? `<span class="anns">${chg}${badge}${writes && lab !== "change" ? '<span class="ann warn">Describes a write</span>' : ""}</span>` : badge;
       const summary = opts.summary || esc(def.description);
-      return `<li ${off ? "data-off" : ""}><label><input type="checkbox" ${on ? "checked" : ""} ${off ? `disabled aria-disabled="true" aria-describedby="${why}"` : ""}><span><code>mcp__policy-settings__${t}</code><span class="d" ${off ? `id="${why}"` : ""}>${summary}${flag}</span></span>${anns}</label>`
-        + `<div class="defrow"><button class="deft" type="button" aria-expanded="false" aria-controls="${did}"><svg><use href="#i-chev"/></svg><span>Full definition</span></button></div>`
-        + defHtml(did, def, found, opts.mark) + "</li>";
+      return `<li ${off ? "data-off" : ""} data-tool="${t}"><label><input type="checkbox" ${on ? "checked" : ""} ${off ? `disabled aria-disabled="true" aria-describedby="${why}"` : ""}><span><code>mcp__${slug}__${t}</code><span class="d" ${off ? `id="${why}"` : ""}>${summary}${flag}</span></span>${anns}</label>`
+        + `<div class="defrow"><button class="deft" type="button" aria-expanded="false" aria-controls="${did}"><svg><use href="#i-chev"/></svg><span>${opts.old ? "Compare definitions" : "Full definition"}</span></button><span class="hs" data-hs>JCS SHA-256 computed when the review opens</span></div>`
+        + (opts.old ? defCmpHtml(did, opts.old, def, found, opts.mark) : defHtml(did, def, found)) + "</li>";
     };
-    const NUM = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"];
-    document.querySelectorAll("[data-trv]").forEach((trv) => {
-      const key = trv.dataset.trv;
+    const NUM = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve"];
+    // Copy a full hash. If the clipboard is not available, the hash is selected so it can be copied with the keyboard.
+    const copyHash = (b) => {
+      const code = b.previousElementSibling;
+      const said = (t) => { b.textContent = t; clearTimeout(b._t); b._t = setTimeout(() => { b.textContent = "Copy"; }, 1800); };
+      const select = () => { const r = document.createRange(); r.selectNodeContents(code); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); said("Selected, copy it with your keyboard"); };
+      if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(b.dataset.copy).then(() => said("Copied"), select);
+      else select();
+    };
+    // Fills one review list. A first review lists the tools of one endpoint, every one unchecked unless the frame shows
+    // the state after approval; the re-review lists the changed tools with the approved and current objects.
+    let renderSeq = 0;
+    function fillTrv(trv, { tools = TOOLS, slug = "policy-settings", checked = [] } = {}) {
+      const key = trv.dataset.trv, seq = ++renderSeq;
+      trv.dataset.seq = seq;
       if (key === "rereview") {
-        trv.innerHTML = CHANGED.map((c) => toolRow(key, c.def, false, { what: c.what, mark: c.mark, summary: `<span class="chg"><span class="was"><span class="k">Approved</span>${c.was}</span><span class="now"><span class="k">Now</span>${c.now}</span></span>` })).join("")
+        trv.innerHTML = CHANGED.map((c) => toolRow(key, c.def, false, { what: c.what, mark: c.mark, old: byName(c.t), summary: `<span class="chg"><span class="was"><span class="k">Approved</span>${c.was}</span><span class="now"><span class="k">Now</span>${c.now}</span></span>` })).join("")
           + `<li><span class="same">Unchanged and still approved: ${UNCHANGED.map((n) => `<code>mcp__policy-settings__${n}</code>`).join(", ")}. Its definition hash matches the approved one.</span></li>`;
       } else {
-        trv.innerHTML = TOOLS.map((d) => toolRow(key, d, key === "after" && APPROVED_AFTER.includes(d.name))).join("");
+        trv.innerHTML = tools.map((d) => toolRow(key, d, checked.includes(d.name), { slug })).join("");
       }
-      // Hash lines: the hash a first review binds to, approved and listed hashes side by side in the re-review.
-      (key === "rereview" ? CHANGED.map((c) => [c.def, byName(c.t)]) : TOOLS.map((d) => [d, null])).forEach(async ([def, old]) => {
-        const dd = trv.querySelector(`#trv-def-${key}-${def.name} .hash`);
+      // Hashes: the short form in the row, the full hash with Copy in the definition. A re-review shows both.
+      const pairs = key === "rereview" ? CHANGED.map((c) => [c.def, byName(c.t)]) : tools.map((d) => [d, null]);
+      pairs.forEach(async ([def, old]) => {
         const [now, was] = await Promise.all([digest(def), old ? digest(old) : ""]);
-        dd.innerHTML = old
-          ? `Approved ${short(was)}, listed now ${short(now)}. They differ, so the approval no longer applies.`
-          : blockedDef(def)
-            ? `${short(now)}. This definition cannot be approved; if the server changes it, the new definition is checked again from the start.`
-            : `${short(now)}. Approving binds to this hash; a change anywhere in the object gives a new hash and returns the tool to review.`;
+        if (trv.dataset.seq !== String(seq)) return;
+        const li = trv.querySelector(`li[data-tool="${def.name}"]`);
+        const hs = li.querySelector("[data-hs]");
+        if (!now) { hs.textContent = "This browser cannot compute SHA-256 on this page."; return; }
+        if (old) {
+          hs.innerHTML = `JCS SHA-256: approved ${short(was)}, now ${short(now)}`;
+          li.querySelector('.hash[data-slot="was"]').innerHTML = fullHash(was, "The hash you approved on 12 November.");
+          li.querySelector('.hash[data-slot="now"]').innerHTML = fullHash(now, "The hash of the object listed now. It differs, so the approval no longer applies.");
+        } else {
+          hs.innerHTML = `JCS SHA-256 ${short(now)}`;
+          li.querySelector(".hash").innerHTML = fullHash(now, blockedDef(def)
+            ? "This definition cannot be approved; if the server changes it, the new definition is checked again from the start."
+            : "Approving binds to this hash at this endpoint; a change anywhere in the object gives a new hash and returns the tool to review.");
+        }
       });
+      trv.dispatchEvent(new Event("change"));
+    }
+    // Step 2 before Continue: nothing is listed, and nothing carries over from the endpoint reviewed before.
+    function clearTrv(trv, msg) {
+      trv.dataset.seq = String(++renderSeq);
+      trv.innerHTML = `<li><span class="same">${msg}</span></li>`;
+      trv.dispatchEvent(new Event("change"));
+    }
+    const openTrv = document.querySelector('[data-trv="open"]');
+    const openHost = document.querySelector("[data-open-host]"), openEp = document.querySelector("[data-open-ep]"), openLead = document.querySelector("[data-open-lead]");
+    // Step 2 reviews exactly the endpoint step 1 continued with, and always opens with every tool unchecked.
+    let lastReviewed = "";
+    function openReview(u) {
+      const srv = SERVERS[u.hostname];
+      openTrv.dataset.endpoint = lastReviewed = u.href;
+      openHost.textContent = `Step 2 of 2, ${u.hostname}`;
+      openEp.innerHTML = `Tools listed by <code>${esc(u.href)}</code>`;
+      openLead.textContent = `The server offers ${srv.tools.length} tools, and none is approved yet.`;
+      fillTrv(openTrv, { tools: srv.tools, slug: srv.slug });
+    }
+    function resetReview(href) {
+      if (!lastReviewed) return;
+      delete openTrv.dataset.endpoint;
+      openHost.textContent = "Step 2 of 2";
+      openEp.innerHTML = href ? `Not listed yet: <code>${esc(href)}</code>` : "Not listed yet";
+      openLead.textContent = "No tools are listed for this address yet.";
+      clearTrv(openTrv, `Cleared, because the address in step 1 changed after <code>${esc(lastReviewed)}</code> was reviewed. Continue in step 1 lists the tools of the address there, every one unchecked: an approval never carries over from one endpoint to another, and a review opened again starts unchecked too.`);
+    }
+    document.querySelectorAll("[data-trv]").forEach((trv) => {
+      const key = trv.dataset.trv;
       trv.addEventListener("click", (e) => {
+        const cp = e.target.closest(".cp"); if (cp) { copyHash(cp); return; }
         const b = e.target.closest(".deft"); if (!b) return;
         const open = b.getAttribute("aria-expanded") !== "true";
         b.setAttribute("aria-expanded", String(open));
-        b.querySelector("span").textContent = open ? "Hide definition" : "Full definition";
+        b.querySelector("span").textContent = open ? "Hide definition" : key === "rereview" ? "Compare definitions" : "Full definition";
         document.getElementById(b.getAttribute("aria-controls")).hidden = !open;
       });
       const dialog = trv.closest(".dialog");
@@ -1657,23 +1795,28 @@ identities with graph_get. Nothing else.
         if (key === "rereview") {
           dialog.querySelector(".trv-count").textContent = `${ok} approved again, ${boxes.length - ok} stay off`;
           btn.textContent = ok ? `Save, ${ok} approved again` : "Save, all stay off";
+        } else if (!boxes.length) {
+          dialog.querySelector(".trv-count").textContent = "No tools listed";
+          btn.textContent = "Approve a tool to add the server";
+          btn.disabled = true;
         } else {
           dialog.querySelector(".trv-count").textContent = ok ? `${ok} approved, ${boxes.length - ok} never offered` : `None approved, ${boxes.length} never offered`;
           btn.textContent = ok ? `Add server with ${ok} ${ok === 1 ? "tool" : "tools"}` : "Approve a tool to add the server";
           btn.disabled = !ok;
         }
         // The second frame describes the state after selection, so its intro follows the live count.
-        if (key === "after") intro.textContent = `${ok ? `You approved ${NUM[ok].toLowerCase()} ${ok === 1 ? "tool" : "tools"} that only ${ok === 1 ? "reads" : "read"}.` : "No tool is approved, so the server cannot be added yet."} Four cannot be approved: the title of baseline_versions says it applies baselines and its mode accepts apply, list_categories has no read-only label from the server, export_report says in its description that it saves on the server, and apply_setting is labelled as a change. Each approval is bound to a hash of the whole definition you approved, so a change anywhere in it returns the tool to review. Only approved tools are offered, and every call is checked against this list, including calls from skills and scheduled checks.`;
+        if (key === "after") intro.textContent = `${ok ? `You approved ${NUM[ok].toLowerCase()} ${ok === 1 ? "tool" : "tools"} that only ${ok === 1 ? "reads" : "read"}.` : "No tool is approved, so the server cannot be added yet."} Five cannot be approved: the title of baseline_versions says it applies baselines and its mode accepts apply, tenant_setting is labelled read-only but its description says it edits the selected tenant setting, list_categories has no read-only label from the server, export_report says in its description that it saves on the server, and apply_setting is labelled as a change. Each approval is bound to the JCS SHA-256 hash of the whole definition you approved at this endpoint, so a change anywhere in it returns the tool to review. Only approved tools are offered, and every call is checked against this list, including calls from skills and scheduled checks.`;
         trv.querySelectorAll("li").forEach((li) => { const i = li.querySelector("input"); if (i) li.dataset.state = i.checked ? "on" : "off"; });
       };
       trv.addEventListener("change", sync);
-      sync();
+      if (key === "after") fillTrv(trv, { checked: APPROVED_AFTER });
+      else if (key === "rereview") fillTrv(trv);
     });
 
     // Add a server by URL, step 1: the address, the authentication, the IT allowlist check before any request,
-    // and what the server will receive. Continue leads to the tool review (step 2).
+    // and what the server will receive. Continue lists the tools of exactly this endpoint in step 2, every one unchecked.
     (() => {
-      const ALLOWED = ["tools.contoso.example", "kql.contoso.example"];
+      const ALLOWED = Object.keys(SERVERS);
       const url = document.getElementById("add-url"), ck = document.getElementById("add-check");
       const recv = document.getElementById("add-recv"), refuse = document.getElementById("add-refuse"), next = document.getElementById("add-next");
       const auth = () => document.querySelector('input[name="add-auth"]:checked').value;
@@ -1682,6 +1825,7 @@ identities with graph_get. Nothing else.
         header: "Now, to list its tools: one request with the header and secret above, and nothing from the tenant or your conversations.",
         signin: "Now, to list its tools: your sign-in token from the server, and nothing from the tenant or your conversations.",
       };
+      let current = null;
       function check() {
         const v = url.value.trim();
         let u = null; try { u = new URL(v); } catch { u = null; }
@@ -1700,6 +1844,10 @@ identities with graph_get. Nothing else.
         document.getElementById("add-recv-now").textContent = RECV_NOW[auth()];
         document.querySelectorAll(".authx").forEach((x) => { x.hidden = x.dataset.auth !== auth(); });
         next.disabled = st === "bad";
+        current = st === "ok" ? u : null;
+        // A different endpoint clears step 2: its tools are listed only by Continue, and nothing carries over.
+        const href = u ? u.href : v;
+        if (openTrv.dataset.endpoint !== href) resetReview(href);
       }
       url.addEventListener("input", check);
       document.getElementById("add-auth").addEventListener("change", check);
@@ -1707,12 +1855,17 @@ identities with graph_get. Nothing else.
       document.getElementById("add-other").addEventListener("click", () => { url.focus(); url.select(); });
       document.getElementById("add-open").addEventListener("click", () => { document.getElementById("b-add").scrollIntoView({ behavior: "smooth", block: "start" }); url.focus({ preventScroll: true }); });
       next.addEventListener("click", () => {
-        check(); if (next.disabled) return;
-        const step2 = document.getElementById("tr-t-open").closest(".win");
+        check(); if (next.disabled || !current) return;
+        openReview(current);
+        const step2 = openTrv.closest(".win");
         step2.scrollIntoView({ behavior: "smooth", block: "start" });
-        step2.querySelector(".trv input:not([disabled])").focus({ preventScroll: true });
+        const first = step2.querySelector(".trv input:not([disabled])");
+        if (first) first.focus({ preventScroll: true });
       });
+      document.getElementById("tr-open-back").addEventListener("click", () => { document.getElementById("add-win").scrollIntoView({ behavior: "smooth", block: "start" }); url.focus({ preventScroll: true }); });
+      // The page opens as if Continue had been pressed for the address in step 1.
       check();
+      openReview(current);
     })();
 
     // Access in an organization where a service is missing: a granted skill is offered only while its grants are on
