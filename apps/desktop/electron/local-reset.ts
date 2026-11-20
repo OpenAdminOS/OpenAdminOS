@@ -20,14 +20,15 @@
  * macOS Keychain item can be removed without a new key being created first.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { rename } from "node:fs/promises";
-import { join, posix, win32 } from "node:path";
+import { randomBytes } from "node:crypto";
+import { closeSync, existsSync, fsyncSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeSync } from "node:fs";
+import { open, rename, rm } from "node:fs/promises";
+import { dirname, join, posix, win32 } from "node:path";
 
 import type { LocalResetProblem, LocalResetReport } from "@openadminos/agent-sdk";
 
 import { LOCAL_RESET_PHRASE } from "../src/shared/local-reset.js";
-import { syncDirectory, writeFileDurably } from "./durable-file.js";
+import { syncDirectory } from "./durable-file.js";
 
 /** The marker file in the data folder. Its presence means a reset is pending. */
 export const LOCAL_RESET_MARKER = "local-reset-pending.json";
@@ -172,14 +173,37 @@ export async function writeLocalResetMarker(
   options: { syncDirectory?: (path: string) => Promise<void> } = {},
 ): Promise<void> {
   const path = join(userDataDir, LOCAL_RESET_MARKER);
-  const temp = `${path}.tmp`;
-  await writeFileDurably(temp, `${JSON.stringify(marker, null, 2)}\n`, { durable: true });
-  await rename(temp, path);
+  const temp = markerTempPath(userDataDir);
+  try {
+    // "wx" creates a new file and fails on anything already there, a link
+    // included, so a planted link can never redirect the write.
+    const handle = await open(temp, "wx", 0o600);
+    try {
+      await handle.writeFile(`${JSON.stringify(marker, null, 2)}\n`, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(temp, path);
+  } catch (cause) {
+    await rm(temp, { force: true }).catch(() => undefined);
+    throw cause;
+  }
   try {
     await (options.syncDirectory ?? syncDirectory)(userDataDir);
   } catch (cause) {
     console.warn(`[local-reset] the marker is in place but the data folder could not be flushed: ${reasonOf(cause)}`);
   }
+}
+
+/** A fresh, unpredictable temporary name for a marker write in the data folder. */
+function markerTempPath(userDataDir: string): string {
+  return join(userDataDir, `${LOCAL_RESET_MARKER}.${randomBytes(8).toString("hex")}.tmp`);
+}
+
+function isMarkerTempName(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower.startsWith(`${LOCAL_RESET_MARKER}.`) && lower.endsWith(".tmp");
 }
 
 // ---------------------------------------------------------------------------
@@ -223,8 +247,20 @@ const nodeFileSystem: LocalResetFileSystem = {
   // maxRetries covers EBUSY and EPERM on Windows while a scanner holds a file.
   remove: (path) => rmSync(path, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }),
   writeMarker: (path, content) => {
-    writeFileSync(`${path}.tmp`, content, { mode: 0o600 });
-    renameSync(`${path}.tmp`, path);
+    const temp = markerTempPath(dirname(path));
+    try {
+      const fd = openSync(temp, "wx", 0o600);
+      try {
+        writeSync(fd, content);
+        fsyncSync(fd);
+      } finally {
+        closeSync(fd);
+      }
+      renameSync(temp, path);
+    } catch (cause) {
+      rmSync(temp, { force: true });
+      throw cause;
+    }
   },
 };
 
@@ -401,7 +437,7 @@ function checkFolderEmpty(fs: LocalResetFileSystem, dir: string, failed: LocalRe
   try {
     for (const name of fs.readdir(dir)) {
       // The marker's own temporary file is part of the reset, not left data.
-      if (name.toLowerCase() === `${LOCAL_RESET_MARKER}.tmp`) {
+      if (isMarkerTempName(name)) {
         removeEntry(fs, dir, name, failed);
         continue;
       }
