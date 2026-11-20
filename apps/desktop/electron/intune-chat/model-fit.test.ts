@@ -103,6 +103,17 @@ describe("Model fit: classifying a failure", () => {
     assert.deepEqual([ollamaLoaded?.neededTokens, ollamaLoaded?.limitTokens], [50000, 45056]);
     const kept = classifyModelFitFailure(new Error("Ollama context size too small: This request did not fit in the 45,056 token context kept from an earlier request. Ollama said: request exceeds"), { providerId: "ollama", isLocal: true });
     assert.deepEqual([kept?.reason, kept?.limitTokens], ["context-too-small", 45056]);
+    // Memory forms without the "context size too small" prefix, as the runtime words them.
+    for (const message of [
+      `Ollama could not load ${LOCAL_MODEL} with the 45,056 token context size kept from an earlier request, usually because free memory ran out. Ollama said: model requires more system memory`,
+      `Ollama failed partway through an answer from ${LOCAL_MODEL} with the 45,056 token context size kept from an earlier request, usually because free memory ran out. Ollama said: runner terminated`,
+      `Ollama failed partway through an answer from ${LOCAL_MODEL} on the retry with a 45,056 token context size, usually because free memory ran out. Ollama said: runner terminated`,
+    ]) {
+      const issue = classifyModelFitFailure(new Error(message), { providerId: "ollama", model: LOCAL_MODEL, isLocal: true });
+      assert.deepEqual([issue?.reason, issue?.limitTokens, issue?.limitIsMemory], ["context-too-small", 45056, true], message);
+    }
+    const retrySize = classifyModelFitFailure("Ollama context size too small: This request did not fit in the 32,768 token context of the retry. Ollama said: x", { providerId: "ollama", isLocal: true });
+    assert.equal(retrySize?.limitTokens, 32768);
     // A remote-backed model on a loopback server already sent its prompt elsewhere: no on-device offer.
     assert.equal(chatModelFitFailure(new Error(OLLAMA_400), { ...ollama, remoteModels: [LOCAL_MODEL] }, LOCAL_MODEL), undefined);
     assert.equal(chatModelFitFailure(new Error(OLLAMA_400), ollama, "gpt-oss:120b-cloud"), undefined);

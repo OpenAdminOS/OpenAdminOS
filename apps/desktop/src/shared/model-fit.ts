@@ -98,8 +98,15 @@ function contextIssueFromText(text: string): Omit<ModelFitIssue, "providerId" | 
     const limitTokens = count(lmStudioLoaded[1]);
     return { reason: "context-too-small", ...(limitTokens ? { limitTokens } : {}) };
   }
-  // A size kept from an earlier request that this one outgrew.
-  const kept = /context size too small: This request did not fit in the ([\d,]+) token context kept from an earlier request/i.exec(text);
+  // Ollama could not run the model at a context size for lack of memory: the size kept from an
+  // earlier request, or the retry's, before or partway through an answer.
+  const memorySize = /^(?:Error: )?Ollama (?:could not load|failed partway through an answer from) .+? (?:with the|on the retry with a) ([\d,]+) token context size(?: kept from an earlier request)?, usually because free memory ran out/i.exec(text.trim());
+  if (memorySize) {
+    const limitTokens = count(memorySize[1]);
+    return { reason: "context-too-small", ...(limitTokens ? { limitTokens, limitIsMemory: true as const } : {}) };
+  }
+  // A size this request did not fit in: one kept from an earlier request, or the retry's.
+  const kept = /context size too small: This request did not fit in the ([\d,]+) token context (?:kept from an earlier request|of the retry)/i.exec(text);
   if (kept) {
     const limitTokens = count(kept[1]);
     return { reason: "context-too-small", ...(limitTokens ? { limitTokens } : {}) };

@@ -29,6 +29,9 @@ export const MODEL_FIT_COPY = {
     if (issue.reason === "thinking-only") return `${model} spent its whole answer budget on reasoning.`;
     const what = `This ${noun(surface)}`;
     const limitVerb = issue.limitIsModelMax ? "supports at most" : "is set to";
+    if (issue.limitTokens && issue.limitIsMemory && !issue.neededTokens) {
+      return `${model} could not run with ${tokens(issue.limitTokens)} tokens of context on this device, usually because free memory ran out.`;
+    }
     if (issue.neededTokens && issue.limitTokens && issue.limitIsMemory) {
       return `${what} needs about ${tokens(issue.neededTokens)} tokens. ${model} could not load with ${tokens(issue.limitTokens)} on this device, usually because free memory ran out.`;
     }
@@ -103,6 +106,8 @@ export const MODEL_FIT_COPY = {
   answeredLocal: (model: string, providerName: string) => `${model} on this device (${providerName})`,
 
   destinationPending: (provider: string) => `Checking where ${provider} is reached before the run can start.`,
+  destinationFailedChat: (provider: string) =>
+    `OpenAdminOS could not read where ${provider} is reached, so nothing was sent. Choose the provider again.`,
   destinationFailed: (provider: string) =>
     `OpenAdminOS could not read where ${provider} is reached, so this run cannot start. Close the review and choose the provider again.`,
   /** The run review's line when a run is started again on another provider after a fit failure. */
