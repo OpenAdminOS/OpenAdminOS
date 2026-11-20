@@ -1014,6 +1014,56 @@ describe("local reset: runs and connector sends", () => {
     }
   });
 
+  it("stops new work for every organization once accepted, and gives it back when the request is refused", async () => {
+    const dir = await tempDir();
+    try {
+      const statePath = join(dir, "state.json");
+      await writeFile(statePath, JSON.stringify({ activeProviderId: "ollama", installedAgents: [], tenants: [tenant], runs: [] }), "utf8");
+      const store = new AppStateStore({ filePath: statePath, tokenStore: memoryTokenStore(new Map()), userDataPath: dir, statsApiUrl: "" });
+      const lifecycle = (store as unknown as { tenantLifecycle: { isWritable(id: string): boolean } }).tenantLifecycle;
+      try {
+        assert.equal(await store.beginLocalReset(), undefined);
+        await store.closeAllTenantWork();
+        assert.equal(lifecycle.isWritable(tenant.id), false);
+        store.cancelLocalReset();
+        assert.equal(lifecycle.isWritable(tenant.id), true);
+      } finally {
+        store.close();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("starts no run and sends nothing more once accepted, and waits for a run still finishing", async () => {
+    const dir = await tempDir();
+    try {
+      const statePath = join(dir, "state.json");
+      await writeFile(statePath, JSON.stringify({ activeProviderId: "ollama", installedAgents: [], tenants: [tenant], runs: [] }), "utf8");
+      const store = new AppStateStore({ filePath: statePath, tokenStore: memoryTokenStore(new Map()), userDataPath: dir, statsApiUrl: "" });
+      const runService = (store as unknown as { runService: { hasActiveDrive(): boolean } }).runService;
+      try {
+        const original = runService.hasActiveDrive.bind(runService);
+        runService.hasActiveDrive = () => true;
+        assert.match((await store.beginLocalReset()) ?? "", /A run is still finishing/);
+        runService.hasActiveDrive = original;
+
+        assert.equal(await store.beginLocalReset(), undefined);
+        await assert.rejects(store.startRun("device-report"), /OpenAdminOS is resetting.*The run did not start/);
+        await assert.rejects(
+          store.sendNovaConnector({ connectorId: "teams", tenantId: tenant.id } as never),
+          /OpenAdminOS is resetting. Nothing more was sent/,
+        );
+        await store.processPendingRunDeliveries();
+        store.cancelLocalReset();
+      } finally {
+        store.close();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("declines connector sends once a reset has started", async () => {
     blockConnectorConfirmations("OpenAdminOS is resetting. Nothing was sent.");
     try {
