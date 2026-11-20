@@ -368,16 +368,16 @@ describe("structured device questions", () => {
     });
   });
 
-  it("falls back for filters it cannot express and reads negation within its clause", () => {
-    for (const question of ["How many Entra devices and Intune devices are there?", "How many devices synced last month?", "How many devices are noncompliant or synced in the last 7 days?", "How many Windows 11 devices are there?", "How many devices are there without Windows?", "How many devices have never synced?", "how many devices are not managed in Intune?", "how many noncompliant devices have not synced", "how many devices have synced?", "how many devices are failing?", "how many devices are not in grace period", "How many devices in Intune are not Windows?", "how many non-Windows devices are there", "How many Windows or macOS devices are there?", "how many devices are not currently compliant", "how many are compliant and how many are not compliant", "which devices are no longer compliant"]) {
+  it("computes only the listed question shapes and leaves every other question to the planner", () => {
+    for (const question of [
+      // Review rounds 5 and 6: independent clauses, two sync windows, qualifiers no filter expresses, a breakdown the set fixes.
+      "How many noncompliant devices are there, and how many Windows devices are there?", "Which devices synced in the last 7 days but have not synced in the last 2 days?",
+      "How many managed Entra devices are there?", "How many Android tablets are there?", "How many Windows devices are there and show per OS",
+      "How many devices are not compliant and synced today?", "how many devices are there without a sync in the last 7 days", "How many devices synced in the last month?",
+      "How many Entra devices and Intune devices are there?", "How many devices synced last month?", "How many devices are noncompliant or synced in the last 7 days?", "How many Windows 11 devices are there?", "How many devices are there without Windows?", "How many devices have never synced?", "how many devices are not managed in Intune?", "how many noncompliant devices have not synced", "how many devices have synced?", "how many devices are failing?", "how many devices are not in grace period", "How many devices in Intune are not Windows?", "how many non-Windows devices are there", "How many Windows or macOS devices are there?", "how many devices are not currently compliant", "how many are compliant and how many are not compliant", "which devices are no longer compliant"]) {
       assert.equal(structuredQueryForQuestion({ question, generatedAt: at }), undefined, question);
     }
-    const both = structuredQueryForQuestion({ question: "How many devices are not compliant and synced today?", generatedAt: at });
-    assert.deepEqual(both?.filters, [
-      { field: "complianceState", op: "eq", value: "noncompliant" },
-      { field: "lastSyncDateTime", op: "gte", value: "2026-11-19T00:00:00.000Z" },
-    ]);
-    for (const question of ["how many devices have not synced in the last 7 days", "how many devices are there without a sync in the last 7 days"]) {
+    for (const question of ["how many devices have not synced in the last 7 days", "Which devices haven't synced in the last 7 days?"]) {
       assert.deepEqual(structuredQueryForQuestion({ question, generatedAt: at })?.filters, [
         { field: "lastSyncDateTime", op: "lt", value: "2026-11-12T12:00:00.000Z" },
       ], question);
@@ -398,10 +398,6 @@ describe("structured device questions", () => {
     assert.deepEqual(bound?.filters, [{ field: "complianceState", op: "eq", value: "noncompliant" }]);
     assert.deepEqual(bound?.focus?.filters, [{ field: "operatingSystem", op: "eq", value: "Windows" }]);
     assert.equal(bound?.scopeLabel, "Intune managed devices not compliant");
-    // "in the last month" is a trailing window; "last month" alone is a calendar month and goes to the planner.
-    assert.deepEqual(structuredQueryForQuestion({ question: "How many devices synced in the last month?", generatedAt: at })?.filters, [
-      { field: "lastSyncDateTime", op: "gte", value: "2026-10-20T12:00:00.000Z" },
-    ]);
     // A union samples no ANDed rows.
     assert.deepEqual(deviceRowFilters("Which devices are Windows or noncompliant?"), []);
     // The sample rows never get the inverse filter either.
@@ -422,6 +418,10 @@ describe("structured device questions", () => {
     // A new question with its own subject starts over.
     assert.equal(structuredQueryForQuestion({ question: "how many macOS devices are there?", generatedAt: at, previous })?.followUp, undefined);
     assert.equal(structuredQueryForQuestion({ question: "And how many devices are there in total?", generatedAt: at, previous })?.followUp, undefined);
+    // A complete question after a follow-up-able answer is asked afresh: 5 Windows devices, not the 4 noncompliant ones.
+    const complete = structuredQueryForQuestion({ question: "And how many Windows devices are there in Intune?", generatedAt: at, previous });
+    assert.equal(complete?.followUp, undefined);
+    assert.deepEqual(complete?.filters, [{ field: "operatingSystem", op: "eq", value: "Windows" }]);
     assert.equal(structuredQueryForQuestion({ question: "how many macs?", generatedAt: at, previous })?.followUp, undefined);
     // A different value on a filtered field is a new question, not a narrowing to nothing.
     const windows = { ...previous, filters: [{ field: "complianceState", op: "eq" as const, value: "noncompliant" }, { field: "operatingSystem", op: "eq" as const, value: "Windows" }], label: "Intune managed Windows devices not compliant", ids: ["md-w1"] };

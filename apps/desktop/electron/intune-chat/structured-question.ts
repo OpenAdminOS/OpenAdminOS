@@ -107,66 +107,11 @@ const OS_FILTERS: Array<{ pattern: RegExp; label: string; predicate: GraphCacheQ
   { pattern: /\blinux\b|\bubuntu\b/, label: "Linux", predicate: { field: "operatingSystem", op: "eq", value: "Linux" } },
 ];
 
-const DEVICE_SUBJECT = /\b(devices?|machines?|endpoints?|computers?|laptops?|pcs?|phones?|tablets?|macs|iphones|ipads|fleet|intune|ones?)\b/;
-const COUNT_INTENT = /\b(how many|number of|count|total|totals|tally)\b/;
-const LIST_INTENT = /\b(which|list|names?|show (?:me )?(?:the |all )?(?:devices|ones|them|those|these|which|me)|what are (?:they|the)|give me (?:the )?(?:list|names))\b/;
-const BREAKDOWN_OS = /\b(?:per|by|each|split by|broken down by|grouped by|for each|across)\s+(?:os|operating systems?|platforms?)\b|\bos (?:split|breakdown)\b|\bper-os\b/;
-const BREAKDOWN_COMPLIANCE = /\b(?:per|by|each)\s+compliance(?: state| status)?\b/;
-const BREAKDOWN_OWNERSHIP = /\b(?:per|by)\s+(?:owner(?:ship)?(?: type)?)\b/;
 const NOT_COMPLIANT = /\b(not compliant|noncompliant|non-compliant|non compliant|aren'?t compliant|isn'?t compliant|out of compliance|failing compliance|fail compliance)\b/;
 const COMPLIANT = /\bcompliant\b/;
 const GRACE = /\bin grace period\b|\bgrace period\b/;
-const ENTRA_SUBJECT = /\b(entra|azure ad|aad|directory devices?|registered devices?|registration|hybrid(?: joined)?|joined|join type|trust type|device objects?)\b/;
-/**
- * Topics the device count path does not model. A question about apps,
- * policies or encryption is left to the planner, so a count of all
- * devices never stands in for an answer to a different question.
- */
-const OTHER_TOPIC = /\b(apps?|applications?|polic(?:y|ies)|profiles?|scripts?|remediations?|updates?|patch|users?|groups?|encrypt\w*|bitlocker|filevault|autopilot|enrol\w*|sign-?ins?|alerts?|incidents?|defender|configuration|certificates?|wi-?fi|vpn|licen[cs]e\w*|storage|disk|memory|serial|model|manufacturer|vendor|ram|cpu|primary user|assigned|assignment|stale|inactive|retire\w*|wipe\w*|delete\w*)\b/;
+/** A lead that marks a short follow-up, for planning it with the previous question. */
 const FOLLOW_UP_LEAD = /^(?:and |but |ok(?:ay)?,? |so |then )?(?:only|just|what about|how about|and|of (?:those|these|them)|which of (?:those|these|them)|how many of (?:those|these|them)|filter (?:to|by|for)|same for)\b/;
-const SWITCH_LEAD = /^(?:and |but |ok(?:ay)?,? |so |then )?(?:what about|how about|and for|same for|now for|and)\b|\binstead\b/;
-const ANAPHORA = /\b(those|these|them|that list|the same|of those|of these|of them|ones)\b/;
-const WHY = /\bwhy\b|\breason\b|\bwhat(?:'s| is) wrong\b|\bcause\b/;
-
-/**
- * Every word a structured question may contain. A question with any other
- * content word ("which Macs need attention", "devices with BitLocker
- * issues") asks something the counts do not answer, so it is left to the
- * planner and the model.
- */
-const KNOWN_WORDS = new Set([
-  "how", "many", "much", "are", "there", "is", "was", "were", "be", "show", "per", "which", "what", "whats", "what's",
-  "not", "compliant", "noncompliant", "non", "compliance", "devices", "device", "managed", "intune", "entra",
-  "list", "give", "tell", "me", "us", "all", "the", "and", "with", "that", "have", "has", "do", "does", "can", "could",
-  "would", "please", "of", "in", "on", "by", "to", "for", "at", "or", "a", "an", "our", "my", "we", "i", "you",
-  "only", "just", "those", "these", "them", "they", "ones", "one", "it", "its", "also", "both", "each", "every",
-  "count", "number", "total", "totals", "tally", "operating", "system", "systems", "os", "platform", "platforms",
-  "split", "breakdown", "broken", "down", "grouped", "group", "across", "state", "status", "states",
-  "windows", "macos", "mac", "macs", "osx", "x", "ios", "ipados", "iphone", "iphones", "ipad", "ipads",
-  "android", "linux", "ubuntu", "machines", "machine", "endpoints", "endpoint", "computers", "computer", "laptops",
-  "laptop", "pcs", "pc", "phones", "phone", "tablets", "tablet", "fleet", "tenant", "currently", "right", "now", "cached",
-  "out", "failing", "fail", "grace", "period", "aren't", "isn't", "arent", "isnt", "ownership", "owner", "type",
-  "sync", "synced", "syncs", "syncing", "checked", "check", "seen", "last", "contacted", "this", "month", "week",
-  "today", "past", "within", "over", "since", "days", "day", "never", "no", "longer", "haven't", "hasn't", "didn't",
-  "havent", "hasnt", "didnt", "without", "names", "name", "them", "about", "how's", "so", "then", "but", "ok", "okay",
-  "same", "filter", "instead", "directory", "azure", "ad", "aad", "registered", "joined", "here", "again", "too",
-]);
-
-const DEVICE_DETAIL_WORDS = new Set(["why", "reason", "reasons", "cause", "causes", "wrong", "marked", "showing", "shows", "show", "flagged", "as", "failing", "fails", "fail", "the", "device", "called", "named", "still", "it", "its"]);
-
-/**
- * The words no handler reads. A number is read only as a sync window ("in
- * the last 7 days"): "Windows 11 devices" names a version the filters do
- * not model, so the 11 is unknown and the question goes to the planner.
- */
-function unknownWords(lower: string): string[] {
-  return lower
-    .replace(/[?.!,;:()"]/g, " ")
-    .replace(/\b\d{1,4}\s+days?\b/g, " days ")
-    .split(/\s+/)
-    .map((word) => word.replace(/^-+|-+$/g, ""))
-    .filter((word) => word && !KNOWN_WORDS.has(word) && !word.split("-").every((part) => KNOWN_WORDS.has(part)));
-}
 
 function normalize(question: string): string {
   return question.toLowerCase().replace(/[’`]/g, "'").replace(/\s+/g, " ").trim();
@@ -180,11 +125,6 @@ function osFilter(lower: string): { label: string; predicate: GraphCacheQueryPre
   // "per OS" names no system; an OS named inside a breakdown phrase is still a filter.
   const matched = OS_FILTERS.filter((entry) => entry.pattern.test(lower));
   return matched.length === 1 ? matched[0] : undefined;
-}
-
-/** More than one OS named ("Windows or macOS"): a filter the parser cannot express, so the question is not structured. */
-function namesSeveralSystems(lower: string): boolean {
-  return OS_FILTERS.filter((entry) => entry.pattern.test(lower)).length > 1;
 }
 
 /**
@@ -211,33 +151,6 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /** A negation on the sync verb: "not synced", "haven't checked in", "without a sync", "no recent sync". */
 const SYNC_NEGATION = /(?:\b(?:not|never|no longer|without)|n't)\s+(?:(?:been|had|yet|recently|once|a|any)\s+){0,2}(?:sync(?:ed|ing|s)?|checked in|check-?in|contacted|seen)\b|\bno (?:recent )?(?:sync|check-?in)\b/;
-const SYNC_VERB = /\b(?:sync(?:ed|ing|s)?|checked in|check-?in|seen|contacted)\b/;
-
-/**
- * Whether the question holds a clause no handler reads. Code renders a local
- * model's answer, so a dropped "not" ("devices not managed in Intune"), a
- * sync verb without a window ("which have not synced") or "failing" would
- * give a confident answer to another question. Such a question goes to the
- * planner instead.
- */
-function hasUnreadClause(lower: string, syncRead: boolean): boolean {
-  if (SYNC_VERB.test(lower) && !syncRead) return true;
-  const rest = lower
-    .replace(new RegExp(NOT_COMPLIANT.source, "g"), " ")
-    .replace(new RegExp(SYNC_NEGATION.source, "g"), " ");
-  return /(?:\b(?:not|no|never|without|longer)\b|n't)/.test(rest) || /\b(?:fail|fails|failing|failed)\b/.test(rest);
-}
-
-/**
- * Where a second clause asking for numbers or a list starts ("how many
- * Windows devices, and how many are not compliant"), or -1 for one clause.
- */
-function secondClauseStart(lower: string): number {
-  const counts = [...lower.matchAll(/\bhow many\b/g)];
-  const lead = /\band (?:which|what|list|show)\b/.exec(lower);
-  const starts = [...(counts.length > 1 ? [counts[1]!.index] : []), ...(lead ? [lead.index] : [])];
-  return starts.length > 0 ? Math.min(...starts) : -1;
-}
 
 /** A sync window named in the question, as a predicate on lastSyncDateTime. */
 export function syncFilter(lower: string, generatedAt: string): { label: string; predicate: GraphCacheQueryPredicate } | undefined {
@@ -274,129 +187,199 @@ export function syncFilter(lower: string, generatedAt: string): { label: string;
 }
 
 /**
- * Reads a device question into a structured query, or undefined when the
- * question is not one code can answer exactly. A follow-up such as "only
- * Windows" narrows `previous` instead of starting over.
+ * The question shapes code answers, each read as a whole sentence.
+ *
+ * An open reading of the words kept finding questions it computed wrongly:
+ * a dropped "not", an "or" read as "and", "Windows 11" read as Windows,
+ * independent clauses read as a subset. On a local model code renders the
+ * answer itself, so a misread is a confident wrong answer. The shapes below
+ * are a closed list; any other question goes to the planner, as before.
+ */
+const OS_WORDS = "windows|macos|ios|ipados|android|linux";
+const STATE_WORDS = "not compliant|noncompliant|compliant|in grace period";
+const SYNC_WINDOW = "in the last \\d{1,4} days|within the last \\d{1,4} days|in the past \\d{1,4} days|this month|this week|today";
+const SYNCED = `(?<sneg>have not |has not |did not |that have not |that have |have )?(?:synced|checked in) (?<swin>${SYNC_WINDOW})`;
+const THERE = "(?: are there| do we have| do i have| we have| exist)?";
+const WHERE = "(?: in intune| in our tenant| in the tenant| in total)?";
+
+/** Intune devices, optionally of one OS: "devices", "managed Windows devices", "Macs". */
+function devicesSlot(name: string): string {
+  return `(?:(?:intune |managed |intune managed )?(?:(?<${name}>${OS_WORDS}) )?(?:intune |managed )?(?:devices|machines|computers|endpoints)|(?<${name}Macs>macs))`;
+}
+
+const COUNT_HEAD = new RegExp(`^how many (?:(?<pre>noncompliant|compliant) )?${devicesSlot("os")}(?: (?:are|that are) (?<post>${STATE_WORDS})| ${SYNCED})?${THERE}${WHERE}(?<rest>.*)$`);
+const LIST_STATE_AFTER = new RegExp(`^(?:which|list|show(?: me)?|what are)(?: all)?(?: the)?(?: of)?(?: our| my| the)? ${devicesSlot("os")}(?: (?:that |which )?(?:are|is))? (?<state>${STATE_WORDS})$`);
+const LIST_STATE_BEFORE = new RegExp(`^(?:list|show(?: me)?|what are)(?: all)?(?: the| our| my)? (?<state>noncompliant|compliant) ${devicesSlot("os")}$`);
+const LIST_SYNC = new RegExp(`^(?:which|list|show(?: me)?)(?: all)?(?: the)?(?: of)?(?: our| my)? ${devicesSlot("os")} ${SYNCED}$`);
+
+/** The clauses a count may add, each whole: a per OS or per state split, the subset to list, or "list them". */
+const CLAUSE_BREAK_OS = /^(?:show |list |give me |with )?(?:them |it |the |a )?(?:split |breakdown )?(?:per|by|split by|broken down by) (?:os|operating system|platform)s?$/;
+const CLAUSE_BREAK_STATE = /^(?:show |list )?(?:them |it )?(?:per|by) compliance(?: state| status)?$/;
+const CLAUSE_FOCUS_STATE = new RegExp(`^(?:(?:show|list|tell)(?: me)? )?(?:which (?:ones |of them |devices )?are|how many (?:of them |of those )?are) (?<state>${STATE_WORDS})$|^(?:show|list)(?: me)? the (?<state2>${STATE_WORDS}) ones$`);
+const CLAUSE_FOCUS_OS = new RegExp(`^(?:(?:show|list)(?: me)? )?(?:which (?:ones |of them )?are|how many (?:of them |of those )?are) (?<os>${OS_WORDS})(?: devices)?$`);
+const CLAUSE_LIST = /^(?:show|list)(?: me)? (?:them|the devices|the list|their names)$/;
+
+/** Follow-ups that refer back to the previous answer. */
+const F_ONLY_OS = new RegExp(`^(?:only|just)(?: the)? (?:(?<os>${OS_WORDS})(?: ones| devices)?|(?<osMacs>macs))$`);
+const F_ONLY_STATE = new RegExp(`^(?:only|just)(?: the)? (?<state>${STATE_WORDS})(?: ones| devices)?$`);
+const F_OF_THOSE_OS = new RegExp(`^(?:which|how many) of (?:those|them|these) (?:are|run) (?<os>${OS_WORDS})(?: devices)?(?: (?<bstate>(?:by|per) compliance(?: state| status)?))?$`);
+const F_OF_THOSE_STATE = new RegExp(`^(?:which|how many) of (?:those|them|these) are (?<state>${STATE_WORDS})(?: (?<bos>(?:by|per) os))?$`);
+const F_OF_THOSE_SYNC = new RegExp(`^(?:which|how many) of (?:those|them|these) ${SYNCED}$`);
+const F_SWITCH_OS = new RegExp(`^(?:what|how) about (?:(?<os>${OS_WORDS})(?: devices)?|(?<osMacs>macs))$|^(?:same )?for (?<os2>${OS_WORDS})$`);
+
+type Part = { label: string; predicate: GraphCacheQueryPredicate };
+
+/** The question in the form the shapes read: lower case, contractions and spellings made plain, no lead or end mark. */
+function shapeText(question: string): string {
+  return normalize(question)
+    .replace(/\bnon[- ]compliant\b/g, "noncompliant")
+    .replace(/\b(are|is)n'?t\b/g, "$1 not")
+    .replace(/\bhaven'?t\b/g, "have not")
+    .replace(/\bhasn'?t\b/g, "has not")
+    .replace(/\bdidn'?t\b/g, "did not")
+    .replace(/\bmac os\b/g, "macos")
+    .replace(/\bipad os\b/g, "ipados")
+    .replace(/[?!.]+$/, "")
+    .replace(/^(?:and|so|ok|okay|then),? /, "")
+    .trim();
+}
+
+function osPart(groups: Record<string, string | undefined>, name = "os"): Part | undefined {
+  const word = groups[name] ?? (groups[`${name}Macs`] ? "macos" : undefined);
+  return word ? osFilter(word) : undefined;
+}
+
+function statePart(word: string | undefined): Part | undefined {
+  if (!word) return undefined;
+  const state = complianceFocus(word);
+  return state === "ambiguous" ? undefined : state;
+}
+
+function syncPart(groups: Record<string, string | undefined>, generatedAt: string): Part | undefined {
+  if (!groups.swin) return undefined;
+  const negated = /not/.test(groups.sneg ?? "");
+  return syncFilter(`${negated ? "not " : ""}synced ${groups.swin}`, generatedAt);
+}
+
+function parts(...entries: Array<Part | undefined>): Part[] {
+  return entries.flatMap((entry) => (entry ? [entry] : []));
+}
+
+/**
+ * Reads a device question into a structured query, or undefined when it is
+ * not one of the shapes code answers. A follow-up such as "only Windows"
+ * narrows `previous` instead of starting over.
  */
 export function structuredQueryForQuestion(input: {
   question: string;
   generatedAt: string;
   previous?: ChatResultContext;
 }): StructuredDeviceQuery | undefined {
-  const lower = normalize(input.question);
-  if (!lower) return undefined;
-  const os = osFilter(lower);
-  const complianceRead = complianceFocus(lower);
-  if (complianceRead === "ambiguous") return undefined;
-  const compliance = complianceRead;
-  const sync = syncFilter(lower, input.generatedAt);
-  const breakdown = [
-    ...(BREAKDOWN_OS.test(lower) ? ["operatingSystem"] : []),
-    ...(BREAKDOWN_COMPLIANCE.test(lower) ? ["complianceState"] : []),
-    ...(BREAKDOWN_OWNERSHIP.test(lower) ? ["managedDeviceOwnerType"] : []),
-  ];
-  const count = COUNT_INTENT.test(lower);
-  const list = LIST_INTENT.test(lower);
-  const constraints = [os, compliance, sync].filter(Boolean).length;
-
-  // A word the parser does not know means the question asks something the counts do not answer.
-  // Filters combine with AND only; "noncompliant or synced this week" is a union the parser does not express.
-  if (unknownWords(lower).length > 0 || namesSeveralSystems(lower) || NEGATED_SYSTEM.test(lower) || /\bor\b/.test(lower) || hasUnreadClause(lower, sync !== undefined)) return undefined;
-  const previous = input.previous;
-  const wordCount = lower.split(" ").length;
-  // A follow-up narrows the previous set: it adds a constraint after a lead such as "only" or "of those",
-  // or refers back to the set ("those", "them") while asking for a count or a list.
-  // "And how many devices are there in total?" asks afresh.
-  const anaphora = ANAPHORA.test(lower);
-  const followsUp = previous !== undefined
-    && !ENTRA_SUBJECT.test(lower)
-    && !OTHER_TOPIC.test(lower)
-    && ((constraints > 0 && (FOLLOW_UP_LEAD.test(lower) || anaphora || (wordCount <= 4 && !DEVICE_SUBJECT.test(lower))))
-      || (anaphora && (count || list || breakdown.length > 0)));
-  if (followsUp && previous) {
-    const added = [os, compliance, sync].flatMap((entry) => (entry ? [entry] : []));
-    // Entra device objects carry no compliance state and no sync time.
-    if (previous.resource === "entraDevices" && (compliance || sync)) return undefined;
-    // A different value on a field already in force ("what about macOS?" after Windows) switches that value
-    // after a switch lead: the same question over a fresh set. Without one ("only the compliant ones" after
-    // the noncompliant list) it is ambiguous and goes to the planner, whatever the size of the previous set.
-    const switched = added.filter((entry) => previous.filters.some((filter) => filter.field === entry.predicate.field && JSON.stringify(filter) !== JSON.stringify(entry.predicate)));
-    if (switched.length > 0) {
-      if (switched.length !== added.length || !SWITCH_LEAD.test(lower)) return undefined;
-      const fields = new Set(switched.map((entry) => entry.predicate.field));
-      const filters = [...previous.filters.filter((filter) => !fields.has(filter.field)), ...switched.map((entry) => entry.predicate)];
-      return { kind: "count", resource: previous.resource, scopeLabel: describeFilters(previous.resource, filters), filters, breakdown, list: true };
-    }
-    // Without the previous rows (more than CONTEXT_ID_LIMIT matched), the cache is read afresh with the
-    // previous filters and the new ones, and the answer says so instead of claiming the previous set.
-    if (!previous.ids) {
-      const filters = dedupe([...previous.filters, ...added.map((entry) => entry.predicate)]);
-      return { kind: "count", resource: previous.resource, scopeLabel: describeFilters(previous.resource, filters), filters, breakdown, list: true };
-    }
-    // Every requested narrowing applies to the previous rows' current values, also one that repeats a filter
-    // already in force: a device whose OS changed since is not listed as Windows.
-    const fresh = added;
-    const label = fresh.map((entry) => entry.label).join(", ");
-    return {
-      kind: "count",
-      resource: previous.resource,
-      scopeLabel: previous.label,
-      filters: previous.filters,
-      breakdown: breakdown.length > 0 ? breakdown : fresh.length === 0 && previous.resource === "managedDevices" ? ["operatingSystem"] : [],
-      ...(fresh.length > 0 ? { focus: { label, filters: fresh.map((entry) => entry.predicate) } } : {}),
-      list: true,
-      followUp: { previousQuestion: previous.question, previousLabel: previous.label },
-      ...(previous.ids ? { ids: previous.ids } : {}),
-    };
+  const text = shapeText(input.question);
+  if (!text) return undefined;
+  if (input.previous) {
+    const followUp = followUpQuery(text, input.previous, input.generatedAt);
+    if (followUp !== "none") return followUp;
   }
+  return countQuery(text, input.generatedAt) ?? listQuery(text, input.generatedAt);
+}
 
-  if (!DEVICE_SUBJECT.test(lower) || OTHER_TOPIC.test(lower) || WHY.test(lower)) return undefined;
-  if (!count && breakdown.length === 0 && !(list && constraints > 0)) return undefined;
-  // A question that names both inventories asks for two counts; the computed result holds one.
-  const entraNamed = ENTRA_SUBJECT.test(lower);
-  if (entraNamed && /\bintune\b|\bmanaged devices?\b/.test(lower)) return undefined;
-  const entra = entraNamed;
-  const resource: StructuredDeviceResource = entra ? "entraDevices" : "managedDevices";
-  // Entra device objects carry no complianceState and no lastSyncDateTime.
-  if (entra && (compliance || sync)) return undefined;
-  // Two clauses ("how many noncompliant devices are there, and how many are Windows"): each filter belongs to
-  // the clause that names it. The first clause is the counted set, the second the listed subset.
-  const second = secondClauseStart(lower);
-  const twoParts = second >= 0;
-  let scopeParts: Array<{ label: string; predicate: GraphCacheQueryPredicate }>;
-  let focusParts: Array<{ label: string; predicate: GraphCacheQueryPredicate }>;
-  if (twoParts) {
-    const clause = (text: string) => {
-      const state = complianceFocus(text);
-      return state === "ambiguous" ? undefined : [osFilter(text), state, syncFilter(text, input.generatedAt)].flatMap((entry) => (entry ? [entry] : []));
-    };
-    const head = clause(lower.slice(0, second));
-    const tail = clause(lower.slice(second));
-    if (!head || !tail) return undefined;
-    // The same field in both clauses with different values is two questions.
-    if (tail.some((entry) => head.some((other) => other.predicate.field === entry.predicate.field))) return undefined;
-    scopeParts = head;
-    focusParts = tail;
-  } else {
-    scopeParts = [os, ...(compliance && !list && !count ? [compliance] : [])].flatMap((entry) => (entry ? [entry] : []));
-    focusParts = [compliance, sync].flatMap((entry) => (entry ? [entry] : []));
+function countQuery(text: string, generatedAt: string): StructuredDeviceQuery | undefined {
+  const match = COUNT_HEAD.exec(text);
+  if (!match?.groups) return undefined;
+  const groups = match.groups;
+  const scope = parts(osPart(groups), statePart(groups.pre ?? groups.post), syncPart(groups, generatedAt));
+  if ((groups.pre && groups.post) || (groups.swin && !scope.some((part) => part.predicate.field === "lastSyncDateTime"))) return undefined;
+  const breakdown: string[] = [];
+  let focus: Part | undefined;
+  let listed = false;
+  for (const clause of (groups.rest ?? "").split(/\s*(?:[?,;.]|\band\b)\s*/).filter(Boolean)) {
+    if (CLAUSE_BREAK_OS.test(clause) && !breakdown.includes("operatingSystem")) breakdown.push("operatingSystem");
+    else if (CLAUSE_BREAK_STATE.test(clause) && !breakdown.includes("complianceState")) breakdown.push("complianceState");
+    else if (CLAUSE_LIST.test(clause)) listed = true;
+    else {
+      const state = CLAUSE_FOCUS_STATE.exec(clause)?.groups;
+      const os = CLAUSE_FOCUS_OS.exec(clause)?.groups;
+      const next = state ? statePart(state.state ?? state.state2) : os ? osPart(os) : undefined;
+      // A clause the shapes do not read, or a second subset, is a different question.
+      if (!next || focus) return undefined;
+      focus = next;
+    }
   }
-  const scopeLabel = describeFilters(resource, scopeParts.map((entry) => entry.predicate));
-  // "How many devices, and which are not compliant": the count covers the set, the list the subset.
-  const focus = focusParts.length > 0 && (count || breakdown.length > 0) && (list || twoParts)
-    ? { label: focusParts.map((entry) => entry.label).join(", "), filters: focusParts.map((entry) => entry.predicate) }
-    : undefined;
-  const scopeFilters = scopeParts.map((entry) => entry.predicate);
-  const filters = focus ? scopeFilters : [...scopeFilters, ...focusParts.map((entry) => entry.predicate)];
-  const label = focus || focusParts.length === 0 ? scopeLabel : `${scopeLabel} ${focusParts.map((entry) => entry.label).join(", ")}`;
+  const fields = new Set(scope.map((part) => part.predicate.field));
+  // A subset or a split on a field the counted set already fixes ("how many Windows devices, per OS") is not answered.
+  if ((focus && fields.has(focus.predicate.field)) || breakdown.some((field) => fields.has(field))) return undefined;
+  const filters = scope.map((part) => part.predicate);
   return {
     kind: "count",
-    resource,
-    scopeLabel: label,
-    filters: dedupe(filters),
+    resource: "managedDevices",
+    scopeLabel: describeFilters("managedDevices", filters),
+    filters,
     breakdown,
-    ...(focus ? { focus } : {}),
-    list: list || Boolean(focus),
+    ...(focus ? { focus: { label: focus.label, filters: [focus.predicate] } } : {}),
+    list: Boolean(focus) || listed,
+  };
+}
+
+function listQuery(text: string, generatedAt: string): StructuredDeviceQuery | undefined {
+  const groups = (LIST_STATE_AFTER.exec(text) ?? LIST_STATE_BEFORE.exec(text))?.groups;
+  const syncGroups = groups ? undefined : LIST_SYNC.exec(text)?.groups;
+  const scope = groups
+    ? parts(osPart(groups), statePart(groups.state))
+    : syncGroups
+      ? parts(osPart(syncGroups), syncPart(syncGroups, generatedAt))
+      : [];
+  if (scope.length === 0 || (groups && !scope.some((part) => part.predicate.field === "complianceState")) || (syncGroups && !scope.some((part) => part.predicate.field === "lastSyncDateTime"))) return undefined;
+  const filters = scope.map((part) => part.predicate);
+  return { kind: "count", resource: "managedDevices", scopeLabel: describeFilters("managedDevices", filters), filters, breakdown: [], list: true };
+}
+
+/** A follow-up query, undefined for a follow-up the shapes cannot answer, or "none" when the text is no follow-up. */
+function followUpQuery(text: string, previous: ChatResultContext, generatedAt: string): StructuredDeviceQuery | undefined | "none" {
+  let added: Part[];
+  let switching = false;
+  const breakdown: string[] = [];
+  let groups: Record<string, string | undefined> | undefined;
+  if ((groups = F_ONLY_OS.exec(text)?.groups)) added = parts(osPart(groups));
+  else if ((groups = F_ONLY_STATE.exec(text)?.groups)) added = parts(statePart(groups.state));
+  else if ((groups = F_OF_THOSE_OS.exec(text)?.groups)) {
+    added = parts(osPart(groups));
+    if (groups.bstate) breakdown.push("complianceState");
+  } else if ((groups = F_OF_THOSE_STATE.exec(text)?.groups)) {
+    added = parts(statePart(groups.state));
+    if (groups.bos) breakdown.push("operatingSystem");
+  } else if ((groups = F_OF_THOSE_SYNC.exec(text)?.groups)) added = parts(syncPart(groups, generatedAt));
+  else if ((groups = F_SWITCH_OS.exec(text)?.groups)) {
+    added = parts(osPart(groups) ?? (groups.os2 ? osFilter(groups.os2) : undefined));
+    switching = true;
+  } else return "none";
+  if (added.length !== 1) return undefined;
+  const part = added[0]!;
+  // Entra device objects carry no compliance state and no sync time.
+  if (previous.resource === "entraDevices" && part.predicate.field !== "operatingSystem") return undefined;
+  // A different value on a field already in force: "what about macOS?" after Windows asks the same question of
+  // macOS; "only the compliant ones" after the noncompliant list is ambiguous and goes to the planner.
+  if (previous.filters.some((filter) => filter.field === part.predicate.field && JSON.stringify(filter) !== JSON.stringify(part.predicate))) {
+    if (!switching) return undefined;
+    const filters = [...previous.filters.filter((filter) => filter.field !== part.predicate.field), part.predicate];
+    return { kind: "count", resource: previous.resource, scopeLabel: describeFilters(previous.resource, filters), filters, breakdown, list: true };
+  }
+  // More than CONTEXT_ID_LIMIT rows matched before: no ids were kept, so the cache is read afresh with both
+  // filters, and the answer does not claim the previous set.
+  if (!previous.ids) {
+    const filters = dedupe([...previous.filters, part.predicate]);
+    return { kind: "count", resource: previous.resource, scopeLabel: describeFilters(previous.resource, filters), filters, breakdown, list: true };
+  }
+  return {
+    kind: "count",
+    resource: previous.resource,
+    scopeLabel: previous.label,
+    filters: previous.filters,
+    breakdown,
+    focus: { label: part.label, filters: [part.predicate] },
+    list: true,
+    followUp: { previousQuestion: previous.question, previousLabel: previous.label },
+    ids: previous.ids,
   };
 }
 
@@ -423,18 +406,17 @@ function dedupe(filters: GraphCacheQueryPredicate[]): GraphCacheQueryPredicate[]
   });
 }
 
+/** "why is LAPTOP-07 not compliant", read whole; the name must be one cached managed device's, exactly. */
+const WHY_NOT_COMPLIANT = /^why (?:is|does) (?:the device |device )?(?<name>[a-z0-9][a-z0-9._-]{2,62}) (?:not compliant|noncompliant|marked noncompliant|marked as noncompliant|show as noncompliant|failing compliance|fail compliance|out of compliance)$/;
+
 /** Whether a question asks why a named managed device is not compliant. */
 export function deviceComplianceReasonQuery(question: string, store: IntelligenceSqliteStore, tenantId: string): DeviceDetailQuery | undefined {
-  const lower = normalize(question);
-  if (!WHY.test(lower) || !(NOT_COMPLIANT.test(lower) || /\bcompliance\b/.test(lower))) return undefined;
-  const matches = store.findGraphRowsNamedIn({ tenantId, resource: "managedDevices", text: question, limit: 5 });
-  const match = matches[0];
-  if (!match) return undefined;
-  // Two records with this name: their states can differ, so code does not pick one. The planner path answers.
-  if (matches.filter((entry) => entry.name.toLowerCase() === match.name.toLowerCase()).length > 1) return undefined;
-  // Every other word must belong to the question form: "according to Microsoft Learn, why is X not compliant" is a docs question.
-  const rest = lower.split(match.name.toLowerCase()).join(" ");
-  if (unknownWords(rest).some((word) => !DEVICE_DETAIL_WORDS.has(word))) return undefined;
+  const name = WHY_NOT_COMPLIANT.exec(shapeText(question))?.groups?.name;
+  if (!name) return undefined;
+  const matches = store.findGraphRowsNamedIn({ tenantId, resource: "managedDevices", text: name, limit: 5 }).filter((entry) => entry.name.toLowerCase() === name);
+  // None, or two records with this name: their states can differ, so code does not pick one. The planner path answers.
+  if (matches.length !== 1) return undefined;
+  const match = matches[0]!;
   return { kind: "device-detail", resource: "managedDevices", deviceId: match.id, deviceName: match.name, topic: "compliance-reason" };
 }
 
@@ -547,6 +529,8 @@ export function computeStructuredResult(input: {
     facts.push(...rows.map(rowLine));
     if (counted.total > rows.length) facts.push(`${counted.total - rows.length} more match and are not listed.`);
   }
+  // A failed latest refresh is said, as the direct answers say it: these counts are older evidence.
+  if (snapshot?.lastError) facts.unshift(`The latest refresh failed, so these counts are from the snapshot refreshed ${snapshot.refreshedAt ?? "earlier"}.`);
   facts.push(`Counted from the ${query.resource === "managedDevices" ? "Intune" : "Entra"} device cache${snapshot?.refreshedAt ? ` refreshed ${snapshot.refreshedAt}` : ""}${snapshot?.partial ? "; the cache does not hold every device, so these counts cover the cached part only" : ""}.`);
 
   // Built from the filters, so a chain of follow-ups reads "Intune managed Windows devices not compliant".
@@ -631,6 +615,7 @@ export function computedTraceEntry(result: ComputedResult): IntuneChatToolTraceE
     tool: "count_cached",
     params: { resource: result.resource, filters: result.context.filters },
     resultSummary: `${result.focus?.total ?? result.total} matching cached rows counted${listed ? ` · ${listed} listed` : ""}`,
+    ...(result.snapshot ? { cacheSource: { resource: result.resource, rows: result.snapshot.rows, ...(result.snapshot.refreshedAt ? { refreshedAt: result.snapshot.refreshedAt } : {}), ...(result.snapshot.lastError ? { error: result.snapshot.lastError } : {}) } } : {}),
     durationMs: 0,
     createdAt: now,
     completedAt: now,

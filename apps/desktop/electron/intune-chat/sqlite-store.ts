@@ -2565,7 +2565,10 @@ export class IntelligenceSqliteStore {
     tenantId: string;
     thresholdIso: string;
     limit: number;
+    /** Field filters the question names, such as its OS, applied before the limit. */
+    filters?: GraphCacheQueryPredicate[];
   }): unknown[] {
+    const extra = (input.filters ?? []).map((predicate) => buildGraphCachePredicateSql(predicate));
     const rows = this.db
       .prepare(
         `SELECT raw_json
@@ -2574,10 +2577,11 @@ export class IntelligenceSqliteStore {
            AND resource = 'managedDevices'
            AND last_seen_at IS NOT NULL
            AND last_seen_at < ?
+           ${extra.map((built) => `AND ${built.sql}`).join(" ")}
          ORDER BY last_seen_at ASC
          LIMIT ?`,
       )
-      .all(input.tenantId, input.thresholdIso, input.limit) as unknown as ResourceRow[];
+      .all(input.tenantId, input.thresholdIso, ...extra.flatMap((built) => built.args), input.limit) as unknown as ResourceRow[];
     return rows.map((row) => readJson<unknown>(row.raw_json, {}));
   }
 

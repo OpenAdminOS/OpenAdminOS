@@ -3826,25 +3826,28 @@ the format. Decisions:
   list?}` counts every cached row in SQL under the filters, with one breakdown
   per groupBy field, and returns the matching rows when at most 50 match. The
   loop prompt sends every count and breakdown to it.
-- Device questions the parser fully understands (counts, per OS, per
-  compliance state or ownership, OS, compliance and sync filters, and lists of
-  those) become a structured query. Any word outside its vocabulary leaves the
-  question to the planner, so "which Macs need attention" is never answered
-  with a list of all Macs. The deterministic answer pack carries the result as
-  an authoritative `computedResult` (exact counts, the full filtered list,
-  plain fact lines) and no sample rows for that resource, only for a tenant or
-  mixed question whose resource the tenant grants. "Not compliant" is Intune's
-  `noncompliant` state, as the direct evidence answers count it; grace period
-  is its own state. Wording the parser cannot read for certain (two operating
-  systems, an excluded one such as "not Windows", "not currently compliant",
-  "not in grace period", both states at once, a "not" or "failing" no filter
-  reads, a sync verb without a window, a number other than a sync window such
-  as "Windows 11", which names a version the filters do not model, an "or",
-  since filters combine with AND only, "last month" or "last week" alone,
-  which name a calendar period, a question naming both Intune and Entra
-  devices) goes to the planner, and the sample rows then get no
-  OS or compliance filter from it either.
-  `count_cached` on a resource that was never refreshed returns no count.
+- Device questions in a closed list of sentence shapes are computed in code:
+  a count of Intune devices (optionally of one OS, of one compliance state, or
+  synced or not synced in the last N days, this week, this month or today)
+  with optional clauses for a per OS or per compliance state split, one
+  subset to list ("and which are not compliant", "and how many are Windows")
+  or "list them"; a list of devices by compliance state or by sync window; the
+  follow-ups "only Windows", "only the compliant ones", "which of those are
+  Windows", "which of those are not compliant", "which of those synced this
+  month" and "what about macOS"; and "why is <device> not compliant". Each
+  shape is read as a whole sentence. Any other question, including one with a
+  word, number, "or", negation or clause outside its shape, goes to the
+  planner as before. An open reading of the words was tried first and kept
+  computing answers to other questions (a dropped "not", "or" read as "and",
+  "Windows 11" read as Windows, independent clauses read as a subset), so the
+  list is closed and grows only by adding a tested shape. The deterministic
+  answer pack carries the result as an authoritative `computedResult` (exact
+  counts, the full filtered list, plain fact lines) and no sample rows for
+  that resource, only for a tenant or mixed question whose resource the tenant
+  grants. "Not compliant" is Intune's `noncompliant` state, as the direct
+  evidence answers count it; grace period is its own state. A failed latest
+  refresh is said in the computed answer. `count_cached` on a resource that
+  was never refreshed returns no count.
 - Intune is the device inventory. Device, OS, sync and compliance wording plans
   `managedDevices` only; `entraDevices` joins for Entra, directory, join,
   registration, stale-device cleanup, duplicate and deleted-record wording.

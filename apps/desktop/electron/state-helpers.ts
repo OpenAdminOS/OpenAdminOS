@@ -978,6 +978,7 @@ export function readPlannedChatRows(
       tenantId: input.tenantId,
       thresholdIso: thresholdIsoDaysBefore(input.generatedAt, staleSyncDays),
       limit: input.limitPerResource,
+      ...(deviceFilters.length > 0 ? { filters: deviceFilters } : {}),
     });
   }
   return rows;
