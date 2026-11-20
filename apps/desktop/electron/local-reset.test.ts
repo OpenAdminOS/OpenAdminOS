@@ -33,6 +33,7 @@ import {
   type LocalResetRequestSteps,
 } from "./local-reset.js";
 import { AppStateStore } from "./state.js";
+import { OrganizationBoundaryError } from "./runs.js";
 import { blockConnectorConfirmations, requestConnectorConfirmation } from "./connector-confirm-bridge.js";
 import { LOCAL_RESET_PHRASE } from "../src/shared/local-reset.js";
 
@@ -1049,7 +1050,10 @@ describe("local reset: runs and connector sends", () => {
         runService.hasActiveDrive = original;
 
         assert.equal(await store.beginLocalReset(), undefined);
-        await assert.rejects(store.startRun("device-report"), /OpenAdminOS is resetting.*The run did not start/);
+        // A schedule treats it as waiting, not as a failed run.
+        await assert.rejects(store.startRun("device-report"), (error: Error) =>
+          error instanceof OrganizationBoundaryError && /OpenAdminOS is resetting.*The run did not start/.test(error.message));
+        await assert.rejects(store.sendWhatsAppWebTestMessage("+15550100"), /OpenAdminOS is resetting. Nothing was sent/);
         await assert.rejects(
           store.sendNovaConnector({ connectorId: "teams", tenantId: tenant.id } as never),
           /OpenAdminOS is resetting. Nothing more was sent/,
