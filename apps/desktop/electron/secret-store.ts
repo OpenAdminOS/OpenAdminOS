@@ -70,7 +70,9 @@ export class SafeStorageTokenCacheStore implements TokenCacheStorage {
     if (dataFolderSealed()) throw new DataFolderSealedError();
     const safeStorage = await this.requireSafeStorage();
     const ciphertext = safeStorage.encryptString(plaintext);
+    if (dataFolderSealed()) throw new DataFolderSealedError();
     await mkdir(dirname(this.filePath), { recursive: true });
+    if (dataFolderSealed()) throw new DataFolderSealedError();
     await writeFile(this.filePath, ciphertext, { mode: 0o600 });
   }
 

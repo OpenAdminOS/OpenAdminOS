@@ -47,7 +47,8 @@ export class SafeStorageProviderSecretStore {
         } catch (error) {
           if (isMissingFile(error)) return undefined;
           if (isSafeStorageDecryptError(error)) {
-            await rm(path, { force: true });
+            // Checked again: the read may have started before the seal.
+            if (!dataFolderSealed()) await rm(path, { force: true });
             return undefined;
           }
           throw error;
@@ -60,7 +61,9 @@ export class SafeStorageProviderSecretStore {
           this.platform,
         );
         const path = this.pathFor(safeProviderId, key);
+        if (dataFolderSealed()) throw new DataFolderSealedError();
         await mkdir(join(this.rootDir, safeProviderId), { recursive: true });
+        if (dataFolderSealed()) throw new DataFolderSealedError();
         await writeFile(path, safeStorage.encryptString(value), { mode: 0o600 });
       },
       remove: async (key: string) => {

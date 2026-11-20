@@ -99,4 +99,39 @@ describe("credential storage while a reset has sealed the data folder", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("does not delete a restored secret when a read that started before the seal fails to decrypt", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-sealed-read-"));
+    try {
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => { release = resolve; });
+      let loading!: () => void;
+      const loadingStarted = new Promise<void>((resolve) => { loading = resolve; });
+      const options = {
+        platform: "darwin" as const,
+        loadSafeStorage: async () => {
+          loading();
+          await held;
+          return working.loadSafeStorage();
+        },
+      };
+      mkdirSync(join(dir, "connector"), { recursive: true });
+      writeFileSync(join(dir, "connector", "token.bin"), "old profile token");
+      const accessor = new SafeStorageConnectorSecretStore(dir, options).forConnector("connector");
+      const read = accessor.get("token");
+      await loadingStarted;
+      // The reset commits and a restore puts the profile's own token back.
+      sealDataFolder();
+      writeFileSync(join(dir, "connector", "token.bin"), "restored token");
+      release();
+      try {
+        assert.equal(await read, undefined);
+      } finally {
+        unsealDataFolder();
+      }
+      assert.equal(readFileSync(join(dir, "connector", "token.bin"), "utf8"), "restored token");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
