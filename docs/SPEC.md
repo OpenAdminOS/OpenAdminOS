@@ -2508,9 +2508,11 @@ what stays (the enterprise application and admin consent in each tenant, the IT
 `policy.json`, exports), and the typed phrase `RESET OPENADMINOS`, checked again
 in the main process. Mockup: `docs/mockups/34-local-reset.html`.
 
-- **Two phases.** The request refuses while a confirmed write run is applying,
-  writes `local-reset-pending.json` into the data folder first (if that fails,
-  nothing changed and the modal says so), then removes the Microsoft sign-in of
+- **Two phases.** The request refuses while a confirmed write run is applying
+  or a confirmation is in flight, and from then on refuses new confirmations
+  until the restart. It writes `local-reset-pending.json` into the data folder
+  first; the rename is the commit point (if it fails, nothing changed and the
+  modal says so; a failed folder flush after it is only logged). It then removes the Microsoft sign-in of
   every tenant and pending disconnect from the token caches, turns off the OS
   scheduler and the menu bar login item (installed builds), stops the gateway,
   MCP servers and stores with a bounded wait, and relaunches.
@@ -2520,12 +2522,15 @@ in the main process. Mockup: `docs/mockups/34-local-reset.html`.
   of the data folder except `policy.json`, the marker and Chromium's lock files.
   The audit anchor and pending files go after everything else, the database
   included, so a database that could not be removed keeps its anchor. Then,
-  installed builds only: the Keychain item `OpenAdminOS Safe Storage` by exact
-  service name, the LaunchAgent or scheduled task, the electron-updater cache
+  installed builds only: the Keychain item by exact service
+  `OpenAdminOS Safe Storage` and account `OpenAdminOS`, the LaunchAgent or
+  scheduled task (checked to be gone afterwards), the electron-updater cache
   `@openadminosdesktop-updater`, and on macOS the Squirrel ShipIt cache, the
   bundle's Caches, HTTPStorages and saved state, and `defaults delete
-  com.openadminos.desktop`. The marker goes last, so an interrupted wipe resumes
-  at the next launch.
+  com.openadminos.desktop`. The marker records when that cleanup ran and goes
+  last, so an interrupted wipe resumes at the next launch without repeating
+  the Keychain step. External commands are bounded at 5 seconds each, below
+  Chromium's wait for a second launch.
 - **Failures.** A data folder entry that cannot be removed keeps the marker and
   opens **Reset did not finish** instead of the app (the paths with reasons,
   Try again relaunches, Show data folder, Quit); a background wake just exits.
@@ -2536,7 +2541,11 @@ in the main process. Mockup: `docs/mockups/34-local-reset.html`.
 - **Development builds** reset `OPENADMINOS_USER_DATA_DIR` when set, otherwise
   the default folder the installed app also uses (the modal names it). They use
   Chromium's mock keychain on macOS, so they never touch the Keychain item, and
-  never touch the installed app's scheduler, login item or caches.
+  never touch the installed app's scheduler, login item or caches. The marker
+  records which build asked (`build`): a development build leaves an installed
+  build's reset alone (Reset did not finish, open the installed app), and an
+  installed build finishes a development build's reset in the data folder only,
+  with a warning. A marker that cannot be read counts as development.
 - **Linux** keeps the safeStorage key in the desktop keyring; the reset does
   not remove keyring entries (the docs say how).
 - **Windows uninstaller.** `nsis.deleteAppDataOnUninstall` stays `false`. In

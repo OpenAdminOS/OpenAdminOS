@@ -37,7 +37,8 @@ At the restart, before anything else runs, it removes:
 In an installed build it also removes the per-user files outside the data
 folder:
 
-- **macOS:** the Keychain item `OpenAdminOS Safe Storage`, the scheduler
+- **macOS:** the Keychain item `OpenAdminOS Safe Storage` (account
+  `OpenAdminOS`), the scheduler
   LaunchAgent, cached app updates (`~/Library/Caches/@openadminosdesktop-updater`,
   `~/Library/Caches/com.openadminos.desktop.ShipIt`), the app's caches,
   HTTP storage, saved window state and preferences
@@ -69,7 +70,9 @@ A few details:
   `OPENADMINOS_USER_DATA_DIR` when that is set, otherwise the default data
   folder, which the installed app uses too. It never touches the Keychain
   item, the scheduler or the installed app's caches: development builds use
-  Chromium's mock keychain on macOS.
+  Chromium's mock keychain on macOS. A reset requested in the installed app is
+  finished only by the installed app; a development build that opens the same
+  folder first shows **Reset did not finish** and leaves it alone.
 
 ## Uninstall on macOS
 
@@ -83,7 +86,7 @@ before the next launch: a new install that finds the old key can read any
 token files that are still there.
 
 ```bash
-security delete-generic-password -s "OpenAdminOS Safe Storage"
+security delete-generic-password -s "OpenAdminOS Safe Storage" -a OpenAdminOS
 launchctl bootout "gui/$(id -u)" ~/Library/LaunchAgents/com.openadminos.scheduler.plist
 rm -f ~/Library/LaunchAgents/com.openadminos.scheduler.plist
 defaults delete com.openadminos.desktop
@@ -127,8 +130,9 @@ so removing the folder also makes any copied token files unreadable.
 Remove the package (`sudo apt remove openadminos`, your package manager, or
 the AppImage file), then remove `~/.config/OpenAdminOS` and
 `~/.cache/@openadminosdesktop-updater`. The key that protects the sign-ins is
-kept by your keyring (GNOME Keyring or KWallet); remove the OpenAdminOS entry
-there with your keyring tool if you do not reset in the app first.
+kept by your keyring (GNOME Keyring or KWallet). Neither the in-app reset nor
+removing the package deletes it: remove the OpenAdminOS entry with your
+keyring tool if you want it gone. Without the token files it protects nothing.
 
 ## Revoke access in Entra
 
