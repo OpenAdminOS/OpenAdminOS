@@ -411,6 +411,10 @@ the installed app's scheduler, login item or caches.
   parent is now waited for only in extract-and-run (appImageHandoffWaitPids,
   tested). Sol medium: the end to end test closes the store before the
   simulated next launch, as process exit does, so it also holds on Windows.
+- Review round 41: no blocking from any reviewer. Applied: a locked
+  database keeps its companions whatever sorts between them (Sol medium,
+  tested), each handoff wait gets its own minute (Muse), SPEC wording on
+  the shutdown and the AppImage restart (Claude, Muse).
 - Process lesson: twice I edited the tree while a reviewer was reading it;
   parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the
