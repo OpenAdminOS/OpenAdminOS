@@ -188,9 +188,12 @@ skills:
         "add exchangeActiveSync and other to client apps and grant Block", or
         "require the Phishing-resistant MFA authentication strength for the
         privileged roles"), and why. For any change that enforces something,
-        add the check to do first: run it in report-only and review sign-in
-        impact, and keep emergency access accounts excluded. Do not claim a
-        change is safe to enforce from this inventory alone.
+        add the check to do first: where report-only applies, run it in
+        report-only and review sign-in impact; for user actions such as
+        registering security info, which report-only does not show, test
+        with an approved pilot group first. Keep emergency access accounts
+        excluded. Do not claim a change is safe to enforce from this
+        inventory alone.
 
         3. Coverage.
         One bullet each for admin MFA, all-user MFA, legacy authentication
