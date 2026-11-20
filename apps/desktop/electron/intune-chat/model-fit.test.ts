@@ -89,6 +89,8 @@ describe("Model fit: classifying a failure", () => {
     assert.equal(classifyModelFitFailure(failure, { providerId: "ollama", isLocal: true })?.limitTokens, 16384);
     // A wrapper's own code does not hide the failure record's.
     assert.equal(classifyModelFitFailure({ code: "agent-failed", failure }, { providerId: "ollama", isLocal: true })?.reason, "context-too-small");
+    // Lemonade passes the llama.cpp server's own wording through.
+    assert.equal(classifyModelFitFailure(new Error("Lemonade responded with HTTP 400: Context size has been exceeded."), { providerId: "lemonade", isLocal: true })?.reason, "context-too-small");
     // A sentence that only mentions a context size is not a llama.cpp context error.
     assert.equal(classifyModelFitFailure("The Graph response exceeds the available context size of the report", { providerId: "lm-studio", isLocal: true }), undefined);
     assert.equal(loopFailureIssue({ failureReason: "thinking-only" }, ollama, LOCAL_MODEL)?.reason, "thinking-only");

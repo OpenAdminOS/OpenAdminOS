@@ -130,6 +130,8 @@ function contextIssueFromText(text: string): Omit<ModelFitIssue, "providerId" | 
     const limitTokens = count(/"n_ctx"\s*:\s*(\d+)/.exec(text)?.[1]);
     return { reason: "context-too-small", ...(neededTokens ? { neededTokens } : {}), ...(limitTokens ? { limitTokens } : {}) };
   }
+  // The llama.cpp server's own wording, which the Lemonade adapter passes through as it is.
+  if (/context size has been exceeded/i.test(text)) return { reason: "context-too-small" };
   // Apple Foundation's helper (SPEC.md, Apple Foundation is a small-context provider). Its count is
   // the prompt alone; the helper also reserves room for the answer, so the prompt can be below the limit.
   if (/context window is too small for this prompt/i.test(text)) {

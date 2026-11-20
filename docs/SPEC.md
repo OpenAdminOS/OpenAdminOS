@@ -2499,7 +2499,7 @@ offers only from it.
 not load the model with the larger context for lack of memory, the LM Studio
 adapter's "LM Studio context length too small" message (PR #219), Ollama's HTTP 400 ("request (N tokens) exceeds
   the available context size (L tokens)"), llama.cpp's
-  `exceed_context_size_error` (LM Studio, Lemonade) and Apple Foundation's
+  `exceed_context_size_error` (LM Studio, Lemonade) and its "Context size has been exceeded" wording, which Lemonade passes through and Apple Foundation's
   context error. A typed runtime failure, where `kind`, `code` or `reason`
   carries `context-too-small` with needed and limit numbers, on the error, on
   its `failure` record or through `cause`, is read by its shape, and a run's
