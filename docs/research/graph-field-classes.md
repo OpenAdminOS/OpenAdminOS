@@ -1754,7 +1754,7 @@ Notes:
 | Wi-Fi profiles | unverified (no Wi-Fi profiles in lab) | 1 | 1 | 0 | 0 | 11 | 0 | 1 |
 | VPN profiles | unverified (no VPN profiles in lab) | 4 | 0 | 0 | 0 | 15 | 0 | 4 |
 | Custom profiles (OMA-URI and Apple mobileconfig) | verified (windows10CustomConfiguration); macOS payload unverified | 3 | 0 | 0 | 0 | 20 | 0 | 5 |
-| **Total** | | **21** | **59** | **60** | **122** | **537** | **48** | **93** |
+| **Total** | | **21** | **62** | **60** | **122** | **536** | **48** | **92** |
 
 Counts are property paths as listed above (grouped method-specific blocks in authenticationMethodsPolicy count as one row each). `@odata.nextLink` rows are included where the skiptoken carries data.
 
