@@ -1784,6 +1784,8 @@ function scanResultsFor(found: ReadonlyMap<ProviderId, ProviderSummary>, probes:
 
 /** How long Disconnect waits for an organization's work to stop before cleanup goes on. */
 const TENANT_DRAIN_MS = 15_000;
+/** A documentation index download stops after this long, so a stalled one ends. */
+const INDEX_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1000;
 
 function errorText(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
@@ -3141,13 +3143,31 @@ export class AppStateStore {
     sourceDir?: string;
     baseUrl?: string;
   }): Promise<RetrievalStatus> {
-    return this.localResetGatedWork(() => this.installRetrievalIndexNow(input));
+    // Refused once a reset has started, but not counted: a download of a few
+    // hundred megabytes must not hold a reset back. The commit aborts it, and
+    // the sealed data folder refuses whatever it would still write.
+    if (this.localResetStarted) {
+      throw new LocalResetInProgressError("OpenAdminOS is resetting and restarts in a moment. Nothing was changed.");
+    }
+    const controller = new AbortController();
+    this.indexDownloads.add(controller);
+    try {
+      return await this.installRetrievalIndexNow(input, AbortSignal.any([controller.signal, AbortSignal.timeout(INDEX_DOWNLOAD_TIMEOUT_MS)]));
+    } finally {
+      this.indexDownloads.delete(controller);
+    }
   }
 
-  private async installRetrievalIndexNow(input: {
-    sourceDir?: string;
-    baseUrl?: string;
-  }): Promise<RetrievalStatus> {
+  /** Documentation index downloads under way, so the reset commit can stop them. */
+  private readonly indexDownloads = new Set<AbortController>();
+
+  private async installRetrievalIndexNow(
+    input: {
+      sourceDir?: string;
+      baseUrl?: string;
+    },
+    signal: AbortSignal,
+  ): Promise<RetrievalStatus> {
     if (!this.userDataPath) {
       throw new Error("Installing a documentation index needs a configured userData directory.");
     }
@@ -3160,6 +3180,7 @@ export class AppStateStore {
       await downloadIndex({
         baseUrl: input.baseUrl ?? DEFAULT_INDEX_BASE_URL,
         targetDir,
+        signal,
       });
     }
     this.retrievalIndexInstance?.reset();
