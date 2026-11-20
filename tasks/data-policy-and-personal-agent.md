@@ -268,6 +268,23 @@ built on top of them are planned separately.
   object and the complete current object side by side, with full hashes
   that can be copied and the short form in the row (B5).
 
+**Review findings adopted (2026-11-19, round 13 of the design review)**
+- Saved Chat history after a restart: each saved Chat message stores its
+  classification evidence next to it in the local database (spans as
+  offsets, lengths and classes, and the field map version; no new copy of
+  the values). Reopening a conversation rebuilds the ledger from it before
+  any follow-up. A saved message without readable evidence counts as
+  unexamined, takes the strictest action on the tier, and the follow-up says
+  so. Disconnect and deleting the conversation remove the evidence (A1, A3).
+- Result delivery from runs the personal agent starts: every delivery from
+  such a run goes through the per-message confirmation card and the
+  call-time checks, showing the final text and destination; nothing posts
+  without a click. Runs started outside the personal agent keep their own
+  delivery behaviour (B3).
+- Step 2 of adding a server shows a different tool list for another path on
+  the same host, and the re-review marks the changed path in both raw JSON
+  panes, including a property present on only one side (mockup 35).
+
 ## Why
 
 Today the choice is binary. With a local model the request never leaves the
@@ -387,6 +404,21 @@ the IT policy file.
       `tenant-values.ts` and the existing private patterns.
 - [ ] A request ledger: values are classified by field when they arrive and
       registered for the run or Chat conversation, in memory only.
+- [ ] Saved Chat history keeps its classification evidence. Each saved Chat
+      message stores, next to it in the local database, the spans the ledger
+      found in its text (offset, length and class of each) and the field map
+      version that classed them. The evidence holds no copy of the values
+      beyond the message text that is already stored. Disconnecting the
+      organization and deleting the conversation remove the evidence with the
+      messages.
+- [ ] When a saved conversation is reopened, including after an app restart,
+      the ledger is rebuilt from that stored evidence before any follow-up is
+      built, so a value that is no longer in the current tenant value index
+      (a Conditional Access policy that was renamed or deleted since) is still
+      known by its class. A saved message without stored evidence (saved
+      before the evidence existed, or evidence that cannot be read) counts as
+      unexamined, as in the budget rule below. `TODO(ugur)`: evidence
+      stored under an older field map version (see open decisions).
 - [ ] Just before each model call, the final request (system text plus
       prompt, including the admin's own words) is scanned against the ledger
       and the detectors, at the one place every provider call is built.
@@ -427,6 +459,10 @@ the IT policy file.
    credential rule alone would allow it.
 9. Every field mapping was checked against a live Graph response in the lab
    tenant, and the record lists the calls.
+10. Stored evidence: a saved Chat message keeps its spans (offset, length,
+    class) and the field map version in the local database and no other copy
+    of its values; Disconnect and deleting the conversation remove the
+    evidence with the messages (test).
 
 ### Phase A2: Provider tiers
 
@@ -496,6 +532,17 @@ the IT policy file.
 - [ ] A call withheld because part of the request could not be examined has a
       designed state (mockup 34, F) that suggests a smaller question, and a
       local model only when no Local rule is Block.
+- [ ] Saved history in a follow-up. History whose evidence was rebuilt (A1) is
+      routed and masked like any other part of the request, by its stored
+      classes and by the scan of the final request. History without stored
+      evidence counts as unexamined and takes the strictest action of any
+      class on the tier: with a Block on the tier it is withheld, and the
+      follow-up is not sent with it; with Mask as the strictest action it is
+      masked one way and never restored. The follow-up says which earlier
+      messages were left out or masked and why, and offers Ask without the
+      earlier answers (the question alone, with no saved history in the
+      request) and a local model only when no Local rule is Block (mockup 34,
+      F, "A conversation reopened after a restart").
 - [ ] Agent manifests declare `descriptor.dataClasses`, derived when absent, with
       a qa-graph check and the JSON Schema updated in the same commit. Agent
       details show what an agent reads. Preflight refuses a run the policy would
@@ -548,6 +595,19 @@ the IT policy file.
    text (renderer test asserts the sentences).
 10. A call withheld for unexamined data shows the designed state and never
    offers a model whose tier has a Block rule.
+11. Restart regression test: a Chat answer restored the name of a Conditional
+   Access policy that is absent from the current tenant value index. The app
+   restarts, the conversation is reopened, and a hosted follow-up is asked
+   with Security on Hosted at Block: the name reaches no provider request,
+   and the follow-up shows the designed blocked state. A calculation from the
+   current index alone would miss the name, and the test fails on it.
+12. History without evidence (test): the same conversation with its stored
+   evidence removed, Security on Hosted at Block. The earlier messages count
+   as unexamined and are withheld, the follow-up is not sent with them, and
+   the notice names the messages left out and offers Ask without the earlier
+   answers, and a local model only when no Local rule is Block. With no
+   Block on Hosted, the earlier messages are masked one way and the answer
+   says so.
 
 ### Phase A4: Masking
 
@@ -665,6 +725,23 @@ the IT policy file.
       says it is too long and offers Send a shorter summary (the agent
       proposes a shorter message on a new card with its own Confirm) or Save
       the full report (kept on this device, nothing sent) (mockup 35).
+- [ ] Deliveries from runs the personal agent starts. When the agent starts
+      an installed agent that has a saved delivery route (Teams, Outlook,
+      Slack, Discord or WhatsApp, the routes in
+      `apps/desktop/electron/run-delivery.ts`),
+      no delivery from that run is posted when the run finishes. Each one is
+      proposed on the same per-message confirmation card, with the final text
+      that would be posted, the destination of the saved route, the
+      organization and the run, and Confirm runs the same call-time checks
+      (active organization, send grant, connection, length). Nothing posts
+      without a click, a run with two routes gets two cards, and a "Not sent"
+      card keeps the run's result on this device. The run card the agent
+      shows before it starts the run (today "Existing saved result-delivery
+      routes may send notifications", in
+      `apps/desktop/electron/nova-actions.ts`) says instead that each
+      delivery waits for a confirmation. Runs started outside the personal
+      agent, such as a scheduled run or Run in Agents, keep the agent's own
+      delivery behaviour; this plan does not change it.
 - [ ] The contract: a tool is offered and callable only while its grant is on
       and the service it uses is connected in the active organization. A
       granted skill is offered only when every grant it uses (for example
@@ -703,6 +780,15 @@ the IT policy file.
    Confirm, and never a series of numbered posts; the card offers Send a
    shorter summary, which yields a new card whose Confirm posts exactly one
    message, and Save the full report, which sends nothing (test, mockup 35).
+9. Saved Teams route (regression test): the personal agent starts an
+   installed agent whose saved delivery route posts to a Teams channel. When
+   the run finishes nothing is posted; a card shows the final message text,
+   the team and channel of the route, the organization and the run. Cancel
+   posts nothing, Confirm posts exactly one message after the call-time
+   checks, and with Send to Teams turned off, Teams not connected or another
+   organization active, Confirm reads "Not sent" with the fix. The same agent
+   started on its schedule delivers by its route as before, with no card
+   (test, mockup 35).
 
 ### Phase B4: Skills
 
@@ -972,3 +1058,8 @@ the IT policy file.
 9. The policy key for user-added MCP servers (proposal: `allowedMcpServers`,
    a list of hosts, separate from `allowedPublicReferences`, which covers
    catalog references) (mockup 35, step 1).
+10. Saved Chat evidence stored under an older field map version (A1). The
+    evidence holds classes, not fields, so a later map that raises a field's
+    class cannot be applied to it. Proposal: when the field map version of a
+    message's evidence is older than a map change that raised any class, the
+    message counts as unexamined; otherwise its stored classes apply.
