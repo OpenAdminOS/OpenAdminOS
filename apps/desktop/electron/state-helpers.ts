@@ -3,6 +3,7 @@ import {
   OPENADMINOS_CLIENT_ID,
   TENANT_DATA_INSTRUCTIONS,
   defaultClientId,
+  estimateTokens,
   tenantAuthority,
   type ExpectedTenantAccount,
 } from "@openadminos/runtime";
@@ -1378,7 +1379,16 @@ export function withSelfTrainingOverlay(base: RunLlmApi, overlay: string): RunLl
     get streamsIncrementally() {
       return base.streamsIncrementally;
     },
-    ...(base.contextWindow ? { contextWindow: (model?: string) => base.contextWindow!(model) } : {}),
+    // The overlay is appended after the run's size check, so it is taken
+    // off the window the check sees.
+    ...(base.contextWindow
+      ? {
+          contextWindow: async (model?: string) => {
+            const window = await base.contextWindow!(model);
+            return window === undefined ? undefined : Math.max(1, window - estimateTokens(`\n\n${overlay}`));
+          },
+        }
+      : {}),
     complete: (options) =>
       base.complete({
         ...options,
