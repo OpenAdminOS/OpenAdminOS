@@ -2476,9 +2476,9 @@ Signals. Only a provider on this device gets the offer.
 the model with the larger context for lack of memory, Ollama's HTTP 400 ("request (N tokens) exceeds
   the available context size (L tokens)"), llama.cpp's
   `exceed_context_size_error` (LM Studio, Lemonade) and Apple Foundation's
-  context error. A typed runtime failure (`kind` or `code`
-  `context-too-small` (`kind`, `code` or `reason`), with needed and limit numbers, on the error, on its
-  `failure` record or through `cause`) is read by its shape, and a run's
+  context error. A typed runtime failure, where `kind`, `code` or `reason`
+  carries `context-too-small` with needed and limit numbers, on the error, on
+  its `failure` record or through `cause`, is read by its shape, and a run's
   typed `failureReason` comes before its error text, so the runtime's prompt
   fit check slots in without a second estimator.
 - The investigation failed on this local model often enough that Chat stops
@@ -2516,8 +2516,13 @@ A local choice sends at once, since nothing leaves the device, but only
 after a fresh check that the model runs here: the host reads Ollama's
 `/api/tags` again (model metadata only; nothing is loaded) and refuses a
 model that is no longer listed or is now remote-backed, or when the list
-cannot be read. A model fit acceptance (`modelFitOfferId`) is refused on an
-ordinary send and on the non-streaming send.
+cannot be read. That check runs again before every model call of the
+request, not only once. A hosted choice takes a destination fingerprint
+(`getProviderDestination`: its address, or the Azure OpenAI resource and
+deployment) when its accept step opens, and the host refuses the send if
+the destination changed since. A model fit acceptance (`modelFitOfferId`)
+is refused on an ordinary send and on the non-streaming send. Right before
+the offer is claimed, the host reads the active organization and model again.
 
 Host checks (`apps/desktop/electron/intune-chat/model-fit.ts`). A failed
 answer that may be run again carries a host-issued, single-use `offerId`,
@@ -2574,11 +2579,16 @@ host admits the run refuses it instead of running elsewhere. A failed dry run
 stays a dry run. A larger local model passes `requireOnDeviceModel`, so the
 host makes the same fresh check before it admits the run, and the run record
 keeps it so every later phase (plan, replan after the diff, apply) checks
-again before it builds the model. Every fit rerun passes
+again before it builds the model and before every model call. Every fit rerun passes
 `bindProviderEndpoint`: the run is bound to where its provider was reached at
 admission (Ollama or LM Studio address, Azure OpenAI resource and
 deployment), and a later phase built for another endpoint fails with nothing
-sent. A model fit request in Chat is bound the same way for its own duration. A write agent still stops at the diff and its typed confirmation. Team
+sent. The run review takes the destination fingerprint when it opens and
+Start passes it (`expectedProviderDestination`); a change refuses the start.
+Run for real of a model fit dry run keeps the on-device requirement and the
+endpoint binding. A model fit request in Chat is bound the same way for its
+own duration, and its answer names where it went only once a model request
+was sent. A write agent still stops at the diff and its typed confirmation. Team
 runs keep their own review in Agent Team.
 
 Open questions (TODO(ugur) in code): a "remember for this conversation"
