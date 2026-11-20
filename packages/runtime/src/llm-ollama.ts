@@ -12,6 +12,8 @@ export interface OllamaProviderOptions {
   endpoint?: string;
   defaultModel?: string;
   timeoutMs?: number;
+  /** How long reading the model's context limit may take (tests). */
+  lookupTimeoutMs?: number;
 }
 
 interface OllamaChatChunk {
@@ -37,6 +39,16 @@ interface OllamaChatChunk {
 
 const DEFAULT_OLLAMA_TIMEOUT_MS = 180_000;
 const DEFAULT_OLLAMA_ENDPOINT = "http://127.0.0.1:11434";
+/** Room left for the answer when the caller sets no token limit. */
+const OLLAMA_ANSWER_RESERVE_TOKENS = 4096;
+const OLLAMA_SHOW_TIMEOUT_MS = 5000;
+
+/**
+ * The context size this app raised for a model, keyed by endpoint and model.
+ * Later requests keep sending it so Ollama does not reload the model with
+ * its smaller default between turns.
+ */
+const ollamaContextOverrides = new Map<string, number>();
 
 export interface OllamaEndpointTrust {
   endpoint: string;
@@ -47,6 +59,7 @@ export interface OllamaEndpointTrust {
 export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi {
   const endpoint = resolveOllamaEndpoint(options.endpoint);
   const defaultModel = options.defaultModel;
+  const lookupTimeoutMs = options.lookupTimeoutMs ?? OLLAMA_SHOW_TIMEOUT_MS;
   const timeoutMs =
     options.timeoutMs ??
     Number.parseInt(
@@ -118,38 +131,88 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         body.options = optionsPayload;
       }
 
+      const cacheKey = `${endpoint}\0${model}`;
+      const send = async (numCtx: number | undefined): Promise<Response> => {
+        const payload = numCtx === undefined ? body : { ...body, options: { ...optionsPayload, num_ctx: numCtx } };
+        let response: Response;
+        try {
+          response = await fetch(url, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(payload),
+            signal: controller.signal,
+            redirect: modelServerRedirect(url),
+          });
+        } catch (error) {
+          throw abortError() ?? new Error(`Ollama not reachable at ${url}: ${describe(error)}`);
+        }
+        if (isRefusedRedirect(response, url)) throw new Error(redirectRefusedDetail("Ollama", url));
+        return response;
+      };
+      /** The body of a failed response; a stop or timeout while reading it keeps its own message. */
+      const errorDetail = async (response: Response): Promise<string> => {
+        if (response.ok) return "";
+        try {
+          return await response.text();
+        } catch (error) {
+          throw abortError() ?? new Error(`Ollama not reachable at ${url}: ${describe(error)}`);
+        }
+      };
+      const abortError = (activeUrl = url): Error | undefined => {
+        if (!controller.signal.aborted) return undefined;
+        return opts.signal?.aborted
+          ? new Error("Ollama request stopped by user.")
+          : new Error(`Ollama timed out after ${timeoutMs}ms at ${activeUrl}.`);
+      };
+
       let response: Response;
+      let raisedCtx: number | undefined;
+      // Set while the retry runs, so a memory failure can name both sizes.
+      let retry: { requested: number; numCtx: number } | undefined;
       try {
-        response = await fetch(url, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(body),
-          signal: controller.signal,
-          redirect: modelServerRedirect(url),
-        });
+        let numCtx = ollamaContextOverrides.get(cacheKey);
+
+        response = await send(numCtx);
+        let detail = await errorDetail(response);
+        const overflow = response.status === 400 ? parseContextOverflow(detail) : undefined;
+        if (overflow) {
+          // Ollama sizes the context from its own default and free memory,
+          // not from the model's limit. Ask for enough room for this prompt
+          // plus the answer, up to what the model supports, and retry once.
+          const modelMax = await readOllamaContextLength(endpoint, model, controller.signal, lookupTimeoutMs);
+          // A stop or the overall deadline during the lookup names the lookup.
+          const stopped = abortError(`${endpoint.replace(/\/$/, "")}/api/show`);
+          if (stopped) throw stopped;
+          const wanted = roundUp(overflow.requested + (opts.maxTokens ?? OLLAMA_ANSWER_RESERVE_TOKENS), 1024);
+          if (modelMax !== undefined && overflow.requested > modelMax) {
+            throw new Error(contextTooSmallMessage(model, overflow.requested, modelMax, true));
+          }
+          numCtx = modelMax === undefined ? wanted : Math.min(wanted, modelMax);
+          retry = { requested: overflow.requested, numCtx };
+          response = await send(numCtx);
+          detail = await errorDetail(response);
+          const retryOverflow = response.status === 400 ? parseContextOverflow(detail) : undefined;
+          if (retryOverflow) {
+            const atModelLimit = modelMax !== undefined && retryOverflow.available >= modelMax;
+            throw new Error(contextTooSmallMessage(model, retryOverflow.requested, retryOverflow.available, atModelLimit));
+          }
+          if (!response.ok && isOllamaMemoryError(detail)) {
+            throw new Error(contextMemoryMessage(model, overflow.requested, numCtx, detail));
+          }
+          if (response.ok) raisedCtx = numCtx;
+        }
+        if (!response.ok) {
+          if (response.status === 404 && detail.toLowerCase().includes("model")) {
+            throw new Error(
+              `Ollama model "${model}" is not pulled. Run \`ollama pull ${model}\`.`,
+            );
+          }
+          throw new Error(`Ollama responded with HTTP ${response.status}: ${truncate(detail, 200)}`);
+        }
       } catch (error) {
         clearTimeout(timer);
         opts.signal?.removeEventListener("abort", abortFromCaller);
-        if (error instanceof Error && error.name === "AbortError") {
-          if (opts.signal?.aborted) {
-            throw new Error("Ollama request stopped by user.");
-          }
-          throw new Error(`Ollama timed out after ${timeoutMs}ms at ${url}.`);
-        }
-        throw new Error(`Ollama not reachable at ${url}: ${describe(error)}`);
-      }
-
-      if (!response.ok) {
-        clearTimeout(timer);
-        opts.signal?.removeEventListener("abort", abortFromCaller);
-        if (isRefusedRedirect(response, url)) throw new Error(redirectRefusedDetail("Ollama", url));
-        const detail = await response.text().catch(() => "");
-        if (response.status === 404 && detail.toLowerCase().includes("model")) {
-          throw new Error(
-            `Ollama model "${model}" is not pulled. Run \`ollama pull ${model}\`.`,
-          );
-        }
-        throw new Error(`Ollama responded with HTTP ${response.status}: ${truncate(detail, 200)}`);
+        throw error;
       }
 
       if (!response.body) {
@@ -184,7 +247,18 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
               continue;
             }
             if (chunk.error) {
+              // Ollama can accept the retry and then fail to load the model
+              // with the larger context.
+              if (retry && accumulated.length === 0 && isOllamaMemoryError(errorText(chunk.error))) {
+                throw new Error(contextMemoryMessage(model, retry.requested, retry.numCtx, errorText(chunk.error)));
+              }
               throw new Error(`Ollama error: ${chunk.error}`);
+            }
+            if (chunk.done && raisedCtx !== undefined) {
+              // Kept only once the stream finished cleanly, and before the
+              // caller sees the last chunk and may stop reading. Concurrent
+              // requests can raise it at once; keep the largest that worked.
+              ollamaContextOverrides.set(cacheKey, Math.max(ollamaContextOverrides.get(cacheKey) ?? 0, raisedCtx));
             }
             if (typeof chunk.model === "string" && chunk.model.length > 0) {
               actualModel = chunk.model;
@@ -406,6 +480,130 @@ function extractTokenUsage(chunk: OllamaChatChunk): LlmTokenUsage | undefined {
     usage.totalTokens = prompt + completion;
   }
   return usage;
+}
+
+/** Reads Ollama's "request (N tokens) exceeds the available context size (M tokens)" error. */
+export function parseContextOverflow(detail: string): { requested: number; available: number } | undefined {
+  const match = /request \((\d+) tokens?\) exceeds the available context size \((\d+) tokens?\)/i.exec(detail);
+  if (!match) return undefined;
+  return { requested: Number(match[1]), available: Number(match[2]) };
+}
+
+/**
+ * The model's maximum context length from /api/show. Undefined only when
+ * Ollama answered successfully without that metadata; a stop of the caller's signal
+ * returns undefined so the caller reports it, and a failed or timed out
+ * lookup throws.
+ */
+async function readOllamaContextLength(
+  endpoint: string,
+  model: string,
+  signal: AbortSignal,
+  timeoutMs = OLLAMA_SHOW_TIMEOUT_MS,
+): Promise<number | undefined> {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const url = `${endpoint.replace(/\/$/, "")}/api/show`;
+  const failure = (error: unknown): Error | undefined => {
+    if (signal.aborted) return undefined;
+    if (timeout.aborted) return new Error(`Ollama did not report the model's context limit within ${timeoutMs}ms at ${url}.`);
+    return new Error(`Ollama not reachable at ${url}: ${describe(error)}`);
+  };
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model }),
+      signal: AbortSignal.any([signal, timeout]),
+      redirect: modelServerRedirect(url),
+    });
+  } catch (error) {
+    const failed = failure(error);
+    if (failed) throw failed;
+    return undefined;
+  }
+  if (isRefusedRedirect(response, url)) throw new Error(redirectRefusedDetail("Ollama", url));
+  let raw: string;
+  try {
+    raw = await response.text();
+  } catch (error) {
+    const failed = failure(error);
+    if (failed) throw failed;
+    return undefined;
+  }
+  if (!response.ok) {
+    throw new Error(`Ollama could not report the model's context limit: HTTP ${response.status} at ${url}: ${truncate(raw, 200)}`);
+  }
+  let data: unknown;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    throw new Error(`Ollama could not report the model's context limit: the answer from ${url} was not JSON: ${truncate(raw, 200)}`);
+  }
+  if (typeof data !== "object" || data === null || Array.isArray(data)) {
+    throw new Error(`Ollama could not report the model's context limit: the answer from ${url} was not a JSON object.`);
+  }
+  const answer = data as { error?: unknown; model_info?: unknown };
+  if (answer.error !== undefined) {
+    throw new Error(`Ollama could not report the model's context limit: ${url} answered with an error: ${truncate(errorText(answer.error), 200)}`);
+  }
+  // A valid answer without the metadata leaves the limit unknown.
+  if (typeof answer.model_info !== "object" || answer.model_info === null) return undefined;
+  for (const [key, value] of Object.entries(answer.model_info as Record<string, unknown>)) {
+    if (key.endsWith(".context_length") && typeof value === "number" && value > 0) return value;
+  }
+  return undefined;
+}
+
+/** Readable text for an error field of any shape. */
+function errorText(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value) ?? "an unreadable error";
+  } catch {
+    return "an unreadable error";
+  }
+}
+
+/**
+ * Ollama's out-of-memory wording: the substrings its own classifier uses
+ * (llm/status.go outOfMemorySubstrings) plus the scheduler's messages when a
+ * model and its context do not fit.
+ */
+const OLLAMA_MEMORY_ERRORS = [
+  "out of memory",
+  "out of device memory",
+  "cudamalloc failed",
+  "hipmalloc failed",
+  "failed to allocate",
+  "allocation failed",
+  "not enough memory",
+  "insufficient memory",
+  "vk_error_out_of_device_memory",
+  "erroroutofmemory",
+  "failed to reserve graph",
+  "requires more system memory",
+  "unable to load full model",
+];
+
+function isOllamaMemoryError(detail: string): boolean {
+  const lower = detail.toLowerCase();
+  return OLLAMA_MEMORY_ERRORS.some((text) => lower.includes(text));
+}
+
+function contextMemoryMessage(model: string, requested: number, numCtx: number, detail: string): string {
+  return `Ollama context size too small: This request needs ${requested.toLocaleString("en-US")} tokens of context, but Ollama could not load ${model} with ${numCtx.toLocaleString("en-US")}, usually because free memory ran out. Ollama said: ${truncate(detail, 200)}`;
+}
+
+function contextTooSmallMessage(model: string, requested: number, limit: number, modelLimit: boolean): string {
+  const needs = `This request needs ${requested.toLocaleString("en-US")} tokens of context`;
+  return modelLimit
+    ? `Ollama context size too small: ${needs}, but ${model} supports at most ${limit.toLocaleString("en-US")}.`
+    : `Ollama context size too small: ${needs}, but Ollama could only give ${model} ${limit.toLocaleString("en-US")}, usually because free memory ran out.`;
+}
+
+function roundUp(value: number, step: number): number {
+  return Math.ceil(value / step) * step;
 }
 
 function describe(error: unknown): string {

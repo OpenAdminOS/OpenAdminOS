@@ -66,3 +66,106 @@ it("gives a prompt that does not fit the model its own recovery from the typed r
   expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
   expect(container.textContent).not.toContain("!");
 });
+
+it.each([
+  "Ollama context size too small: This request needs 40,652 tokens of context, but qwen3:8b supports at most 40,960.",
+  "Ollama context size too small: This request needs 40,652 tokens of context, but Ollama could only give gpt-oss:20b 16,384, usually because free memory ran out.",
+])("gives an Ollama context overflow its own recovery: %s", (error) => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama context too small")).toBeInTheDocument();
+  expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
+  expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
+});
+
+it("still matches a model that is not pulled", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: 'Ollama model "qwen3:8b" is not pulled. Run `ollama pull qwen3:8b`.' };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Model not pulled")).toBeInTheDocument();
+  expect(screen.queryByText("Ollama context too small")).not.toBeInTheDocument();
+});
+
+it.each([
+  "Ollama did not report the model's context limit within 5000ms at http://127.0.0.1:11434/api/show.",
+  "Ollama could not report the model's context limit: HTTP 503 at http://127.0.0.1:11434/api/show: busy",
+])("gives a failed Ollama context limit lookup its own recovery: %s", (error) => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama did not report the model's context limit")).toBeInTheDocument();
+  expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
+  expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
+});
+
+it.each([
+  ["Ollama at http://127.0.0.1:11434/api/show answered with a redirect to another address. OpenAdminOS does not follow redirects from a model server on this device, so nothing was sent there."],
+  ["Ollama not reachable at http://127.0.0.1:11434/api/show: fetch failed"],
+])("gives a failed lookup of the model's context limit its recovery: %s", (error) => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama did not report the model's context limit")).toBeInTheDocument();
+  expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
+});
+
+it("does not read incidental `ollama pull` text as a missing model", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama could not report the model's context limit: HTTP 503 at http://127.0.0.1:11434/api/show: ollama pull is disabled during maintenance" };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama did not report the model's context limit")).toBeInTheDocument();
+  expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
+});
+
+it("matches the provider's message when no Ollama model is available", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "No Ollama model available. Pull a model with `ollama pull <model>`." };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Model not pulled")).toBeInTheDocument();
+});
+
+it("treats the overall deadline during the context limit lookup as a lookup failure, not a slow generation", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama timed out after 180000ms at http://127.0.0.1:11434/api/show." };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama did not report the model's context limit")).toBeInTheDocument();
+  expect(screen.queryByText("Ollama generation timed out")).not.toBeInTheDocument();
+  expect(screen.queryByText("Request timed out")).not.toBeInTheDocument();
+});
+
+it("gives a memory failure on the context retry the context playbook", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama context size too small: This request needs 40,652 tokens of context, but Ollama could not load gpt-oss:20b with 45,056, usually because free memory ran out. Ollama said: model requires more system memory (24.1 GiB) than is available (12.0 GiB)" };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama context too small")).toBeInTheDocument();
+  expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
+});
+
+it("does not read incidental `is not pulled` text as a missing model", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama could not report the model's context limit: HTTP 503 at http://127.0.0.1:11434/api/show: maintenance index is not pulled from cache" };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
+});
+
+it.each([
+  "Ollama not reachable at http://127.0.0.1:11434/api/show: fetch failed",
+  "Ollama could not report the model's context limit: HTTP 401 at http://127.0.0.1:11434/api/show: unauthorized",
+  "Ollama could not report the model's context limit: http://127.0.0.1:11434/api/show answered with an error: invalid model name",
+])("shows only the lookup playbook for a failed context limit lookup: %s", (error) => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama did not report the model's context limit")).toBeInTheDocument();
+  for (const title of ["Ollama isn't running", "Tenant token expired", "Manifest validation failed", "Request timed out", "Model not pulled"]) {
+    expect(screen.queryByText(title)).not.toBeInTheDocument();
+  }
+});
+
+it("does not show the missing-model playbook for a lookup error that quotes it", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama could not report the model's context limit: HTTP 502 at http://127.0.0.1:11434/api/show: upstream said Ollama model \"qwen3:8b\" is not pulled. Run `ollama pull qwen3:8b`." };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama did not report the model's context limit")).toBeInTheDocument();
+  expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
+});
+
+it("shows only the lookup playbook for an HTTP 403 from the lookup, even with a stored Graph denial", () => {
+  const error = "Ollama could not report the model's context limit: HTTP 403 at http://127.0.0.1:11434/api/show: Forbidden";
+  const accessDenial = classifyGraphAccessDenied({});
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error, accessDenial };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama did not report the model's context limit")).toBeInTheDocument();
+  expect(screen.queryByText(accessDenial.title)).not.toBeInTheDocument();
+  expect(screen.queryByText("Graph access cause unverified")).not.toBeInTheDocument();
+});
