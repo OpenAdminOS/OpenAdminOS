@@ -7,7 +7,7 @@ import type {
 } from "@openadminos/agent-sdk";
 import { ContextTooSmallError } from "@openadminos/agent-sdk";
 import { isRefusedRedirect, modelServerRedirect, redirectRefusedDetail } from "./llm-openai-compatible.js";
-import { keepOllamaSize, ollamaRequestNumCtx, parseOllamaShow, readOllamaContextWindow, type OllamaShowContext } from "./ollama-context.js";
+import { keepOllamaSize, keptOllamaRevision, ollamaRequestNumCtx, parseOllamaShow, readOllamaContextWindow, type OllamaShowContext } from "./ollama-context.js";
 import { DEFAULT_ANSWER_RESERVE_TOKENS } from "./prompt-fit.js";
 
 export interface OllamaProviderOptions {
@@ -203,6 +203,8 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       let requestRevision: string | undefined;
       // Mutable: a kept size below a model's new pin is dropped before sending.
       let cachedCtx = ollamaContextOverrides.get(cacheKey);
+      // Read with the size, so the two are checked as one.
+      const cachedRevision = cachedCtx === undefined ? undefined : keptOllamaRevision(endpoint, model);
       /**
        * Forgets a size the attempt that just failed sent. A failure is
        * evidence only about the size that attempt asked for, at the moment it
@@ -260,7 +262,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         const sized = await ollamaRequestNumCtx({
           endpoint, model, ...(opts.system ? { system: opts.system } : {}), prompt: opts.prompt,
           ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
-          ...(cachedCtx !== undefined ? { currentNumCtx: cachedCtx } : {}),
+          ...(cachedCtx !== undefined ? { currentNumCtx: cachedCtx, ...(cachedRevision !== undefined ? { currentRevision: cachedRevision } : {}) } : {}),
           ...(opts.enforceContextWindow ? { enforce: true } : {}),
           timeoutMs: lookupTimeoutMs, signal: controller.signal,
         });
@@ -301,6 +303,22 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           if (firstSent !== undefined && overflow.available < firstSent) forgetSize(firstSent);
           // The first request's budget ends here; the lookup has its own.
           clearTimeout(timer);
+          // An agent run is held to the pin this request's first lookup saw:
+          // Ollama counted more than the estimate, so refuse before any retry
+          // lookup can lose that pin or fail.
+          const answerBudget = opts.maxTokens ?? DEFAULT_ANSWER_RESERVE_TOKENS;
+          const seenLimit = sized?.pinnedNumCtx !== undefined ? Math.min(sized.pinnedNumCtx, sized.modelMaxContext ?? Infinity) : undefined;
+          if (opts.enforceContextWindow && seenLimit !== undefined && overflow.requested + answerBudget > seenLimit) {
+            throw new ContextTooSmallError({
+              code: "context-too-small",
+              promptTokens: overflow.requested,
+              answerTokens: answerBudget,
+              neededTokens: overflow.requested + answerBudget,
+              limitTokens: seenLimit,
+              model,
+              sentToProvider: true,
+            });
+          }
           // Ollama sizes the context from its own default and free memory,
           // not from the model's limit. Ask for enough room for this prompt
           // plus the answer, up to what the model supports, and retry once.
@@ -311,7 +329,10 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           const wanted = roundUp(overflow.requested + (opts.maxTokens ?? OLLAMA_ANSWER_RESERVE_TOKENS), 1024);
           // An agent run holds a pinned model to its pin, on the retry too.
           // Ollama counted more than the estimate, so the request did not fit.
-          const pin = retryShow?.pinnedNumCtx;
+          // A retry lookup without a pin for the same revision keeps the pin the
+          // first lookup saw.
+          const pin = retryShow?.pinnedNumCtx ??
+            (retryShow?.revision === undefined || retryShow.revision === sized?.revision ? sized?.pinnedNumCtx : undefined);
           const enforcedLimit = opts.enforceContextWindow && pin !== undefined ? Math.min(pin, modelMax ?? Infinity) : undefined;
           if (enforcedLimit !== undefined) {
             const answerTokens = opts.maxTokens ?? DEFAULT_ANSWER_RESERVE_TOKENS;

@@ -84,6 +84,11 @@ const revisionKey = (endpoint: string, model: string) => `${endpoint.replace(/\/
  * chose it saw. A request that finishes after the model was created again
  * keeps its size under the revision it was sized for, never the newer one.
  */
+/** The revision a kept size belongs to, read with the size at request start. */
+export function keptOllamaRevision(endpoint: string, model: string): string | undefined {
+  return keptRevisions.get(revisionKey(endpoint, model));
+}
+
 export function keepOllamaSize(
   overrides: Map<string, number>,
   cacheKey: string,
@@ -117,6 +122,9 @@ export interface OllamaRequestContext {
   neededTokens: number;
   /** The model revision this lookup saw, to bind a size kept from it. */
   revision?: string;
+  /** The pin and maximum this lookup saw, for the overflow retry. */
+  pinnedNumCtx?: number;
+  modelMaxContext?: number;
   dropKept?: boolean;
   /** Send no num_ctx this time, but leave the kept size for other callers. */
   skipKept?: boolean;
@@ -174,6 +182,12 @@ export interface OllamaRequestContextInput {
   maxTokens?: number;
   /** num_ctx this app already sends for the model, if any. */
   currentNumCtx?: number;
+  /**
+   * The revision that kept size belongs to, read together with it when the
+   * request started, so a size kept since by a concurrent request is not
+   * mistaken for this one.
+   */
+  currentRevision?: string;
   /** Refuse a request larger than a pin this lookup finds (agent runs). */
   enforce?: boolean;
   fetchImpl?: typeof fetch;
@@ -209,12 +223,15 @@ export async function ollamaRequestNumCtx(
   // request's size: a larger one loaded since (by another client) must not
   // be reloaded smaller.
   if (neededTokens <= SMALLEST_DEFAULT_CONTEXT && input.currentNumCtx === undefined) return undefined;
-  const key = revisionKey(input.endpoint, input.model);
   const fetchImpl = input.fetchImpl ?? fetch;
   const timeoutMs = input.timeoutMs ?? LOOKUP_TIMEOUT_MS;
   const base = input.endpoint.replace(/\/$/, "");
   const show = await readShow(fetchImpl, base, input.model, timeoutMs, input.signal);
-  const seen = show.revision !== undefined ? { revision: show.revision } : {};
+  const seen = {
+    ...(show.revision !== undefined ? { revision: show.revision } : {}),
+    ...(show.pinnedNumCtx !== undefined ? { pinnedNumCtx: show.pinnedNumCtx } : {}),
+    ...(show.modelMaxContext !== undefined ? { modelMaxContext: show.modelMaxContext } : {}),
+  };
   // The fresh limit comes before anything kept: the pin, else the
   // architecture maximum. If the run's own lookup could not see it (Ollama
   // briefly unavailable, or the model created again since), refuse here with
@@ -228,16 +245,14 @@ export async function ollamaRequestNumCtx(
   }
   // A kept size belongs to the model revision it was kept for. A model
   // created again under the same name starts from its own settings.
+  // The kept size and its revision are checked as one: a size kept for
+  // another revision, or larger than this model's maximum, is not reused.
   let current = input.currentNumCtx;
   let dropKept = false;
-  if (current !== undefined && show.revision !== undefined) {
-    const keptFor = keptRevisions.get(key);
-    if (keptFor === undefined) keptRevisions.set(key, show.revision);
-    else if (keptFor !== show.revision) {
-      keptRevisions.delete(key);
-      dropKept = true;
-      current = undefined;
-    }
+  if (current !== undefined && (input.currentRevision !== show.revision ||
+    (show.modelMaxContext !== undefined && current > show.modelMaxContext))) {
+    dropKept = true;
+    current = undefined;
   }
   if (show.pinnedNumCtx !== undefined) {
     // A kept size below the pin would override it: Ollama applies a
