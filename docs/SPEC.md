@@ -1774,9 +1774,10 @@ Identity class and secrets keep their Credential class within security objects.
 Security fields carry a mask role for names and identifiers or for setting values.
 App role and permission scope names are identifiers. App role flags,
 compliance rules and authorization policy settings stay readable in A4.
-Conditional Access location and role GUIDs and preauthorized delegated
-permission IDs use the identifier role. Terms such as All and AllTrusted
-and control values such as mfa use the setting role.
+Field map v5 gives the identifier role to Conditional Access location and role
+GUIDs, terms of use IDs, custom authentication factor IDs, and preauthorized
+delegated permission IDs. Terms such as All and AllTrusted and control values
+such as mfa use the setting role.
 
 An unmapped Graph field or resource defaults to Identity. Mapped containers
 supply a class to unmapped descendants. An explicit child rule can specialize
@@ -1816,10 +1817,15 @@ The SDK exposes `DataClass`, `DATA_CLASSES_BY_SENSITIVITY`, `DataClassCounts`,
 coverage. The SQLite cache classifies a row on write and stores the versioned
 paths, classes and mask roles alongside it. The classifier reads the existing
 row values at those paths. It stores no second copy of the values in SQLite.
-Cached users and groups are indexed by resource when their snapshot changes
-and when the store opens. The desktop prepares new classifications and builds
-startup indexes in batches, yielding between batches. Older cache rows are
-backfilled once. The existing SQLite snapshot replacement is atomic.
+The local worker classifies incoming Graph responses and prepares cache row
+classifications and identity indexes for fresh snapshots. The existing SQLite
+snapshot replacement is atomic. If classification fails during a refresh, the
+new rows remain usable with incomplete coverage. Startup builds indexes in
+batches and publishes only finished shards. Older cache rows are backfilled once.
+The request scanner marks coverage incomplete if the worker lacks the current
+identity index. A confirmed tenant identity can raise a stale cached field
+class. Generic syntax matches such as an unconfirmed GUID honor typed field
+provenance.
 
 The model-facing ledger is a plaintext secret store in process memory. Never
 log, persist or send its contents outside the local classification worker.
@@ -1829,10 +1835,12 @@ in each of eight conversations, with a 15-minute maximum lifetime per ledger.
 Cancellation disposes of the active turn. Conversation deletion and switching
 organizations release the corresponding observations. Disconnect releases them
 when the organization is removed, even if subsequent cleanup needs a retry.
-Temporary history evidence is disposed of after the current turn. If a
-request replays a saved Chat turn whose ledger is unavailable, including
-after expiry or restart, the replayed range has incomplete coverage. Text
-detectors and the cache index still identify evidence in the replay.
+Disconnect also clears the organization's worker identity shards and keeps
+pending removals out of startup indexing. Temporary history evidence is
+disposed of after the current turn. Chat and desktop Nova reasoning mark
+replayed ranges incomplete if the original observations were dropped, expired
+or otherwise unavailable. Text detectors and the cache index still identify
+evidence in the replay.
 
 The decorator scans final system and prompt text for raw and JSON-serialized
 values and recognizes credential and identifier patterns, including UPNs,
@@ -1849,9 +1857,11 @@ an opaque unlabeled secret can evade detection.
 A turn keeps up to two million units for values and provenance, favoring
 Credential and Identity when it has to drop lower classes. Retained evidence
 and drops are counted separately. Received data has
-a 32-million-unit work limit per classification. The request scan works in
-chunks over up to 16 million UTF-16 code units and 200,000 units of match work
-per section. Each turn indexes its own match patterns, and the scanner checks
+a 32-million-unit work limit per classification. Live Graph observations over
+32,768 UTF-16 code units count as dropped from the ledger. The request scan
+matches ledger evidence in chunks across up to 16 million UTF-16 code units
+and 200,000 units of match work per section. Text detectors read the bounded
+section so long gaps and tokens can cross ledger chunk boundaries. Each turn indexes its own match patterns, and the scanner checks
 an anchor's first code unit before looking up the full anchor. Later turns
 reuse the existing indexes. One local worker per desktop process scans larger
 requests and requests with cached identity indexes. Matcher changes synchronize
@@ -1869,11 +1879,13 @@ does not mark a later turn incomplete. If classification fails or the worker
 times out, the observer
 marks the request failed and the provider call proceeds with unchanged options.
 
-Each event includes the field map version, timestamp and available run or
-conversation ID. The host retains the most recent 16 records per scope across
-32 scopes for development and tests, with up to 256 offsets per retained
-record. Live observers receive the full result. The host exposes counters for unscoped
-registrations and requests. The records are local diagnostics.
+Each local diagnostic event includes the field map version, timestamp and
+available run or conversation ID. Graph evidence sources use static route
+labels. The host retains the most recent 16 records per scope across 32 scopes,
+with up to 256 offsets per retained record. Records expire after 15 minutes.
+Disconnect clears records associated with that organization. Live observers
+receive the full classification result. The host exposes counters for unscoped
+registrations and requests.
 
 Record IDs and tenant IDs can correlate fields of one record. Phase A4 will
 treat fields that co-occur in a record at that record's highest class when it

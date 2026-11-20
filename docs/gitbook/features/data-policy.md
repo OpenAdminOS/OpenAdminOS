@@ -30,8 +30,8 @@ Text checks recognize some patterns, such as email addresses and labeled
 passwords, and can find values the app already knows about the organization.
 An unfamiliar name or an opaque, unlabeled secret can evade these checks.
 
-OpenAdminOS classifies cache rows when it saves them. Larger model requests
-are scanned by a background worker on this device. A model request scan
+A background worker on this device classifies incoming Graph data, prepares
+cache classifications and scans larger model requests. A model request scan
 can examine up to 16 million UTF-16 code units each for the system text and
 the prompt, subject to the match work limit. If the scan cannot examine all
 the evidence, its local record marks coverage incomplete separately from
@@ -41,11 +41,15 @@ worker times out. The local evidence budget favors credentials and identity
 values. Live runs keep registering evidence until they finish or are
 cancelled. Temporary Chat observations are kept on this device
 for up to four completed turns in each of eight conversations, with a
-15-minute maximum lifetime. A saved Chat turn included in a follow-up
-has incomplete coverage if its observations have expired or are otherwise
-unavailable. Cancelling a turn clears its active observations.
-Deleting the conversation or disconnecting or switching organizations also
-releases the associated observations.
+15-minute maximum lifetime. A saved turn included in a follow-up in Chat or
+desktop Nova reasoning has incomplete coverage if its original observations
+were dropped, expired or are otherwise unavailable. Cancelling a turn clears
+its active observations. Deleting the conversation or switching organizations
+also releases associated observations. Disconnect clears the organization's
+classification observations, identity indexes and local classification
+diagnostics when the removal is saved, even if local cleanup needs a retry.
+Classification diagnostics use static Graph route labels and expire after
+15 minutes.
 
 Hosted Nova voice uses a separate request path. Its classification coverage
 is planned with provider routing in Phase A3.
