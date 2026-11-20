@@ -13,10 +13,12 @@ import * as path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { describe, it } from "node:test";
 
-import type {
-  RunContext,
-  SandboxBrokerRequest,
-  SandboxBrokerResponse,
+import {
+  GraphAccessDeniedError,
+  graphAccessDenialFromError,
+  type RunContext,
+  type SandboxBrokerRequest,
+  type SandboxBrokerResponse,
 } from "@openadminos/agent-sdk";
 
 import {
@@ -139,6 +141,66 @@ definition:
     assert.ok(capturedInput?.readonlyPaths.includes(agentDir));
     assert.equal(capturedInput?.env?.ELECTRON_RUN_AS_NODE, "1");
     assert.ok(capturedInput?.env?.OPENADMINOS_BROKER_DIR);
+  });
+
+  it("keeps a brokered Graph denial as the cause when the script exits on it", async () => {
+    for (const exitsOnDenial of [true, false]) {
+      const tempRoot = await mkdtemp(path.join(tmpdir(), "openadminos-script-denial-"));
+      const agentDir = path.join(tempRoot, "agent");
+      await mkdir(agentDir, { recursive: true });
+      await writeFile(path.join(agentDir, "agent.mjs"), "process.exit(1);\n");
+      const denied = new GraphAccessDeniedError({ method: "GET", path: "/deviceManagement/managedDevices", requiredScopes: ["DeviceManagementManagedDevices.Read.All"], grantedScopes: [] });
+      const runner: SandboxRunner = {
+        id: "mxc",
+        probe: async () => ({ backend: "mxc", status: "available", experimentalEnabled: true, supported: true, detail: "test" }),
+        run: async (input) => {
+          const response = await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, {
+            id: "graph-1",
+            method: "graph.request",
+            params: { method: "GET", path: "/deviceManagement/managedDevices", query: { $select: "id,deviceName" } },
+          } satisfies SandboxBrokerRequest);
+          assert.equal(response.ok, false);
+          const stderr = exitsOnDenial ? `Error: graph.request: ${response.error?.message}` : "Error: result file could not be written";
+          return { exitCode: 1, signal: null, stdout: "", stderr };
+        },
+      };
+      const manifest = parseAgentTemplate(`
+descriptor:
+  id: script-auditor
+  name: Script Auditor
+  description: Test script auditor.
+  version: 0.1.0
+  author:
+    name: OpenAdminOS
+  category: devices
+  mode: read
+execution:
+  kind: script
+  sandbox: mxc
+  entrypoint: agent.mjs
+skills:
+  - id: load_devices
+    format: graph
+    label: Load devices
+    settings:
+      method: GET
+      path: /deviceManagement/managedDevices
+      select:
+        - id
+        - deviceName
+      scopes:
+        - DeviceManagementManagedDevices.Read.All
+definition:
+  result:
+    summary: Script result.
+`);
+      const module = scriptAgentTemplateToModule(manifest, agentDir, { sandboxRunner: runner, tempRoot, nodePath: process.execPath });
+      const ctx = fakeRunContext();
+      ctx.graph.request = async () => { throw denied; };
+      const error = await module.run(ctx).then(() => undefined, (failure: unknown) => failure);
+      assert.ok(error instanceof Error);
+      assert.equal(graphAccessDenialFromError(error)?.cause, exitsOnDenial ? "missing-consent" : undefined);
+    }
   });
 
   it("refuses direct template-module conversion for script agents", () => {

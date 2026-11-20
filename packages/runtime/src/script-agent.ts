@@ -181,8 +181,13 @@ async function runScriptAgent(
 
         if (sandboxResult.exitCode !== 0) {
           const detail = sandboxResult.stderr.trim() || `exit code ${sandboxResult.exitCode}`;
+          // The script sees only the message of a Graph denial. When it exits
+          // on that denial, the typed error is kept as the cause so the run
+          // records the Graph denial.
+          const denied = broker.getGraphAccessDenied();
           throw new Error(
             `MXC script agent "${manifest.descriptor.id}" failed: ${truncate(detail, 600)}`,
+            denied && detail.includes(denied.message) ? { cause: denied } : undefined,
           );
         }
 
