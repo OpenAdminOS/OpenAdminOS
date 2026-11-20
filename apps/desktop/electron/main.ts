@@ -5389,7 +5389,7 @@ function showNoticeBeforeReady(title: string, text: string): void {
     const result = spawnSync(tool, args, { stdio: "ignore", timeout: 600_000 });
     // The tool ran, so the notice was shown, however it was closed; a dialog
     // left open past the bound was shown too. Only a missing tool tries the next.
-    if (result.status !== null) return;
+    if (result.status !== null || result.signal) return;
     if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT") return;
   }
 }
@@ -5465,9 +5465,9 @@ function removeSchedulerRegistration(): void {
     // its own user cannot read is not a case this app creates.
     if (windowsSchedulerTaskPresence() === "absent") return;
     const xml = windowsSchedulerTaskXml();
-    if (!windowsTaskBelongsToThisAccount(xml === undefined ? undefined : windowsTaskBinary(xml), process.execPath, app.getPath("home"))) {
+    if (!windowsTaskBelongsToThisAccount(xml === undefined ? undefined : windowsTaskBinary(xml), app.getPath("home"))) {
       throw new Error(
-        `the scheduled task ${WINDOWS_SCHEDULER_TASK} runs a copy of OpenAdminOS outside this account's profile, so it may belong to another account and was left in place. Check it in Task Scheduler`,
+        `the scheduled task ${WINDOWS_SCHEDULER_TASK} runs a copy of OpenAdminOS outside this account's profile, so it may belong to another account and was left in place. Check Run As User in Task Scheduler and remove it there if it is yours`,
       );
     }
     removeWindowsSchedulerTask();

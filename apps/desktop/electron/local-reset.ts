@@ -347,8 +347,9 @@ export function localResetPolicyProblem(userDataDir: string): string | undefined
     let stat: ReturnType<typeof lstatSync>;
     try {
       stat = lstatSync(join(userDataDir, name));
-    } catch {
-      continue;
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code === "ENOENT") continue;
+      return `the IT policy file ${name} could not be checked (${reasonOf(cause)})`;
     }
     if (stat.isSymbolicLink()) {
       return `the IT policy file ${name} is a link, and the reset cannot be sure that what it points to survives. Ask whoever manages this device to place the policy file itself in the data folder, or use the machine-wide policy path, then reset`;
@@ -754,15 +755,17 @@ function recordLeftoversDone(
 
 /**
  * The Windows task name is the same for every account on the machine, so an
- * elevated reset must not remove another account's task. The installer is
- * per user, so a task that runs this executable, or one under this
- * account's profile, is this account's; anything else is left in place.
+ * elevated reset must not remove another account's task. The default
+ * install is per user, under the profile, so only a task whose program lies
+ * under this account's profile counts as this account's. A copy installed
+ * for all users (Program Files) or elsewhere could be shared, so its task is
+ * left in place with a warning, even when it runs this same program.
  */
-export function windowsTaskBelongsToThisAccount(taskBinary: string | undefined, execPath: string, home: string): boolean {
+export function windowsTaskBelongsToThisAccount(taskBinary: string | undefined, home: string): boolean {
   if (!taskBinary) return false;
   const binary = win32.normalize(taskBinary).toLowerCase();
   const homePrefix = `${win32.normalize(home).toLowerCase().replace(/\\+$/, "")}\\`;
-  return binary === win32.normalize(execPath).toLowerCase() || binary.startsWith(homePrefix);
+  return binary.startsWith(homePrefix);
 }
 
 /** `security` exits 44 when no item matches. */

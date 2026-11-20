@@ -720,15 +720,15 @@ describe("local reset: wipe at launch", () => {
     }
   });
 
-  it("removes the Windows scheduled task only when it runs this account's copy", () => {
-    const execPath = "C:\\Users\\ada\\AppData\\Local\\Programs\\OpenAdminOS\\OpenAdminOS.exe";
+  it("removes the Windows scheduled task only when its program is under this account's profile", () => {
     const home = "C:\\Users\\ada";
-    assert.equal(windowsTaskBelongsToThisAccount(execPath, execPath, home), true);
-    assert.equal(windowsTaskBelongsToThisAccount("c:\\users\\ADA\\AppData\\Local\\Programs\\OpenAdminOS\\openadminos.exe", execPath, home), true);
-    assert.equal(windowsTaskBelongsToThisAccount("C:\\Users\\ada\\old\\OpenAdminOS.exe", execPath, home), true);
-    assert.equal(windowsTaskBelongsToThisAccount("C:\\Users\\bob\\AppData\\Local\\Programs\\OpenAdminOS\\OpenAdminOS.exe", execPath, home), false);
-    assert.equal(windowsTaskBelongsToThisAccount("C:\\Users\\adam\\OpenAdminOS.exe", execPath, home), false);
-    assert.equal(windowsTaskBelongsToThisAccount(undefined, execPath, home), false);
+    assert.equal(windowsTaskBelongsToThisAccount("C:\\Users\\ada\\AppData\\Local\\Programs\\OpenAdminOS\\OpenAdminOS.exe", home), true);
+    assert.equal(windowsTaskBelongsToThisAccount("c:\\users\\ADA\\AppData\\Local\\Programs\\OpenAdminOS\\openadminos.exe", home), true);
+    // A copy for all users may be shared, even when it is the program running now.
+    assert.equal(windowsTaskBelongsToThisAccount("C:\\Program Files\\OpenAdminOS\\OpenAdminOS.exe", home), false);
+    assert.equal(windowsTaskBelongsToThisAccount("C:\\Users\\bob\\AppData\\Local\\Programs\\OpenAdminOS\\OpenAdminOS.exe", home), false);
+    assert.equal(windowsTaskBelongsToThisAccount("C:\\Users\\adam\\OpenAdminOS.exe", home), false);
+    assert.equal(windowsTaskBelongsToThisAccount(undefined, home), false);
   });
 
   it("treats a sub-folder it cannot read as something it cannot rule out, and ignores letter case", async () => {
