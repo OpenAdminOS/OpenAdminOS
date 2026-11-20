@@ -275,6 +275,10 @@ definition:
     assert.equal(endedOnSizeRefusal(`${refusal}\n    at main (agent.mjs:4:1)\n\nNode.js v22.23.5`), true);
     assert.equal(endedOnSizeRefusal(`${refusal}\nfalling back to local counts\nTypeError: Cannot read properties of undefined (reading 'value')\n    at main (agent.mjs:9:1)`), false);
     assert.equal(endedOnSizeRefusal("TypeError: x is not a function"), false);
+    // Node's output for an uncaught throw: the source line, a caret, then what was thrown.
+    const thrown = (value: string) => `file:///work/agent.mjs:9\n  throw ${value};\n  ^\n\n${value}\n(Use \`node --trace-uncaught ...\` to show where the exception was thrown)`;
+    assert.equal(endedOnSizeRefusal(`${refusal}\n${thrown("fallback failed")}`), false, "a string thrown after a logged refusal");
+    assert.equal(endedOnSizeRefusal(`file:///work/agent.mjs:4\n  const llm = await brokerRequest(...);\n  ^\n\n${refusal}\n    at main (agent.mjs:4:1)`), true);
   });
 
     it("refuses direct template-module conversion for script agents", () => {

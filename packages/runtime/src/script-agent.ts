@@ -339,14 +339,23 @@ function resolveEntrypoint(agentDir: string, entrypoint: string): string {
 }
 
 /**
- * Whether the error the script ended on (the last error header Node prints,
- * such as "Error: llm.complete: ...") is the size refusal. A refusal the
- * script logged earlier and then moved past does not count.
+ * Whether the script ended on the size refusal. Node prints an uncaught
+ * exception after the source line and a caret ("^"); the first line after
+ * the last caret is what the script threw, whether an Error ("Error:
+ * llm.complete: ...") or a plain string. Without a caret (the script exited
+ * on its own), the last error header counts. A refusal the script logged
+ * earlier and then moved past does not count.
  */
 export function endedOnSizeRefusal(stderr: string): boolean {
-  const headers = [...stderr.matchAll(/^(?:Uncaught )?[A-Za-z]*Error\b[^\n]*$/gm)];
-  const last = headers.at(-1)?.[0] ?? "";
-  return /context-too-small|tokens of context/i.test(last);
+  const lines = stderr.split("\n");
+  let caret = -1;
+  lines.forEach((line, index) => {
+    if (/^\s*\^+\s*$/.test(line)) caret = index;
+  });
+  const terminal = caret >= 0
+    ? lines.slice(caret + 1).find((line) => line.trim().length > 0) ?? ""
+    : [...stderr.matchAll(/^(?:Uncaught )?[A-Za-z]*Error\b[^\n]*$/gm)].at(-1)?.[0] ?? "";
+  return /context-too-small|tokens of context/i.test(terminal);
 }
 
 async function readScriptResult(
