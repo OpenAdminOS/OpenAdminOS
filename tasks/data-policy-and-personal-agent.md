@@ -505,9 +505,11 @@ the IT policy file.
       one Chat conversation and is never stored.
 - [ ] A masked `security` object keeps its setting values and replaces names
       and identifiers only.
-- [ ] Rehydration on the way back: streaming with holdback for split tokens,
-      before the agentic loop parses tool actions, and in `runLlmSkill` before a
-      step result is stored. Only reversible placeholders are restored: identity,
+- [ ] Rehydration on the way back: streaming with holdback for split tokens;
+      for tool calls, after the agentic loop parses the action, restored in the
+      parsed parameter values (never in serialized JSON, where a name with
+      quotation marks could break parsing), then the arguments are validated
+      before execution; and in `runLlmSkill` before a step result is stored. Only reversible placeholders are restored: identity,
       device and security names and identifiers. Activity and configuration
       placeholders, when those classes are masked, are not restored: they stay
       masked in the answer, the transcript and tool parameters, like credential
@@ -652,9 +654,11 @@ the IT policy file.
       are allowed; the tool's read-only annotation is shown but not trusted on
       its own, and a tool annotated as a change cannot be approved. Approval
       requires a read-only annotation and no documented write behavior: the
-      app flags tools whose name or description describes saving, changing,
-      sending or deleting, and a flagged tool cannot be approved in any review
-      state, with the reason shown in its row. The
+      app checks the whole definition (name, description, and every input
+      parameter's name and description) and flags a tool that describes
+      saving, changing, sending or deleting, in the first review and in every
+      re-review; a flagged tool cannot be approved in any review state, with
+      the reason shown in its row. The
       approval is enforced at every call, including calls from skills and
       scheduled checks. A tool that is not approved, or added by the server
       later and not yet reviewed, is never offered.
@@ -682,7 +686,9 @@ the IT policy file.
    a skill or a scheduled check (test per path).
 5. A tool annotated read-only whose description says it saves on the server
    (`export_report`) is flagged and cannot be approved, in the first review
-   and when the review is reopened (test).
+   and when the review is reopened (test). The same holds for a tool whose
+   name and description read as read-only but whose input parameter is
+   described as applying a change (`list_baselines` with `apply_to_tenant`).
 6. Regression test: an approved read tool (`get_setting`) whose description
    changes under the same id is neither offered nor callable, from Chat, a
    skill or a scheduled check, until it is approved again; the same holds for
