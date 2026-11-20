@@ -2630,7 +2630,13 @@ start. Start passes the provider and model the review showed, never one the
 host resolves again, and the host refuses a model the provider no longer
 reports. When the chosen provider is not ready and the review opens setup, a
 provider picked there stays on that run: setup does not change the active
-provider for a model fit rerun.
+provider for a model fit rerun or for Run for real of a model fit dry run, and
+checks the picked provider in full the way selecting it does. A run resumed
+from setup opens only its own review. A hosted provider that reports no model
+is not offered, its review does not start, and the host refuses a model fit
+rerun or request on it without a model, since the approval names one model.
+An Azure OpenAI model fit request is refused when the deployment configured
+now is not the one the admin reviewed.
 Run for real of a model fit dry run keeps the on-device requirement and the
 endpoint binding, and so does Run again of a model fit rerun. A model fit request in Chat is bound the same way for its
 own duration, and its answer names where it went only once a model request
