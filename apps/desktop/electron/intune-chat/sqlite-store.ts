@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { setImmediate as yieldToMain } from "node:timers/promises";
-import { inflateSync } from "node:zlib";
+import { promisify } from "node:util";
+import { inflate } from "node:zlib";
 import { collectTenantValues, TenantValueIndex } from "./tenant-values.js";
 import {
   addCacheIdentity, addUserFirstName, ClassificationSlice, classifyCacheRows, currentClassificationLedger,
@@ -2889,8 +2890,15 @@ export class IntelligenceSqliteStore {
     resource: GraphCacheResourceKind, rows: readonly SnapshotResourceRow[], parsed: readonly unknown[], originals = parsed,
   ): void {
     let sidecar: ReturnType<DatabaseSync["prepare"]> | undefined;
-    registerCacheRows(resource, rows, parsed, originals, index => {
-      const row = rows[index]!;
+    // Keep row keys and parsed views in the observer. The SQLite JSON strings
+    // can be collected once the foreground read returns.
+    let bytes = 0;
+    const keys = rows.map(row => {
+      bytes += 128 + 12 * row.raw_json.length;
+      return [row.rowid, row.snapshot_id] as const;
+    });
+    registerCacheRows(resource, bytes, parsed, originals, index => {
+      const [rowid, snapshotId] = keys[index]!;
       sidecar ??= this.db.prepare(`SELECT
         CASE WHEN length(s.compressed) <= ? THEN s.compressed END AS compressed,
         CASE WHEN s.cache_rowid IS NULL AND length(CAST(g.classification_json AS BLOB)) <= ?
@@ -2899,10 +2907,10 @@ export class IntelligenceSqliteStore {
           ON s.cache_rowid = g.rowid AND s.snapshot_id = g.snapshot_id AND s.field_map_version = ?
         WHERE g.rowid = ? AND g.snapshot_id = ?`);
       const record = sidecar.get(MAX_READ_SIDECAR_UNITS, MAX_READ_SIDECAR_UNITS, GRAPH_FIELD_CLASSES_VERSION,
-        row.rowid, row.snapshot_id) as { compressed?: Uint8Array; classification_json?: string } | undefined;
+        rowid, snapshotId) as { compressed?: Uint8Array; classification_json?: string } | undefined;
       if (!record?.compressed) return record?.classification_json;
-      try { return inflateSync(record.compressed, { maxOutputLength: MAX_READ_SIDECAR_UNITS }).toString(); }
-      catch { return undefined; }
+      return inflateSidecar(record.compressed, { maxOutputLength: MAX_READ_SIDECAR_UNITS })
+        .catch(() => undefined);
     });
   }
 
@@ -5088,29 +5096,46 @@ function cacheClassificationRow({ rawJson, normalized }: NormalizedGraphResource
   return { rawJson, graphId: normalized.graphId, displayName: normalized.displayName };
 }
 
+const inflateSidecar = promisify(inflate);
+
 function registerCacheRows(
-  resource: GraphCacheResourceKind, rows: readonly SnapshotResourceRow[], parsed: readonly unknown[], originals: readonly unknown[],
-  sidecar: (index: number) => string | undefined,
+  resource: GraphCacheResourceKind, bytes: number, parsed: readonly unknown[], originals: readonly unknown[],
+  sidecar: (index: number) => string | undefined | Promise<Buffer | undefined>,
 ): void {
-  if (!rows.length) return;
+  if (!parsed.length) return;
   const source = `cache:${resource}`;
   const ledger = currentClassificationLedger();
   if (!ledger) {
     registerClassifiedValues(source, { fields: [], incomplete: false });
     return;
   }
-  // Reserve raw text, parsed rows and their projected views before retaining them.
-  const bytes = rows.reduce((total, row) => total + 128 + 12 * row.raw_json.length, 0);
   void ledger.scheduleRegistration(bytes, async signal => {
     const slice = new ClassificationSlice(signal);
-    for (let index = 0; index < rows.length; index++) {
+    let firstRegistration = true;
+    for (let index = 0; index < parsed.length; index++) {
       signal.throwIfAborted();
-      const fields = cacheClassificationFields(parsed[index], sidecar(index), originals[index]);
+      const pendingSidecar = sidecar(index);
+      let encoded: string | undefined;
+      if (pendingSidecar instanceof Promise) {
+        const bytes = await pendingSidecar;
+        await slice.yield();
+        signal.throwIfAborted();
+        encoded = bytes?.toString();
+      } else {
+        encoded = pendingSidecar;
+      }
+      const fields = cacheClassificationFields(parsed[index], encoded, originals[index]);
       let batch: Array<ClassifiedValues["fields"][number]> = [];
       let next = fields.next();
       while (!next.done) {
         if (next.value) batch.push(next.value);
-        if (batch.length >= 16 || slice.elapsed) {
+        if (batch.length >= (firstRegistration ? 1 : 4) || slice.elapsed) {
+          // Give the first matcher insertion its own slice.
+          if (firstRegistration && batch.length) {
+            await slice.yield();
+            signal.throwIfAborted();
+            firstRegistration = false;
+          }
           ledger.registerClassified(source, { fields: batch, incomplete: false });
           batch = [];
           if (slice.elapsed) await slice.yield();

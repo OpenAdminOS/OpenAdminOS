@@ -214,10 +214,11 @@ it("reuses versioned cache metadata on reopen and backfills rows from older vers
   const tenantId = "fixture-tenant";
   const resource = "applications";
   const row = { id: "fixture-app", passwordCredentials: [{ hint: "Jz7" }] };
+  const other = { id: "other-fixture-app", passwordCredentials: [{ hint: "Zq4" }] };
   let store = new IntelligenceSqliteStore(path);
   try {
     store.replaceGraphResources({ tenantId, resource, label: "Applications", scopeSet: [],
-      refreshedAt: "2026-11-18T00:00:00.000Z", rows: [row] });
+      refreshedAt: "2026-11-18T00:00:00.000Z", rows: [row, other] });
     store.close();
     const db = new DatabaseSync(path);
     try {
@@ -230,11 +231,11 @@ it("reuses versioned cache metadata on reopen and backfills rows from older vers
     await store.waitForCacheClassification();
     const ledger = new ClassificationLedger();
     const result = withClassificationScope(ledger, () => store.queryGraphCache({ tenantId, resource }));
-    assert.deepEqual(result.rows[0]?.row, row);
+    assert.deepEqual(result.rows.map(entry => entry.row), [row, other]);
     await ledger.waitForObservations();
-    const request = ledger.classifyRequest({ prompt: JSON.stringify(row) });
+    const request = ledger.classifyRequest({ prompt: JSON.stringify([row, other]) });
     assert.equal(request.coverageIncomplete, false);
-    assert.equal(request.counts.credential, 1);
+    assert.equal(request.counts.credential, 2);
   } finally {
     store.close();
     await rm(dir, { recursive: true, force: true });
