@@ -67,11 +67,6 @@ export function parseLmStudioContextOverflow(detail: string): { requested?: numb
 interface LmStudioContextInfo {
   loaded?: number;
   max?: number;
-  /**
-   * The model key `lms load` takes, set only when LM Studio confirmed it for
-   * the requested id (which may be an instance such as `qwen3-8b:2`).
-   */
-  key?: string;
 }
 
 /**
@@ -111,11 +106,7 @@ async function readLmStudioContext(endpoint: string, model: string, signal?: Abo
       const instance = instances.find((item) => item.id === model) ?? (entry.key === model && instances.length === 1 ? instances[0] : undefined);
       if (!instance) continue;
       const config = isRecord(instance.config) ? instance.config : {};
-      found = {
-        ...tokenCount("loaded", config.context_length),
-        ...tokenCount("max", entry.max_context_length),
-        ...(typeof entry.key === "string" && entry.key.length > 0 ? { key: entry.key } : {}),
-      };
+      found = { ...tokenCount("loaded", config.context_length), ...tokenCount("max", entry.max_context_length) };
       break;
     }
     if (found.loaded !== undefined || controller.signal.aborted) return found;
@@ -123,8 +114,7 @@ async function readLmStudioContext(endpoint: string, model: string, signal?: Abo
     if (!isRecord(v0)) return found;
     // A model LM Studio reports as not loaded has no loaded size.
     const loadedV0 = v0.state === undefined || v0.state === "loaded" ? tokenCount("loaded", v0.loaded_context_length) : {};
-    const keyV0 = v0.id === model && v0.state === "loaded" ? { key: model } : {};
-    return { ...loadedV0, ...tokenCount("max", v0.max_context_length), ...keyV0, ...found };
+    return { ...loadedV0, ...tokenCount("max", v0.max_context_length), ...found };
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener("abort", abort);
@@ -177,30 +167,20 @@ async function lmStudioContextOverflowMessage(failure: OpenAiCompatibleFailure):
     const size = target === undefined ? "" : ` to at least ${n(target)}`;
     const limit =
       max !== undefined ? ` (${model} supports up to ${n(max)})` : target !== undefined ? " if the model supports that many" : "";
-    // `lms load` alone adds a second instance and leaves this one at its
-    // old size, so unload it and load it again under the same identifier.
-    // The commands are offered only for a key LM Studio confirmed and for
-    // values that are safe to paste into a shell unquoted.
-    const key = info.key;
-    const commands =
-      key !== undefined && isShellSafe(key) && isShellSafe(model)
-        ? `, or run \`lms unload ${model}\` and then \`lms load ${key} --context-length ${target ?? "<tokens>"}${key === model ? "" : ` --identifier ${model}`}\``
-        : "";
+    // No `lms` command is offered: `lms load` alone adds a second
+    // instance, the request may name an instance under another identifier,
+    // and the endpoint may be another machine. The load settings change the
+    // instance that failed, on the server that runs it.
     // At the model's limit the prompt fits, but with less room for the answer than planned.
     const room = requested !== undefined && wanted !== undefined && target !== undefined && target < wanted
       ? ` That leaves ${n(target - requested)} tokens for the answer.`
       : "";
     parts.push(
-      `Raise Context Length${size}${limit} in the model's load settings in LM Studio and reload it${commands}, then re-run.${room} If LM Studio refuses the larger size or keeps the smaller one, narrow the request or pick a model with a larger context window. OpenAdminOS does not reload the model itself, because that would replace the model you loaded.`,
+      `Raise Context Length${size}${limit} in the model's load settings in LM Studio (My Models, or the loaded model in the Developer tab) and reload it, then re-run.${room} If LM Studio refuses the larger size or keeps the smaller one, narrow the request or pick a model with a larger context window. OpenAdminOS does not reload the model itself, because that would replace the model you loaded.`,
     );
   }
   parts.push(`LM Studio said: ${truncate(serverMessage(failure.detail), 200)}`);
   return parts.join(" ");
-}
-
-/** A model key or identifier that a shell passes through as one plain argument. */
-function isShellSafe(value: string): boolean {
-  return /^[A-Za-z0-9][A-Za-z0-9._/:@+-]*$/.test(value);
 }
 
 /** The message inside a JSON error body, or the body as it is. */

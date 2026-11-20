@@ -271,7 +271,8 @@ describe("LM Studio context length too small", () => {
       await assert.rejects(llm.complete({ prompt: "big" }), (error: Error) => {
         assert.match(error.message, /^LM Studio context length too small: This request needs 15,857 tokens of context, but qwen3-8b is loaded in LM Studio with a context length of 4,096\./);
         assert.match(error.message, /Raise Context Length to at least 20,480 \(qwen3-8b supports up to 32,768\)/);
-        assert.match(error.message, /reload it, or run `lms unload qwen3-8b` and then `lms load qwen3-8b --context-length 20480`, then re-run\./);
+        assert.match(error.message, /in the model's load settings in LM Studio \(My Models, or the loaded model in the Developer tab\) and reload it, then re-run\./);
+        assert.doesNotMatch(error.message, /lms (un)?load/);
         assert.match(error.message, /LM Studio said: <LM Studio error> Trying to keep the first 15857 tokens/);
         return true;
       });
@@ -311,7 +312,7 @@ describe("LM Studio context length too small", () => {
       await assert.rejects(llm.complete({ prompt: "big" }), (error: Error) => {
         assert.match(error.message, /^LM Studio context length too small: This request does not fit in the 8,192 tokens of context qwen3-8b is loaded with in LM Studio\./);
         assert.match(error.message, /Raise Context Length \(qwen3-8b supports up to 40,960\)/);
-        assert.match(error.message, /--context-length <tokens>/);
+        assert.doesNotMatch(error.message, /lms (un)?load/);
         return true;
       });
     } finally {
@@ -335,7 +336,7 @@ describe("LM Studio context length too small", () => {
     }
   });
 
-  it("names the model key in the command when the request used a loaded instance id", async () => {
+  it("reads the loaded size of the instance the request named", async () => {
     const server = await fakeLmStudio((req, res) => {
       if (req.url === "/api/v1/models") {
         return sendJson(res, 200, {
@@ -348,7 +349,7 @@ describe("LM Studio context length too small", () => {
       const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b:2" });
       await assert.rejects(llm.complete({ prompt: "big" }), (error: Error) => {
         assert.match(error.message, /but qwen3-8b:2 is loaded in LM Studio with a context length of 4,096/);
-        assert.match(error.message, /run `lms unload qwen3-8b:2` and then `lms load qwen3-8b --context-length 20480 --identifier qwen3-8b:2`/);
+        assert.doesNotMatch(error.message, /lms (un)?load/);
         return true;
       });
     } finally {
@@ -408,7 +409,7 @@ describe("LM Studio context length too small", () => {
     }
   });
 
-  it("offers no command for an id LM Studio did not confirm", async () => {
+  it("gives only the load settings steps when LM Studio reports no sizes", async () => {
     const server = await fakeLmStudio((req, res) => {
       if (req.url?.startsWith("/api/")) return sendJson(res, 404, { error: "Unexpected endpoint" });
       sendJson(res, 400, { error: OLD_OVERFLOW });
@@ -416,7 +417,7 @@ describe("LM Studio context length too small", () => {
     try {
       const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b:2" });
       await assert.rejects(llm.complete({ prompt: "big" }), (error: Error) => {
-        assert.match(error.message, /Raise Context Length to at least 20,480 if the model supports that many in the model's load settings in LM Studio and reload it, then re-run\./);
+        assert.match(error.message, /Raise Context Length to at least 20,480 if the model supports that many in the model's load settings in LM Studio \(My Models, or the loaded model in the Developer tab\) and reload it, then re-run\./);
         assert.doesNotMatch(error.message, /lms (un)?load/);
         return true;
       });
@@ -425,7 +426,7 @@ describe("LM Studio context length too small", () => {
     }
   });
 
-  it("offers no command for an identifier a shell would split or interpret", async () => {
+  it("never puts a model identifier into a shell command", async () => {
     for (const id of ["QA model", "qwen;rm -rf ~", "$(id)"]) {
       const server = await fakeLmStudio((req, res) => {
         if (req.url === "/api/v1/models") return sendJson(res, 200, v1Models(id, 4096, 32768));
