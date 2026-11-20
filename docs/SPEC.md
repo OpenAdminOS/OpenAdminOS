@@ -3837,7 +3837,8 @@ the format. Decisions:
   `noncompliant` state, as the direct evidence answers count it; grace period
   is its own state. Wording the parser cannot read for certain (two operating
   systems, an excluded one such as "not Windows", "not currently compliant",
-  both states at once) goes to the planner, and the sample rows then get no
+  "not in grace period", both states at once, a "not" or "failing" no filter
+  reads, a sync verb without a window) goes to the planner, and the sample rows then get no
   OS or compliance filter from it either.
   `count_cached` on a resource that was never refreshed returns no count.
 - Intune is the device inventory. Device, OS, sync and compliance wording plans
@@ -3852,8 +3853,8 @@ the format. Decisions:
   so a device added by a later refresh is not counted as part of the previous
   answer. A different value on a field already filtered after a switch lead
   ("what about macOS" after Windows) asks the same question of a fresh set.
-  The trace and the prompt carry how many previous rows a follow-up counts,
-  not their ids. Any other answer clears the context, and
+  What ran shows the filters of a follow-up, not the row ids. A device
+  lookup stores no follow-up context. Any other answer clears the context, and
   follow-up planning reads write intent from the current question only. Short
   follow-ups are planned with the previous question as context. The context is
   stored only when the visible answer came from the computed result (code, or

@@ -12,8 +12,9 @@ import type { GraphCacheQueryPredicate, IntelligenceSqliteStore } from "./sqlite
  * The local 8B model was handed 20 sample rows of managed and Entra
  * devices together and asked to count. It said 3 where 6 devices were
  * not compliant, skipped the per OS split, and named Entra-only devices.
- * Here code reads the question into filters, counts in SQL over every
- * cached row, and the model only writes the answer around the facts.
+ * Here code reads the question into filters and counts in SQL over every
+ * cached row. On a local model code also writes the answer from the facts;
+ * a hosted model writes it from them as authoritative evidence.
  */
 
 export type StructuredDeviceResource = "managedDevices" | "entraDevices";
@@ -86,7 +87,7 @@ export interface ComputedResult {
   /** Rows of the set itself, when the set is listed and has no focus. */
   rows?: ComputedListedRow[];
   rowsComplete?: boolean;
-  /** Plain sentences, computed in code, that the answer must state. */
+  /** Plain sentences, computed in code: the answer a local model's turn shows, and the facts a hosted model states. */
   facts: string[];
   /** What the question asks that the cached data does not hold. */
   notInData?: string[];
@@ -192,6 +193,7 @@ function complianceFocus(lower: string): { label: string; predicate: GraphCacheQ
   const rest = lower.replace(new RegExp(NOT_COMPLIANT.source, "g"), " ");
   const positive = COMPLIANT.test(rest);
   if ([negative, positive, GRACE.test(lower)].filter(Boolean).length > 1) return "ambiguous";
+  if (/(?:\b(?:not|no longer|never)|n't)\s+(?:\w+\s+){0,2}(?:in\s+)?(?:a\s+|the\s+)?grace\b/.test(lower)) return "ambiguous";
   if (positive && /(?:\b(?:not|no longer|never)|n't)\s+(?:\w+\s+){0,2}compliant\b/.test(rest)) return "ambiguous";
   if (negative) return { label: "not compliant", predicate: { field: "complianceState", op: "eq", value: "noncompliant" } };
   if (GRACE.test(lower)) return { label: "in grace period", predicate: { field: "complianceState", op: "eq", value: "inGracePeriod" } };
@@ -201,13 +203,37 @@ function complianceFocus(lower: string): { label: string; predicate: GraphCacheQ
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
+/** A negation on the sync verb: "not synced", "haven't checked in", "without a sync", "no recent sync". */
+const SYNC_NEGATION = /(?:\b(?:not|never|no longer|without)|n't)\s+(?:(?:been|had|yet|recently|once|a|any)\s+){0,2}(?:sync(?:ed|ing|s)?|checked in|check-?in|contacted|seen)\b|\bno (?:recent )?(?:sync|check-?in)\b/;
+const SYNC_VERB = /\b(?:sync(?:ed|ing|s)?|checked in|check-?in|seen|contacted)\b/;
+
+/**
+ * Whether the question holds a clause no handler reads. Code renders a local
+ * model's answer, so a dropped "not" ("devices not managed in Intune"), a
+ * sync verb without a window ("which have not synced") or "failing" would
+ * give a confident answer to another question. Such a question goes to the
+ * planner instead.
+ */
+function hasUnreadClause(lower: string, syncRead: boolean): boolean {
+  if (SYNC_VERB.test(lower) && !syncRead) return true;
+  const rest = lower
+    .replace(new RegExp(NOT_COMPLIANT.source, "g"), " ")
+    .replace(new RegExp(SYNC_NEGATION.source, "g"), " ");
+  return /(?:\b(?:not|no|never|without|longer)\b|n't)/.test(rest) || /\b(?:fail|fails|failing|failed)\b/.test(rest);
+}
+
+/** More than one clause asks for numbers or a list: "how many Windows devices, and how many are not compliant". */
+function asksTwoParts(lower: string): boolean {
+  return (lower.match(/\bhow many\b/g)?.length ?? 0) > 1 || /\band (?:which|what|list|show)\b/.test(lower);
+}
+
 /** A sync window named in the question, as a predicate on lastSyncDateTime. */
 export function syncFilter(lower: string, generatedAt: string): { label: string; predicate: GraphCacheQueryPredicate } | undefined {
   if (!/\b(sync(?:ed|ing|s)?|checked in|check-?in|last seen|contacted)\b/.test(lower)) return undefined;
   const now = new Date(generatedAt);
   if (!Number.isFinite(now.getTime())) return undefined;
   // Only a negation on the sync verb itself counts: "not compliant and synced today" is synced today.
-  const negated = /(?:\b(?:not|never|no longer|without)|n't)\s+(?:(?:been|had|yet|recently|once|a|any)\s+){0,2}(?:sync(?:ed|ing|s)?|checked in|check-?in|contacted|seen)\b|\bno (?:recent )?(?:sync|check-?in)\b/.test(lower);
+  const negated = SYNC_NEGATION.test(lower);
   let since: Date | undefined;
   let label = "";
   if (/\bthis month\b/.test(lower)) {
@@ -260,7 +286,7 @@ export function structuredQueryForQuestion(input: {
   const constraints = [os, compliance, sync].filter(Boolean).length;
 
   // A word the parser does not know means the question asks something the counts do not answer.
-  if (unknownWords(lower).length > 0 || namesSeveralSystems(lower) || NEGATED_SYSTEM.test(lower)) return undefined;
+  if (unknownWords(lower).length > 0 || namesSeveralSystems(lower) || NEGATED_SYSTEM.test(lower) || hasUnreadClause(lower, sync !== undefined)) return undefined;
   const previous = input.previous;
   const wordCount = lower.split(" ").length;
   // A follow-up narrows the previous set: it adds a constraint after a lead such as "only" or "of those",
@@ -320,7 +346,8 @@ export function structuredQueryForQuestion(input: {
     : `Entra ${os ? `${os.label} ` : ""}devices`;
   // "How many devices, and which are not compliant": the count covers the set, the list the subset.
   const focusParts = [compliance, sync].flatMap((entry) => (entry ? [entry] : []));
-  const focus = focusParts.length > 0 && (count || breakdown.length > 0) && list
+  // A second clause ("and how many are not compliant") is the subset, never a filter on the whole count.
+  const focus = focusParts.length > 0 && (count || breakdown.length > 0) && (list || asksTwoParts(lower))
     ? { label: focusParts.map((entry) => entry.label).join(", "), filters: focusParts.map((entry) => entry.predicate) }
     : undefined;
   const filters = focus ? scopeFilters : [...scopeFilters, ...focusParts.map((entry) => entry.predicate)];
@@ -629,7 +656,8 @@ export function readChatResultContext(store: IntelligenceSqliteStore, conversati
 
 /** The context the next question narrows: this answer's computed result, or none. */
 export function chatResultContextFor(result: ComputedResult | undefined, input: { tenantId: string; question: string; computedAt: string }): ChatResultContext | undefined {
-  if (!result) return undefined;
+  // A device lookup is about one device; a follow-up such as "only Windows" never narrows it.
+  if (!result || result.kind === "device-detail") return undefined;
   return { ...result.context, question: input.question, tenantId: input.tenantId, computedAt: input.computedAt };
 }
 

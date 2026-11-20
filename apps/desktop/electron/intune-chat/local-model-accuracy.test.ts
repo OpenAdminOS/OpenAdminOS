@@ -314,7 +314,7 @@ describe("structured device questions", () => {
   });
 
   it("falls back for filters it cannot express and reads negation within its clause", () => {
-    for (const question of ["How many devices in Intune are not Windows?", "how many non-Windows devices are there", "How many Windows or macOS devices are there?", "how many devices are not currently compliant", "how many are compliant and how many are not compliant", "which devices are no longer compliant"]) {
+    for (const question of ["how many devices are not managed in Intune?", "how many noncompliant devices have not synced", "how many devices have synced?", "how many devices are failing?", "how many devices are not in grace period", "How many devices in Intune are not Windows?", "how many non-Windows devices are there", "How many Windows or macOS devices are there?", "how many devices are not currently compliant", "how many are compliant and how many are not compliant", "which devices are no longer compliant"]) {
       assert.equal(structuredQueryForQuestion({ question, generatedAt: at }), undefined, question);
     }
     const both = structuredQueryForQuestion({ question: "How many devices are not compliant and synced today?", generatedAt: at });
@@ -328,6 +328,10 @@ describe("structured device questions", () => {
       ], question);
     }
     assert.equal(structuredQueryForQuestion({ question: "which devices are not compliant or in grace period", generatedAt: at }), undefined);
+    // A second count clause is the subset, never a filter on the whole count.
+    const twoParts = structuredQueryForQuestion({ question: "how many Windows devices are there and how many are not compliant", generatedAt: at });
+    assert.deepEqual(twoParts?.filters, [{ field: "operatingSystem", op: "eq", value: "Windows" }]);
+    assert.deepEqual(twoParts?.focus?.filters, [{ field: "complianceState", op: "eq", value: "noncompliant" }]);
     // The sample rows never get the inverse filter either.
     assert.deepEqual(deviceRowFilters("How many devices in Intune are not Windows?"), []);
   });

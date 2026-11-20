@@ -1455,14 +1455,10 @@ function countCached(ctx: IntuneChatToolContext, params: unknown): unknown {
   let filters: GraphCacheQueryPredicate[] | undefined;
   let groupBy: string[] = [];
   let list = false;
-  let ids: string[] | undefined;
   try {
     const record = params as Record<string, unknown>;
-    const extras = Object.keys(record).filter(key => !["resource", "where", "filters", "groupBy", "list", "ids"].includes(key));
+    const extras = Object.keys(record).filter(key => !["resource", "where", "filters", "groupBy", "list"].includes(key));
     if (extras.length) throw new Error(`Unsupported count_cached parameters: ${extras.join(", ")}. Use resource, where, filters, groupBy or list; nothing was counted.`);
-    // ids narrows a count to rows an earlier answer matched; the host sends it for a follow-up.
-    if (record.ids !== undefined && (!Array.isArray(record.ids) || record.ids.length > 500 || record.ids.some(id => typeof id !== "string"))) throw new Error("ids must be an array of at most 500 row ids.");
-    ids = record.ids as string[] | undefined;
     const rawGroup = record.groupBy;
     groupBy = rawGroup === undefined ? [] : typeof rawGroup === "string" ? [rawGroup] : Array.isArray(rawGroup) && rawGroup.every(field => typeof field === "string") ? rawGroup as string[] : (() => { throw new Error("groupBy must be a field name or an array of at most three field names."); })();
     if (groupBy.length > 3) throw new Error("groupBy takes at most three fields.");
@@ -1488,7 +1484,6 @@ function countCached(ctx: IntuneChatToolContext, params: unknown): unknown {
     tenantId: ctx.tenantId,
     resource,
     ...(filters ? { filters } : {}),
-    ...(ids ? { ids } : {}),
     groupBy,
     ...(list ? { listLimit: COUNT_CACHED_LIST_CAP } : {}),
   });
