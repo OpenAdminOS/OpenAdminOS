@@ -2506,7 +2506,9 @@ access with no sign-in (tester finding, 18 Nov, macOS). Settings > Data has
 **Reset OpenAdminOS**: a product modal with the data folder, what is removed and
 what stays (the enterprise application and admin consent in each tenant, the IT
 `policy.json`, exports), and the typed phrase `RESET OPENADMINOS`, checked again
-in the main process. Mockup: `docs/mockups/34-local-reset.html`.
+in the main process. The impact list scrolls and the buttons stay in view at
+the smallest window height; a refusal from the main process is shown in full.
+Mockup: `docs/mockups/34-local-reset.html`.
 
 - **Two phases.** The request refuses while a confirmed write run is applying
   (also a cancelled one, or one whose organization was disconnected, while
@@ -2572,9 +2574,10 @@ in the main process. Mockup: `docs/mockups/34-local-reset.html`.
   LaunchAgent's process group, which waits for it to exit and runs `open` on
   the app bundle, because launchd ends the group, Electron's relaunch helper
   included, with the job. On Windows the task name is the same for every
-  account, so the reset removes the task only when it runs this executable
-  or one under this account's profile (the installer is per user) and
-  otherwise leaves it with a warning; a per-user task name is a follow-up.
+  account, so the reset removes the task only when its program lies under
+  this account's profile (the default per-user install) and otherwise, also
+  for a copy installed for all users, leaves it with a warning; a per-user
+  task name is a follow-up.
   The LaunchAgent is unloaded by its exact service
   label, never by path (a path can name other jobs), and only a plain file
   at the plist path is deleted. Removal is checked afterwards (`launchctl print` exit 113, a

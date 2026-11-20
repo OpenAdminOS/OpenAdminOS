@@ -175,6 +175,15 @@ the installed app's scheduler, login item or caches.
   account's copy, links removed with Directory.Delete instead of cmd. Open
   follow-up: a per-user Windows task name (the scheduler registration is
   outside this change).
+- Review round 12: Claude and Muse no blocking (Muse: long refusals were cut
+  by the 240 character filter, fixed; unreadable policy entry refuses; Linux
+  notice stops on a signal; guide repeats the Keychain command and stops on
+  a policy folder); Sol four blocking (task owner on a shared install, the
+  Linux findmnt check, the manual steps deleting policy.json, the dialog
+  clipped at the minimum window height), all fixed: ownership only by a
+  program under this account's profile, `findmnt -rno TARGET | grep -F`,
+  `find ... ! -iname policy.json` in the macOS and Linux steps, a scrolling
+  dialog body with fixed buttons.
 - Found in the end to end run and fixed: the incomplete screen called the
   appearance handler before it was registered, and failure reasons repeated
   full paths.
