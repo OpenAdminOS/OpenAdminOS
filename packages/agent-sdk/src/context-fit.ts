@@ -23,11 +23,16 @@ export type RunFailureReason = ContextTooSmallFailure;
 export class ContextTooSmallError extends Error {
   readonly code = "context-too-small" as const;
   readonly failure: ContextTooSmallFailure;
+  /** Also on the error itself, so a reader of `code`, `neededTokens` and `limitTokens` needs no unwrapping. */
+  readonly neededTokens: number;
+  readonly limitTokens: number;
 
   constructor(failure: ContextTooSmallFailure) {
     super(contextTooSmallMessage(failure));
     this.name = "ContextTooSmallError";
     this.failure = failure;
+    this.neededTokens = failure.neededTokens;
+    this.limitTokens = failure.limitTokens;
   }
 }
 

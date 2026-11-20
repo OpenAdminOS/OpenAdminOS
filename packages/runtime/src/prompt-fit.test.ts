@@ -61,6 +61,9 @@ describe("checkPromptFit", () => {
       () => assertPromptFits({ prompt: "word ".repeat(20_000), contextWindow: 4096, model: "small" }),
       (error: unknown) => {
         assert.ok(error instanceof ContextTooSmallError);
+        assert.equal(error.code, "context-too-small");
+        assert.equal(error.limitTokens, 4096);
+        assert.equal(error.neededTokens, error.failure.neededTokens);
         const failure = contextTooSmallFromError(error);
         assert.ok(failure);
         assert.equal(error.message, contextTooSmallMessage(failure));
