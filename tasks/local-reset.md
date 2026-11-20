@@ -278,6 +278,15 @@ the installed app's scheduler, login item or caches.
   removal or the marker's file creation; Node has no handle-relative
   removal, the per-entry identity check limits it to one entry, and only a
   process of the same account can cause it.
+- Review round 24: Claude and Muse no blocking; Sol accepted the round 23
+  limit and found one blocking (the checks' state read created a missing
+  state file, which could replace a restored one; while a reset is checked
+  or under way a missing state file is now never created) and two mediums
+  (the sandbox flag came back through the relaunch environment, now restored
+  to the launch value; the keychain lookup could hide a match or a login
+  failure, now each other keychain in the search list is looked up on its
+  own with its own warning). Muse lows applied: the same keychain fix, the
+  narrower SPEC sentence, a writable check in the close test.
 - Process lesson: twice I edited the tree while a reviewer was reading it;
   parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the
