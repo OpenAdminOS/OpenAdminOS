@@ -259,6 +259,15 @@ the installed app's scheduler, login item or caches.
   the embedding model into Ollama's store, skipped on that launch) and a
   medium (the ctime fallback for blocked statx, a birth time equal to the
   change time now counts as unknown).
+- Review round 22: Claude and Muse no blocking (Muse nits on two comments,
+  applied); Sol two blocking and a medium. The phase 1 sign-out is removed:
+  it rewrote token caches in place, which cannot be bound to the folder the
+  reset was accepted for (rounds 16, 20, 21 and 22 all found holes there);
+  the launch wipe deletes the token files before anything reads them. This
+  deviates from the brief's step list and is flagged in the hand-back. The
+  Keychain deletion and lookup are limited to the login keychain, in the app
+  and the guide. An entry that cannot be removed keeps the entries named
+  after it, so a locked `openadminos.db` keeps its `-wal` and `-shm`.
 - Process lesson: twice I edited the tree while a reviewer was reading it;
   parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the
