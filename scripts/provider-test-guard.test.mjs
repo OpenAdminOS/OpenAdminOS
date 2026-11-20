@@ -266,7 +266,8 @@ it("probes the renderer directly, never through a proxy the runner inherited", a
   await new Promise((resolve) => proxy.listen(0, "127.0.0.1", resolve));
   // A test-owned listener holds the port for the whole test and is never ready,
   // so only a proxy could make the probe succeed.
-  const notReady = createServer((_request, response) => { response.statusCode = 503; response.end(); });
+  let direct = 0;
+  const notReady = createServer((_request, response) => { direct += 1; response.statusCode = 503; response.end(); });
   await new Promise((resolve) => notReady.listen(0, "127.0.0.1", resolve));
   const port = notReady.address().port;
   const helper = fileURLToPath(new URL("./smoke-provider-isolation.mjs", import.meta.url));
@@ -277,7 +278,9 @@ it("probes the renderer directly, never through a proxy the runner inherited", a
     const { ProxyAgent, setGlobalDispatcher } = require("undici");
     setGlobalDispatcher(new ProxyAgent(process.env.HTTP_PROXY));
     import(${JSON.stringify(pathToFileURL(helper).href)}).then(async ({ waitForSmokeServer }) => {
-      const child = spawn(process.execPath, ["-e", "console.log('ready at :${port}'); setInterval(() => {}, 1000)"], { stdio: ["ignore", "pipe", "pipe"] });
+      const child = spawn(process.execPath, ["-e", "setInterval(() => console.log('ready at :${port}'), 100)"], { stdio: ["ignore", "pipe", "pipe"] });
+      // Start the deadline only once the fixture is up, so a slow start cannot pass the test without a probe.
+      await new Promise((resolve) => child.stdout.once("data", resolve));
       try { await waitForSmokeServer(child, "http://127.0.0.1:${port}", 1500); console.log("READY"); }
       catch (error) { console.log("REJECTED " + error.message); }
       finally { child.kill(); process.exit(0); }
@@ -292,6 +295,8 @@ it("probes the renderer directly, never through a proxy the runner inherited", a
     });
     assert.match(stdout, /REJECTED Timed out waiting for the smoke server/);
     assert.equal(proxied, 0);
+    // The probe did run, directly against the listener that holds the port.
+    assert.ok(direct > 0, "the readiness probe never reached the direct listener");
   } finally {
     await new Promise((resolve) => proxy.close(resolve));
     await new Promise((resolve) => notReady.close(resolve));
@@ -300,7 +305,9 @@ it("probes the renderer directly, never through a proxy the runner inherited", a
 
 it("drops inherited smoke and capture launch flags from the Electron environment", async () => {
   const inherited = ["OPENADMINOS_SCREENSHOT_CAPTURE", "OPENADMINOS_OFFICE_SMOKE", "OPENADMINOS_FIRST_RUN_CAPTURE",
-    "OPENADMINOS_INTUNE_CHAT_SMOKE", "OPENADMINOS_SUPPORT_BUNDLE_EXPORT_PATH"];
+    "OPENADMINOS_INTUNE_CHAT_SMOKE", "OPENADMINOS_SUPPORT_BUNDLE_EXPORT_PATH",
+    "OPENADMINOS_CLAUDE_CODE_BINARY", "OPENADMINOS_CODEX_BINARY", "OPENADMINOS_COPILOT_BINARY",
+    "OPENADMINOS_GEMINI_BINARY", "OPENADMINOS_APPLE_FOUNDATION_HELPER"];
   const saved = Object.fromEntries(inherited.map((name) => [name, process.env[name]]));
   for (const name of inherited) process.env[name] = "1";
   let isolation;
