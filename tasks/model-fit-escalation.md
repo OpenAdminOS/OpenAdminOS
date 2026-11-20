@@ -27,30 +27,30 @@ Only a local provider gets the offer.
 
 ## Deliverables
 
-- [ ] Mockup `docs/mockups/36-model-fit.html` and index entry: the Chat notice
+- [x] Mockup `docs/mockups/36-model-fit.html` and index entry: the Chat notice
       with plain numbers, the choices (hosted with location label and cost note,
       larger local model, split, keep local), the accept step, the after state,
       the decline state, the policy state, and the agent run failure with
       Run with provider and its accept step.
-- [ ] Shared pure module `apps/desktop/src/shared/model-fit.ts`: classify a
+- [x] Shared pure module `apps/desktop/src/shared/model-fit.ts`: classify a
       failure, list choices from the provider list (configured and ready only,
       hosted never first or preselected), parse model size.
-- [ ] Copy `apps/desktop/src/copy/model-fit.ts` using `providerDataLocation`.
-- [ ] Contracts in `packages/agent-sdk`: `ModelFitIssue`, `ChatModelOverride`
+- [x] Copy `apps/desktop/src/copy/model-fit.ts` using `providerDataLocation`.
+- [x] Contracts in `packages/agent-sdk`: `ModelFitIssue`, `ChatModelOverride`
       on `SendIntuneChatMessageInput`, `modelFit` and `switchedFrom` on
       `IntuneChatMessage` (stored in answer meta).
-- [ ] Main: `electron/intune-chat/model-fit.ts` resolves and validates a
+- [x] Main: `electron/intune-chat/model-fit.ts` resolves and validates a
       per-request override (listed, ready, local active provider, hosted needs a
       fresh non-remembered consent for that provider and model); minimal hook in
       `service.ts`; IPC validation in `main.ts`.
-- [ ] Renderer Chat: notice, accept step (the existing hosted consent panel in
+- [x] Renderer Chat: notice, accept step (the existing hosted consent panel in
       a per-request mode, no remember box, no Enter shortcut), after-state line
       on the answer, decline line.
-- [ ] Agent runs: the run failure view offers Run with provider for a
+- [x] Agent runs: the run failure view offers Run with provider for a
       context-too-small failure on a local model; the run preflight is the
       accept step and says why and that it is this run only; Start run reruns
       with the chosen provider. Write agents still stop at the diff.
-- [ ] Tests (below), SPEC.md section, CHANGELOG line.
+- [x] Tests (below), SPEC.md section, CHANGELOG line.
 
 ## Acceptance criteria
 
@@ -81,4 +81,36 @@ Only a local provider gets the offer.
 
 ## Review
 
-(filled in at the end)
+PR #213, based on main (merged up to date twice; workstreams A and B+C were
+on origin but not merged, so this PR reads their typed failures by shape
+instead of stacking on them).
+
+Reviews: six rounds each of Codex gpt-6.2-sol (high), Muse Wonder Full 1.0
+(high; round 1 failed on a transport error) and a Claude feature-dev
+evaluator. Sol's blocking findings, all fixed with tests:
+- round 1: Ollama Cloud models treated as local; approval not bound to the
+  request.
+- round 2: acceptance reusable for another request; two sends from one
+  acceptance; remote-backed Ollama aliases; rerun in an unreviewed
+  organization.
+- round 3: accept step could send text the admin removed; cached alias
+  locality; ordinary sends reusing a fit acceptance.
+- round 4: on-device requirement dropped after admission; Azure endpoint
+  change between phases; merge conflict with main.
+- round 5: alias change between calls; destination change during review;
+  Run for real dropping the safeguards.
+
+Live check: real Chat service with the local model mocked and the real
+Claude Code CLI (2.1.328, alias `sonnet`, answered as claude-sonnet-5-5).
+No local model was loaded (maintainer instruction, see tasks/lessons.md).
+
+Acceptance criteria 1 to 4 are covered by electron/intune-chat/model-fit.test.ts,
+electron/run-lifecycle.test.ts, src/pages/IntuneChatModelFit.test.tsx,
+src/pages/RunResult.test.tsx and src/setup/pending-intent.test.ts. Criterion 5:
+the full electron suite passes under Node 22 apart from the load-sensitive Nova
+follow-up timing test (passes alone); typecheck is clean.
+
+Open TODO(ugur): remember for this conversation; read local context lengths
+for local choices; cost estimate on hosted rows; label Ollama Cloud and
+remote-backed models everywhere; the thinking-only shape from the reasoning
+report branch.
