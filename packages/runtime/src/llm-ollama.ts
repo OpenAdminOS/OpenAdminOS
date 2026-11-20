@@ -198,7 +198,8 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       // failure treats the same way.
       let retry: { requested: number; numCtx: number; sizedUpFront?: boolean } | undefined;
       let modelMax: number | undefined;
-      const cachedCtx = ollamaContextOverrides.get(cacheKey);
+      // Mutable: a kept size below a model's new pin is dropped before sending.
+      let cachedCtx = ollamaContextOverrides.get(cacheKey);
       /**
        * Forgets a size the attempt that just failed sent. A failure is
        * evidence only about the size that attempt asked for, at the moment it
@@ -260,14 +261,18 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           timeoutMs: lookupTimeoutMs, signal: controller.signal,
         });
         if (opts.signal?.aborted) throw stoppedByUser();
-        if (sized !== undefined) {
+        if (sized !== undefined && "dropKept" in sized) {
+          if (cachedCtx !== undefined && ollamaContextOverrides.get(cacheKey) === cachedCtx) ollamaContextOverrides.delete(cacheKey);
+          cachedCtx = undefined;
+          numCtx = undefined;
+        } else if (sized !== undefined) {
           numCtx = sized.numCtx;
           raisedCtx = sized.numCtx;
           retry = { requested: sized.neededTokens, numCtx: sized.numCtx, sizedUpFront: true };
           retryFailuresAtStart = ollamaContextFailures.get(contextFailureKey(cacheKey, sized.numCtx)) ?? 0;
         }
 
-        startAttempt(sized !== undefined
+        startAttempt(sized !== undefined && "numCtx" in sized
           ? ` with a ${formatTokens(sized.numCtx)} token context sized for this request`
           : cachedCtx === undefined ? "" : ` with the ${formatTokens(cachedCtx)} token context kept from an earlier request`);
         // The size this first send asked for: kept, sized up front, or none.

@@ -1256,4 +1256,29 @@ describe("Ollama context for an unpinned model", () => {
       globalThis.fetch = original;
     }
   });
+
+  it("stops sending a kept size below a pin the model gained when it was created again", async () => {
+    const original = globalThis.fetch;
+    let pinned = false;
+    const ollama = scripted({ showBody: unpinned });
+    globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+      if (new URL(String(input)).pathname === "/api/show" && pinned) {
+        return new Response(JSON.stringify({ parameters: "num_ctx                        16384", model_info: unpinned.model_info }), { status: 200 });
+      }
+      return ollama.fetchImpl(input, init);
+    }) as typeof fetch;
+    try {
+      const llm = createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "recreated" });
+      await llm.complete({ prompt: words(2000), maxTokens: 1000 });
+      assert.equal(ollama.chats.at(-1), 4096);
+      // `ollama create recreated` with PARAMETER num_ctx 16384.
+      pinned = true;
+      await llm.complete({ prompt: words(8000), maxTokens: 1000 });
+      assert.equal(ollama.chats.at(-1), undefined, "the request leaves the pin in charge");
+      await llm.complete({ prompt: "short", maxTokens: 100 });
+      assert.equal(ollama.chats.at(-1), undefined, "the dropped size is not used again");
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
 });
