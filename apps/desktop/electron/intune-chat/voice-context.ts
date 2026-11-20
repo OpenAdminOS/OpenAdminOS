@@ -163,7 +163,8 @@ export function clipVoiceText(text: string, bytes: number, historyField?: "text"
     .subarray(0, bytes)
     .toString("utf8")
     .replace(/\uFFFD$/, "");
-  return registerRenderedFragment(text, clipped, { key: historyField, requireEvidence: historyField !== undefined && clipped !== text });
+  const provenance = historyField ? { before: `"${historyField}":"`, after: '"', requireEvidence: clipped !== text } : {};
+  return registerRenderedFragment(text, clipped, provenance);
 }
 
 /** Exact platform-filtered app counts use app-type aggregates over all cached rows. */

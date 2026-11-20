@@ -167,6 +167,25 @@ it("observes clipped voice history only for the active turn", async t => {
   assert.equal(ledger.classifyRequest(probe).spans.some(span => span.source === "nova:history"), false);
 });
 
+it("preserves a password read from a different field when voice history shortens it", async t => {
+  const text = "source-password-value-".repeat(20);
+  const ledger = new ClassificationLedger();
+  const prior = new ClassificationLedger();
+  t.after(() => { ledger.dispose(); prior.dispose(); });
+  prior.register("fixture", { secretText: text });
+  ledger.include(prior);
+  const messages = [
+    { id: "question", conversationId: "chat", role: "user" as const, status: "completed" as const, content: "Check the record.", createdAt: "2026-11-19T00:00:00Z" },
+    { id: "answer", conversationId: "chat", role: "assistant" as const, status: "completed" as const, content: text, createdAt: "2026-11-19T00:01:00Z" },
+  ];
+  const { history } = withClassificationScope(ledger, () => voiceConversationContext("What about that record?", messages, true, [], () => prior));
+  await ledger.waitForObservations();
+  const result = await ledger.classifyProviderRequest({ prompt: history });
+  assert.equal(result.coverageIncomplete, false);
+  assert.ok(result.spans.some(span => span.kind === "credential" && span.source === "fixture" &&
+    history.slice(span.start, span.end) === text.slice(0, 128)));
+});
+
 it("summarizes encryption and OS versions without treating unknown values as false", () => {
   const aggregate = () => ({
     total: 100,
