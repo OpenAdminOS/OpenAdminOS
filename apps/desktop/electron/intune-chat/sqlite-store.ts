@@ -99,8 +99,12 @@ interface ResourceStatusRow {
 
 interface ResourceRow {
   raw_json: string;
-  classification_json?: string | null;
   refreshed_at?: string;
+}
+
+interface SnapshotResourceRow extends ResourceRow {
+  rowid: number;
+  snapshot_id: string;
 }
 
 interface CachedGraphResourceRow {
@@ -2433,26 +2437,26 @@ export class IntelligenceSqliteStore {
       }
       let rows = this.db
         .prepare(
-          `SELECT raw_json, classification_json
+          `SELECT rowid, snapshot_id, raw_json
            FROM graph_resources
            WHERE ${where.join(" AND ")}
            ORDER BY COALESCE(last_seen_at, refreshed_at) DESC
            LIMIT ?`,
         )
-        .all(...args, input.limitPerResource) as unknown as ResourceRow[];
+        .all(...args, input.limitPerResource) as unknown as SnapshotResourceRow[];
       if (rows.length === 0 && terms.length > 0) {
         rows = this.db
           .prepare(
-            `SELECT raw_json, classification_json
+            `SELECT rowid, snapshot_id, raw_json
              FROM graph_resources
              WHERE tenant_id = ? AND resource = ?
              ORDER BY COALESCE(last_seen_at, refreshed_at) DESC
              LIMIT ?`,
           )
-          .all(input.tenantId, resource, input.limitPerResource) as unknown as ResourceRow[];
+          .all(input.tenantId, resource, input.limitPerResource) as unknown as SnapshotResourceRow[];
       }
       const parsed = rows.map(row => readJson<unknown>(row.raw_json, {}));
-      registerCacheRows(resource, rows, parsed);
+      this.observeCacheRows(resource, rows, parsed);
       out[resource] = parsed;
     }
     return out;
@@ -2854,7 +2858,7 @@ export class IntelligenceSqliteStore {
       .all(...args, limit) as unknown as Array<{ rowid: number; total_count: number }>;
     const details = this.db.prepare(`SELECT rowid, raw_json, snapshot_id, refreshed_at
       FROM graph_resources WHERE rowid IN (SELECT value FROM json_each(?))`)
-      .all(JSON.stringify(selected.map(row => row.rowid))) as unknown as Array<ResourceRow & { rowid: number; snapshot_id: string }>;
+      .all(JSON.stringify(selected.map(row => row.rowid))) as unknown as SnapshotResourceRow[];
     const byId = new Map(details.map(row => [row.rowid, row]));
     const rows = selected.map(row => byId.get(row.rowid)!);
     const parsed = rows.map((row) => ({
@@ -2863,12 +2867,7 @@ export class IntelligenceSqliteStore {
     }));
     const originals = parsed.map(entry => entry.row);
     const projected = input.projectRow ? parsed.map(entry => ({ ...entry, row: input.projectRow!(entry.row) })) : parsed;
-    let sidecar: ReturnType<DatabaseSync["prepare"]> | undefined;
-    registerCacheRows(input.resource, rows, projected.map(entry => entry.row), originals, index => {
-      const row = rows[index]!;
-      sidecar ??= this.db.prepare("SELECT classification_json FROM graph_resources WHERE rowid = ? AND snapshot_id = ?");
-      return (sidecar.get(row.rowid, row.snapshot_id) as Pick<ResourceRow, "classification_json"> | undefined)?.classification_json;
-    });
+    this.observeCacheRows(input.resource, rows, projected.map(entry => entry.row), originals);
     return {
       resource: input.resource,
       totalCount: selected[0]?.total_count ?? 0,
@@ -2878,6 +2877,18 @@ export class IntelligenceSqliteStore {
     };
   }
 
+  private observeCacheRows(
+    resource: GraphCacheResourceKind, rows: readonly SnapshotResourceRow[], parsed: readonly unknown[], originals = parsed,
+  ): void {
+    let sidecar: ReturnType<DatabaseSync["prepare"]> | undefined;
+    registerCacheRows(resource, rows, parsed, originals, index => {
+      const row = rows[index]!;
+      sidecar ??= this.db.prepare(`SELECT classification_json FROM graph_resources
+        WHERE rowid = ? AND snapshot_id = ? AND length(CAST(classification_json AS BLOB)) <= ?`);
+      return (sidecar.get(row.rowid, row.snapshot_id, 128 * 1024) as { classification_json?: string } | undefined)?.classification_json;
+    });
+  }
+
   readManagedDevicesLastSyncBefore(input: {
     tenantId: string;
     thresholdIso: string;
@@ -2885,7 +2896,7 @@ export class IntelligenceSqliteStore {
   }): unknown[] {
     const rows = this.db
       .prepare(
-        `SELECT raw_json, classification_json
+        `SELECT rowid, snapshot_id, raw_json
          FROM graph_resources
          WHERE tenant_id = ?
            AND resource = 'managedDevices'
@@ -2894,9 +2905,9 @@ export class IntelligenceSqliteStore {
          ORDER BY last_seen_at ASC
          LIMIT ?`,
       )
-      .all(input.tenantId, input.thresholdIso, input.limit) as unknown as ResourceRow[];
+      .all(input.tenantId, input.thresholdIso, input.limit) as unknown as SnapshotResourceRow[];
     const parsed = rows.map((row) => readJson<unknown>(row.raw_json, {}));
-    registerCacheRows("managedDevices", rows, parsed);
+    this.observeCacheRows("managedDevices", rows, parsed);
     return parsed;
   }
 
@@ -5050,8 +5061,8 @@ function cacheClassificationRow({ rawJson, normalized }: NormalizedGraphResource
 }
 
 function registerCacheRows(
-  resource: GraphCacheResourceKind, rows: readonly ResourceRow[], parsed: readonly unknown[], originals = parsed,
-  sidecar = (index: number) => rows[index]?.classification_json,
+  resource: GraphCacheResourceKind, rows: readonly SnapshotResourceRow[], parsed: readonly unknown[], originals: readonly unknown[],
+  sidecar: (index: number) => string | undefined,
 ): void {
   if (!rows.length) return;
   const source = `cache:${resource}`;

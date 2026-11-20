@@ -418,6 +418,50 @@ it("does not register sidecars from a snapshot that replaced the cache read", as
   }
 });
 
+it("defers sidecar reads for deterministic Chat and keys them to the selected snapshots", async t => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-cache-deterministic-"));
+  const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+  const ledger = new ClassificationLedger();
+  const tenantId = "tenant-1";
+  const date = "2026-11-18T00:00:00.000Z";
+  const score = { id: "score", currentScore: 30 };
+  const device = { id: "device", lastSyncDateTime: date, activationLockBypassCode: "q7z" };
+  const resources = [
+    { resource: "secureScores", label: "Secure Score", rows: [score] },
+    { resource: "managedDevices", label: "Devices", rows: [device] },
+  ] as const;
+  const seed = () => {
+    for (const input of resources) store.replaceGraphResources({ ...input, rows: [...input.rows], tenantId, scopeSet: [], refreshedAt: date });
+  };
+  try {
+    seed();
+    const prepare = DatabaseSync.prototype.prepare;
+    const sidecarReads: string[] = [];
+    t.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
+      if (/SELECT[^]*classification_json[^]*FROM graph_resources/i.test(sql)) sidecarReads.push(sql);
+      return prepare.call(this, sql);
+    });
+    const result = withClassificationScope(ledger, () => ({
+      score: store.readGraphRows({ tenantId, resources: ["secureScores"], searchTerms: ["no match"], limitPerResource: 5 }).secureScores,
+      devices: store.readManagedDevicesLastSyncBefore({ tenantId, thresholdIso: "2026-11-19T00:00:00.000Z", limit: 5 }),
+    }));
+    assert.deepEqual(result, { score: [score], devices: [device] });
+    assert.deepEqual(sidecarReads, []);
+    seed(); // Same row IDs and values, different snapshots.
+    await ledger.waitForObservations();
+    assert.equal(sidecarReads.length, 2);
+    assert.ok(sidecarReads.every(sql => sql.includes("snapshot_id = ?")));
+    const observation = ledger.classifyRequest({ prompt: JSON.stringify(result) });
+    assert.equal(observation.unexamined.registrations, 2);
+    assert.ok(!observation.spans.some(span => span.source === "cache:managedDevices"));
+    assert.equal(observation.coverageIncomplete, true);
+  } finally {
+    ledger.dispose();
+    await store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 it("keeps the previous rows and identity index when batched preparation is cancelled", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-cache-classification-cancel-"));
   const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
