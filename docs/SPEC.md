@@ -2525,7 +2525,8 @@ A local choice sends at once, since nothing leaves the device, but only
 after a fresh check that the model runs here: the host reads Ollama's
 `/api/tags` again (model metadata only; nothing is loaded) and refuses a
 model that is no longer listed or is now remote-backed, or when the list
-cannot be read. That check runs again before every model call of the
+cannot be read; for LM Studio and Lemonade it classifies the address they
+are reached at, and refuses one outside this device. That check runs again before every model call of the
 request, not only once. A hosted choice takes a destination fingerprint
 (`getProviderDestination`: its address, or the Azure OpenAI resource and
 deployment, and Lemonade's address, which can be set outside this device)

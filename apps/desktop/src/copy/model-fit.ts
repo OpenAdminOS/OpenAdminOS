@@ -97,7 +97,7 @@ export const MODEL_FIT_COPY = {
   once: "Asked for every request. Nothing is remembered.",
   back: "Back",
   questionLabel: "Question that is sent",
-  acceptWithdrawn: "Your question or attachments changed, so nothing was sent. Choose a provider again to send the question shown in the notice, or send the edited question as a new message.",
+  acceptWithdrawn: "Your question or attachments changed, so nothing was sent. Choose a provider again to review what is sent, or send the edited question as a new message.",
 
   answeredBy: "Answered by",
   /** A switched request that failed or was stopped: the prompt still left this device. */
