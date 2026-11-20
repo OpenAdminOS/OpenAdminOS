@@ -486,7 +486,7 @@ describe("a Nova follow-up run", () => {
       // The hung call did not hold the next one: both were asked in the same pass.
       assert.equal(calls, 2);
     } finally {
-      store.close();
+      await store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
