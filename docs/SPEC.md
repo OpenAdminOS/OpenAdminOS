@@ -2575,9 +2575,11 @@ Mockup: `docs/mockups/34-local-reset.html`.
   the app bundle, because launchd ends the group, Electron's relaunch helper
   included, with the job. On Windows the task name is the same for every
   account, so the reset removes the task only when its program lies under
-  this account's profile (the default per-user install) and otherwise, also
-  for a copy installed for all users, leaves it with a warning; a per-user
-  task name is a follow-up.
+  this account's profile (the default per-user install) and the account it
+  runs as (`<Principal><UserId>`) is this one by name or SID (`whoami
+  /user`); otherwise, also for a copy installed for all users or when either
+  side is unknown, it leaves the task with a warning. A per-user task name
+  is a follow-up.
   The LaunchAgent is unloaded by its exact service
   label, never by path (a path can name other jobs), and only a plain file
   at the plist path is deleted. Removal is checked afterwards (`launchctl print` exit 113, a

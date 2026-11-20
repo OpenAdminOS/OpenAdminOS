@@ -184,6 +184,14 @@ the installed app's scheduler, login item or caches.
   program under this account's profile, `findmnt -rno TARGET | grep -F`,
   `find ... ! -iname policy.json` in the macOS and Linux steps, a scrolling
   dialog body with fixed buttons.
+- Review round 13: Claude one blocking (a code fence closed mid-line, so the
+  rest of the guide rendered as code), Muse one blocking (the macOS cookie
+  store, a plain file, was always skipped by the folder walk), Sol two
+  blocking (a service account's task pointing at this profile, `findmnt`
+  escaping spaces) plus the same two. All fixed: the walk runs only for
+  folders, the task must also run as this account (name or SID), the guide
+  decodes mount targets and stops when the check fails, the fences are
+  fixed, and a policy.json that is not a plain file refuses.
 - Found in the end to end run and fixed: the incomplete screen called the
   appearance handler before it was registered, and failure reasons repeated
   full paths.
