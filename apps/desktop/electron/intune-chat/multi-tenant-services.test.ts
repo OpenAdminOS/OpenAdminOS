@@ -83,7 +83,7 @@ async function makeFixture(tenants: TenantRecord[], answers?: string[], beforeCo
     graphTenants,
     prompts,
     async close() {
-      store.close();
+      await store.close();
       await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     },
   };

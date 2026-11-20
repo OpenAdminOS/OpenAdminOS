@@ -196,6 +196,31 @@ it("reuses versioned cache metadata on reopen and backfills rows from older vers
   }
 });
 
+it("closing a profile drains outstanding classification before the profile can be removed", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-cache-close-"));
+  let unblock!: () => void;
+  const blocked = new Promise<void>(resolve => { unblock = resolve; });
+  let started!: () => void;
+  const entered = new Promise<void>(resolve => { started = resolve; });
+  const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"), {
+    backgroundClassification: true,
+    beforeClassification: () => { started(); return blocked; },
+  });
+  try {
+    await entered;
+    let closed = false;
+    const closing = store.close().then(() => { closed = true; });
+    await nextTick();
+    assert.equal(closed, false);
+    unblock();
+    await closing;
+    assert.equal(closed, true);
+  } finally {
+    unblock();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 it("background backfill leaves a removed database absent", async t => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const dir = await mkdtemp(join(tmpdir(), "openadminos-cache-removed-"));

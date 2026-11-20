@@ -476,7 +476,9 @@ export class IntelligenceSqliteStore {
     }
   }
 
-  close(): void {
+  /** Close the main connection and settle background work for this profile. */
+  close(): Promise<void> {
+    const settled = this.waitForCacheClassification();
     this.closed = true;
     for (const tenantId of new Set([...this.classificationIndexes.keys(), ...this.tenantIdentityShards.keys(),
       ...this.stagedIdentityShards.keys(), ...this.stagedFirstNames.keys()])) {
@@ -484,6 +486,7 @@ export class IntelligenceSqliteStore {
     }
     this.tenantIdentityIndexes.clear();
     this.db.close();
+    return settled ?? Promise.resolve();
   }
 
   /**

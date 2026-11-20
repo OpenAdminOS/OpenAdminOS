@@ -72,8 +72,7 @@ async function fixture(options: {
     }
   };
   return { dir, filePath, store, prompts, waitForClassifications, close: async () => {
-    await store["requireIntelligenceStore"]().waitForCacheClassification();
-    store.close();
+    await store.close();
     await rm(dir, { recursive: true, force: true });
   } };
 }

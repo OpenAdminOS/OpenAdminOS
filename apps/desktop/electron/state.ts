@@ -2385,7 +2385,7 @@ export class AppStateStore {
     return this.novaStores().followUps;
   }
 
-  close(): void {
+  close(): Promise<void> {
     this.chatService.clearClassifications();
     this.classificationDiagnosticsClosed = true;
     clearTimeout(this.classificationDiagnosticsExpiry);
@@ -2394,9 +2394,10 @@ export class AppStateStore {
     void this.gatewayService.stop();
     void this.mcpHost.closeAll();
     this.officeServiceInstance?.close();
-    this.intelligenceStore?.close();
+    const cacheClosed = this.intelligenceStore?.close();
     this.novaStoresInstance?.db.close();
     this.auditLog.close();
+    return cacheClosed ?? Promise.resolve();
   }
 
   private agentUpdatesRoot(): string | undefined {

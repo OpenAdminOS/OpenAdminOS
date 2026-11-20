@@ -81,7 +81,7 @@ describe("tenant disconnect", () => {
       assert.equal(state.tenants.length, 0);
       assert.equal(state.runs.length, 0);
       assert.equal(state.activeTenantId, undefined);
-      store.close();
+      await store.close();
 
       const persisted = JSON.parse(await readFile(statePath, "utf8")) as {
         runDeliveryQueue?: unknown[];
@@ -144,7 +144,7 @@ describe("tenant disconnect", () => {
       );
       inspected.close();
     } finally {
-      try { store.close(); } catch { /* already closed */ }
+      try { await store.close(); } catch { /* already closed */ }
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -251,7 +251,7 @@ async function fixture(extra: Record<string, unknown> = {}, options: Record<stri
   return {
     dir, statePath, store, signIn,
     async close() {
-      store.close();
+      await store.close();
       await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     },
   };

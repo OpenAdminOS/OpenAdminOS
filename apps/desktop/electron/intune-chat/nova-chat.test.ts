@@ -99,8 +99,7 @@ async function fixture(empty = false, deviceRows?: unknown[]) {
     calls,
     prompts,
     cleanup: async () => {
-      await store["requireIntelligenceStore"]().waitForCacheClassification();
-      store.close();
+      await store.close();
       await rm(dir, { recursive: true, force: true });
     },
   };

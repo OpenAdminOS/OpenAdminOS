@@ -63,7 +63,7 @@ it("persists each cache denial and keeps consent, role, and licence readiness di
     assert.equal(cached.lastError, undefined);
     assert.equal(cached.rows, 1);
   } finally {
-    store.close();
+    await store.close();
     await rm(dir, { recursive: true, force: true });
   }
 });
