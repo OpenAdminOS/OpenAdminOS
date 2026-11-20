@@ -2605,8 +2605,6 @@ export class IntuneChatService {
       consentVerified = true;
     };
     if (reachesModel) verifyConsent();
-    // The offer is used up once this request is cleared to send.
-    if (fitOffer) this.modelFitOffers.consume(fitOffer.id);
     // The consent audit is per tenant; a no-tenant send has none to record against.
     // A follow-up's consent was recorded when it was set; the fire time adds none.
     if (provider?.isLocal === false && input.hostedProviderConsent && !noTenant && !options.scheduledConsent) {
@@ -2636,6 +2634,8 @@ export class IntuneChatService {
         if (!conversation.tenantId) store.bindConversationTenant(conversation.id, tenant.id);
       }
     }
+    // The offer is used up once this request is cleared to send: consent and conversation checks passed.
+    if (fitOffer) this.modelFitOffers.consume(fitOffer.id);
     // A new chat is named after the question until the answer gives it a title.
     const newConversationTitle = conversation ? undefined : chatTitleForPrompt(content);
     if (!conversation) {

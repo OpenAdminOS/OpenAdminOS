@@ -10,6 +10,9 @@ import { isProviderReady } from "./provider-detection.js";
  * renderer, which offers the choices.
  */
 
+// "thinking-only" has no producer on main yet: the reasoning report work
+// (runtime/gpt-oss-reasoning-report) is to raise it as a typed reason.
+// TODO(ugur): confirm the shape that branch uses (`kind` or `code`).
 const FIT_REASONS: readonly ModelFitReason[] = ["context-too-small", "repeated-failure", "thinking-only"];
 
 function count(text: string | undefined): number | undefined {
