@@ -232,8 +232,15 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         } else if (cachedCtx !== undefined && !response.ok && isOllamaMemoryError(detail)) {
           forgetCachedCtx();
           throw new Error(cachedContextMemoryMessage(model, cachedCtx, detail));
+        } else if (cachedCtx !== undefined && isOllamaPromptTooLong(detail)) {
+          // Ollama's overflow without token counts: nothing to size a retry
+          // from, but the kept size did not fit either.
+          forgetCachedCtx();
+          throw new Error(`Ollama context size too small: This request did not fit in the ${formatTokens(cachedCtx)} token context kept from an earlier request. The next request starts from Ollama's default context size. Ollama said: ${truncate(detail, 200)}`);
         }
         if (!response.ok) {
+          // A retry that fails this way does not keep the earlier size either.
+          if (isOllamaPromptTooLong(detail)) forgetCachedCtx();
           if (response.status === 404 && detail.toLowerCase().includes("model")) {
             throw new Error(
               `Ollama model "${model}" is not pulled. Run \`ollama pull ${model}\`.`,
@@ -293,12 +300,17 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
               // Ollama can accept the retry and then fail to load the model
               // with the larger context.
               const text = errorText(chunk.error);
+              if (isOllamaPromptTooLong(text)) forgetCachedCtx();
               if (isOllamaMemoryError(text)) {
                 forgetCachedCtx();
-                if (retry && accumulated.length === 0) {
-                  throw new Error(contextMemoryMessage(model, retry.requested, retry.numCtx, text));
+                if (retry) {
+                  throw new Error(
+                    accumulated.length === 0
+                      ? contextMemoryMessage(model, retry.requested, retry.numCtx, text)
+                      : `Ollama failed partway through an answer from ${model} on the retry with a ${formatTokens(retry.numCtx)} token context size, usually because free memory ran out. Ollama said: ${truncate(text, 200)}`,
+                  );
                 }
-                if (!retry && cachedCtx !== undefined) {
+                if (cachedCtx !== undefined) {
                   throw new Error(cachedContextMemoryMessage(model, cachedCtx, text, accumulated.length > 0));
                 }
               }
@@ -635,6 +647,11 @@ const OLLAMA_MEMORY_ERRORS = [
   "requires more system memory",
   "unable to load full model",
 ];
+
+/** Ollama's overflow message without token counts (llm/llama_server.go promptTooLongMessage). */
+function isOllamaPromptTooLong(detail: string): boolean {
+  return detail.toLowerCase().includes("the prompt is longer than the context length currently available");
+}
 
 function isOllamaMemoryError(detail: string): boolean {
   const lower = detail.toLowerCase();

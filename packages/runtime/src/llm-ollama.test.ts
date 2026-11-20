@@ -101,6 +101,8 @@ describe("Ollama context size", () => {
     retryStallAfterToken?: (res: ServerResponse) => void;
     /** A request with num_ctx sends a token and the final record in one write. */
     retryOneWrite?: boolean;
+    /** A request with num_ctx gets Ollama's overflow without token counts. */
+    retryPromptTooLong?: boolean;
   }) {
     const chats: Array<{ num_ctx?: number }> = [];
     const shows: string[] = [];
@@ -172,6 +174,11 @@ describe("Ollama context size", () => {
         if (numCtx !== undefined && options.retryRedirect) {
           res.writeHead(307, { location: "http://example.com/api/chat" });
           res.end();
+          return;
+        }
+        if (numCtx !== undefined && options.retryPromptTooLong) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: "the prompt is longer than the context length currently available to the model; shorten the prompt, adjust the context length in settings, or use a model with a longer context length" }));
           return;
         }
         if (numCtx !== undefined && options.retryPartialError) {
@@ -608,6 +615,46 @@ describe("Ollama context size", () => {
       fake.options.retryPartialError = undefined;
       fake.options.limit = () => 65536;
       await llm.complete({ prompt: "big" });
+      assert.deepEqual(fake.chats.at(-1), {});
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("drops the kept context on Ollama's overflow without token counts", async () => {
+    const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384 });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "kept-no-counts" });
+      await llm.complete({ prompt: "big" });
+      fake.options.retryPromptTooLong = true;
+      await assert.rejects(
+        llm.complete({ prompt: "big" }),
+        /^Error: Ollama context size too small: This request did not fit in the 45,056 token context kept from an earlier request\. The next request starts from Ollama's default context size\. Ollama said: /,
+      );
+      fake.options.retryPromptTooLong = false;
+      fake.options.limit = () => 65536;
+      await llm.complete({ prompt: "small" });
+      assert.deepEqual(fake.chats.at(-1), {});
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("names the retry's size when the retry runs out of memory after its answer started", async () => {
+    const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384 });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "retry-partial" });
+      await llm.complete({ prompt: "big" });
+      fake.options.requested = (prompt) => (prompt === "huge" ? 80000 : 40652);
+      fake.options.retryPartialError = "out of memory";
+      await assert.rejects(
+        llm.complete({ prompt: "huge" }),
+        /^Error: Ollama failed partway through an answer from retry-partial on the retry with a 84,992 token context size, usually because free memory ran out\./,
+      );
+      assert.deepEqual(fake.chats.slice(2), [{ num_ctx: 45056 }, { num_ctx: 84992 }]);
+      fake.options.retryPartialError = undefined;
+      fake.options.limit = () => 131072;
+      await llm.complete({ prompt: "small" });
       assert.deepEqual(fake.chats.at(-1), {});
     } finally {
       await fake.close();
