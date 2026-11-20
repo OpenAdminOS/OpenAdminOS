@@ -13,15 +13,15 @@ Reviews Conditional Access policies for coverage, exclusions, report-only contro
 | Field | Value |
 | --- | --- |
 | Agent ID | `conditional-access-explainer` |
-| Version | `1.1.1` |
+| Version | `1.2.0` |
 | Mode | `read` |
 | Tier | `agent` |
 | Category | `policies` |
 | Required Entra tier | `p1` |
 | Preferred model | `llama3.1:8b` |
-| Minimum app version | `0.6.3` |
+| Minimum app version | `0.7.3-nightly.99999999999999` |
 | Author | OpenAdminOS · verified |
-| Last changed | 2026-11-04 · `6b31f810` |
+| Last changed | 2026-11-19 · `3a7aa1ca` |
 
 ## Execution
 
