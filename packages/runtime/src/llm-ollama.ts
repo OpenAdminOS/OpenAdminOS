@@ -5,6 +5,7 @@ import type {
   LlmTokenUsage,
   RunLlmApi,
 } from "@openadminos/agent-sdk";
+import { ContextTooSmallError } from "@openadminos/agent-sdk";
 import { isRefusedRedirect, modelServerRedirect, redirectRefusedDetail } from "./llm-openai-compatible.js";
 import { ollamaRequestNumCtx, parseOllamaShow, readOllamaContextWindow } from "./ollama-context.js";
 
@@ -258,9 +259,11 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           endpoint, model, ...(opts.system ? { system: opts.system } : {}), prompt: opts.prompt,
           ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
           ...(cachedCtx !== undefined ? { currentNumCtx: cachedCtx } : {}),
+          ...(opts.enforceContextWindow ? { enforce: true } : {}),
           timeoutMs: lookupTimeoutMs, signal: controller.signal,
         });
         if (opts.signal?.aborted) throw stoppedByUser();
+        if (sized !== undefined && "tooLarge" in sized) throw new ContextTooSmallError(sized.tooLarge);
         if (sized !== undefined && "dropKept" in sized) {
           if (cachedCtx !== undefined && ollamaContextOverrides.get(cacheKey) === cachedCtx) ollamaContextOverrides.delete(cacheKey);
           cachedCtx = undefined;
