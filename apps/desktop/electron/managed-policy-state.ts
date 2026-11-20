@@ -160,7 +160,10 @@ export function applyManagedPolicyToProviders(
         ...rest,
         status: "error",
         models: [],
-        detail: `Your IT department set the model ${model}, which ${provider.name} does not list. Install it, then refresh providers.`,
+        // A local runtime can get the model; a hosted tool offers a fixed list, so only IT can change it.
+        detail: provider.isLocal
+          ? `Your IT department set the model ${model}, which ${provider.name} does not list. Install it, then refresh providers.`
+          : `Your IT department set the model ${model}, which ${provider.name} does not offer. Ask IT to choose a model it offers, then refresh providers.`,
       };
     });
 }

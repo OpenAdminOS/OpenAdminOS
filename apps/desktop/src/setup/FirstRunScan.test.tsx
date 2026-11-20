@@ -125,6 +125,24 @@ describe("first-launch model scan screen", () => {
     expect(screen.getByText(/^Claude Code: Claude Code sends prompts to Anthropic, or to Amazon Bedrock or Google Vertex/)).toBeInTheDocument();
   });
 
+  it("disables a signed-in tool ruled out by policy with its reason and no Retry", async () => {
+    const reason = "Your IT department set the model missing-model, which Claude Code does not offer. Ask IT to choose a model it offers, then refresh providers.";
+    const probes = [probe("anthropic", "Claude Code", "hosted", "claude --version, claude auth status", {
+      state: "unavailable", ready: false, summary: "Unavailable", facts: [reason],
+    })];
+    const { bridge, finish } = scanBridge({ kind: "nothing" }, probes);
+    renderGate(bridge);
+    await finish();
+    const group = await screen.findByRole("radiogroup", { name: "What answers in Chat" });
+    const row = within(group).getByRole("radio", { name: /^Claude Code/ });
+    expect(row).toBeDisabled();
+    expect(row.closest("label")).toHaveTextContent("Unavailable");
+    expect(row.closest("label")).toHaveTextContent(reason);
+    expect(within(group).queryByRole("button", { name: /check Claude Code again/i })).toBeNull();
+    expect(screen.queryByText("Signed in")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Use Claude Code" })).toBeNull();
+  });
+
   it("shows the settled state with no motion under reduced motion", async () => {
     const { bridge, finish } = scanBridge({ kind: "hosted-detected", providerIds: ["anthropic"] });
     const { container } = renderGate(bridge);
@@ -414,6 +432,21 @@ describe("first-launch model scan screen", () => {
     await screen.findByRole("heading", { level: 1, name: "OpenAdmin 8B is ready on this device" });
     expect(screen.queryByText(MODEL_SCAN_COPY.nothingLeaves)).not.toBeInTheDocument();
     expect(screen.getAllByText("Runs on this device. Your references get tool queries to learn.microsoft.com.").length).toBeGreaterThan(0);
+  });
+
+  it("shows a ready model's capability warning in What ran", async () => {
+    const warning = "Some model capabilities could not be verified. Ollama answered with a redirect to another address.";
+    const probes = [probe("ollama", "Ollama", "local", "localhost:11434", {
+      summary: "Running, 1 model", models: ["llama3.1:8b"], warning,
+    })];
+    const { bridge, finish } = scanBridge({ kind: "local-ready", providerId: "ollama", model: "llama3.1:8b" }, probes);
+    renderGate(bridge);
+    await finish();
+    const ledger = await screen.findByText(MODEL_SCAN_COPY.whatRan, { selector: "summary" });
+    await userEvent.click(ledger);
+    expect(within(ledger.closest("details")!).getByText(warning)).toBeVisible();
+    expect(radio("Ollama")).toBeEnabled();
+    expect(radio("Ollama").closest("label")).toHaveTextContent("Ready");
   });
 
   it("can be left before it settles, completing the first run without selecting anything (round 2, item N)", async () => {

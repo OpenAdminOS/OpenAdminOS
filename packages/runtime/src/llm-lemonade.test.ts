@@ -175,6 +175,40 @@ describe("createLemonadeLlm", () => {
       assert.deepEqual(chunks.at(-1)?.tokenUsage, { promptTokens: 4, completionTokens: 2, totalTokens: 6 });
     });
   });
+
+  it("keeps the partial answer when a stream sends a string error, as before", async () => {
+    await withFetch(async (input) => {
+      if (String(input).endsWith("/models")) return listed("Qwen3-0.6B-GGUF");
+      const encoder = new TextEncoder();
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"Hi"}}]}\n\n'));
+          controller.enqueue(encoder.encode('data: {"error":"Context size has been exceeded."}\n\n'));
+          controller.close();
+        },
+      });
+      return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+    }, async () => {
+      const chunks = [];
+      for await (const chunk of createLemonadeLlm({ defaultModel: "Qwen3-0.6B-GGUF" }).stream({ prompt: "Say hi" })) {
+        chunks.push(chunk);
+      }
+      assert.equal(chunks.at(-1)?.accumulated, "Hi");
+      assert.equal(chunks.at(-1)?.done, true);
+    });
+  });
+
+  it("does not read an LM Studio context wording from Lemonade as an LM Studio error", async () => {
+    await withFetch(async (input) => {
+      if (String(input).endsWith("/models")) return listed("Qwen3-0.6B-GGUF");
+      return new Response(JSON.stringify({ error: { message: "Context size has been exceeded." } }), { status: 400 });
+    }, async () => {
+      await assert.rejects(
+        createLemonadeLlm({ defaultModel: "Qwen3-0.6B-GGUF" }).complete({ prompt: "x" }),
+        /^Error: Lemonade responded with HTTP 400: /,
+      );
+    });
+  });
 });
 
 function listed(id: string): Response {

@@ -92,6 +92,7 @@ interface Harness {
 
 async function withHarness(run: (harness: Harness) => Promise<void>, options: {
   emptyCache?: boolean; graphError?: string; incremental?: boolean; docsIndex?: boolean; chunkDelayMs?: number;
+  searchIndex?: () => Promise<[]>;
   /** Answers the query writer from its prompt instead of the script's last MCP params. */
   writer?: (prompt: string) => string | undefined;
   /** Graph responses by path, in place of an empty collection. */
@@ -187,6 +188,7 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: {
       documentationIndexVersion: () => "2026-08-26",
       retrieveDocumentation: async (query: string) => {
         docsSearches.push(query);
+        if (options.searchIndex) return options.searchIndex();
         return [
           { file: "defender/mac-install-manually.md", title: "Manual deployment for Defender on macOS", text: "Download the onboarding package.", score: 0.9 },
           { file: "defender/mac-prerequisites.md", title: "Prerequisites for Defender on macOS", text: "Grant full disk access.", score: 0.8 },
@@ -344,6 +346,37 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       assert.ok(prompts.every((entry) => !entry.prompt.includes("passages from the local docs index")));
       assert.deepEqual(message.documentationSources?.map((source) => source.kind), ["mcp", "mcp"]);
     }, { docsIndex: true });
+  });
+
+  it("records a failed documentation search separately from a successful search with no matches", async () => {
+    let fail = true;
+    const reason = "Ollama at http://127.0.0.1:11434/api/embed answered with a redirect to another address.";
+    await withHarness(async ({ store, script }) => {
+      const search = async () => {
+        script([
+          { kind: "docs", sources: ["microsoft-learn"], tool: learnTool, params: { query: "nothing about onboarding" } },
+          { final: true, answer: "Deploy the onboarding package." },
+        ]);
+        return (await store.streamIntuneChatMessage({ content: ONBOARDING_QUESTION }, () => {})).assistantMessage;
+      };
+      const failed = (await search()).steps?.find((step) => step.kind === "docs-index");
+      assert.equal(failed?.status, "failed");
+      assert.match(failed.title, /^Could not search the local docs index/);
+      assert.ok(failed.detail?.includes(reason));
+      assert.match(failed.detail ?? "", /Settings, Privacy.*ask again/);
+      assert.doesNotMatch(failed.detail ?? "", /No passages matched/);
+
+      fail = false;
+      const empty = (await search()).steps?.find((step) => step.kind === "docs-index");
+      assert.equal(empty?.status, "completed");
+      assert.match(empty.detail ?? "", /^No passages matched/);
+    }, {
+      docsIndex: true,
+      searchIndex: async () => {
+        if (fail) throw new Error(reason);
+        return [];
+      },
+    });
   });
 
   it("searches the local docs index after Microsoft Learn returns nothing, as its own step after the Learn call", async () => {
