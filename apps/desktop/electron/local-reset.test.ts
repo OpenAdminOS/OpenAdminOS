@@ -1512,9 +1512,24 @@ describe("local reset: restart", () => {
     const execPath = "/tmp/.mount_OpenAdXyz/openadminos";
     const argv = [execPath, "--some-flag", "--background-scheduler"];
     const env = { APPIMAGE: "/home/admin/Apps/OpenAdminOS.AppImage", APPDIR: "/tmp/.mount_OpenAdXyz" };
+    const mounted = () => "36 35 0:50 / /tmp/.mount_OpenAdXyz ro,nosuid,nodev - fuse.OpenAdminOS.AppImage OpenAdminOS.AppImage ro\n";
     assert.deepEqual(
-      relaunchTarget({ platform: "linux", env, argv, execPath, dropArgs: ["--background-scheduler"] }),
-      { execPath: "/home/admin/Apps/OpenAdminOS.AppImage", args: ["--some-flag"] },
+      relaunchTarget({ platform: "linux", env, argv, execPath, dropArgs: ["--background-scheduler"], mountInfo: mounted }),
+      { execPath: "/home/admin/Apps/OpenAdminOS.AppImage", args: ["--some-flag"], extractAndRun: false },
+    );
+    // Extract-and-run: the app folder is an unpacked copy, not a mount, and
+    // the runtime stripped its flag, so the restart asks for the mode again.
+    const extracted = { APPIMAGE: env.APPIMAGE, APPDIR: "/tmp/appimage_extracted_0123abcd" };
+    assert.deepEqual(
+      relaunchTarget({
+        platform: "linux",
+        env: extracted,
+        argv: ["/tmp/appimage_extracted_0123abcd/openadminos"],
+        execPath: "/tmp/appimage_extracted_0123abcd/openadminos",
+        dropArgs: [],
+        mountInfo: () => "",
+      }),
+      { execPath: env.APPIMAGE, args: [], extractAndRun: true },
     );
     assert.deepEqual(relaunchTarget({ platform: "linux", env: {}, argv, execPath, dropArgs: ["--background-scheduler"] }), { args: ["--some-flag"] });
     // An APPIMAGE inherited from a parent AppImage is not this app's.

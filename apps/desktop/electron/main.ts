@@ -56,7 +56,7 @@ import {
 } from "electron";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { arch as osArch, release as osRelease, tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -5596,7 +5596,7 @@ function relaunchInteractive(): void {
     dropArgs: [BACKGROUND_SCHEDULER_ARG, MENU_BAR_ARG],
   });
   if (target.execPath) {
-    relaunchAppImage(target.execPath, target.args);
+    relaunchAppImage(target.execPath, target.args, target.extractAndRun === true);
     return;
   }
   app.relaunch(target);
@@ -5637,10 +5637,21 @@ function relaunchOutsideLaunchAgent(): void {
  * could not mount itself through the setuid fusermount. The shell waits for
  * this process to exit, at most a minute, then starts the AppImage file.
  */
-function relaunchAppImage(appImage: string, args: string[]): void {
-  const script = 'pid="$1"; shift; i=0; while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 300 ]; do sleep 0.2; i=$((i+1)); done; exec "$@"';
+function relaunchAppImage(appImage: string, args: string[], extractAndRun: boolean): void {
   try {
-    const child = spawn("/bin/sh", ["-c", script, "sh", String(process.pid), appImage, ...args], { detached: true, stdio: "ignore" });
+    accessSync(appImage, fsConstants.X_OK);
+  } catch (error) {
+    console.warn("[local-reset] the AppImage cannot be started again from where it was; it resets at the next launch", error);
+    app.exit(0);
+    return;
+  }
+  // It waits for this process and for the AppImage runtime that started it
+  // (its parent), which unmounts or removes the extracted copy once this
+  // process is gone, so the new runtime does not reuse a folder being removed.
+  const script = 'pids="$1"; shift; i=0; for p in $pids; do while kill -0 "$p" 2>/dev/null && [ "$i" -lt 300 ]; do sleep 0.2; i=$((i+1)); done; done; exec "$@"';
+  const env = { ...process.env, ...(extractAndRun ? { APPIMAGE_EXTRACT_AND_RUN: "1" } : {}) };
+  try {
+    const child = spawn("/bin/sh", ["-c", script, "sh", `${process.pid} ${process.ppid}`, appImage, ...args], { detached: true, stdio: "ignore", env });
     child.unref();
     child.once("spawn", () => app.exit(0));
     child.once("error", (error) => {

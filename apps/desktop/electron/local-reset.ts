@@ -250,15 +250,43 @@ export function relaunchTarget(input: {
   argv: readonly string[];
   execPath: string;
   dropArgs: readonly string[];
-}): { execPath?: string; args: string[] } {
+  /** The Linux mount table, to tell a mounted AppImage from an extracted one. */
+  mountInfo?: () => string;
+}): { execPath?: string; args: string[]; extractAndRun?: boolean } {
   const args = input.argv.slice(1).filter((arg) => !input.dropArgs.includes(arg));
   // Only this app's own AppImage: the runtime sets APPDIR to the folder it
   // runs from, and APPIMAGE can be inherited from a parent that is another
-  // AppImage (an installed package started from such a shell).
+  // AppImage (an installed package started from such a shell). APPDIR is
+  // compared as written and as the system resolves it.
   const appImage = input.platform === "linux" ? input.env.APPIMAGE : undefined;
-  const appDir = input.env.APPDIR;
-  const ownAppImage = Boolean(appImage && appDir && input.execPath.startsWith(`${appDir.replace(/\/+$/, "")}/`));
-  return ownAppImage ? { execPath: appImage, args } : { args };
+  const appDir = input.env.APPDIR?.replace(/\/+$/, "");
+  if (!appImage || !appDir) return { args };
+  const appDirs = [appDir];
+  try {
+    appDirs.push(realpathSync(appDir));
+  } catch {
+    // The lexical spelling is all there is.
+  }
+  if (!appDirs.some((dir) => input.execPath.startsWith(`${dir}/`))) return { args };
+  // Extract-and-run (no working FUSE): the runtime unpacked the app instead
+  // of mounting it, and strips its flag before the app starts, so the new
+  // process is told again through the variable the runtime also reads.
+  const extractAndRun = !appDirs.some((dir) => isMountPoint(dir, input.mountInfo));
+  return { execPath: appImage, args, extractAndRun };
+}
+
+/** True when the Linux mount table lists a mount exactly at `path`; an unreadable table counts as one. */
+function isMountPoint(path: string, mountInfo: (() => string) | undefined): boolean {
+  let table: string;
+  try {
+    table = (mountInfo ?? (() => readFileSync("/proc/self/mountinfo", "utf8")))();
+  } catch {
+    return true;
+  }
+  return table.split("\n").some((line) => {
+    const point = line.split(" ")[4];
+    return point !== undefined && point.replace(/\\([0-7]{3})/g, (_match, octal: string) => String.fromCharCode(parseInt(octal, 8))) === path;
+  });
 }
 
 /** The marker and the temporary files its writes go through, by name. */
