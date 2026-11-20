@@ -3491,6 +3491,8 @@ Registry QA is expected to run cleanly for bundled agents. When the upstream Mic
 | `28-logo-explorations.html` | Logo concepts; concept A (oa ligature) shipped | ✅ Done |
 | `29-first-run.html` | Two-choice welcome, pilot mode, and connected-stage summary | ✅ Done |
 | `32-connections-first-run.html` | Model-first launch, Chat without an organization, inline service connect, Connections page, organizations, Jamf Pro pattern | Direction approved 2026-11-08, not built |
+| `34-data-policy.html` | Data policy: data classes against Local, Confidential and Hosted, IT-locked rows, masking in the strip, Chat and run activity, blocked and unclassified states, what an agent reads | Proposed 2026-11-18, not built |
+| `35-personal-agent.html` | Personal agent: name and persona, access grants, SKILL.md skills library, Save as skill, learning proposals, recurring read-only checks and daily brief | Proposed 2026-11-18, not built |
 
 When implementing screens in production code, port the design tokens from `_design.css` to the production app's theme system (Tailwind config or CSS variables in the global stylesheet). Build the components listed in §3 as proper React components, not as one-off implementations per screen.
 
