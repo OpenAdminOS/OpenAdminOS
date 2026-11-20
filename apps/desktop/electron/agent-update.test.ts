@@ -30,9 +30,13 @@ describe("registry manifest integrity and update lifecycle", () => {
       join(repoRoot, "agents", "find-inactive-devices", "manifest.yaml"),
       "utf8",
     );
+    let nextVersion = "";
     const updatedManifest = originalManifest.replace(
-      "version: 1.1.0",
-      "version: 1.2.0",
+      /^  version: (\d+)\.(\d+)\.(\d+)$/m,
+      (_line, major: string, minor: string) => {
+        nextVersion = `${major}.${Number(minor) + 1}.0`;
+        return `  version: ${nextVersion}`;
+      },
     );
     assert.notEqual(updatedManifest, originalManifest);
 
@@ -83,12 +87,12 @@ describe("registry manifest integrity and update lifecycle", () => {
       currentManifest = updatedManifest;
       currentEntry = {
         ...currentEntry,
-        version: "1.2.0",
+        version: nextVersion,
         manifestSha256: digest(updatedManifest),
       };
       await store.initRegistry();
       const review = await store.getAgentUpdateReview("find-inactive-devices");
-      assert.equal(review.toVersion, "1.2.0");
+      assert.equal(review.toVersion, nextVersion);
       await store.updateAgent("find-inactive-devices");
       assert.equal(await readFile(manifestPath, "utf8"), updatedManifest);
 
