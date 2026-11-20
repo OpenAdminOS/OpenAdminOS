@@ -5702,11 +5702,14 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
         committedFolder = await writeLocalResetMarker(dataFolder, marker, {
           expectFolder: committedFolder,
           onCommitted: () => {
-            // No update check starts after the commit: electron-updater writes
-            // its staging id into the data folder through file system
-            // functions it captured at load, which the guard cannot see.
-            stopAutoUpdater();
-            store.markLocalResetCommitted();
+            try {
+              store.markLocalResetCommitted();
+            } finally {
+              // No update check starts after the commit: electron-updater
+              // writes its staging id into the data folder through file
+              // system functions it captured at load, which the guard cannot see.
+              stopAutoUpdater();
+            }
           },
         });
       },
