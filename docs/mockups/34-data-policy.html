@@ -619,7 +619,7 @@
         <div><span class="cap">Hosted voice, during a call</span><span data-strip="defaults" data-form="full" data-voice data-label="Hosted voice · OpenAI · hears what you say"></span></div>
         <div><span class="cap">Hosted voice, Security on Hosted is Block</span><span data-strip="secblock" data-form="full" data-voice data-label="Hosted voice · OpenAI · hears what you say"></span></div>
         <div><span class="cap">Same, narrow window</span><span data-strip="secblock" data-form="short" data-voice data-label="Hosted voice · OpenAI · hears what you say"></span></div>
-        <div><span class="cap">Voice on this device, hosted reasoning</span><span data-strip="defaults" data-form="full" data-label="Voice on this device · Claude Code"></span></div>
+        <div><span class="cap">Voice on this device, hosted reasoning</span><span data-strip="defaults" data-form="full" data-label="Transcribed on this device · Hosted reasoning with Claude Code"></span></div>
       </div>
       <div class="two" style="margin-top:16px">
         <div style="display:grid;gap:12px">
@@ -1361,7 +1361,7 @@
         const rule = `${joinList(d.withheldBy.map(clsName))} ${wasWere(d.withheldBy)} Block on Hosted at ${last.at}`;
         // A withheld session start never went out: the call opened without the profile.
         const body = last.start
-          ? `<b>Session start context withheld at ${last.at}</b>${last.body}. ${rule}, so the call opened without the profile and the app sent none of it to OpenAI. The voice model said so:<q>I don't have your profile in this call: your data policy keeps ${names} data from OpenAI. ${last.said}</q>`
+          ? `<b>Session start context withheld at ${last.at}</b>${last.body}. ${rule}, so the call opened without the profile and the app sent none of it to OpenAI. The voice model said so:<q>The app withheld your profile from this call. ${last.said}</q>`
           : `<b>Context withheld at ${last.at}</b>${last.what}, for "${last.ask}". ${rule}, so the app sent none of this context to OpenAI. The call went on without it, and the voice model said so:<q>I can't use the ${names} data for that in this call. ${last.said}</q>`;
         note = `<div class="withheld" role="status">${body}<span class="rec">${rec.text}</span>${rec.acts.join("") ? `<span class="acts">${rec.acts.join("")}</span>` : ""}</div>`;
         return note;
@@ -1374,7 +1374,7 @@
       return `<h4 class="voice">Hosted voice · OpenAI</h4>
         <p class="soft">During a voice call, OpenAI receives what you say and the tenant data the app sends as context, starting with the session start request.</p>
         <dl><dt>What you say aloud</dt><dd class="lv">Sent as audio, not checked by data policy</dd><dt>Transcript on screen</dt><dd>Names and identifiers of people, devices and security objects restored on this device; activity, configuration and credential placeholders stay masked</dd></dl>
-        <p class="sub">Context sent in this call, as decided when it was sent</p>
+        <p class="sub">Context transfers in this call, as decided at the time</p>
         <dl class="tx">${call.map(transferLine).join("")}</dl>
         ${note}
         <p class="sub">Next transfer under current rules, a preview</p>

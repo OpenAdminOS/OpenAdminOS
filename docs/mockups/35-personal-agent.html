@@ -695,7 +695,7 @@
       <ul class="notes">
         <li>Decided: in the first version a user-added server offers only the tools the admin approves as read-only at add time. The review opens with every tool unchecked, so nothing is approved by default, and Add server stays disabled until at least one tool is approved. The tool's read-only label from the server is shown in each row but never approves a tool on its own.</li>
         <li>A tool the server labels as a change is disabled from the start and cannot be approved at all; its row says why. Both frames are live: check and uncheck tools to see the count and the button follow.</li>
-        <li>Decided in round 4: approval needs a read-only label and no documented write behavior. The app flags a tool whose name or description describes saving, changing, sending or deleting, such as <code>export_report</code>, which saves a report on the server; a flagged tool is disabled in every review state with the reason under its name, whatever its read-only label. The flag is a check the app makes, not a promise about the server: a write the description does not mention cannot be detected, which is why approval stays a human decision.</li>
+        <li>Decided in round 4: approval needs a read-only label and no documented write behavior. The app flags a tool whose name, description or input parameters describe saving, changing, sending or deleting, such as <code>export_report</code>, which saves a report on the server; a flagged tool is disabled in every review state with the reason under its name, whatever its read-only label. The flag is a check the app makes, not a promise about the server: a write the description does not mention cannot be detected, which is why approval stays a human decision.</li>
         <li>A tool that is not approved is never offered to the model. The approval is checked again at every call, whether it comes from Chat, a skill or a scheduled check, so a skill that names <code>mcp__policy-settings__export_report</code> cannot use it.</li>
         <li>When the server later adds a tool, the new tool stays off until the admin reviews it here. The review can be reopened from the server's row in Access; approving a tool later is the same step.</li>
       </ul>
@@ -706,7 +706,7 @@
             <div class="dialog" role="dialog" aria-labelledby="tr-t-re" style="width:100%;box-shadow:none;border-radius:12px">
               <header><span class="xs muted">Policy settings reference, tools.contoso.example</span><h2 id="tr-t-re">Review 3 changed tools</h2></header>
               <div class="body">
-                <p>On 19 November the server changed the definition of 3 tools you approved on 12 November. Their approval no longer applies: <span data-name>Nova</span> does not offer them, and every call to them is refused, from Chat, skills and scheduled checks, until you approve them again here. A tool whose new definition says it saves, changes, sends or deletes cannot be approved.</p>
+                <p>On 19 November the server changed the definition of 3 tools you approved on 12 November. Their approval no longer applies: <span data-name>Nova</span> does not offer them, and every call to them is refused, from Chat, skills and scheduled checks, until you approve them again here. A tool whose new definition, input parameters included, says it saves, changes, sends or deletes cannot be approved.</p>
                 <ul class="trv" data-trv="rereview"></ul>
               </div>
               <footer><span class="xs muted trv-count" aria-live="polite" style="margin-right:auto"></span><button class="bt ghost" type="button">Later</button><button class="bt primary trv-ok" type="button"></button></footer>
@@ -716,7 +716,7 @@
         <ul class="notes" style="margin-top:20px">
           <li>An approval belongs to the exact definition the admin saw: the tool's name, description, input schema and annotations, under the same id. The app compares the definition the server lists with the approved one before it offers a tool and again at every call; any difference sets the tool back to review, unchecked, and it is neither offered nor callable until the admin approves it again.</li>
           <li><code>get_setting</code> is the case to read first: an approved read tool whose description changed and still only reads. It returns to review with the old and new description side by side, unchecked, and can be approved again.</li>
-          <li>A change in the input schema counts the same way, as <code>list_baselines</code> shows with its new parameter.</li>
+          <li>A change in the input schema counts the same way, and the write check reads the parameters too: <code>list_baselines</code> gained <code>apply_to_tenant</code>, described as assigning a baseline, so it cannot be approved although its name and description still read as read-only. A parameter that only reads, such as a filter, returns the tool to review and it can be approved again, like <code>get_setting</code>.</li>
           <li>When the new definition describes saving, changing, sending or deleting, as <code>compare_baselines</code> now does, the tool is flagged and cannot be approved, the same check as at add time.</li>
           <li>Unchanged approved tools keep their approval. The server's row in Access reads "1 approved, 3 changed and waiting for review" with a Review changes button, and the status strip keeps naming the host while any approved tool is offered.</li>
         </ul>
@@ -1282,15 +1282,15 @@ identities with graph_get. Nothing else.
     // Definitions the server changed after approval, under the same ids. Any change sends the tool back to review.
     const CHANGED = [
       { t: "get_setting", what: "Description changed", was: "Returns one setting with its allowed values", now: "Returns one setting with its allowed values <mark>and the Microsoft Learn link that documents it</mark>", kind: "ro" },
-      { t: "list_baselines", what: "Input changed", was: "Input: <code>platform</code>", now: "Input: <code>platform</code>, <mark><code>include_deprecated</code></mark>", kind: "ro" },
+      { t: "list_baselines", what: "Input changed", was: "Input: <code>platform</code>", now: "Input: <code>platform</code>, <mark><code>apply_to_tenant</code>: assigns the newest baseline to the tenant</mark>", kind: "writes" },
       { t: "compare_baselines", what: "Description changed", was: "Compares two baseline versions", now: "Compares two baseline versions <mark>and saves the comparison on the server</mark>", kind: "writes" },
     ];
     const toolRow = (key, t, d, kind, on, extra = "") => {
       const change = kind === "change", writes = kind === "writes", off = change || writes;
       const why = `trv-why-${key}-${t}`;
-      const flag = writes ? `<span class="flag">Its description ${key === "rereview" ? "now " : ""}says it saves on the server, so it cannot be approved, whatever its read-only label.</span>` : "";
+      const flag = writes ? `<span class="flag">Its definition ${key === "rereview" ? "now " : ""}describes saving or changing data, so it cannot be approved, whatever its read-only label.</span>` : "";
       const chg = extra ? `<span class="ann chgd">${extra}</span>` : "";
-      const anns = writes || extra ? `<span class="anns">${chg}<span class="ann">Labelled read-only</span>${writes ? '<span class="ann warn">Describes saving</span>' : ""}</span>` : `<span class="ann${change ? " warn" : ""}">${change ? "Labelled as a change" : "Labelled read-only"}</span>`;
+      const anns = writes || extra ? `<span class="anns">${chg}<span class="ann">Labelled read-only</span>${writes ? '<span class="ann warn">Describes a write</span>' : ""}</span>` : `<span class="ann${change ? " warn" : ""}">${change ? "Labelled as a change" : "Labelled read-only"}</span>`;
       return `<li ${off ? "data-off" : ""}><label><input type="checkbox" ${on ? "checked" : ""} ${off ? `disabled aria-disabled="true" aria-describedby="${why}"` : ""}><span><code>mcp__policy-settings__${t}</code><span class="d" ${off ? `id="${why}"` : ""}>${d}${flag}</span></span>${anns}</label></li>`;
     };
     const NUM = ["No", "One", "Two", "Three", "Four", "Five", "Six"];
