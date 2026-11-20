@@ -311,8 +311,28 @@
                 },
                 "source": {
                   "description": "Liquid expression resolving to an array, e.g. \"{{ load_devices.output }}\". Used by all transforms except `correlate-stale-devices`."
+                },
+                "pick": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "group-by-age: field path kept per item instead of the whole item, e.g. displayName."
+                },
+                "fallbackTimestampField": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "group-by-age: field read when timestampField is null or empty on an item."
+                },
+                "missingBucket": {
+                  "type": "string",
+                  "description": "count-by-field: bucket for null, absent, empty string and empty array values."
                 }
-              }
+              },
+              "allOf": [
+                {
+                  "if": { "properties": { "kind": { "const": "compact-conditional-access" } }, "required": ["kind"] },
+                  "then": { "required": ["source"] }
+                }
+              ]
             }
           }
         }
