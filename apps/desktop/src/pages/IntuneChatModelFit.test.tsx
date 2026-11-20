@@ -169,6 +169,15 @@ describe("IntuneChat model fit (mockup 36)", () => {
     expect(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel })).toHaveValue("");
   });
 
+  it("puts the question back when Split is chosen with an empty composer", async () => {
+    const bridge = fitBridge();
+    const { user } = await sendTooLarge(bridge);
+    await screen.findByDisplayValue(QUESTION);
+    fireEvent.change(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel }), { target: { value: "" } });
+    await user.click(within(await screen.findByRole("region", { name: "llama3.1 cannot fit this request" })).getByRole("button", { name: "Split the question" }));
+    expect(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel })).toHaveValue(QUESTION);
+  });
+
   it("offers no hosted provider when the managed policy allows only local ones", async () => {
     const state = createMockAppState({
       // The main process leaves out what the policy does not allow.

@@ -1302,7 +1302,9 @@ function IntuneChatContent() {
     if (!offer) return;
     if (!offer.answered) {
       // The failed question is the conversation's draft already; whatever the admin made of it,
-      // an edit or a cleared draft, stays as it is.
+      // an edit or a cleared draft, stays as it is. Split says the question is back, so an
+      // empty composer gets it again.
+      if (next === "split" && input.trim() === "") setInput(offer.content);
       setNotice(next === "split" ? MODEL_FIT_COPY.splitNotice : MODEL_FIT_COPY.declined(modelFitReturnModel(offer)));
     }
     window.requestAnimationFrame(() => composerRef.current?.focus());
