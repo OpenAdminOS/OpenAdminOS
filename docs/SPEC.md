@@ -2469,7 +2469,8 @@ Never silently and never preselected. This keeps the admin in the loop and
 helps with cost. Design: mockup 36 (`docs/mockups/36-model-fit.html`; 35 is
 taken by the personal agent mockup in PR #207).
 
-Signals. Only a provider on this device gets the offer.
+Signals. Only a model on this device gets the offer: a local provider, and not
+a remote-backed or Ollama Cloud model, whose prompt already left the device.
 - The prompt does not fit the context window. Today this is the provider's own
   error: the Ollama adapter's "context size too small" message with the tokens
   needed and the limit (PR #211 and later), including the form where Ollama could
@@ -2520,8 +2521,12 @@ model that is no longer listed or is now remote-backed, or when the list
 cannot be read. That check runs again before every model call of the
 request, not only once. A hosted choice takes a destination fingerprint
 (`getProviderDestination`: its address, or the Azure OpenAI resource and
-deployment) when its accept step opens, and the host refuses the send if
-the destination changed since. A model fit acceptance (`modelFitOfferId`)
+deployment, and Lemonade's address, which can be set outside this device)
+when its accept step opens, and the host refuses the send if the destination
+changed since. The check and the binding come from one read of the
+destination, and the binding is checked again on the address the adapter is
+built with. A lookup for an earlier choice is dropped when the admin picks
+another provider. A model fit acceptance (`modelFitOfferId`)
 is refused on an ordinary send and on the non-streaming send. Right before
 the offer is claimed, the host reads the active organization and model again.
 
@@ -2585,7 +2590,9 @@ again before it builds the model and before every model call. Every fit rerun pa
 admission (Ollama or LM Studio address, Azure OpenAI resource and
 deployment), and a later phase built for another endpoint fails with nothing
 sent. The run review takes the destination fingerprint when it opens and
-Start passes it (`expectedProviderDestination`); a change refuses the start.
+Start passes it (`expectedProviderDestination`); Start stays disabled until
+it is read, a failed read says so in the review, and a change refuses the
+start.
 Run for real of a model fit dry run keeps the on-device requirement and the
 endpoint binding. A model fit request in Chat is bound the same way for its
 own duration, and its answer names where it went only once a model request

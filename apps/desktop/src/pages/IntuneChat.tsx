@@ -299,6 +299,10 @@ function IntuneChatContent() {
   const [rememberHostedConsent, setRememberHostedConsent] = useState(false);
   const [modelFitOffer, setModelFitOffer] = useState<ModelFitOffer | null>(null);
   const [modelFitAccept, setModelFitAccept] = useState<ModelFitAccept | null>(null);
+  // The latest provider choice; a destination lookup for an earlier one is dropped.
+  const modelFitChoiceRef = useRef(0);
+  const modelFitOfferRef = useRef<ModelFitOffer | null>(null);
+  modelFitOfferRef.current = modelFitOffer;
   const [tenantGroups, setTenantGroups] = useState<TenantGroup[]>([]);
   const [savedQueries, setSavedQueries] = useState<SavedMultiTenantQuery[]>([]);
   const [scopeMode, setScopeMode] = useState<MultiTenantScopeMode>("active");
@@ -1239,12 +1243,16 @@ function IntuneChatContent() {
     // The request exactly as it failed, with the workspace selection it had.
     const workspaceContext = offer.workspaceContext;
     if (choice.isLocal) {
+      modelFitChoiceRef.current += 1;
       void executeSend(offer.content, undefined, offer.conversationId, workspaceContext, override, offer.workspaceContextSummary);
       return;
     }
     const contextSummary = offer.workspaceContextSummary;
+    const choiceId = (modelFitChoiceRef.current += 1);
     // Where the provider is reached as this accept step opens; the host refuses a send that goes elsewhere.
     const destination = await window.openAdminOS?.getProviderDestination?.(choice.providerId).catch(() => undefined);
+    // A later choice, or a withdrawn offer, supersedes this lookup.
+    if (choiceId !== modelFitChoiceRef.current || modelFitOfferRef.current?.issue.offerId !== offer.issue.offerId) return;
     setModelFitAccept({
       offer,
       override: { ...override, ...(destination ? { destination } : {}) },
@@ -1840,7 +1848,7 @@ function IntuneChatContent() {
 
   const renderComposer = (placement: "home" | "docked") => (
     <>
-    {modelFitAccept && modelFitOfferShown ? (
+    {modelFitAccept && modelFitOfferShown && modelFitAccept.offer.issue.offerId === modelFitOffer?.issue.offerId ? (
       <HostedChatConsentPanel
         prompt={modelFitAccept.prompt}
         tenantName={tenants.find((tenant) => tenant.id === modelFitAccept.prompt.tenantId)?.displayName}
