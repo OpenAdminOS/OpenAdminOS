@@ -2614,7 +2614,12 @@ Mockup: `docs/mockups/34-local-reset.html`.
   log's side files (anchor and pending file, written by path) are not
   written again, also not when it closes, and no expired rows are pruned
   (a prune must move the anchor with them); events kept only in memory go
-  with the log the reset removes. A refused reset unfreezes them.
+  with the log the reset removes. A refused reset unfreezes them. The
+  Microsoft token caches are held the same way from the commit: no write,
+  no clear, and a read returns an empty cache without opening the file (a
+  read that cannot decrypt would otherwise delete it), so a sign-in
+  refresh that was waiting on the network when the reset started never
+  writes or deletes a token file afterwards.
   On Linux the mount table is read again before every removal in the data
   folder and right before a cache folder's removal, so a bind mount added
   under either while the wipe runs is never removed through. On Windows the
