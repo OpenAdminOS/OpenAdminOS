@@ -72,7 +72,7 @@ const PHONE_NUMBER = /(?<!\w)(?:\+[1-9]\d{0,2}[ .-]?)?(?:\(\d{3}\)|\b\d{3})[ .-]
 const MAC_ADDRESS = /\b(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}\b/gi;
 const SECURITY_IDENTITY_KEYS = /^(?:user|group|(?:(?:include|exclude|target)?(?:users?|groups?|principals?)ids?|(?:include|exclude|target)(?:users|groups))|userprincipalname|userdisplayname|principaldisplayname|principal)$/i;
 const SECURITY_ODATA_TYPE = /^(?:.*(?:endpointsecurity|securitybaseline|defender|firewall|diskencryption|attacksurfacereduction|antivirus|authenticationmethod|conditionalaccess|namedlocation|roleassignment|roledefinition|rolesetting|crosstenantaccess).*|(?:windows(?:10|81)|macos)endpointprotectionconfiguration|bitlockerencryptionpolicy)$/i;
-const SECURITY_ENCRYPTION_SETTING_ID = /(?:^|[_./:-])(?:bitlocker|filevault2?)(?:$|[_./:-])/i;
+const SECURITY_ENDPOINT_SETTING_ID = /(?:^|[_./:-])(?:bitlocker|filevault2?|deviceguard|dmaguard|systemguard|localpoliciessecurityoptions)(?:$|[_./:-])/i;
 const SETTINGS_PATH = /^(?:\/devicemanagement\/(?:configurationpolicies|intents|grouppolicyconfigurations)$)|\/(?:settings|definitionvalues|presentationvalues)$/;
 const SECRET_SETTING_TYPE = /(?:secret|password)(?:setting|presentation|value)|(?:setting|presentation|value)password$/i;
 const SECRET_SETTING_ID = /(?:^|[_/.:-])(?:password|presharedkey|privatekey|sharedsecret|accountkey|certificatepassword|sastoken|connectionstring)(?:$|[_/.:-])/i;
@@ -415,7 +415,7 @@ export function walkDataClasses(
     const identityType = /^(?:user|group)$/i.test(shape) && (base === "security" || inherited === "security");
     const securityType = SECURITY_ODATA_TYPE.test(shape) || settings && (
       typeof templateFamily === "string" && SECURITY_ODATA_TYPE.test(templateFamily) ||
-      typeof definition === "string" && (SECURITY_ODATA_TYPE.test(definition) || SECURITY_ENCRYPTION_SETTING_ID.test(definition))
+      typeof definition === "string" && (SECURITY_ODATA_TYPE.test(definition) || SECURITY_ENDPOINT_SETTING_ID.test(definition))
     );
     let effective = mapped ?? inherited ?? base;
     if (inherited === "credential" || inherited === "security") effective = maxDataClass(effective, inherited);

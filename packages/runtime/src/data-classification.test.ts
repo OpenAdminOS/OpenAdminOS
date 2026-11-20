@@ -280,6 +280,119 @@ test("maps the documented encryption states and preserves the device and user cl
   });
 });
 
+test("maps the full managed device attestation and posture families to security", () => {
+  const attestationFields = `
+    lastUpdateDateTime contentNamespaceUrl deviceHealthAttestationStatus contentVersion issuedDateTime
+    attestationIdentityKey resetCount restartCount dataExcutionPolicy bitLockerStatus bootManagerVersion
+    codeIntegrityCheckVersion secureBoot bootDebugging operatingSystemKernelDebugging codeIntegrity testSigning
+    safeMode windowsPE earlyLaunchAntiMalwareDriverProtection virtualSecureMode pcrHashAlgorithm bootAppSecurityVersion
+    bootManagerSecurityVersion tpmVersion pcr0 secureBootConfigurationPolicyFingerPrint codeIntegrityPolicy
+    bootRevisionListInfo operatingSystemRevListInfo healthStatusMismatchInfo healthAttestationSupportedStatus
+    memoryIntegrityProtection memoryAccessProtection virtualizationBasedSecurity firmwareProtection systemManagementMode securedCorePC
+  `.trim().split(/\s+/);
+  const row = {
+    deviceName: "fixture-workstation", userDisplayName: "Fixture Person", operatingSystem: "Windows",
+    isEncrypted: true, partnerReportedThreatState: "secured", windowsActiveMalwareCount: 2, windowsRemediatedMalwareCount: 5,
+    complianceState: "noncompliant", complianceGracePeriodExpirationDateTime: "2027-01-31T00:00:00Z",
+    jailBroken: "unknown", lostModeState: "disabled", exchangeAccessState: "quarantined", exchangeAccessStateReason: "policy",
+    androidSecurityPatchLevel: "2026-10-01", securityPatchLevel: "2026-09-01", bootstrapTokenEscrowed: true,
+    deviceFirmwareConfigurationInterfaceManaged: true, managementCertificateExpirationDate: "2027-01-15T00:00:00Z",
+    hardwareInformation: { isEncrypted: true, tpmSpecificationVersion: "2.0", tpmManufacturer: "Fixture", tpmVersion: "2.3",
+      systemManagementBIOSVersion: "1.1", deviceGuardVirtualizationBasedSecurityHardwareRequirementState: "meetsHardwareRequirements",
+      deviceGuardVirtualizationBasedSecurityState: "running", deviceGuardLocalSystemAuthorityCredentialGuardState: "enabled" },
+    deviceHealthAttestationState: Object.fromEntries(attestationFields.map(field => [field, "fixture"])),
+    deviceIdentityAttestationDetail: { deviceIdentityAttestationStatus: "trusted" },
+    configurationManagerClientHealthState: { state: "healthy", errorCode: 0 },
+  };
+  const { classes, securityMaskRoles } = classifyData(row, { graphPath: "/deviceManagement/managedDevices/fixture-device" });
+  const other = { "/deviceName": "device", "/userDisplayName": "identity", "/operatingSystem": "configuration" };
+  for (const field of attestationFields) assert.equal(classes[`/deviceHealthAttestationState/${field}`], "security", field);
+  for (const [pointer, kind] of Object.entries(classes)) {
+    assert.equal(kind, Object.hasOwn(other, pointer) ? other[pointer as keyof typeof other] : "security", pointer);
+    if (kind === "security") {
+      assert.equal(securityMaskRoles[pointer], /\/(?:secureBootConfigurationPolicyFingerPrint|codeIntegrityPolicy)$/.test(pointer)
+        ? "nameOrIdentifier" : "setting", pointer);
+    }
+  }
+});
+
+test("keeps Windows protection and compliance posture roles through expansions and direct navigation", () => {
+  const malware = { id: "malware-report", malwareDisplayName: "Fixture malware", malwareThreatState: "quarantined", detectionCount: 4,
+    managedDeviceId: "fixture-device", initialDetectionDateTime: "2026-11-18T00:00:00Z" };
+  const protection = { id: "protection-report", antiMalwareVersion: "2.5", engineVersion: "7.5", signatureVersion: "4.5",
+    realTimeProtectionEnabled: true, networkInspectionSystemEnabled: true, malwareProtectionEnabled: false,
+    managedDeviceHealthState: "unhealthy", quickScanOverdue: true, fullScanRequired: false, signatureUpdateOverdue: true,
+    managedDeviceName: "fixture-workstation", lastReportedDateTime: "2026-11-18T00:00:00Z", detectedMalwareState: [malware] };
+  const policy = { id: "compliance-policy", displayName: "Fixture compliance policy", state: "noncompliant", settingCount: 1,
+    settingStates: [{ setting: "EncryptionRequired", settingName: "Encryption required", settingInstanceId: "instance-4", state: "error",
+      currentValue: "disabled", errorCode: 7, userName: "Fixture Person", userEmail: "person@example.test",
+      sources: [{ id: "source-policy", displayName: "Source policy", sourceType: "deviceCompliancePolicy" }] }] };
+  const cases: Array<{ field: string; pointer: string; item: object; identifier: string[];
+    device: string[]; activity: string[]; identity: string[] }> = [
+    { field: "windowsProtectionState", pointer: "/windowsProtectionState", item: protection,
+      identifier: ["/id", "/detectedMalwareState/0/id", "/detectedMalwareState/0/malwareDisplayName"],
+      device: ["/managedDeviceName", "/detectedMalwareState/0/managedDeviceId"], identity: [],
+      activity: ["/lastReportedDateTime", "/detectedMalwareState/0/initialDetectionDateTime"] },
+    { field: "deviceCompliancePolicyStates", pointer: "/deviceCompliancePolicyStates/0", item: policy,
+      identifier: ["/id", "/displayName", "/settingStates/0/setting", "/settingStates/0/settingName", "/settingStates/0/settingInstanceId",
+        "/settingStates/0/sources/0/id", "/settingStates/0/sources/0/displayName"],
+      identity: ["/settingStates/0/userName", "/settingStates/0/userEmail"], device: [], activity: [] },
+  ];
+  for (const base of ["/deviceManagement/managedDevices", "/deviceManagement/comanagedDevices", "/me/managedDevices", "/users/fixture-user/managedDevices"]) {
+    for (const { field, pointer, item, identifier, identity, device, activity } of cases) {
+      const graphPath = `/beta${base}/fixture-device`;
+      const direct = classifyData(item, { graphPath: `${graphPath}/${field}` });
+      for (const [key, kind] of Object.entries(direct.classes)) {
+        assert.equal(kind, identity.includes(key) ? "identity" : device.includes(key) ? "device" : activity.includes(key) ? "activity" : "security", key);
+        if (kind === "security") assert.equal(direct.securityMaskRoles[key], identifier.includes(key) ? "nameOrIdentifier" : "setting", key);
+      }
+      const expanded = classifyData({ [field]: field === "windowsProtectionState" ? item : [item] }, { graphPath: `${graphPath}?$expand=${field}` });
+      assert.deepEqual(expanded.classes, Object.fromEntries(Object.entries(direct.classes).map(([key, kind]) => [pointer + key, kind])));
+      assert.deepEqual(expanded.securityMaskRoles, Object.fromEntries(Object.entries(direct.securityMaskRoles).map(([key, role]) => [pointer + key, role])));
+    }
+    const directMalware = classifyData(malware, { graphPath: `${base}/fixture-device/windowsProtectionState/detectedMalwareState/malware-report` });
+    assert.equal(directMalware.classes["/malwareThreatState"], "security");
+    assert.equal(directMalware.securityMaskRoles["/id"], "nameOrIdentifier");
+    assert.equal(directMalware.classes["/managedDeviceId"], "device");
+  }
+});
+
+test("classifies posture and security object identifiers across mapped Graph resources", () => {
+  const cases = [
+    ["/devices", { isCompliant: false, isManaged: true, isRooted: false, isManagementRestricted: true, trustType: "AzureAd",
+      complianceExpirationDateTime: "2027-01-01T00:00:00Z" }, []],
+    ["/auditLogs/signIns", { deviceDetail: { isCompliant: true, isManaged: false, trustType: "AzureAd" } }, []],
+    ["/deviceManagement/managedDeviceOverview", { deviceExchangeAccessStateSummary: { allowedDeviceCount: 2, quarantinedDeviceCount: 1 } }, []],
+    ["/deviceManagement/deviceConfigurations", { omaSettings: [{ isEncrypted: true }], deviceGuardEnableSecureBootWithDMA: true,
+      applicationGuardEnabled: true, applicationGuardCertificateThumbprints: ["fixture-fingerprint"], appLockerApplicationControl: "enforce",
+      dmaGuardDeviceEnumerationPolicy: "block", gatekeeperBlockOverride: true, localSecurityOptionsDisableGuestAccount: true,
+      lanManagerWorkstationDisableInsecureGuestLogons: true, smartScreenEnableInShell: true, allowSampleSharing: false,
+      enableExpeditedTelemetryReporting: true }, ["/applicationGuardCertificateThumbprints/0"]],
+    ["/deviceAppManagement/managedAppPolicies", { id: "policy", deviceComplianceRequired: true, maximumAllowedDeviceThreatLevel: "low" }, ["/id"]],
+    ["/deviceAppManagement/iosManagedAppProtections", { displayName: "App policy", appDataEncryptionType: "whenDeviceLocked" }, ["/displayName"]],
+    ["/deviceAppManagement/androidManagedAppProtections", { id: "policy", encryptAppData: true, requiredAndroidSafetyNetDeviceAttestationType: "basicIntegrity" }, ["/id"]],
+    ["/security/alerts_v2", { id: "alert", alertPolicyId: "rule", detectorId: "fixture", incidentId: "incident", providerAlertId: "provider-alert",
+      severity: "high", status: "active", investigationState: "running", classification: "truePositive", determination: "malware",
+      evidence: [{ defenderAvStatus: "updated", healthStatus: "active", onboardingStatus: "onboarded", riskScore: "low", rbacGroupId: 3, rbacGroupName: "Endpoint group" }] },
+      ["/id", "/alertPolicyId", "/detectorId", "/incidentId", "/providerAlertId", "/evidence/0/rbacGroupId", "/evidence/0/rbacGroupName"]],
+    ["/security/incidents", { id: "incident", displayName: "Fixture incident", redirectIncidentId: "other-incident", severity: "high",
+      status: "active", classification: "truePositive", determination: "malware", priorityScore: 26 }, ["/id", "/displayName", "/redirectIncidentId"]],
+    ["/security/secureScores", { id: "report", currentScore: 50, maxScore: 100, enabledServices: ["Defender"], controlScores: [{ controlName: "Control",
+      implementationStatus: "Enabled", on: true, score: 15, scoreInPercentage: 50, count: 4, total: 8 }] }, ["/id", "/controlScores/0/controlName"]],
+    ["/security/secureScoreControlProfiles", { controlStateUpdates: [{ state: "ignored" }] }, []],
+    ["/informationProtection/bitlocker/recoveryKeys", { id: "recovery-object", volumeType: "operatingSystemVolume" }, ["/id"]],
+  ] as const;
+  for (const [graphPath, data, identifiers] of cases) {
+    const { classes, securityMaskRoles } = classifyData(data, { graphPath });
+    for (const [pointer, kind] of Object.entries(classes)) {
+      assert.equal(kind, "security", `${graphPath} ${pointer}`);
+      assert.equal(securityMaskRoles[pointer], identifiers.some(identifier => identifier === pointer) ? "nameOrIdentifier" : "setting", `${graphPath} ${pointer}`);
+    }
+  }
+  assert.deepEqual(classifyData({ id: "catalog-control", controlName: "Catalog control" },
+    { graphPath: "/security/secureScoreControlProfiles" }).classes, { "/id": "public", "/controlName": "public" });
+});
+
 test("classifies endpoint protection settings in legacy policy and Settings Catalog responses", () => {
   const legacyPath = "/deviceManagement/deviceConfigurations";
   for (const [graphPath, payload, expected] of [
@@ -306,6 +419,10 @@ test("classifies endpoint protection settings in legacy policy and Settings Cata
     "device_vendor_msft_firewall_mdmstore_domainprofile_enablefirewall",
     "device_vendor_msft_policy_config_defender_allowrealtimemonitoring",
     "device_vendor_msft_policy_config_defender_attacksurfacereductionrules",
+    "device_vendor_msft_policy_config_deviceguard_enablevirtualizationbasedsecurity",
+    "device_vendor_msft_policy_config_dmaguard_deviceenumerationpolicy",
+    "device_vendor_msft_policy_config_systemguard_configuresystemguardlaunch",
+    "device_vendor_msft_policy_config_localpoliciessecurityoptions_networksecurity_lanmanagerauthenticationlevel",
   ]) {
     const result = classifyData({ id: "fixture", settingInstance: { settingDefinitionId, simpleSettingValue: { value: true } } },
       { graphPath: "/deviceManagement/configurationPolicies/fixture/settings" });

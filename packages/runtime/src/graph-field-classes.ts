@@ -3,7 +3,7 @@ import type { DataClass } from "@openadminos/agent-sdk";
 // Source: docs/research/graph-field-classes.md and the decisions in docs/SPEC.md.
 // [] matches an array element. * matches one property in a keyed object.
 // Mapped containers set an inherited class. Unknown branches start at the resource default.
-export const GRAPH_FIELD_CLASSES_VERSION = 7;
+export const GRAPH_FIELD_CLASSES_VERSION = 8;
 
 /** Equivalent paths in the bundled Graph index, with route parameters normalized by the classifier. */
 export const GRAPH_ROUTE_ALIASES = {
@@ -13,6 +13,15 @@ export const GRAPH_ROUTE_ALIASES = {
   "/deviceManagement/comanagedDevices": "/deviceManagement/managedDevices",
   "/me/managedDevices": "/deviceManagement/managedDevices",
   "/users/{id}/managedDevices": "/deviceManagement/managedDevices",
+  "/deviceManagement/comanagedDevices/{id}/windowsProtectionState": "/deviceManagement/managedDevices/{id}/windowsProtectionState",
+  "/me/managedDevices/{id}/windowsProtectionState": "/deviceManagement/managedDevices/{id}/windowsProtectionState",
+  "/users/{id}/managedDevices/{id}/windowsProtectionState": "/deviceManagement/managedDevices/{id}/windowsProtectionState",
+  "/deviceManagement/comanagedDevices/{id}/windowsProtectionState/detectedMalwareState": "/deviceManagement/managedDevices/{id}/windowsProtectionState/detectedMalwareState",
+  "/me/managedDevices/{id}/windowsProtectionState/detectedMalwareState": "/deviceManagement/managedDevices/{id}/windowsProtectionState/detectedMalwareState",
+  "/users/{id}/managedDevices/{id}/windowsProtectionState/detectedMalwareState": "/deviceManagement/managedDevices/{id}/windowsProtectionState/detectedMalwareState",
+  "/deviceManagement/comanagedDevices/{id}/deviceCompliancePolicyStates": "/deviceManagement/managedDevices/{id}/deviceCompliancePolicyStates",
+  "/me/managedDevices/{id}/deviceCompliancePolicyStates": "/deviceManagement/managedDevices/{id}/deviceCompliancePolicyStates",
+  "/users/{id}/managedDevices/{id}/deviceCompliancePolicyStates": "/deviceManagement/managedDevices/{id}/deviceCompliancePolicyStates",
   "/me/informationProtection/bitlocker/recoveryKeys": "/informationProtection/bitlocker/recoveryKeys",
   "/users/{id}/informationProtection/bitlocker/recoveryKeys": "/informationProtection/bitlocker/recoveryKeys",
   "/sites/{id}/informationProtection/bitlocker/recoveryKeys": "/informationProtection/bitlocker/recoveryKeys",
@@ -36,13 +45,14 @@ export const GRAPH_ROUTE_ALIASES = {
 const SECURITY_MASK_NAMES = /^(?:name|id|.*(?:Name|Id|Ids)|.*ConsentDescription|description|cidrAddress|rolePermissions|permissionGrantPolicyIdsAssignedToDefaultUserRole)$/i;
 const SECURITY_PERMISSION_NAMES = /\/(?:(?:approles|oauth2permissionscopes)\/\[\]\/value|oauth2permissiongrants\/\[\]\/scope)$/;
 const SECURITY_LOCATION_RANGES = /\/ipranges\//;
+const POSTURE_IDENTIFIERS = /(?:\/devicehealthattestationstate\/(?:securebootconfigurationpolicyfingerprint|codeintegritypolicy)|\/(?:settingstates|compliancesettingstates)\/\[\]\/setting|\/controlscores\/\[\]\/controlname|\/applicationguardcertificatethumbprints\/\[\])$/;
 const CONDITIONAL_ACCESS_IDENTIFIERS = /^\/(?:conditions\/(?:locations\/(?:include|exclude)locations|users\/(?:include|exclude)roles)|grantcontrols\/(?:termsofuse|customauthenticationfactors))\/\[\]$/;
 const GRAPH_GUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
 export function graphSecurityMaskRole(field: string, path: string, route: string, value: unknown): SecurityMaskRole {
   const conditionalAccessId = route === "/identity/conditionalaccess/policies" &&
     CONDITIONAL_ACCESS_IDENTIFIERS.test(path) && typeof value === "string" && GRAPH_GUID.test(value);
-  return conditionalAccessId || SECURITY_MASK_NAMES.test(field) || SECURITY_PERMISSION_NAMES.test(path) ||
+  return conditionalAccessId || SECURITY_MASK_NAMES.test(field) || SECURITY_PERMISSION_NAMES.test(path) || POSTURE_IDENTIFIERS.test(path) ||
     SECURITY_LOCATION_RANGES.test(path) || field.toLowerCase() === "scope" && route === "/oauth2permissiongrants"
     ? "nameOrIdentifier" : "setting";
 }
@@ -50,7 +60,7 @@ export type SecurityMaskRole = "nameOrIdentifier" | "setting";
 
 export const GRAPH_TEXT_FIELDS = /^(?:notes?|groupTag|publisher|rule|redirectUris?|.*(?:description|name|url|uri|reason)|comment|summary|details|title|message|oldValue|newValue)$/i;
 export const GRAPH_DEVICE_NAME_FIELDS = /^(?:deviceName|managedDeviceName)$/i;
-export const GRAPH_LEGACY_ENDPOINT_SECURITY_FIELDS = /^\/(?:(?:bitLocker|fileVault|firewall|defender|windowsDefender|advancedThreatProtection)[^/]+|securityBlockAzureADJoinedDevicesAutoEncryption|storageRequireMobileDeviceEncryption)$/i;
+export const GRAPH_LEGACY_ENDPOINT_SECURITY_FIELDS = /^\/(?:(?:bitLocker|fileVault|firewall|defender|windowsDefender|advancedThreatProtection|deviceGuard|applicationGuard|appLocker|dmaGuard|gatekeeper|localSecurityOptions|lanManager|smartScreen)[^/]+|allowSampleSharing|enableExpeditedTelemetryReporting|securityBlockAzureADJoinedDevicesAutoEncryption|storageRequireMobileDeviceEncryption)$/i;
 
 export const GRAPH_SECURITY_RESOURCES = new Set([
   "/identity/conditionalAccess/policies", "/identity/conditionalAccess/namedLocations",
@@ -59,6 +69,8 @@ export const GRAPH_SECURITY_RESOURCES = new Set([
   "/policies/identitySecurityDefaultsEnforcementPolicy", "/policies/crossTenantAccessPolicy",
   "/policies/crossTenantAccessPolicy/default", "/policies/crossTenantAccessPolicy/partners",
   "/policies/authorizationPolicy", "/deviceManagement/deviceCompliancePolicies",
+  "/deviceAppManagement/managedAppPolicies", "/deviceAppManagement/iosManagedAppProtections",
+  "/deviceAppManagement/androidManagedAppProtections",
   "/appRoleAssignments", "/oauth2PermissionGrants",
   "/directoryRoles", "/directoryRoleTemplates", "/roleManagement/directory/roleDefinitions",
   "/roleManagement/directory/roleAssignments", "/roleManagement/directory/transitiveRoleAssignments",
@@ -70,6 +82,39 @@ export const GRAPH_SECURITY_RESOURCES = new Set([
   "/deviceManagement/intents/{id}/settings", "/deviceManagement/templates",
   "/identityProtection/policies", "/policies/identityProtectionPolicies",
 ]);
+
+const malwareFields = {
+  identity: "tenantDisplayName tenantId",
+  device: "managedDeviceId managedDeviceName",
+  activity: "deviceDeleted initialDetectionDateTime lastRefreshedDateTime lastStateChangeDateTime",
+  security: "id additionalInformationUrl detectionCount malwareCategory malwareDisplayName malwareExecutionState malwareId malwareSeverity malwareThreatState",
+};
+
+const malwareArray = "detectedMalwareState[]";
+const windowsProtectionFields = {
+  identity: `tenantDisplayName tenantId ${under(malwareArray, malwareFields.identity)}`,
+  device: `managedDeviceId managedDeviceName ${under(malwareArray, malwareFields.device)}`,
+  activity: `
+    deviceDeleted devicePropertyRefreshDateTime lastFullScanDateTime lastQuickScanDateTime lastRefreshedDateTime lastReportedDateTime
+    ${under(malwareArray, malwareFields.activity)}
+  `,
+  security: `
+    id antiMalwareVersion attentionRequired engineVersion fullScanOverdue fullScanRequired
+    lastFullScanSignatureVersion lastQuickScanSignatureVersion malwareProtectionEnabled managedDeviceHealthState
+    networkInspectionSystemEnabled quickScanOverdue realTimeProtectionEnabled rebootRequired signatureUpdateOverdue
+    signatureVersion ${under(malwareArray, malwareFields.security)}
+  `,
+};
+
+const compliancePolicyStateFields = {
+  identity: "settingStates[].userName settingStates[].userEmail",
+  security: "id displayName version platformType state settingCount settingStates[]",
+};
+
+function under(prefix: string, fields: string): string {
+  return fields.trim().split(/\s+/).map(field => `${prefix}.${field}`).join(" ");
+}
+
 export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataClass, string>>>> = {
   "/deviceManagement/managedDevices": {
     credential: "activationLockBypassCode remoteAssistanceSessionUrl",
@@ -77,6 +122,8 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
       userPrincipalName userId emailAddress enrolledByUserPrincipalName phoneNumber userDisplayName
       notes hardwareInformation.phoneNumber
       hardwareInformation.sharedDeviceCachedUsers[] usersLoggedOn[].userId
+      ${under("windowsProtectionState", windowsProtectionFields.identity)}
+      ${under("deviceCompliancePolicyStates[]", compliancePolicyStateFields.identity)}
     `,
     device: `
       id deviceName managedDeviceName azureADDeviceId easDeviceId azureActiveDirectoryDeviceId imei serialNumber
@@ -86,50 +133,60 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
       hardwareInformation.deviceFullQualifiedDomainName hardwareInformation.ipAddressV4
       hardwareInformation.subnetAddress hardwareInformation.esimIdentifier
       hardwareInformation.wiredIPv4Addresses[] chromeOSDeviceInfo[] supplementalDeviceDetails[]
+      ${under("windowsProtectionState", windowsProtectionFields.device)}
     `,
     activity: `
       lastSyncDateTime enrolledDateTime easActivationDateTime exchangeLastSuccessfulSyncDateTime
       remoteAssistanceSessionErrorDetails preferMdmOverGroupPolicyAppliedDateTime deviceActionResults[]
       usersLoggedOn[].lastLogOnDateTime
+      ${under("windowsProtectionState", windowsProtectionFields.activity)}
     `,
     security: `
       isEncrypted hardwareInformation.isEncrypted partnerReportedThreatState windowsActiveMalwareCount
       windowsRemediatedMalwareCount hardwareInformation.deviceGuardVirtualizationBasedSecurityHardwareRequirementState
       hardwareInformation.deviceGuardVirtualizationBasedSecurityState
       hardwareInformation.deviceGuardLocalSystemAuthorityCredentialGuardState
+      hardwareInformation.tpmSpecificationVersion hardwareInformation.tpmManufacturer hardwareInformation.tpmVersion
+      hardwareInformation.systemManagementBIOSVersion deviceHealthAttestationState deviceIdentityAttestationDetail
+      complianceState complianceGracePeriodExpirationDateTime jailBroken lostModeState exchangeAccessState
+      exchangeAccessStateReason androidSecurityPatchLevel securityPatchLevel bootstrapTokenEscrowed
+      deviceFirmwareConfigurationInterfaceManaged managementCertificateExpirationDate
+      configurationManagerClientHealthState
+      ${under("windowsProtectionState", windowsProtectionFields.security)}
+      ${under("deviceCompliancePolicyStates[]", compliancePolicyStateFields.security)}
     `,
     configuration: `
-      operatingSystem osVersion complianceState managementState managedDeviceOwnerType
-      deviceEnrollmentType manufacturer model ownerType chassisType deviceType jailBroken managementAgent
-      easActivated aadRegistered azureADRegistered lostModeState deviceRegistrationState
-      deviceCategoryDisplayName isSupervised exchangeAccessState exchangeAccessStateReason
-      complianceGracePeriodExpirationDateTime androidSecurityPatchLevel
-      configurationManagerClientEnabledFeatures deviceHealthAttestationState subscriberCarrier
+      operatingSystem osVersion managementState managedDeviceOwnerType
+      deviceEnrollmentType manufacturer model ownerType chassisType deviceType managementAgent
+      easActivated aadRegistered azureADRegistered deviceRegistrationState
+      deviceCategoryDisplayName isSupervised configurationManagerClientEnabledFeatures subscriberCarrier
       totalStorageSpaceInBytes freeStorageSpaceInBytes retireAfterDateTime
-      autopilotEnrolled requireUserEnrollmentApproval managementCertificateExpirationDate
+      autopilotEnrolled requireUserEnrollmentApproval
       roleScopeTagIds[]
-      configurationManagerClientHealthState physicalMemoryInBytes processorArchitecture
-      specificationVersion joinType skuFamily securityPatchLevel skuNumber managementFeatures
-      enrollmentProfileName bootstrapTokenEscrowed deviceFirmwareConfigurationInterfaceManaged
-      deviceIdentityAttestationDetail hardwareInformation.totalStorageSpace
+      physicalMemoryInBytes processorArchitecture
+      specificationVersion joinType skuFamily skuNumber managementFeatures
+      enrollmentProfileName hardwareInformation.totalStorageSpace
       hardwareInformation.freeStorageSpace hardwareInformation.manufacturer hardwareInformation.model
       hardwareInformation.subscriberCarrier hardwareInformation.cellularTechnology
       hardwareInformation.operatingSystemLanguage hardwareInformation.isSupervised
       hardwareInformation.batteryHealthPercentage
       hardwareInformation.batteryChargeCycles hardwareInformation.isSharedDevice
-      hardwareInformation.tpmSpecificationVersion hardwareInformation.operatingSystemEdition
+      hardwareInformation.operatingSystemEdition
       hardwareInformation.osBuildNumber hardwareInformation.operatingSystemProductType
-      hardwareInformation.systemManagementBIOSVersion hardwareInformation.tpmManufacturer
-      hardwareInformation.tpmVersion hardwareInformation.batteryLevelPercentage
+      hardwareInformation.batteryLevelPercentage
       hardwareInformation.residentUsersCount hardwareInformation.productName
       hardwareInformation.deviceLicensingStatus hardwareInformation.deviceLicensingLastErrorCode
       hardwareInformation.deviceLicensingLastErrorDescription
     `,
   },
+  "/deviceManagement/managedDevices/{id}/windowsProtectionState": windowsProtectionFields,
+  "/deviceManagement/managedDevices/{id}/windowsProtectionState/detectedMalwareState": malwareFields,
+  "/deviceManagement/managedDevices/{id}/deviceCompliancePolicyStates": compliancePolicyStateFields,
   "/devices": {
     device: "id deviceId displayName",
     activity: "approximateLastSignInDateTime",
-    configuration: "accountEnabled operatingSystem trustType isManaged",
+    configuration: "accountEnabled operatingSystem",
+    security: "isCompliant complianceExpirationDateTime isManaged trustType isRooted isManagementRestricted",
   },
   "/users": {
     credential: "passwordProfile.password",
@@ -150,6 +207,7 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
     configuration: "id displayName securityEnabled groupTypes[] createdDateTime",
   },
   "/deviceManagement/deviceCompliancePolicies": {
+    identity: "deviceStatuses[].userName userStatuses[].userName",
     security: "@odata.type id displayName description createdDateTime lastModifiedDateTime",
   },
   "/deviceManagement/deviceConfigurations": {
@@ -158,6 +216,7 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
       omaSettings[].secretReferenceValueId omaSettings[].value payload
     `,
     identity: "outerIdentityPrivacyTemporaryValue",
+    security: "omaSettings[].isEncrypted",
     configuration: `
       @odata.type id displayName description createdDateTime lastModifiedDateTime ssid networkName
       wifiSecurityType connectAutomatically connectWhenNetworkNameIsHidden proxySetting proxyManualAddress
@@ -167,7 +226,7 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
       userDomain dnsSuffixes[] trustedNetworkDomains[] roleScopeTagIds[] supportsScopeTags
       deviceManagementApplicabilityRuleOsEdition deviceManagementApplicabilityRuleOsVersion
       deviceManagementApplicabilityRuleDeviceMode version omaSettings[].@odata.type
-      omaSettings[].displayName omaSettings[].description omaSettings[].omaUri omaSettings[].isEncrypted
+      omaSettings[].displayName omaSettings[].description omaSettings[].omaUri
       omaSettings[].isReadOnly payloadName payloadFileName
     `,
   },
@@ -188,7 +247,6 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
       id createdDateTime appDisplayName clientAppUsed conditionalAccessStatus isInteractive riskDetail
       riskLevelAggregated riskLevelDuringSignIn riskState resourceDisplayName status.errorCode
       status.failureReason status.additionalDetails deviceDetail.operatingSystem deviceDetail.browser
-      deviceDetail.isCompliant deviceDetail.isManaged deviceDetail.trustType
       appliedConditionalAccessPolicies[].sessionControlsNotSatisfied[]
       appliedConditionalAccessPolicies[].result appliedConditionalAccessPolicies[].conditionsSatisfied
       appliedConditionalAccessPolicies[].conditionsNotSatisfied
@@ -198,7 +256,8 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
       appliedConditionalAccessPolicies[].excludeRulesSatisfied[]
     `,
     security: `
-       appliedConditionalAccessPolicies[].id appliedConditionalAccessPolicies[].displayName
+      deviceDetail.isCompliant deviceDetail.isManaged deviceDetail.trustType
+      appliedConditionalAccessPolicies[].id appliedConditionalAccessPolicies[].displayName
       appliedConditionalAccessPolicies[].enforcedGrantControls[]
       appliedConditionalAccessPolicies[].enforcedSessionControls[]
     `,
@@ -263,13 +322,13 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
     configuration: "id displayName version sizeInByte deviceCount publisher platform",
   },
   "/deviceAppManagement/managedAppPolicies": {
-    configuration: "@odata.type id displayName description createdDateTime lastModifiedDateTime",
+    security: "@odata.type id displayName description createdDateTime lastModifiedDateTime",
   },
   "/deviceAppManagement/iosManagedAppProtections": {
-    configuration: "@odata.type id displayName description createdDateTime lastModifiedDateTime",
+    security: "@odata.type id displayName description createdDateTime lastModifiedDateTime",
   },
   "/deviceAppManagement/androidManagedAppProtections": {
-    configuration: "@odata.type id displayName description createdDateTime lastModifiedDateTime",
+    security: "@odata.type id displayName description createdDateTime lastModifiedDateTime",
   },
   "/deviceAppManagement/mobileAppConfigurations": {
     credential: "encodedSettingXml settings[].appConfigKeyValue",
@@ -365,6 +424,7 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
     configuration: "id displayName description",
   },
   "/deviceManagement/managedDeviceOverview": {
+    security: "deviceExchangeAccessStateSummary",
     configuration: `
       id enrolledDeviceCount mdmEnrolledCount dualEnrolledDeviceCount managedDeviceModelsAndManufacturers
       lastModifiedDateTime deviceOperatingSystemSummary.androidCount deviceOperatingSystemSummary.iosCount
@@ -377,11 +437,7 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
       deviceOperatingSystemSummary.androidCorporateWorkProfileCount
       deviceOperatingSystemSummary.configMgrDeviceCount deviceOperatingSystemSummary.aospUserlessCount
       deviceOperatingSystemSummary.aospUserAssociatedCount deviceOperatingSystemSummary.linuxCount
-      deviceOperatingSystemSummary.chromeOSCount deviceExchangeAccessStateSummary.allowedDeviceCount
-      deviceExchangeAccessStateSummary.blockedDeviceCount
-      deviceExchangeAccessStateSummary.quarantinedDeviceCount
-      deviceExchangeAccessStateSummary.unknownDeviceCount
-      deviceExchangeAccessStateSummary.unavailableDeviceCount
+      deviceOperatingSystemSummary.chromeOSCount
     `,
   },
   "/deviceManagement/managedDeviceEncryptionStates": {
@@ -549,21 +605,30 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
     configuration: "id isDefault isInitial isVerified authenticationType",
   },
   "/security/alerts_v2": {
+    security: `
+      id alertPolicyId detectorId incidentId providerAlertId severity status investigationState
+      classification determination evidence[].defenderAvStatus evidence[].healthStatus evidence[].onboardingStatus
+      evidence[].riskScore evidence[].rbacGroupId evidence[].rbacGroupName
+    `,
+    device: "evidence[].azureAdDeviceId evidence[].mdeDeviceId evidence[].deviceDnsName evidence[].hostName",
     activity: `
-      id title severity status detectionSource serviceSource createdDateTime lastUpdateDateTime
+      title detectionSource serviceSource createdDateTime lastUpdateDateTime
     `,
   },
   "/security/incidents": {
     identity: "assignedTo",
+    security: "id displayName redirectIncidentId severity status classification determination priorityScore",
     activity: `
-      id displayName severity status classification determination createdDateTime lastUpdateDateTime
+      createdDateTime lastUpdateDateTime
     `,
   },
   "/security/secureScores": {
+    security: `
+      id currentScore maxScore enabledServices[] controlScores[].controlName controlScores[].implementationStatus
+      controlScores[].on controlScores[].score controlScores[].scoreInPercentage controlScores[].count controlScores[].total
+    `,
     configuration: `
-      id createdDateTime currentScore maxScore activeUserCount licensedUserCount azureTenantId
-      enabledServices[] controlScores[].implementationStatus controlScores[].lastSynced controlScores[].on
-      controlScores[].score controlScores[].scoreInPercentage controlScores[].count controlScores[].total
+      createdDateTime activeUserCount licensedUserCount azureTenantId controlScores[].lastSynced
     `,
     public: `
       averageComparativeScores[].SeatSizeRangeLowerValue
@@ -574,7 +639,7 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
       averageComparativeScores[].deviceScoreMax averageComparativeScores[].identityScore
       averageComparativeScores[].identityScoreMax averageComparativeScores[].infrastructureScore
       averageComparativeScores[].infrastructureScoreMax controlScores[].controlCategory
-      controlScores[].controlName controlScores[].description vendorInformation.provider
+      controlScores[].description vendorInformation.provider
       vendorInformation.providerVersion vendorInformation.subProvider vendorInformation.vendor
     `,
   },
@@ -583,9 +648,10 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
       controlStateUpdates[].assignedTo controlStateUpdates[].comment controlStateUpdates[].updatedBy
     `,
     activity: "controlStateUpdates[].updatedDateTime",
-    configuration: "azureTenantId controlStateUpdates[].state",
+    configuration: "azureTenantId",
+    security: "controlStateUpdates[].state",
     public: `
-      id actionType actionUrl controlCategory title deprecated implementationCost lastModifiedDateTime
+      id actionType actionUrl controlCategory controlName title deprecated implementationCost lastModifiedDateTime
       maxScore rank remediation remediationImpact service threats[] tier userImpact
       vendorInformation.provider vendorInformation.providerVersion vendorInformation.subProvider
       vendorInformation.vendor complianceInformation[]
@@ -598,9 +664,9 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
   },
   "/informationProtection/bitlocker/recoveryKeys": {
     credential: "key",
-    device: "id deviceId",
+    device: "deviceId",
     activity: "createdDateTime",
-    security: "volumeType",
+    security: "id volumeType",
   },
   "/directory/deviceLocalCredentials": {
     credential: "credentials[].passwordBase64",

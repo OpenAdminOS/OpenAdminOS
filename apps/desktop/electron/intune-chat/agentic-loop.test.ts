@@ -168,6 +168,55 @@ it("keeps a clipped Graph credential classified after deferred ingress settles",
   }
 });
 
+it("observes managed device posture in the final Chat provider request", async t => {
+  const dir = await mkdtemp(join(tmpdir(), "chat-managed-device-posture-"));
+  const store = seededStore(dir);
+  const ledger = new ClassificationLedger();
+  t.after(async () => { ledger.dispose(); store.close(); await rm(dir, { recursive: true, force: true }); });
+  const path = "/deviceManagement/managedDevices";
+  const row = {
+    deviceHealthAttestationState: { bitLockerStatus: "Disabled", secureBoot: "Disabled", earlyLaunchAntiMalwareDriverProtection: "Disabled",
+      codeIntegrity: "Measured", secureBootConfigurationPolicyFingerPrint: "fixture-fingerprint" },
+    deviceIdentityAttestationDetail: { deviceIdentityAttestationStatus: "trusted" },
+    hardwareInformation: { tpmVersion: "2.0" },
+    complianceState: "noncompliant",
+    windowsProtectionState: { managedDeviceHealthState: "unhealthy", id: "protection-id" },
+  };
+  const tools = toolContext(store);
+  tools.graphForScopes = async () => ({
+    request: async () => ({ value: [row] }),
+    listManagedDevices: async () => [],
+    retireManagedDevice: async () => { throw new Error("Unexpected write"); },
+  });
+  const requests: LlmOptions[] = [];
+  const events: RequestClassificationEvent[] = [];
+  const llm: RunLlmApi = { available: true, async complete(request) {
+    requests.push(request);
+    if (requests.length === 1) return { model: "fixture", text: JSON.stringify({ tool: "graph_get", params: { path } }) };
+    if (requests.length === 2) {
+      assert.equal(ledger.classifyRequest(request).coverageIncomplete, true);
+      await ledger.waitForObservations();
+      return { model: "fixture", text: '{"tool":"list_cached_resources","params":{}}' };
+    }
+    return { model: "fixture", text: '{"final":true,"answer":"Reviewed."}' };
+  }, async *stream() {} };
+  const result = await withClassificationScope(ledger, () =>
+    runAgenticChat({ ...baseInput(store, withRequestClassification(llm, "ollama", event => events.push(event))), tools }));
+  assert.equal(result.ok, true);
+  await ledger.waitForObservations();
+  assert.equal(requests.length, 3);
+  const finalEvent = events.reduce((last, event) => event.requestSequence > last.requestSequence ? event : last);
+  const final = finalEvent.classification;
+  assert.equal(final.coverageIncomplete, false);
+  assert.deepEqual(final.spans.filter(span => span.section === "prompt" && span.source === `graph:${path}`)
+    .map(({ start, end, kind, maskRole }) => [requests[2]!.prompt.slice(start, end), kind, maskRole]), [
+    ["Disabled", "security", "setting"], ["Disabled", "security", "setting"], ["Disabled", "security", "setting"],
+    ["Measured", "security", "setting"], ["fixture-fingerprint", "security", "nameOrIdentifier"], ["trusted", "security", "setting"],
+    ["2.0", "security", "setting"], ["noncompliant", "security", "setting"], ["unhealthy", "security", "setting"],
+    ["protection-id", "security", "nameOrIdentifier"],
+  ]);
+});
+
 it("classifies the identity cut inside a Graph preview array in the next Chat request", async t => {
   const dir = await mkdtemp(join(tmpdir(), "chat-preview-array-"));
   const store = seededStore(dir);

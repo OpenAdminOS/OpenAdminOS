@@ -22,6 +22,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Data policy preserves field classification for clipped array values in previews and marks unresolved fragments in Chat and Nova as incomplete.
 - Data policy keeps the last visible value's classification when a formatted preview ends before its delimiter.
 - Data policy classifies disk encryption and endpoint protection posture as Security, including policy names and IDs in encryption reports.
+- Data policy recognizes escaped matches and competing origins in model requests and classifies device attestation, compliance and Defender posture as Security.
 
 - GitHub Copilot Fusion: the Copilot provider offers Copilot Fusion Standard, High and Max from the CLI's catalog, shows tiers your plan does not include greyed out with the reason, says when several models may see a prompt, and makes Copilot Free accounts usable (they list only Fusion Standard). Copilot models now show their catalog names, such as MAI Code 2 for Microsoft's MAI models, and models your organization's Copilot policy turns off are greyed out with the reason.
 - Lemonade Server as a local provider: the model scan, Settings and the model choice find it on its loopback port (13305), offer its downloaded chat models (never embedding, speech, image or cloud-routed ones) and keep prompts on this device; LM Studio and Lemonade share one OpenAI-compatible adapter.

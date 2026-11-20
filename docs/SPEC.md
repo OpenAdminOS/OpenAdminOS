@@ -1774,10 +1774,12 @@ Identity class and secrets keep their Credential class within security objects.
 Security fields carry a mask role for names and identifiers or for setting values.
 App role and permission scope names are identifiers. App role flags,
 compliance rules and authorization policy settings stay readable in A4.
-Field map v7 classifies device encryption and endpoint protection posture as
-Security. Encryption report policy IDs and names use the identifier role.
-Encryption states and BitLocker volume types use the setting role. Recovery
-keys retain their Credential class.
+Field map v8 classifies device attestation, compliance and endpoint protection
+posture as Security. The rule covers measured boot, code integrity, Windows
+protection, Defender status, device compliance and Secure Score controls.
+The report, policy and control identifiers use the identifier role. Posture
+values use the setting role. Device and user identifiers retain their own
+classes. Recovery keys retain their Credential class.
 The field map gives the identifier role to Conditional Access location and role
 GUIDs, terms of use IDs, custom authentication factor IDs, and preauthorized
 delegated permission IDs. Terms such as All and AllTrusted and control values
@@ -1878,6 +1880,11 @@ and low-specificity values need field or rendering provenance, or a
 whole-word match for distinctive short identifiers. Boolean and numeric
 values need provenance. Serialized arrays preserve field provenance for all
 elements, including nested arrays. Generic phrases use word boundaries.
+JSON and fence escapes count as boundaries at the edges of a match, with
+offsets in the original provider text. Exact ranges keep the highest class
+from competing observations. If a lower-class field match and a more sensitive
+origin cannot be resolved from the rendering provenance, the local record marks
+that range incomplete.
 When a sandboxed script uses a Graph value that needs field provenance as
 an unbound word or token in its system text or prompt, the matching range is
 incomplete. This check covers script text within each section.

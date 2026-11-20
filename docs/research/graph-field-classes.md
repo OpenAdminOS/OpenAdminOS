@@ -63,6 +63,33 @@ remain Credential. Settings Catalog uses the template family and setting
 definition IDs where present, including BitLocker and FileVault IDs in
 standalone settings responses.
 
+## Field map v8 posture verification
+
+The local msgraph index supplied the managed device and hardware schemas,
+the full health attestation and identity attestation shapes, and the Windows
+protection, malware and compliance setting state shapes. The route index
+confirmed the direct report paths for managed and co-managed devices, `/me`
+and `/users/{id}`. Synthetic fixtures cover those routes and the same data
+expanded inline. The projected route families below were checked against the
+historical inventory and the corresponding bundled schemas.
+
+| Resource | Security settings and status | Security identifiers |
+| --- | --- | --- |
+| Managed devices | Health and identity attestation, BitLocker, Secure Boot, code integrity, early launch antimalware, TPM and Device Guard, compliance and grace period, jailbreak and lost mode, Exchange access, patch levels, bootstrap token escrow status, firmware management, management certificate expiry and ConfigMgr client health | Secure Boot policy fingerprint and code integrity policy |
+| Windows protection and malware reports | Antivirus engine and signatures, real-time and network protection, scan and remediation status, health and malware counts | Report and malware IDs and names |
+| Compliance policy state | Policy and per-setting state, counts, errors and current values | Report, policy and setting IDs and names |
+| Entra device details and Intune overview | Compliance, management and trust posture, and Exchange access summary | |
+| Legacy and Settings Catalog profiles | OMA encryption metadata, firewall, antivirus, Device Guard, Application Guard, AppLocker, DMA Guard, System Guard, Gatekeeper, SmartScreen, local security options and Defender reporting | Profile identifiers on typed endpoint security objects and certificate thumbprints |
+| Managed app protection | Encryption, attestation, application data protection and compliance controls | Policy IDs and names |
+| Defender alerts, incidents and Secure Score | Investigation status, antivirus and onboarding health, risk, score and control implementation state | Alert, incident, detector, report, security group and control identifiers |
+| BitLocker recovery records | Volume type | Recovery record ID |
+
+Device IDs and report device names retain Device. User identifiers retain
+Identity. Recovery material retains Credential. Public Secure Score catalog
+fields retain Public. A Chat regression checks that the final provider request
+contains the expected attestation and protection spans and mask roles after
+the background Graph ingress settles.
+
 ## Endpoints
 
 ### PIM for Groups and expanded policy settings
