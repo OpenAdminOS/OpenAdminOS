@@ -447,6 +447,10 @@ it("backfills a stale Secure Score page through bounded worker jobs", async t =>
       assert.deepEqual(fields.at(-1), [["controlScores", "241", "description"], "description", "public"]);
       store.replaceGraphResources({ tenantId, resource, label: "Secure Score", scopeSet: [],
         refreshedAt: "2026-11-19T00:00:00.000Z", rows: [rows[0]] });
+      assert.equal(check.prepare(`SELECT COUNT(*) AS sidecars FROM graph_classification_sidecars s
+        JOIN graph_resources g ON g.rowid = s.cache_rowid AND g.snapshot_id = s.snapshot_id`).get()?.sidecars, 0);
+      assert.equal(check.prepare("SELECT COUNT(*) AS sidecars FROM graph_classification_sidecars").get()?.sidecars, 90);
+      await store["staleSidecarCleanup"];
       assert.equal(check.prepare("SELECT COUNT(*) AS sidecars FROM graph_classification_sidecars").get()?.sidecars, 0);
     } finally { check.close(); }
   } finally {

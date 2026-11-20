@@ -102,6 +102,46 @@ describe("Intune Chat SQLite store", () => {
     });
   }
 
+  it("invalidates sidecars at clear and purge commit and reclaims them in batches", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-sidecar-cleanup-"));
+    const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+    const db = store["db"];
+    try {
+      const snapshot = {
+        tenantId: "fixture-clear", resource: "managedDevices" as const, label: "Devices",
+        scopeSet: [], rows: Array.from({ length: 129 }, (_, i) => ({ id: `fixture-${i}` })),
+        refreshedAt: "2026-01-01T00:00:00.000Z",
+      };
+      for (const tenantId of ["fixture-clear", "fixture-purge", "fixture-keep"]) {
+        store.replaceGraphResources({ ...snapshot, tenantId });
+        db.prepare(`INSERT INTO graph_classification_sidecars
+          (cache_rowid, tenant_id, resource, snapshot_id, field_map_version, compressed)
+          SELECT rowid, tenant_id, resource, snapshot_id, 8, X'01'
+          FROM graph_resources WHERE tenant_id = ?`).run(tenantId);
+      }
+      db.exec("CREATE TABLE IF NOT EXISTS audit_events (tenant_id TEXT)");
+      const physical = db.prepare("SELECT COUNT(*) AS count FROM graph_classification_sidecars WHERE tenant_id = ?");
+      const readable = db.prepare(`SELECT COUNT(*) AS count FROM graph_classification_sidecars s JOIN graph_resources g
+        ON g.rowid = s.cache_rowid AND g.snapshot_id = s.snapshot_id WHERE s.tenant_id = ?`);
+
+      store.clearGraphCache("fixture-clear");
+      assert.equal(readable.get("fixture-clear")?.count, 0);
+      assert.equal(physical.get("fixture-clear")?.count, 129);
+      await store["staleSidecarCleanup"];
+      assert.equal(physical.get("fixture-clear")?.count, 0);
+
+      const pending = store.purgeTenant("fixture-purge");
+      assert.equal(readable.get("fixture-purge")?.count, 0);
+      assert.equal(physical.get("fixture-purge")?.count, 129);
+      await pending;
+      assert.equal(physical.get("fixture-purge")?.count, 0);
+      assert.equal(readable.get("fixture-keep")?.count, 129);
+    } finally {
+      await store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("reads drift history before trying to upgrade a transaction while another writer holds the lock", async t => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-drift-locked-"));
     const path = join(dir, "openadminos.db");

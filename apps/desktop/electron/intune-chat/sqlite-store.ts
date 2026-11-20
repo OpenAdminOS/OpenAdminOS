@@ -449,6 +449,8 @@ export class IntelligenceSqliteStore {
   private readonly stagedIdentityShards = new Map<string, Map<GraphCacheResourceKind, TenantValueIndex>>();
   private readonly stagedFirstNames = new Map<string, Map<GraphCacheResourceKind, TenantValueIndex>>();
   private classificationInitialization?: Promise<void>;
+  private staleSidecarCleanup?: Promise<void>;
+  private staleSidecarGeneration = 0;
   private startupIdentityTenants?: Set<string>;
   private readonly cacheSnapshots = new Map<string, Map<GraphCacheResourceKind, string>>();
   private readonly cacheClassifications = new Map<string, Set<Promise<void>>>();
@@ -475,6 +477,7 @@ export class IntelligenceSqliteStore {
       if (existsSync(sidecar)) chmodSync(sidecar, 0o600);
     }
     this.migrate();
+    this.scheduleStaleSidecarCleanup();
     if (options.backgroundClassification) {
       this.classificationInitialization = this.initializeCacheClassification(options.beforeClassification);
     } else {
@@ -492,7 +495,7 @@ export class IntelligenceSqliteStore {
     }
     this.tenantIdentityIndexes.clear();
     this.db.close();
-    return settled ?? Promise.resolve();
+    return Promise.all([settled, this.staleSidecarCleanup]).then(() => undefined);
   }
 
   /**
@@ -867,8 +870,6 @@ export class IntelligenceSqliteStore {
           pageLimitReached: input.pageLimitReached === true,
         });
       }
-      this.db.prepare("DELETE FROM graph_classification_sidecars WHERE tenant_id = ? AND resource = ?")
-        .run(input.tenantId, input.resource);
       this.db.prepare("DELETE FROM graph_resources WHERE tenant_id = ? AND resource = ?")
         .run(input.tenantId, input.resource);
       const insert = this.db.prepare(
@@ -942,6 +943,7 @@ export class IntelligenceSqliteStore {
           input.tenantTotal ?? null,
         );
       this.db.exec("COMMIT");
+      this.scheduleStaleSidecarCleanup();
       if (egressIndex || identityUnavailable) {
         this.tenantIdentityIndexes.delete(input.tenantId);
         let unavailable = this.unavailableIdentityResources.get(input.tenantId);
@@ -2270,7 +2272,6 @@ export class IntelligenceSqliteStore {
       this.db
         .prepare(`DELETE FROM graph_resources WHERE tenant_id = ?`)
         .run(tenantId);
-      this.db.prepare("DELETE FROM graph_classification_sidecars WHERE tenant_id = ?").run(tenantId);
       this.db
         .prepare(`DELETE FROM graph_cache_status WHERE tenant_id = ?`)
         .run(tenantId);
@@ -2283,9 +2284,67 @@ export class IntelligenceSqliteStore {
     this.tenantIdentityIndexes.delete(tenantId);
     this.cacheSnapshots.delete(tenantId);
     this.releaseIdentityShards(tenantId);
+    this.scheduleStaleSidecarCleanup();
   }
 
-  purgeTenant(tenantId: string): void {
+  private scheduleStaleSidecarCleanup(): void {
+    this.staleSidecarGeneration++;
+    if (this.staleSidecarCleanup) return;
+    this.staleSidecarCleanup = this.cleanStaleSidecars()
+      .catch(() => { /* A later cache change or startup can retry unreachable sidecars. */ })
+      .finally(() => { this.staleSidecarCleanup = undefined; });
+  }
+
+  private async cleanStaleSidecars(): Promise<void> {
+    // Snapshot replacement or removal makes the old sidecar unreachable
+    // immediately. Scan the sidecar table in primary-key order to reclaim
+    // those rows, including any left by a previous app session.
+    let generation = this.staleSidecarGeneration;
+    let cursor = 0;
+    let delay = 0;
+    let page: ReturnType<DatabaseSync["prepare"]> | undefined;
+    let remove: ReturnType<DatabaseSync["prepare"]> | undefined;
+    for (;;) {
+      if (delay) await waitForRetry(delay);
+      else await yieldToMain();
+      if (this.closed) return;
+      page ??= this.db.prepare(`SELECT s.cache_rowid AS id, g.rowid IS NULL AS stale
+        FROM graph_classification_sidecars s LEFT JOIN graph_resources g
+          ON g.rowid = s.cache_rowid AND g.snapshot_id = s.snapshot_id
+          AND g.tenant_id = s.tenant_id AND g.resource = s.resource
+        WHERE s.cache_rowid > ? ORDER BY s.cache_rowid LIMIT 64`);
+      remove ??= this.db.prepare(`DELETE FROM graph_classification_sidecars
+        WHERE cache_rowid IN (SELECT value FROM json_each(?))
+          AND NOT EXISTS (
+            SELECT 1 FROM graph_resources g WHERE g.rowid = cache_rowid
+              AND g.snapshot_id = graph_classification_sidecars.snapshot_id
+              AND g.tenant_id = graph_classification_sidecars.tenant_id
+              AND g.resource = graph_classification_sidecars.resource
+          )`);
+      const rows = page.all(cursor) as unknown as Array<{ id: number; stale: number }>;
+      const ids = rows.filter(row => row.stale).map(row => row.id);
+      if (ids.length) {
+        this.db.exec("PRAGMA busy_timeout = 0");
+        try {
+          remove.run(JSON.stringify(ids));
+        } catch (error) {
+          if (!isSqliteBusy(error)) throw error;
+          delay = Math.min(400, delay ? delay * 2 : 25);
+          continue;
+        } finally {
+          this.db.exec("PRAGMA busy_timeout = 5000");
+        }
+      }
+      delay = 0;
+      cursor = rows.at(-1)?.id ?? cursor;
+      if (rows.length === 64) continue;
+      if (generation === this.staleSidecarGeneration) return;
+      generation = this.staleSidecarGeneration;
+      cursor = 0;
+    }
+  }
+
+  async purgeTenant(tenantId: string): Promise<void> {
     const multiTenantJobs = this.db
       .prepare(
         `SELECT id, conversation_id, resolved_tenant_ids_json
@@ -2317,7 +2376,6 @@ export class IntelligenceSqliteStore {
     try {
       for (const table of [
         "graph_resources",
-        "graph_classification_sidecars",
         "graph_cache_status",
         "drift_object_versions",
         "drift_snapshots",
@@ -2390,6 +2448,26 @@ export class IntelligenceSqliteStore {
       this.db.exec("ROLLBACK");
       throw error;
     }
+    // Disconnect waits for physical deletion, while other cache changes
+    // need only invalidate the snapshot before returning.
+    const remove = this.db.prepare(`DELETE FROM graph_classification_sidecars WHERE cache_rowid IN (
+      SELECT cache_rowid FROM graph_classification_sidecars WHERE tenant_id = ? LIMIT 64
+    )`);
+    for (let delay = 0; ;) {
+      if (delay) await waitForRetry(delay);
+      else await yieldToMain();
+      this.db.exec("PRAGMA busy_timeout = 0");
+      try {
+        if (Number(remove.run(tenantId).changes) < 64) break;
+        delay = 0;
+      } catch (error) {
+        if (!isSqliteBusy(error) || delay >= 400) throw error;
+        delay = delay ? delay * 2 : 25;
+      } finally {
+        this.db.exec("PRAGMA busy_timeout = 5000");
+      }
+    }
+    await yieldToMain();
     this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
   }
 
@@ -2931,6 +3009,7 @@ export class IntelligenceSqliteStore {
           THEN g.classification_json END AS classification_json
         FROM graph_resources g LEFT JOIN graph_classification_sidecars s
           ON s.cache_rowid = g.rowid AND s.snapshot_id = g.snapshot_id AND s.field_map_version = ?
+          AND s.tenant_id = g.tenant_id AND s.resource = g.resource
         WHERE g.rowid = ? AND g.snapshot_id = ?`);
       const record = sidecar.get(MAX_READ_SIDECAR_UNITS, MAX_READ_SIDECAR_UNITS, GRAPH_FIELD_CLASSES_VERSION,
         rowid, snapshotId) as { compressed?: Uint8Array; classification_json?: string } | undefined;

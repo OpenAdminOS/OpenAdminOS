@@ -8805,7 +8805,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         }
       }
       try {
-        this.intelligenceStore?.purgeTenant(id);
+        await this.intelligenceStore?.purgeTenant(id);
       } catch (cause) {
         throw new Error(`Its Chat and cache data could not be deleted. ${errorText(cause)}`, { cause });
       }

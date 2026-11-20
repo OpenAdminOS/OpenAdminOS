@@ -25,7 +25,7 @@ function classifyStartupPage(
     const prefix = `[${GRAPH_FIELD_CLASSES_VERSION},%`;
     const select = db.prepare(`SELECT g.rowid, g.snapshot_id AS snapshotId, g.graph_id AS graphId, g.display_name AS displayName, g.raw_json AS rawJson
       FROM graph_resources g
-      ${page.indexOnly ? "" : "LEFT JOIN graph_classification_sidecars s ON s.cache_rowid = g.rowid AND s.snapshot_id = g.snapshot_id"}
+      ${page.indexOnly ? "" : "LEFT JOIN graph_classification_sidecars s ON s.cache_rowid = g.rowid AND s.snapshot_id = g.snapshot_id AND s.tenant_id = g.tenant_id AND s.resource = g.resource"}
       WHERE g.tenant_id = ? AND g.resource = ? AND g.rowid > ?
       ${page.snapshotId === undefined ? "" : "AND g.snapshot_id = ?"}
       ${page.indexOnly ? "" : `AND length(CAST(g.raw_json AS BLOB)) <= 262144

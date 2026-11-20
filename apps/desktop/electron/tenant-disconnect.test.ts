@@ -695,7 +695,7 @@ describe("Disconnect redesign: GPT-6.1-Sol reproductions", () => {
         accessToken: "token",
       }),
     });
-    const intelligence = (f.store as unknown as { intelligenceStore: { purgeTenant(id: string): void } }).intelligenceStore;
+    const intelligence = (f.store as unknown as { intelligenceStore: { purgeTenant(id: string): Promise<void> } }).intelligenceStore;
     const purge = intelligence.purgeTenant.bind(intelligence);
     intelligence.purgeTenant = () => {
       throw new Error("The database is locked.");
