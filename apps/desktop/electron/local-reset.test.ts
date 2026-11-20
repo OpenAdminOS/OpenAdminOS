@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -531,6 +531,54 @@ describe("local reset: wipe at launch", () => {
     }
   });
 
+  it("stops when a folder sits where the policy file belongs", async () => {
+    const dir = await tempDir();
+    try {
+      seedDataFolder(dir, DEV_MARKER);
+      rmSync(join(dir, "policy.json"));
+      mkdirSync(join(dir, "Policy.json"));
+      writeFileSync(join(dir, "Policy.json", "stash.bin"), "x");
+      const report = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", home: dir, env: {} });
+      assert.equal(report?.status, "incomplete");
+      assert.match(report?.failed[0]?.reason ?? "", /is a folder, not the IT policy file/);
+      assert.ok(existsSync(join(dir, "state.json")));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not warn when exactly five Keychain items were removed", async () => {
+    const dir = await tempDir();
+    try {
+      seedDataFolder(dir, MARKER);
+      const { run, calls } = recordingRun({ "/usr/bin/security": [{ status: 0 }, { status: 0 }, { status: 0 }, { status: 0 }, { status: 0 }, keychainNotFound] });
+      const report = runPendingLocalReset({ userDataDir: dir, packaged: true, platform: "darwin", home: join(dir, "home"), env: {}, run });
+      assert.deepEqual(report?.warnings, []);
+      assert.equal(calls.filter((call) => call[0] === "/usr/bin/security").length, 6);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not bring back a cleared warning when the wipe resumes", async () => {
+    const dir = await tempDir();
+    try {
+      seedDataFolder(dir, { ...MARKER, requestWarnings: [{ item: "Background scheduler", reason: "launchctl failed" }] });
+      const { run } = recordingRun({ "/usr/bin/security": [keychainNotFound] });
+      const first = runPendingLocalReset({
+        userDataDir: dir, packaged: true, platform: "darwin", home: join(dir, "home"), env: {}, run,
+        removeScheduler: () => undefined,
+        fs: failingFileSystem((path) => path.endsWith(LOCAL_RESET_MARKER)),
+      });
+      assert.equal(first?.status, "incomplete");
+      const second = runPendingLocalReset({ userDataDir: dir, packaged: true, platform: "darwin", home: join(dir, "home"), env: {}, run });
+      assert.equal(second?.status, "completed");
+      assert.deepEqual(second?.warnings, []);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("never writes through a link planted where a marker temp file used to go", async () => {
     const dir = await tempDir();
     try {
@@ -607,7 +655,9 @@ describe("local reset: wipe at launch", () => {
       seedDataFolder(shared, DEV_MARKER);
       const linked = join(dir, "profile-link");
       symlinkSync(shared, linked);
-      for (const path of [linked, `${linked}/`, `${linked}/.`, `${linked}/inner/..`]) {
+      // "profile-link/../shared" lists the real parent of the target, while the
+      // path reads as a folder next to the link.
+      for (const path of [linked, `${linked}/`, `${linked}/.`, `${linked}/inner/..`, `${linked}/../shared`]) {
         assert.equal(folderGoesThroughLink(path), true, path);
         assert.equal(localResetLinkCheck(path).dataFolderIsLink, true, path);
         const report = runPendingLocalReset({ userDataDir: path, packaged: false, platform: "linux", home: dir, env: {} });
@@ -617,6 +667,12 @@ describe("local reset: wipe at launch", () => {
       assert.equal(folderGoesThroughLink(shared), false);
       assert.equal(folderGoesThroughLink(`${shared}/`), false);
       assert.equal(folderGoesThroughLink(join(dir, "missing")), false);
+      // Linux: a folder that is itself a mount point, such as a bind mount.
+      const realShared = realpathSync(shared);
+      const mountInfo = () => `36 35 98:0 /mnt1 ${realShared.replaceAll(" ", "\\040")} rw,noatime master:1 - ext3 /dev/root rw\n`;
+      assert.equal(folderGoesThroughLink(shared, { platform: "linux", mountInfo }), true);
+      assert.equal(folderGoesThroughLink(shared, { platform: "darwin", mountInfo }), false);
+      assert.equal(folderGoesThroughLink(shared, { platform: "linux", mountInfo: () => "36 35 98:0 / / rw - ext4 /dev/root rw\n" }), false);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -630,7 +686,7 @@ describe("local reset: wipe at launch", () => {
       mkdirSync(join(dir, "managed"));
       writeFileSync(join(dir, "managed", "current.json"), "{}");
       symlinkSync(join(dir, "managed", "current.json"), join(dir, "policy.json"));
-      assert.match(policyLinkProblem(dir) ?? "", /is a link to a file in the data folder/);
+      assert.match(policyLinkProblem(dir) ?? "", /is a link that goes through the data folder/);
       const report = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", home: dir, env: {} });
       assert.equal(report?.status, "incomplete");
       assert.ok(existsSync(join(dir, "managed", "current.json")));
@@ -645,6 +701,20 @@ describe("local reset: wipe at launch", () => {
       assert.equal(runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", home: dir, env: {} })?.status, "completed");
       assert.ok(existsSync(outsidePolicy));
       rmSync(outsidePolicy);
+
+      // A chain through a folder link inside the data folder counts too.
+      const central = join(dir, "..", `${basename(dir)}-central`);
+      mkdirSync(central, { recursive: true });
+      writeFileSync(join(central, "current.json"), "{}");
+      writeFileSync(join(dir, LOCAL_RESET_MARKER), JSON.stringify(DEV_MARKER));
+      rmSync(join(dir, "policy.json"));
+      symlinkSync(central, join(dir, "managed-link"));
+      symlinkSync(join(dir, "managed-link", "current.json"), join(dir, "policy.json"));
+      assert.match(policyLinkProblem(dir) ?? "", /goes through the data folder/);
+      assert.equal(runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", home: dir, env: {} })?.status, "incomplete");
+      assert.ok(existsSync(join(dir, "managed-link")));
+      assert.equal(readFileSync(join(dir, "policy.json"), "utf8"), "{}");
+      rmSync(central, { recursive: true, force: true });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
