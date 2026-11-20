@@ -266,6 +266,9 @@ describe("Model fit: the per-request override", () => {
       /does not report a model yet/,
     );
     assert.deepEqual(modelFitChoices({ issue: { reason: "context-too-small", providerId: "ollama", model: LOCAL_MODEL }, providers: [ollama, unpinned] }).hosted, []);
+    // A configured default the provider does not list falls back to a model it does list.
+    const unlistedDefault: ProviderSummary = { ...claude, models: ["claude-sonnet-5-5"], defaultModel: "claude-from-config" };
+    assert.deepEqual(modelFitChoices({ issue: { reason: "context-too-small", providerId: "ollama", model: LOCAL_MODEL }, providers: [ollama, unlistedDefault] }).hosted.map((choice) => choice.model), ["claude-sonnet-5-5"]);
     // A default from the CLI's config with no listed models (Codex without its model cache) is not offered either.
     const configDefaultOnly: ProviderSummary = { ...claude, models: [], defaultModel: "claude-sonnet-5-5" };
     assert.deepEqual(modelFitChoices({ issue: { reason: "context-too-small", providerId: "ollama", model: LOCAL_MODEL }, providers: [ollama, configDefaultOnly] }).hosted, []);

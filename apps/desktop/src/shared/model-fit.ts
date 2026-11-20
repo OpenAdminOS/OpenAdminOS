@@ -203,6 +203,21 @@ export function isListedHostedModel(provider: Pick<ProviderSummary, "models">, m
 }
 
 /**
+ * The model a hosted provider would run a model fit request on: its pinned or
+ * default model when the provider lists it, else the first model it lists
+ * (a CLI's configured default can be one it does not list). Undefined when it
+ * lists none, so the provider is not offered.
+ */
+export function hostedModelFitModel(
+  provider: Pick<ProviderSummary, "id" | "models" | "defaultModel">,
+  activeModelByProviderId?: Partial<Record<ProviderId, string>>,
+): string | undefined {
+  const preferred = resolveProviderDefaultModel(provider as ProviderSummary, activeModelByProviderId).model;
+  if (isListedHostedModel(provider, preferred)) return preferred;
+  return provider.models.find((model) => isListedHostedModel(provider, model));
+}
+
+/**
  * An Ollama Cloud model, such as "gpt-oss:120b-cloud" or "glm-4.6:cloud".
  * A loopback Ollama that is signed in to ollama.com lists these with its
  * local models, but their prompts are processed on Ollama's servers, so
@@ -277,8 +292,8 @@ export function modelFitChoices(input: {
     .filter((provider) => !provider.isLocal && HOSTED_PROVIDER_IDS.has(provider.id) && provider.id !== issue.providerId && isProviderReady(provider) && managedProviderAllowed(input.managedPolicy, provider.id))
     .flatMap((provider) => {
       // The accept step names the exact model, so a provider that reports none yet is not offered.
-      const model = resolveProviderDefaultModel(provider, input.activeModelByProviderId).model;
-      return isListedHostedModel(provider, model) ? [{ providerId: provider.id, providerName: provider.name, isLocal: false, model }] : [];
+      const model = hostedModelFitModel(provider, input.activeModelByProviderId);
+      return model ? [{ providerId: provider.id, providerName: provider.name, isLocal: false, model }] : [];
     });
   const currentSize = modelSizeBillions(issue.model);
   const local: ModelFitChoice[] = [];

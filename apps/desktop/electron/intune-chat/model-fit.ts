@@ -10,7 +10,7 @@ import type {
   ProviderSummary,
   RunLlmApi,
 } from "@openadminos/agent-sdk";
-import { classifyModelFitFailure, isListedHostedModel, isOnDeviceModel, isPlaceholderModel, isRemoteBackedModel, SELF_HOSTED_PROVIDER_IDS } from "../../src/shared/model-fit.js";
+import { classifyModelFitFailure, hostedModelFitModel, isListedHostedModel, isOnDeviceModel, isPlaceholderModel, isRemoteBackedModel, SELF_HOSTED_PROVIDER_IDS } from "../../src/shared/model-fit.js";
 import { isProviderReady } from "../../src/shared/provider-detection.js";
 
 /**
@@ -165,7 +165,7 @@ export function resolveChatTurnProvider(input: {
   if (override.model !== undefined && chosen.models.length > 0 && !chosen.models.includes(override.model)) {
     throw new ModelOverrideError(`${chosen.name} does not list ${override.model}, so nothing was sent. Choose it again in Chat.`);
   }
-  const model = override.model ?? resolveProviderDefaultModel(chosen, input.activeModelByProviderId).model;
+  const model = override.model ?? (chosen.isLocal ? resolveProviderDefaultModel(chosen, input.activeModelByProviderId).model : hostedModelFitModel(chosen, input.activeModelByProviderId));
   if ((chosen.id === offer.failed.providerId && model === offer.failed.model) || (chosen.id === active.id && model === activeModel)) {
     throw new ModelOverrideError("That model already could not do this request. Choose another one, or narrow the question.");
   }
