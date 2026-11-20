@@ -457,11 +457,12 @@ function writeMacosLaunchAgent(): void {
   }
 }
 
-function removeMacosLaunchAgent(): void {
+function removeMacosLaunchAgent(guard: () => void = () => undefined): void {
   const plistPath = macosSchedulerPlistPath();
   const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
   // Only this service by its label: given a path, launchctl unloads every
   // job definition it finds there, which could be other apps' jobs.
+  guard();
   try {
     execFileSync("launchctl", ["bootout", uid === undefined ? `gui/${MACOS_SCHEDULER_LABEL}` : `gui/${uid}/${MACOS_SCHEDULER_LABEL}`], { stdio: "ignore", timeout: 5_000 });
   } catch {
@@ -477,6 +478,7 @@ function removeMacosLaunchAgent(): void {
   if (!stat.isFile()) {
     throw new Error(`something other than the scheduler file is at ${plistPath}, so it was left in place`);
   }
+  guard();
   rmSync(plistPath, { force: true });
 }
 
@@ -5454,9 +5456,9 @@ function finishLocalResetAfterReady(report: LocalResetReport): void {
  * the removal helpers treat any failure as "already removed", and a reset
  * must not report a scheduler as off while it still launches the app.
  */
-function removeSchedulerRegistration(): void {
+function removeSchedulerRegistration(guard: () => void = () => undefined): void {
   if (process.platform === "darwin") {
-    removeMacosLaunchAgent();
+    removeMacosLaunchAgent(guard);
     const loaded = macosLaunchAgentLoaded();
     if (existsSync(macosSchedulerPlistPath()) || loaded !== "absent") {
       throw new Error(

@@ -29,6 +29,7 @@ import {
   MACOS_SAFE_STORAGE_SERVICE,
   readLocalResetMarker,
   sharedReadOnlyFile,
+  isKeptThroughReset,
   UPDATER_CACHE_DIR,
   requestLocalReset,
   runPendingLocalReset,
@@ -84,6 +85,9 @@ function recordingRun(results: Record<string, CommandResult[]> = {}): { run: (fi
 }
 
 const keychainNotFound: CommandResult = { status: 44 };
+
+/** An empty Linux mount table, for wipes tested with the Linux platform on another system. */
+const noMounts = () => "";
 
 describe("local reset: removal plan", () => {
   it("keeps the policy file, the marker and Chromium's lock files, with the audit side files last", () => {
@@ -193,7 +197,7 @@ describe("local reset: wipe at launch", () => {
           rmSync(path, { recursive: true, force: true });
         },
       };
-      const report = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", home: dir, env: {}, fs });
+      const report = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", mountInfo: noMounts, home: dir, env: {}, fs });
       assert.deepEqual(report?.failed, [{ item: "logs", reason: "something inside it could not be removed" }]);
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -208,7 +212,7 @@ describe("local reset: wipe at launch", () => {
       const first = runPendingLocalReset({
         userDataDir: dir,
         packaged: false,
-        platform: "linux",
+        platform: "linux", mountInfo: noMounts,
         home: dir,
         env: {},
         fs: failingFileSystem((path) => path.endsWith("connectors")),
@@ -218,10 +222,10 @@ describe("local reset: wipe at launch", () => {
       assert.ok(existsSync(join(dir, "connectors", "secrets", "file")));
       assert.ok(existsSync(join(dir, "openadminos.db-audit-anchor.json")));
 
-      const second = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", home: dir, env: {} });
+      const second = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", mountInfo: noMounts, home: dir, env: {} });
       assert.equal(second?.status, "completed");
       assert.deepEqual(readdirSync(dir).sort(), ["SingletonLock", "policy.json"]);
-      assert.equal(runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", home: dir, env: {} }), undefined);
+      assert.equal(runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", mountInfo: noMounts, home: dir, env: {} }), undefined);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -389,11 +393,11 @@ describe("local reset: wipe at launch", () => {
           }
         },
       };
-      const report = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", home: dir, env: {}, fs });
+      const report = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", mountInfo: noMounts, home: dir, env: {}, fs });
       assert.equal(report?.status, "incomplete");
       assert.deepEqual(report?.failed, [{ item: "Session Storage", reason: "it was created again during the reset" }]);
       assert.ok(existsSync(join(dir, LOCAL_RESET_MARKER)));
-      const second = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", home: dir, env: {} });
+      const second = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", mountInfo: noMounts, home: dir, env: {} });
       assert.equal(second?.status, "completed");
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -467,7 +471,7 @@ describe("local reset: wipe at launch", () => {
       const linked = join(dir, "profile-link");
       symlinkSync(shared, linked);
       assert.equal(folderGoesThroughLink(linked), true);
-      const report = runPendingLocalReset({ userDataDir: linked, packaged: false, platform: "linux", home: dir, env: {} });
+      const report = runPendingLocalReset({ userDataDir: linked, packaged: false, platform: "linux", mountInfo: noMounts, home: dir, env: {} });
       assert.equal(report?.status, "incomplete");
       assert.match(report?.failed[0]?.reason ?? "", /is a link, holds another mount, or could not be read in full/);
       assert.ok(existsSync(join(shared, "state.json")));
@@ -478,7 +482,7 @@ describe("local reset: wipe at launch", () => {
       symlinkSync(join(dir, "other-cache.bin"), join(profile, "tokens-abc.bin"));
       writeFileSync(join(profile, "tokens.bin"), "x");
       writeFileSync(join(profile, LOCAL_RESET_MARKER), JSON.stringify(markerFor(profile, DEV_MARKER)));
-      assert.equal(runPendingLocalReset({ userDataDir: profile, packaged: false, platform: "linux", home: dir, env: {} })?.status, "completed");
+      assert.equal(runPendingLocalReset({ userDataDir: profile, packaged: false, platform: "linux", mountInfo: noMounts, home: dir, env: {} })?.status, "completed");
       assert.equal(readFileSync(join(dir, "other-cache.bin"), "utf8"), "other profile");
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -529,7 +533,7 @@ describe("local reset: wipe at launch", () => {
       writeFileSync(join(dir, "backup-tokens.bin"), "backup bytes");
       linkSync(join(dir, "backup-tokens.bin"), join(profile, "tokens.bin"));
       writeFileSync(join(profile, LOCAL_RESET_MARKER), JSON.stringify(markerFor(profile, DEV_MARKER)));
-      assert.equal(runPendingLocalReset({ userDataDir: profile, packaged: false, platform: "linux", home: dir, env: {} })?.status, "completed");
+      assert.equal(runPendingLocalReset({ userDataDir: profile, packaged: false, platform: "linux", mountInfo: noMounts, home: dir, env: {} })?.status, "completed");
       assert.equal(readFileSync(join(dir, "backup-tokens.bin"), "utf8"), "backup bytes");
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -541,7 +545,7 @@ describe("local reset: wipe at launch", () => {
     try {
       writeFileSync(join(dir, "state.json"), "{}");
       mkdirSync(join(dir, LOCAL_RESET_MARKER));
-      const report = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", home: dir, env: {} });
+      const report = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", mountInfo: noMounts, home: dir, env: {} });
       assert.equal(report?.status, "incomplete");
       assert.ok(existsSync(join(dir, "state.json")));
     } finally {
@@ -573,7 +577,7 @@ describe("local reset: wipe at launch", () => {
       writeFileSync(join(profile, "state.json"), "{}");
       writeFileSync(join(dir, "elsewhere.json"), JSON.stringify(DEV_MARKER));
       linkSync(join(dir, "elsewhere.json"), join(profile, LOCAL_RESET_MARKER));
-      const report = runPendingLocalReset({ userDataDir: profile, packaged: false, platform: "linux", home: dir, env: {} });
+      const report = runPendingLocalReset({ userDataDir: profile, packaged: false, platform: "linux", mountInfo: noMounts, home: dir, env: {} });
       assert.equal(report?.status, "incomplete");
       assert.ok(existsSync(join(profile, "state.json")));
     } finally {
@@ -617,7 +621,7 @@ describe("local reset: wipe at launch", () => {
       rmSync(join(dir, "policy.json"));
       mkdirSync(join(dir, "Policy.json"));
       writeFileSync(join(dir, "Policy.json", "stash.bin"), "x");
-      const report = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", home: dir, env: {} });
+      const report = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", mountInfo: noMounts, home: dir, env: {} });
       assert.equal(report?.status, "incomplete");
       assert.match(report?.failed[0]?.reason ?? "", /is a folder, not the IT policy file/);
       assert.ok(existsSync(join(dir, "state.json")));
@@ -729,7 +733,7 @@ describe("local reset: wipe at launch", () => {
       assert.equal(readFileSync(outside, "utf8"), "keep me");
       assert.equal(readLocalResetMarker(data)?.build, "development");
       assert.deepEqual(readdirSync(data).filter((name) => name.endsWith(".tmp")), [`${LOCAL_RESET_MARKER}.tmp`]);
-      const report = runPendingLocalReset({ userDataDir: data, packaged: false, platform: "linux", home: dir, env: {} });
+      const report = runPendingLocalReset({ userDataDir: data, packaged: false, platform: "linux", mountInfo: noMounts, home: dir, env: {} });
       assert.equal(report?.status, "completed");
       assert.deepEqual(readdirSync(data), []);
       assert.equal(readFileSync(outside, "utf8"), "keep me");
@@ -754,7 +758,7 @@ describe("local reset: wipe at launch", () => {
     try {
       await writeLocalResetMarker(dir, { ...DEV_MARKER, requestWarnings: [{ item: "Background scheduler", reason: "launchctl failed" }] });
       assert.deepEqual(readLocalResetMarker(dir)?.requestWarnings, [{ item: "Background scheduler", reason: "launchctl failed" }]);
-      const report = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", home: dir, env: {} });
+      const report = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", mountInfo: noMounts, home: dir, env: {} });
       assert.deepEqual(report?.warnings, [{ item: "Background scheduler", reason: "launchctl failed" }]);
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -777,7 +781,7 @@ describe("local reset: wipe at launch", () => {
       try {
         writeFileSync(join(dir, LOCAL_RESET_MARKER), content);
         writeFileSync(join(dir, "tokens.bin"), "x");
-        const report = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", home: dir, env: {} });
+        const report = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", mountInfo: noMounts, home: dir, env: {} });
         assert.equal(report?.status, "incomplete", content);
         assert.match(report?.failed[0]?.reason ?? "", /not a complete reset request, so nothing was removed/);
         assert.ok(existsSync(join(dir, "tokens.bin")), content);
@@ -799,7 +803,7 @@ describe("local reset: wipe at launch", () => {
       // path reads as a folder next to the link.
       for (const path of [linked, `${linked}/`, `${linked}/.`, `${linked}/inner/..`, `${linked}/../shared`]) {
         assert.equal(folderGoesThroughLink(path), true, path);
-        const report = runPendingLocalReset({ userDataDir: path, packaged: false, platform: "linux", home: dir, env: {} });
+        const report = runPendingLocalReset({ userDataDir: path, packaged: false, platform: "linux", mountInfo: noMounts, home: dir, env: {} });
         assert.equal(report?.status, "incomplete", path);
         assert.ok(existsSync(join(shared, "state.json")), path);
       }
@@ -846,7 +850,7 @@ describe("local reset: wipe at launch", () => {
         rmSync(join(dir, "policy.json"));
         plant();
         assert.match(localResetPolicyProblem(dir) ?? "", /is a link, and the reset cannot be sure/);
-        const report = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", home: dir, env: {} });
+        const report = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", mountInfo: noMounts, home: dir, env: {} });
         assert.equal(report?.status, "incomplete");
         assert.ok(existsSync(join(dir, "state.json")));
       }
@@ -1000,7 +1004,8 @@ describe("local reset: wipe at launch", () => {
         };
         const report = runPendingLocalReset({
           userDataDir: profile, packaged: true, platform: "darwin", home: join(dir, "home"), env: {}, run,
-          removeScheduler: () => { if (when === "scheduler") restore(); },
+          // The scheduler step checks the folder right before its own removal.
+          removeScheduler: (guard) => { if (when === "scheduler") { restore(); guard(); } },
         });
         assert.equal(report?.status, "incomplete", when);
         assert.match(report?.failed.at(-1)?.reason ?? "", /was replaced by another folder or a link/, when);
@@ -1008,9 +1013,38 @@ describe("local reset: wipe at launch", () => {
         assert.equal(calls.filter((call) => call[1] === "delete-generic-password").length, when === "keychain" ? 1 : 0, when);
         assert.ok(!calls.some((call) => call[0] === "/usr/bin/defaults"), when);
         assert.equal(readFileSync(join(profile, "tokens.bin"), "utf8"), "restored tokens", when);
+        assert.ok(!report?.warnings.some((warning) => warning.item === "Background scheduler"), when);
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
+    }
+  });
+
+  it("on Linux stops before the next removal when a mount appears inside the data folder", async () => {
+    const dir = await tempDir();
+    try {
+      const profile = join(dir, "profile");
+      mkdirSync(profile);
+      seedDataFolder(profile, DEV_MARKER);
+      const real = realpathSync(profile);
+      let reads = 0;
+      const report = runPendingLocalReset({
+        userDataDir: profile,
+        packaged: false,
+        platform: "linux",
+        home: dir,
+        env: {},
+        // A mount service bind-mounts shared storage under registry-cache
+        // after the first removal.
+        mountInfo: () => (reads++ === 0 ? "" : `36 35 0:42 / ${real}/registry-cache rw - ext4 /dev/sdb1 rw\n`),
+      });
+      assert.equal(report?.status, "incomplete");
+      assert.match(report?.failed.at(-1)?.reason ?? "", /a mount appeared at or inside the data folder/);
+      // One entry went; the wipe stopped before the next one.
+      assert.equal(reads, 2);
+      assert.ok(existsSync(join(profile, "registry-cache", "file")));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
     }
   });
 
@@ -1032,7 +1066,8 @@ describe("local reset: wipe at launch", () => {
         env: { XDG_CACHE_HOME: join(dir, "cache") },
         // The mount table is read during the walk: a restore lands right then.
         mountInfo: () => {
-          if (!swapped) {
+          const dataWiped = readdirSync(profile).every((name) => isKeptThroughReset(name));
+          if (dataWiped && !swapped) {
             swapped = true;
             renameSync(cache, `${cache}-old`);
             mkdirSync(cache);
@@ -1113,7 +1148,7 @@ describe("local reset: wipe at launch", () => {
           }
         },
       };
-      const report = runPendingLocalReset({ userDataDir: data, packaged: false, platform: "linux", home: dir, env: {}, fs });
+      const report = runPendingLocalReset({ userDataDir: data, packaged: false, platform: "linux", mountInfo: noMounts, home: dir, env: {}, fs });
       assert.equal(report?.status, "incomplete");
       assert.equal(readFileSync(join(other, "logs", "keep.txt"), "utf8"), "keep");
     } finally {

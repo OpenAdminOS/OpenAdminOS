@@ -432,8 +432,12 @@ export interface LocalResetWipeOptions {
   run?: (file: string, args: string[]) => CommandResult;
   /** Linux mount table, for tests. */
   mountInfo?: () => string;
-  /** Removes the OS scheduler registration (LaunchAgent or scheduled task). Installed builds only. */
-  removeScheduler?: () => void;
+  /**
+   * Removes the OS scheduler registration (LaunchAgent or scheduled task).
+   * Installed builds only. Calls `guard` right before each removal it makes;
+   * the guard throws when the data folder was replaced meanwhile.
+   */
+  removeScheduler?: (guard: () => void) => void;
   /** The Windows hard-link check, for tests. */
   scanSharedFiles?: typeof sharedReadOnlyFile;
   now?: () => Date;
@@ -657,8 +661,23 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
   // and the entry itself are checked again right before the removal; if
   // either was replaced meanwhile, the wipe stops.
   const scanShared = options.scanSharedFiles ?? sharedReadOnlyFile;
+  // On Linux a bind mount looks like a plain folder: the mount table is
+  // read again before every removal, so a mount added under the data folder
+  // while the wipe runs (by a mount service, for example) is never removed
+  // through. The full walk ran once above.
+  let realDataFolder = userDataDir;
+  try {
+    realDataFolder = realpathSync(userDataDir);
+  } catch {
+    // The identity checks stop the wipe if the folder is gone.
+  }
   let folderChanged = false;
   const removeHere = (name: string): boolean => {
+    if (options.platform === "linux" && hasMountAtOrUnder(realDataFolder, options.mountInfo)) {
+      failed.push({ item: userDataDir, reason: MOUNT_APPEARED_REASON });
+      folderChanged = true;
+      return false;
+    }
     if (options.platform === "win32") {
       const path = join(userDataDir, name);
       const before = entryIdentity(path);
@@ -775,6 +794,9 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
 
 const MARKER_OTHER_FOLDER_REASON =
   "it was written for this data folder on another device, or before the folder was copied or restored here, so nothing was removed. To keep this data, remove that file from the data folder and open OpenAdminOS again; to reset here, remove it and choose Reset OpenAdminOS again";
+
+const MOUNT_APPEARED_REASON =
+  "a mount appeared at or inside the data folder while the reset ran, so nothing more was removed there. Unmount it, then open OpenAdminOS again";
 
 const DATA_FOLDER_CHANGED_REASON =
   "the data folder was replaced by another folder or a link while the reset ran, so nothing more was written or removed there. Check the folder, then open OpenAdminOS again";
@@ -959,7 +981,7 @@ function removeLeftovers(
 ): void {
   guard();
   try {
-    options.removeScheduler?.();
+    options.removeScheduler?.(guard);
     // Removed now: a warning from the request about it no longer holds.
     if (options.removeScheduler) {
       for (let index = warnings.length - 1; index >= 0; index -= 1) {
@@ -967,6 +989,7 @@ function removeLeftovers(
       }
     }
   } catch (cause) {
+    if (cause instanceof FolderChangedDuringReset) throw cause;
     warnings.push({ item: "Background scheduler", reason: reasonOf(cause) });
   }
   if (options.platform === "darwin") {
