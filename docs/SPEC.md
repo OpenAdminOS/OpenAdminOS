@@ -534,8 +534,12 @@ author's choice and what the first request gets, so it is the limit:
 OpenAdmin 8B pins 16,384, the size its rope scaling was trained at. A model
 without a pinned `num_ctx` is limited by its architecture `context_length`,
 because the adapter raises `num_ctx` on an overflow up to that maximum
-(PR #211). A caller that does not raise `num_ctx` gets the size Ollama loaded
-the model with (`/api/ps`) instead. LM Studio reports none for now because its
+(PR #211). Such a model's first send already carries an explicit `num_ctx`
+covering the estimated request (a power of two, never below the size it is
+loaded with), because Ollama loads it at its own default, reloads it there
+after an eviction, and an older Ollama shortens a longer prompt without an
+error. A caller that does not raise `num_ctx` gets the size Ollama loaded the
+model with (`/api/ps`) instead. LM Studio reports none for now because its
 context fields could not be verified.
 
 The runtime's `estimateTokens` counts letters, digits, mixed ids,

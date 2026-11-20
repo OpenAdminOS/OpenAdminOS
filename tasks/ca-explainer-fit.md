@@ -12,8 +12,8 @@ A 33 policy tenant renders a review prompt of about 40,000 tokens. Ollama return
 - [x] Runtime: `group-by-age` gains an optional `pick` field so buckets can hold names instead of whole objects.
 - [x] Manifest: the CA explainer prompt uses the compact records, age buckets hold names only, and the report asks for plain explanations and concrete improvements.
 - [x] SDK: optional `RunLlmApi.contextWindow(model)`, a typed `ContextTooSmallError` (code `context-too-small`, needed and limit numbers), and `RunRecord.failureReason`.
-- [x] Runtime: `estimatePromptTokens` and `checkPromptFit` exported; agent LLM calls check the fit before sending when a context window is known.
-- [x] Ollama: context window from `/api/show` in a separate helper module. A pinned `num_ctx` is the limit (what the first request gets); an unpinned model is limited by its maximum, since #211 raises `num_ctx` on an overflow. One line hook in `llm-ollama.ts`.
+- [x] Runtime: `estimateTokens` and `checkPromptFit` exported; agent LLM calls check the fit before sending when a context window is known.
+- [x] Ollama: context window from `/api/show` in a separate helper module. A pinned `num_ctx` is the limit (what the first request gets); an unpinned model is limited by its maximum, and its first send carries an explicit `num_ctx` covering the request (never below the loaded size), so it is never served at a smaller default. #211's retry still handles an estimate that came out low.
 - [x] LM Studio: left undefined (API shape could not be verified).
 - [x] Wrappers forward `contextWindow` (tenant data filter, run thinking wrapper, self training overlay).
 - [x] Desktop: RunFailureRemediation playbook for `context-too-small`, read from the typed reason.
