@@ -188,9 +188,9 @@ export async function writeLocalResetMarker(
   options: {
     syncDirectory?: (path: string) => Promise<void>;
     /**
-     * The folder the first write was for. A later write (the warnings) goes
-     * only to that same folder and keeps its identity, so a folder restored
-     * or swapped in meanwhile never receives a reset request.
+     * The folder this reset was accepted for, taken before the checks.
+     * Every write goes only to that folder and records its identity, so a
+     * folder restored or swapped in meanwhile never receives a reset request.
      */
     expectFolder?: LocalResetFolderIdentity;
   } = {},
@@ -764,8 +764,9 @@ export function sameSessionFolder(a: LocalResetFolderIdentity, b: LocalResetFold
 
 /**
  * Across a restart: the device number can change with a reboot or a
- * remount (network homes, btrfs, autofs), so it is not compared. A copy
- * restored or roamed elsewhere gets a new inode and a new birth time.
+ * remount (network homes, btrfs, autofs), so it is compared only where no
+ * birth time is known. A copy restored or roamed elsewhere gets a new
+ * inode and a new birth time.
  */
 export function markerFolderMatches(stored: LocalResetFolderIdentity, now: LocalResetFolderIdentity): boolean {
   const birthKnown = stored.birth !== 0 && now.birth !== 0;
