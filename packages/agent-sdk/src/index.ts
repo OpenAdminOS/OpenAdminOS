@@ -723,6 +723,11 @@ export interface StartRunOptions {
    */
   expectNoTenant?: boolean;
   /**
+   * A model fit rerun on a model on this device: the host checks again that
+   * the model runs here before admitting the run, and refuses it otherwise.
+   */
+  requireOnDeviceModel?: boolean;
+  /**
    * Pin the run to a specific LLM provider id, overriding the globally
    * active provider for this run only. The provider must be known and
    * implemented; unknown / unimplemented ids throw at queue time. Omit
@@ -1469,7 +1474,13 @@ export interface IntuneChatMessage {
    * This answer came from a provider the admin chose for this request only,
    * after the local model could not do it. Names the model it replaced.
    */
-  switchedFrom?: { providerId: ProviderId; model?: string; reason: ModelFitReason };
+  switchedFrom?: {
+    providerId: ProviderId;
+    model?: string;
+    reason: ModelFitReason;
+    /** Whether the provider that took the request was on this device when it was sent; the answer is labelled from this, not from later settings. */
+    toOnDevice?: boolean;
+  };
 }
 
 /**

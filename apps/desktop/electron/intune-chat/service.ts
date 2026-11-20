@@ -441,6 +441,8 @@ export interface ChatServiceHost {
   requireIntelligenceStore(): IntelligenceSqliteStore;
   resolveTenant(persisted: ChatPersistedState, tenantId?: string): TenantRecord;
   listProviders(): Promise<ProviderSummary[]>;
+  /** A fresh check that this provider runs this model on this device, before a model fit retry on it. */
+  verifyOnDeviceModel?(providerId: ProviderId, model: string | undefined): Promise<boolean>;
   /** With a binding, the model is built only for that endpoint (see ProviderEndpointBinding in state.ts). */
   buildLlm(providerId: ProviderId, model: string | undefined, binding?: { endpoint: string | undefined }): Promise<RunLlmApi>;
   buildGraph(
@@ -2092,7 +2094,7 @@ export class IntuneChatService {
       throw new Error("Chat message must not be empty.");
     }
     // A per-request provider is offered only in the streaming Chat the renderer uses.
-    if (input.modelOverride) throw new ModelOverrideError("Choosing another provider for one request works only in Chat. Send the question there.");
+    if (input.modelOverride || input.hostedProviderConsent?.modelFitOfferId !== undefined) throw new ModelOverrideError("Choosing another provider for one request works only in Chat. Send the question there.");
 
     const store = this.host.requireIntelligenceStore();
     const persisted = await this.host.read();
@@ -2575,6 +2577,10 @@ export class IntuneChatService {
     });
     const provider = turn.provider;
     const providerId = provider.id;
+    // An on-device retry goes out only after a fresh check that the model runs here.
+    if (turn.switchedFrom && provider.isLocal && !(await this.host.verifyOnDeviceModel?.(providerId, turn.model))) {
+      throw new ModelOverrideError(`OpenAdminOS could not confirm that ${turn.model ?? provider.name} runs on this device, so nothing was sent. Choose another model, or a hosted provider.`);
+    }
     options.signal?.throwIfAborted();
     // Nova keeps requiring a tenant.
     if (noTenant && (options.voice || options.scope)) {

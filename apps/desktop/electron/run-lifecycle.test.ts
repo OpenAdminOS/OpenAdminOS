@@ -377,3 +377,17 @@ it('refuses a run reviewed with no organization once an organization became acti
   await assert.rejects(h.service.startRun('docs', { expectNoTenant: true, providerId: 'anthropic' }), /organization became active after you reviewed this run/);
   assert.equal(h.state().runs.length, 0);
 });
+
+it('admits a model fit rerun on a model on this device only after a fresh check that it runs here', async () => {
+  const h = harness();
+  const agent = { id: 'docs', slug: 'docs', name: 'Docs', description: 'No service calls', requiresEntraTier: 'free', version: '1.0.0', mode: 'read', category: 'devices', tier: 'agent', scopes: [], author: { name: 'Test' }, installedAt: new Date().toISOString() } as AgentSummary;
+  Object.assign(h.host, {
+    appVersion: '0.7.2',
+    listProviders: async () => [{ id: 'ollama', name: 'Ollama', status: 'connected', models: ['gpt-oss:20b'], defaultModel: 'gpt-oss:20b', isLocal: true }],
+    providerCanRun: () => true,
+    verifyOnDeviceModel: async () => false,
+  });
+  await h.host.write({ ...h.state(), installedAgents: [agent], tenants: [] });
+  await assert.rejects(h.service.startRun('docs', { requireOnDeviceModel: true, providerId: 'ollama', model: 'gpt-oss:20b' }), /could not confirm that gpt-oss:20b runs on this device/);
+  assert.equal(h.state().runs.length, 0);
+});

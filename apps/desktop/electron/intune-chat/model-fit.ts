@@ -133,7 +133,13 @@ export function resolveChatTurnProvider(input: {
   nova: boolean;
 }): ChatTurnProvider {
   const { override, offer, active, activeModel } = input;
-  if (!override) return { provider: active, model: activeModel };
+  if (!override) {
+    // An acceptance made for a model fit offer covers that one request, never an ordinary send.
+    if (input.consent?.modelFitOfferId !== undefined) {
+      throw new ModelOverrideError("That approval was for one request the local model could not do, so nothing was sent. Send the question again.");
+    }
+    return { provider: active, model: activeModel };
+  }
   if (input.nova) throw new ModelOverrideError("Nova answers with its own provider only. Ask this in Chat to choose another one.");
   if (!offer || offer.id !== override.offerId) {
     throw new ModelOverrideError("This choice is no longer available, so nothing was sent. Send the question again.");
@@ -178,7 +184,7 @@ export function resolveChatTurnProvider(input: {
   return {
     provider: chosen,
     model,
-    switchedFrom: { providerId: offer.anchor.providerId, ...(offer.anchor.model ? { model: offer.anchor.model } : {}), reason: offer.reason },
+    switchedFrom: { providerId: offer.anchor.providerId, ...(offer.anchor.model ? { model: offer.anchor.model } : {}), reason: offer.reason, toOnDevice: chosen.isLocal },
   };
 }
 

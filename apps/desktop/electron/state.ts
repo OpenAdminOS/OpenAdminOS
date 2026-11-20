@@ -402,6 +402,7 @@ import {
   checkLmStudio,
   checkOllama,
   isProviderId,
+  ollamaModelIsOnDevice,
 } from "./provider-detail.js";
 import {
   DEFAULT_STATS_API_URL,
@@ -1817,6 +1818,18 @@ function novaProviderEndpoint(providerId: ProviderId, persisted?: Pick<Persisted
   return undefined;
 }
 
+/**
+ * A model fit retry on a model on this device is sent only after a fresh
+ * check that it runs here. Ollama can list remote-backed models next to local
+ * ones, so it is read again; LM Studio serves loaded model files, Lemonade
+ * reads its list on every request and refuses cloud models, and Apple
+ * Foundation runs only on this Mac.
+ */
+async function verifyOnDeviceModel(providerId: ProviderId, model: string | undefined): Promise<boolean> {
+  if (providerId === "ollama") return model ? ollamaModelIsOnDevice(model) : false;
+  return providerId === "lm-studio" || providerId === "lemonade" || providerId === "apple-foundation";
+}
+
 export class AppStateStore {
   /**
    * The lifecycle of each tenant (open, closing, removed) and the one place
@@ -2071,6 +2084,7 @@ export class AppStateStore {
       resolveTenant: (persisted, tenantId) =>
         host.resolveTenant(persisted as PersistedState, tenantId),
       listProviders: () => host.listProviders(),
+      verifyOnDeviceModel: (providerId, model) => verifyOnDeviceModel(providerId, model),
       now: () => host.clock(),
       buildLlm: (providerId, model, binding) => host.buildLlm(providerId, model, binding),
       buildGraph: (pinnedTenantId, agentScopes) =>
@@ -2155,6 +2169,7 @@ export class AppStateStore {
       write: (state) => host.write(state as PersistedState),
       serialize: (task) => host.serialize(task),
       listProviders: () => host.listProviders(),
+      verifyOnDeviceModel: (providerId, model) => verifyOnDeviceModel(providerId, model),
       providerCanRun: (provider) => host.providerCanRun(provider),
       validateOfficeApproval: run => host.officeService.validateApproval(run),
       buildLlm: (providerId, model) => host.buildLlm(providerId, model),

@@ -1,3 +1,4 @@
+import { isOllamaCloudModel } from "../src/shared/model-fit.js";
 import { access } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -93,6 +94,31 @@ async function mapLimited<T, R>(items: readonly T[], limit: number, task: (item:
   });
   await Promise.all(workers);
   return results;
+}
+
+/**
+ * Whether Ollama runs this model on this device right now, from a fresh
+ * /api/tags read (model metadata only; nothing is loaded). False when the
+ * endpoint is outside this device, the model is not listed or is
+ * remote-backed, or the list cannot be read: an on-device retry that cannot
+ * be confirmed is not sent.
+ */
+export async function ollamaModelIsOnDevice(model: string): Promise<boolean> {
+  const endpoint = resolveOllamaEndpoint().replace(/\/$/, "");
+  if (!classifyOllamaEndpoint(endpoint).isLocal || isOllamaCloudModel(model)) return false;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OLLAMA_TAGS_TIMEOUT_MS);
+  try {
+    const response = await fetchLocal(`${endpoint}/api/tags`, { signal: controller.signal });
+    if (!response.ok) return false;
+    const payload = (await response.json()) as OllamaTagsResponse;
+    const entry = payload.models?.find((candidate) => candidate.name === model);
+    return Boolean(entry && !entry.remote_host && !entry.remote_model);
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function checkOllama(provider: ProviderSummary, options: ScanCheckOptions = {}): Promise<ProviderSummary> {

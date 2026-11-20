@@ -336,6 +336,8 @@ export interface RunServiceHost {
   write(state: RunPersistedState): Promise<void>;
   serialize<T>(task: () => Promise<T>): Promise<T>;
   listProviders(): Promise<ProviderSummary[]>;
+  /** A fresh check that this provider runs this model on this device (model fit reruns). */
+  verifyOnDeviceModel?(providerId: ProviderId, model: string | undefined): Promise<boolean>;
   providerCanRun(
     provider: ProviderSummary | undefined,
   ): provider is ProviderSummary & { status: "connected" | "available" };
@@ -682,6 +684,11 @@ export class RunService {
         throw new Error(
           `${activeProvider.name} isn't ready. Open Settings → LLM Providers to check the connection.`,
         );
+      }
+
+      // A model fit rerun on a model on this device is admitted only after a fresh check that it runs here.
+      if (options.requireOnDeviceModel && (activeProvider?.isLocal !== true || !(await this.host.verifyOnDeviceModel?.(providerId, model)))) {
+        throw new Error(`OpenAdminOS could not confirm that ${model ?? activeProvider?.name ?? providerId} runs on this device, so the run did not start. Choose another model, or a hosted provider.`);
       }
 
       if (options.retryOfRunId && activeProvider?.isLocal !== true) {

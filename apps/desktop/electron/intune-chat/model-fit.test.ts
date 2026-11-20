@@ -146,10 +146,14 @@ describe("Model fit: the per-request override", () => {
   const base = { providers: [ollama, claude], active: ollama, activeModel: LOCAL_MODEL, nova: false, offer };
   const override = { offerId: "fit_1", providerId: "anthropic" as const, model: "claude-sonnet-5-5" };
 
-  it("keeps the active provider without an override", () => {
+  it("keeps the active provider without an override, and refuses a model fit acceptance on an ordinary send", () => {
     const turn = resolveChatTurnProvider({ ...base, offer: undefined, override: undefined, consent: undefined });
     assert.equal(turn.provider.id, "ollama");
     assert.equal(turn.switchedFrom, undefined);
+    assert.throws(
+      () => resolveChatTurnProvider({ ...base, active: claude, activeModel: "claude-sonnet-5-5", offer: undefined, override: undefined, consent: freshConsent("anthropic", "claude-sonnet-5-5") }),
+      /approval was for one request/,
+    );
   });
 
   it("refuses an override without its offer, without an acceptance, or with a remembered one", () => {
@@ -167,7 +171,7 @@ describe("Model fit: the per-request override", () => {
     const turn = resolveChatTurnProvider({ ...base, override, consent: freshConsent("anthropic", "claude-sonnet-5-5") });
     assert.equal(turn.provider.id, "anthropic");
     assert.equal(turn.model, "claude-sonnet-5-5");
-    assert.deepEqual(turn.switchedFrom, { providerId: "ollama", model: LOCAL_MODEL, reason: "context-too-small" });
+    assert.deepEqual(turn.switchedFrom, { providerId: "ollama", model: LOCAL_MODEL, reason: "context-too-small", toOnDevice: false });
   });
 
   it("refuses a provider that is not listed (left out by policy) or not ready, a stale offer, and Nova", () => {
@@ -197,7 +201,7 @@ describe("Model fit: the per-request override", () => {
   it("keeps the active model as the anchor after a larger local model also failed", () => {
     const retried: ModelFitOffer = { ...offer, failed: { providerId: "ollama", model: "gpt-oss:20b" } };
     const turn = resolveChatTurnProvider({ ...base, offer: retried, override, consent: freshConsent("anthropic", "claude-sonnet-5-5") });
-    assert.deepEqual(turn.switchedFrom, { providerId: "ollama", model: LOCAL_MODEL, reason: "context-too-small" });
+    assert.deepEqual(turn.switchedFrom, { providerId: "ollama", model: LOCAL_MODEL, reason: "context-too-small", toOnDevice: false });
     assert.throws(() => resolveChatTurnProvider({ ...base, offer: retried, override: { offerId: "fit_1", providerId: "ollama", model: "gpt-oss:20b" }, consent: undefined }), /already could not do this request/);
   });
 });
@@ -229,7 +233,7 @@ describe("Model fit: offers", () => {
 });
 
 /** A local model that rejects every prompt for its size, and a hosted one that answers. */
-function chatHost(store: IntelligenceSqliteStore, built: string[]): ChatServiceHost {
+function chatHost(store: IntelligenceSqliteStore, built: string[], onDevice: (model: string | undefined) => boolean = () => true): ChatServiceHost {
   const failingLocal: RunLlmApi = {
     available: true,
     defaultModel: LOCAL_MODEL,
@@ -248,6 +252,7 @@ function chatHost(store: IntelligenceSqliteStore, built: string[]): ChatServiceH
     resolveTenant: () => { throw new Error("no tenant in this test"); },
     requireIntelligenceStore: () => store,
     listProviders: async () => [ollama, claude],
+    verifyOnDeviceModel: async (_providerId: ProviderId, model: string | undefined) => onDevice(model),
     buildLlm: async (providerId: ProviderId) => {
       built.push(providerId);
       return providerId === "anthropic" ? hosted : failingLocal;
@@ -333,7 +338,7 @@ describe("Model fit in Chat", () => {
       const result = await service.streamIntuneChatMessage(accepted, () => undefined);
       assert.equal(result.assistantMessage.status, "completed", result.assistantMessage.error);
       assert.equal(result.assistantMessage.providerId, "anthropic");
-      assert.deepEqual(result.assistantMessage.switchedFrom, { providerId: "ollama", model: LOCAL_MODEL, reason: "context-too-small" });
+      assert.deepEqual(result.assistantMessage.switchedFrom, { providerId: "ollama", model: LOCAL_MODEL, reason: "context-too-small", toOnDevice: false });
       assert.ok(built.length > 0 && built.every((id) => id === "anthropic"), `built ${built.join(", ")}`);
       // Single use: the same acceptance cannot send it again.
       await assert.rejects(service.streamIntuneChatMessage({ ...accepted, hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5", false, offerId) }, () => undefined), /no longer available/);
@@ -361,6 +366,32 @@ describe("Model fit in Chat", () => {
       assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
       const refused = results.find((result) => result.status === "rejected") as PromiseRejectedResult;
       assert.match(String(refused.reason), /already used|no longer available/);
+    });
+  });
+
+  it("sends an on-device retry only after a fresh check that the model runs here", async () => {
+    await withStore(async (store) => {
+      const built: string[] = [];
+      // gpt-oss:20b turned into a remote-backed alias since the provider list was read.
+      const service = new IntuneChatService(chatHost(store, built, (model) => model !== "gpt-oss:20b"));
+      const failed = await service.streamIntuneChatMessage({ content: QUESTION }, () => undefined);
+      built.length = 0;
+      await assert.rejects(
+        service.streamIntuneChatMessage({
+          content: QUESTION,
+          conversationId: failed.conversation.id,
+          modelOverride: { offerId: failed.assistantMessage.modelFit!.offerId!, providerId: "ollama", model: "gpt-oss:20b" },
+        }, () => undefined),
+        /could not confirm that gpt-oss:20b runs on this device/,
+      );
+      assert.deepEqual(built, []);
+    });
+  });
+
+  it("refuses a model fit acceptance on the non-streaming send", async () => {
+    await withStore(async (store) => {
+      const service = new IntuneChatService(chatHost(store, []));
+      await assert.rejects(service.sendIntuneChatMessage({ content: QUESTION, hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5") }), /works only in Chat/);
     });
   });
 

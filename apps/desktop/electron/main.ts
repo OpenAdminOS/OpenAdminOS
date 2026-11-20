@@ -3436,6 +3436,10 @@ function validateStartRunOptions(value: unknown): StartRunOptions | undefined {
     if (options.tenantId !== undefined) throw new Error("startRun.expectNoTenant cannot be combined with a tenant.");
     options.expectNoTenant = true;
   }
+  if (value.requireOnDeviceModel !== undefined) {
+    if (value.requireOnDeviceModel !== true) throw new Error("startRun.requireOnDeviceModel must be true when present.");
+    options.requireOnDeviceModel = true;
+  }
   if (value.providerId !== undefined) {
     options.providerId = validateProviderId(value.providerId, "startRun.providerId");
   }
