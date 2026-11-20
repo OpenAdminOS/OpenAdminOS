@@ -121,7 +121,9 @@ export async function isolateSmokeProviders(...origins) {
       // Inherited smoke and capture launch flags would change which code path
       // Electron runs, so a smoke could pass without running its own flow.
       // Each runner sets the flags for its own mode after this.
-      if (/^(electron_run_as_node|node_options|node_use_env_proxy|http_proxy|https_proxy|all_proxy|no_proxy|openagents_stats_api)$/i.test(key) ||
+      // Provider binary overrides would point the app at a real installed CLI,
+      // which the guard blocks, failing the smoke on that machine every time.
+      if (/^(electron_run_as_node|node_options|node_use_env_proxy|http_proxy|https_proxy|all_proxy|no_proxy|openagents_stats_api|openadminos_(claude_code|codex|copilot|gemini)_binary|openadminos_apple_foundation_helper)$/i.test(key) ||
           SMOKE_LAUNCH_VARIABLES.has(key.toUpperCase())) {
         delete env[key];
       }
