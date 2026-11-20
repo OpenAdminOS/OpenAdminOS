@@ -72,7 +72,7 @@ interface MessageRow {
 }
 
 /** Answer fields stored together: the question kind, steps, citation targets, follow-ups and prompt provenance. */
-type AnswerMeta = Pick<IntuneChatMessage, "questionKind" | "steps" | "documentationSources" | "followUps" | "tenantFollowUps" | "tenantContext" | "privatePrompt" | "notConnected">;
+type AnswerMeta = Pick<IntuneChatMessage, "questionKind" | "steps" | "documentationSources" | "followUps" | "tenantFollowUps" | "tenantContext" | "privatePrompt" | "notConnected" | "modelFit" | "switchedFrom">;
 
 interface ResourceStatusRow {
   resource: GraphCacheResourceKind;
@@ -4152,6 +4152,11 @@ function readMessage(row: MessageRow): IntuneChatMessage {
   };
 }
 
+function withoutOfferId(issue: NonNullable<IntuneChatMessage["modelFit"]>): NonNullable<IntuneChatMessage["modelFit"]> {
+  const { offerId: _offerId, ...rest } = issue;
+  return rest;
+}
+
 function answerMetaJson(message: IntuneChatMessage): string | null {
   const meta: AnswerMeta = {
     ...(message.questionKind ? { questionKind: message.questionKind } : {}),
@@ -4162,6 +4167,9 @@ function answerMetaJson(message: IntuneChatMessage): string | null {
     ...(message.tenantContext ? { tenantContext: true } : {}),
     ...(message.privatePrompt ? { privatePrompt: true } : {}),
     ...(message.notConnected ? { notConnected: message.notConnected } : {}),
+    // The offer id is in memory only and single use; a stored answer keeps the reason, not the offer.
+    ...(message.modelFit ? { modelFit: withoutOfferId(message.modelFit) } : {}),
+    ...(message.switchedFrom ? { switchedFrom: message.switchedFrom } : {}),
   };
   return Object.keys(meta).length > 0 ? JSON.stringify(meta) : null;
 }

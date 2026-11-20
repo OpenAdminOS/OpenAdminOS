@@ -124,6 +124,7 @@ import type {
   SetGraphCacheRefreshScheduleInput,
   SetRunHistoryRetentionSettingsInput,
   SendIntuneChatMessageInput,
+  ChatModelOverride,
   SupportBundleInput,
   SupportIssueSubmissionInput,
   SupportIssueSubmissionResult,
@@ -3430,6 +3431,22 @@ function validateStartRunOptions(value: unknown): StartRunOptions | undefined {
   if (value.tenantId !== undefined) {
     options.tenantId = requireBoundedString(value.tenantId, "startRun.tenantId", 256);
   }
+  if (value.expectNoTenant !== undefined) {
+    if (value.expectNoTenant !== true) throw new Error("startRun.expectNoTenant must be true when present.");
+    if (options.tenantId !== undefined) throw new Error("startRun.expectNoTenant cannot be combined with a tenant.");
+    options.expectNoTenant = true;
+  }
+  if (value.requireOnDeviceModel !== undefined) {
+    if (value.requireOnDeviceModel !== true) throw new Error("startRun.requireOnDeviceModel must be true when present.");
+    options.requireOnDeviceModel = true;
+  }
+  if (value.bindProviderEndpoint !== undefined) {
+    if (value.bindProviderEndpoint !== true) throw new Error("startRun.bindProviderEndpoint must be true when present.");
+    options.bindProviderEndpoint = true;
+  }
+  if (value.expectedProviderDestination !== undefined) {
+    options.expectedProviderDestination = requireBoundedString(value.expectedProviderDestination, "startRun.expectedProviderDestination", 64);
+  }
   if (value.providerId !== undefined) {
     options.providerId = validateProviderId(value.providerId, "startRun.providerId");
   }
@@ -3941,6 +3958,9 @@ function validateHostedProviderConsent(
   }
   const providerId = validateProviderId(value.providerId, "hostedProviderConsent.providerId");
   const remember = typeof value.remember === "boolean" ? { remember: value.remember } : {};
+  const fitOffer = value.modelFitOfferId === undefined
+    ? {}
+    : { modelFitOfferId: requireBoundedString(value.modelFitOfferId, "hostedProviderConsent.modelFitOfferId", 128) };
   const model = value.model === undefined ? undefined : requireBoundedString(value.model, "hostedProviderConsent.model", 256);
   // Bound to no tenant or to one tenant, never both: a no-tenant
   // acknowledgement covers no tenant context and no workspace.
@@ -3951,7 +3971,7 @@ function validateHostedProviderConsent(
     if (value.tenantId !== undefined || workspaceContext) {
       throw new Error("hostedProviderConsent.noTenant cannot be combined with a tenant or workspace context.");
     }
-    return { noTenant: true, providerId, ...(model !== undefined ? { model } : {}), acknowledgedAt, ...remember };
+    return { noTenant: true, providerId, ...(model !== undefined ? { model } : {}), acknowledgedAt, ...remember, ...fitOffer };
   }
   return {
     tenantId: requireBoundedString(value.tenantId, "hostedProviderConsent.tenantId", 256),
@@ -3960,6 +3980,7 @@ function validateHostedProviderConsent(
     acknowledgedAt,
     ...remember,
     ...(workspaceContext ? { workspaceContext } : {}),
+    ...fitOffer,
   };
 }
 
@@ -4019,6 +4040,20 @@ function validateSendIntuneChatMessageInput(value: unknown): SendIntuneChatMessa
     ...(value.workspaceContext !== undefined
       ? { workspaceContext: validateWorkspacePromptContextInput(value.workspaceContext) }
       : {}),
+    ...(value.modelOverride !== undefined
+      ? { modelOverride: validateChatModelOverride(value.modelOverride) }
+      : {}),
+  };
+}
+
+/** One request on another provider after the local model could not do it; the service checks it against its offer. */
+function validateChatModelOverride(value: unknown): ChatModelOverride {
+  if (!isPlainRecord(value)) throw new Error("modelOverride must be an object.");
+  return {
+    offerId: requireBoundedString(value.offerId, "modelOverride.offerId", 128),
+    providerId: validateProviderId(value.providerId, "modelOverride.providerId"),
+    ...(value.model !== undefined ? { model: requireBoundedString(value.model, "modelOverride.model", 256) } : {}),
+    ...(value.destination !== undefined ? { destination: requireBoundedString(value.destination, "modelOverride.destination", 64) } : {}),
   };
 }
 
@@ -5561,6 +5596,10 @@ function registerIpcHandlers() {
         requireBoundedString(conversationId, "conversationId", 256),
       ),
     ),
+  );
+  ipcMain.handle(
+    "openadminos:get-provider-destination",
+    handleTrusted((_event, providerId: unknown) => store.providerDestination(validateProviderId(providerId))),
   );
   ipcMain.handle(
     "openadminos:preview-intune-chat-send",

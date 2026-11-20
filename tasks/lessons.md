@@ -53,3 +53,13 @@ Format:
 **Why:** For PR #205 two WebFetch summaries of docs.github.com said Fusion Max was not included in Copilot Pro+. The github/docs source shows Pro+ includes it. The wrong plan names shipped in the unavailable-tier reason and the docs until a reviewer (Muse, round 2) checked the source; a Pro user would have been told to buy a larger plan than needed.
 
 **How to apply:** Any user-facing sentence naming plans, tiers, prices or regions gets a source-level check, and a test that asserts the exact sentence.
+
+---
+
+## Never load a local model on the maintainer's Mac, even for a live check
+
+**Pattern:** Live checks of the app use a hosted provider (Claude Code or Codex CLI). A local model and its context window are mocked in tests; nothing sends a request to Ollama's `/api/chat` or `/api/generate`, runs `ollama run`, or points the app at a local model.
+
+**Why:** During the model fit work (PR #213, 2026-11-19) I probed Ollama with a chat request and then ran the dev app against a small-context copy of OpenAdmin 8B to trigger a real overflow. Loading the model made the machine unusable, and the maintainer had already asked for hosted-only live checks.
+
+**How to apply:** Before any live check, confirm the app profile has a hosted provider active and no local one that could answer or embed. To show a local-model failure state, inject it in tests, not on the machine. Check `ollama ps` afterwards and run `ollama stop <model>` if anything is loaded. Pass this rule to every reviewer or implementer subagent.

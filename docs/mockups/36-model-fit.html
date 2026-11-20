@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>36 Model fit, OpenAdminOS</title>
+  <link rel="stylesheet" href="_design.css">
+  <!--
+    Mockup 36 (2026-11-19): the local model cannot do a request.
+
+    Decided by the maintainer on 2026-11-19: Chat may run one request with a
+    hosted provider, but only after a notice in Chat that says what happens
+    and where data goes, and an explicit accept. Never silent, never
+    preselected. Approval is per request, nothing is remembered in v1.
+
+    Location labels are the production ones from
+    apps/desktop/src/copy/trust.ts (providerDataLocation). Amber means
+    "leaves this device", as everywhere else.
+  -->
+  <style>
+    :root {
+      --warning-soft: rgba(229,198,120,.10);
+      --warning-line: rgba(229,198,120,.28);
+      --success-soft: rgba(156,200,143,.10);
+      --info-soft: rgba(168,176,187,.08);
+      --radius: 10px;
+    }
+    html, body { height: auto; overflow: auto; }
+    body { font-size: 14px; letter-spacing: 0; padding: 32px 24px 80px; }
+    button { font: inherit; cursor: pointer; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    .doc { max-width: 980px; margin: 0 auto; }
+    .doc > header { margin-bottom: 40px; }
+    .doc > header .eyebrow { color: var(--text-3); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+    .doc > header h1 { font-family: Newsreader, Georgia, serif; font-size: 34px; font-weight: 500; margin: 6px 0 8px; }
+    .doc > header p { color: var(--text-1); max-width: 72ch; }
+    .sect { margin: 0 0 56px; }
+    .sect > h2 { font-family: Newsreader, Georgia, serif; font-weight: 500; font-size: 22px; margin-bottom: 4px; }
+    .sect > p { color: var(--text-2); max-width: 76ch; margin-bottom: 14px; }
+    .notes { margin: 12px 0 0 18px; color: var(--text-2); font-size: 13px; }
+    .notes li { margin: 3px 0; }
+
+    /* A window around each state */
+    .win { border: 1px solid var(--border); border-radius: 12px; background: var(--bg-1); overflow: hidden; }
+    .win .bar { height: 40px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-2); }
+    .win .bar .local { color: var(--success); }
+    .win .bar .leaves { color: var(--warning); }
+    .chat { max-width: 720px; margin: 0 auto; padding: 20px 20px 18px; }
+
+    .bubble { margin: 0 0 16px auto; width: fit-content; max-width: 82%; padding: 8px 14px; border-radius: 16px; background: var(--bg-3); }
+    .answer { margin: 0 0 16px; color: var(--text-0); }
+    .answer p + p { margin-top: 8px; }
+    .scope { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--text-2); font-size: 13px; margin-bottom: 8px; }
+    .tile { width: 18px; height: 18px; border-radius: 5px; background: var(--bg-4); display: inline-grid; place-items: center; font-size: 10px; color: var(--text-1); }
+    .failed { color: var(--text-2); font-size: 13px; margin-bottom: 14px; }
+
+    /* The notice */
+    .fit { border-radius: var(--radius); background: var(--bg-2); border: 1px solid var(--border); padding: 16px 18px; margin-bottom: 12px; }
+    .fit h3 { font-size: 15px; font-weight: 500; }
+    .fit .why { color: var(--text-1); margin-top: 4px; }
+    .fit .why strong { color: var(--text-0); font-weight: 500; font-variant-numeric: tabular-nums; }
+    .fit .sent { color: var(--text-3); font-size: 12px; margin-top: 4px; }
+    .choices { margin-top: 14px; display: grid; gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    .choice { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; align-items: center; padding: 10px 12px; background: var(--bg-1); }
+    .choice .name { font-weight: 500; }
+    .choice .where { font-size: 12px; margin-top: 1px; }
+    .choice .where.leaves { color: var(--warning); }
+    .choice .where.stays { color: var(--success); }
+    .choice .note { font-size: 12px; color: var(--text-3); margin-top: 1px; }
+    .group-label { font-size: 12px; color: var(--text-3); margin: 14px 0 6px; }
+    .fit .end { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
+    .fit .end .hint { color: var(--text-3); font-size: 12px; margin-left: auto; }
+
+    button.btn { border-radius: 8px; padding: 5px 12px; background: var(--bg-3); color: var(--text-0); border: 1px solid var(--border); font-size: 13px; white-space: nowrap; }
+    button.btn:hover { background: var(--bg-4); }
+    button.primary { background: var(--accent); color: var(--bg-0); border-color: transparent; }
+    button.ghost { background: transparent; border-color: transparent; color: var(--text-1); }
+
+    /* Accept step: the hosted confirmation in its per-request form */
+    .confirm { border-radius: var(--radius); background: var(--bg-2); border: 1px solid var(--warning-line); padding: 16px 18px 14px; margin-bottom: 12px; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
+    .confirm h3 { font-size: 15px; font-weight: 500; }
+    .confirm p { color: var(--text-1); margin-top: 4px; }
+    .facts { display: grid; grid-template-columns: 96px minmax(0,1fr); gap: 6px 14px; margin-top: 12px; font-size: 13px; }
+    .facts dt { color: var(--text-3); }
+    .facts dd.leaves { color: var(--warning); }
+    .facts dd .detail { display: block; color: var(--text-3); font-size: 12px; margin-top: 2px; }
+    .confirm .once { margin-top: 10px; font-size: 12px; color: var(--text-2); }
+    .confirm .acts { display: flex; gap: 8px; margin-top: 14px; }
+
+    .composer { border-radius: 12px; background: var(--bg-2); border: 1px solid var(--border); padding: 10px 12px 8px 14px; }
+    .composer .ph { color: var(--text-0); min-height: 22px; }
+    .composer .ph.empty { color: var(--text-3); }
+    .composer .row { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; color: var(--text-2); }
+    .composer .row .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+    .composer .send { margin-left: auto; width: 26px; height: 26px; border-radius: 7px; border: 0; background: var(--accent); color: var(--bg-0); }
+    .boundary { margin-top: 8px; font-size: 12px; color: var(--success); }
+
+    .attrib { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; margin: 0 0 10px; padding: 7px 10px; border-radius: 8px; background: var(--warning-soft); border: 1px solid var(--warning-line); font-size: 13px; }
+    .attrib .leaves { color: var(--warning); }
+    .attrib .rest { color: var(--text-2); }
+    .status-line { border-radius: 8px; background: var(--success-soft); border: 1px solid rgba(156,200,143,.25); color: var(--success); padding: 8px 12px; font-size: 13px; margin-bottom: 12px; }
+    .fallback { border-radius: 8px; background: var(--warning-soft); color: var(--warning); padding: 8px 12px; font-size: 13px; margin-bottom: 10px; }
+    .policy { color: var(--text-2); font-size: 13px; padding: 10px 12px; background: var(--bg-1); border: 1px dashed var(--border-strong); border-radius: 8px; margin-top: 14px; }
+
+    /* Run failure */
+    .run { max-width: 760px; margin: 0 auto; padding: 22px 20px; }
+    .run h3 { font-family: Newsreader, Georgia, serif; font-weight: 500; font-size: 22px; }
+    .run .meta { color: var(--text-2); font-size: 13px; margin-top: 2px; }
+    .badge { display: inline-flex; align-items: center; gap: 6px; border-radius: 6px; padding: 1px 8px; font-size: 12px; background: rgba(241,160,160,.12); color: var(--danger); }
+    .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--danger); }
+    .errbox { margin-top: 14px; border-radius: 8px; padding: 10px 12px; background: var(--bg-2); border: 1px solid var(--border); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: var(--text-1); overflow-wrap: anywhere; }
+    .modal { max-width: 560px; margin: 0 auto; border-radius: 12px; background: var(--bg-2); border: 1px solid var(--border); box-shadow: 0 16px 48px rgba(0,0,0,.4); }
+    .modal header { padding: 16px 20px 0; }
+    .modal header h4 { font-size: 16px; font-weight: 500; }
+    .modal header .sub { color: var(--text-2); font-size: 13px; }
+    .modal .body { padding: 14px 20px 18px; }
+    .modal .facts { grid-template-columns: 110px minmax(0,1fr); }
+    .modal .acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+    .reason { margin-top: 2px; border-radius: 8px; padding: 9px 12px; background: var(--info-soft); border: 1px solid var(--border); color: var(--text-1); font-size: 13px; }
+    .two { display: grid; grid-template-columns: 1fr; gap: 16px; }
+    @media (max-width: 720px) { .choice { grid-template-columns: 1fr; } .facts, .modal .facts { grid-template-columns: 1fr; } .facts dt { margin-top: 6px; } }
+  </style>
+</head>
+<body>
+<div class="doc">
+  <header>
+    <div class="eyebrow">Design reference 36</div>
+    <h1>When the local model cannot do a request</h1>
+    <p>Chat and agent runs say plainly why the model on this device cannot do this one request, in numbers when the provider gives them, and offer what else is configured. A hosted provider runs the request only after the admin chooses it and accepts a step that names where the data goes. The next message is back on the local model.</p>
+  </header>
+
+  <!-- A -->
+  <section class="sect" id="a">
+    <h2>A. The notice: the request does not fit</h2>
+    <p>Shown in place of the generic error when the local model rejects a request for its size. Nothing has gone to another provider yet. The choices list only providers that are configured and ready, with no default: every option is a separate button, none is focused or highlighted.</p>
+    <div class="win">
+      <div class="bar"><span>Contoso</span><span class="local">local-only · no data leaves this device</span></div>
+      <div class="chat">
+        <div class="bubble">List every device in Contoso with its compliance policies, configuration profiles and last sign-in, and group them by owner.</div>
+        <div class="failed">No answer. OpenAdmin 8B could not take this request.</div>
+        <div class="fit" role="region" aria-labelledby="a-t">
+          <h3 id="a-t">OpenAdmin 8B cannot fit this request</h3>
+          <p class="why">This request needs about <strong>40,652</strong> tokens. OpenAdmin 8B is set to <strong>16,384</strong>.</p>
+          <p class="sent">Nothing goes to another provider unless you choose one.</p>
+          <div class="group-label">Run this one request with</div>
+          <div class="choices">
+            <div class="choice">
+              <div>
+                <div class="name">Claude Code</div>
+                <div class="where leaves">Claude Code · location set by your account</div>
+                <div class="note">Uses your Claude Code sign-in. The request counts toward that account's usage or bill.</div>
+              </div>
+              <button class="btn" type="button">Run with Claude Code</button>
+            </div>
+            <div class="choice">
+              <div>
+                <div class="name">Codex</div>
+                <div class="where leaves">Codex · location set by your account</div>
+                <div class="note">Uses your Codex sign-in. The request counts toward that account's usage or bill.</div>
+              </div>
+              <button class="btn" type="button">Run with Codex</button>
+            </div>
+            <div class="choice">
+              <div>
+                <div class="name">gpt-oss:20b</div>
+                <div class="where stays">Ollama · on this device</div>
+                <div class="note">A larger model on this device. Its context size is not checked before the request.</div>
+              </div>
+              <button class="btn" type="button">Use gpt-oss:20b</button>
+            </div>
+          </div>
+          <div class="end">
+            <button class="btn" type="button">Split the question</button>
+            <button class="btn ghost" type="button">Keep on OpenAdmin 8B</button>
+          </div>
+        </div>
+        <div class="composer"><div class="ph empty">Ask about your tenant</div><div class="row"><span class="dot"></span>OpenAdmin 8B<button class="send" aria-label="Send">&uarr;</button></div></div>
+        <p class="boundary">Local model. Tenant data stays on this device.</p>
+      </div>
+    </div>
+    <ul class="notes">
+      <li>Numbers come from the provider's error (Ollama names both) or, once it lands, from the runtime's prompt fit check. Without numbers: "This request is larger than the context OpenAdmin 8B is set to."</li>
+      <li>Hosted rows always show the production location label in amber, and a cost note: the app does not know the admin's plan or price, so it says where the cost lands.</li>
+      <li>The larger local model is chosen by the size in its name (8B, 20B). Its context window is not read, so the note says so.</li>
+      <li>Split the question puts the question back into the composer with a hint. Nothing is split automatically.</li>
+    </ul>
+  </section>
+
+  <!-- B -->
+  <section class="sect" id="b">
+    <h2>B. Accept step</h2>
+    <p>Choosing Claude Code opens the hosted confirmation in its per-request form, above the composer. It names the provider and where the data goes, says it is for this request only, and has no remember box. Enter does not send from here: only the Send button does.</p>
+    <div class="win">
+      <div class="bar"><span>Contoso</span><span class="local">local-only · no data leaves this device</span></div>
+      <div class="chat">
+        <div class="bubble">List every device in Contoso with its compliance policies, configuration profiles and last sign-in, and group them by owner.</div>
+        <div class="confirm" role="dialog" aria-labelledby="b-t">
+          <h3 id="b-t">Run this request with Claude Code?</h3>
+          <p>OpenAdmin 8B cannot fit it. Claude Code answers this one request. Your next message goes to OpenAdmin 8B again.</p>
+          <p class="sent" style="margin-top:10px">Question that is sent</p>
+          <div class="errbox" style="margin-top:4px;font-family:inherit">List every device in Contoso with its compliance policies, configuration profiles and last sign-in, and group them by owner.</div>
+          <dl class="facts">
+            <dt>Goes to</dt>
+            <dd class="leaves">Claude Code · location set by your account<span class="detail">Claude Code sends prompts to Anthropic, or to Amazon Bedrock or Google Vertex if its settings select them.</span></dd>
+            <dt>Model</dt><dd>Claude Sonnet 5.5</dd>
+            <dt>What is sent</dt><dd>Your question, this conversation and the Contoso data the answer needs</dd>
+            <dt>Stays here</dt><dd>Chat history and the Graph cache</dd>
+            <dt>Cost</dt><dd>Counts toward your Claude Code account's usage or bill</dd>
+          </dl>
+          <p class="once">Asked for every request. Nothing is remembered.</p>
+          <div class="acts"><button class="btn primary" type="button">Send through Claude Code</button><button class="btn ghost" type="button">Back</button></div>
+        </div>
+        <div class="composer"><div class="ph empty">Ask about your tenant</div><div class="row"><span class="dot"></span>OpenAdmin 8B<button class="send" aria-label="Send">&uarr;</button></div></div>
+      </div>
+    </div>
+    <ul class="notes">
+      <li>The host refuses the request unless it carries a fresh acceptance for this provider and model that is not a remembered one, so a remembered "do not ask again" for Claude Code never covers it.</li>
+      <li>Masking from the data policy, when it lands, applies to this send like any hosted send: it goes through the same model choke point.</li>
+    </ul>
+  </section>
+
+  <!-- C -->
+  <section class="sect" id="c">
+    <h2>C. After: which provider answered</h2>
+    <p>The answer carries a line that names the provider with its location label. The composer and the status strip stay on the local model, because nothing changed for the next message.</p>
+    <div class="win">
+      <div class="bar"><span>Contoso</span><span class="local">local-only · no data leaves this device</span></div>
+      <div class="chat">
+        <div class="bubble">List every device in Contoso with its compliance policies, configuration profiles and last sign-in, and group them by owner.</div>
+        <div class="answer">
+          <div class="attrib"><span>Answered by</span><span class="leaves">Claude Code · location set by your account</span><span class="rest">for this request only. Chat is back on OpenAdmin 8B.</span></div>
+          <div class="scope"><span class="tile">C</span><span>Contoso</span><span>·</span><span>data from 4 minutes ago</span></div>
+          <p>Contoso has 412 managed devices across 187 owners. 23 owners have more than three devices...</p>
+        </div>
+        <div class="composer"><div class="ph empty">Ask about your tenant</div><div class="row"><span class="dot"></span>OpenAdmin 8B<button class="send" aria-label="Send">&uarr;</button></div></div>
+        <p class="boundary">Local model. Tenant data stays on this device.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- D -->
+  <section class="sect" id="d">
+    <h2>D. Declined</h2>
+    <p>Keep on OpenAdmin 8B closes the notice. The question stays in the composer as the admin left it (it is the conversation's draft after the failure), and the line says what happened and what to do next. Split the question puts it back only into an empty composer.</p>
+    <div class="win">
+      <div class="bar"><span>Contoso</span><span class="local">local-only · no data leaves this device</span></div>
+      <div class="chat">
+        <div class="bubble">List every device in Contoso with its compliance policies, configuration profiles and last sign-in, and group them by owner.</div>
+        <div class="failed">No answer. OpenAdmin 8B could not take this request.</div>
+        <div class="status-line" role="status">Kept on OpenAdmin 8B. Nothing was sent. Narrow the question, for example to one platform or one group, or split it into smaller questions, then send again.</div>
+        <div class="composer"><div class="ph">List every device in Contoso with its compliance policies, configuration profiles and last sign-in, and group them by owner.</div><div class="row"><span class="dot"></span>OpenAdmin 8B<button class="send" aria-label="Send">&uarr;</button></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- E -->
+  <section class="sect" id="e">
+    <h2>E. Other signals and limits</h2>
+    <p>The same notice follows an answer when the investigation failed on this model twice in a row and the answer came from cached data only. When the managed policy allows no hosted provider, or none is set up, the hosted rows are not shown and one line says why.</p>
+    <div class="two">
+      <div class="win">
+        <div class="bar"><span>Contoso</span><span class="local">local-only · no data leaves this device</span></div>
+        <div class="chat">
+          <div class="answer">
+            <div class="fallback" role="status">Deterministic retrieval: OpenAdmin 8B did not hold the investigative format, so this answer skips it.</div>
+            <p>From cached data: 18 devices are noncompliant with the Windows baseline...</p>
+          </div>
+          <div class="fit" role="region" aria-labelledby="e-t">
+            <h3 id="e-t">OpenAdmin 8B could not investigate this question</h3>
+            <p class="why">It could not finish the investigation twice in a row, so this answer comes from cached data only.</p>
+            <div class="group-label">Ask this again with</div>
+            <div class="choices">
+              <div class="choice">
+                <div>
+                  <div class="name">Codex</div>
+                  <div class="where leaves">Codex · location set by your account</div>
+                  <div class="note">Uses your Codex sign-in. The request counts toward that account's usage or bill.</div>
+                </div>
+                <button class="btn" type="button">Run with Codex</button>
+              </div>
+            </div>
+            <div class="end"><button class="btn ghost" type="button">Keep this answer</button></div>
+          </div>
+        </div>
+      </div>
+      <div class="win">
+        <div class="bar"><span>Contoso</span><span class="local">local-only · no data leaves this device</span></div>
+        <div class="chat">
+          <div class="fit" role="region" aria-labelledby="e2-t">
+            <h3 id="e2-t">OpenAdmin 8B cannot fit this request</h3>
+            <p class="why">This request needs about <strong>40,652</strong> tokens. OpenAdmin 8B is set to <strong>16,384</strong>.</p>
+            <div class="policy">Your organization's policy does not allow a hosted provider for this request.</div>
+            <div class="end"><button class="btn" type="button">Split the question</button><button class="btn ghost" type="button">Keep on OpenAdmin 8B</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <ul class="notes">
+      <li>Policy: providers the policy does not allow are not in the provider list, and the host refuses to build a model for them, so the offer cannot list them.</li>
+      <li>None ready: "No hosted provider is ready, so none is offered." with a link to Settings, Providers.</li>
+      <li>A thinking-only answer that ran out of budget uses the same notice once the runtime reports it as its own reason: "OpenAdmin 8B spent its whole answer budget on reasoning."</li>
+    </ul>
+  </section>
+
+  <!-- F -->
+  <section class="sect" id="f">
+    <h2>F. Agent run that does not fit</h2>
+    <p>A run that fails because its prompt is larger than the local model's context offers the same choices on the run page. Choosing a provider opens the run review, which is the accept step for runs: it names the provider, where prompts go, and why this provider is used for this run only. A write agent still stops at the diff and its typed confirmation.</p>
+    <div class="win">
+      <div class="bar"><span>Contoso</span><span class="local">local-only · no data leaves this device</span></div>
+      <div class="run">
+        <h3>Device compliance report</h3>
+        <div class="meta"><span class="badge">Failed</span> &nbsp;OpenAdmin 8B · Ollama · 2 minutes ago</div>
+        <div class="errbox">Ollama context size too small: This request needs 40,652 tokens of context, but Ollama could only give openadminos/openadmin-8b 16,384, usually because free memory ran out.</div>
+        <div class="fit" style="margin-top:14px" role="region" aria-labelledby="f-t">
+          <h3 id="f-t">OpenAdmin 8B cannot fit this run</h3>
+          <p class="why">This run needs about <strong>40,652</strong> tokens. OpenAdmin 8B is set to <strong>16,384</strong>.</p>
+          <p class="sent">Nothing goes to another provider unless you choose one.</p>
+          <div class="group-label">Run again with</div>
+          <div class="choices">
+            <div class="choice">
+              <div>
+                <div class="name">Claude Code</div>
+                <div class="where leaves">Claude Code · location set by your account</div>
+                <div class="note">Uses your Claude Code sign-in. The run counts toward that account's usage or bill.</div>
+              </div>
+              <button class="btn" type="button">Run with Claude Code</button>
+            </div>
+            <div class="choice">
+              <div>
+                <div class="name">gpt-oss:20b</div>
+                <div class="where stays">Ollama · on this device</div>
+                <div class="note">A larger model on this device. Its context size is not checked before the run.</div>
+              </div>
+              <button class="btn" type="button">Use gpt-oss:20b</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div style="height:16px"></div>
+    <div class="modal" role="dialog" aria-labelledby="f2-t">
+      <header><h4 id="f2-t">Review run</h4><div class="sub">Device compliance report</div></header>
+      <div class="body">
+        <div class="reason">OpenAdmin 8B could not fit the last run, so this run uses Claude Code. This run only: the agent keeps its model for later runs.</div>
+        <dl class="facts">
+          <dt>Organization</dt><dd>Contoso</dd>
+          <dt>Reads</dt><dd>Intune, read-only</dd>
+          <dt>Model</dt><dd>Claude Sonnet 5.5<span class="detail" style="color:var(--warning)">Prompts and tenant data leave this device through Claude Code; location set by your account, with agent context.</span><span class="detail">Claude Code sends prompts to Anthropic, or to Amazon Bedrock or Google Vertex if its settings select them.</span></dd>
+          <dt>Changes</dt><dd>None. This agent cannot change tenant state.</dd>
+        </dl>
+        <div class="acts"><button class="btn ghost" type="button">Cancel</button><button class="btn primary" type="button">Start run</button></div>
+      </div>
+    </div>
+    <ul class="notes">
+      <li>Start run starts the agent again with the chosen provider and model. The first run stays in history as failed.</li>
+      <li>A write agent's review keeps its line "Pauses for a diff and typed confirmation before anything is applied."</li>
+    </ul>
+  </section>
+</div>
+</body>
+</html>

@@ -53,6 +53,8 @@ import {
   type IntuneChatAgentSuggestion,
   type IntuneChatConversation,
   type IntuneChatMessage,
+  type ChatModelOverride,
+  type ModelFitIssue,
   type IntuneChatProgressStep,
   type IntuneChatStep,
   type IntuneChatSource,
@@ -96,6 +98,9 @@ import { endLiveChatRun, startLiveChatRun, updateLiveChatRun, useLiveChatRuns, t
 import { OPEN_NEW_CONVERSATION_EVENT } from "../shared/shortcuts";
 import { formatAgentDisplayName } from "../shared/agent-display";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
+import { ModelFitNotice, modelFitModelName } from "../components/ModelFitNotice";
+import { MODEL_FIT_COPY } from "../copy/model-fit";
+import { MODEL_FIT_RESEND, modelFitChoices, type ModelFitChoice } from "../shared/model-fit";
 import { currentReturnTo, useSetupFlow } from "../setup/SetupFlowContext";
 import { Badge, IconButton, Menu, SegmentedControl, Tooltip } from "../components/ui";
 import { AnswerBody, FollowUpChip, SourceList, StepSkeleton, StepSummary, StepTimeline } from "../components/chat/ChatSteps";
@@ -140,6 +145,35 @@ type HostedChatConsentPrompt = {
   workspaceContextSummary?: WorkspacePromptContextSummary;
   /** Hosts of the enabled MCP servers this answer can query. */
   toolHosts?: string[];
+};
+
+/** A request the local model could not do, offered again with the configured alternatives (mockup 36). */
+type ModelFitOffer = {
+  /** Carries the host's single-use `offerId`. */
+  issue: ModelFitIssue & { offerId: string };
+  /** The answer the offer came with; the live notice speaks for it, so its own reason line is not repeated. */
+  assistantMessageId: string;
+  content: string;
+  conversationId: string;
+  tenantId?: string;
+  /** The provider and model active when the offer was made; a change withdraws it. */
+  activeProviderId: ProviderId;
+  activeModel?: string;
+  /** Chat answered from cached data already (a fallback), so the offer is to ask again. */
+  answered?: boolean;
+  /** The workspace selection the request was sent with; the host binds the offer to it. */
+  workspaceContext?: WorkspacePromptContextInput;
+  workspaceContextSummary?: WorkspacePromptContextSummary;
+};
+
+/** The hosted choice waiting for its per-request accept. */
+type ModelFitAccept = {
+  offer: ModelFitOffer;
+  override: ChatModelOverride;
+  prompt: HostedChatConsentPrompt;
+  /** The composer and attachments when the accept step opened; a change closes it unsent. */
+  composerAtOpen: string;
+  attachmentsAtOpen: string;
 };
 
 type HostedProviderConsentInput = NonNullable<
@@ -263,6 +297,12 @@ function IntuneChatContent() {
   const [hostedConsentPrompt, setHostedConsentPrompt] =
     useState<HostedChatConsentPrompt | null>(null);
   const [rememberHostedConsent, setRememberHostedConsent] = useState(false);
+  const [modelFitOffer, setModelFitOffer] = useState<ModelFitOffer | null>(null);
+  const [modelFitAccept, setModelFitAccept] = useState<ModelFitAccept | null>(null);
+  // The latest provider choice; a destination lookup for an earlier one is dropped.
+  const modelFitChoiceRef = useRef(0);
+  const modelFitOfferRef = useRef<ModelFitOffer | null>(null);
+  modelFitOfferRef.current = modelFitOffer;
   const [tenantGroups, setTenantGroups] = useState<TenantGroup[]>([]);
   const [savedQueries, setSavedQueries] = useState<SavedMultiTenantQuery[]>([]);
   const [scopeMode, setScopeMode] = useState<MultiTenantScopeMode>("active");
@@ -301,6 +341,8 @@ function IntuneChatContent() {
   const [choiceDoneProviderId, setChoiceDoneProviderId] = useState<ProviderId | null>(null);
   const [modelReadyAnnouncement, setModelReadyAnnouncement] = useState<{ providerId: ProviderId; text: string } | null>(null);
   const sendInFlightRef = useRef(false);
+  // Model fit offers already shown again after a refused retry.
+  const restoredOfferIdsRef = useRef(new Set<string>());
   const activeStreamIdRef = useRef<string | null>(null);
   // A run keeps going after the admin leaves Chat. Its end must not bring them back.
   const mountedRef = useRef(true);
@@ -406,6 +448,8 @@ function IntuneChatContent() {
       ...(workspaceContextSummary.includesInstructions ? { includeInstructions: true } : {}),
     };
   };
+  // What the next send would attach, to notice a change while a model fit accept is open.
+  const currentAttachmentsKey = JSON.stringify(buildWorkspaceContextInput() ?? null);
 
   useEffect(() => {
     const api = window.openAdminOS;
@@ -608,6 +652,8 @@ function IntuneChatContent() {
     setProgressAssistantMessageId(null);
     setOptimisticDraft(null);
     setFailedRequest(null);
+    setModelFitOffer(null);
+    setModelFitAccept(null);
     clearChatDraft(null);
     dispatchSend({ type: "reset" });
     setScopeMode("active");
@@ -784,6 +830,9 @@ function IntuneChatContent() {
   const prepareMultiTenantReview = async (content: string) => {
     const api = window.openAdminOS;
     if (!api || runningMultiTenant) return;
+    // A batch across organizations replaces the one-request offer, so two sends never run at once.
+    setModelFitOffer(null);
+    setModelFitAccept(null);
     setError(null);
     setNotice(null);
     setMultiTenantPreflight(null);
@@ -871,9 +920,14 @@ function IntuneChatContent() {
     hostedProviderConsent?: HostedProviderConsentInput,
     conversationIdOverride?: string | null,
     workspaceContext?: WorkspacePromptContextInput,
+    /** This request only, on the provider the admin chose after the local model could not do it. */
+    modelOverride?: ChatModelOverride,
+    /** The summary of `workspaceContext` as the admin saw it; defaults to the composer's. */
+    workspaceSummary?: WorkspacePromptContextSummary,
   ) => {
     const api = window.openAdminOS;
-    if (!api || !content || sending) return;
+    // The ref also stops a second click in the same tick, before `sending` updates.
+    if (!api || !content || sending || sendInFlightRef.current) return;
     const targetConversationId =
       conversationIdOverride === null
         ? null
@@ -898,8 +952,21 @@ function IntuneChatContent() {
       content: "",
       status: "streaming",
       createdAt: pendingCreatedAt,
-      providerId: provider?.id ?? state.activeProviderId,
-      ...(activeModel ? { model: activeModel } : {}),
+      ...(modelOverride
+        ? {
+            providerId: modelOverride.providerId,
+            ...(modelOverride.model ? { model: modelOverride.model } : {}),
+            // While it runs, the turn says where the accepted request is going; the host's answer replaces this.
+            ...(modelFitOfferRef.current
+              ? { switchedFrom: {
+                  providerId: modelFitOfferRef.current.activeProviderId,
+                  ...(modelFitOfferRef.current.activeModel ? { model: modelFitOfferRef.current.activeModel } : {}),
+                  reason: modelFitOfferRef.current.issue.reason,
+                  toOnDevice: state.providers.find((entry) => entry.id === modelOverride.providerId)?.isLocal === true,
+                } }
+              : {}),
+          }
+        : { providerId: provider?.id ?? state.activeProviderId, ...(activeModel ? { model: activeModel } : {}) }),
     };
 
     sendInFlightRef.current = true;
@@ -908,6 +975,10 @@ function IntuneChatContent() {
     dispatchSend({ type: "send" });
     setSending(true);
     setFailedRequest(null);
+    // A retry the host refuses before sending anything gets its choices back (below).
+    const offerBeforeRetry = modelOverride ? modelFitOfferRef.current : null;
+    setModelFitOffer(null);
+    setModelFitAccept(null);
     setError(null);
     setNotice(null);
     clearProgressTimer();
@@ -922,11 +993,18 @@ function IntuneChatContent() {
       pendingUserMessage,
       pendingAssistantMessage,
     ]);
-    setInput("");
-    clearChatDraft(targetConversationId);
+    // A model fit retry sends the original question; a different draft the admin typed since stays.
+    // An emptied composer counts as an edit too: a later failure does not put the question back.
+    const keepDraft = Boolean(modelOverride) && input.trim() !== content.trim();
+    if (!keepDraft) {
+      setInput("");
+      clearChatDraft(targetConversationId);
+    }
     let failed = false;
     let cancelled = false;
     let reachedTerminal = false;
+    // The host claims a model fit offer before it reports the stream started.
+    let startedSeen = false;
     const streamId = window.crypto.randomUUID();
     activeStreamIdRef.current = streamId;
     const sendTenantId = state.activeTenantId;
@@ -953,6 +1031,7 @@ function IntuneChatContent() {
           refreshIfStale: true,
           ...(hostedProviderConsent ? { hostedProviderConsent } : {}),
           ...(workspaceContext ? { workspaceContext } : {}),
+          ...(modelOverride ? { modelOverride } : {}),
         },
         (event) => {
           // After a tenant switch this stream belongs to the previous
@@ -963,6 +1042,7 @@ function IntuneChatContent() {
             return;
           }
           if (event.type === "started") {
+            startedSeen = true;
             dispatchSend({ type: "stream" });
             setOptimisticDraft(null);
             setPendingConversation(event.conversation);
@@ -1046,13 +1126,35 @@ function IntuneChatContent() {
               const withUser = upsertMessage(withoutPending, event.result.userMessage);
               return upsertMessage(withUser, event.result.assistantMessage);
             });
+            // The local model could not do this request: the notice replaces the
+            // generic error and offers what else is configured (mockup 36).
+            const modelFit = event.type === "cancelled" ? undefined : event.result.assistantMessage.modelFit;
+            const offerId = modelFit?.offerId;
+            if (modelFit && offerId) {
+              // The question stays the draft of the conversation it failed in, so it is in the
+              // composer once that conversation opens, and decline does not need to put it back.
+              // A different draft the admin kept stays the stored draft too.
+              if (event.type === "failed" && !keepDraft) writeChatDraft(event.result.conversation.id, content);
+              setModelFitOffer({
+                issue: { ...modelFit, offerId },
+                assistantMessageId: event.result.assistantMessage.id,
+                content,
+                conversationId: event.result.conversation.id,
+                ...(sendTenantId ? { tenantId: sendTenantId } : {}),
+                activeProviderId: provider?.id ?? state.activeProviderId,
+                ...(activeModel ? { activeModel } : {}),
+                ...(event.type === "completed" ? { answered: true } : {}),
+                ...(workspaceContext ? { workspaceContext } : {}),
+                ...(workspaceContext && (workspaceSummary ?? workspaceContextSummary) ? { workspaceContextSummary: workspaceSummary ?? workspaceContextSummary } : {}),
+              });
+            }
             if (event.type === "failed") {
               reachedTerminal = true;
               failed = true;
               dispatchSend({ type: "fail" });
-              setError(event.error);
+              if (!offerId) setError(event.error);
               setFailedRequest({ content, conversationId: targetConversationId });
-              setInput(content);
+              if (!keepDraft) setInput(content);
             }
             if (event.type === "completed") {
               reachedTerminal = true;
@@ -1090,8 +1192,20 @@ function IntuneChatContent() {
       const errorMessage = caught instanceof Error ? caught.message : String(caught);
       if (!reachedTerminal) dispatchSend({ type: "fail" });
       setError(errorMessage);
+      // The host refused the retry before it started (and before it used the offer), so the choices
+      // it tells the admin to make again are shown again. The withdrawal checks still drop them if
+      // the conversation, organization or model changed.
+      // Each offer comes back once: if the host had used it before refusing, choosing it again is
+      // refused too, and the admin is not looped through the same refusal.
+      // A refusal that ends the offer (expired, used, another question, the model changed) tells the
+      // admin to send the question again instead, so its choices do not come back.
+      const offerEnded = errorMessage.includes(MODEL_FIT_RESEND);
+      if (offerBeforeRetry && !offerEnded && !reachedTerminal && !startedSeen && !restoredOfferIdsRef.current.has(offerBeforeRetry.issue.offerId)) {
+        restoredOfferIdsRef.current.add(offerBeforeRetry.issue.offerId);
+        setModelFitOffer(offerBeforeRetry);
+      }
       setFailedRequest({ content, conversationId: targetConversationId });
-      setInput(content);
+      if (!keepDraft) setInput(content);
       setChatProgress({
         message: "Chat answer failed.",
         progressPercent: 100,
@@ -1114,7 +1228,8 @@ function IntuneChatContent() {
             providerId: provider?.id ?? state.activeProviderId,
             ...(activeModel ? { model: activeModel } : {}),
           },
-          (existing) => ({
+          // A send the host refused never reached a provider, so the optimistic destination goes.
+          ({ switchedFrom: _optimistic, ...existing }) => ({
             ...existing,
             content: existing.content.trim()
               ? existing.content
@@ -1160,6 +1275,129 @@ function IntuneChatContent() {
       pending.workspaceContext,
     );
   };
+
+  // A model fit choice runs this one request on the chosen provider. A
+  // local one sends at once, since nothing leaves the device; a hosted one
+  // opens the accept step first and sends only from its Send button.
+  const chooseModelFit = async (offer: ModelFitOffer, choice: ModelFitChoice) => {
+    const override: ChatModelOverride = {
+      offerId: offer.issue.offerId,
+      providerId: choice.providerId,
+      ...(choice.model ? { model: choice.model } : {}),
+    };
+    // The request exactly as it failed, with the workspace selection it had.
+    const workspaceContext = offer.workspaceContext;
+    if (choice.isLocal) {
+      modelFitChoiceRef.current += 1;
+      void executeSend(offer.content, undefined, offer.conversationId, workspaceContext, override, offer.workspaceContextSummary);
+      return;
+    }
+    const contextSummary = offer.workspaceContextSummary;
+    const choiceId = (modelFitChoiceRef.current += 1);
+    // Where the provider is reached as this accept step opens; the host refuses a send that goes elsewhere.
+    const destination = await window.openAdminOS?.getProviderDestination?.(choice.providerId).catch(() => undefined);
+    // A later choice, or a withdrawn offer, supersedes this lookup.
+    if (choiceId !== modelFitChoiceRef.current || modelFitOfferRef.current?.issue.offerId !== offer.issue.offerId) return;
+    // Without a destination the host would refuse the send, so the accept step does not open.
+    if (window.openAdminOS?.getProviderDestination && !destination) {
+      setNotice(MODEL_FIT_COPY.destinationFailedChat(choice.providerName));
+      return;
+    }
+    setModelFitAccept({
+      offer,
+      override: { ...override, ...(destination ? { destination } : {}) },
+      prompt: {
+        content: offer.content,
+        conversationId: offer.conversationId,
+        ...(offer.tenantId ? { tenantId: offer.tenantId } : {}),
+        providerId: choice.providerId,
+        providerName: choice.providerName,
+        ...(choice.model ? { model: choice.model } : {}),
+        ...(workspaceContext ? { workspaceContext } : {}),
+        ...(contextSummary ? { workspaceContextSummary: contextSummary } : {}),
+        toolHosts: chatToolHosts(state),
+      },
+      composerAtOpen: input,
+      attachmentsAtOpen: currentAttachmentsKey,
+    });
+  };
+
+  const confirmModelFitAndSend = async () => {
+    const pending = modelFitAccept;
+    if (!pending) return;
+    setModelFitAccept(null);
+    // Never a remembered acknowledgement: the host refuses one for an override.
+    await executeSend(
+      pending.prompt.content,
+      createHostedProviderConsent(pending.prompt.tenantId, pending.prompt.providerId, false, pending.prompt.workspaceContextSummary, pending.prompt.model, pending.override.offerId),
+      pending.prompt.conversationId,
+      pending.prompt.workspaceContext,
+      pending.override,
+      pending.prompt.workspaceContextSummary,
+    );
+  };
+
+  const closeModelFit = (next: "split" | "keep") => {
+    const offer = modelFitOffer;
+    setModelFitOffer(null);
+    setModelFitAccept(null);
+    if (!offer) return;
+    if (!offer.answered) {
+      // The failed question is the conversation's draft already; whatever the admin made of it,
+      // an edit or a cleared draft, stays as it is. Split says the question is back, so an
+      // empty composer gets it again.
+      if (next === "split" && input.trim() === "") setInput(offer.content);
+      setNotice(next === "split" ? MODEL_FIT_COPY.splitNotice : MODEL_FIT_COPY.declined(modelFitReturnModel(offer)));
+    }
+    window.requestAnimationFrame(() => composerRef.current?.focus());
+  };
+
+  // An offer belongs to its conversation, organization and active model. A
+  // new chat opens on no conversation until the host names it, so the offer
+  // waits for its id there; any other conversation, or a change of model or
+  // organization, withdraws it.
+  const modelFitOfferShown = modelFitOffer !== null && activeConversationId === modelFitOffer.conversationId;
+  // The accept step sends the question it shows. Editing the composer or the
+  // attachments while it is open closes it unsent, so nothing changed goes out
+  // under an acceptance of something else.
+  useEffect(() => {
+    if (!modelFitAccept) return;
+    if (input !== modelFitAccept.composerAtOpen || currentAttachmentsKey !== modelFitAccept.attachmentsAtOpen) {
+      setModelFitAccept(null);
+      setNotice(MODEL_FIT_COPY.acceptWithdrawn);
+    }
+  }, [currentAttachmentsKey, input, modelFitAccept]);
+  useEffect(() => {
+    if (!modelFitOffer) return;
+    const otherConversation = activeConversationId !== null && activeConversationId !== modelFitOffer.conversationId;
+    const otherTenant = (state.activeTenantId ?? undefined) !== modelFitOffer.tenantId;
+    const otherModel = (provider?.id ?? state.activeProviderId) !== modelFitOffer.activeProviderId || activeModel !== modelFitOffer.activeModel;
+    if (otherConversation || otherTenant || otherModel) {
+      setModelFitOffer(null);
+      // An open accept step says why it closed and gives the keyboard a place to land.
+      if (modelFitAccept && !otherConversation) {
+        setNotice(MODEL_FIT_COPY.offerWithdrawn);
+        window.requestAnimationFrame(() => composerRef.current?.focus());
+      }
+      setModelFitAccept(null);
+    }
+  }, [activeConversationId, activeModel, modelFitAccept, modelFitOffer, provider?.id, state.activeProviderId, state.activeTenantId]);
+  // The accept step names one provider and model. When that is no longer a choice (a policy refresh,
+  // a failed check), it closes unsent and the offer stays, so the admin can choose another option.
+  useEffect(() => {
+    if (!modelFitAccept) return;
+    const current = modelFitChoices({
+      issue: modelFitAccept.offer.issue,
+      providers: state.providers,
+      activeModelByProviderId: state.activeModelByProviderId,
+      managedPolicy: state.managedPolicy,
+    });
+    const still = current.hosted.some((choice) => choice.providerId === modelFitAccept.prompt.providerId && choice.model === modelFitAccept.prompt.model);
+    if (!still) {
+      setModelFitAccept(null);
+      setNotice(MODEL_FIT_COPY.acceptProviderGone(modelFitAccept.prompt.providerName));
+    }
+  }, [modelFitAccept, state.activeModelByProviderId, state.managedPolicy, state.providers]);
 
   const confirmHostedBatchConsentAndRun = async () => {
     const prompt = hostedBatchConsentPrompt;
@@ -1684,6 +1922,39 @@ function IntuneChatContent() {
 
   const renderComposer = (placement: "home" | "docked") => (
     <>
+    {modelFitAccept && modelFitOfferShown && modelFitAccept.offer.issue.offerId === modelFitOffer?.issue.offerId ? (
+      <HostedChatConsentPanel
+        prompt={modelFitAccept.prompt}
+        tenantName={tenants.find((tenant) => tenant.id === modelFitAccept.prompt.tenantId)?.displayName}
+        remember={false}
+        onRememberChange={() => undefined}
+        modelFit={{ issue: modelFitAccept.offer.issue, returnModel: modelFitReturnModel(modelFitAccept.offer) }}
+        onClose={() => {
+          setModelFitAccept(null);
+          // Back to the notice the admin chose from.
+          window.requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-model-fit]")?.focus());
+        }}
+        onConfirm={() => void confirmModelFitAndSend()}
+        onUseLocal={() => setModelFitAccept(null)}
+      />
+    ) : modelFitOffer && modelFitOfferShown && !runInProgress ? (
+      <ModelFitNotice
+        issue={modelFitOffer.issue}
+        choices={modelFitChoices({
+          issue: modelFitOffer.issue,
+          providers: state.providers,
+          activeModelByProviderId: state.activeModelByProviderId,
+          managedPolicy: state.managedPolicy,
+        })}
+        surface="chat"
+        returnModel={modelFitReturnModel(modelFitOffer)}
+        answered={modelFitOffer.answered === true}
+        onChoose={(choice) => void chooseModelFit(modelFitOffer, choice)}
+        onSplit={() => closeModelFit("split")}
+        onKeep={() => closeModelFit("keep")}
+        onOpenProviders={() => navigate("/settings/providers")}
+      />
+    ) : null}
     {hostedConsentPrompt ? (
       <HostedChatConsentPanel
         prompt={hostedConsentPrompt}
@@ -2091,6 +2362,7 @@ function IntuneChatContent() {
                         latestAssistant={message.id === latestAssistantMessageId}
                         tenant={messageTenant}
                         multiTenant={messageConversation?.scopeKind === "multi-tenant"}
+                        liveModelFit={modelFitOfferShown && modelFitOffer?.assistantMessageId === message.id}
                         regenerateDisabled={sending || !previousUserPromptForMessage(displayedMessages, message)}
                         editDisabled={sending}
                         onCopy={() => void handleCopyMessage(message)}
@@ -4005,9 +4277,16 @@ function HostedChatConsentPanel({
   onConfirm,
   onUseLocal,
   tenantName,
+  modelFit,
 }: {
   prompt: HostedChatConsentPrompt;
   tenantName?: string | undefined;
+  /**
+   * The per-request accept after the local model could not do the request
+   * (mockup 36, section B): no remember box, Back instead of Cancel, and
+   * only the Send button sends.
+   */
+  modelFit?: { issue: ModelFitIssue; returnModel: string };
   remember: boolean;
   onRememberChange: (remember: boolean) => void;
   onClose: () => void;
@@ -4017,9 +4296,14 @@ function HostedChatConsentPanel({
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement | null>(null);
   // Focus starts on the primary action, so Enter sends and Escape cancels.
+  // A model fit accept starts on the panel itself: the admin chose this
+  // provider a moment ago, and the send needs its own click.
+  // Keyed on the offer, so a re-render while the step is open does not pull focus back.
+  const modelFitOfferId = modelFit?.issue.offerId;
   useEffect(() => {
-    panelRef.current?.querySelector<HTMLButtonElement>("[data-hosted-send]")?.focus();
-  }, []);
+    if (modelFitOfferId !== undefined) panelRef.current?.focus();
+    else panelRef.current?.querySelector<HTMLButtonElement>("[data-hosted-send]")?.focus();
+  }, [modelFitOfferId]);
   const noTenant = !prompt.tenantId;
   const company = PROVIDER_COMPANIES[prompt.providerId] ?? prompt.providerName;
   const tool = PROVIDER_TOOL_NAMES[prompt.providerId] ?? prompt.providerName;
@@ -4041,6 +4325,7 @@ function HostedChatConsentPanel({
     ...(modelName ? [[HOSTED_CONFIRM_COPY.model, modelName, false] as [string, string, boolean]] : []),
     [HOSTED_CONFIRM_COPY.whatIsSent, noTenant ? HOSTED_CONFIRM_COPY.sentNoTenant(Boolean(prompt.toolHosts?.length)) : HOSTED_CONFIRM_COPY.sentTenant(tenant, workspace), false],
     [HOSTED_CONFIRM_COPY.staysHere, noTenant ? HOSTED_CONFIRM_COPY.staysNoTenant : HOSTED_CONFIRM_COPY.staysTenant, false],
+    ...(modelFit ? [[MODEL_FIT_COPY.cost, MODEL_FIT_COPY.costFact(prompt.providerId, tool), false] as [string, string, boolean]] : []),
   ];
   const toolHosts = prompt.toolHosts?.length ? deriveTrustCopy({ provider: { id: prompt.providerId, name: prompt.providerName, isLocal: false }, toolHosts: prompt.toolHosts, noTenant }).toolHosts : undefined;
   return (
@@ -4049,22 +4334,25 @@ function HostedChatConsentPanel({
       aria-modal="false"
       aria-labelledby={titleId}
       ref={panelRef}
-      className="hosted-confirm mb-3 rounded-lg bg-[var(--color-surface)] px-[18px] py-4 shadow-[var(--shadow-pop)]"
+      {...(modelFit ? { tabIndex: -1, "data-model-fit-accept": "" } : {})}
+      className="hosted-confirm mb-3 rounded-lg bg-[var(--color-surface)] px-[18px] py-4 shadow-[var(--shadow-pop)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)]"
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           event.preventDefault();
           onClose();
-        } else if (event.key === "Enter" && !(event.target instanceof HTMLButtonElement) && !(event.target instanceof HTMLInputElement)) {
+        } else if (!modelFit && event.key === "Enter" && !(event.target instanceof HTMLButtonElement) && !(event.target instanceof HTMLInputElement)) {
           event.preventDefault();
           onConfirm();
         }
       }}
     >
       <h2 id={titleId} className="text-base font-medium text-[var(--color-text)]">
-        {through ? HOSTED_CONFIRM_COPY.titleThrough(tool) : HOSTED_CONFIRM_COPY.title(company)}
+        {modelFit ? MODEL_FIT_COPY.acceptTitle(tool) : through ? HOSTED_CONFIRM_COPY.titleThrough(tool) : HOSTED_CONFIRM_COPY.title(company)}
       </h2>
       <p className="mt-1 text-sm text-[var(--color-text-soft)]">
-        {through
+        {modelFit
+          ? MODEL_FIT_COPY.acceptBody(modelFit.issue, modelFitModelName(modelFit.issue), modelFit.returnModel, tool)
+          : through
           ? noTenant
             ? HOSTED_CONFIRM_COPY.bodyThroughNoTenant(tool)
             : HOSTED_CONFIRM_COPY.bodyThroughTenant(tool, tenant)
@@ -4072,6 +4360,15 @@ function HostedChatConsentPanel({
             ? HOSTED_CONFIRM_COPY.bodyNoTenant(tool, apiName)
             : HOSTED_CONFIRM_COPY.bodyTenant(tool, apiName, tenant)}
       </p>
+      {modelFit ? (
+        <figure className="mt-3">
+          <figcaption className="mb-1 text-xs text-[var(--color-text-muted)]">{MODEL_FIT_COPY.questionLabel}</figcaption>
+          {/* Focusable, so a long question scrolls by keyboard too. */}
+          <blockquote data-model-fit-question="" tabIndex={0} className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)]">
+            {prompt.content}
+          </blockquote>
+        </figure>
+      ) : null}
       <dl className="mt-3 grid grid-cols-[88px_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
         {facts.map(([term, value, hosted]) => (
           <div key={term} className="contents">
@@ -4084,6 +4381,7 @@ function HostedChatConsentPanel({
         ))}
       </dl>
       {toolHosts ? <p className="mt-2 text-xs text-[var(--color-text-muted)]">{toolHosts.detail}</p> : null}
+      {modelFit ? <p className="mt-3 text-xs text-[var(--color-text-soft)]">{MODEL_FIT_COPY.once}</p> : (
       <label className="mt-3 flex cursor-pointer items-start gap-2.5 text-sm text-[var(--color-text-soft)]">
         <input
           type="checkbox"
@@ -4095,21 +4393,22 @@ function HostedChatConsentPanel({
           {noTenant ? HOSTED_CONFIRM_COPY.rememberNoTenant(modelName ?? tool) : HOSTED_CONFIRM_COPY.rememberTenant(tenant, tool, modelName)}
         </span>
       </label>
+      )}
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <Button data-hosted-send="" variant="primary" onClick={onConfirm}>
           {through ? HOSTED_CONFIRM_COPY.sendThrough(tool) : HOSTED_CONFIRM_COPY.send(company)}
         </Button>
         <Button variant="ghost" onClick={onClose}>
-          {HOSTED_CONFIRM_COPY.cancel}
+          {modelFit ? MODEL_FIT_COPY.back : HOSTED_CONFIRM_COPY.cancel}
         </Button>
         <span className="flex-1" />
-        <button
+        {modelFit ? null : <button
           type="button"
           onClick={onUseLocal}
           className="rounded-sm text-sm text-[var(--color-text-soft)] underline decoration-[var(--color-border-strong)] underline-offset-[3px] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]"
         >
           {HOSTED_CONFIRM_COPY.useLocal}
-        </button>
+        </button>}
       </div>
     </div>
   );
@@ -4120,6 +4419,11 @@ function HostedChatConsentPanel({
  * for questions with nothing connected. The two are separate decisions:
  * a remembered no-tenant confirmation never covers a send with a tenant.
  */
+/** The model Chat goes back to after a model fit offer: the one active when it was made. */
+function modelFitReturnModel(offer: ModelFitOffer): string {
+  return modelFitModelName({ providerId: offer.activeProviderId, ...(offer.activeModel ? { model: offer.activeModel } : {}) });
+}
+
 function requiresHostedChatConsent(
   provider: { id: ProviderId; isLocal: boolean } | undefined,
   tenant: { id: string } | undefined,
@@ -4146,10 +4450,12 @@ export function createHostedProviderConsent(
   remember: boolean,
   workspaceContext?: WorkspacePromptContextSummary,
   model?: string,
+  /** The model fit offer this acceptance is for; it covers that one request only. */
+  modelFitOfferId?: string,
 ): HostedProviderConsentInput {
   const acknowledgedAt = new Date().toISOString();
   // The model the admin saw in the confirmation; the host refuses a send that would use another.
-  const named = model ? { model } : {};
+  const named = { ...(model ? { model } : {}), ...(modelFitOfferId ? { modelFitOfferId } : {}) };
   if (!tenantId) {
     return { noTenant: true, providerId, ...named, acknowledgedAt, ...(remember ? { remember: true } : {}) };
   }
@@ -4302,6 +4608,7 @@ function ChatMessageBubble({
   copied,
   latestAssistant,
   tenant,
+  liveModelFit = false,
   multiTenant,
   regenerateDisabled,
   editDisabled,
@@ -4318,6 +4625,8 @@ function ChatMessageBubble({
   copied: boolean;
   latestAssistant: boolean;
   tenant?: TenantRecord;
+  /** The live model fit notice speaks for this answer. */
+  liveModelFit?: boolean;
   multiTenant: boolean;
   regenerateDisabled: boolean;
   /** A send is still finishing, so Edit would be ignored; it waits instead. */
@@ -4372,10 +4681,13 @@ function ChatMessageBubble({
   return (
     <article className="group mb-[34px] w-full" title={`Answered ${timestamp}`}>
       {progress ? (
-        <PendingAnswer tenant={tenant} steps={message.steps} {...(stopping ? { stopping: progress.message } : {})} />
+        <>
+          {message.switchedFrom && message.providerId ? <SwitchedProviderLine message={message} /> : null}
+          <PendingAnswer tenant={tenant} steps={message.steps} {...(stopping ? { stopping: progress.message } : {})} />
+        </>
       ) : (
         <>
-          <AnswerScopeDisclosure tenant={tenant} multiTenant={multiTenant} message={message} />
+          <AnswerScopeDisclosure tenant={tenant} multiTenant={multiTenant} message={message} liveModelFit={liveModelFit} />
           <StepSummary message={message} details={<AnswerDetails message={message} />} />
         </>
       )}
@@ -4424,10 +4736,12 @@ function AnswerScopeDisclosure({
   tenant,
   multiTenant,
   message,
+  liveModelFit = false,
 }: {
   tenant?: TenantRecord;
   multiTenant: boolean;
   message: IntuneChatMessage;
+  liveModelFit?: boolean;
 }) {
   const notice = message.engineNotice;
   const sources = message.sources ?? [];
@@ -4443,6 +4757,16 @@ function AnswerScopeDisclosure({
 
   return (
     <>
+    {message.switchedFrom && message.providerId && message.status !== "streaming" ? (
+      <SwitchedProviderLine message={message} />
+    ) : null}
+    {message.modelFit && message.status !== "streaming" && !liveModelFit ? (
+      // The reason stays with the stored answer after a reload; the choices live only with the request that failed.
+      <div data-model-fit-reason="" className="mb-2.5 rounded-lg bg-[var(--color-surface)] px-3 py-2 text-sm ring-1 ring-[var(--color-border)]">
+        <span className="font-medium text-[var(--color-text)]">{MODEL_FIT_COPY.title(message.modelFit, modelFitModelName(message.modelFit), "chat")}.</span>{" "}
+        <span className="text-[var(--color-text-soft)] tabular-nums">{MODEL_FIT_COPY.why(message.modelFit, modelFitModelName(message.modelFit), "chat")}</span>
+      </div>
+    ) : null}
     {docsOnly ? null : (
       <div className="mb-2.5 flex flex-wrap items-center gap-2 text-sm text-[var(--color-text-muted)]">
         {multiTenant ? (
@@ -4467,6 +4791,38 @@ function AnswerScopeDisclosure({
       </div>
     ) : null}
     </>
+  );
+}
+
+/**
+ * Which provider answered a request the admin moved off the local model
+ * (mockup 36, section C). A hosted one is named with its location label.
+ */
+function SwitchedProviderLine({ message }: { message: IntuneChatMessage }) {
+  const { state: { providers, activeProviderId, activeModelByProviderId } } = useAppState();
+  const providerId = message.providerId!;
+  const switchedFrom = message.switchedFrom!;
+  const provider = providers.find((entry) => entry.id === providerId);
+  const name = provider?.name ?? PROVIDER_TOOL_NAMES[providerId] ?? providerId;
+  // Where it went is what was recorded when it was sent; a provider no longer
+  // listed, or an older answer without the record, is named with its location label.
+  const local = switchedFrom.toOnDevice ?? provider?.isLocal === true;
+  const back = modelFitModelName({ providerId: switchedFrom.providerId, ...(switchedFrom.model ? { model: switchedFrom.model } : {}) });
+  // "Chat is back on" names the model it left only while Chat still uses it; a stored answer
+  // read after the admin changed the provider or model says only that it was this request.
+  const activeModel = resolveProviderDefaultModel(providers.find((entry) => entry.id === activeProviderId), activeModelByProviderId).model;
+  const stillOnModelLeft = switchedFrom.providerId === activeProviderId && (!switchedFrom.model || switchedFrom.model === activeModel);
+  return (
+    <div
+      data-switched-provider=""
+      className={`mb-2.5 rounded-lg px-3 py-1.5 text-sm ring-1 ${local ? "bg-[var(--color-success-soft)] ring-[var(--color-success)]/25" : "bg-[var(--color-warning-soft)] ring-[var(--color-warning)]/25"}`}
+    >
+      <span className="text-[var(--color-text)]">{message.status === "streaming" ? MODEL_FIT_COPY.sendingTo : message.status === "completed" ? MODEL_FIT_COPY.answeredBy : MODEL_FIT_COPY.sentTo}</span>{" "}
+      <span className={local ? "text-[var(--color-success)]" : "text-[var(--color-warning)]"}>
+        {local ? MODEL_FIT_COPY.answeredLocal(message.model ?? name, name) : providerDataLocation({ id: providerId, name })}
+      </span>{" "}
+      <span className="text-[var(--color-text-soft)]">{message.status === "streaming" || !stillOnModelLeft ? MODEL_FIT_COPY.sendingRest : MODEL_FIT_COPY.answeredRest(back)}</span>
+    </div>
   );
 }
 
