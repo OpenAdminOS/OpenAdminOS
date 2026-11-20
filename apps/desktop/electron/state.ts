@@ -5301,17 +5301,17 @@ export class AppStateStore {
   }
 
   async approveSelfTrainingSuggestion(id: string): Promise<SelfTrainingSuggestion> {
-    return this.chatService.approveSelfTrainingSuggestion(id);
+    return this.localResetGatedWork(() => this.chatService.approveSelfTrainingSuggestion(id));
   }
 
   async rejectSelfTrainingSuggestion(id: string): Promise<SelfTrainingSuggestion> {
-    return this.chatService.rejectSelfTrainingSuggestion(id);
+    return this.localResetGatedWork(() => this.chatService.rejectSelfTrainingSuggestion(id));
   }
 
   async resetSelfTrainingSuggestions(
     input: ResetSelfTrainingInput,
   ): Promise<SelfTrainingSuggestion[]> {
-    return this.chatService.resetSelfTrainingSuggestions(input);
+    return this.localResetGatedWork(() => this.chatService.resetSelfTrainingSuggestions(input));
   }
 
   async listWorkspaces(tenantId?: string): Promise<WorkspaceSummary[]> {
@@ -6581,6 +6581,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * agent (the user gets a clear error and can rename their draft).
    */
   async saveAgentDraft(yamlSource: string): Promise<AppState> {
+    return this.localResetGatedWork(() => this.saveAgentDraftNow(yamlSource));
+  }
+
+  private async saveAgentDraftNow(yamlSource: string): Promise<AppState> {
     if (typeof yamlSource !== "string" || yamlSource.trim().length === 0) {
       throw new Error("saveAgentDraft: yamlSource must be a non-empty string.");
     }
@@ -6611,6 +6615,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   async updateUserAgentDraft(slug: string, yamlSource: string): Promise<AppState> {
+    return this.localResetGatedWork(() => this.updateUserAgentDraftNow(slug, yamlSource));
+  }
+
+  private async updateUserAgentDraftNow(slug: string, yamlSource: string): Promise<AppState> {
     if (!this.userAgentsDir) {
       throw new Error("updateUserAgentDraft: user-agents directory is not configured.");
     }
