@@ -208,17 +208,31 @@ function graphHostAfter(raw: string, prefix: RegExp): boolean {
 const ADAPTER_403 = /^Graph responded with HTTP 403 for (\S+?):?(?:\s|$)/;
 const ADAPTER_ANY = /^Graph (?:responded with HTTP \d+|request failed \(|request timed out after \d+ms:) ?(?:for )?(\S+?)[):]?(?:\s|$)/;
 const OWN_DENIAL_403 = /^(?:Microsoft Graph denied access to [^\n]*?\(HTTP 403\)|Microsoft Graph rejected the (?:\w+ )?request \(HTTP 403\)|Microsoft Graph answered \S+ with HTTP 403\b)/;
-const OWN_GRAPH_TEXT = /^(?:Microsoft Graph (?:denied|rejected|answered|responded)\b|(?:Teams|Outlook) Graph request failed\b)/;
+const OWN_GRAPH_TEXT = /^(?:Microsoft Graph (?:denied|rejected|answered|responded)\b|Graph rejected the access token \(HTTP 401\)|(?:Teams|Outlook) Graph request failed\b)/;
 
 /**
  * A sandboxed script agent's failure as earlier versions stored it: the
- * script's stderr, where a brokered Graph error follows "graph.request: ".
+ * script's stderr, where a Node stack preamble (file and line, source line,
+ * caret) can come before the thrown error's header. Only a header for a
+ * brokered Graph request ("Error: graph.request: ...") is unwrapped; text
+ * further down, such as a provider body that quotes a Graph error, is not.
  */
-const SCRIPT_AGENT_GRAPH_ERROR = /^MXC script agent "[^"\n]*" failed: [\s\S]*?\bgraph\.request: /;
+const SCRIPT_AGENT_FAILURE = /^MXC script agent "[^"\n]*" failed: /;
+const ERROR_HEADER = /^[A-Za-z]*Error: /;
+
+function unwrapScriptAgentGraphError(raw: string): string {
+  const prefix = raw.match(SCRIPT_AGENT_FAILURE)?.[0];
+  if (!prefix) return raw;
+  const lines = raw.slice(prefix.length).split("\n");
+  const headerAt = lines.findIndex((line) => ERROR_HEADER.test(line));
+  if (headerAt < 0) return raw;
+  const thrown = [lines[headerAt]!.replace(ERROR_HEADER, ""), ...lines.slice(headerAt + 1)].join("\n");
+  return thrown.startsWith("graph.request: ") ? thrown.slice("graph.request: ".length) : raw;
+}
 
 function storedText(error: unknown): string {
   const raw = (error instanceof Error ? error.message : String(error ?? "")).trimStart();
-  return raw.replace(SCRIPT_AGENT_GRAPH_ERROR, "");
+  return unwrapScriptAgentGraphError(raw);
 }
 
 /** True when a stored error message was written by OpenAdminOS's Graph code. */

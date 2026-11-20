@@ -169,6 +169,12 @@ describe("Graph access denial classification", () => {
     const nightly = 'MXC script agent "intune-device-posture-auditor" failed: Error: graph.request: Microsoft Graph denied access to GET /deviceManagement/managedDevices (HTTP 403). OpenAdminOS cannot determine the cause.';
     assert.equal(graphAccessDenialFromStoredText(nightly)?.cause, "unknown");
     const llm = 'MXC script agent "intune-device-posture-auditor" failed: Error: llm.complete: Ollama responded with HTTP 403: Forbidden';
+    // A provider failure whose body quotes a brokered Graph error.
+    const quoted = 'MXC script agent "intune-device-posture-auditor" failed: file:///agent.mjs:151\n    throw new Error(`${method}: ${message}`);\n          ^\n\nError: llm.complete: Ollama responded with HTTP 403: upstream said\nError: graph.request: Graph responded with HTTP 403 for https://graph.microsoft.com/v1.0/users: {}';
+    assert.equal(graphAccessDenialFromStoredText(quoted), undefined);
+    assert.equal(storedGraphAccessDenial(classifyGraphAccessDenied({}), quoted)?.source, "microsoft-graph");
+    const { source: _s, ...untagged } = classifyGraphAccessDenied({});
+    assert.equal(storedGraphAccessDenial(untagged, quoted), undefined);
     assert.equal(graphAccessDenialFromStoredText(llm), undefined);
     assert.equal(errorComesFromGraph(llm), false);
   });
