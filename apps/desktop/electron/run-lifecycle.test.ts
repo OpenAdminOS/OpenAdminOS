@@ -461,14 +461,20 @@ it('records a fit issue on a failed run only after confirming its model ran on t
   });
   const failed = (id: string) => ({ id, agentSlug: 'docs', status: 'failed', providerId: 'ollama', model: 'gpt-oss:20b', queuedAt: new Date().toISOString(), steps: [], logs: [],
     error: 'Ollama context size too small: This request needs 40,652 tokens of context, but Ollama could only give gpt-oss:20b 16,384, usually because free memory ran out.' }) as unknown as RunRecord;
-  await h.host.write({ ...h.state(), runs: [failed('r1'), failed('r2')] });
+  // Both runs are still running when their failure is saved.
+  await h.host.write({ ...h.state(), runs: [{ ...failed('r1'), status: 'running' }, { ...failed('r2'), status: 'running' }] as RunRecord[] });
   await h.service.persistRunSnapshot(failed('r1'));
   assert.deepEqual(h.state().runs.find((run) => run.id === 'r1')?.modelFit, { reason: 'context-too-small', neededTokens: 40652, limitTokens: 16384, providerId: 'ollama', model: 'gpt-oss:20b' });
-  // A later snapshot of the same failure, with Ollama no longer answering, keeps the confirmed issue.
+  // A later snapshot of the same failure, with Ollama no longer answering, keeps the confirmed issue
+  // (and a later check never decides it).
   onDevice = false;
   await h.service.persistRunSnapshot(failed('r1'));
   assert.equal(h.state().runs.find((run) => run.id === 'r1')?.modelFit?.reason, 'context-too-small');
   // The alias is remote-backed when the run fails: nothing is offered.
+  await h.service.persistRunSnapshot(failed('r2'));
+  assert.equal(h.state().runs.find((run) => run.id === 'r2')?.modelFit, undefined);
+  // A later snapshot, once the model is confirmed again, does not stamp it after the fact.
+  onDevice = true;
   await h.service.persistRunSnapshot(failed('r2'));
   assert.equal(h.state().runs.find((run) => run.id === 'r2')?.modelFit, undefined);
 });

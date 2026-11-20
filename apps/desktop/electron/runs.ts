@@ -1857,6 +1857,9 @@ export class RunService {
   private async withModelFitIssue(run: RunRecord): Promise<RunRecord> {
     if (run.status !== "failed" || run.modelFit || !run.providerId || run.origin !== undefined || run.officeContext) return run;
     try {
+      // Only when the run turns failed: a later snapshot of a failure already checked keeps what
+      // that check found (persistRunSnapshot carries an issue over), so no later state decides it.
+      if ((await this.host.read()).runs.find((existing) => existing.id === run.id)?.status === "failed") return run;
       const provider = (await this.host.listProviders()).find((entry) => entry.id === run.providerId);
       if (!provider || !isOnDeviceModel(provider, run.model)) return run;
       const context = { providerId: provider.id, model: run.model, isLocal: true };
