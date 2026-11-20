@@ -133,6 +133,14 @@ the installed app's scheduler, login item or caches.
   falling back to the original profile), all fixed with tests; a scheduler
   retry that works clears the request's warning; the recovery profile is
   removed on quit.
+- Review round 7: Claude no blocking (recovery profile left by app.exit,
+  fixed); Muse one blocking (malformed marker), fixed; Sol four blocking:
+  trailing separator on a linked folder (fixed), launchctl bootout by path
+  (fixed: by label, plain file only), malformed marker (fixed), and the
+  single-instance lock created in a linked folder before recovery redirects
+  the profile (not changed: Chromium creates its lock files in the profile on
+  every launch, before and without this PR; argued in round 8). Linux pre-ready
+  notice falls back to zenity or kdialog.
 - Found in the end to end run and fixed: the incomplete screen called the
   appearance handler before it was registered, and failure reasons repeated
   full paths.

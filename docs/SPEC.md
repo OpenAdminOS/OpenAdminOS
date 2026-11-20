@@ -2537,13 +2537,17 @@ in the main process. Mockup: `docs/mockups/34-local-reset.html`.
   and never emptied at launch (it may point at a shared folder). Sign-out
   skips token caches that are links or files with more than one hard link,
   with a warning; the wipe removes links inside the folder without following
-  them. Only a plain marker file with a single link starts a wipe: anything
-  else at that path (a link, a shared file, a folder) leaves the reset
-  incomplete and nothing is removed. Sign-out is also skipped when the folder
+  them, and checks the folder by its bare name (a trailing separator would
+  make the check look through a link). Only a plain marker file with a single
+  link starts a wipe: anything else at that path (a link, a shared file, a
+  folder) leaves the reset incomplete and nothing is removed. Sign-out is also skipped when the folder
   cannot be listed. The reset-incomplete window runs from a fresh temporary
-  profile, removed on quit, so it never writes into the folder it could not
-  reset; if that profile cannot be created, a native notice lists what is not
-  finished and the launch stops, since no window can show yet.
+  profile, removed on every way out (Quit, Try again, closing the window), so
+  it never writes into the folder it could not reset; if that profile cannot
+  be created, a native notice lists what is not finished and the launch
+  stops, since no window can show yet (on Linux through zenity or kdialog).
+  Chromium's own single-instance lock files are created in the data folder
+  as on every launch of that profile; nothing else is written there.
 - **Marker writes** go through a new temporary file with a random name,
   created exclusively (`wx`), so a link planted in a restored profile is never
   followed; the temporary file is removed when the rename fails.
@@ -2556,7 +2560,9 @@ in the main process. Mockup: `docs/mockups/34-local-reset.html`.
   removes it. That process restarts through a detached shell outside the
   LaunchAgent's process group, which waits for it to exit and runs `open` on
   the app bundle, because launchd ends the group, Electron's relaunch helper
-  included, with the job. Removal is checked afterwards (`launchctl print` exit 113, a
+  included, with the job. The LaunchAgent is unloaded by its exact service
+  label, never by path (a path can name other jobs), and only a plain file
+  at the plist path is deleted. Removal is checked afterwards (`launchctl print` exit 113, a
   `schtasks /Query` that no longer finds the task), with every command bounded.
 - **Kept names** are matched without regard to letter case, because macOS and
   Windows volumes read `Policy.json` through the path `policy.json`.
@@ -2574,7 +2580,9 @@ in the main process. Mockup: `docs/mockups/34-local-reset.html`.
   records which build asked (`build`): a development build leaves an installed
   build's reset alone (Reset did not finish, open the installed app), and an
   installed build finishes a development build's reset in the data folder only,
-  with a warning. A marker that cannot be read counts as development.
+  with a warning. A marker that is not a complete reset request (version 1,
+  a valid request time and a known build) never starts a wipe: the launch
+  stops with nothing removed and says how to keep or reset the data.
 - **Linux** keeps the safeStorage key in the desktop keyring; the reset does
   not remove keyring entries (the docs say how).
 - **Windows uninstaller.** `nsis.deleteAppDataOnUninstall` stays `false`. In
