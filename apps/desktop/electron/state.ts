@@ -2449,9 +2449,8 @@ export class AppStateStore {
   markLocalResetCommitted(): void {
     this.localResetCommitted = true;
     this.auditLog.freezeSideFiles();
-    // The known writers skip quietly, and every other change by path inside
-    // the data folder through Node's file system API is refused.
-    sealDataFolder(this.userDataPath, { allowNamePrefixes: [LOCAL_RESET_MARKER] });
+    // The work that writes on its own stops first, so a guard that failed
+    // to install would still leave nothing running.
     for (const download of this.indexDownloads) download.abort();
     // WhatsApp Web clients write and delete their auth files by path on
     // their own (credential and key updates, a logged out session, a QR
@@ -2459,6 +2458,9 @@ export class AppStateStore {
     // created, and none opens a socket again.
     stopAllWhatsAppWebClients();
     this.whatsappWebClientInstance?.dispose();
+    // The known writers skip quietly, and every other change by path inside
+    // the data folder through Node's file system API is refused.
+    sealDataFolder(this.userDataPath, { allowNamePrefixes: [LOCAL_RESET_MARKER] });
   }
 
   /**
