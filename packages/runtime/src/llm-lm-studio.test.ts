@@ -524,8 +524,6 @@ describe("LM Studio context length too small", () => {
     }
   });
 
-  // A synthetic stream: LM Studio issue #2256 shows these counts only in its
-  // own log, so this checks the parsing when a server does send them.
   it("reads the sizes for an endpoint on LM Studio's REST v0 base", async () => {
     const server = await fakeLmStudio((req, res) => {
       if (req.url === "/api/v1/models") return sendJson(res, 404, { error: "Unexpected endpoint" });
@@ -542,6 +540,8 @@ describe("LM Studio context length too small", () => {
     }
   });
 
+  // A synthetic stream: LM Studio issue #2256 shows these counts only in its
+  // own log, so this checks the parsing when a server does send them.
   it("reads the counts from an error sent inside the stream", async () => {
     const server = await fakeLmStudio((req, res) => {
       if (req.url === "/api/v1/models") return sendJson(res, 200, v1Models("qwen3-8b", 8192, 32768));
