@@ -2540,7 +2540,12 @@ Mockup: `docs/mockups/34-local-reset.html`.
   start of the checks until the restart, a missing `state.json` is never
   created (the normal first launch rule is off; reads fall back to the state
   the process last knew), and closing and draining organizations uses that
-  in-memory state, not the file. The restart puts the sandbox flag in the
+  in-memory state, not the file. Once the marker is written every state
+  write is refused when it runs ("Nothing was saved"), a write queued before
+  that included, before any audit record: an atomic write would put this
+  process's state over whatever folder is at the path now. Before the
+  marker writes go on as usual, so a refused reset loses nothing. The
+  SQLite stores write through handles opened on the original files. The restart puts the sandbox flag in the
   environment back to how the launch found it, so the setting removed with
   `state.json` does not come back as the next launch's default.
 - **Accepted limit: a folder replaced during one removal** (raised in review
@@ -2563,7 +2568,13 @@ Mockup: `docs/mockups/34-local-reset.html`.
   included, so a database that could not be removed keeps its anchor. An
   entry that cannot be removed keeps the entries named after it (a locked
   `openadminos.db` keeps its `-wal` and `-shm`), so the next try finds an
-  intact database; everything else still goes. Then,
+  intact database; everything else still goes. On Windows an entry holding
+  a read-only file with more than one hard link stays too, and is listed: a
+  hard link shares its attributes, and removing a read-only file clears the
+  attribute first, which would make a backup's copy writable; cache folders
+  outside the data folder get the same check, as a warning. The guide's
+  PowerShell script leaves files whose `LinkType` is `HardLink` for the same
+  reason. Then,
   installed builds only: the Keychain item by exact service
   `OpenAdminOS Safe Storage` and account `OpenAdminOS`, searched only in the
   login keychain (`~/Library/Keychains/login.keychain-db`, where safeStorage
@@ -2571,7 +2582,8 @@ Mockup: `docs/mockups/34-local-reset.html`.
   Mac is left alone; then each other keychain in the user's search list is
   looked up on its own (attributes only), and each one holding an item of
   that name gets its own warning with its path, for an admin whose default
-  keychain is not the login keychain, the LaunchAgent or
+  keychain is not the login keychain (the login keychain is recognized by
+  file identity, however the list spells it), the LaunchAgent or
   scheduled task (checked to be gone afterwards), the electron-updater cache
   `@openadminosdesktop-updater`, and on macOS the Squirrel ShipIt cache, the
   bundle's Caches, HTTPStorages and saved state, and `defaults delete

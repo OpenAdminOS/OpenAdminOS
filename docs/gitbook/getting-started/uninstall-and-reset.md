@@ -73,6 +73,10 @@ A few details:
   **Reset did not finish** with the files that are left. Close the program
   that holds them and choose **Try again**, or remove them from the data folder
   yourself and choose **Try again**.
+- On Windows, a read-only file that is also linked from another place, such
+  as a backup that uses hard links, is left in place and listed: removing it
+  would make the other copy writable too. Remove the other link first, or the
+  file by hand, then choose **Try again**.
 - A development build (`npm run dev`) resets the folder in
   `OPENADMINOS_USER_DATA_DIR` when that is set, otherwise the default data
   folder, which the installed app uses too. It never touches the Keychain
@@ -182,14 +186,18 @@ Then run this in PowerShell:
 
 ```powershell
 # Removes a folder's contents without following links: a junction or
-# symbolic link is removed as a link, never entered.
+# symbolic link is removed as a link, never entered. A file with another
+# hard link (such as a backup's copy) is left and named: -Force would clear
+# its read-only, hidden or system attribute, and that changes the other copy.
 function Remove-OpenAdminOSContents([string]$Path, [string[]]$Keep = @()) {
   Get-ChildItem -LiteralPath $Path -Force | Where-Object { $Keep -notcontains $_.Name } | ForEach-Object {
     if ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) {
       if ($_.PSIsContainer) { [IO.Directory]::Delete($_.FullName, $false) } else { Remove-Item -LiteralPath $_.FullName -Force }
+    } elseif (-not $_.PSIsContainer -and $_.LinkType -eq "HardLink") {
+      "$($_.FullName) is also linked from another place. Check that place, then remove this file yourself."
     } elseif ($_.PSIsContainer) {
       Remove-OpenAdminOSContents $_.FullName
-      Remove-Item -LiteralPath $_.FullName -Force
+      if (-not (Get-ChildItem -LiteralPath $_.FullName -Force)) { Remove-Item -LiteralPath $_.FullName -Force }
     } else {
       Remove-Item -LiteralPath $_.FullName -Force
     }
@@ -219,7 +227,9 @@ if ($policy -and ($policy.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
 ```
 
 The script keeps `policy.json`, the IT policy file, and stops when it is a
-link or a folder. It stops at a data or cache folder that is a junction or link, because
+link or a folder. It leaves any file that is also linked from another place,
+such as a backup, and lists it: removing it would change that copy's
+attributes too. It stops at a data or cache folder that is a junction or link, because
 removing through it would delete files wherever it points, and it removes
 links inside the folders as links, without entering them. If no one manages
 the device and the folder is not a link, you can remove the whole
