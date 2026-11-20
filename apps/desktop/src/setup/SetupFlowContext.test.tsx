@@ -232,6 +232,24 @@ describe("contextual tenant setup", () => {
     expect(await screen.findByRole("heading", { name: "Tenant connected" })).toBeInTheDocument();
   });
 
+  it("does not offer a self-hosted server outside this device for a model fit rerun", async () => {
+    writePendingIntent(
+      createPendingIntent({
+        kind: "agent-run",
+        slug: "device-offboard",
+        providerId: "anthropic",
+        modelFit: { reason: "context-too-small", providerId: "ollama", model: "llama3.1" },
+        returnTo: "/runs/run-1",
+      }),
+    );
+    const providers = mockProviders.map((provider) => (provider.id === "lm-studio" ? { ...provider, isLocal: false, status: "connected" as const } : provider));
+    renderWithAppState(<div>App content</div>, { route: "/chat", bridge: makeMockBridge({}, createMockAppState({ activeProviderId: "ollama", providers })) });
+
+    await screen.findByRole("heading", { name: "Pick an LLM provider" });
+    expect(screen.queryByRole("button", { name: /LM Studio/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /Codex/ })).toBeInTheDocument();
+  });
+
   it("treats a configured Azure provider at available as ready, matching the host", async () => {
     const providers = mockProviders.map((provider) =>
       provider.id === "azure-openai"

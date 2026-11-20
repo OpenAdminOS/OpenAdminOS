@@ -15,10 +15,12 @@ import { isProviderImplemented } from "../shared/providers";
 import type {
   ConnectTenantOptions,
   ProviderId,
+  ProviderSummary,
   RequestedScope,
   TenantRecord,
 } from "../shared/openAdminOS";
 import { isManagedSettingLocked } from "../shared/openAdminOS";
+import { SELF_HOSTED_PROVIDER_IDS } from "../shared/model-fit";
 import { useAppState } from "../state";
 import {
   clearPendingIntent,
@@ -105,6 +107,8 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
           ? candidate.providerId
           : state.activeProviderId;
       const provider = state.providers.find((entry) => entry.id === providerId);
+      // A run for one request after a model fit failure never goes to a self-hosted server outside this device.
+      if (isOneRunProviderIntent(candidate) && provider && !modelFitEligible(provider)) return false;
       return Boolean(
         provider &&
           isProviderImplemented(provider.id) &&
@@ -393,7 +397,8 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
         error={error}
         activeTenant={connectedTenant ?? activeTenant}
         agentName={pendingAgentName}
-        providers={state.providers}
+        // The picker for one run offers only what the run host admits for it.
+        providers={isOneRunProviderIntent(intent) ? state.providers.filter(modelFitEligible) : state.providers}
         activeProviderId={isOneRunProviderIntent(intent) && intent.providerId ? intent.providerId : state.activeProviderId}
         savedRegistrations={state.savedAppRegistrations ?? []}
         registrationLocked={
@@ -425,6 +430,11 @@ export function useSetupFlow(): SetupFlowValue {
 
 export function currentReturnTo(pathname: string, search = ""): string {
   return `${pathname}${search}`;
+}
+
+/** A self-hosted server outside this device (LM Studio, Lemonade or Ollama reached elsewhere) is never a model fit choice. */
+function modelFitEligible(provider: ProviderSummary): boolean {
+  return provider.isLocal || !SELF_HOSTED_PROVIDER_IDS.has(provider.id);
 }
 
 /** A model fit rerun (or Run again of one): the provider it names is for this run only. */
