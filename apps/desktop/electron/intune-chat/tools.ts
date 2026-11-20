@@ -351,32 +351,40 @@ function pathValue(record: Record<string, unknown>, key: string): unknown {
   return value;
 }
 
-function textOf(value: unknown): string | undefined {
+function textOf(value: unknown, before?: string, fromResult = true): string | undefined {
   if (typeof value === "string") {
     const trimmed = value.trim();
-    if (trimmed) return trimmed === value ? trimmed : registerRenderedFragment(value, trimmed);
+    if (trimmed) return trimmed === value || !fromResult ? trimmed : registerRenderedFragment(value, trimmed, { before, requireEvidence: true });
   }
-  if (typeof value === "number" && Number.isFinite(value)) return registerRenderedFragment(value, String(value));
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return fromResult ? registerRenderedFragment(value, String(value), { before, requireEvidence: true }) : String(value);
+  }
   return undefined;
 }
 
 /** A short field as text: scalars, lists of scalars, and records or lists of records by their scalar values. */
-function factText(value: unknown): string | undefined {
-  const flat = (entry: unknown): string | undefined => {
-    if (typeof entry === "boolean") return entry ? "yes" : "no";
-    const scalar = textOf(entry);
+function factText(value: unknown, key: string): string | undefined {
+  const before = `${key}: `;
+  const flat = (entry: unknown, direct = false): string | undefined => {
+    if (typeof entry === "boolean") {
+      const text = entry ? "yes" : "no";
+      return direct ? registerRenderedFragment(entry, text, { before, requireEvidence: true }) : text;
+    }
+    const scalar = textOf(entry, before, direct);
     if (scalar !== undefined) return scalar;
     if (entry && typeof entry === "object" && !Array.isArray(entry)) {
-      const parts = Object.values(entry as Record<string, unknown>).map((part) => (typeof part === "boolean" ? undefined : textOf(part))).filter(Boolean);
+      const parts = Object.values(entry as Record<string, unknown>).map((part) => (typeof part === "boolean" ? undefined : textOf(part, undefined, false))).filter(Boolean);
       return parts.length > 0 ? parts.join(" ") : undefined;
     }
     return undefined;
   };
   const text = Array.isArray(value)
-    ? value.map(flat).filter(Boolean).join(value.some((entry) => entry && typeof entry === "object") ? "; " : ", ")
-    : flat(value);
+    ? value.map(entry => flat(entry)).filter(Boolean).join(value.some((entry) => entry && typeof entry === "object") ? "; " : ", ")
+    : flat(value, true);
   if (!text) return undefined;
-  return text.length > FACT_CHARS ? registerRenderedFragment(text, `${text.slice(0, FACT_CHARS)} [...]`, { requireEvidence: true }) : text;
+  const rendered = text.length > FACT_CHARS ? `${text.slice(0, FACT_CHARS)} [...]` : text;
+  return value && typeof value === "object" || rendered !== text
+    ? registerRenderedFragment(text, rendered, { before, unknownOrigin: true }) : rendered;
 }
 
 function httpsLink(record: Record<string, unknown>, keys: readonly string[] | undefined): string | undefined {
@@ -400,11 +408,11 @@ function shapeItem(record: Record<string, unknown>, shape: McpResultShape, clean
   const url = httpsLink(record, shape.url);
   const text = shape.text?.map((key) => textOf(pathValue(record, key))).find(Boolean);
   const facts = (shape.facts ?? []).flatMap((key) => {
-    const fact = factText(pathValue(record, key));
+    const fact = factText(pathValue(record, key), key);
     return fact ? [`${key}: ${fact}`] : [];
   });
   const excerpt = [text, ...facts].filter(Boolean).join("\n");
-  const id = shape.id?.map((key) => textOf(pathValue(record, key))).find(Boolean);
+  const id = shape.id?.map((key) => textOf(pathValue(record, key), '"id":"')).find(Boolean);
   return { title, ...(url ? { url } : {}), ...(excerpt ? { excerpt } : {}), ...(id ? { id } : {}) };
 }
 
@@ -445,7 +453,7 @@ function readFormatted(data: unknown, text: string, format: McpResultFormat, cal
   if (found.length > 0 || !format.whole || !data || typeof data !== "object" || Array.isArray(data)) return listResult(found, matched, rootMatched ? undefined : envelopeCounts(data));
   const record = data as Record<string, unknown>;
   if (format.whole.emptyWhenZero?.some((key) => record[key] === 0)) return { items: [], empty: true };
-  const params = Object.values(call.args ?? {}).flatMap((value) => (Array.isArray(value) ? value : [value])).map((value) => textOf(value)).filter(Boolean);
+  const params = Object.values(call.args ?? {}).flatMap((value) => (Array.isArray(value) ? value : [value])).map((value) => textOf(value, undefined, false)).filter(Boolean);
   const title = clean(`${call.tool ?? "Result"}${params.length > 0 ? `: ${params.join(" ")}` : ""}`);
   const url = httpsLink(record, format.whole.url);
   return { items: [{ title, ...(url ? { url } : {}), excerpt: textOf(text) || JSON.stringify(record) }], empty: false };
@@ -484,7 +492,8 @@ export function parseMcpResults(text: string, call: { structured?: unknown; args
 export function readMcpResult(text: string, call: { structured?: unknown; args?: Record<string, unknown>; host?: string; tool?: string; format?: McpResultFormat } = {}): McpReadResult {
   const clean = (value: string) => {
     const normalized = value.replace(/\s+/g, " ").trim();
-    return registerRenderedFragment(value, normalized.slice(0, 200), { requireEvidence: normalized.length > 200 });
+    const rendered = normalized.slice(0, 200);
+    return rendered === value ? value : registerRenderedFragment(value, rendered, { requireEvidence: true });
   };
   if (!text.trim() && call.structured === undefined) return { items: [], empty: true };
   if (call.format) {

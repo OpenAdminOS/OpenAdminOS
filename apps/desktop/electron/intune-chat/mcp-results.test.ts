@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { ClassificationLedger, withClassificationScope } from "@openadminos/runtime/data-classification";
+
 import type { McpResultFormat } from "../mcp/catalog.js";
 import { toolStepFinish } from "./chat-steps.js";
 import { mcpListingNote, mcpServerHasMore, readMcpResult } from "./tools.js";
@@ -25,6 +27,21 @@ describe("MCP results read by a catalog format", () => {
       { title: "Feature one", url: "https://example.com/42", excerpt: "Does a thing.\nstatus: Rolling out\ntags: A, B\ndates: GA 2026; Preview 2025", id: "42" },
       { title: "Unsafe link" },
     ]);
+  });
+
+  it("retains scalar fact classes and reports flattened records with unknown provenance", async t => {
+    const ledger = new ClassificationLedger();
+    t.after(() => ledger.dispose());
+    const structured = { title: "Fixture", status: true, id: 17, tags: [{ value: 9 }] };
+    ledger.register("fixture", structured);
+    const read = withClassificationScope(ledger, () => readMcpResult("", { format, structured }));
+    const prompt = JSON.stringify(read.items);
+    const start = prompt.indexOf("yes");
+    await ledger.waitForObservations();
+    const result = ledger.classifyRequest({ prompt });
+    assert.ok(result.spans.some(span => span.kind === "identity" && span.start === start && span.end === start + 3));
+    assert.ok(result.spans.some(span => span.kind === "identity" && prompt.slice(span.start, span.end) === "17"));
+    assert.ok(result.unexamined.ranges.some(range => prompt.slice(range.start, range.end) === "9"));
   });
 
   it("joins title parts, needs every part and the required keys, and does not search a matched record further", () => {

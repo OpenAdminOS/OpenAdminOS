@@ -95,6 +95,7 @@ export function collectClassifiedValues(data: unknown, options: ClassificationOp
 }
 
 interface RenderProvenance {
+  unknownOrigin?: boolean;
   jsonPrefix?: boolean;
   requireEvidence?: boolean;
   key?: string;
@@ -742,7 +743,7 @@ export class ClassificationLedger {
   rendered(original: unknown, fragment: Scalar, provenance: RenderProvenance): void {
     if (this.disposed || (typeof original !== "string" && typeof original !== "number" && typeof original !== "boolean")) return;
     try {
-      const deferred = provenance.jsonPrefix || provenance.requireEvidence;
+      const deferred = provenance.jsonPrefix || provenance.requireEvidence || provenance.unknownOrigin;
       if (deferred || this.pendingRegistrations || this.pendingRenderings.length) {
         const units = (typeof original === "string" ? original.length : 16) +
           (typeof fragment === "string" ? fragment.length : 16) + 64 + (provenance.key?.length ?? 0) +
@@ -815,6 +816,10 @@ export class ClassificationLedger {
           ledger, hostSerialization,
         })),
       });
+    }
+    if (provenance.unknownOrigin && typeof fragment === "string") {
+      this.recordClippedGap(fragment, provenance);
+      return;
     }
     let best: Evidence | undefined;
     let owner: ClassificationLedger = this;

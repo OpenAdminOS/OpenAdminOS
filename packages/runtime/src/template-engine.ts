@@ -304,7 +304,7 @@ function evaluateExpression(parsed: ParsedExpression, ctx: TemplateContext, trac
         if (trace) trace.casing.push(name);
         else registerRenderedFragment(value, rendered, { key: parsed.path.split(".").at(-1)! });
       }
-    } else if (trace && rendered !== value) {
+    } else if (trace && (rendered !== value || name === "type" || name === "size" || name === "total" || name === "length")) {
       switch (name) {
         case "sample":
           // The prefix retains its original elements and field key.
@@ -402,7 +402,7 @@ function* tracePieces(
   requireEvidence ||= origin !== undefined;
   if (typeof value === "string" && value.length > MAX_TRACE_PIECE) return false;
   if (typeof value === "number" && !Number.isFinite(value) && format === "json") {
-    yield { text: "null" };
+    yield { text: "null", origin: "unmapped" };
   } else if (format === "json" && typeof value === "string") {
     yield { text: '"' };
     yield { text: JSON.stringify(value).slice(1, -1), origin: evidence, requireEvidence };
