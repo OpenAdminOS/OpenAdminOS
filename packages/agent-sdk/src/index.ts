@@ -732,6 +732,13 @@ export interface StartRunOptions {
    */
   requireOnDeviceModel?: boolean;
   /**
+   * A model fit rerun: the run is bound to where its provider is reached at
+   * admission (Ollama or LM Studio address, Azure OpenAI resource and
+   * deployment), so a settings change while its diff is open cannot send a
+   * later phase elsewhere.
+   */
+  bindProviderEndpoint?: boolean;
+  /**
    * Pin the run to a specific LLM provider id, overriding the globally
    * active provider for this run only. The provider must be known and
    * implemented; unknown / unimplemented ids throw at queue time. Omit
@@ -1073,6 +1080,10 @@ export interface RunRecord {
   error?: string;
   steps: RunStepRecord[];
   accessDenial?: GraphAccessDenial;
+  /** Model fit rerun on a model on this device: every phase checks again that it runs here before building the model. */
+  requireOnDeviceModel?: true;
+  /** Model fit rerun: where the provider was reached at admission; every phase is built only for it. */
+  providerEndpointBinding?: { endpoint: string | undefined };
   logs: RunLogRecord[];
   plan?: WritePlan;
   /** Host-produced assessment, retained with the reviewed plan in run history. */
@@ -1505,6 +1516,8 @@ export interface ModelFitIssue {
   limitTokens?: number;
   /** The limit is the most the model supports, not the size it was loaded with. */
   limitIsModelMax?: true;
+  /** The limit is the size the server tried and could not load, usually for lack of memory. */
+  limitIsMemory?: true;
   /**
    * Host-issued and single use: the one request this issue may be run again
    * for, bound to its conversation, organization, question and the active

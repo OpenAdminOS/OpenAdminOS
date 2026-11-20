@@ -2089,6 +2089,7 @@ export class AppStateStore {
         host.resolveTenant(persisted as PersistedState, tenantId),
       listProviders: () => host.listProviders(),
       verifyOnDeviceModel: (providerId, model) => verifyOnDeviceModel(providerId, model),
+      providerEndpoint: (providerId) => host.novaProviderEndpoint(providerId),
       now: () => host.clock(),
       buildLlm: (providerId, model, binding) => host.buildLlm(providerId, model, binding),
       buildGraph: (pinnedTenantId, agentScopes) =>
@@ -2174,9 +2175,10 @@ export class AppStateStore {
       serialize: (task) => host.serialize(task),
       listProviders: () => host.listProviders(),
       verifyOnDeviceModel: (providerId, model) => verifyOnDeviceModel(providerId, model),
+      providerEndpoint: (providerId) => host.novaProviderEndpoint(providerId),
       providerCanRun: (provider) => host.providerCanRun(provider),
       validateOfficeApproval: run => host.officeService.validateApproval(run),
-      buildLlm: (providerId, model) => host.buildLlm(providerId, model),
+      buildLlm: (providerId, model, binding) => host.buildLlm(providerId, model, binding),
       buildGraph: (pinnedTenantId, agentScopes, execution) =>
         host.buildGraph(pinnedTenantId, agentScopes, execution),
       readConnectorConfigs: () => host.readConnectorConfigs(),

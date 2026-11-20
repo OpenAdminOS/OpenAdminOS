@@ -392,6 +392,8 @@ export default function AgentDetail({
               ...pinTenant,
               // A model on this device is checked again by the host before the run is admitted.
               ...(choice.modelFit && pendingProvider?.isLocal ? { requireOnDeviceModel: true } : {}),
+              // Every later phase (replan, apply) goes only where the provider was reached when the run was admitted.
+              ...(choice.modelFit ? { bindProviderEndpoint: true } : {}),
               ...(choice.providerId ? { providerId: choice.providerId } : {}),
               ...(choice.model ? { model: choice.model } : {}),
             }

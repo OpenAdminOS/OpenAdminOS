@@ -3440,6 +3440,10 @@ function validateStartRunOptions(value: unknown): StartRunOptions | undefined {
     if (value.requireOnDeviceModel !== true) throw new Error("startRun.requireOnDeviceModel must be true when present.");
     options.requireOnDeviceModel = true;
   }
+  if (value.bindProviderEndpoint !== undefined) {
+    if (value.bindProviderEndpoint !== true) throw new Error("startRun.bindProviderEndpoint must be true when present.");
+    options.bindProviderEndpoint = true;
+  }
   if (value.providerId !== undefined) {
     options.providerId = validateProviderId(value.providerId, "startRun.providerId");
   }

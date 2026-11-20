@@ -391,3 +391,29 @@ it('admits a model fit rerun on a model on this device only after a fresh check 
   await assert.rejects(h.service.startRun('docs', { requireOnDeviceModel: true, providerId: 'ollama', model: 'gpt-oss:20b' }), /could not confirm that gpt-oss:20b runs on this device/);
   assert.equal(h.state().runs.length, 0);
 });
+
+it('binds a model fit rerun to its endpoint and checks the model again when a phase builds it', async () => {
+  const h = harness();
+  const agent = { id: 'docs', slug: 'docs', name: 'Docs', description: 'No service calls', requiresEntraTier: 'free', version: '1.0.0', mode: 'read', category: 'devices', tier: 'agent', scopes: [], author: { name: 'Test' }, installedAt: new Date().toISOString() } as AgentSummary;
+  const checks: boolean[] = [];
+  const builds: Array<{ endpoint: string | undefined } | undefined> = [];
+  Object.assign(h.host, {
+    appVersion: '0.7.2',
+    listProviders: async () => [{ id: 'ollama', name: 'Ollama', status: 'connected', models: ['gpt-oss:20b'], defaultModel: 'gpt-oss:20b', isLocal: true }],
+    providerCanRun: () => true,
+    // On this device at admission; a remote-backed alias by the time the run builds its model.
+    verifyOnDeviceModel: async () => { const onDevice = checks.length === 0; checks.push(onDevice); return onDevice; },
+    providerEndpoint: async () => 'http://127.0.0.1:11434',
+    buildLlm: async (_id: string, _model: string | undefined, binding?: { endpoint: string | undefined }) => { builds.push(binding); return new Promise(() => {}); },
+  });
+  await h.host.write({ ...h.state(), installedAgents: [agent], tenants: [] });
+  const run = await h.service.startRun('docs', { requireOnDeviceModel: true, bindProviderEndpoint: true, providerId: 'ollama', model: 'gpt-oss:20b' });
+  assert.equal(run.requireOnDeviceModel, true);
+  assert.deepEqual(run.providerEndpointBinding, { endpoint: 'http://127.0.0.1:11434' });
+  await settle();
+  assert.deepEqual(checks, [true, false]);
+  assert.deepEqual(builds, [], 'nothing was built once the model could not be confirmed');
+  const failed = h.state().runs.find((entry) => entry.id === run.id);
+  assert.equal(failed?.status, 'failed');
+  assert.match(failed?.error ?? '', /still runs on this device/);
+});
