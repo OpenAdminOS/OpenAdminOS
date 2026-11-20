@@ -141,6 +141,12 @@ the installed app's scheduler, login item or caches.
   the profile (not changed: Chromium creates its lock files in the profile on
   every launch, before and without this PR; argued in round 8). Linux pre-ready
   notice falls back to zenity or kdialog.
+- Review round 8: Claude no blocking; Sol withdrew the lock item and found
+  three blocking (a `link/.` style path, a policy.json linked to a file
+  inside the folder, the uninstall guide unloading by path), all fixed;
+  Muse one blocking (the same path forms), fixed, plus recovery profile
+  removal on process exit, no saved window state for the recovery window, and
+  a stricter Linux notice fallback.
 - Found in the end to end run and fixed: the incomplete screen called the
   appearance handler before it was registered, and failure reasons repeated
   full paths.

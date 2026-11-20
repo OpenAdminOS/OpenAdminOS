@@ -2537,12 +2537,16 @@ in the main process. Mockup: `docs/mockups/34-local-reset.html`.
   and never emptied at launch (it may point at a shared folder). Sign-out
   skips token caches that are links or files with more than one hard link,
   with a warning; the wipe removes links inside the folder without following
-  them, and checks the folder by its bare name (a trailing separator would
-  make the check look through a link). Only a plain marker file with a single
+  them. The folder counts as a link unless its real location is its real
+  parent plus its own name, so forms such as `link/`, `link/.` or `link/..`
+  that the system resolves through a link are caught too. A `policy.json`
+  that is a link to a file inside the data folder stops the reset, at the
+  request and at launch, because the wipe would remove what it points to. Only a plain marker file with a single
   link starts a wipe: anything else at that path (a link, a shared file, a
   folder) leaves the reset incomplete and nothing is removed. Sign-out is also skipped when the folder
   cannot be listed. The reset-incomplete window runs from a fresh temporary
-  profile, removed on every way out (Quit, Try again, closing the window), so
+  profile without saved window state, removed on every way out (Quit, Try
+  again, closing the window, process exit), so
   it never writes into the folder it could not reset; if that profile cannot
   be created, a native notice lists what is not finished and the launch
   stops, since no window can show yet (on Linux through zenity or kdialog).
