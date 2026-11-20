@@ -210,8 +210,8 @@ describe("contextual tenant setup", () => {
         returnTo: "/runs/run-1",
       }),
     );
-    let finish: () => void = () => undefined;
-    const recheckProvider = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const pending: Array<() => void> = [];
+    const recheckProvider = vi.fn(() => new Promise<void>((resolve) => { pending.push(resolve); }));
     const bridge = makeMockBridge({ recheckProvider }, createMockAppState({ activeProviderId: "ollama" }));
     renderWithAppState(<div>App content</div>, { route: "/chat", bridge });
 
@@ -220,7 +220,15 @@ describe("contextual tenant setup", () => {
     await waitFor(() => expect(recheckProvider).toHaveBeenCalledWith("openai"));
     // Codex shows as connected from the cached result, but setup waits for its check.
     expect(screen.getByRole("heading", { name: "Pick an LLM provider" })).toBeInTheDocument();
-    finish();
+    // A second pick while the first check runs: the first one finishing does not move setup on.
+    await user.click(screen.getByRole("button", { name: /Codex/ }));
+    await waitFor(() => expect(recheckProvider).toHaveBeenCalledTimes(2));
+    const reads = vi.mocked(bridge.getAppState).mock.calls.length;
+    pending[0]!();
+    // The first check's refresh has run.
+    await waitFor(() => expect(vi.mocked(bridge.getAppState).mock.calls.length).toBeGreaterThan(reads));
+    expect(screen.getByRole("heading", { name: "Pick an LLM provider" })).toBeInTheDocument();
+    pending[1]!();
     expect(await screen.findByRole("heading", { name: "Tenant connected" })).toBeInTheDocument();
   });
 

@@ -187,12 +187,13 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
 
   // A provider picked for one run moves setup on only once its full check is done,
   // so a cached "connected" does not let the admin resume before a stale sign-in shows.
-  const [oneRunCheckPending, setOneRunCheckPending] = useState(false);
+  // A count, so a second pick while the first check runs keeps it pending until both are done.
+  const [oneRunChecksRunning, setOneRunChecksRunning] = useState(0);
   useEffect(() => {
-    if (open && stage === "provider" && !oneRunCheckPending && providerReadyForIntent(intent)) {
+    if (open && stage === "provider" && oneRunChecksRunning === 0 && providerReadyForIntent(intent)) {
       setStage("ready");
     }
-  }, [intent, oneRunCheckPending, open, providerReadyForIntent, stage]);
+  }, [intent, oneRunChecksRunning, open, providerReadyForIntent, stage]);
 
   const requireTenant = useCallback(
     (nextIntent?: PendingIntent) => {
@@ -285,7 +286,7 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
 
   const recheckOneRunProvider = useCallback(
     async (id: ProviderId) => {
-      setOneRunCheckPending(true);
+      setOneRunChecksRunning((running) => running + 1);
       try {
         await window.openAdminOS?.recheckProvider?.(id);
       } finally {
@@ -293,7 +294,7 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
         try {
           await refresh();
         } finally {
-          setOneRunCheckPending(false);
+          setOneRunChecksRunning((running) => running - 1);
         }
       }
     },
