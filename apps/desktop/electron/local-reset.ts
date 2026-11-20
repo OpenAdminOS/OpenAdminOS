@@ -780,23 +780,24 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
   }
   const plan = localResetRemovalPlan(entries);
   // An entry that could not be removed keeps the files that belong to it
-  // (a locked openadminos.db its -wal and -shm, which sort right after it),
-  // so the next try finds an intact database; everything else still goes,
-  // the token files included. The audit side files stay while anything
-  // else does, so a database left behind keeps its anchor too.
-  let keptWith: string | undefined;
+  // (a locked openadminos.db its -wal and -shm), whatever sorts between
+  // them, so the next try finds an intact database; everything else still
+  // goes, the token files included. The audit side files stay while
+  // anything else does, so a database left behind keeps its anchor too.
+  const notRemoved: string[] = [];
   for (const name of plan.first) {
-    if (keptWith !== undefined && name.startsWith(`${keptWith}-`)) {
-      failed.push({ item: name, reason: `kept with ${keptWith}, which could not be removed` });
+    const owner = notRemoved.find((kept) => name.startsWith(`${kept}-`));
+    if (owner !== undefined) {
+      failed.push({ item: name, reason: `kept with ${owner}, which could not be removed` });
       continue;
     }
     if (!sameFolder()) {
       failed.push({ item: userDataDir, reason: DATA_FOLDER_CHANGED_REASON });
       break;
     }
-    if (removeHere(name)) keptWith = undefined;
-    else if (folderChanged) break;
-    else keptWith = name;
+    if (removeHere(name)) continue;
+    if (folderChanged) break;
+    notRemoved.push(name);
   }
   if (failed.length > 0) return finish("incomplete");
   for (const name of plan.last) if (!removeIfSameFolder(name)) break;

@@ -193,6 +193,24 @@ describe("local reset: wipe at launch", () => {
     }
   });
 
+  it("keeps a locked database's own files even when another entry sorts between them", async () => {
+    const dir = await tempDir();
+    try {
+      seedDataFolder(dir);
+      // "openadminos.db (copy)" sorts after "openadminos.db" and before its -wal.
+      writeFileSync(join(dir, "openadminos.db (copy)"), "x");
+      writeFileSync(join(dir, "openadminos.db-shm"), "x");
+      const fs = failingFileSystem((path) => path.endsWith("openadminos.db"));
+      const report = runPendingLocalReset({ userDataDir: dir, packaged: true, platform: "darwin", home: dir, env: {}, fs, run: recordingRun().run });
+      assert.equal(report?.status, "incomplete");
+      assert.ok(!existsSync(join(dir, "openadminos.db (copy)")));
+      assert.ok(existsSync(join(dir, "openadminos.db-wal")));
+      assert.ok(existsSync(join(dir, "openadminos.db-shm")));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("states reasons in plain words without repeating the path", async () => {
     const dir = await tempDir();
     try {
