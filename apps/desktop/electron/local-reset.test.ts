@@ -1082,6 +1082,85 @@ describe("local reset: wipe at launch", () => {
     }
   });
 
+  it("leaves a cache folder replaced while the data folder is listed before its removal", async () => {
+    const dir = await tempDir();
+    try {
+      const profile = join(dir, "profile");
+      mkdirSync(profile);
+      seedDataFolder(profile, MARKER);
+      const cache = join(dir, "cache", UPDATER_CACHE_DIR);
+      mkdirSync(cache, { recursive: true });
+      writeFileSync(join(cache, "update.AppImage"), "old update");
+      let cacheWalked = false;
+      let swapped = false;
+      const base = failingFileSystem(() => false);
+      const report = runPendingLocalReset({
+        userDataDir: profile,
+        packaged: true,
+        platform: "linux",
+        home: join(dir, "home"),
+        env: { XDG_CACHE_HOME: join(dir, "cache") },
+        mountInfo: () => {
+          if (readdirSync(profile).every((name) => isKeptThroughReset(name))) cacheWalked = true;
+          return "";
+        },
+        fs: {
+          ...base,
+          // The guard lists the data folder after the cache's walk: a backup
+          // job replaces the cache right then.
+          readdir: (path) => {
+            if (path === profile && cacheWalked && !swapped) {
+              swapped = true;
+              renameSync(cache, `${cache}-old`);
+              mkdirSync(cache);
+              writeFileSync(join(cache, "restored"), "restored cache");
+            }
+            return base.readdir(path);
+          },
+        },
+      });
+      assert.ok(swapped);
+      assert.equal(report?.status, "completed");
+      assert.deepEqual(report?.warnings, [{ item: cache, reason: "it was replaced while it was being checked, so it was left in place" }]);
+      assert.equal(readFileSync(join(cache, "restored"), "utf8"), "restored cache");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not record the outside cleanup as done when files come back during its last step", async () => {
+    const dir = await tempDir();
+    try {
+      const profile = join(dir, "profile");
+      mkdirSync(profile);
+      seedDataFolder(profile, MARKER);
+      const cache = join(dir, "cache", UPDATER_CACHE_DIR);
+      mkdirSync(cache, { recursive: true });
+      const base = failingFileSystem(() => false);
+      const report = runPendingLocalReset({
+        userDataDir: profile,
+        packaged: true,
+        platform: "linux",
+        mountInfo: noMounts,
+        home: join(dir, "home"),
+        env: { XDG_CACHE_HOME: join(dir, "cache") },
+        fs: {
+          ...base,
+          remove: (path) => {
+            base.remove(path);
+            // A restore puts the token file back while the last cache goes.
+            if (path === cache) writeFileSync(join(profile, "tokens.bin"), "restored tokens");
+          },
+        },
+      });
+      assert.equal(report?.status, "incomplete");
+      assert.deepEqual(report?.failed, [{ item: "tokens.bin", reason: "it was created again during the reset" }]);
+      assert.equal(readLocalResetMarker(profile)?.leftoversDone, undefined);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("on Linux leaves a cache folder that gains a mount after its walk", async () => {
     const dir = await tempDir();
     try {

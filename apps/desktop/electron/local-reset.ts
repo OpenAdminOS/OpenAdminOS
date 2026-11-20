@@ -755,20 +755,20 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
       // replaces the folder or puts files back into it, keeps its Keychain
       // key and its caches. Files that came back are listed; the next try
       // removes them first, then the key.
+      const guard = () => {
+        if (!sameFolder()) throw new FolderChangedDuringReset([{ item: userDataDir, reason: DATA_FOLDER_CHANGED_REASON }]);
+        const appeared: LocalResetProblem[] = [];
+        checkFolderEmpty(fs, userDataDir, appeared, () => true);
+        if (appeared.length > 0) throw new FolderChangedDuringReset(appeared);
+      };
       try {
-        removeLeftovers(options, fs, run, warnings, () => {
-          if (!sameFolder()) throw new FolderChangedDuringReset([{ item: userDataDir, reason: DATA_FOLDER_CHANGED_REASON }]);
-          const appeared: LocalResetProblem[] = [];
-          checkFolderEmpty(fs, userDataDir, appeared, () => true);
-          if (appeared.length > 0) throw new FolderChangedDuringReset(appeared);
-        });
+        removeLeftovers(options, fs, run, warnings, guard);
+        // Once more after the last step: files that came back during it
+        // leave the cleanup unrecorded, so the next try repeats all of it.
+        guard();
       } catch (cause) {
         if (!(cause instanceof FolderChangedDuringReset)) throw cause;
         failed.push(...cause.problems);
-        return finish("incomplete");
-      }
-      if (!sameFolder()) {
-        failed.push({ item: userDataDir, reason: DATA_FOLDER_CHANGED_REASON });
         return finish("incomplete");
       }
       // Recorded before the marker goes, so a marker that cannot be removed
@@ -1049,6 +1049,15 @@ function removeLeftovers(
         continue;
       }
     }
+    guard();
+    // On Linux a bind mount added inside the cache since its walk is never
+    // removed through, as in the data folder.
+    if (options.platform === "linux" && hasMountAtOrUnder(realpathOr(path), options.mountInfo)) {
+      warnings.push({ item: path, reason: linkReason });
+      continue;
+    }
+    // The last check before the removal: the guard lists the data folder,
+    // which can take a while on redirected storage.
     const after = entryIdentity(path);
     if (!sameEntry(before, after)) {
       warnings.push({
@@ -1057,13 +1066,6 @@ function removeLeftovers(
           ? "it cannot be told apart from another item on this disk, so it was left in place"
           : "it was replaced while it was being checked, so it was left in place",
       });
-      continue;
-    }
-    guard();
-    // On Linux a bind mount added inside the cache since its walk is never
-    // removed through, as in the data folder.
-    if (options.platform === "linux" && hasMountAtOrUnder(realpathOr(path), options.mountInfo)) {
-      warnings.push({ item: path, reason: linkReason });
       continue;
     }
     try {
