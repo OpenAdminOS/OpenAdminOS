@@ -182,7 +182,9 @@ describe("Ollama context size", () => {
           return;
         }
         if (options.failCtx && numCtx === options.failCtx.numCtx) {
+          // Fails one request only.
           const { delayMs, error } = options.failCtx;
+          options.failCtx = undefined;
           setTimeout(() => {
             res.statusCode = 500;
             res.end(JSON.stringify({ error }));
@@ -674,7 +676,8 @@ describe("Ollama context size", () => {
       fake.options.retryPartialError = undefined;
       fake.options.limit = () => 131072;
       await llm.complete({ prompt: "small" });
-      assert.deepEqual(fake.chats.at(-1), {});
+      // Only the retry's size failed; the kept 45,056 still worked and stays.
+      assert.deepEqual(fake.chats.at(-1), { num_ctx: 45056 });
     } finally {
       await fake.close();
     }
@@ -761,6 +764,30 @@ describe("Ollama context size", () => {
       await llm.complete({ prompt: "huge" });
       // One request with the restored size, no overflow and retry.
       assert.deepEqual(fake.chats.slice(before), [{ num_ctx: 84992 }]);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("forgets the retry's size when it fails after a concurrent request kept that same size", async () => {
+    const fake = await fakeOllama({
+      modelMax: 131072,
+      // The older request's first attempt (the third request) gets only 16,384 for the kept 45,056.
+      limit: (numCtx) => (numCtx === 45056 && fake.chats.length === 3 ? 16384 : numCtx ?? 16384),
+    });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "same-size" });
+      await llm.complete({ prompt: "big" });
+      // The older request forgets 45,056, then retries with 45,056, which fails late.
+      fake.options.failCtx = { numCtx: 45056, delayMs: 300, error: "model requires more system memory (24.1 GiB) than is available (12.0 GiB)" };
+      const older = llm.complete({ prompt: "big" });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Meanwhile a newer request raises 45,056 again and keeps it.
+      await llm.complete({ prompt: "big" });
+      await assert.rejects(older, /could not load same-size with 45,056/);
+      fake.options.limit = () => 65536;
+      await llm.complete({ prompt: "small" });
+      assert.deepEqual(fake.chats.at(-1), {});
     } finally {
       await fake.close();
     }

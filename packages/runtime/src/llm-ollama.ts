@@ -194,28 +194,23 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       let modelMax: number | undefined;
       const cachedCtx = ollamaContextOverrides.get(cacheKey);
       /**
-       * Forgets every size this request sent (the kept one and the retry's)
-       * while the cache still holds it, so a size a concurrent request set
-       * and this one just saw fail is not sent again.
+       * Forgets a size the attempt that just failed sent. A failure is
+       * evidence only about the size that attempt asked for, at the moment it
+       * failed, so it never touches another size, and it forgets this size
+       * even when a concurrent request has kept it since.
        */
-      // Sizes this request already forgot, so a later failure of the same
-      // request does not forget one a newer request has since restored.
-      const forgotten = new Set<number>();
-      const forgetSentSizes = () => {
-        for (const size of [cachedCtx, retry?.numCtx]) {
-          if (size === undefined || forgotten.has(size)) continue;
-          forgotten.add(size);
-          const failureKey = contextFailureKey(cacheKey, size);
-          ollamaContextFailures.set(failureKey, (ollamaContextFailures.get(failureKey) ?? 0) + 1);
-          if (ollamaContextOverrides.get(cacheKey) === size) ollamaContextOverrides.delete(cacheKey);
-        }
+      const forgetSize = (size: number | undefined) => {
+        if (size === undefined) return;
+        const failureKey = contextFailureKey(cacheKey, size);
+        ollamaContextFailures.set(failureKey, (ollamaContextFailures.get(failureKey) ?? 0) + 1);
+        if (ollamaContextOverrides.get(cacheKey) === size) ollamaContextOverrides.delete(cacheKey);
       };
       // The failure count of the retry's size when the retry started.
       let retryFailuresAtStart = 0;
       /**
        * A failure, from an HTTP answer or the stream, that shows the context
-       * this request sent did not fit or could not be loaded. Forgets the
-       * sizes it sent and returns the message; undefined for other failures.
+       * the running attempt sent did not fit or could not be loaded. Forgets
+       * that size and returns the message; undefined for other failures.
        */
       const contextFailure = (text: string, answering: boolean): Error | undefined => {
         const counted = parseContextOverflow(text);
@@ -224,7 +219,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         // Ollama still giving the kept size means the prompt grew, not that
         // memory ran out; the kept size stays.
         const keptStillGiven = counted !== undefined && !retry && cachedCtx !== undefined && counted.available >= cachedCtx;
-        if (!keptStillGiven) forgetSentSizes();
+        if (!keptStillGiven) forgetSize(retry ? retry.numCtx : cachedCtx);
         if (memory) {
           if (retry) {
             return new Error(
@@ -256,9 +251,8 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         const overflow = response.status === 400 ? parseContextOverflow(detail) : undefined;
         if (overflow) {
           // Less room than the kept size asked for means Ollama can no longer
-          // give it. Otherwise the prompt grew; the kept size stays unless
-          // the retry below fails too.
-          if (cachedCtx !== undefined && overflow.available < cachedCtx) forgetSentSizes();
+          // give it. Otherwise the prompt grew and the kept size stays.
+          if (cachedCtx !== undefined && overflow.available < cachedCtx) forgetSize(cachedCtx);
           // The first request's budget ends here; the lookup has its own.
           clearTimeout(timer);
           // Ollama sizes the context from its own default and free memory,
