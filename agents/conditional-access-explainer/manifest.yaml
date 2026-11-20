@@ -177,13 +177,19 @@ skills:
         Write the review in this exact shape, in plain admin language, in
         under 700 words. Cite policy names in quotes for every claim, and
         name at most three policies per bullet ("and N more" for the rest).
+        The bullet counts below are upper bounds: write fewer, or "None
+        found in this policy set.", when the records support no more. If the
+        tenant has no policies, say so in the summary, mark every coverage
+        line not proven, and recommend the baseline policies to create
+        (MFA for admins, MFA for all users, block legacy authentication),
+        each as a report-only policy to review first.
 
         1. Summary.
         Two or three sentences: the overall posture and the single most
         important risk.
 
         2. Recommended changes.
-        Three to five numbered, concrete changes, most important first. Each
+        Up to five numbered, concrete changes, most important first. Each
         says which policy to change or create, the exact setting (for example
         "add exchangeActiveSync and other to client apps and grant Block", or
         "require the Phishing-resistant MFA authentication strength for the
@@ -206,7 +212,7 @@ skills:
         required only when it is the sole requirement or the operator is AND.
 
         4. Gaps and conflicts.
-        Three to six bullets. Each names the policies involved and the
+        Up to six bullets. Each names the policies involved and the
         evidence: an exclusion, a report-only or disabled state, a missing
         control, client apps or platforms left out, or two policies that
         overlap in a way that has a concrete effect. Policies that apply to
