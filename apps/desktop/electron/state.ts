@@ -365,6 +365,7 @@ import {
   type UsageTelemetryPayload,
 } from "./telemetry/usage.js";
 import { DataFolderSealedError, dataFolderSealed, sealDataFolder, unsealDataFolder } from "./data-folder-seal.js";
+import { LOCAL_RESET_MARKER } from "./local-reset.js";
 import { LocalResetInProgressError, OrganizationBoundaryError, RunService, gatewayRejectionCoolingDown, type RunGraphExecution, type SplashtopRunClient } from "./runs.js";
 import { RunDeliveryService } from "./run-delivery.js";
 import {
@@ -2446,7 +2447,10 @@ export class AppStateStore {
   markLocalResetCommitted(): void {
     this.localResetCommitted = true;
     this.auditLog.freezeSideFiles();
-    sealDataFolder();
+    // The known writers skip quietly, and every other change by path inside
+    // the data folder through Node's file system API is refused.
+    sealDataFolder(this.userDataPath, { allowNamePrefixes: [LOCAL_RESET_MARKER] });
+    for (const download of this.indexDownloads) download.abort();
     // WhatsApp Web clients write and delete their auth files by path on
     // their own (credential and key updates, a logged out session, a QR
     // refresh): every client of the process stops now, also one a delivery

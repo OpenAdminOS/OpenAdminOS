@@ -122,6 +122,7 @@ export function attachWindowStatePersistence(window: BrowserWindow): void {
     const file = statePath();
     try {
       await mkdir(dirname(file), { recursive: true });
+      if (dataFolderSealed()) return;
       await writeFile(file, JSON.stringify(next, null, 2), "utf8");
     } catch (error) {
       console.error("[window-state] failed to persist", error);

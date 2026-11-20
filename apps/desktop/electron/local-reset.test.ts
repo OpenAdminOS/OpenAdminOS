@@ -40,7 +40,7 @@ import {
   type LocalResetRequestSteps,
 } from "./local-reset.js";
 import { AppStateStore } from "./state.js";
-import { dataFolderSealed, unsealDataFolder } from "./data-folder-seal.js";
+import { dataFolderSealed, sealDataFolder, unsealDataFolder } from "./data-folder-seal.js";
 
 // A committed reset seals the data folder for the whole process; each test
 // starts unsealed, as a new process does.
@@ -924,6 +924,43 @@ describe("local reset: wipe at launch", () => {
     assert.equal(markerFolderMatches({ ...stored, ino: 0, birth: 0 }, { ...stored, ino: 0, birth: 0 }), false);
   });
 
+  it("still adds the request warnings to its own marker in a sealed data folder", async () => {
+    const dir = await tempDir();
+    try {
+      const statePath = join(dir, "state.json");
+      await writeFile(statePath, JSON.stringify({ activeProviderId: "ollama", installedAgents: [], runs: [], tenants: [] }), "utf8");
+      const store = new AppStateStore({ filePath: statePath, tokenStore: memoryTokenStore(new Map()), userDataPath: dir, statsApiUrl: "" });
+      try {
+        let committedFolder: ReturnType<typeof localResetFolderIdentity>;
+        const { marker } = await requestLocalReset(LOCAL_RESET_PHRASE, {
+          checkReady: async () => assert.equal(await store.beginLocalReset(), undefined),
+          writeMarker: async (next) => {
+            committedFolder = await writeLocalResetMarker(dir, next, {
+              ...(committedFolder ? { expectFolder: committedFolder } : {}),
+              onCommitted: () => store.markLocalResetCommitted(),
+            });
+          },
+          stopTenantWork: async () => store.closeAllTenantWork(),
+          disableScheduler: async () => { throw new Error("launchctl failed"); },
+          disableLoginItem: async () => undefined,
+          build: "development",
+        });
+        assert.equal(dataFolderSealed(), true);
+        assert.deepEqual(marker.requestWarnings, [{ item: "Background scheduler", reason: "launchctl failed" }]);
+        assert.deepEqual(readLocalResetMarker(dir)?.requestWarnings, marker.requestWarnings);
+        // Everything else in the folder stays sealed.
+        assert.throws(() => writeFileSync(join(dir, "local-reset-pending.json.d", "x"), "x"), { code: "EROFS" });
+        assert.throws(() => writeFileSync(join(dir, "state.json"), "x"), { code: "EROFS" });
+      } finally {
+        store.cancelLocalReset();
+        store.close();
+      }
+    } finally {
+      unsealDataFolder();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("marks the reset committed at the rename, before the folder flush returns", async () => {
     const dir = await tempDir();
     try {
@@ -1577,8 +1614,11 @@ describe("local reset: end to end with the store", () => {
       // No confirmed change starts between the request and the restart.
       await assert.rejects(store.confirmRun("any-run", "ANY PHRASE"), /OpenAdminOS is resetting.*Nothing was applied/);
       await store.shutdown(500);
+      // The committed process refuses every change in the folder, the wipe's too.
+      assert.throws(() => writeFileSync(join(dir, "late.txt"), "late"), { code: "EROFS" });
 
-      // Phase 2, at the next launch.
+      // Phase 2, at the next launch: a new process, with no seal.
+      unsealDataFolder();
       const report = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: process.platform, home: join(dir, "home"), env: {} });
       assert.equal(report?.status, "completed");
       assert.deepEqual(readdirSync(dir), ["policy.json"]);
@@ -1618,6 +1658,7 @@ describe("local reset: end to end with the store", () => {
       await store.shutdown(200);
       assert.ok(!existsSync(statePath));
     } finally {
+      unsealDataFolder();
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -1637,7 +1678,10 @@ describe("local reset: end to end with the store", () => {
         const queued = store.setUpdateChannel("stable");
         await store.closeAllTenantWork();
         await assert.rejects(queued, /OpenAdminOS is resetting.*Nothing was saved/);
+        // A restore in another process removes the file; this process may not.
+        unsealDataFolder();
         rmSync(statePath);
+        sealDataFolder(dir);
         await assert.rejects(store.setUpdateChannel("nightly"), /Nothing was saved/);
         assert.ok(!existsSync(statePath));
         // A request refused after the commit (not reachable today) saves again.
