@@ -47,7 +47,7 @@ import {
 } from "electron";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { arch as osArch, release as osRelease, tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -334,6 +334,17 @@ let localResetReport: LocalResetReport | undefined;
 let localResetReportDismissed = false;
 /** Set once a reset was requested in this session: the app restarts and takes no second request. */
 let localResetRequested = false;
+/** The temporary profile the reset-incomplete window runs from; removed on every way out. */
+let localResetRecoveryProfile: string | undefined;
+
+function removeLocalResetRecoveryProfile(): void {
+  if (!localResetRecoveryProfile) return;
+  try {
+    rmSync(localResetRecoveryProfile, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  } catch (error) {
+    console.warn("[local-reset] the temporary recovery profile could not be removed", error);
+  }
+}
 const LOCAL_RESET_INCOMPLETE_ROUTE = "/reset-incomplete";
 /** How long the stores get to stop before the restart after a reset request. */
 const LOCAL_RESET_SHUTDOWN_MS = 3_000;
@@ -441,11 +452,22 @@ function writeMacosLaunchAgent(): void {
 function removeMacosLaunchAgent(): void {
   const plistPath = macosSchedulerPlistPath();
   const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
-  const domain = uid === undefined ? "gui" : `gui/${uid}`;
+  // Only this service by its label: given a path, launchctl unloads every
+  // job definition it finds there, which could be other apps' jobs.
   try {
-    execFileSync("launchctl", ["bootout", domain, plistPath], { stdio: "ignore", timeout: 5_000 });
+    execFileSync("launchctl", ["bootout", uid === undefined ? `gui/${MACOS_SCHEDULER_LABEL}` : `gui/${uid}/${MACOS_SCHEDULER_LABEL}`], { stdio: "ignore", timeout: 5_000 });
   } catch {
     // Already unloaded.
+  }
+  let stat: ReturnType<typeof lstatSync> | undefined;
+  try {
+    stat = lstatSync(plistPath);
+  } catch {
+    stat = undefined;
+  }
+  if (!stat) return;
+  if (!stat.isFile()) {
+    throw new Error(`something other than the scheduler file is at ${plistPath}, so it was left in place`);
   }
   rmSync(plistPath, { force: true });
 }
@@ -5349,6 +5371,24 @@ function createMenuBarCompanionForInteractiveLaunch(): void {
   }
 }
 
+/**
+ * A notice before any window can exist. Electron shows a native box on
+ * macOS and Windows; on Linux it only writes to stderr before ready, so a
+ * desktop dialog tool is tried there.
+ */
+function showNoticeBeforeReady(title: string, text: string): void {
+  dialog.showErrorBox(title, text);
+  if (process.platform !== "linux") return;
+  const tools: Array<[string, string[]]> = [
+    ["zenity", ["--error", `--title=${title}`, `--text=${text}`, "--no-markup"]],
+    ["kdialog", ["--title", title, "--error", text]],
+  ];
+  for (const [tool, args] of tools) {
+    const result = spawnSync(tool, args, { stdio: "ignore", timeout: 600_000 });
+    if (!result.error) return;
+  }
+}
+
 /** Phase 2 of Reset OpenAdminOS, at the top of the main script. See local-reset.ts. */
 function runLocalResetAtLaunch(): LocalResetReport | undefined {
   const userDataDir = app.getPath("userData");
@@ -5481,6 +5521,8 @@ function localResetInfo(): LocalResetInfo {
 
 /** Restart without the background or menu bar launch flags, so the next launch opens the window. */
 function relaunchInteractive(): void {
+  // app.exit skips will-quit, so the recovery profile goes here.
+  removeLocalResetRecoveryProfile();
   if (process.platform === "darwin" && app.isPackaged && isBackgroundSchedulerLaunch) {
     relaunchOutsideLaunchAgent();
     return;
@@ -5650,6 +5692,7 @@ function registerStorelessIpcHandlers(): void {
     "openadminos:quit-after-incomplete-reset",
     handleTrusted(() => {
       if (localResetReport?.status !== "incomplete") return;
+      removeLocalResetRecoveryProfile();
       app.exit(0);
     }),
   );
@@ -7233,25 +7276,24 @@ if (!gotLock) {
   // was taken.
   if (localResetReport?.status === "incomplete") {
     try {
-      const recoveryProfile = mkdtempSync(join(tmpdir(), "openadminos-reset-recovery-"));
-      app.setPath("userData", recoveryProfile);
-      app.on("will-quit", () => rmSync(recoveryProfile, { recursive: true, force: true }));
+      localResetRecoveryProfile = mkdtempSync(join(tmpdir(), "openadminos-reset-recovery-"));
+      app.setPath("userData", localResetRecoveryProfile);
+      app.on("will-quit", removeLocalResetRecoveryProfile);
     } catch (error) {
+      removeLocalResetRecoveryProfile();
       // Without its own profile the window would write into the folder the
       // reset could not empty. No window can show yet, so this one notice is
       // native, and the launch stops.
       console.error("[local-reset] the recovery window could not get its own profile", error);
-      dialog.showErrorBox(
-        "Reset did not finish",
-        [
-          `The reset of this device has not finished, and OpenAdminOS could not create a temporary folder to show what is left (${error instanceof Error ? error.message : String(error)}). OpenAdminOS does not open until the reset finishes.`,
-          "",
-          "Not finished:",
-          ...localResetReport.failed.map((entry) => `${entry.item}: ${entry.reason}`),
-          "",
-          "Uninstall and reset in the OpenAdminOS docs describes what to do. Then open OpenAdminOS again.",
-        ].join("\n"),
-      );
+      const notice = [
+        `The reset of this device has not finished, and OpenAdminOS could not create a temporary folder to show what is left (${error instanceof Error ? error.message : String(error)}). OpenAdminOS does not open until the reset finishes.`,
+        "",
+        "Not finished:",
+        ...localResetReport.failed.map((entry) => `${entry.item}: ${entry.reason}`),
+        "",
+        "Uninstall and reset in the OpenAdminOS docs describes what to do. Then open OpenAdminOS again.",
+      ].join("\n");
+      showNoticeBeforeReady("Reset did not finish", notice);
       localResetYielding = true;
       app.exit(1);
     }
