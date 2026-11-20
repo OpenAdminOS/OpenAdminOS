@@ -612,7 +612,8 @@ it("a row-limited collection keeps the rows within the memory budget instead of 
   await assert.rejects(fetchGraphCachePages(graph, {path:"/auditLogs/signIns"}, undefined, true), /128 MiB/);
 });
 
-it("registers raw legacy device pages before the adapter projects them", async () => {
+it("registers raw legacy device pages without delaying projected results", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const path = "/deviceManagement/managedDevices";
   const requests: string[] = [];
   const graph = createGraphAdapter({
@@ -629,6 +630,8 @@ it("registers raw legacy device pages before the adapter projects them", async (
   const devices = await withClassificationScope(ledger, () => graph.listManagedDevices());
   assert.equal(requests.length, 2);
   assert.doesNotMatch(JSON.stringify(devices), /synthetic-credential/);
+  assert.equal(ledger.classifyRequest({ prompt: "" }).coverageIncomplete, true);
+  await ledger.waitForObservations();
   assert.equal(ledger.classifyRequest({ prompt: JSON.stringify(devices) }).counts.credential, 0);
   assert.equal(ledger.classifyRequest({ prompt: "Value synthetic-credential" }).counts.credential, 1);
 });

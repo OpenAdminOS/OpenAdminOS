@@ -481,7 +481,8 @@ function learnContext(call: McpChatContext["call"]): McpChatContext {
 const callLearn = JSON.stringify({ tool: learnTool.name, params: { query: "Defender for Endpoint on macOS" } });
 
 for (const allowlisted of [true, false]) {
-it(`classifies ${allowlisted ? "public reference" : "unlisted"} MCP observations and raises recognizable tenant values`, async () => {
+it(`classifies ${allowlisted ? "public reference" : "unlisted"} MCP observations and raises recognizable tenant values`, async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   await withStore(async (store) => {
     let calls = 0;
     const mcp = learnContext(async () => {
@@ -502,7 +503,10 @@ it(`classifies ${allowlisted ? "public reference" : "unlisted"} MCP observations
     };
     const context = allowlisted ? mcp : { ...mcp, tools: [tool], servers: [{ ...learn, id: tool.serverId }] };
     mcp.tenantValues.add("Synthetic Person", "name");
-    const ledger = new ClassificationLedger(mcp.tenantValues);
+    const ledger = new ClassificationLedger({
+      matches: text => mcp.tenantValues.matches(text),
+      workerShards: () => [mcp.tenantValues],
+    });
     const llm: RunLlmApi = {
       available: true,
       async complete(options) {
@@ -510,6 +514,7 @@ it(`classifies ${allowlisted ? "public reference" : "unlisted"} MCP observations
           return { text: '{"query":"Defender for Endpoint on macOS"}', model: "test" };
         }
         if (calls === 0) return { text: JSON.stringify({ tool: tool.name, params: {} }), model: "test" };
+        await ledger.waitForObservations();
         const classification = ledger.classifyRequest(options);
         const source = "third-party:learn.microsoft.com";
         assert.equal(classification.spans.some(span => span.source === source && span.kind === "public"), allowlisted);

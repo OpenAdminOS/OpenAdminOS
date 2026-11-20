@@ -161,7 +161,9 @@ async function confirmAfter(
           async *stream() {
             modelCalls += 1;
             if (tracked && options.beforeLaterPage) {
-              laterPageClassified = currentClassificationLedger()?.classifyRequest({
+              const ledger = currentClassificationLedger();
+              await ledger?.waitForObservations();
+              laterPageClassified = ledger?.classifyRequest({
                 prompt: '{"hint":"q7z"}',
               }).counts.credential === 1;
             }
