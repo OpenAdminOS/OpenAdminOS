@@ -110,7 +110,7 @@ it("says the model refused a prompt it received, instead of saying nothing was s
     steps: [], logs: [], error: contextTooSmallMessage(failureReason), failureReason,
   };
   const { container } = render(<RunFailureRemediation run={run} />);
-  expect(container.textContent).toContain("the model refused the request before answering");
+  expect(container.textContent).toContain("the model refused the request or stopped before finishing its answer");
   expect(container.textContent).not.toContain("stopped before sending anything");
 });
 

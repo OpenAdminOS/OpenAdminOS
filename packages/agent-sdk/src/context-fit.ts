@@ -50,7 +50,7 @@ export function contextTooSmallMessage(failure: ContextTooSmallFailure): string 
     `This request needs about ${formatTokens(failure.neededTokens)} tokens of context ` +
     `(${formatTokens(failure.promptTokens)} for the prompt and ${formatTokens(failure.answerTokens)} for the answer), ` +
     `but ${model} accepts ${formatTokens(failure.limitTokens)}. ` +
-    (failure.sentToProvider ? "The model refused it before answering. " : "Nothing was sent to the model. ") +
+    (failure.sentToProvider ? "The model refused it or stopped before finishing the answer. " : "Nothing was sent to the model. ") +
     "Pick a model with a larger context window, switch to a hosted provider, or narrow the agent's scope, then re-run."
   );
 }

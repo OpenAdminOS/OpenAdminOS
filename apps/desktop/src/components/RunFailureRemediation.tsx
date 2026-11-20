@@ -138,7 +138,7 @@ function contextTooSmallSuggestion(failure: ContextTooSmallFailure): Suggestion 
     body:
       `This run needs about ${tokens(failure.neededTokens)} tokens of context and ${model} accepts ${tokens(failure.limitTokens)}, ` +
       (failure.sentToProvider
-        ? "so the model refused the request before answering. "
+        ? "so the model refused the request or stopped before finishing its answer. "
         : "so OpenAdminOS stopped before sending anything. ") +
       "Pick a local model with a larger context window in Settings → LLM Providers, " +
       "switch to a hosted provider (the prompt then leaves this device), or run the agent against a narrower scope, then re-run.",

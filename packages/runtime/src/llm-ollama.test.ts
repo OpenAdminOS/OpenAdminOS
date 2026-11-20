@@ -1418,7 +1418,7 @@ describe("Ollama context for an unpinned model", () => {
           assert.ok(error instanceof ContextTooSmallError);
           assert.equal(error.failure.limitTokens, 16384);
           assert.equal(error.failure.sentToProvider, true);
-          assert.match(error.message, /refused it before answering/);
+          assert.match(error.message, /refused it or stopped before finishing the answer/);
           assert.doesNotMatch(error.message, /Nothing was sent/);
           return true;
         },
@@ -1657,7 +1657,7 @@ describe("Ollama context for an unpinned model", () => {
           ollama.handlers.push(() => new Response(JSON.stringify({ error: "request (9000 tokens) exceeds the available context size (8192 tokens), try increasing it" }), { status: 400 }));
           ollama.handlers.push(() => new Response(tooLong, { status: 400 }));
         } else {
-          ollama.handlers.push(() => new Response(`${tooLong}\n`, { status: 200 }));
+          ollama.handlers.push(() => new Response(`${JSON.stringify({ model: "m", message: { content: "Partial" }, done: false })}\n${tooLong}\n`, { status: 200 }));
         }
         globalThis.fetch = ollama.fetchImpl;
         await assert.rejects(
@@ -1670,6 +1670,74 @@ describe("Ollama context for an unpinned model", () => {
           },
         );
       }
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("holds an agent run to Ollama's own size when no lookup says whether the model is pinned", async () => {
+    const original = globalThis.fetch;
+    try {
+      for (const retryLookup of ["unavailable", "partial"] as const) {
+        const chats: Array<number | undefined> = [];
+        let shows = 0;
+        globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+          const path = new URL(String(input)).pathname;
+          if (path === "/api/ps") return new Response("unavailable", { status: 503 });
+          if (path === "/api/show") {
+            shows += 1;
+            // The first lookup fails; the retry lookup fails
+            // too, or answers without parameters or model_info.
+            if (shows === 1 || retryLookup === "unavailable") return new Response("unavailable", { status: 503 });
+            return new Response(JSON.stringify({ modified_at: "2026-11-01T00:00:00Z" }), { status: 200 });
+          }
+          chats.push((JSON.parse(String(init?.body)) as { options?: { num_ctx?: number } }).options?.num_ctx);
+          return new Response(JSON.stringify({ error: "request (18000 tokens) exceeds the available context size (16384 tokens), try increasing it" }), { status: 400 });
+        }) as typeof fetch;
+        await assert.rejects(
+          createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: `no-metadata-${retryLookup}` }).complete({ prompt: words(14000), maxTokens: 1000, enforceContextWindow: true }),
+          (error: unknown) => {
+            if (retryLookup === "partial") {
+              assert.ok(error instanceof ContextTooSmallError);
+              assert.equal(error.failure.limitTokens, 16384);
+              assert.equal(error.failure.sentToProvider, true);
+            } else {
+              assert.match(String(error), /could not report the model's context limit/);
+            }
+            return true;
+          },
+        );
+        // One send, with no num_ctx that could override a pin.
+        assert.deepEqual(chats, [undefined], retryLookup);
+      }
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("keeps the first lookup's maximum when the retry lookup for the same revision omits it", async () => {
+    const original = globalThis.fetch;
+    const chats: Array<number | undefined> = [];
+    let shows = 0;
+    globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/api/show") {
+        shows += 1;
+        const body = shows === 1
+          ? { modified_at: "2026-11-01T00:00:00Z", model_info: { "general.architecture": "llama", "llama.context_length": 16384 } }
+          : { modified_at: "2026-11-01T00:00:00Z" };
+        return new Response(JSON.stringify(body), { status: 200 });
+      }
+      if (path === "/api/ps") return new Response(JSON.stringify({ models: [] }), { status: 200 });
+      chats.push((JSON.parse(String(init?.body)) as { options?: { num_ctx?: number } }).options?.num_ctx);
+      if (chats.length === 1) return new Response(JSON.stringify({ error: "request (15000 tokens) exceeds the available context size (8192 tokens), try increasing it" }), { status: 400 });
+      return new Response(`${JSON.stringify({ model: "m", message: { content: "ok" }, done: true })}\n`, { status: 200 });
+    }) as typeof fetch;
+    try {
+      await createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "partial-retry" }).complete({ prompt: words(5000), enforceContextWindow: true });
+      // The retry asks for room up to the 16,384 maximum the first lookup saw, never past it.
+      assert.equal(chats.length, 2);
+      assert.equal(chats[1], 16384);
     } finally {
       globalThis.fetch = original;
     }

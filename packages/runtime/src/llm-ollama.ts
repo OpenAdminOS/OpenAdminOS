@@ -376,15 +376,32 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           // plus the answer, up to what the model supports, and retry once.
           const retryShow = await readOllamaShowForRetry(endpoint, model, opts.signal ?? new AbortController().signal, lookupTimeoutMs);
           if (opts.signal?.aborted) throw stoppedByUser();
-          modelMax = retryShow?.modelMaxContext;
+          // A retry lookup for the same revision that omits something keeps
+          // what the first lookup saw.
+          const sameRevision = retryShow?.revision === undefined || retryShow.revision === sized?.revision;
+          modelMax = retryShow?.modelMaxContext ?? (sameRevision ? sized?.modelMaxContext : undefined);
           if (retryShow?.revision !== undefined) requestRevision = retryShow.revision;
           const wanted = roundUp(overflow.requested + (opts.maxTokens ?? OLLAMA_ANSWER_RESERVE_TOKENS), 1024);
           // An agent run holds a pinned model to its pin, on the retry too.
           // Ollama counted more than the estimate, so the request did not fit.
           // A retry lookup without a pin for the same revision keeps the pin the
           // first lookup saw.
-          const pin = retryShow?.pinnedNumCtx ??
-            (retryShow?.revision === undefined || retryShow.revision === sized?.revision ? sized?.pinnedNumCtx : undefined);
+          const pin = retryShow?.pinnedNumCtx ?? (sameRevision ? sized?.pinnedNumCtx : undefined);
+          // An agent run that never learned whether the model is pinned does
+          // not raise num_ctx, which would override a pin: the size Ollama
+          // ran it with is the limit it gets.
+          if (opts.enforceContextWindow && pin === undefined && modelMax === undefined) {
+            const answerTokens = opts.maxTokens ?? DEFAULT_ANSWER_RESERVE_TOKENS;
+            throw new ContextTooSmallError({
+              code: "context-too-small",
+              promptTokens: overflow.requested,
+              answerTokens,
+              neededTokens: overflow.requested + answerTokens,
+              limitTokens: overflow.available,
+              model,
+              sentToProvider: true,
+            });
+          }
           // An agent run is held to the pin, else to the model's maximum, with
           // room for its answer.
           const enforcedLimit = !opts.enforceContextWindow
