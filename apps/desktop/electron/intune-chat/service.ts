@@ -3068,6 +3068,12 @@ export class IntuneChatService {
       if (turn.switchedFrom) {
         built = guardModelFitLlm(built, {
           before: async () => {
+            // The check reads the address the provider is reached at now; the adapter sends to the
+            // bound one, so a moved address stops the call instead of checking the wrong server.
+            const bound = options.providerBinding;
+            if (bound && this.host.providerTarget && (await this.host.providerTarget(providerId)).endpoint !== bound.endpoint) {
+              throw new ModelOverrideError(`${provider.name}'s settings changed while this request ran, so nothing more was sent.`);
+            }
             if (provider.isLocal && !(await this.host.verifyOnDeviceModel?.(providerId, selectedModel))) {
               throw new ModelOverrideError(`OpenAdminOS could not confirm that ${selectedModel ?? provider.name} still runs on this device, so nothing more was sent to it.`);
             }

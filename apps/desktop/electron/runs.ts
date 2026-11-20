@@ -1396,6 +1396,11 @@ export class RunService {
     // diff can take long enough for the model's alias or address to change.
     return guardModelFitLlm(llm, {
       before: async () => {
+        // The adapter sends to the bound address; a moved address stops the call before the check.
+        const bound = run.providerEndpointBinding;
+        if (bound && this.host.providerTarget && (await this.host.providerTarget(providerId)).endpoint !== bound.endpoint) {
+          throw new Error("The provider's settings changed while this run ran, so nothing more was sent. Review the run again.");
+        }
         const current = (await this.host.listProviders()).find((entry) => entry.id === providerId);
         if (current?.isLocal !== true || !(await this.host.verifyOnDeviceModel?.(providerId, model))) {
           throw new Error(`OpenAdminOS could not confirm that ${model ?? current?.name ?? providerId} still runs on this device, so nothing more was sent to it. Start the run again.`);

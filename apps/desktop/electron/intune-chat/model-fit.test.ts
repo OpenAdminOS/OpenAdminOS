@@ -87,6 +87,10 @@ describe("Model fit: classifying a failure", () => {
     const fromCause = classifyModelFitFailure(wrapped, { providerId: "ollama", model: LOCAL_MODEL, isLocal: true });
     assert.deepEqual([fromCause?.neededTokens, fromCause?.limitTokens], [31100, 16384]);
     assert.equal(classifyModelFitFailure(failure, { providerId: "ollama", isLocal: true })?.limitTokens, 16384);
+    // A wrapper's own code does not hide the failure record's.
+    assert.equal(classifyModelFitFailure({ code: "agent-failed", failure }, { providerId: "ollama", isLocal: true })?.reason, "context-too-small");
+    // A sentence that only mentions a context size is not a llama.cpp context error.
+    assert.equal(classifyModelFitFailure("The Graph response exceeds the available context size of the report", { providerId: "lm-studio", isLocal: true }), undefined);
     assert.equal(loopFailureIssue({ failureReason: "thinking-only" }, ollama, LOCAL_MODEL)?.reason, "thinking-only");
     assert.equal(loopFailureIssue({ failureReason: "malformed" }, ollama, LOCAL_MODEL), undefined);
     assert.equal(loopFailureIssue({ failureReason: "context-too-small" }, claude, "claude-sonnet-5-5"), undefined);
@@ -527,6 +531,30 @@ describe("Model fit in Chat", () => {
     await assert.rejects((async () => { for await (const _chunk of guarded.stream({ prompt: "c" })) { /* drain */ } })(), /not on this device/);
     assert.deepEqual(calls, ["complete", "complete"]);
     assert.equal(dispatched, 1);
+  });
+
+  it("stops a model fit request whose provider address moves while it runs", async () => {
+    await withStore(async (store) => {
+      const built: string[] = [];
+      const host = chatHost(store, built);
+      let endpoint = "endpoint-a";
+      host.providerTarget = async (providerId) => ({ endpoint: providerId === "anthropic" ? endpoint : undefined, destination: `dest-${providerId}` });
+      // The address moves once the request is built and before its model call.
+      const build = host.buildLlm.bind(host);
+      host.buildLlm = async (providerId, model, binding) => { const llm = await build(providerId, model, binding); if (providerId === "anthropic") endpoint = "endpoint-b"; return llm; };
+      const service = new IntuneChatService(host);
+      const failed = await service.streamIntuneChatMessage({ content: QUESTION }, () => undefined);
+      const offerId = failed.assistantMessage.modelFit!.offerId!;
+      const result = await service.streamIntuneChatMessage({
+        content: QUESTION,
+        conversationId: failed.conversation.id,
+        modelOverride: { offerId, providerId: "anthropic", model: "claude-sonnet-5-5", destination: "dest-anthropic" },
+        hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5", false, offerId),
+      }, () => undefined);
+      assert.equal(result.assistantMessage.status, "failed");
+      assert.match(result.assistantMessage.error ?? "", /settings changed while this request ran/);
+      assert.equal(result.assistantMessage.switchedFrom, undefined);
+    });
   });
 
   it("sends only one of two concurrent requests that take up the same offer", async () => {
