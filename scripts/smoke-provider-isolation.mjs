@@ -1,11 +1,26 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { get as httpGet } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const preload = fileURLToPath(new URL("./smoke-provider-preload.cjs", import.meta.url));
+
+// Probe the renderer directly. The parent process may have inherited proxy
+// settings that Electron does not, so the global fetch could answer through a
+// proxy; this request uses its own socket, follows no redirect and is bounded.
+function probeDirect(url) {
+  return new Promise((resolve) => {
+    const request = httpGet(url, { agent: false, timeout: 2_000 }, (response) => {
+      response.resume();
+      resolve(response.statusCode >= 200 && response.statusCode < 300);
+    });
+    request.on("timeout", () => request.destroy());
+    request.on("error", () => resolve(false));
+  });
+}
 
 export async function terminateSmokeChild(child) {
   if (!child?.pid || child.exitCode !== null || child.signalCode !== null) return;
@@ -44,10 +59,7 @@ export function waitForSmokeServer(child, url, timeoutMs) {
       if (checking || settled) return;
       checking = true;
       try {
-        const response = await fetch(url);
-        if (response.ok && child.exitCode === null && child.signalCode === null) return finish();
-      } catch {
-        // The server is still starting.
+        if (await probeDirect(url) && child.exitCode === null && child.signalCode === null) return finish();
       } finally {
         checking = false;
       }

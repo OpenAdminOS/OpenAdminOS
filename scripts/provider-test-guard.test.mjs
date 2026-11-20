@@ -5,7 +5,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { waitForSmokeServer } from "./smoke-provider-isolation.mjs";
 
 const preload = fileURLToPath(new URL("../tests/provider-test-setup.mjs", import.meta.url));
@@ -230,3 +230,48 @@ it("accepts only the smoke run's own server as ready, never a listener another p
     own.kill();
   }
 });
+
+it("probes the renderer directly, never through a proxy the runner inherited", async () => {
+  let proxied = 0;
+  const proxy = createServer((_request, response) => {
+    proxied += 1;
+    response.end("proxy says ok");
+  });
+  // Proxy clients may tunnel with CONNECT instead of sending the request itself.
+  proxy.on("connect", (_request, socket) => {
+    proxied += 1;
+    socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+  });
+  await new Promise((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+  const probe = createServer();
+  await new Promise((resolve) => probe.listen(0, "127.0.0.1", resolve));
+  const port = probe.address().port;
+  await new Promise((resolve) => probe.close(resolve));
+  const helper = fileURLToPath(new URL("./smoke-provider-isolation.mjs", import.meta.url));
+  // The "server" reports its address but never listens, so only a proxy could answer.
+  // A proxy reaches the probe through the inherited environment or a dispatcher
+  // installed before the helper runs; the probe must ignore both.
+  const runner = `const { spawn } = require("node:child_process");
+    const { ProxyAgent, setGlobalDispatcher } = require("undici");
+    setGlobalDispatcher(new ProxyAgent(process.env.HTTP_PROXY));
+    import(${JSON.stringify(pathToFileURL(helper).href)}).then(async ({ waitForSmokeServer }) => {
+      const child = spawn(process.execPath, ["-e", "console.log('ready at :${port}'); setInterval(() => {}, 1000)"], { stdio: ["ignore", "pipe", "pipe"] });
+      try { await waitForSmokeServer(child, "http://127.0.0.1:${port}", 1500); console.log("READY"); }
+      catch (error) { console.log("REJECTED " + error.message); }
+      finally { child.kill(); process.exit(0); }
+    });`;
+  const proxyUrl = `http://127.0.0.1:${proxy.address().port}`;
+  const env = { ...process.env, NODE_USE_ENV_PROXY: "1", HTTP_PROXY: proxyUrl, http_proxy: proxyUrl, NO_PROXY: "", no_proxy: "" };
+  delete env.NODE_TEST_CONTEXT;
+  delete env.NODE_OPTIONS;
+  try {
+    const stdout = await new Promise((resolve) => {
+      execFile(process.execPath, ["-e", runner], { env, cwd: fileURLToPath(new URL("..", import.meta.url)), timeout: 30_000 }, (_error, out) => resolve(out));
+    });
+    assert.match(stdout, /REJECTED Timed out waiting for the smoke server/);
+    assert.equal(proxied, 0);
+  } finally {
+    await new Promise((resolve) => proxy.close(resolve));
+  }
+});
+
