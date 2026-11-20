@@ -132,6 +132,12 @@ type ScanState = {
   identityIndex: ClassificationOptions["identityIndex"];
 };
 
+type EvidenceSnapshot = {
+  state: ScanState;
+  revisions: readonly number[];
+  shards: ReturnType<NonNullable<NonNullable<ScanState["identityIndex"]>["workerShards"]>>;
+};
+
 export type WorkerValue = [Scalar, ValueEntry | undefined, Array<[string, Fence]>];
 type TransferableString = string | ArrayBuffer;
 type TransferablePattern = Omit<MatchPattern, "entry" | "text" | "before" | "after"> & {
@@ -388,6 +394,7 @@ export class ClassificationLedger {
   private prior: readonly ClassificationLedger[] = [];
   private transient?: ClassificationLedger;
   private remaining = VALUE_BUDGET;
+  private revision = 0;
   private dropped = 0;
   private incompleteRegistrations = 0;
   private disposed = false;
@@ -477,6 +484,7 @@ export class ClassificationLedger {
     this.prior = [];
     this.historyFences.clear();
     this.historyReplays.clear();
+    this.revision++;
   }
 
   registerHistoryReplay(text: string, replays: readonly HistoryReplay[]): void {
@@ -484,7 +492,10 @@ export class ClassificationLedger {
   }
 
   markPromptReplay(start: number, end: number): void {
-    if (!this.disposed) this.promptReplay = { start, end };
+    if (!this.disposed) {
+      this.promptReplay = { start, end };
+      this.revision++;
+    }
   }
 
   private get replayEvidenceIncomplete(): boolean {
@@ -588,6 +599,7 @@ export class ClassificationLedger {
     if (typeof fragment === "string" && !fragment.trim()) return;
     if (provenance.fence && typeof original === "string" && typeof fragment === "string") {
       const replays = this.historyReplays.get(original);
+      if (replays) this.revision++;
       if (replays) this.historyFences.set(provenance.fence, {
         length: fragment.length,
         replays: replays.map(({ start, end, ledger }) => ({
@@ -695,6 +707,7 @@ export class ClassificationLedger {
   }
 
   private add(value: Scalar, evidence: Evidence, contextOnly = false): ValueEntry | undefined {
+    this.revision++;
     let entry = this.values.get(value);
     if (entry) {
       const previous = entry.fields.get(evidence.key);
@@ -931,7 +944,31 @@ export class ClassificationLedger {
     return this.scanRequest(request, this.scanState());
   }
 
-  async classifyProviderRequest(request: RequestText & Pick<LlmOptions, "signal">): Promise<RequestClassification> {
+  captureEvidence(): EvidenceSnapshot {
+    const state = this.scanState();
+    return { state, revisions: state.retained.map(ledger => ledger.revision),
+      shards: [...state.identityIndex?.workerShards?.() ?? []] };
+  }
+
+  private evidenceCurrent({ state, revisions, shards }: EvidenceSnapshot, latest: ScanState): boolean {
+    const currentShards = [...latest.identityIndex?.workerShards?.() ?? []];
+    return state.retained.length === latest.retained.length && state.retained.every((ledger, index) =>
+      ledger === latest.retained[index] && ledger.revision === revisions[index]) &&
+      currentShards.length === shards.length && shards.every((shard, index) => shard === currentShards[index]);
+  }
+
+  private withCurrentCoverage(result: RequestClassification, evidence: EvidenceSnapshot): RequestClassification {
+    const latest = this.scanState();
+    const { state } = evidence;
+    const droppedValues = Math.max(result.droppedValues, latest.dropped);
+    const registrations = Math.max(result.unexamined.registrations, latest.registrations);
+    if (this.evidenceCurrent(evidence, latest) && !state.incomplete && !latest.incomplete &&
+        droppedValues === result.droppedValues && registrations === result.unexamined.registrations) return result;
+    return { ...result, droppedValues, coverageIncomplete: true, effectiveClass: "credential",
+      unexamined: { ...result.unexamined, registrations, values: droppedValues } };
+  }
+
+  async classifyProviderRequest(request: RequestText & Pick<LlmOptions, "signal">, evidence = this.captureEvidence()): Promise<RequestClassification> {
     const length = (request.system?.length ?? 0) + request.prompt.length;
     const ledgerUnits = (ledger: ClassificationLedger) => ledger.disposed ? 0 : VALUE_BUDGET - ledger.remaining;
     const retainedUnits = ledgerUnits(this) + (this.transient ? ledgerUnits(this.transient) : 0) +
@@ -941,9 +978,9 @@ export class ClassificationLedger {
       const slice = new ClassificationSlice();
       const result = this.classifyRequest(request);
       if (slice.elapsed) await slice.yield();
-      return result;
+      return this.withCurrentCoverage(result, evidence);
     }
-    return this.classifyLargeRequest(request, request.signal);
+    return this.classifyLargeRequest(request, request.signal, evidence);
   }
 
   private async syncLedger(client: ClassificationWorker, slice: ClassificationSlice): Promise<number | undefined> {
@@ -990,7 +1027,7 @@ export class ClassificationLedger {
     return state.id;
   }
 
-  async classifyLargeRequest(request: RequestText, signal?: AbortSignal): Promise<RequestClassification> {
+  async classifyLargeRequest(request: RequestText, signal?: AbortSignal, evidence = this.captureEvidence()): Promise<RequestClassification> {
     const wasDisposed = this.disposed;
     let indexCurrent = () => true;
     const bytes = 128 + 2 * ((request.system?.length ?? 0) + request.prompt.length);
@@ -998,7 +1035,7 @@ export class ClassificationLedger {
       const slice = new ClassificationSlice();
       const sections = { system: await encodeSection(request.system, slice), prompt: await encodeSection(request.prompt, slice) };
       const transfers = Object.values(sections).flatMap(section => section ? [section.buffer] : []);
-      const { retained, identityIndex, ...state } = this.scanState();
+      const { retained, identityIndex, ...state } = evidence.state;
       const ledgers: number[] = [];
       for (const ledger of retained) {
         const id = await ledger.syncLedger(client, slice);
@@ -1012,7 +1049,9 @@ export class ClassificationLedger {
       return {
         message: { type: "scan", sections, ledgers, shards, state: {
           ...state, historyFences: latest.historyFences,
-          incomplete: state.incomplete || latest.incomplete || !indexCurrent(),
+          dropped: Math.max(state.dropped, latest.dropped),
+          registrations: Math.max(state.registrations, latest.registrations),
+          incomplete: state.incomplete || latest.incomplete || !indexCurrent() || !this.evidenceCurrent(evidence, latest),
         } },
         transfers,
       };
@@ -1226,12 +1265,13 @@ export function withRequestClassification(
     if (ledger.expired) return;
     const { scopeId, tenantIds } = ledger;
     const { prompt, system } = options;
+    const evidence = ledger.captureEvidence();
     ledger.observeRequest(async scanSignal => {
       let result: RequestClassification;
       let failed = false;
       try {
         scanSignal.throwIfAborted();
-        result = await ledger.classifyProviderRequest({ prompt, system, signal: scanSignal });
+        result = await ledger.classifyProviderRequest({ prompt, system, signal: scanSignal }, evidence);
       } catch {
         failed = true;
         const ranges: UnexaminedRange[] = [];

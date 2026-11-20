@@ -707,6 +707,41 @@ test("worker keeps scoped matcher changes and returns offsets for the unchanged 
   }
 });
 
+test("worker synchronization cannot report complete coverage after evidence is evicted", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const ledger = new ClassificationLedger();
+  const setting = "known security setting";
+  ledger.registerClassified("fixture:policy", { incomplete: false,
+    fields: [{ value: setting, key: "setting", kind: "security" }] });
+  for (let i = 0; i < 125; i++) {
+    ledger.registerClassified("fixture:tenant", { incomplete: false,
+      fields: [{ value: i + "-identity".padEnd(15_900, "x"), key: "displayName", kind: "identity" }] });
+  }
+  ledger.registerClassified("fixture:tenant", { incomplete: false,
+    fields: [{ value: "identity filler".padEnd(4600, "y"), key: "displayName", kind: "identity" }] });
+  const prompt = " ".repeat(600) + setting;
+  assert.equal(ledger.classifyRequest({ prompt }).counts.security, 1);
+  const post = ClassificationWorker.prototype.post;
+  let synchronized = false;
+  t.mock.method(ClassificationWorker.prototype, "post", function (
+    this: ClassificationWorker, ...args: Parameters<ClassificationWorker["post"]>
+  ) {
+    post.apply(this, args);
+    if (synchronized || args[0].type !== "values") return;
+    synchronized = true;
+    ledger.registerClassified("fixture:tenant", { incomplete: false,
+      fields: [{ value: "new identity".padEnd(110, "z"), key: "displayName", kind: "identity" }] });
+  });
+  try {
+    const result = await ledger.classifyLargeRequest({ prompt });
+    assert.equal(synchronized, true);
+    assert.equal(result.counts.security, 0);
+    assert.equal(result.droppedValues, 1);
+    assert.equal(result.coverageIncomplete, true);
+    assert.equal(result.effectiveClass, "credential");
+  } finally { ledger.dispose(); }
+});
+
 test("Graph ingress sends field classification to the worker and a worker failure leaves provider options intact", async t => {
   const post = ClassificationWorker.prototype.post;
   const sent: string[] = [];
