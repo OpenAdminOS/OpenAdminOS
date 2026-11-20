@@ -102,25 +102,37 @@ it("resolves promisified execFile for a registered fixture", { skip: process.pla
   assert.match(stdout, /^# pass 1$/m);
 });
 
-it("leaves a launch without a smoke flag unguarded even with the harness environment", async () => {
+it("installs the smoke guard only for the flag combinations the app treats as smoke launches", async () => {
   const directory = await mkdtemp(join(tmpdir(), "smoke-preload-"));
   const logPath = join(directory, "violations.log");
   const smokePreload = fileURLToPath(new URL("./smoke-provider-preload.cjs", import.meta.url));
   const env = { ...process.env, OPENADMINOS_SMOKE_PROVIDER_GUARD: JSON.stringify({ origins: [], logPath }) };
-  for (const name of ["OPENADMINOS_INTUNE_CHAT_SMOKE", "OPENADMINOS_REPORT_ISSUE_SMOKE", "OPENADMINOS_OFFICE_SMOKE", "NODE_TEST_CONTEXT"]) {
+  for (const name of ["OPENADMINOS_INTUNE_CHAT_SMOKE", "OPENADMINOS_REPORT_ISSUE_SMOKE", "OPENADMINOS_OFFICE_SMOKE",
+    "OPENADMINOS_SCREENSHOT_CAPTURE", "NODE_TEST_CONTEXT"]) {
     delete env[name];
   }
+  // Synchronous ESM loading is disabled, as in an Electron launch with
+  // --no-experimental-require-module: an unflagged launch must not load the guard.
+  const run = (extra) => new Promise((resolve) => {
+    execFile(process.execPath, ["--no-experimental-require-module", "--require", smokePreload, "-e", ""],
+      { env: { ...env, ...extra } }, (error, stdout, stderr) => resolve({ code: error ? error.code : 0, stderr }));
+  });
   try {
-    const run = (extra) => new Promise((resolve) => {
-      execFile(process.execPath, ["--require", smokePreload, "-e", ""], { env: { ...env, ...extra } },
-        (error, stdout, stderr) => resolve({ code: error ? error.code : 0, stderr }));
-    });
-    const plain = await run({});
-    assert.equal(plain.code, 0, plain.stderr);
-    await assert.rejects(access(logPath), { code: "ENOENT" });
-    // With a smoke flag the preload proceeds and insists on the Electron main process.
-    const flagged = await run({ OPENADMINOS_INTUNE_CHAT_SMOKE: "1" });
-    assert.notEqual(flagged.code, 0);
+    for (const extra of [{}, { OPENADMINOS_OFFICE_SMOKE: "1" }, { OPENADMINOS_SCREENSHOT_CAPTURE: "1" }]) {
+      const result = await run(extra);
+      assert.equal(result.code, 0, `${JSON.stringify(extra)}: ${result.stderr}`);
+      await assert.rejects(access(logPath), { code: "ENOENT" });
+    }
+    // Real smoke launches proceed past the flag check and then fail in plain Node,
+    // which is neither the Electron main process nor loading ESM synchronously.
+    for (const extra of [
+      { OPENADMINOS_INTUNE_CHAT_SMOKE: "1" },
+      { OPENADMINOS_REPORT_ISSUE_SMOKE: "1" },
+      { OPENADMINOS_OFFICE_SMOKE: "1", OPENADMINOS_SCREENSHOT_CAPTURE: "1" },
+    ]) {
+      const result = await run(extra);
+      assert.notEqual(result.code, 0, JSON.stringify(extra));
+    }
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
