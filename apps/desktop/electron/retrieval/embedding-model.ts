@@ -1,5 +1,6 @@
-import { classifyOllamaEndpoint, isRefusedRedirect, modelServerRedirect, ollamaHostEndpoint, redirectRefusedDetail } from "@openadminos/runtime";
-import { DEFAULT_INDEX_EMBEDDING_MODEL, assertLoopback } from "./retrieval.js";
+import { classifyOllamaEndpoint, isConnectionRefused, isRefusedRedirect, ollamaHostEndpoint, redirectRefusedDetail } from "@openadminos/runtime";
+import { loopbackTransport } from "./direct-fetch.js";
+import { DEFAULT_INDEX_EMBEDDING_MODEL, connectionCode, fetchLoopback, loopbackLabel } from "./retrieval.js";
 
 /**
  * The documentation index is only half of grounding. Retrieval also
@@ -25,35 +26,52 @@ export function embeddingEndpoint(): string {
   return moved && classifyOllamaEndpoint(moved).isLocal ? moved : DEFAULT_EMBEDDING_ENDPOINT;
 }
 
+/** A network failure's code, such as UND_ERR_SOCKET, rather than undici's bare "fetch failed". */
+function failureCode(error: unknown): string {
+  return connectionCode(error) ?? (error instanceof Error ? error.message : String(error));
+}
+
 function normalizeModelName(name: string): string {
   return name.includes(":") ? name : `${name}:latest`;
 }
 
-/** Whether Ollama is reachable and, if so, whether it has the model. */
+/** Whether Ollama answered and whether its model list contains the required model. */
 export async function embeddingModelState(
   endpoint: string = embeddingEndpoint(),
   model: string = DEFAULT_INDEX_EMBEDDING_MODEL,
-  fetchImpl: typeof fetch = fetch,
-): Promise<{ ollamaReachable: boolean; installed: boolean }> {
-  assertLoopback(endpoint);
+  fetchImpl: typeof fetch = loopbackTransport.fetch,
+): Promise<{ ollamaReachable?: boolean; installed: boolean; error?: string }> {
+  // Refuses a non-loopback endpoint before any connection.
+  loopbackLabel(endpoint, "/api/tags");
+  const recovery = "Check Ollama's local endpoint, then refresh the documentation index status.";
+  let answered = false;
   try {
-    const url = `${endpoint.replace(/\/$/, "")}/api/tags`;
-    const response = await fetchImpl(url, {
-      signal: AbortSignal.timeout(3000),
-      redirect: modelServerRedirect(url),
-    });
-    // A redirect is not followed, so it is not Ollama answering.
-    if (!response.ok) return { ollamaReachable: false, installed: false };
-    const payload = (await response.json()) as {
-      models?: Array<{ name?: string }>;
-    };
+    const { response, url } = await fetchLoopback(endpoint, "/api/tags", { signal: AbortSignal.timeout(3000) }, fetchImpl);
+    answered = true;
+    if (isRefusedRedirect(response, url)) {
+      return { ollamaReachable: true, installed: false, error: `${redirectRefusedDetail("Ollama", url)} ${recovery}` };
+    }
+    if (!response.ok) {
+      return { ollamaReachable: true, installed: false, error: `Ollama's model list returned HTTP ${response.status}. ${recovery}` };
+    }
+    const payload = (await response.json()) as { models?: Array<{ name?: string }> };
+    if (!Array.isArray(payload?.models) || !payload.models.every((entry) => typeof entry?.name === "string")) {
+      throw new SyntaxError("Ollama returned an invalid model list");
+    }
     const wanted = normalizeModelName(model);
-    const installed = (payload.models ?? []).some(
-      (entry) => typeof entry.name === "string" && normalizeModelName(entry.name) === wanted,
+    const installed = payload.models.some(
+      (entry) => typeof entry?.name === "string" && normalizeModelName(entry.name) === wanted,
     );
     return { ollamaReachable: true, installed };
-  } catch {
-    return { ollamaReachable: false, installed: false };
+  } catch (error) {
+    // A reset means something answered and then closed the connection: not a stopped Ollama.
+    if (!answered && connectionCode(error) !== "ECONNRESET" && isConnectionRefused(error)) return { ollamaReachable: false, installed: false };
+    const reason = error instanceof SyntaxError
+      ? "Ollama returned an invalid model list."
+      : error instanceof Error && (error.name === "TimeoutError" || (error.name === "AbortError" && error.cause instanceof Error && error.cause.name === "TimeoutError"))
+        ? "Ollama's model list request timed out."
+        : `Could not read Ollama's model list (${failureCode(error)}).`;
+    return { ...(answered ? { ollamaReachable: true } : {}), installed: false, error: `${reason} ${recovery}` };
   }
 }
 
@@ -66,20 +84,42 @@ export async function embeddingModelState(
 export async function pullEmbeddingModel(
   endpoint: string = embeddingEndpoint(),
   model: string = DEFAULT_INDEX_EMBEDDING_MODEL,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = loopbackTransport.fetch,
 ): Promise<void> {
-  assertLoopback(endpoint);
-  const url = `${endpoint.replace(/\/$/, "")}/api/pull`;
-  const response = await fetchImpl(url, {
+  try {
+    await pullOnce(endpoint, model, fetchImpl);
+  } catch (error) {
+    if (error instanceof Error && error.name === "TimeoutError") throw new EmbeddingPullStalledError(model, error);
+    throw error;
+  }
+}
+
+/**
+ * The local Ollama stopped answering during a model pull. It is about this
+ * device, not the registry, and it does not count as the day's attempt, so
+ * the next launch tries again.
+ */
+export class EmbeddingPullStalledError extends Error {
+  constructor(model: string, cause: Error) {
+    super(`Ollama stopped answering while downloading ${model}. Check that Ollama is running, then restart OpenAdminOS to download it again.`, { cause });
+    this.name = "EmbeddingPullStalledError";
+  }
+}
+
+async function pullOnce(endpoint: string, model: string, fetchImpl: typeof fetch): Promise<void> {
+  const { response, url } = await fetchLoopback(endpoint, "/api/pull", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ model, stream: false }),
-    redirect: modelServerRedirect(url),
-  });
+  }, fetchImpl);
   if (isRefusedRedirect(response, url)) throw new Error(redirectRefusedDetail("Ollama", url));
   // Ollama reports a failed download in the body, often with HTTP 500:
   // read it first, so the reason (an unreachable registry, a proxy) is kept.
-  const payload = (await response.json().catch(() => undefined)) as
+  // Only a body that is not JSON is skipped: a read that fails or stalls is the pull failing.
+  const payload = (await response.json().catch((error: unknown) => {
+    if (error instanceof SyntaxError) return undefined;
+    throw error;
+  })) as
     | { status?: string; error?: string }
     | undefined;
   if (payload?.error) {
@@ -87,5 +127,9 @@ export async function pullEmbeddingModel(
   }
   if (!response.ok) {
     throw new Error(`Ollama pull failed with HTTP ${response.status}.`);
+  }
+  // A finished pull says so; an empty or other answer is not one, or the day's attempt would be spent on nothing.
+  if (payload?.status !== "success") {
+    throw new Error("Ollama answered the download without saying it finished.");
   }
 }

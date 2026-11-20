@@ -115,6 +115,19 @@ describe("local documentation retrieval", () => {
     }
   });
 
+  it("ranks a huge but finite query vector like its scaled copy (PR #206 review round 4)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-retrieval-"));
+    try {
+      await writeIndex(dir, [[0, 1], [1, 0]], [{ file: "unrelated.md", text: "unrelated" }, { file: "match.md", text: "match" }]);
+      const index = new RetrievalIndex(dir);
+      const hits = await index.retrieve("question", async () => [1e200, 1e180], { k: 2 });
+      assert.equal(hits[0]?.file, "match.md");
+      assert.ok(hits[0]!.score > 0.99);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a query embedding whose dimension does not match the index", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-retrieval-"));
     try {

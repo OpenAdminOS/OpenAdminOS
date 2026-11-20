@@ -178,16 +178,20 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
       }
     }).finally(() => clearTimeout(showTimeout));
     const models = installedModels.filter((_, i) => supported[i]);
+    const capabilityWarning = models.length > 0 && redirectedShow
+      ? `Some model capabilities could not be verified. ${redirectedShow} Check Ollama's endpoint and refresh providers.`
+      : undefined;
 
     return {
       ...trustedProvider,
       status: models.length ? "connected" : "error",
       // Capabilities that could not be read are a failed check, not "no text model".
       ...(models.length === 0 && unverified ? { checkFailed: true } : {}),
+      ...(capabilityWarning ? { capabilityWarning } : {}),
       detail: ollamaEndpointDetail(
         endpointTrust,
         models.length > 0
-          ? `Running on ${endpoint}${unverified ? `. Some model capabilities could not be verified; ${redirectedShow ? `${redirectedShow} ` : ""}refresh to retry` : ""}`
+          ? `Running on ${endpoint}${capabilityWarning ? `. ${capabilityWarning}` : unverified ? ". Some model capabilities could not be verified; refresh to retry" : ""}`
           : unverified
             ? redirectedShow ?? "Ollama is running, but text-generation capabilities could not be verified. Check the server's /api/show support and refresh providers."
             : "Ollama has no text-generation models available. Install a text-generation model, then refresh providers.",

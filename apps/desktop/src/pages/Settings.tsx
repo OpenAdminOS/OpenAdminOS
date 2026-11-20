@@ -729,6 +729,9 @@ function ProviderRow({
           {expanded ? "Hide details" : "Details"}
         </UiButton>
       </div>
+      {provider.status === "connected" && provider.capabilityWarning ? (
+        <p className="px-5 pb-4 text-sm text-[var(--color-warning)]">{provider.capabilityWarning}</p>
+      ) : null}
       {expanded ? (
         <div className="border-t border-[var(--color-border-soft)] bg-[var(--color-bg-raised)]/30 px-5 py-4">
           <p className="max-w-[720px] text-sm leading-5 text-[var(--color-text-soft)]">{provider.description}</p>
@@ -3919,6 +3922,7 @@ function PrivacySection({
       setRetrievalError("Documentation index refresh is unavailable in this build.");
       return;
     }
+    if (retrievalInstalling) return;
 
     setRetrievalRefreshing(true);
     setRetrievalError(null);
@@ -3933,7 +3937,7 @@ function PrivacySection({
 
   const installRetrievalIndex = async (source: "download" | "folder" = "download") => {
     const install = window.openAdminOS?.installRetrievalIndex;
-    if (!install || retrievalInstalling) return;
+    if (!install || retrievalInstalling || retrievalRefreshing) return;
     setRetrievalInstalling(true);
     setRetrievalError(null);
     try {
@@ -4146,6 +4150,8 @@ function PrivacySection({
                 disabled={
                   retrievalLoading ||
                   retrievalRefreshing ||
+                  // An install replies with the status after it: a Refresh beside it could answer with the older one.
+                  retrievalInstalling ||
                   !window.openAdminOS?.refreshRetrievalIndex
                 }
                 onClick={() => void refreshRetrievalStatus()}
@@ -4163,6 +4169,7 @@ function PrivacySection({
                 disabled={
                   retrievalLoading ||
                   retrievalInstalling ||
+                  retrievalRefreshing ||
                   !window.openAdminOS?.installRetrievalIndex
                 }
                 onClick={() => void installRetrievalIndex("download")}
@@ -4176,6 +4183,7 @@ function PrivacySection({
                 disabled={
                   retrievalLoading ||
                   retrievalInstalling ||
+                  retrievalRefreshing ||
                   !window.openAdminOS?.installRetrievalIndex
                 }
                 onClick={() => void installRetrievalIndex("folder")}
@@ -4231,15 +4239,6 @@ function PrivacySection({
                       mono
                     />
                   </dl>
-                  {retrievalStatus.embeddingModelInstalled === false ? (
-                    <p role={retrievalStatus.embeddingModelError ? "alert" : undefined} className="mt-2 text-sm text-[var(--color-warning)]">
-                      {retrievalStatus.embeddingModelError
-                        ? retrievalStatus.embeddingModelError
-                        : retrievalStatus.ollamaReachable
-                        ? "The embedding model is not installed yet. It downloads automatically in the background through Ollama; answers stay ungrounded until it arrives."
-                        : "Ollama isn't running, so the embedding model can't be fetched and questions can't be matched against the index. Start Ollama and it installs automatically."}
-                    </p>
-                  ) : null}
                   <p className="mt-3 text-xs leading-relaxed text-[var(--color-text-muted)]">
                     Built from Microsoft's published documentation for Intune,
                     Entra, and Defender, used under{" "}
@@ -4260,13 +4259,18 @@ function PrivacySection({
                     <StatusDot tone="muted" /> Not documentation-grounded yet
                   </div>
                   <p className="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
-                    {retrievalStatus?.ollamaReachable === false
-                      ? "Documentation grounding needs the local Ollama runtime, which isn't running. Once Ollama is available, the index and embedding model install automatically in the background."
-                      : (retrievalStatus?.reason ??
-                        "No local documentation index is available yet.")}
+                    {retrievalStatus?.reason ?? "No local documentation index is available yet."}
                   </p>
                 </div>
               )}
+              {!retrievalLoading && retrievalStatus?.embeddingModelInstalled === false ? (
+                <p role={retrievalStatus.embeddingModelError ? "alert" : undefined} className="mt-2 text-sm text-[var(--color-warning)]">
+                  {retrievalStatus.embeddingModelError
+                    ?? (retrievalStatus.ollamaReachable === false
+                      ? "Ollama not reachable. Start Ollama on this device, then refresh the documentation index status."
+                      : "The embedding model is not installed yet. OpenAdminOS downloads it through Ollama in the background when it starts with Ollama running; answers stay ungrounded until it arrives.")}
+                </p>
+              ) : null}
             </div>
             {retrievalError && (
               <div
