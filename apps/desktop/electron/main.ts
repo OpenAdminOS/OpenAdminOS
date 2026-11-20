@@ -47,9 +47,9 @@ import {
 } from "electron";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile, stat, writeFile } from "node:fs/promises";
-import { arch as osArch, release as osRelease } from "node:os";
+import { arch as osArch, release as osRelease, tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, resolve, win32 } from "node:path";
 import { AppStateStore, TENANT_CLOSING_REASON } from "./state.js";
@@ -5503,9 +5503,16 @@ function relaunchOutsideLaunchAgent(): void {
   const script = 'i=0; while kill -0 "$0" 2>/dev/null && [ "$i" -lt 300 ]; do sleep 0.2; i=$((i+1)); done; exec /usr/bin/open "$1"';
   try {
     const child = spawn("/bin/sh", ["-c", script, String(process.pid), bundle], { detached: true, stdio: "ignore" });
-    // A spawn failure arrives as an event; the marker stays, so the next launch resets.
-    child.on("error", (error) => console.warn("[local-reset] could not start the app again after the reset request; it resets at the next launch", error));
     child.unref();
+    // Exit once the shell has started, or once its failure is known; the
+    // marker stays either way, so a failed handoff resets at the next launch.
+    child.once("spawn", () => app.exit(0));
+    child.once("error", (error) => {
+      console.warn("[local-reset] could not start the app again after the reset request; it resets at the next launch", error);
+      app.exit(0);
+    });
+    setTimeout(() => app.exit(0), 2_000);
+    return;
   } catch (error) {
     console.warn("[local-reset] could not start the app again after the reset request; it resets at the next launch", error);
   }
@@ -5535,7 +5542,7 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
         if (linked.length > 0) {
           return [{
             item: "Microsoft sign-ins",
-            reason: `not removed from the token caches, because ${linked.join(", ")} ${linked.length === 1 ? "is a link" : "are links"} to another place. The links are removed with the data folder; the files they point to are not touched`,
+            reason: `not removed from the token caches, because ${linked.join(", ")} ${linked.length === 1 ? "is a link or a file shared with" : "are links or files shared with"} another place. They are removed from the data folder only; the other copies are not touched`,
           }];
         }
         return store.forgetAllSignIns();
@@ -5627,7 +5634,8 @@ function registerStorelessIpcHandlers(): void {
   ipcMain.handle(
     "openadminos:show-local-reset-data-folder",
     handleTrusted(async () => {
-      const failure = await shell.openPath(app.getPath("userData"));
+      // The real data folder: during recovery the app runs from a temporary profile.
+      const failure = await shell.openPath(localResetReport?.dataFolder ?? app.getPath("userData"));
       if (failure) throw new Error(`The data folder could not be opened: ${failure}`);
     }),
   );
@@ -7212,6 +7220,17 @@ if (!gotLock) {
     }
   }
   if (!localResetYielding) localResetReport = runLocalResetAtLaunch();
+  // The recovery window must not write into the folder it could not reset
+  // (it may be a link to a shared folder): Chromium's files and the window
+  // state go to a fresh temporary profile instead. The lock stays where it
+  // was taken.
+  if (localResetReport?.status === "incomplete") {
+    try {
+      app.setPath("userData", mkdtempSync(join(tmpdir(), "openadminos-reset-recovery-")));
+    } catch (error) {
+      console.warn("[local-reset] the recovery window could not get its own profile", error);
+    }
+  }
   app.on("second-instance", (_event, argv) => {
     if (localResetReport?.status === "incomplete") {
       if (argv.includes(BACKGROUND_SCHEDULER_ARG)) return;
