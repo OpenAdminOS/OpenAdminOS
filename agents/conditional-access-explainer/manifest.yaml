@@ -175,8 +175,11 @@ skills:
         {{ compact_policies.output }}
 
         Write the review in this exact shape, in plain admin language, in
-        under 700 words. Cite policy names in quotes for every claim, and
-        name at most three policies per bullet ("and N more" for the rest).
+        under 700 words. Cite policy names in quotes for every claim the
+        records support, and name at most three policies per bullet ("and N
+        more" for the rest). A "not proven" line and a proposal to create a
+        missing policy need no citation: say that no policy in the set
+        covers it.
         The bullet counts below are upper bounds: write fewer, or "None
         found in this policy set.", when the records support no more. If the
         tenant has no policies, say so in the summary, mark every coverage
@@ -207,7 +210,8 @@ skills:
         One bullet each for admin MFA, all-user MFA, legacy authentication
         block, device compliance, guest and external access, risky sign-ins
         and users, and session controls. Say covered, partially covered, or
-        not proven, and name the policies and the reason. Under grant, OR
+        not proven, and name the policies and the reason (for not proven,
+        say that no policy in the set shows it). Under grant, OR
         means any one listed requirement satisfies the policy, so MFA is
         required only when it is the sole requirement or the operator is AND.
 
