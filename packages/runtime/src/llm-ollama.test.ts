@@ -1167,4 +1167,89 @@ describe("Ollama context for an unpinned model", () => {
       globalThis.fetch = original;
     }
   });
+
+  // A scripted Ollama: /api/show and /api/ps answer from the given values,
+  // and each /api/chat call is answered by the next handler in order.
+  function scripted(options: { showBody: unknown; loaded?: () => number | undefined; model?: string }) {
+    const chats: Array<number | undefined> = [];
+    const handlers: Array<(numCtx: number | undefined) => Promise<Response> | Response> = [];
+    const ok = () => new Response(`${JSON.stringify({ model: "m", message: { content: "ok" }, done: true })}\n`, { status: 200 });
+    const fetchImpl = (async (input: string | URL, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/api/show") return new Response(JSON.stringify(options.showBody), { status: 200 });
+      if (path === "/api/ps") {
+        const loaded = options.loaded?.();
+        return new Response(JSON.stringify({ models: loaded ? [{ name: `${options.model ?? ""}:latest`, context_length: loaded }] : [] }), { status: 200 });
+      }
+      const numCtx = (JSON.parse(String(init?.body)) as { options?: { num_ctx?: number } }).options?.num_ctx;
+      chats.push(numCtx);
+      const handler = handlers.shift();
+      return handler ? handler(numCtx) : ok();
+    }) as typeof fetch;
+    return { chats, handlers, fetchImpl, ok };
+  }
+  const words = (count: number) => "word ".repeat(count);
+  const unpinned = { model_info: { "general.architecture": "llama", "llama.context_length": 131072 } };
+
+  it("forgets the size a refused first send asked for, so a concurrent request that sent it is not kept", async () => {
+    const original = globalThis.fetch;
+    const ollama = scripted({ showBody: unpinned });
+    globalThis.fetch = ollama.fetchImpl;
+    try {
+      const llm = createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "concurrent" });
+      // Keep 4,096 from an earlier request.
+      await llm.complete({ prompt: words(2000), maxTokens: 1000 });
+      assert.equal(ollama.chats.at(-1), 4096);
+      // B asks for 16,384 and its answer is held; A asks for 16,384 and is refused at 8,192.
+      let releaseB!: () => void;
+      const heldB = new Promise<void>((resolve) => { releaseB = resolve; });
+      ollama.handlers.push(async () => { await heldB; return ollama.ok(); });
+      ollama.handlers.push(() => new Response(JSON.stringify({ error: "request (9000 tokens) exceeds the available context size (8192 tokens), try increasing it" }), { status: 400 }));
+      const b = llm.complete({ prompt: words(8000), maxTokens: 1000 });
+      await new Promise((resolve) => setImmediate(resolve));
+      const a = llm.complete({ prompt: words(8000), maxTokens: 1000 });
+      await a;
+      releaseB();
+      await b;
+      assert.deepEqual(ollama.chats.slice(1), [16384, 16384, 10240]);
+      // The next request reuses A's 10,240, not B's refused 16,384.
+      await llm.complete({ prompt: words(8000), maxTokens: 1000 });
+      assert.equal(ollama.chats.at(-1), 10240);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("never reloads a model smaller than it is loaded when reusing a kept size", async () => {
+    const original = globalThis.fetch;
+    let loaded: number | undefined;
+    const ollama = scripted({ showBody: unpinned, loaded: () => loaded, model: "loaded-larger" });
+    globalThis.fetch = ollama.fetchImpl;
+    try {
+      const llm = createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "loaded-larger" });
+      await llm.complete({ prompt: words(2000), maxTokens: 1000 });
+      assert.equal(ollama.chats.at(-1), 4096);
+      // Another client loads the model at 32,768.
+      loaded = 32768;
+      await llm.complete({ prompt: words(2500), maxTokens: 1000 });
+      assert.equal(ollama.chats.at(-1), 32768);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("reads the retry limit from the architecture key even when a rope key comes first", async () => {
+    const original = globalThis.fetch;
+    const ollama = scripted({
+      showBody: { model_info: { "mistral3.rope.scaling.original_context_length": 16384, "general.architecture": "mistral3", "mistral3.context_length": 262144 } },
+    });
+    ollama.handlers.push(() => new Response(JSON.stringify({ error: "request (20000 tokens) exceeds the available context size (4096 tokens), try increasing it" }), { status: 400 }));
+    globalThis.fetch = ollama.fetchImpl;
+    try {
+      await createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "rope-first" }).complete({ prompt: "big", maxTokens: 1000 });
+      assert.deepEqual(ollama.chats, [undefined, 21504]);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
 });

@@ -94,6 +94,32 @@ async function readJson(
   }
 }
 
+/**
+ * /api/show answers per endpoint and model. A model's Modelfile parameters
+ * and architecture limit do not change while it stays pulled, so a
+ * successful reading is kept; an empty one is asked again next time.
+ */
+const showCache = new Map<string, OllamaShowContext>();
+
+async function cachedShow(
+  fetchImpl: typeof fetch,
+  base: string,
+  model: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<OllamaShowContext> {
+  const key = `${base}\0${model}`;
+  const kept = showCache.get(key);
+  if (kept) return kept;
+  const show = parseOllamaShow(await readJson(fetchImpl, `${base}/api/show`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model }),
+  }, timeoutMs, signal));
+  if (show.pinnedNumCtx !== undefined || show.modelMaxContext !== undefined) showCache.set(key, show);
+  return show;
+}
+
 export interface OllamaRequestContextInput {
   endpoint: string;
   model: string;
@@ -130,17 +156,15 @@ export async function ollamaRequestNumCtx(
     ...(input.maxTokens !== undefined ? { maxTokens: input.maxTokens } : {}),
   });
   if (neededTokens <= SMALLEST_DEFAULT_CONTEXT) return undefined;
-  if (input.currentNumCtx !== undefined && input.currentNumCtx >= neededTokens) return undefined;
   const fetchImpl = input.fetchImpl ?? fetch;
   const timeoutMs = input.timeoutMs ?? LOOKUP_TIMEOUT_MS;
   const base = input.endpoint.replace(/\/$/, "");
-  const show = parseOllamaShow(await readJson(fetchImpl, `${base}/api/show`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ model: input.model }),
-  }, timeoutMs, input.signal));
+  const show = await cachedShow(fetchImpl, base, input.model, timeoutMs, input.signal);
   if (show.pinnedNumCtx !== undefined) return undefined;
+  // Read the loaded size even when this app keeps a large enough size: a
+  // larger one loaded since (by another client) must not be reloaded smaller.
   const loaded = parseOllamaLoadedContext(await readJson(fetchImpl, `${base}/api/ps`, { method: "GET" }, timeoutMs, input.signal), input.model) ?? 0;
+  if (input.currentNumCtx !== undefined && input.currentNumCtx >= neededTokens && loaded <= input.currentNumCtx) return undefined;
   let target = 4096;
   while (target < neededTokens) target *= 2;
   target = Math.max(target, loaded, input.currentNumCtx ?? 0);

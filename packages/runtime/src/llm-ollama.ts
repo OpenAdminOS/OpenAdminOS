@@ -6,7 +6,7 @@ import type {
   RunLlmApi,
 } from "@openadminos/agent-sdk";
 import { isRefusedRedirect, modelServerRedirect, redirectRefusedDetail } from "./llm-openai-compatible.js";
-import { ollamaRequestNumCtx, readOllamaContextWindow } from "./ollama-context.js";
+import { ollamaRequestNumCtx, parseOllamaShow, readOllamaContextWindow } from "./ollama-context.js";
 
 export interface OllamaProviderOptions {
   endpoint?: string;
@@ -270,13 +270,17 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         startAttempt(sized !== undefined
           ? ` with a ${formatTokens(sized.numCtx)} token context sized for this request`
           : cachedCtx === undefined ? "" : ` with the ${formatTokens(cachedCtx)} token context kept from an earlier request`);
+        // The size this first send asked for: kept, sized up front, or none.
+        const firstSent = numCtx;
         response = await send(numCtx);
         let detail = await errorDetail(response);
         const overflow = response.status === 400 ? parseContextOverflow(detail) : undefined;
         if (overflow) {
-          // Less room than the kept size asked for means Ollama can no longer
-          // give it. Otherwise the prompt grew and the kept size stays.
-          if (cachedCtx !== undefined && overflow.available < cachedCtx) forgetSize(cachedCtx);
+          // Less room than this send asked for means Ollama can no longer give
+          // it, so that size is forgotten (and a concurrent request that sent
+          // it is not kept) before the retry lookup. A size this request did
+          // not send is untouched. Otherwise the prompt grew and the size stays.
+          if (firstSent !== undefined && overflow.available < firstSent) forgetSize(firstSent);
           // The first request's budget ends here; the lookup has its own.
           clearTimeout(timer);
           // Ollama sizes the context from its own default and free memory,
@@ -658,10 +662,9 @@ async function readOllamaContextLength(
   }
   // A valid answer without the metadata leaves the limit unknown.
   if (typeof answer.model_info !== "object" || answer.model_info === null) return undefined;
-  for (const [key, value] of Object.entries(answer.model_info as Record<string, unknown>)) {
-    if (key.endsWith(".context_length") && typeof value === "number" && value > 0) return value;
-  }
-  return undefined;
+  // The same reading as the size check: the architecture's own key, not a
+  // rope or other key that also ends in context_length.
+  return parseOllamaShow(answer).modelMaxContext;
 }
 
 /** Readable text for an error field of any shape. */
