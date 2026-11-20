@@ -610,6 +610,26 @@ test("Conditional Access references and delegated permissions distinguish identi
   assert.deepEqual(Object.values(application.securityMaskRoles), ["nameOrIdentifier", "nameOrIdentifier"]);
 });
 
+test("confirmed tenant identity raises stale device provenance while a generic GUID keeps its field class", () => {
+  const index = new TenantValueIndex();
+  const ledger = new ClassificationLedger({
+    matches: text => index.matches(text),
+    spans: text => TenantValueIndex.spansFor(text, [index]),
+    workerShards: () => [index],
+  });
+  const guid = "aaaaaaaa-1111-2222-3333-444444444444";
+  const device = { deviceName: "Yelena", id: guid };
+  ledger.register("graph:managedDevices", device, { graphPath: "/deviceManagement/managedDevices" });
+  const prompt = JSON.stringify(device);
+  assert.deepEqual(ledger.classifyRequest({ prompt }).spans.map(span => span.kind), ["device", "device"]);
+  index.add("Yelena", "name");
+  const { spans } = ledger.classifyRequest({ prompt });
+  assert.deepEqual(spans.map(span => [prompt.slice(span.start, span.end), span.kind]), [
+    ["Yelena", "identity"], [guid, "device"],
+  ]);
+  ledger.dispose();
+});
+
 test("generic phrases match only at word boundaries", () => {
   const ledger = new ClassificationLedger();
   ledger.register("fixture", { status: "not configured" });
