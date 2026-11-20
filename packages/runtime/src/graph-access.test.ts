@@ -158,6 +158,19 @@ describe("Graph access denial classification", () => {
     assert.equal(storedGraphAccessDenial(legacy, ollama), undefined);
     assert.equal(storedGraphAccessDenial(legacy, graphAccessDenialText(legacy)), legacy);
     assert.equal(storedGraphAccessDenial(undefined, graphAccessDenialText(legacy)), undefined);
+    // A Graph error that was not a 403, whose path happens to contain "403".
+    assert.equal(storedGraphAccessDenial(legacy, "Graph responded with HTTP 404 for https://graph.microsoft.com/v1.0/users/403: Not Found"), undefined);
+  });
+
+  it("reads a sandboxed script agent's stored failure from its brokered Graph error", () => {
+    const graph = 'MXC script agent "intune-device-posture-auditor" failed: file:///agent.mjs:151\n    throw new Error(`${method}: ${message}`);\nError: graph.request: Graph responded with HTTP 403 for https://graph.microsoft.com/beta/deviceManagement/managedDevices: {"error":{"code":"Forbidden"}}';
+    assert.equal(graphAccessDenialFromStoredText(graph)?.cause, "unknown");
+    assert.equal(errorComesFromGraph(graph), true);
+    const nightly = 'MXC script agent "intune-device-posture-auditor" failed: Error: graph.request: Microsoft Graph denied access to GET /deviceManagement/managedDevices (HTTP 403). OpenAdminOS cannot determine the cause.';
+    assert.equal(graphAccessDenialFromStoredText(nightly)?.cause, "unknown");
+    const llm = 'MXC script agent "intune-device-posture-auditor" failed: Error: llm.complete: Ollama responded with HTTP 403: Forbidden';
+    assert.equal(graphAccessDenialFromStoredText(llm), undefined);
+    assert.equal(errorComesFromGraph(llm), false);
   });
 
   it("never recommends a read-only role for a write action", () => {

@@ -1055,6 +1055,12 @@ export interface RunRecord {
   error?: string;
   steps: RunStepRecord[];
   accessDenial?: GraphAccessDenial;
+  /**
+   * True on a failure classified from its typed error, with or without a
+   * Graph denial. Its message is then never read for Graph advice; only
+   * records without it, stored by earlier versions, are read from their text.
+   */
+  graphDenialChecked?: boolean;
   logs: RunLogRecord[];
   plan?: WritePlan;
   /** Host-produced assessment, retained with the reviewed plan in run history. */

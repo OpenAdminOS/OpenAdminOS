@@ -210,8 +210,15 @@ const ADAPTER_ANY = /^Graph (?:responded with HTTP \d+|request failed \(|request
 const OWN_DENIAL_403 = /^(?:Microsoft Graph denied access to [^\n]*?\(HTTP 403\)|Microsoft Graph rejected the (?:\w+ )?request \(HTTP 403\)|Microsoft Graph answered \S+ with HTTP 403\b)/;
 const OWN_GRAPH_TEXT = /^(?:Microsoft Graph (?:denied|rejected|answered|responded)\b|(?:Teams|Outlook) Graph request failed\b)/;
 
+/**
+ * A sandboxed script agent's failure as earlier versions stored it: the
+ * script's stderr, where a brokered Graph error follows "graph.request: ".
+ */
+const SCRIPT_AGENT_GRAPH_ERROR = /^MXC script agent "[^"\n]*" failed: [\s\S]*?\bgraph\.request: /;
+
 function storedText(error: unknown): string {
-  return (error instanceof Error ? error.message : String(error ?? "")).trimStart();
+  const raw = (error instanceof Error ? error.message : String(error ?? "")).trimStart();
+  return raw.replace(SCRIPT_AGENT_GRAPH_ERROR, "");
 }
 
 /** True when a stored error message was written by OpenAdminOS's Graph code. */
@@ -243,9 +250,10 @@ export function graphAccessDenialFromStoredText(text: string | undefined, contex
 /**
  * A stored denial to show for a run or cache error. Denials stored by earlier
  * versions could come from a 403 of any service; those are kept only when the
- * error itself came from Graph.
+ * stored error text is a Graph 403 that Graph code wrote.
  */
 export function storedGraphAccessDenial(denial: GraphAccessDenial | undefined, error: unknown): GraphAccessDenial | undefined {
   if (!denial) return undefined;
-  return denial.source === "microsoft-graph" || errorComesFromGraph(error) ? denial : undefined;
+  if (denial.source === "microsoft-graph" || typedGraphDenial(error)) return denial;
+  return graphAccessDenialFromStoredText(storedText(error)) ? denial : undefined;
 }

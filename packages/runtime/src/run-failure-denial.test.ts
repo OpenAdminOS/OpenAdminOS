@@ -61,6 +61,7 @@ it("does not store a Graph denial for an HTTP 403 from a model server, a vendor 
     const result = await runFailingWith(new Error(message));
     assert.equal(result.status, "failed");
     assert.equal(result.accessDenial, undefined, message);
+    assert.equal(result.graphDenialChecked, true);
   }
 });
 
