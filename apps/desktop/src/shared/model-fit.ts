@@ -36,7 +36,11 @@ function typedIssue(error: unknown, depth = 0): Omit<ModelFitIssue, "providerId"
   if (!error || typeof error !== "object" || depth > 4) return undefined;
   const outer = error as Record<string, unknown>;
   // The failure record's own code wins over a wrapper's ("agent-failed" around "context-too-small").
-  const record = outer.failure && typeof outer.failure === "object" ? { ...(outer.failure as Record<string, unknown>), code: (outer.failure as Record<string, unknown>).code ?? outer.code } : outer;
+  // A field the record leaves out falls back to the wrapper's.
+  const failure = outer.failure && typeof outer.failure === "object" ? (outer.failure as Record<string, unknown>) : undefined;
+  const record = failure
+    ? Object.fromEntries(["kind", "code", "reason", "neededTokens", "needed", "limitTokens", "limit"].map((key) => [key, failure[key] ?? outer[key]]))
+    : outer;
   const reason = [record.kind, record.code, record.reason].find(
     (value): value is ModelFitReason => typeof value === "string" && (FIT_REASONS as readonly string[]).includes(value),
   );
@@ -156,7 +160,9 @@ export function classifyModelFitFailure(
   context: { providerId: ProviderId; model?: string | undefined; isLocal: boolean },
 ): ModelFitIssue | undefined {
   if (!context.isLocal) return undefined;
-  const typed = typedIssue(error);
+  // A bare typed reason, such as a run's `failureReason: "context-too-small"`.
+  const bare = typeof error === "string" && error !== "repeated-failure" && (FIT_REASONS as readonly string[]).includes(error) ? { reason: error as ModelFitReason } : undefined;
+  const typed = bare ?? typedIssue(error);
   const text = typeof error === "string" ? error : error instanceof Error ? error.message : undefined;
   const found = typed ?? (text ? contextIssueFromText(text) : undefined);
   if (!found) return undefined;

@@ -75,6 +75,16 @@ describe("Model fit: classifying a failure", () => {
     assert.equal(raw?.limitTokens, 16384);
   });
 
+  it("reads a bare typed reason and a wrapper's reason around a failure record without one", () => {
+    const local = { providerId: "ollama" as const, model: LOCAL_MODEL, isLocal: true };
+    assert.deepEqual(classifyModelFitFailure("context-too-small", local), { reason: "context-too-small", providerId: "ollama", model: LOCAL_MODEL });
+    assert.deepEqual(classifyModelFitFailure("thinking-only", local), { reason: "thinking-only", providerId: "ollama", model: LOCAL_MODEL });
+    assert.equal(classifyModelFitFailure("repeated-failure", local), undefined);
+    assert.equal(classifyModelFitFailure("auth-expired", local), undefined);
+    const wrapped = Object.assign(new Error("The run stopped."), { kind: "context-too-small", neededTokens: 40652, failure: { stage: "plan", limitTokens: 16384 } });
+    assert.deepEqual(classifyModelFitFailure(wrapped, local), { reason: "context-too-small", neededTokens: 40652, limitTokens: 16384, providerId: "ollama", model: LOCAL_MODEL });
+  });
+
   it("reads the adapter's memory failure, a wrapped typed failure and the loop's reason", () => {
     const memory = classifyModelFitFailure(
       `Ollama context size too small: This request needs 40,652 tokens of context, but Ollama could not load ${LOCAL_MODEL} with 40,960, usually because free memory ran out. Ollama said: model requires more system memory`,
