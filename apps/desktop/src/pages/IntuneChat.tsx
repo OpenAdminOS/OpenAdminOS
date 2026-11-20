@@ -151,6 +151,8 @@ type HostedChatConsentPrompt = {
 type ModelFitOffer = {
   /** Carries the host's single-use `offerId`. */
   issue: ModelFitIssue & { offerId: string };
+  /** The answer the offer came with; the live notice speaks for it, so its own reason line is not repeated. */
+  assistantMessageId: string;
   content: string;
   conversationId: string;
   tenantId?: string;
@@ -1099,6 +1101,7 @@ function IntuneChatContent() {
             if (modelFit && offerId) {
               setModelFitOffer({
                 issue: { ...modelFit, offerId },
+                assistantMessageId: event.result.assistantMessage.id,
                 content,
                 conversationId: event.result.conversation.id,
                 ...(sendTenantId ? { tenantId: sendTenantId } : {}),
@@ -2277,6 +2280,7 @@ function IntuneChatContent() {
                         latestAssistant={message.id === latestAssistantMessageId}
                         tenant={messageTenant}
                         multiTenant={messageConversation?.scopeKind === "multi-tenant"}
+                        liveModelFit={modelFitOfferShown && modelFitOffer?.assistantMessageId === message.id}
                         regenerateDisabled={sending || !previousUserPromptForMessage(displayedMessages, message)}
                         editDisabled={sending}
                         onCopy={() => void handleCopyMessage(message)}
@@ -4519,6 +4523,7 @@ function ChatMessageBubble({
   copied,
   latestAssistant,
   tenant,
+  liveModelFit = false,
   multiTenant,
   regenerateDisabled,
   editDisabled,
@@ -4535,6 +4540,8 @@ function ChatMessageBubble({
   copied: boolean;
   latestAssistant: boolean;
   tenant?: TenantRecord;
+  /** The live model fit notice speaks for this answer. */
+  liveModelFit?: boolean;
   multiTenant: boolean;
   regenerateDisabled: boolean;
   /** A send is still finishing, so Edit would be ignored; it waits instead. */
@@ -4592,7 +4599,7 @@ function ChatMessageBubble({
         <PendingAnswer tenant={tenant} steps={message.steps} {...(stopping ? { stopping: progress.message } : {})} />
       ) : (
         <>
-          <AnswerScopeDisclosure tenant={tenant} multiTenant={multiTenant} message={message} />
+          <AnswerScopeDisclosure tenant={tenant} multiTenant={multiTenant} message={message} liveModelFit={liveModelFit} />
           <StepSummary message={message} details={<AnswerDetails message={message} />} />
         </>
       )}
@@ -4641,10 +4648,12 @@ function AnswerScopeDisclosure({
   tenant,
   multiTenant,
   message,
+  liveModelFit = false,
 }: {
   tenant?: TenantRecord;
   multiTenant: boolean;
   message: IntuneChatMessage;
+  liveModelFit?: boolean;
 }) {
   const notice = message.engineNotice;
   const sources = message.sources ?? [];
@@ -4664,7 +4673,7 @@ function AnswerScopeDisclosure({
     {message.switchedFrom && message.providerId && message.status !== "streaming" ? (
       <SwitchedProviderLine message={message} providers={appState.providers} />
     ) : null}
-    {message.modelFit && message.status !== "streaming" ? (
+    {message.modelFit && message.status !== "streaming" && !liveModelFit ? (
       // The reason stays with the stored answer after a reload; the choices live only with the request that failed.
       <div data-model-fit-reason="" className="mb-2.5 rounded-lg bg-[var(--color-surface)] px-3 py-2 text-sm ring-1 ring-[var(--color-border)]">
         <span className="font-medium text-[var(--color-text)]">{MODEL_FIT_COPY.title(message.modelFit, modelFitModelName(message.modelFit), "chat")}.</span>{" "}
