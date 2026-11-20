@@ -122,6 +122,9 @@ describe("IntuneChat model fit (mockup 36)", () => {
     expect(input.hostedProviderConsent).not.toHaveProperty("remember");
 
     const answeredBy = (await screen.findByText("Answered by")).parentElement!;
+    // The question that was retried leaves the composer and the stored draft.
+    expect(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel })).toHaveValue("");
+    expect(readChatDraft(conversation.id)).toBe("");
     expect(answeredBy).toHaveTextContent("Answered by Codex · location set by your account for this request only. Chat is back on llama3.1.");
   });
 
