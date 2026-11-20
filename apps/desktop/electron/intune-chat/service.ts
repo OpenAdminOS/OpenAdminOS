@@ -2929,7 +2929,15 @@ export class IntuneChatService {
         }
       }
     });
-    if (!lazyRefresh) await refreshPlanned();
+    if (!lazyRefresh) {
+      // Stop during the refresh ends in the designed cancelled answer below, as on the lazy path,
+      // never as an abort error out of the send.
+      try {
+        await refreshPlanned();
+      } catch (error) {
+        if (!isCancelled()) throw error;
+      }
+    }
     if (isCancelled()) {
       const result = finishCancelled();
       sendProgress({

@@ -281,6 +281,24 @@ describe("local model accuracy on the tester's tenant", () => {
   });
 });
 
+describe("Stop during the refresh before an answer", () => {
+  it("ends in the designed cancelled answer, not an abort error out of the send", async () => {
+    const controller = new AbortController();
+    await withHarness(async ({ store }) => {
+      await store.setChatInvestigationMode("always-deterministic");
+      const events: string[] = [];
+      // Sign-ins are not cached, so the answer refreshes them first; Stop lands as the refresh starts.
+      const result = await store.streamIntuneChatMessage({ content: "Which recent sign-ins failed?" }, (event) => {
+        events.push(event.type);
+        if (event.type === "status" && event.message.startsWith("Refreshing")) controller.abort();
+      }, { signal: controller.signal });
+      assert.equal(result.assistantMessage.status, "cancelled");
+      assert.match(result.assistantMessage.content, /stopped by user/i);
+      assert.ok(events.includes("cancelled"));
+    });
+  });
+});
+
 describe("structured device questions", () => {
   const at = "2026-11-19T12:00:00.000Z";
   it("reads Q1 into a count with a per OS breakdown and a not compliant list", () => {
