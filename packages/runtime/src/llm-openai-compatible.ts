@@ -51,6 +51,12 @@ export interface OpenAiCompatibleServer {
    * the error a streamed or JSON answer carried.
    */
   contextOverflowMessage?: (failure: OpenAiCompatibleFailure) => Promise<string | undefined>;
+  /**
+   * Whether an `error` field that is a plain string fails the request.
+   * LM Studio 0.3.x sends its errors that way; Lemonade's string errors keep
+   * their earlier handling. Defaults to false.
+   */
+  stringErrors?: boolean;
 }
 
 export interface OpenAiCompatibleFailure {
@@ -235,7 +241,7 @@ export function createOpenAiCompatibleLlm(
           new Error(`${name} responded with HTTP ${response.status}: ${truncate(detail, 200)}`);
       }
       const payload = (await response.json()) as ChatResponse;
-      const payloadError = errorMessage(payload);
+      const payloadError = errorMessage(payload, server.stringErrors ?? false);
       if (payloadError) {
         throw (await contextOverflow(payloadError, model, opts)) ?? new Error(`${name} error: ${payloadError}`);
       }
@@ -336,7 +342,7 @@ export function createOpenAiCompatibleLlm(
             } catch {
               continue;
             }
-            const payloadError = errorMessage(payload);
+            const payloadError = errorMessage(payload, server.stringErrors ?? false);
             if (payloadError) {
               throw (await contextOverflow(payloadError, model, opts)) ?? new Error(`${name} error: ${payloadError}`);
             }
@@ -513,9 +519,9 @@ export function classifyOpenAiCompatibleEndpoint(
   };
 }
 
-function errorMessage(payload: ChatResponse): string | undefined {
+function errorMessage(payload: ChatResponse, stringErrors: boolean): string | undefined {
   const { error } = payload;
-  if (typeof error === "string") return error.length > 0 ? error : undefined;
+  if (typeof error === "string") return stringErrors && error.length > 0 ? error : undefined;
   return error?.message || undefined;
 }
 

@@ -271,7 +271,7 @@ describe("LM Studio context length too small", () => {
       await assert.rejects(llm.complete({ prompt: "big" }), (error: Error) => {
         assert.match(error.message, /^LM Studio context length too small: This request needs 15,857 tokens of context, but qwen3-8b is loaded in LM Studio with a context length of 4,096\./);
         assert.match(error.message, /Raise Context Length to at least 20,480 \(qwen3-8b supports up to 32,768\)/);
-        assert.match(error.message, /`lms load qwen3-8b --context-length 20480`/);
+        assert.match(error.message, /run `lms unload qwen3-8b` and then `lms load qwen3-8b --context-length 20480`, then re-run\./);
         assert.match(error.message, /LM Studio said: <LM Studio error> Trying to keep the first 15857 tokens/);
         return true;
       });
@@ -342,7 +342,7 @@ describe("LM Studio context length too small", () => {
       const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b:2" });
       await assert.rejects(llm.complete({ prompt: "big" }), (error: Error) => {
         assert.match(error.message, /but qwen3-8b:2 is loaded in LM Studio with a context length of 4,096/);
-        assert.match(error.message, /`lms load qwen3-8b --context-length 20480`/);
+        assert.match(error.message, /run `lms unload qwen3-8b:2` and then `lms load qwen3-8b --context-length 20480 --identifier qwen3-8b:2`/);
         return true;
       });
     } finally {
@@ -366,6 +366,38 @@ describe("LM Studio context length too small", () => {
     }
   });
 
+  it("treats a request equal to the model's limit as not fitting", async () => {
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url === "/api/v1/models") return sendJson(res, 200, v1Models("qwen3-8b", 4096, 8192));
+      sendJson(res, 400, { error: { message: "The number of tokens to keep from the initial prompt is greater than the context length (n_keep: 8192 >= n_ctx: 4096)." } });
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b" });
+      await assert.rejects(llm.complete({ prompt: "big" }), (error: Error) => {
+        assert.match(error.message, /qwen3-8b supports at most 8,192, so narrow the request/);
+        assert.doesNotMatch(error.message, /Raise Context Length/);
+        return true;
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("says the suggested size is subject to the model's limit when LM Studio does not report it", async () => {
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url?.startsWith("/api/")) return sendJson(res, 404, { error: "Unexpected endpoint" });
+      sendJson(res, 400, { error: OLD_OVERFLOW });
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b" });
+      await assert.rejects(llm.complete({ prompt: "big" }), /Raise Context Length to at least 20,480 if the model supports that many in the model's load settings/);
+    } finally {
+      await server.close();
+    }
+  });
+
+  // A synthetic stream: LM Studio issue #2256 shows these counts only in its
+  // own log, so this checks the parsing when a server does send them.
   it("reads the counts from an error sent inside the stream", async () => {
     const server = await fakeLmStudio((req, res) => {
       if (req.url === "/api/v1/models") return sendJson(res, 200, v1Models("qwen3-8b", 8192, 32768));

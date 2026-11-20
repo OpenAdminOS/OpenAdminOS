@@ -31,6 +31,7 @@ const LM_STUDIO: OpenAiCompatibleServer = {
     "LM Studio isn't running or the local server is off. Start the server from LM Studio's Developer tab, then try again.",
   noModelsDetail: "LM Studio server is running but no models are loaded.",
   contextOverflowMessage: lmStudioContextOverflowMessage,
+  stringErrors: true,
 };
 
 /** Room left for the answer when the caller sets no token limit. */
@@ -157,16 +158,24 @@ async function lmStudioContextOverflowMessage(failure: OpenAiCompatibleFailure):
     parts.push(`This request does not fit in the context length ${model} is loaded with in LM Studio.`);
   }
 
-  const atModelLimit = max !== undefined && (requested !== undefined ? requested > max : loaded !== undefined && loaded >= max);
+  // LM Studio fails when the prompt is at least the context length
+  // ("n_keep: N >= n_ctx: M"), so a model whose limit equals the prompt
+  // cannot fit it either.
+  const atModelLimit = max !== undefined && (requested !== undefined ? requested >= max : loaded !== undefined && loaded >= max);
   if (atModelLimit) {
     parts.push(`${model} supports at most ${n(max)}, so narrow the request or pick a model with a larger context window.`);
   } else {
     const wanted = requested === undefined ? undefined : roundUp(requested + (failure.maxTokens ?? LM_STUDIO_ANSWER_RESERVE_TOKENS), 1024);
     const target = wanted === undefined ? undefined : max === undefined ? wanted : Math.min(wanted, max);
     const size = target === undefined ? "" : ` to at least ${n(target)}`;
-    const limit = max === undefined ? "" : ` (${model} supports up to ${n(max)})`;
+    const limit =
+      max !== undefined ? ` (${model} supports up to ${n(max)})` : target !== undefined ? " if the model supports that many" : "";
+    // `lms load` alone adds a second instance and leaves this one at its
+    // old size, so unload it and load it again under the same identifier.
+    const key = info.key ?? model;
+    const identifier = key === model ? "" : ` --identifier ${model}`;
     parts.push(
-      `Raise Context Length${size}${limit} in the model's load settings in LM Studio and reload it, or run \`lms load ${info.key ?? model} --context-length ${target ?? "<tokens>"}\`, then re-run. OpenAdminOS does not reload the model itself, because that would replace the model you loaded.`,
+      `Raise Context Length${size}${limit} in the model's load settings in LM Studio and reload it, or run \`lms unload ${model}\` and then \`lms load ${key} --context-length ${target ?? "<tokens>"}${identifier}\`, then re-run. OpenAdminOS does not reload the model itself, because that would replace the model you loaded.`,
     );
   }
   parts.push(`LM Studio said: ${truncate(serverMessage(failure.detail), 200)}`);
