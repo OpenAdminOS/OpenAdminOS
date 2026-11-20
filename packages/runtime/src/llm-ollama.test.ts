@@ -1484,4 +1484,69 @@ describe("Ollama context for an unpinned model", () => {
       globalThis.fetch = original;
     }
   });
+
+  it("does not reuse a kept size another request replaced while this request's lookup was held", async () => {
+    const original = globalThis.fetch;
+    const revisionA = { ...unpinned, modified_at: "2026-11-01T00:00:00Z" };
+    // Replaced by a smaller unpinned model with a 16,384 maximum.
+    const revisionB = { model_info: { "general.architecture": "llama", "llama.context_length": 16384 }, modified_at: "2026-11-20T00:00:00Z" };
+    let show: unknown = revisionA;
+    let holdNextShow = false;
+    let releaseShow!: () => void;
+    const heldShow = new Promise<void>((resolve) => { releaseShow = resolve; });
+    let showsAfterSwitch = 0;
+    const ollama = scripted({ showBody: undefined });
+    globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+      if (new URL(String(input)).pathname === "/api/show") {
+        if (holdNextShow) {
+          showsAfterSwitch += 1;
+          if (showsAfterSwitch === 2) await heldShow;
+        }
+        return new Response(JSON.stringify(show), { status: 200 });
+      }
+      return ollama.fetchImpl(input, init);
+    }) as typeof fetch;
+    try {
+      const llm = createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "replaced-concurrently" });
+      await llm.complete({ prompt: words(40000), maxTokens: 1000 });
+      assert.equal(ollama.chats.at(-1), 65536);
+      show = revisionB;
+      holdNextShow = true;
+      // Both requests start with the kept 65,536 for revision A.
+      const first = llm.complete({ prompt: words(5000), maxTokens: 1000 });
+      const second = llm.complete({ prompt: words(5000), maxTokens: 1000 });
+      await first;
+      assert.equal(ollama.chats.at(-1), 8192, "the first request sizes revision B");
+      releaseShow();
+      await second;
+      assert.equal(ollama.chats.at(-1), 8192, "the second request does not send revision A's 65,536");
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("keeps the pin its first lookup saw when the retry lookup omits it, on an agent run", async () => {
+    const original = globalThis.fetch;
+    let shows = 0;
+    const ollama = scripted({ showBody: undefined });
+    ollama.handlers.push(() => new Response(JSON.stringify({ error: "request (17000 tokens) exceeds the available context size (16384 tokens), try increasing it" }), { status: 400 }));
+    globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+      if (new URL(String(input)).pathname === "/api/show") {
+        shows += 1;
+        // The first lookup reports the pin; a later one comes back without parameters.
+        return new Response(JSON.stringify(shows === 1 ? { parameters: "num_ctx                        16384", model_info: unpinned.model_info } : { model_info: unpinned.model_info }), { status: 200 });
+      }
+      return ollama.fetchImpl(input, init);
+    }) as typeof fetch;
+    try {
+      await assert.rejects(
+        createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "pin-then-none" }).complete({ prompt: words(14000), maxTokens: 1000, enforceContextWindow: true }),
+        (error: unknown) => error instanceof ContextTooSmallError && error.failure.limitTokens === 16384 && error.failure.sentToProvider === true,
+      );
+      assert.deepEqual(ollama.chats, [undefined], "no retry past the pin");
+      assert.equal(shows, 1, "the refusal does not wait for a retry lookup");
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
 });
