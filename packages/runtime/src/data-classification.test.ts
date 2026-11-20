@@ -974,6 +974,43 @@ test("worker preserves long fenced evidence and can remove its mirror", async ()
   assert.equal((await ledger.classifyLargeRequest(request)).counts.credential, 0);
 });
 
+test("request sequence follows dispatch through an out-of-order failure and success", async t => {
+  const ledger = new ClassificationLedger();
+  const observed: RequestClassificationEvent[] = [];
+  let release!: () => void;
+  const stall = new Promise<void>(resolve => { release = resolve; });
+  const classifier = ledger.classifyProviderRequest.bind(ledger);
+  t.mock.method(ledger, "classifyProviderRequest", async (...args: Parameters<typeof classifier>) => {
+    if (args[0].prompt === "first") {
+      await stall;
+      throw new Error("Fixture observation failure");
+    }
+    return classifier(...args);
+  });
+  let observeStream!: () => void;
+  const streamObserved = new Promise<void>(resolve => { observeStream = resolve; });
+  const llm = withRequestClassification({
+    available: true,
+    async complete() { return { text: "first result", model: "fixture" }; },
+    async *stream() {},
+  }, "ollama", event => {
+    observed.push(event);
+    if (event.method === "stream") observeStream();
+  });
+  try {
+    await withClassificationScope(ledger, () => llm.complete({ prompt: "first" }));
+    await withClassificationScope(ledger, () => llm.stream({ prompt: "second" })[Symbol.asyncIterator]().next());
+    await streamObserved;
+    release();
+    await ledger.waitForObservations();
+    assert.deepEqual(observed.map(event => [event.method, event.failed]), [["stream", false], ["complete", true]]);
+    assert.equal(observed[0]!.requestSequence, observed[1]!.requestSequence + 1);
+  } finally {
+    release();
+    ledger.dispose();
+  }
+});
+
 test("a failed worker transport reports incomplete coverage and recovers on the next request", async t => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const post = ClassificationWorker.prototype.post;

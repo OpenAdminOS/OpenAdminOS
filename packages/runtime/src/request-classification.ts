@@ -43,6 +43,7 @@ export interface RequestClassification {
 }
 
 export interface RequestClassificationEvent {
+  requestSequence: number;
   providerId: ProviderId;
   method: "complete" | "stream";
   fieldMapVersion: number;
@@ -1251,6 +1252,7 @@ export async function clearTenantClassificationLedgers(tenantId: string): Promis
 const scopes = new AsyncLocalStorage<ClassificationLedger>();
 let unscopedRegistrations = 0;
 let unscopedRequests = 0;
+let requestSequence = 0;
 
 export function classificationDiagnostics(): Readonly<{ unscopedRegistrations: number; unscopedRequests: number }> {
   return { unscopedRegistrations, unscopedRequests };
@@ -1317,7 +1319,7 @@ export function withRequestClassification(
   observe: (event: RequestClassificationEvent, tenantIds: readonly string[]) => void,
 ): RunLlmApi {
   const classify = (
-    scoped: ClassificationLedger | undefined, method: RequestClassificationEvent["method"], options: LlmOptions,
+    scoped: ClassificationLedger | undefined, method: RequestClassificationEvent["method"], options: LlmOptions, sequence: number,
   ) => {
     if (!llm.available) return;
     if (!scoped) unscopedRequests++;
@@ -1342,7 +1344,7 @@ export function withRequestClassification(
       }
       if (ledger.expired) return;
       try {
-        observe({ providerId, method, fieldMapVersion: GRAPH_FIELD_CLASSES_VERSION, timestamp: new Date().toISOString(),
+        observe({ requestSequence: sequence, providerId, method, fieldMapVersion: GRAPH_FIELD_CLASSES_VERSION, timestamp: new Date().toISOString(),
           ...(scopeId ? { scopeId } : {}), scopePresent: scoped !== undefined,
           failed, classification: result }, tenantIds);
       } catch { /* Development observers cannot change provider behavior. */ }
@@ -1354,13 +1356,14 @@ export function withRequestClassification(
     streamsIncrementally: llm.streamsIncrementally,
     async complete(options) {
       const ledger = scopes.getStore();
+      const sequence = ++requestSequence;
       try { return llm.complete(options); }
-      finally { classify(ledger, "complete", options); }
+      finally { classify(ledger, "complete", options, sequence); }
     },
     stream(options) {
       const ledger = scopes.getStore();
       return (async function* () {
-        classify(ledger, "stream", options);
+        classify(ledger, "stream", options, ++requestSequence);
         yield* llm.stream(options);
       })();
     },
