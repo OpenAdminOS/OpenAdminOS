@@ -118,6 +118,8 @@ for (const omit of [false, true]) {
       async *stream() {},
     }, "ollama", event => seen.push(event.classification));
     const ledger = new ClassificationLedger();
+    // Exercise the prompt projection with earlier evidence already available.
+    ledger.register("graph:/applications", { value: evidence }, { graphPath: "/applications" });
     await withClassificationScope(ledger, () => runAgentTemplate(manifest, {
       agent: { id: slug }, providerId: "ollama", realWrites: false, llm,
       graph: { request: async () => ({ value: evidence }) }, log: () => {},

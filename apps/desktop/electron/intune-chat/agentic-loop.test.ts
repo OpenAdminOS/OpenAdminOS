@@ -93,6 +93,8 @@ it("classifies the exact clipped Graph script without changing either request", 
         JSON.stringify({ final: true, answer: "Reviewed." }) };
     }, async *stream() {} };
     const ledger = new ClassificationLedger();
+    if (classify) ledger.register(`graph:${path}`,
+      { value: [{ id: "test-script", scriptContent: script }] }, { graphPath: path });
     const result = await withClassificationScope(ledger, () =>
       runAgenticChat({ ...baseInput(store, classify ? withRequestClassification(llm, "ollama", e => events.push(e)) : llm), tools }));
     assert.equal(result.ok, true);
@@ -123,6 +125,7 @@ it("classifies the fenced Splashtop organization name in the first model request
   try {
     const name = "Kite";
     const ledger = new ClassificationLedger(store.classificationIdentityIndex(tenant.id));
+    ledger.register("organization:name", name);
     assert.equal(store.classificationIdentityIndex(tenant.id).matches(name), false);
     const events: RequestClassificationEvent[] = [];
     let system: string | undefined;

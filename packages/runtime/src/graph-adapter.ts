@@ -206,7 +206,7 @@ export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
           accessContext: options.accessContext,
         });
         const graphPath = "/deviceManagement/managedDevices";
-        await registerGraphTenantData(graphPath, payload, options.signal);
+        registerGraphTenantData(graphPath, payload, options.signal);
         for (const item of payload.value ?? []) {
           records.push(toManagedDeviceRecord(item));
         }

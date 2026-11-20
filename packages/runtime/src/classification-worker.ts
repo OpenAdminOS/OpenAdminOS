@@ -20,21 +20,22 @@ function classifyStartupPage(
   try {
     db.exec("PRAGMA busy_timeout = 5000; PRAGMA secure_delete = ON;");
     const prefix = `[${GRAPH_FIELD_CLASSES_VERSION},%`;
-    const select = db.prepare(`SELECT rowid, graph_id AS graphId, display_name AS displayName, raw_json AS rawJson
+    const select = db.prepare(`SELECT rowid, snapshot_id AS snapshotId, graph_id AS graphId, display_name AS displayName, raw_json AS rawJson
       FROM graph_resources WHERE tenant_id = ? AND resource = ? AND rowid > ?
+      ${page.snapshotId === undefined ? "" : "AND snapshot_id = ?"}
       ${page.indexOnly ? "" : "AND (classification_json IS NULL OR classification_json NOT LIKE ?)"}
       ORDER BY rowid LIMIT ?`);
-    const params = [page.tenantId, page.resource, page.afterRowId];
+    const params = [page.tenantId, page.resource, page.afterRowId, ...(page.snapshotId === undefined ? [] : [page.snapshotId])];
     const rows = select.all(...params, ...(page.indexOnly ? [64] : [prefix, 8])) as
-      unknown as Array<CacheClassificationRow & { rowid: number }>;
+      unknown as Array<CacheClassificationRow & { rowid: number; snapshotId: string }>;
     if (!rows.length) return { sidecars: [] };
     const result = prepareCacheClassification(rows, options, page.indexOnly, indexNames, page.indexOnly);
     if (!page.indexOnly) {
       const update = db.prepare(`UPDATE graph_resources SET classification_json = ?
-        WHERE rowid = ? AND tenant_id = ? AND resource = ? AND raw_json = ?
+        WHERE rowid = ? AND tenant_id = ? AND resource = ? AND snapshot_id = ? AND raw_json = ?
         AND (classification_json IS NULL OR classification_json NOT LIKE ?)`);
       for (const [i, row] of rows.entries()) {
-        update.run(result.sidecars[i]!, row.rowid, page.tenantId, page.resource, row.rawJson, prefix);
+        update.run(result.sidecars[i]!, row.rowid, page.tenantId, page.resource, row.snapshotId, row.rawJson, prefix);
       }
       result.sidecars = [];
     }
@@ -72,7 +73,8 @@ port.on("message", (message: WorkerMessage) => {
       const identityIndex = indexes.length ? {
         matches: (text: string) => !TenantValueIndex.spansFor(text, indexes).next().done,
       } : undefined;
-      const options = { graphPath: message.graphPath, ...(identityIndex ? { identityIndex } : {}) };
+      const options = { ...(message.type === "graph" ? message.settings : { graphPath: message.graphPath }),
+        ...(identityIndex ? { identityIndex } : {}) };
       if (message.type === "graph") {
         const rows = graphRows;
         graphRows = [];

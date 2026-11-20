@@ -27,6 +27,49 @@ import {
   type McpChatTool,
 } from "./tools.js";
 
+it("starts and releases an aborted Chat turn lease while startup classification is pending", async () => {
+  await withStore(async store => {
+    let resolveStartup!: () => void;
+    const startup = new Promise<void>(resolve => { resolveStartup = resolve; });
+    const controller = new AbortController();
+    let resolveEntered!: () => void;
+    const entered = new Promise<void>(resolve => { resolveEntered = resolve; });
+    let leased = false;
+    const host = {
+      requireIntelligenceStore: () => store,
+      async tenantLease<T>(_id: string, work: (signal: AbortSignal) => Promise<T>) {
+        leased = true;
+        try { return await work(new AbortController().signal); }
+        finally { leased = false; }
+      },
+    } as unknown as ChatServiceHost;
+    const original = store.waitForCacheClassification;
+    store.waitForCacheClassification = () => startup;
+    const service = new IntuneChatService(host);
+    const turn = service["leasedScope"](tenant.id, controller.signal, signal => {
+      resolveEntered();
+      return new Promise((_resolve, reject) =>
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true }));
+    });
+    const stopped = assert.rejects(turn, /Fixture stop/);
+    try {
+      await Promise.race([
+        entered,
+        new Promise<void>(resolve => setImmediate(resolve)).then(() => assert.fail("Turn waited for startup")),
+      ]);
+      assert.equal(leased, true);
+      controller.abort(new Error("Fixture stop"));
+      await stopped;
+      assert.equal(leased, false);
+    } finally {
+      controller.abort(new Error("Fixture stop"));
+      resolveStartup();
+      store.waitForCacheClassification = original;
+      await stopped;
+    }
+  });
+});
+
 const tenant: TenantRecord = {
   id: "tenant-1",
   displayName: "Contoso",

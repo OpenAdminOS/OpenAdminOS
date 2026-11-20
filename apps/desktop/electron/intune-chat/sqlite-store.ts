@@ -6,7 +6,7 @@ import { setImmediate as yieldToMain } from "node:timers/promises";
 import { collectTenantValues, TenantValueIndex } from "./tenant-values.js";
 import {
   addCacheIdentity, addUserFirstName, ClassificationSlice, classifyCacheRows, currentClassificationLedger,
-  GRAPH_FIELD_CLASSES_VERSION, INCOMPLETE_CACHE_CLASSIFICATION, prepareCacheClassification, registerClassifiedValues,
+  GRAPH_FIELD_CLASSES_VERSION, prepareCacheClassification, registerClassifiedValues,
   ClassificationWorkerRetiredError, clearTenantClassificationLedgers, releaseClassificationIdentityShard, retireClassificationWorker,
   type CacheClassificationResult, type ClassificationOptions,
 } from "@openadminos/runtime/data-classification";
@@ -140,7 +140,7 @@ interface GraphResourceSnapshot {
 }
 
 interface PreparedGraphResources {
-  rows: Array<NormalizedGraphResourceRow & { classification: string }>;
+  rows: Array<NormalizedGraphResourceRow & { classification: string | null }>;
   egressIndex?: TenantValueIndex;
   firstNames?: TenantValueIndex;
   identityUnavailable?: boolean;
@@ -443,6 +443,9 @@ export class IntelligenceSqliteStore {
   private readonly stagedIdentityShards = new Map<string, Map<GraphCacheResourceKind, TenantValueIndex>>();
   private readonly stagedFirstNames = new Map<string, Map<GraphCacheResourceKind, TenantValueIndex>>();
   private classificationInitialization?: Promise<void>;
+  private startupIdentityTenants?: Set<string>;
+  private readonly cacheSnapshots = new Map<string, Map<GraphCacheResourceKind, string>>();
+  private readonly cacheClassifications = new Map<string, Set<Promise<void>>>();
   private startupClassification?: { tenantId: string; done: Promise<void> };
   private readonly classificationDisconnects = new Map<string, Promise<void>>();
   private closed = false;
@@ -797,33 +800,21 @@ export class IntelligenceSqliteStore {
 
   async replaceGraphResourcesInBatches(input: GraphResourceSnapshot, signal?: AbortSignal): Promise<void> {
     const cacheGeneration = this.cacheCleared.get(input.tenantId);
-    await this.waitForCacheClassification();
     this.assertTenantWritable(input.tenantId, "graph cache");
     const rows: NormalizedGraphResourceRow[] = [];
-    const workerRows: ReturnType<typeof cacheClassificationRow>[] = [];
     const slice = new ClassificationSlice();
     for (const row of input.rows) {
       signal?.throwIfAborted();
-      const prepared = prepareGraphResource(row);
-      rows.push(prepared);
-      workerRows.push(cacheClassificationRow(prepared));
+      rows.push(prepareGraphResource(row));
       if (slice.elapsed) await slice.yield();
     }
-    const { graphPath, identityIndex, indexValues, indexNames } = this.graphClassificationOptions(input);
-    let classified: CacheClassificationResult | undefined;
-    try {
-      classified = await classifyCacheRows(workerRows, graphPath, identityIndex, indexValues, indexNames, signal);
-    } catch {
-      // Keep the cache refresh usable if the optional classifier fails.
-      signal?.throwIfAborted();
-    }
-    const prepared = this.attachCacheClassification(rows, classified);
-    if (!classified && indexValues) prepared.identityUnavailable = true;
     signal?.throwIfAborted();
     if (this.cacheCleared.get(input.tenantId) !== cacheGeneration) {
       throw new Error("The cache was cleared during this refresh. Run the refresh again.");
     }
-    this.writeGraphResources(input, prepared);
+    const identityUnavailable = identityResources.has(input.resource);
+    const snapshotId = this.writeGraphResources(input, { ...this.attachCacheClassification(rows), identityUnavailable });
+    this.scheduleCacheSnapshotClassification(input.tenantId, input.resource, snapshotId);
   }
 
   private graphClassificationOptions(input: GraphResourceSnapshot) {
@@ -837,7 +828,7 @@ export class IntelligenceSqliteStore {
 
   private attachCacheClassification(rows: NormalizedGraphResourceRow[], classified?: CacheClassificationResult): PreparedGraphResources {
     return {
-      rows: rows.map((row, index) => ({ ...row, classification: classified?.sidecars[index] ?? INCOMPLETE_CACHE_CLASSIFICATION })),
+      rows: rows.map((row, index) => ({ ...row, classification: classified?.sidecars[index] ?? null })),
       ...(classified?.egressIndex ? { egressIndex: TenantValueIndex.fromWorkerSnapshot(classified.egressIndex) } : {}),
       ...(classified?.firstNames ? { firstNames: TenantValueIndex.fromWorkerSnapshot(classified.firstNames) } : {}),
     };
@@ -845,7 +836,7 @@ export class IntelligenceSqliteStore {
 
   private writeGraphResources(
     input: GraphResourceSnapshot, { rows: normalizedRows, egressIndex, firstNames, identityUnavailable }: PreparedGraphResources,
-  ): void {
+  ): string {
     this.assertTenantWritable(input.tenantId, "graph cache");
     const snapshotId = `${input.resource}-${input.refreshedAt}-${randomUUID().slice(0, 8)}`;
     this.db.exec("BEGIN");
@@ -956,6 +947,7 @@ export class IntelligenceSqliteStore {
         }
       }
       if (firstNames) this.setIdentityShard(this.classificationIndexes, input.tenantId, input.resource, firstNames);
+      return snapshotId;
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
@@ -2272,6 +2264,7 @@ export class IntelligenceSqliteStore {
     }
     this.cacheCleared.set(tenantId, (this.cacheCleared.get(tenantId) ?? 0) + 1);
     this.tenantIdentityIndexes.delete(tenantId);
+    this.cacheSnapshots.delete(tenantId);
     this.releaseIdentityShards(tenantId);
   }
 
@@ -2529,7 +2522,8 @@ export class IntelligenceSqliteStore {
     return {
       matches: text => !TenantValueIndex.spansFor(text, shards()).next().done,
       spans: text => TenantValueIndex.spansFor(text, shards()),
-      isComplete: () => this.cacheClassificationReady && !this.disconnectedClassificationTenants.has(tenantId) &&
+      isComplete: () => (this.cacheClassificationReady || this.startupIdentityTenants?.has(tenantId) === false) &&
+        !this.disconnectedClassificationTenants.has(tenantId) &&
         !(["users", "groups"] as const).some(resource => this.unavailableIdentityResources.get(tenantId)?.has(resource)),
       workerShards: shards,
     };
@@ -2555,10 +2549,13 @@ export class IntelligenceSqliteStore {
     this.tenantIdentityIndexes.get(tenantId)?.clear();
     this.tenantIdentityIndexes.delete(tenantId);
     this.releaseIdentityShards(tenantId);
+    this.cacheSnapshots.delete(tenantId);
+    const refreshes = [...this.cacheClassifications.get(tenantId) ?? []];
     const startup = this.startupClassification;
     const retired = retireClassificationWorker();
     const settled = Promise.all([
       retired,
+      ...refreshes,
       clearTenantClassificationLedgers(tenantId),
       startup?.tenantId === tenantId ? startup.done.catch(() => undefined) : undefined,
     ]).then(() => undefined);
@@ -2586,7 +2583,47 @@ export class IntelligenceSqliteStore {
   }
 
   waitForCacheClassification(): Promise<void> | undefined {
-    return this.classificationInitialization;
+    const refreshes = [...this.cacheClassifications.values()].flatMap(jobs => [...jobs]);
+    return refreshes.length ? Promise.all([this.classificationInitialization, ...refreshes]).then(() => undefined)
+      : this.classificationInitialization;
+  }
+
+  private scheduleCacheSnapshotClassification(tenantId: string, resource: GraphCacheResourceKind, snapshotId: string): void {
+    let snapshots = this.cacheSnapshots.get(tenantId);
+    if (!snapshots) this.cacheSnapshots.set(tenantId, snapshots = new Map());
+    snapshots.set(resource, snapshotId);
+    this.stagedIdentityShards.get(tenantId)?.delete(resource);
+    this.stagedFirstNames.get(tenantId)?.delete(resource);
+    const generation = this.cacheCleared.get(tenantId);
+    const current = () => !this.closed && !this.disconnectedClassificationTenants.has(tenantId) &&
+      this.cacheSnapshots.get(tenantId)?.get(resource) === snapshotId && this.cacheCleared.get(tenantId) === generation;
+    let jobs = this.cacheClassifications.get(tenantId);
+    if (!jobs) this.cacheClassifications.set(tenantId, jobs = new Set());
+    const pending = jobs;
+    const job = yieldToMain().then(async () => {
+      if (!current()) return;
+      if (identityResources.has(resource)) {
+        const identity = new Map<string, Map<GraphCacheResourceKind, TenantValueIndex>>();
+        const firstNames = new Map<string, Map<GraphCacheResourceKind, TenantValueIndex>>();
+        await this.classifyStartupRows(tenantId, resource, true, current, identity, firstNames, snapshotId);
+        if (!current()) return;
+        this.tenantIdentityIndexes.delete(tenantId);
+        this.setIdentityShard(this.tenantIdentityShards, tenantId, resource, identity.get(tenantId)?.get(resource) ?? new TenantValueIndex());
+        if (resource === "users") {
+          this.setIdentityShard(this.classificationIndexes, tenantId, resource, firstNames.get(tenantId)?.get(resource) ?? new TenantValueIndex());
+        }
+        const unavailable = this.unavailableIdentityResources.get(tenantId);
+        unavailable?.delete(resource);
+        if (!unavailable?.size) this.unavailableIdentityResources.delete(tenantId);
+      }
+      await this.classifyStartupRows(tenantId, resource, false, current, undefined, undefined, snapshotId);
+    }).catch(() => {
+      // Raw rows are already committed. Unfinished evidence remains incomplete.
+    }).finally(() => {
+      pending.delete(job);
+      if (!pending.size) this.cacheClassifications.delete(tenantId);
+    });
+    pending.add(job);
   }
 
   private async initializeCacheClassification(beforeClassification?: () => Promise<unknown>): Promise<void> {
@@ -2596,11 +2633,13 @@ export class IntelligenceSqliteStore {
       if (this.closed) return;
       const resources = this.db.prepare("SELECT DISTINCT tenant_id, resource FROM graph_resources ORDER BY tenant_id, resource").all() as
         unknown as Array<{ tenant_id: string; resource: GraphCacheResourceKind }>;
+      this.startupIdentityTenants = new Set(resources.filter(row => identityResources.has(row.resource)).map(row => row.tenant_id));
       const generations = new Map(this.cacheCleared);
       const current = (tenantId: string) => !this.closed && !this.disconnectedClassificationTenants.has(tenantId) &&
         generations.get(tenantId) === this.cacheCleared.get(tenantId);
       const process = async (tenantId: string, resource: GraphCacheResourceKind, indexOnly: boolean) => {
-        const done = this.classifyStartupRows(tenantId, resource, indexOnly, () => current(tenantId));
+        const done = this.classifyStartupRows(tenantId, resource, indexOnly,
+          () => current(tenantId) && !this.cacheSnapshots.get(tenantId)?.has(resource));
         this.startupClassification = { tenantId, done };
         try { await done; } finally { delete this.startupClassification; }
       };
@@ -2616,6 +2655,7 @@ export class IntelligenceSqliteStore {
         }
         staged.clear();
       }
+      this.startupIdentityTenants.clear();
       for (const { tenant_id: tenantId, resource } of resources) {
         if (current(tenantId)) await process(tenantId, resource, false);
       }
@@ -2631,12 +2671,13 @@ export class IntelligenceSqliteStore {
 
   private async classifyStartupRows(
     tenantId: string, resource: GraphCacheResourceKind, indexOnly: boolean, current: () => boolean,
+    identityShards = this.stagedIdentityShards, firstNameShards = this.stagedFirstNames, snapshotId?: string,
   ): Promise<void> {
     const graphPath = pathForResource(resource)?.path ?? "";
     let cursor = 0;
     while (current()) {
       const identity = indexOnly || resource === "users" || resource === "groups" ? undefined : this.classificationIdentityIndex(tenantId);
-      const startup = { dbPath: this.dbPath, tenantId, resource, afterRowId: cursor, indexOnly };
+      const startup = { dbPath: this.dbPath, tenantId, resource, afterRowId: cursor, indexOnly, snapshotId };
       let result: CacheClassificationResult;
       try {
         result = await classifyCacheRows([], graphPath, identity, indexOnly, indexOnly && resource === "users", undefined, startup);
@@ -2649,8 +2690,8 @@ export class IntelligenceSqliteStore {
       cursor = result.nextRowId;
       if (indexOnly) {
         const slice = new ClassificationSlice();
-        for (const [snapshot, staged] of [[result.egressIndex, this.stagedIdentityShards],
-          [result.firstNames, this.stagedFirstNames]] as const) {
+        for (const [snapshot, staged] of [[result.egressIndex, identityShards],
+          [result.firstNames, firstNameShards]] as const) {
           if (!snapshot) continue;
           let shard = staged.get(tenantId)?.get(resource);
           if (!shard) this.setIdentityShard(staged, tenantId, resource, shard = new TenantValueIndex());

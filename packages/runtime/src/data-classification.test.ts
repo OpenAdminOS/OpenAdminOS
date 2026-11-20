@@ -769,7 +769,8 @@ test("Graph ingress sends field classification to the worker and a worker failur
     }, "ollama", event => events.push(event));
     try {
       await withClassificationScope(ledger, async () => {
-        await registerGraphTenantData("/applications", payload);
+        registerGraphTenantData("/applications", payload);
+        await ledger.waitForObservations();
         assert.equal((await llm.complete(request)).text, "reviewed");
       });
       await ledger.waitForObservations();
@@ -779,6 +780,40 @@ test("Graph ingress sends field classification to the worker and a worker failur
     } finally { ledger.dispose(); }
   }
   assert.equal(sent.filter(type => type === "graph").length, 2);
+});
+
+test("provider dispatch preserves incomplete coverage while scoped ingress is pending", async t => {
+  const ledger = new ClassificationLedger();
+  const other = new ClassificationLedger();
+  const events: RequestClassificationEvent[] = [];
+  let resolveFinished!: () => void;
+  const finished = new Promise<void>(resolve => { resolveFinished = resolve; });
+  const pending = ledger.scheduleRegistration(() => finished);
+  const request = { prompt: "A short request" };
+  const model = withRequestClassification({
+    available: true,
+    async complete(options) {
+      assert.equal(options, request);
+      return { text: "done", model: "fixture" };
+    },
+    async *stream() {},
+  }, "ollama", event => events.push(event));
+  try {
+    assert.equal((await withClassificationScope(ledger, () => model.complete(request))).text, "done");
+    await withClassificationScope(other, () => model.complete(request));
+    await other.waitForObservations();
+    assert.equal(events.find(event => !event.classification.coverageIncomplete)?.classification.unexamined.registrations, 0);
+    resolveFinished();
+    await pending;
+    await ledger.waitForObservations();
+    const incomplete = events.find(event => event.classification.coverageIncomplete);
+    assert.equal(incomplete?.classification.unexamined.registrations, 1);
+    assert.equal(incomplete?.classification.effectiveClass, "credential");
+  } finally {
+    resolveFinished();
+    ledger.dispose();
+    other.dispose();
+  }
 });
 
 test("Secure Score Graph ingress preserves field evidence across bounded worker batches", async t => {

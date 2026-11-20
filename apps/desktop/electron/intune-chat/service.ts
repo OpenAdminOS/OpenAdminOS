@@ -681,7 +681,6 @@ export class IntuneChatService {
       if (activeSignal?.aborted) dispose();
       activeSignal?.addEventListener("abort", dispose, { once: true });
       try {
-        if (tenantId) await store.waitForCacheClassification();
         activeSignal?.throwIfAborted();
         return await withClassificationScope(ledger, () => work(activeSignal));
       }

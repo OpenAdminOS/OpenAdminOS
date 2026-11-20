@@ -128,7 +128,7 @@ async function handleGraphRequest(
   }
   validateSelectSubset(operation, request);
   const response = await input.ctx.graph.request(request);
-  await registerGraphTenantData(request.path, response);
+  registerGraphTenantData(request.path, response);
   return response;
 }
 

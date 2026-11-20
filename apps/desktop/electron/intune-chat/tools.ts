@@ -1523,7 +1523,7 @@ async function graphGet(
   const requestPage = async (input: GraphRequestInput): Promise<unknown> => {
     try {
       const data = await graph.request({ ...input, ...(ctx.signal ? { signal: ctx.signal } : {}) });
-      await registerGraphTenantData(input.path, data, ctx.signal);
+      registerGraphTenantData(input.path, data, ctx.signal);
       return data;
     } catch (error) {
       const denial = graphAccessDenialFromError(error, { path, method: "GET", requiredScopes: validation.scopes });

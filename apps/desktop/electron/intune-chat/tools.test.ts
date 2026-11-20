@@ -264,6 +264,31 @@ it("keeps the previous rows and identity index when batched preparation is cance
   }
 });
 
+it("commits a refresh while startup classification is still pending", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-cache-refresh-pending-"));
+  let resolveStartup!: () => void;
+  const startup = new Promise<void>(resolve => { resolveStartup = resolve; });
+  const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"), {
+    backgroundClassification: true, beforeClassification: () => startup,
+  });
+  try {
+    const snapshot = { tenantId: "tenant-1", resource: "users" as const, label: "Users",
+      scopeSet: [], refreshedAt: "2026-11-18T00:00:00.000Z" };
+    const row = { id: "new-user", displayName: "Synthetic Person" };
+    await Promise.race([
+      store.replaceGraphResourcesInBatches({ ...snapshot, rows: [row] }),
+      nextTick().then(() => assert.fail("Refresh waited for startup classification")),
+    ]);
+    assert.deepEqual(store.queryGraphCache(snapshot).rows.map(entry => entry.row), [row]);
+    assert.equal(store.classificationIdentityIndex(snapshot.tenantId).isComplete?.(), false);
+  } finally {
+    resolveStartup();
+    await store.waitForCacheClassification();
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 it("prepares fresh cache sidecars and identity indexes in the local worker", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-classification-ingress-"));
   const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
@@ -272,9 +297,11 @@ it("prepares fresh cache sidecars and identity indexes in the local worker", asy
     await store.replaceGraphResourcesInBatches({ ...common, resource: "users", label: "Users",
       rows: [{ id: "fixture-id", displayName: "Yelena Fixture" }] });
     assert.equal(store.tenantIdentityValues(common.tenantId).matches("Yelena Fixture"), true);
+    await store.waitForCacheClassification();
     const resource = "managedDevices";
     const row = { id: "device-1", deviceName: "Yelena", activationLockBypassCode: "q7z" };
     await store.replaceGraphResourcesInBatches({ ...common, resource, label: "Devices", rows: [row] });
+    await store.waitForCacheClassification();
     const ledger = new ClassificationLedger();
     const result = withClassificationScope(ledger, () => store.queryGraphCache({ ...common, resource }));
     assert.deepEqual(result.rows.map(entry => entry.row), [row]);
@@ -847,9 +874,18 @@ describe("Intune Chat read-only tools", () => {
     }
   });
 
-  it("graph_get follows nextLink pages within the row cap", async () => {
+  it("graph_get follows nextLink pages within the row cap", async t => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
     const store = seededStore(dir, 1);
+    const ledger = new ClassificationLedger();
+    let resolveGate!: () => void;
+    const gate = new Promise<void>(resolve => { resolveGate = resolve; });
+    const registrations: Promise<void>[] = [];
+    t.mock.method(ledger, "registerGraph", () => {
+      const job = ledger.scheduleRegistration(() => gate);
+      registrations.push(job);
+      return job;
+    });
     try {
       const seenSkiptokens: Array<string | undefined> = [];
       const graph: RunGraphApi = {
@@ -870,10 +906,11 @@ describe("Intune Chat read-only tools", () => {
         },
       };
       const ctx = toolContext(store, { graphForScopes: async () => graph });
-      const execution = await executeIntuneChatTool(ctx, "graph_get", {
+      const executionPromise = withClassificationScope(ledger, () => executeIntuneChatTool(ctx, "graph_get", {
         path: "/users",
         query: { $select: "id,displayName", $count: "true" },
-      });
+      }));
+      const execution = await Promise.race([executionPromise, nextTick().then(() => assert.fail("Paging waited for registration"))]);
       const result = execution.result as {
         returnedRows: number;
         truncated: boolean;
@@ -881,6 +918,8 @@ describe("Intune Chat read-only tools", () => {
         pagesFetched?: number;
         rows: Array<{ id: string }>;
       };
+      assert.equal(registrations.length, 2);
+      assert.equal(ledger.classifyRequest({ prompt: "Paging completed" }).coverageIncomplete, true);
       assert.deepEqual(seenSkiptokens, [undefined, "page2"]);
       assert.equal(result.returnedRows, 50);
       assert.equal(result.truncated, true);
@@ -890,6 +929,9 @@ describe("Intune Chat read-only tools", () => {
       assert.equal(result.rows[0]?.id, "user-p1-0");
       assert.equal(result.rows[30]?.id, "user-p2-0");
     } finally {
+      resolveGate();
+      await Promise.all(registrations);
+      ledger.dispose();
       store.close();
       await rm(dir, { recursive: true, force: true });
     }

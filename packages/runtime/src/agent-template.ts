@@ -1059,7 +1059,7 @@ async function requestGraphPages(input: {
     query: input.query,
     headers: input.headers,
   });
-  await registerGraphTenantData(input.path, first);
+  registerGraphTenantData(input.path, first);
   const firstPage = graphCollectionPage(first);
   if (!firstPage) return first;
 
@@ -1084,7 +1084,7 @@ async function requestGraphPages(input: {
       query: next.query,
       headers: input.headers,
     });
-    await registerGraphTenantData(next.path, payload);
+    registerGraphTenantData(next.path, payload);
     const page = graphCollectionPage(payload);
     if (!page) {
       throw new Error(`Graph paging for ${input.path} returned a non-collection response.`);

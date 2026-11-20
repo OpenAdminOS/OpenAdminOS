@@ -9,7 +9,7 @@ import type { WorkerScan, WorkerResult, WorkerValue, WorkerLargeValue } from "./
 import type { WorkerGraphResult } from "./graph-ingress-classification.js";
 
 type WorkerJob = WorkerScan
-  | { type: "graph"; data: unknown; graphPath: string; shards: number[]; collection?: string | true }
+  | { type: "graph"; data: unknown; settings: Omit<ClassificationOptions, "identityIndex">; shards: number[]; collection?: string | true }
   | { type: "cache"; rows: CacheClassificationRow[]; graphPath: string; shards: number[]; indexValues: boolean; indexNames: boolean; startup?: CacheStartupPage };
 
 interface WorkerReplies {

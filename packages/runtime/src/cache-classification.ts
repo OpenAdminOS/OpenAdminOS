@@ -48,6 +48,7 @@ export interface CacheStartupPage {
   resource: string;
   afterRowId: number;
   indexOnly: boolean;
+  snapshotId?: string;
 }
 
 export interface CacheClassificationResult {
