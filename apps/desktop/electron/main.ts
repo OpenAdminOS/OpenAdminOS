@@ -5486,12 +5486,13 @@ function removeSchedulerRegistration(guard: () => void = () => undefined): void 
         `the scheduled task ${WINDOWS_SCHEDULER_TASK} could not be confirmed as this account's (its program or the account it runs as is another), so it was left in place. Check Run As User in Task Scheduler and remove it there if it is yours`,
       );
     }
-    guard();
     if (windowsSchedulerTaskXml() !== xml) {
       throw new Error(
         `the scheduled task ${WINDOWS_SCHEDULER_TASK} changed while it was being checked, so it was left in place. Check Run As User in Task Scheduler and remove it there if it is yours`,
       );
     }
+    // The last check before the delete: the query above can take seconds.
+    guard();
     removeWindowsSchedulerTask();
     const after = windowsSchedulerTaskPresence();
     if (after !== "absent") {
