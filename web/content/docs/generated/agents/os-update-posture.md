@@ -13,15 +13,15 @@ Reviews Intune OS version distribution, compliance, ownership, enrollment, and s
 | Field | Value |
 | --- | --- |
 | Agent ID | `os-update-posture` |
-| Version | `1.1.0` |
+| Version | `1.2.0` |
 | Mode | `read` |
 | Tier | `dashboard` |
 | Category | `updates` |
 | Required Entra tier | `free` |
 | Preferred model | `llama3.1:8b` |
-| Minimum app version | `0.1.0` |
+| Minimum app version | `0.7.3` |
 | Author | OpenAdminOS · verified |
-| Last changed | 2026-11-04 · `6b31f810` |
+| Last changed | 2026-11-19 · `acf7be83` |
 
 ## Execution
 

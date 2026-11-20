@@ -13,15 +13,15 @@ Reviews app registrations for stale experiments, risky exposure, credentials, an
 | Field | Value |
 | --- | --- |
 | Agent ID | `dormant-app-registrations` |
-| Version | `1.1.1` |
+| Version | `1.2.0` |
 | Mode | `read` |
 | Tier | `agent` |
 | Category | `apps` |
 | Required Entra tier | `free` |
 | Preferred model | `llama3.1:8b` |
-| Minimum app version | `0.6.3` |
+| Minimum app version | `0.7.3` |
 | Author | OpenAdminOS · verified |
-| Last changed | 2026-11-04 · `6b31f810` |
+| Last changed | 2026-11-19 · `acf7be83` |
 
 ## Execution
 
