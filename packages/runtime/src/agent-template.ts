@@ -1615,7 +1615,11 @@ function transformCountByField(
 
   for (const item of spec.source as Array<Record<string, unknown>>) {
     const raw = readFieldPath(item, spec.field);
-    const missing = raw === undefined || raw === null || (raw === "" && spec.missingBucket !== undefined);
+    // An empty string or empty array (Graph's "no risk levels") counts as
+    // missing only when the manifest names a bucket for it, so agents
+    // without missingBucket keep their counts.
+    const empty = raw === "" || (Array.isArray(raw) && raw.length === 0);
+    const missing = raw === undefined || raw === null || (empty && spec.missingBucket !== undefined);
     if (missing && !spec.missingBucket) continue;
     const key = missing ? spec.missingBucket! : typeof raw === "string" ? raw : String(raw);
     Object.defineProperty(result, key, { value: (Object.hasOwn(result, key) ? result[key]! : 0) + 1, writable: true, enumerable: true, configurable: true });

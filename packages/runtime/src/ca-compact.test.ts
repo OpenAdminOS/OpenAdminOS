@@ -111,3 +111,28 @@ describe("counts and top template filters", () => {
     assert.equal(Object.getOwnPropertyDescriptor(out, "__proto__")?.value, 2);
   });
 });
+
+describe("count-by-field with array values", () => {
+  it("puts empty arrays in the missing bucket only when one is named", async () => {
+    const { parseAgentTemplate, runAgentTemplate } = await import("./agent-template.js");
+    const rows = [{ levels: [] }, { levels: ["high"] }, { levels: ["high", "medium"] }, { levels: [] }];
+    const manifest = (missing: string) => parseAgentTemplate(JSON.stringify({
+      descriptor: { id: "count-test", name: "Count", description: "Count", version: "1.0.0", category: "policies", mode: "read" },
+      skills: [
+        { id: "rows", format: "graph", label: "Read", settings: { method: "GET", path: "/identity/conditionalAccess/policies" } },
+        { id: "by_level", format: "transform", label: "Count", settings: { kind: "count-by-field", source: "{{ rows.output }}", field: "levels", ...(missing ? { missingBucket: missing } : {}) } },
+      ],
+      definition: { triggers: [{ id: "manual", kind: "manual" }], result: { summary: "done", data: { counts: "{{ by_level.output }}" } } },
+    }));
+    const ctx = {
+      agent: { id: "count-test" }, providerId: "ollama",
+      graph: { request: async () => ({ value: rows }) },
+      llm: { available: false }, log: () => {},
+      step: async (_label: string, _detail: string, fn: () => Promise<unknown>) => fn(),
+    } as never;
+    const named = await runAgentTemplate(manifest("(none)"), ctx);
+    assert.deepEqual((named.result as { counts: unknown }).counts, { "(none)": 2, high: 1, "high,medium": 1 });
+    const unnamed = await runAgentTemplate(manifest(""), ctx);
+    assert.deepEqual((unnamed.result as { counts: unknown }).counts, { "": 2, high: 1, "high,medium": 1 });
+  });
+});
