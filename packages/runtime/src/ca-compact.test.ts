@@ -157,6 +157,27 @@ describe("compactConditionalAccessPolicy", () => {
     assert.deepEqual(legacy.deviceStates, { include: "All", exclude: "Compliant" });
   });
 
+    it("keeps a strength without a display name, filter rules and secondary-only reauthentication", () => {
+    const record = compactConditionalAccessPolicy({
+      displayName: "Strength by id", state: "enabled",
+      conditions: {
+        applications: { includeApplications: ["All"], applicationFilter: { mode: "exclude", rule: 'CustomSecurityAttribute.App_Tier -eq "Legacy"' } },
+        clientApplications: { includeServicePrincipals: ["sp-1"], servicePrincipalFilter: { mode: "include", rule: 'CustomSecurityAttribute.Workload -eq "Batch"' } },
+      },
+      grantControls: { operator: "OR", builtInControls: ["compliantDevice"], authenticationStrength: { id: "00000000-0000-0000-0000-000000000004" } },
+      sessionControls: { signInFrequency: { value: 1, type: "hours", authenticationType: "secondaryAuthentication", frequencyInterval: "timeBased", isEnabled: true } },
+    }, NOW);
+    assert.deepEqual(record.grant, { operator: "OR", controls: ["compliantDevice"], authStrength: { name: "Phishing-resistant MFA", type: "builtIn", satisfies: "mfa" } });
+    assert.deepEqual((record.apps as { appFilter?: string }).appFilter, 'exclude: CustomSecurityAttribute.App_Tier -eq "Legacy"');
+    assert.deepEqual((record.workloadIdentities as { filter?: string }).filter, 'include: CustomSecurityAttribute.Workload -eq "Batch"');
+    assert.deepEqual(record.session, ["sign-in frequency 1 hours (secondary authentication only)"]);
+    const unnamed = compactConditionalAccessPolicy({
+      displayName: "Custom strength by id", state: "enabled",
+      grantControls: { operator: "OR", builtInControls: [], authenticationStrength: { id: "c0ffee00-0000-4000-a000-000000000001" } },
+    }, NOW);
+    assert.deepEqual(unnamed.grant, { authStrength: { name: "unnamed authentication strength" } });
+  });
+
     it("survives malformed input", () => {
     assert.deepEqual(compactConditionalAccessPolicy(null, NOW), { name: "(unnamed policy)", state: "unknown" });
   });
