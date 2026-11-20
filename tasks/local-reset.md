@@ -287,6 +287,14 @@ the installed app's scheduler, login item or caches.
   failure, now each other keychain in the search list is looked up on its
   own with its own warning). Muse lows applied: the same keychain fix, the
   narrower SPEC sentence, a writable check in the close test.
+- Review round 25: Claude no blocking. Sol one blocking (on Windows, removing
+  a read-only file that a backup also hard links clears the shared
+  attribute; such entries now stay and are listed, in the app and in the
+  guide's script) and a medium (the post-reset warnings list is now bounded
+  and scrolls). Muse one blocking (ordinary state writes still reached
+  state.json after the marker; every write is now refused once the marker is
+  committed, a queued one included) and a low (the login keychain is
+  recognized by file identity in the other-keychain loop).
 - Process lesson: twice I edited the tree while a reviewer was reading it;
   parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the
