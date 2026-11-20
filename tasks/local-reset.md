@@ -348,6 +348,11 @@ the installed app's scheduler, login item or caches.
   guard listed the folder after checking it; it now checks the identity
   again after the listing). Muse: no prune while the audit log is frozen
   (medium), and a refused reset unfreezes it (low).
+- Review round 33: Claude and Muse no blocking. Sol one blocking (a token
+  refresh that returns after the commit wrote or, on a decrypt failure,
+  deleted a token cache by path); every token cache store, legacy ones
+  included, is now held after the commit: no write, no clear, reads return
+  an empty cache without opening the file.
 - Process lesson: twice I edited the tree while a reviewer was reading it;
   parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the
