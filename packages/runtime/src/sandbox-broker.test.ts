@@ -48,6 +48,45 @@ it("fences the script prompt, keeps the author system prompt, and strips echoed 
 });
 
 describe("sandbox broker", () => {
+  it("reports a credential copied into a configuration field as competing provenance", async t => {
+    const path = "/applications";
+    const agent = fakeAgent({ scopes: ["Application.Read.All"], graphOperations: [{ method: "GET", path }] });
+    const ledger = new ClassificationLedger();
+    t.after(() => ledger.dispose());
+    const application = { displayName: "qxz", passwordCredentials: [{ hint: "qxz" }] };
+    const events: RequestClassificationEvent[] = [];
+    let request: LlmOptions | undefined;
+    const ctx = fakeContext(agent, {
+      graphRequest: async () => ({ value: [application] }),
+      llmComplete: async options => {
+        assert.equal(events.length, 0);
+        request = options;
+        return { text: "Reviewed", model: "fixture" };
+      },
+    });
+    ctx.llm = withRequestClassification(ctx.llm, "ollama", event => { events.push(event); });
+    const broker = createSandboxBroker({ agent, ctx });
+    await withClassificationScope(ledger, async () => {
+      const read = await broker.handle({ id: "read", method: "graph.request", params: { method: "GET", path } });
+      assert.equal(read.ok, true);
+      await ledger.waitForObservations();
+      const { hint } = (read.result as { value: typeof application[] }).value[0]!.passwordCredentials[0]!;
+      const script = JSON.stringify({ displayName: hint });
+      assert.equal((await broker.handle({ id: "model", method: "llm.complete", params: { prompt: script, system: script } })).ok, true);
+      await ledger.waitForObservations();
+      const { classification } = events[0]!;
+      assert.equal(classification.coverageIncomplete, true);
+      for (const section of ["system", "prompt"] as const) {
+        const start = request![section]!.indexOf(hint);
+        const end = start + hint.length;
+        assert.deepEqual(classification.spans.filter(span => span.section === section).map(({ start, end, kind }) => [start, end, kind]),
+          [[start, end, "credential"]]);
+        assert.deepEqual(classification.unexamined.ranges.filter(range => range.section === section),
+          [{ section, start, end, reason: "competing-provenance" }]);
+      }
+    });
+  });
+
   it("preserves script matches at both edges of fence and JSON escapes", async t => {
     const path = "/applications";
     const agent = fakeAgent({ scopes: ["Application.Read.All"], graphOperations: [{ method: "GET", path }] });

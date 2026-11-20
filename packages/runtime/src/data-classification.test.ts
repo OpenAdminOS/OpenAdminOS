@@ -1020,6 +1020,57 @@ test("serialized field provenance follows every array element across nesting and
   }
 });
 
+test("a serialized field keeps the most sensitive competing origin and reports an unresolved range", async t => {
+  const cases = [
+    { value: "qxz", key: "displayName", low: "configuration", lowPath: "/applications",
+      high: "credential", highPath: "/applications", data: { passwordCredentials: [{ hint: "qxz" }] } },
+    { value: "ops", key: "displayName", low: "configuration", lowPath: "/applications",
+      high: "identity", highPath: "/groups", data: { mailNickname: "ops" } },
+    { value: "mfa", key: "deviceName", low: "device", lowPath: "/deviceManagement/managedDevices",
+      high: "security", highPath: "/identity/conditionalAccess/policies", data: { grantControls: { builtInControls: ["mfa"] } } },
+    { value: "same", key: "id", low: "device", lowPath: "/devices",
+      high: "security", highPath: "/identity/conditionalAccess/policies", data: { id: "same" } },
+    { value: true, key: "accountEnabled", low: "configuration", lowPath: "/devices",
+      high: "security", highPath: "/deviceManagement/deviceCompliancePolicies", data: { passwordRequired: true } },
+    { value: "qxz987654321", key: "displayName", low: "configuration", lowPath: "/applications",
+      high: "credential", highPath: "/applications", data: { passwordCredentials: [{ hint: "qxz987654321" }] } },
+  ] as const;
+  for (const { value, key, low, lowPath, high, highPath, data } of cases) {
+    for (const placement of ["forward", "reverse", "prior"] as const) {
+      const ledger = new ClassificationLedger();
+      const prior = new ClassificationLedger();
+      t.after(() => { ledger.dispose(); prior.dispose(); });
+      const registerLow = () => ledger.register("lower", { [key]: value }, { graphPath: lowPath });
+      const registerHigh = () => (placement === "prior" ? prior : ledger).register("higher", data, { graphPath: highPath });
+      if (placement === "reverse") { registerHigh(); registerLow(); }
+      else { registerLow(); registerHigh(); }
+      if (placement === "prior") ledger.include(prior);
+      assert.equal(classifyData({ [key]: value }, { graphPath: lowPath }).classes[`/${key}`], low);
+      const json = JSON.stringify({ [key]: [value] });
+      const verify = (request: { prompt: string; system: string }, result: ReturnType<typeof ledger.classifyRequest>) => {
+        assert.equal(result.coverageIncomplete, true);
+        for (const section of ["system", "prompt"] as const) {
+          const start = request[section].indexOf(String(value));
+          const end = start + String(value).length;
+          assert.deepEqual(result.spans.filter(span => span.section === section).map(span => [span.start, span.end, span.kind]), [[start, end, high]]);
+          assert.deepEqual(result.unexamined.ranges.filter(range => range.section === section), [{ section, start, end, reason: "competing-provenance" }]);
+        }
+      };
+      const request = { system: json, prompt: JSON.stringify({ nested: json }) };
+      verify(request, ledger.classifyRequest(request));
+      if (placement === "prior") {
+        const large = { ...request, prompt: "Context. ".repeat(80) + request.prompt };
+        verify(large, await ledger.classifyProviderRequest(large));
+      }
+      const proven = withTemplateInterpolations({ system: [{ key: key.toLowerCase(), value,
+        start: json.indexOf(String(value)), end: json.indexOf(String(value)) + String(value).length }] }, () =>
+        ledger.classifyRequest({ system: json, prompt: "Review tenant data." }));
+      assert.equal(proven.coverageIncomplete, false);
+      assert.equal(proven.spans[0]?.kind, high);
+    }
+  }
+});
+
 test("Conditional Access references and delegated permissions distinguish identifiers from settings", () => {
   const ids = ["aaaaaaaa-1111-2222-3333-444444444444", "bbbbbbbb-1111-2222-3333-444444444444"];
   const graphPath = "/identity/conditionalAccess/policies";

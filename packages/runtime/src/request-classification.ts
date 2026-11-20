@@ -15,7 +15,7 @@ export interface ClassificationSpan extends TextSpan {
 
 interface UnexaminedRange extends TextSpan {
   section: ClassificationSpan["section"];
-  reason: "text-limit" | "match-limit" | "history-evidence-unavailable" | "history-provenance-unavailable" | "script-provenance-unavailable" | "clipped-provenance-unavailable" | "failure";
+  reason: "text-limit" | "match-limit" | "history-evidence-unavailable" | "history-provenance-unavailable" | "script-provenance-unavailable" | "clipped-provenance-unavailable" | "competing-provenance" | "failure";
 }
 
 interface HistoryReplay extends TextSpan {
@@ -107,6 +107,7 @@ interface Evidence {
   source: string;
   key: string;
   maskRole?: SecurityMaskRole;
+  leastSensitiveFieldKind?: DataClass;
 }
 interface ValueEntry {
   kind: DataClass;
@@ -309,6 +310,10 @@ function preferEvidence(previous: Evidence | undefined, next: Evidence): boolean
   return !previous || (previous.kind !== next.kind
     ? maxDataClass(previous.kind, next.kind) === next.kind
     : next.maskRole === "nameOrIdentifier" && previous.maskRole !== next.maskRole);
+}
+
+function lessSensitiveKind(first: DataClass | undefined, second: DataClass): DataClass {
+  return first && maxDataClass(first, second) === second ? first : second;
 }
 
 function classification(
@@ -901,6 +906,11 @@ export class ClassificationLedger {
         }
         entry.fields.set(evidence.key, evidence);
       }
+      if (previous && (previous.kind !== evidence.kind || previous.leastSensitiveFieldKind)) {
+        const bound = entry.fields.get(evidence.key)!;
+        const lower = lessSensitiveKind(previous.leastSensitiveFieldKind ?? previous.kind, evidence.kind);
+        entry.fields.set(evidence.key, { ...bound, leastSensitiveFieldKind: lower });
+      }
       if (preferEvidence(entry.best, evidence)) {
         this.byClass.get(entry.kind)!.delete(value);
         this.byClass.get(evidence.kind)!.add(value);
@@ -1071,6 +1081,7 @@ export class ClassificationLedger {
     replayAt?: (start: number, end: number) => void,
     scriptAt?: (start: number, end: number) => void,
     clippedAt?: (start: number, end: number) => void,
+    fieldEvidence?: (span: TextSpan, best: Evidence, bound?: Evidence) => void,
   ): boolean {
     for (let at = from; at < to; at++) {
       const first = text.charCodeAt(at);
@@ -1124,10 +1135,12 @@ export class ClassificationLedger {
             }
             const field = mode === "field" ? fieldAt?.(start, end) : undefined;
             const evidence = mode === "field" ? (field === undefined ? undefined : entry.fields.get(field)) : entry.best;
-            if (evidence) {
+            if (evidence || field !== undefined && entry.best) {
               // String quotes are syntax, separate from the value to be masked.
               const quoteWidth = mode === "field" ? value.startsWith('\\"') ? 2 : value.startsWith('"') ? 1 : 0 : 0;
-              emit({ start: start + quoteWidth, end: end - quoteWidth }, evidence, mode === "field" || mode === "context");
+              const span = { start: start + quoteWidth, end: end - quoteWidth };
+              if (field !== undefined && entry.best) fieldEvidence?.(span, entry.best, evidence);
+              else if (evidence) emit(span, evidence, mode === "context");
             }
           }
         }
@@ -1381,19 +1394,22 @@ export class ClassificationLedger {
       const fullLength = fullLengths?.[section] ?? original.length;
       if (text.length < fullLength) ranges.push({ section, start: text.length, end: fullLength, reason: "text-limit" });
       const found = new Map<string, ClassificationSpan & { authoritative?: boolean }>();
+      const provenRanges = new Set<string>();
+      const matchedFields = new Map<string, TextSpan & { best: Evidence; bound?: Evidence; leastSensitive?: DataClass }>();
       const work = { remaining: MATCH_BUDGET };
       let fields: ReturnType<typeof jsonFields> | undefined;
       const fieldAt = (start: number, end: number) => {
         const field = (fields ??= jsonFields(text)).get(start);
         return field?.end === end ? field.key : undefined;
       };
-      const collect = ({ start, end }: TextSpan, evidence: Evidence, authoritative = false) => {
+      const collect = ({ start, end }: TextSpan, evidence: Evidence, authoritative = false, fieldBacked = false) => {
         const { kind, source, maskRole } = evidence;
         const key = `${start}:${end}`;
+        if (authoritative && !fieldBacked) provenRanges.add(key);
         const previous = found.get(key);
         // A bare GUID can identify a device or a policy. Use typed
         // provenance for that syntax when available.
-        if (previous?.authoritative && source === "detector:identifier") return;
+        if (source === "detector:identifier" && (provenRanges.has(key) || matchedFields.get(key)?.bound)) return;
         const higher = previous && previous.kind !== kind && maxDataClass(previous.kind, kind) === kind;
         const sameWithBetterEvidence = previous?.kind === kind && (
           authoritative && !previous.authoritative ||
@@ -1403,6 +1419,16 @@ export class ClassificationLedger {
         if (!previous || higher || sameWithBetterEvidence) {
           found.set(key, { section, start, end, kind, source, ...(maskRole ? { maskRole } : {}), ...(authoritative ? { authoritative } : {}) });
         }
+      };
+      const collectFieldEvidence = (span: TextSpan, best: Evidence, bound?: Evidence) => {
+        const key = `${span.start}:${span.end}`;
+        const match = matchedFields.get(key) ?? { ...span, best };
+        if (preferEvidence(match.best, best)) match.best = best;
+        if (bound) {
+          if (preferEvidence(match.bound, bound)) match.bound = bound;
+          match.leastSensitive = lessSensitiveKind(match.leastSensitive, bound.leastSensitiveFieldKind ?? bound.kind);
+        }
+        matchedFields.set(key, match);
       };
       for (const span of state.renderedSpans ?? []) {
         if (span.section === section && span.end <= text.length) collect(span, { ...span, key: "" }, true);
@@ -1460,12 +1486,23 @@ export class ClassificationLedger {
       for (let from = 0; from < text.length; from += TEXT_CHUNK) {
         const to = Math.min(text.length, from + TEXT_CHUNK);
         if (!this.scan(rawIndex, text, from, to, work, collect, boundary, fieldAt, replayAt, scriptAt,
-            (start, end) => clipped.set(`${start}:${end}`, { start, end })) ||
+            (start, end) => clipped.set(`${start}:${end}`, { start, end }), collectFieldEvidence) ||
             foldedIndex && folded !== undefined && !this.scan(foldedIndex, folded, from, to, work, collect, boundary)) {
           // The section-wide detector pass has not examined any of this text.
           ranges.push({ section, start: 0, end: text.length, reason: "match-limit" });
           break;
         }
+      }
+      const competing = new Map<string, TextSpan>();
+      for (const [key, { start, end, best, bound, leastSensitive }] of matchedFields) {
+        const proven = provenRanges.has(key);
+        if (!bound && !proven) continue;
+        const span = { start, end };
+        const match = found.get(key);
+        const highest = match ? maxDataClass(match.kind, best.kind) : best.kind;
+        if (bound && !proven && highest !== leastSensitive) competing.set(key, span);
+        if (bound) collect(span, bound, true, true);
+        if (!bound || best.kind !== bound.kind) collect(span, best);
       }
       // Detector grammar can span an arbitrarily long gap or token. Run on
       // the bounded section so the ledger's chunks do not clip its input.
@@ -1480,11 +1517,12 @@ export class ClassificationLedger {
         if (found.get(key)?.kind !== "credential") ranges.push({ section, ...span, reason: "history-provenance-unavailable" });
       }
       for (const [matches, reason] of [[ambiguousScript, "script-provenance-unavailable"],
+        [competing, "competing-provenance"],
         [clipped, "clipped-provenance-unavailable"]] as const) {
         let reported = 0;
         let overflow: UnexaminedRange | undefined;
         for (const [key, span] of matches) {
-          if (reason === "script-provenance-unavailable" && found.get(key)?.authoritative) continue;
+          if (reason === "script-provenance-unavailable" && (provenRanges.has(key) || matchedFields.get(key)?.bound)) continue;
           if (++reported <= 256) ranges.push({ section, ...span, reason });
           else if (!overflow) overflow = { section, ...span, reason };
           else {
