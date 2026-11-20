@@ -1884,11 +1884,14 @@ export class RunService {
       // Only when the run turns failed: a later snapshot of a failure already checked keeps what
       // that check found (persistRunSnapshot carries an issue over), so no later state decides it.
       if ((await this.host.read()).runs.find((existing) => existing.id === run.id)?.status === "failed") return run;
+      // Classified first, so an unrelated failure (a Graph permission error) is saved without
+      // waiting on provider discovery; only a fit candidate checks where its model runs.
+      const context = { providerId: run.providerId, model: run.model, isLocal: true };
+      const issue = classifyModelFitFailure((run as { failureReason?: unknown }).failureReason ?? run.error, context) ?? classifyModelFitFailure(run.error, context);
+      if (!issue) return run;
       const provider = (await this.host.listProviders()).find((entry) => entry.id === run.providerId);
       if (!provider || !isOnDeviceModel(provider, run.model)) return run;
-      const context = { providerId: provider.id, model: run.model, isLocal: true };
-      const issue = classifyModelFitFailure((run as { failureReason?: unknown }).failureReason ?? run.error, context) ?? classifyModelFitFailure(run.error, context);
-      if (!issue || !(await this.host.verifyOnDeviceModel?.(provider.id, run.model))) return run;
+      if (!(await this.host.verifyOnDeviceModel?.(provider.id, run.model))) return run;
       return { ...run, modelFit: issue };
     } catch {
       // A check that cannot run offers nothing; the run keeps its failure as it is.

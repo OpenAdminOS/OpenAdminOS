@@ -530,3 +530,15 @@ it('records a fit issue on a failed run only after confirming its model ran on t
   await h.service.persistRunSnapshot(failed('r2'));
   assert.equal(h.state().runs.find((run) => run.id === 'r2')?.modelFit, undefined);
 });
+
+it('saves an unrelated run failure without waiting on provider discovery', async () => {
+  const h = harness();
+  let listed = 0;
+  Object.assign(h.host, { listProviders: async () => { listed += 1; return []; }, verifyOnDeviceModel: async () => true });
+  const failed = { id: 'r3', agentSlug: 'docs', status: 'failed', providerId: 'ollama', model: 'gpt-oss:20b', queuedAt: new Date().toISOString(), steps: [], logs: [],
+    error: 'Graph returned 403 Forbidden for /deviceManagement/managedDevices.' } as unknown as RunRecord;
+  await h.host.write({ ...h.state(), runs: [{ ...failed, status: 'running' }] as RunRecord[] });
+  await h.service.persistRunSnapshot(failed);
+  assert.equal(h.state().runs.find((run) => run.id === 'r3')?.status, 'failed');
+  assert.equal(listed, 0);
+});
