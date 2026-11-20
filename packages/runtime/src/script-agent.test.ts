@@ -149,12 +149,15 @@ definition:
     const role = new GraphAccessDeniedError({ method: "GET", path: "/deviceManagement/managedDevices", requiredScopes: ["DeviceManagementManagedDevices.Read.All"], grantedScopes: ["DeviceManagementManagedDevices.Read.All"] });
     const teams = new ConnectorScopeError("Microsoft Graph rejected the request (HTTP 403). The signed-in admin lacks the required Teams scopes.", { connectorId: "teams", missingScopes: [] });
     // Each case: the errors Graph raises in order, the response the script exits on, and the cause expected.
-    const cases: Array<{ denials: Error[]; exitOn: number | "other"; via?: "connector"; cause: string | undefined }> = [
+    const cases: Array<{ denials: Error[]; exitOn: number | "other" | "llm"; via?: "connector"; cause: string | undefined }> = [
       { denials: [consent], exitOn: 0, cause: "missing-consent" },
       { denials: [consent], exitOn: "other", cause: undefined },
-      { denials: [consent, role], exitOn: 0, cause: "missing-consent" },
       { denials: [consent, role], exitOn: 1, cause: "missing-role" },
+      // The script recovered from the first denial and failed on the second request.
+      { denials: [consent, role], exitOn: 0, cause: undefined },
       { denials: [teams], exitOn: 0, via: "connector", cause: "unknown" },
+      // The script logged a Graph denial, went on, and exited on a provider 403.
+      { denials: [consent], exitOn: "llm", cause: undefined },
     ];
     for (const testCase of cases) {
       const tempRoot = await mkdtemp(path.join(tmpdir(), "openadminos-script-denial-"));
@@ -174,7 +177,13 @@ definition:
             messages.push(response.error?.message ?? "");
           }
           const method = testCase.via === "connector" ? "connector.invoke" : "graph.request";
-          const stderr = testCase.exitOn === "other" ? "Error: result file could not be written" : `Error: ${method}: ${messages[testCase.exitOn]}`;
+          let stderr: string;
+          if (testCase.exitOn === "other") stderr = "Error: result file could not be written";
+          else if (testCase.exitOn === "llm") {
+            const llm = await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, { id: "llm-1", method: "llm.complete", params: { prompt: "Summarize.", maxTokens: 10 } } satisfies SandboxBrokerRequest);
+            assert.equal(llm.ok, false);
+            stderr = `Warning: ${method}: ${messages[0]}\nError: llm.complete: ${llm.error?.message}`;
+          } else stderr = `Error: ${method}: ${messages[testCase.exitOn]}`;
           return { exitCode: 1, signal: null, stdout: "", stderr };
         },
       };
@@ -219,6 +228,7 @@ definition:
       const ctx = fakeRunContext();
       let call = 0;
       ctx.graph.request = async () => { throw testCase.denials[call++]!; };
+      ctx.llm.complete = async () => { throw new Error("Ollama responded with HTTP 403 at http://127.0.0.1:11434/api/chat: Forbidden"); };
       ctx.connectors = { teams: { capabilities: { postChannelMessage: async () => { throw testCase.denials[call++]!; } } } } as unknown as RunContext["connectors"];
       const error = await module.run(ctx).then(() => undefined, (failure: unknown) => failure);
       assert.ok(error instanceof Error);

@@ -30,8 +30,10 @@ export interface SandboxBroker {
   getWritePlan(): WritePlan | undefined;
   /**
    * The typed Graph denial behind a script failure. The script only sees a
-   * denial's message, so the failure is matched to the brokered Graph or
-   * connector request whose denial message it carries, the latest first.
+   * denial's message, so a denial counts only when it answered the script's
+   * last brokered request (log calls aside) and the script's output carries
+   * its message. A denial the script recovered from is followed by other
+   * requests and never counts.
    */
   graphDenialFor(scriptOutput: string): Error | undefined;
 }
@@ -61,13 +63,15 @@ class SandboxBrokerError extends Error {
 
 export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
   let writePlan: WritePlan | undefined;
-  const graphDenials: Error[] = [];
+  // The error that answered the last brokered request, log calls aside.
+  let lastFailure: unknown;
 
   return {
     async handle(request) {
       const id = typeof request?.id === "string" && request.id.length > 0
         ? request.id
         : "unknown";
+      if (request?.method !== "log") lastFailure = undefined;
       try {
         assertBaseRequest(request);
         switch (request.method) {
@@ -95,12 +99,15 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
             );
         }
       } catch (error) {
-        if (error instanceof Error && graphAccessDenialFromError(error)) graphDenials.push(error);
+        if (request?.method !== "log") lastFailure = error;
         return failure(id, error);
       }
     },
     getWritePlan: () => writePlan,
-    graphDenialFor: (scriptOutput) => [...graphDenials].reverse().find((denied) => scriptOutput.includes(denied.message)),
+    graphDenialFor: (scriptOutput) =>
+      lastFailure instanceof Error && graphAccessDenialFromError(lastFailure) && scriptOutput.includes(lastFailure.message)
+        ? lastFailure
+        : undefined,
   };
 }
 
