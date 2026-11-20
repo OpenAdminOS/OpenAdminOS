@@ -141,13 +141,43 @@ export class GraphAccessDeniedError extends Error {
   }
 }
 
+/**
+ * Text that only OpenAdminOS's own Graph clients put in an error message:
+ * the runtime adapter ("Graph responded with HTTP 403 for https://graph.microsoft.com/...",
+ * "Microsoft Graph denied access to ..."), the connectors ("Microsoft Graph
+ * responded ...", "Teams Graph request failed ..."), a Graph endpoint URL, or
+ * Graph's own premium-licence error code. A real Graph 403 body
+ * ({"error":{"code":"Forbidden"|"accessDenied",...}}) does not name Graph, so
+ * the source is read from the client's wrapper, never from a bare "403".
+ */
+const GRAPH_SOURCE = /\bMicrosoft Graph\b|\bGraph (?:responded|request)\b|\b(?:graph\.microsoft\.(?:com|us)|dod-graph\.microsoft\.us|microsoftgraph\.chinacloudapi\.cn)\b|Authentication_RequestFromNonPremiumTenantOrB2CTenant/i;
+
+function graphAccessDeniedErrorIn(error: unknown): GraphAccessDeniedError | undefined {
+  for (let current = error, depth = 0; current instanceof Error && depth < 5; current = current.cause, depth += 1) {
+    if (current instanceof GraphAccessDeniedError) return current;
+  }
+  return undefined;
+}
+
+/**
+ * True when the error came from a Microsoft Graph call. A 403 from a local
+ * model server, a vendor API, or an MCP server is not a Graph denial.
+ */
+export function errorComesFromGraph(error: unknown): boolean {
+  if (graphAccessDeniedErrorIn(error)) return true;
+  const raw = error instanceof Error ? error.message : String(error ?? "");
+  return GRAPH_SOURCE.test(raw);
+}
+
 /** Old string-only errors remain unknown until evidence is available. */
 export function graphAccessDenialFromError(error: unknown, context: GraphAccessContext = {}): GraphAccessDenial | undefined {
-  if (error instanceof GraphAccessDeniedError) {
+  const denied = graphAccessDeniedErrorIn(error);
+  if (denied) {
     const overrides: GraphAccessContext = Object.fromEntries(Object.entries(context).filter(([, value]) => value !== undefined));
-    return classifyGraphAccessDenied({ ...error.accessContext, ...overrides });
+    return classifyGraphAccessDenied({ ...denied.accessContext, ...overrides });
   }
   const raw = error instanceof Error ? error.message : String(error);
+  if (!GRAPH_SOURCE.test(raw)) return undefined;
   if (!/\b403\b|\bforbidden\b|Authentication_RequestFromNonPremiumTenantOrB2CTenant/i.test(raw)) return undefined;
   const errorCode = raw.match(/"code"\s*:\s*"([^"]+)"/)?.[1]
     ?? (raw.includes("Authentication_RequestFromNonPremiumTenantOrB2CTenant") ? "Authentication_RequestFromNonPremiumTenantOrB2CTenant" : undefined);

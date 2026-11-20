@@ -495,7 +495,7 @@ describe("Intune Chat read-only tools", () => {
           async listManagedDevices() { return []; },
           async retireManagedDevice() { throw new Error("write should not run"); },
           async request() {
-            throw new Error('Graph GET /users failed (HTTP 403): {"error":{"code":"Authorization_RequestDenied"}}');
+            throw new Error('Graph responded with HTTP 403 for https://graph.microsoft.com/beta/users: {"error":{"code":"Authorization_RequestDenied"}}');
           },
         }),
       });

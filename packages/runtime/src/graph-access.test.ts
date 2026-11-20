@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { classifyGraphAccessDenied, graphAccessDenialFromError, graphAccessDenialText } from "@openadminos/agent-sdk";
+import { classifyGraphAccessDenied, errorComesFromGraph, GraphAccessDeniedError, graphAccessDenialFromError, graphAccessDenialText } from "@openadminos/agent-sdk";
 
 describe("Graph access denial classification", () => {
   const users = { path: "/users", requiredScopes: ["User.Read.All"] };
@@ -78,6 +78,48 @@ describe("Graph access denial classification", () => {
     assert.doesNotMatch(graphAccessDenialText(denial), /reconnect/i);
     assert.equal(classifyGraphAccessDenied({ ...users, grantedScopes: ["User.Read.All"], errorCode: "insufficient_claims" }).cause, "unknown");
     assert.equal(graphAccessDenialFromError("HTTP 429"), undefined);
+  });
+
+  it("classifies only errors that come from Microsoft Graph", () => {
+    // Bodies as Graph returned them for a real 403 (verified 2026-11-19).
+    const forbidden = '{"error":{"code":"Forbidden","message":"You cannot perform the requested operation, required scopes are missing in the token.","innerError":{"date":"2026-11-20T02:51:48"}}}';
+    const accessDenied = '{"error":{"code":"accessDenied","message":"Request Authorization failed","innerError":{"date":"2026-11-20T02:52:02"}}}';
+    for (const [raw, code] of [
+      [`Graph responded with HTTP 403 for https://graph.microsoft.com/v1.0/identityProtection/riskyUsers: ${forbidden}`, "Forbidden"],
+      [`Microsoft Graph responded with HTTP 403 for /users/1/authentication/methods: ${accessDenied}`, "accessDenied"],
+    ] as const) {
+      assert.equal(errorComesFromGraph(raw), true);
+      const denial = graphAccessDenialFromError(raw)!;
+      assert.equal(denial.cause, "unknown");
+      assert.equal(denial.title, "Graph access cause unverified");
+      assert.match(raw, new RegExp(code));
+    }
+    assert.equal(graphAccessDenialFromError("Microsoft Graph rejected the request (HTTP 403). The signed-in admin lacks the required Teams scopes.")?.cause, "unknown");
+    // A stored denial's own text still reads as a Graph error.
+    const stored = graphAccessDenialText(classifyGraphAccessDenied({ ...users, grantedScopes: [] }));
+    assert.equal(errorComesFromGraph(stored), true);
+    assert.equal(graphAccessDenialFromError(stored)?.cause, "unknown");
+    // An agent that wraps the Graph error keeps its evidence.
+    const thrown = new GraphAccessDeniedError({ ...users, grantedScopes: [] });
+    assert.equal(graphAccessDenialFromError(new Error("Listing users failed.", { cause: thrown }))?.cause, "missing-consent");
+    assert.equal(errorComesFromGraph(new Error("Listing users failed.", { cause: thrown })), true);
+    assert.equal(graphAccessDenialFromError(thrown)?.cause, "missing-consent");
+  });
+
+  it("does not classify an HTTP 403 from a model server, a vendor API, or an MCP server as a Graph denial", () => {
+    for (const raw of [
+      "HTTP 403",
+      "Ollama could not report the model's context limit: HTTP 403 at http://127.0.0.1:11434/api/show: Forbidden",
+      "LM Studio responded with HTTP 403 at http://127.0.0.1:1234/v1/models: forbidden",
+      "Anthropic API returned 403 Forbidden: permission_error",
+      "Azure OpenAI responded with HTTP 403 for https://contoso.openai.azure.com/openai/deployments/gpt: {\"error\":{\"code\":\"PermissionDenied\"}}",
+      "MCP server \"tickets\" responded with HTTP 403: forbidden",
+      "Splashtop refused this request (HTTP 403) at my.splashtop.com.",
+    ]) {
+      assert.equal(errorComesFromGraph(raw), false, raw);
+      assert.equal(graphAccessDenialFromError(raw), undefined, raw);
+      assert.equal(graphAccessDenialFromError(new Error(raw), { path: "/users", requiredScopes: ["User.Read.All"] }), undefined, raw);
+    }
   });
 
   it("never recommends a read-only role for a write action", () => {
