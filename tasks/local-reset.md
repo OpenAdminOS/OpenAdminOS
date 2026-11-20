@@ -353,6 +353,17 @@ the installed app's scheduler, login item or caches.
   deleted a token cache by path); every token cache store, legacy ones
   included, is now held after the commit: no write, no clear, reads return
   an empty cache without opening the file.
+- Review round 34: Claude no blocking. Sol one blocking (closing SQLite
+  at the reset shutdown deletes the write-ahead log by path; the databases
+  are now left open until the process exits). Muse two blocking and a
+  medium, all credential files written or deleted by path after the commit
+  (Splashtop, WhatsApp Web, provider and connector secrets). Instead of
+  fixing each caller, the commit now seals the data folder for the process
+  (data-folder-seal.ts, checked by every secret store), stops the WhatsApp
+  Web client, and WhatsApp Web and Splashtop network calls are refused
+  once a reset starts and hold it while they run. Muse lows: a reset
+  message passes through the sign-in error wording; the token test asserts
+  clear and the reopening.
 - Process lesson: twice I edited the tree while a reviewer was reading it;
   parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the
