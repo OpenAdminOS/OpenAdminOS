@@ -3079,6 +3079,7 @@ export class IntuneChatService {
             }
           },
           dispatched: () => { modelFitDispatched = true; },
+          model: selectedModel,
         });
       }
       const llm = withTenantDataOutputFilter(gateHostedLlm(built, verifyConsent));

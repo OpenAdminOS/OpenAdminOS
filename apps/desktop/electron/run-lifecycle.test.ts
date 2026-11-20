@@ -389,6 +389,9 @@ it('admits a model fit rerun on a model on this device only after a fresh check 
   });
   await h.host.write({ ...h.state(), installedAgents: [agent], tenants: [] });
   await assert.rejects(h.service.startRun('docs', { requireOnDeviceModel: true, providerId: 'ollama', model: 'gpt-oss:20b' }), /could not confirm that gpt-oss:20b runs on this device/);
+  // Without a model named, each phase could run another one: the rerun does not start.
+  Object.assign(h.host, { listProviders: async () => [{ id: 'lm-studio', name: 'LM Studio', status: 'connected', models: [], isLocal: true }], verifyOnDeviceModel: async () => true });
+  await assert.rejects(h.service.startRun('docs', { requireOnDeviceModel: true, providerId: 'lm-studio' }), /could not tell which LM Studio model this run uses/);
   assert.equal(h.state().runs.length, 0);
 });
 

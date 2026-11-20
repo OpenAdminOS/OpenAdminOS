@@ -725,7 +725,11 @@ export class RunService {
         }
       }
 
-      // A model fit rerun on a model on this device is admitted only after a fresh check that it runs here.
+      // A model fit rerun on a model on this device is admitted only after a fresh check that it runs here,
+      // and only with a model named, so every phase runs the same one.
+      if (options.requireOnDeviceModel && !model) {
+        throw new Error(`OpenAdminOS could not tell which ${activeProvider?.name ?? providerId} model this run uses, so it did not start. Choose a model, then review the run again.`);
+      }
       if (options.requireOnDeviceModel) {
         if (activeProvider?.isLocal !== true || !(await this.host.verifyOnDeviceModel?.(providerId, model))) {
           throw new Error(`OpenAdminOS could not confirm that ${model ?? activeProvider?.name ?? providerId} runs on this device, so the run did not start. Choose another model, or a hosted provider.`);
@@ -1407,7 +1411,10 @@ export class RunService {
       }
       throw error;
     }
-    if (!run.requireOnDeviceModel) return llm;
+    // A hosted model fit rerun runs only the model its review named, call by call.
+    if (!run.requireOnDeviceModel) {
+      return run.providerEndpointBinding?.scope === "model-fit" ? guardModelFitLlm(llm, { before: async () => undefined, dispatched: () => undefined, model }) : llm;
+    }
     // Every model call of the phase checks again, since evidence gathering and the
     // diff can take long enough for the model's alias or address to change.
     return guardModelFitLlm(llm, {
@@ -1423,6 +1430,7 @@ export class RunService {
         }
       },
       dispatched: () => undefined,
+      model,
     });
   }
 

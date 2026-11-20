@@ -583,6 +583,23 @@ describe("Model fit in Chat", () => {
     assert.equal(dispatched, 1);
   });
 
+  it("refuses a call that names another model than the reviewed one", async () => {
+    const calls: Array<string | undefined> = [];
+    const inner: RunLlmApi = {
+      available: true,
+      async complete(options) { calls.push(options.model); return { text: "ok", model: "m" }; },
+      async *stream(options) { calls.push(options.model); yield { delta: "ok", accumulated: "ok", done: true, model: "m" }; },
+    };
+    let dispatched = 0;
+    const guarded = guardModelFitLlm(inner, { before: async () => undefined, dispatched: () => { dispatched += 1; }, model: "gpt-oss:20b" });
+    await guarded.complete({ prompt: "a" });
+    await guarded.complete({ prompt: "b", model: "gpt-oss:20b" });
+    await assert.rejects(guarded.complete({ prompt: "c", model: "gpt-oss:120b-cloud" }), /approved for gpt-oss:20b only/);
+    await assert.rejects((async () => { for await (const _chunk of guarded.stream({ prompt: "d", model: "other" })) { /* drain */ } })(), /approved for gpt-oss:20b only/);
+    assert.deepEqual(calls, [undefined, "gpt-oss:20b"]);
+    assert.equal(dispatched, 2);
+  });
+
   it("does not count a call to a model that is not available as dispatched", async () => {
     const inner: RunLlmApi = {
       available: false,

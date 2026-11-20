@@ -213,7 +213,14 @@ export function resolveChatTurnProvider(input: {
  * retry, so an alias that turns remote-backed within one request is refused
  * there too. This PR does not edit that file.
  */
-export function guardModelFitLlm(llm: RunLlmApi, guard: { before: () => Promise<void>; dispatched: () => void }): RunLlmApi {
+export function guardModelFitLlm(llm: RunLlmApi, guard: { before: () => Promise<void>; dispatched: () => void; model?: string | undefined }): RunLlmApi {
+  // A call that names another model than the reviewed one is refused before any check or I/O:
+  // the adapter would honour it, and the approval named one model.
+  const sameModel = (options: { model?: string | undefined }) => {
+    if (guard.model !== undefined && options.model !== undefined && options.model !== guard.model) {
+      throw new ModelOverrideError(`This request was approved for ${guard.model} only, so a call for ${options.model} was not sent.`);
+    }
+  };
   return {
     ...llm,
     // A call that is already stopped reaches the adapter with an aborted signal and sends nothing,
@@ -221,11 +228,13 @@ export function guardModelFitLlm(llm: RunLlmApi, guard: { before: () => Promise<
     // An adapter that throws while building its request is still counted; the answer then says
     // "Attempted through", not that it was sent.
     complete: async (options) => {
+      sameModel(options);
       await guard.before();
       if (!options.signal?.aborted && llm.available) guard.dispatched();
       return llm.complete(options);
     },
     stream: async function* (options) {
+      sameModel(options);
       await guard.before();
       if (!options.signal?.aborted && llm.available) guard.dispatched();
       yield* llm.stream(options);
