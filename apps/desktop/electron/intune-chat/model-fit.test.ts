@@ -283,7 +283,7 @@ function chatHost(store: IntelligenceSqliteStore, built: string[], onDevice: (mo
     requireIntelligenceStore: () => store,
     listProviders: async () => [ollama, claude],
     verifyOnDeviceModel: async (_providerId: ProviderId, model: string | undefined) => onDevice(model),
-    providerEndpoint: async (providerId: ProviderId) => (providerId === "anthropic" ? "claude-code" : undefined),
+    providerTarget: async (providerId: ProviderId) => ({ endpoint: providerId === "anthropic" ? "claude-code" : undefined, destination: `dest-${providerId}` }),
     buildLlm: async (providerId: ProviderId, _model: string | undefined, binding?: { endpoint: string | undefined }) => {
       built.push(providerId);
       bindings.push(binding);
@@ -364,7 +364,7 @@ describe("Model fit in Chat", () => {
       const accepted = {
         content: QUESTION,
         conversationId,
-        modelOverride: { offerId, providerId: "anthropic" as const, model: "claude-sonnet-5-5" },
+        modelOverride: { offerId, providerId: "anthropic" as const, model: "claude-sonnet-5-5", destination: "dest-anthropic" },
         hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5", false, offerId),
       };
       const result = await service.streamIntuneChatMessage(accepted, () => undefined);
@@ -393,7 +393,7 @@ describe("Model fit in Chat", () => {
       await service.streamIntuneChatMessage({
         content: QUESTION,
         conversationId: failed.conversation.id,
-        modelOverride: { offerId, providerId: "anthropic", model: "claude-sonnet-5-5" },
+        modelOverride: { offerId, providerId: "anthropic", model: "claude-sonnet-5-5", destination: "dest-anthropic" },
         hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5", false, offerId),
       }, () => undefined);
       assert.ok(bindings.length > 0 && bindings.every((binding) => binding?.endpoint === "claude-code"), JSON.stringify(bindings));
@@ -425,7 +425,7 @@ describe("Model fit in Chat", () => {
       const stopped = await service.streamIntuneChatMessage({
         content: QUESTION,
         conversationId: failed.conversation.id,
-        modelOverride: { offerId, providerId: "anthropic", model: "claude-sonnet-5-5" },
+        modelOverride: { offerId, providerId: "anthropic", model: "claude-sonnet-5-5", destination: "dest-anthropic" },
         hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5", false, offerId),
       }, () => undefined, { signal: controller.signal });
       assert.equal(stopped.assistantMessage.status, "cancelled");
@@ -439,7 +439,7 @@ describe("Model fit in Chat", () => {
       const built: string[] = [];
       const host = chatHost(store, built);
       let destination = "resource-a";
-      host.providerDestination = async () => destination;
+      host.providerTarget = async () => ({ endpoint: destination, destination });
       const service = new IntuneChatService(host);
       const failed = await service.streamIntuneChatMessage({ content: QUESTION }, () => undefined);
       const offerId = failed.assistantMessage.modelFit!.offerId!;
@@ -510,7 +510,7 @@ describe("Model fit in Chat", () => {
       const send = () => service.streamIntuneChatMessage({
         content: QUESTION,
         conversationId: failed.conversation.id,
-        modelOverride: { offerId, providerId: "anthropic", model: "claude-sonnet-5-5" },
+        modelOverride: { offerId, providerId: "anthropic", model: "claude-sonnet-5-5", destination: "dest-anthropic" },
         hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5", false, offerId),
       }, () => undefined);
       const results = await Promise.allSettled([send(), send()]);
@@ -557,7 +557,7 @@ describe("Model fit in Chat", () => {
         service.streamIntuneChatMessage({
           content: QUESTION,
           conversationId: failed.conversation.id,
-          modelOverride: { offerId: failed.assistantMessage.modelFit!.offerId!, providerId: "anthropic", model: "claude-sonnet-5-5" },
+          modelOverride: { offerId: failed.assistantMessage.modelFit!.offerId!, providerId: "anthropic", model: "claude-sonnet-5-5", destination: "dest-anthropic" },
           hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5", false, failed.assistantMessage.modelFit!.offerId!),
         }, () => undefined),
         /deleted/,

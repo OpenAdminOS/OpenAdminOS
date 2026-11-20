@@ -2089,8 +2089,7 @@ export class AppStateStore {
         host.resolveTenant(persisted as PersistedState, tenantId),
       listProviders: () => host.listProviders(),
       verifyOnDeviceModel: (providerId, model) => verifyOnDeviceModel(providerId, model),
-      providerEndpoint: (providerId) => host.novaProviderEndpoint(providerId),
-      providerDestination: (providerId) => host.providerDestination(providerId),
+      providerTarget: (providerId) => host.providerTarget(providerId),
       now: () => host.clock(),
       buildLlm: (providerId, model, binding) => host.buildLlm(providerId, model, binding),
       buildGraph: (pinnedTenantId, agentScopes) =>
@@ -2176,8 +2175,7 @@ export class AppStateStore {
       serialize: (task) => host.serialize(task),
       listProviders: () => host.listProviders(),
       verifyOnDeviceModel: (providerId, model) => verifyOnDeviceModel(providerId, model),
-      providerEndpoint: (providerId) => host.novaProviderEndpoint(providerId),
-      providerDestination: (providerId) => host.providerDestination(providerId),
+      providerTarget: (providerId) => host.providerTarget(providerId),
       providerCanRun: (provider) => host.providerCanRun(provider),
       validateOfficeApproval: run => host.officeService.validateApproval(run),
       buildLlm: (providerId, model, binding) => host.buildLlm(providerId, model, binding),
@@ -7401,8 +7399,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   /** Where a provider is reached now; see novaProviderEndpoint. */
   /** An opaque fingerprint of where a provider is reached now, for a model fit review to compare later. */
   async providerDestination(providerId: ProviderId): Promise<string> {
+    return (await this.providerTarget(providerId)).destination;
+  }
+
+  /** Where a provider is reached and its fingerprint, from one read, so a check and a binding cannot disagree. */
+  async providerTarget(providerId: ProviderId): Promise<{ endpoint: string | undefined; destination: string }> {
     const endpoint = await this.novaProviderEndpoint(providerId);
-    return createHash("sha256").update(`${providerId}\0${endpoint ?? ""}`).digest("hex").slice(0, 32);
+    return { endpoint, destination: createHash("sha256").update(`${providerId}\0${endpoint ?? ""}`).digest("hex").slice(0, 32) };
   }
 
   async novaProviderEndpoint(providerId: ProviderId): Promise<string | undefined> {

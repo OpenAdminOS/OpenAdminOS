@@ -344,10 +344,8 @@ export interface RunServiceHost {
   ): provider is ProviderSummary & { status: "connected" | "available" };
   validateOfficeApproval?(run: RunRecord): Promise<void>;
   buildLlm(providerId: ProviderId, model: string | undefined, binding?: { endpoint: string | undefined }): Promise<RunLlmApi>;
-  /** Where a provider is reached now (address, or Azure resource and deployment), for binding a model fit rerun. */
-  providerEndpoint?(providerId: ProviderId): Promise<string | undefined>;
-  /** An opaque fingerprint of where a provider is reached now, compared with what the run review saw. */
-  providerDestination?(providerId: ProviderId): Promise<string>;
+  /** Where a provider is reached now (address, or Azure resource and deployment) and its fingerprint, from one read. */
+  providerTarget?(providerId: ProviderId): Promise<{ endpoint: string | undefined; destination: string }>;
   buildGraph(
     pinnedTenantId?: string,
     agentScopes?: string[],
@@ -804,10 +802,15 @@ export class RunService {
       if (options.requireOnDeviceModel) queuedRun.requireOnDeviceModel = true;
       if (options.bindProviderEndpoint) {
         // The destination the run review saw; a change since refuses the start before anything is sent.
-        if (this.host.providerDestination && options.expectedProviderDestination !== (await this.host.providerDestination(providerId))) {
+        // One read for the check and the binding, so they cannot disagree.
+        const target = await this.host.providerTarget?.(providerId);
+        if (!target || options.expectedProviderDestination === undefined) {
+          throw new Error("OpenAdminOS could not read where the provider is reached when the run was reviewed, so it did not start. Review it again.");
+        }
+        if (options.expectedProviderDestination !== target.destination) {
           throw new Error("The provider's settings changed after this run was reviewed, so it did not start. Review it again.");
         }
-        queuedRun.providerEndpointBinding = { endpoint: await this.host.providerEndpoint?.(providerId) };
+        queuedRun.providerEndpointBinding = { endpoint: target.endpoint };
       } else if (inheritedEndpointBinding) {
         queuedRun.providerEndpointBinding = inheritedEndpointBinding;
       }

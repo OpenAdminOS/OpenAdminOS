@@ -443,10 +443,8 @@ export interface ChatServiceHost {
   listProviders(): Promise<ProviderSummary[]>;
   /** A fresh check that this provider runs this model on this device, before a model fit retry on it. */
   verifyOnDeviceModel?(providerId: ProviderId, model: string | undefined): Promise<boolean>;
-  /** Where a provider is reached now (address, or Azure resource and deployment), for binding a model fit request to it. */
-  providerEndpoint?(providerId: ProviderId): Promise<string | undefined>;
-  /** An opaque fingerprint of where a provider is reached now, compared with what a model fit review saw. */
-  providerDestination?(providerId: ProviderId): Promise<string>;
+  /** Where a provider is reached now (address, or Azure resource and deployment) and its fingerprint, from one read. */
+  providerTarget?(providerId: ProviderId): Promise<{ endpoint: string | undefined; destination: string }>;
   /** With a binding, the model is built only for that endpoint (see ProviderEndpointBinding in state.ts). */
   buildLlm(providerId: ProviderId, model: string | undefined, binding?: { endpoint: string | undefined }): Promise<RunLlmApi>;
   buildGraph(
@@ -2585,17 +2583,16 @@ export class IntuneChatService {
     if (turn.switchedFrom && provider.isLocal && !(await this.host.verifyOnDeviceModel?.(providerId, turn.model))) {
       throw new ModelOverrideError(`OpenAdminOS could not confirm that ${turn.model ?? provider.name} runs on this device, so nothing was sent. Choose another model, or a hosted provider.`);
     }
-    // The request is built only for where the chosen provider is reached now, so a
-    // settings change while it runs (another Azure resource or deployment) cannot redirect it.
     // A hosted choice goes only to the destination its accept step saw (for
-    // Azure OpenAI the resource and deployment, not only the deployment name).
-    if (turn.switchedFrom && !provider.isLocal && this.host.providerDestination) {
-      if (input.modelOverride?.destination !== (await this.host.providerDestination(providerId))) {
+    // Azure OpenAI the resource and deployment, not only the deployment name),
+    // and the request is built only for it. One read serves the check and the
+    // binding, so a settings change in between cannot redirect it.
+    if (turn.switchedFrom && this.host.providerTarget) {
+      const target = await this.host.providerTarget(providerId);
+      if (!provider.isLocal && input.modelOverride?.destination !== target.destination) {
         throw new ModelOverrideError(`${provider.name}'s settings changed after you chose it, so nothing was sent. Choose it again to review where the request goes.`);
       }
-    }
-    if (turn.switchedFrom && !options.providerBinding && this.host.providerEndpoint) {
-      options = { ...options, providerBinding: { endpoint: await this.host.providerEndpoint(providerId) } };
+      if (!options.providerBinding) options = { ...options, providerBinding: { endpoint: target.endpoint } };
     }
     // Whether a model request of this turn went out, so the answer says "Sent to" only when one did.
     let modelFitDispatched = false;
