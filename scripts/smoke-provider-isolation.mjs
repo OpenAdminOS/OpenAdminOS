@@ -84,7 +84,9 @@ export async function isolateSmokeProviders(...origins) {
     const endpoint = `http://127.0.0.1:${unavailable.address().port}`;
     const env = { ...process.env };
     for (const key of Object.keys(env)) {
-      if (/^(electron_run_as_node|node_options|node_use_env_proxy|http_proxy|https_proxy|all_proxy|no_proxy|openagents_stats_api)$/i.test(key)) {
+      // Capture modes other than the one a runner sets would change which code
+      // path Electron runs, so a smoke could pass without running its own flow.
+      if (/^(electron_run_as_node|node_options|node_use_env_proxy|http_proxy|https_proxy|all_proxy|no_proxy|openagents_stats_api|openadminos_(first_run|landing|website|brand)_capture|openadminos_capture_external_url)$/i.test(key)) {
         delete env[key];
       }
     }
