@@ -337,6 +337,17 @@ describe("Model fit: offers", () => {
     assert.throws(() => offers.claim(id), /already used/);
   });
 
+  it("replaces an earlier offer for the same conversation, and keeps other conversations' offers", () => {
+    const offers = new ModelFitOffers();
+    const base = { tenantId: undefined, content: "q", workspaceKey: undefined, anchor: { providerId: "ollama" as const, model: LOCAL_MODEL }, failed: { providerId: "ollama" as const, model: LOCAL_MODEL }, reason: "context-too-small" as const };
+    const first = offers.issue({ ...base, conversationId: "chat_1" });
+    const other = offers.issue({ ...base, conversationId: "chat_2" });
+    const second = offers.issue({ ...base, conversationId: "chat_1" });
+    assert.throws(() => offers.check(first, { conversationId: "chat_1", tenantId: undefined, content: "q", workspaceKey: undefined }), /no longer available/);
+    offers.check(second, { conversationId: "chat_1", tenantId: undefined, content: "q", workspaceKey: undefined });
+    offers.check(other, { conversationId: "chat_2", tenantId: undefined, content: "q", workspaceKey: undefined });
+  });
+
   it("binds an offer to its conversation, organization and question, and lets it expire", () => {
     let now = 1_000;
     const offers = new ModelFitOffers(() => now);
