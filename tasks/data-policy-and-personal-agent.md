@@ -19,7 +19,7 @@ built on top of them are planned separately.
   value is masked, and the text transcript shows the real values. Round 4 of
   the design review refined which tenant data is masked: voice context follows
   the data policy rules like any hosted call. Spoken input is covered by the
-  proposal of 2026-11-19 below.
+  decision of 2026-11-19 below.
 - Skills use the open SKILL.md format, with import and export.
 - Proactive work: recurring read-only checks and a daily brief per organization,
   each confirmed on a card and capped.
@@ -99,7 +99,7 @@ built on top of them are planned separately.
   still be sent. On Confidential, `credential` defaults to Mask; Allow is
   possible only after the confirmation dialog, and IT can lock it.
 
-**Proposed 2026-11-19, pending confirmation (agent lead, not yet confirmed by Ugur)**
+**Decisions (Ugur, 2026-11-19, hosted voice and session start)**
 - Hosted voice is honest about its boundary. What the admin says aloud goes to
   the hosted voice provider as audio and is not gated by data policy. The
   hosted voice strip says so ("hears what you say"), and so do the data policy
@@ -107,6 +107,9 @@ built on top of them are planned separately.
   data policy: the words are transcribed on the device, then the text goes
   through the same request scan as a typed question before any hosted
   reasoning call.
+- When a rule blocks a class carried by the voice session start request, the
+  session opens without the whole profile block (not per note), consistent
+  with how other transfers are withheld.
 
 **Decisions (Ugur, 2026-11-19, round 4 of the design review)**
 - Confirmations that loosen `security` name what masking replaces (policy
@@ -208,11 +211,9 @@ built on top of them are planned separately.
   the way back. Activity and configuration placeholders, when those classes
   are masked, stay masked like credential ones in the answer, the transcript
   and tool parameters.
-- Withholding the whole profile block at session start when a rule blocks a
-  class it carries is a proposal pending the maintainer's confirmation. The
-  alternative is per note: leave out only the instructions and notes that
-  carry the blocked class and send the rest. While the call has no profile,
-  the withheld session start says the call opened without it.
+- Decided by Ugur on 2026-11-19: when a rule blocks a class the session start
+  carries, the whole profile block is withheld, not only the notes that carry
+  it. The withheld session start says the call opened without the profile.
 
 ## Why
 
@@ -402,13 +403,10 @@ the IT policy file.
       session start request: the profile block with standing instructions and
       confirmed notes that `nova.ts` sends when the OpenAI session opens goes
       through the same scan and rules as every later context transfer, and the
-      voice popover lists it as its own transfer. Proposed 2026-11-19,
-      pending the maintainer's confirmation: when a rule blocks a class it
-      carries, the session opens without the whole profile block, and the
-      voice model, the transcript and the popover say the call opened without
-      the profile. The alternative is per note: leave out only the standing
-      instructions and confirmed notes that carry the blocked class and send
-      the rest. The voice model speaks roles
+      voice popover lists it as its own transfer. When a rule blocks a class
+      it carries, the session opens without the whole profile block (decided
+      2026-11-19), and the voice model, the transcript and the popover say the
+      call opened without the profile. The voice model speaks roles
       where a value is masked, and the transcript shows real values. When a
       rule blocks a context transfer, the session continues without that
       context and the voice model and the transcript say what was withheld.
@@ -427,8 +425,7 @@ the IT policy file.
       decision the current rules make for the entire transfer (every class it
       carries, not only the class that withheld it), and offers Ask again only
       when that decision would send the context (mockup 34, A and B). What the admin says aloud goes to the hosted
-      voice provider as audio and is not gated (proposed 2026-11-19, pending
-      confirmation); the hosted voice strip ("hears what you say"), the Data
+      voice provider as audio and is not gated (decided 2026-11-19); the hosted voice strip ("hears what you say"), the Data
       policy settings and the docs say so. Voice on this device keeps
       spoken words under data policy: they are transcribed on the device and
       the text goes through the same request scan before any hosted reasoning
@@ -474,11 +471,9 @@ the IT policy file.
 3. A test inspects the session start request `nova.ts` sends when the OpenAI
    session opens and shows that a recognized recovery key in a confirmed note
    is masked one way as `[CREDENTIAL]` with Credential on Hosted at Mask.
-   Proposed 2026-11-19, pending the maintainer's confirmation: with Credential
-   on Hosted at Block the whole profile block is withheld, the session opens
-   without it, and the popover says the call opened without the profile; if
-   the per-note alternative is chosen instead, the test asserts that only the
-   note holding the recovery key is left out. The voice popover lists the
+   With Credential on Hosted at Block the whole profile block is withheld, the
+   session opens without it, and the popover says the call opened without the
+   profile. The voice popover lists the
    session start as its own transfer (renderer test).
 4. A test proves text from voice on this device goes through the request scan
    before a hosted reasoning call.
@@ -758,8 +753,9 @@ the IT policy file.
 1. ~~Default rules~~ mask on hosted (2026-11-18).
 2. ~~Hosted voice with masking~~ speak roles, real values in the transcript
    (2026-11-18); voice context follows the data policy rules (round 4,
-   2026-11-19). Proposed 2026-11-19, pending confirmation: spoken words are
-   not gated in hosted voice, local voice keeps them under data policy.
+   2026-11-19). Spoken words are not gated in hosted voice, local voice keeps
+   them under data policy (decided 2026-11-19); a blocked session start
+   withholds the whole profile block (decided 2026-11-19).
 3. ~~Skill format~~ SKILL.md (2026-11-18).
 4. One personal agent now, several profiles later (proposal).
 5. Local stdio MCP servers (proposal: not in the first version).
