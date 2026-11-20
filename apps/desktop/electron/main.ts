@@ -6,6 +6,8 @@ import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
 import { officeFullscreen } from "./office-fullscreen.js";
 import {
   LocalResetRequestError,
+  localResetDataFolderLinkMessage,
+  localResetLinkCheck,
   MANAGED_POLICY_FILE,
   readLocalResetMarker,
   requestLocalReset,
@@ -5385,13 +5387,14 @@ function runLocalResetAtLaunch(): LocalResetReport | undefined {
 function finishLocalResetAfterReady(report: LocalResetReport): void {
   // Only an installed build's own request turns off the installed login item.
   if (process.platform !== "darwin" || !app.isPackaged || pendingLocalResetBuild !== "installed") return;
+  // The request may have warned about it already: this later try replaces
+  // that warning, or clears it when it now succeeds.
+  const others = report.warnings.filter((warning) => warning.item !== "Menu bar login item");
   try {
     disableCompanionLoginItemForReset();
+    report.warnings = others;
   } catch (error) {
-    report.warnings.push({
-      item: "Menu bar login item",
-      reason: error instanceof Error ? error.message : String(error),
-    });
+    report.warnings = [...others, { item: "Menu bar login item", reason: error instanceof Error ? error.message : String(error) }];
   }
 }
 
@@ -5457,7 +5460,11 @@ function disableCompanionLoginItemForReset(): void {
     throw new Error(`macOS did not report whether it is on (${settings.detail}). Check System Settings, General, Login Items`);
   }
   if (!settings.enabled) return;
-  if (setCompanionLaunchEnabled(false).enabled) {
+  const after = setCompanionLaunchEnabled(false);
+  if (!after.supported) {
+    throw new Error(`macOS did not confirm that it is off (${after.detail}). Check System Settings, General, Login Items`);
+  }
+  if (after.enabled) {
     throw new Error("macOS still lists it as on. Turn it off in System Settings, General, Login Items");
   }
 }
@@ -5511,11 +5518,25 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
   try {
     await requestLocalReset(confirmation, {
       checkReady: async () => {
+        if (localResetLinkCheck(app.getPath("userData")).dataFolderIsLink) {
+          throw new LocalResetRequestError(localResetDataFolderLinkMessage());
+        }
         const blocker = await store.beginLocalReset();
         if (blocker) throw new LocalResetRequestError(blocker);
       },
       writeMarker: (marker) => writeLocalResetMarker(app.getPath("userData"), marker),
-      forgetSignIns: () => store.forgetAllSignIns(),
+      forgetSignIns: async () => {
+        // Sign-out rewrites the token caches; a cache that is a link would
+        // be rewritten wherever it points. The wipe removes the link only.
+        const linked = localResetLinkCheck(app.getPath("userData")).linkedTokenCaches;
+        if (linked.length > 0) {
+          return [{
+            item: "Microsoft sign-ins",
+            reason: `not removed from the token caches, because ${linked.join(", ")} ${linked.length === 1 ? "is a link" : "are links"} to another place. The links are removed with the data folder; the files they point to are not touched`,
+          }];
+        }
+        return store.forgetAllSignIns();
+      },
       disableScheduler: async () => {
         // A development build never registered the per-user scheduler; the
         // installed app's registration is not its to remove. A process that

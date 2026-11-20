@@ -21,7 +21,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { closeSync, existsSync, fsyncSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, lstatSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeSync } from "node:fs";
 import { open, rename, rm } from "node:fs/promises";
 import { dirname, join, posix, win32 } from "node:path";
 
@@ -206,6 +206,35 @@ function isMarkerTempName(name: string): boolean {
   return lower.startsWith(`${LOCAL_RESET_MARKER}.`) && lower.endsWith(".tmp");
 }
 
+const DATA_FOLDER_LINK_REASON =
+  "the data folder is a link to another folder, so OpenAdminOS does not empty it. Remove its files by hand, as described in Uninstall and reset";
+
+/**
+ * Links in the data folder the reset must not write or delete through: the
+ * folder itself, and token cache files, which sign-out would rewrite.
+ */
+export function localResetLinkCheck(userDataDir: string, fs: Pick<LocalResetFileSystem, "isLink" | "readdir"> = nodeFileSystem): {
+  dataFolderIsLink: boolean;
+  linkedTokenCaches: string[];
+} {
+  if (fs.isLink(userDataDir)) return { dataFolderIsLink: true, linkedTokenCaches: [] };
+  let entries: string[] = [];
+  try {
+    entries = fs.readdir(userDataDir);
+  } catch {
+    entries = [];
+  }
+  return {
+    dataFolderIsLink: false,
+    linkedTokenCaches: entries.filter((name) => /^tokens.*\.bin$/i.test(name) && fs.isLink(join(userDataDir, name))),
+  };
+}
+
+/** The request refuses a data folder that is a link; nothing is removed. */
+export function localResetDataFolderLinkMessage(): string {
+  return `The reset could not start: ${DATA_FOLDER_LINK_REASON}. Nothing was removed.`;
+}
+
 // ---------------------------------------------------------------------------
 // Phase 2: the wipe at launch.
 // ---------------------------------------------------------------------------
@@ -224,6 +253,8 @@ export interface LocalResetFileSystem {
   remove(path: string): void;
   /** Replaces the marker atomically. */
   writeMarker(path: string, content: string): void;
+  /** The path itself is a symbolic link (not followed). */
+  isLink(path: string): boolean;
 }
 
 export interface LocalResetWipeOptions {
@@ -241,6 +272,13 @@ export interface LocalResetWipeOptions {
 }
 
 const nodeFileSystem: LocalResetFileSystem = {
+  isLink: (path) => {
+    try {
+      return lstatSync(path).isSymbolicLink();
+    } catch {
+      return false;
+    }
+  },
   exists: existsSync,
   readdir: (path) => readdirSync(path),
   readFile: (path) => readFileSync(path, "utf8"),
@@ -382,6 +420,13 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
       item: "Reset requested in the installed app",
       reason: "open the installed OpenAdminOS to finish it; a development build does not remove its Keychain item, scheduler or caches",
     });
+    return finish("incomplete");
+  }
+
+  // A data folder that is a link may point at a folder other things share;
+  // its entries are never listed or removed through it.
+  if (fs.isLink(userDataDir)) {
+    failed.push({ item: userDataDir, reason: DATA_FOLDER_LINK_REASON });
     return finish("incomplete");
   }
 
