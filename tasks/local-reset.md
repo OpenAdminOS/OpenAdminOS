@@ -304,6 +304,15 @@ the installed app's scheduler, login item or caches.
   blocking; its lows applied: the commit is checked again before the state
   file rename, an unlistable folder on Windows stays, Windows separators in
   the listed path.
+- Review round 27: Claude and Muse no blocking; Sol withdrew the round 26
+  in-flight write blocker and found one blocking (on Windows the hard-link
+  check runs before the removal and can take seconds; the folder and the
+  entry are now checked again right after it, cache folders too) and two
+  mediums (the write guard now turns on at the marker's rename, before its
+  flush, and atomicRename checks it before every retry; the Linux guide says
+  to quit OpenAdminOS first). Muse lows: the SPEC marker bullet names the
+  Linux device rule; the retry check has a unit test (the state write's own
+  pre-rename check is covered through it, not by a timed integration test).
 - Process lesson: twice I edited the tree while a reviewer was reading it;
   parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the
