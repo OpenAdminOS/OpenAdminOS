@@ -83,9 +83,11 @@ and stop if any of these applies:
 
 - The data folder or a cache folder is a link, or something is mounted at it
   or inside it. Removing through it would delete files wherever it points.
-  On macOS check with `ls -ld <folder>` and `mount | grep -i openadmin`; on
-  Linux with `ls -ld <folder>` and `findmnt -R <folder>`. Unmount first, or
-  remove only the link itself. The Windows script below checks for links.
+  On macOS check with `ls -ld <folder>` and `mount | grep -i openadmin`. On
+  Linux check with `ls -ld <folder>` and
+  `findmnt -rno TARGET | grep -F "$(realpath <folder>)"`, which lists every
+  mount at or inside the folder. Unmount first, or remove only the link
+  itself. The Windows script below checks for links.
 - `policy.json` in the data folder is a link (`ls -l` shows an arrow; on
   Windows the script stops on it). Removing the other files can break the IT
   policy; ask whoever manages the device first.
@@ -104,6 +106,7 @@ before the next launch: a new install that finds the old key can read any
 token files that are still there.
 
 ```bash
+# Repeat until it reports that the item could not be found.
 security delete-generic-password -s "OpenAdminOS Safe Storage" -a OpenAdminOS
 launchctl bootout "gui/$(id -u)/com.openadminos.scheduler"
 rm -f ~/Library/LaunchAgents/com.openadminos.scheduler.plist
@@ -116,9 +119,13 @@ rm -rf ~/Library/Caches/@openadminosdesktop-updater \
   "$HOME/Library/Saved Application State/com.openadminos.desktop.savedState"
 ```
 
-Then remove the data folder `~/Library/Application Support/OpenAdminOS`. If
-your device is managed and the folder holds `policy.json`, remove everything
-except that file. If `ls -ld` shows the folder as a link (an arrow to
+Then empty the data folder, keeping the IT policy file if there is one:
+
+```bash
+find "$HOME/Library/Application Support/OpenAdminOS" -mindepth 1 -maxdepth 1 ! -iname policy.json -exec rm -rf {} +
+```
+
+If no one manages the device, you can remove the whole folder instead. If `ls -ld` shows the folder as a link (an arrow to
 another place), remove only the link with `rm`, without a trailing slash,
 and check the folder it points to before removing anything there. Commands
 that report that an item does not exist can be ignored. Turn off **OpenAdminOS Menu Bar Helper** in **System Settings >
@@ -166,6 +173,8 @@ $cache = "$env:LOCALAPPDATA\@openadminosdesktop-updater"
 $policy = Get-Item -LiteralPath "$data\policy.json" -Force -ErrorAction SilentlyContinue
 if ($policy -and ($policy.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
   "policy.json is a link to $($policy.Target). Ask whoever manages this device before removing anything."
+} elseif ($policy -and $policy.PSIsContainer) {
+  "policy.json is a folder, not the IT policy file. Move it out of the data folder, then run this again."
 } else {
   foreach ($folder in @($data, $cache)) {
     $item = Get-Item -LiteralPath $folder -Force -ErrorAction SilentlyContinue
@@ -182,7 +191,7 @@ if ($policy -and ($policy.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
 ```
 
 The script keeps `policy.json`, the IT policy file, and stops when it is a
-link. It stops at a data or cache folder that is a junction or link, because
+link or a folder. It stops at a data or cache folder that is a junction or link, because
 removing through it would delete files wherever it points, and it removes
 links inside the folders as links, without entering them. If no one manages
 the device and the folder is not a link, you can remove the whole
@@ -194,8 +203,13 @@ copied token files unreadable.
 
 Remove the package (`sudo apt remove openadminos`, your package manager, or
 the AppImage file). Then make the checks in
-[Before removing files by hand](#before-removing-files-by-hand) and remove
-`~/.config/OpenAdminOS` and `~/.cache/@openadminosdesktop-updater`. The key that protects the sign-ins is
+[Before removing files by hand](#before-removing-files-by-hand), empty the
+data folder while keeping the IT policy file, and remove the update cache:
+
+```bash
+find ~/.config/OpenAdminOS -mindepth 1 -maxdepth 1 ! -iname policy.json -exec rm -rf {} +
+rm -rf ~/.cache/@openadminosdesktop-updater
+``` The key that protects the sign-ins is
 kept by your keyring (GNOME Keyring or KWallet). Neither the in-app reset nor
 removing the package deletes it: remove the OpenAdminOS entry with your
 keyring tool if you want it gone. Without the token files it protects nothing.
