@@ -1868,7 +1868,10 @@ replayed ranges incomplete if the original observations were dropped, expired
 or otherwise unavailable. Text detectors and the cache index still identify
 evidence in the replay. A short Credential value that matches replayed text
 without its original field or rendering provenance marks that matching range
-incomplete. Desktop Nova command routing scans with the current tenant's
+incomplete. Retained replay decodes up to three escape layers in bounded work
+and maps each match to the original UTF-16 spelling. Unsupported, truncated
+or over-budget escape evidence leaves the affected replay incomplete.
+Desktop Nova command routing scans with the current tenant's
 identity index and marks the previous request's range incomplete when the
 original evidence is unavailable. Disconnect clears its local diagnostics.
 

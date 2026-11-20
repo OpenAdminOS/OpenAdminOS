@@ -236,6 +236,45 @@ function wordBoundaries(text: string): (edge: number, side: -1 | 1) => boolean {
   };
 }
 
+const MAX_REPLAY_DECODE_LAYERS = 3;
+const MAX_REPLAY_DECODE_UNITS = 128_000;
+const REPLAY_ESCAPE = /\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}|[\s\S]|$)/g;
+const REPLAY_ESCAPE_VALUES: Readonly<Record<string, string>> = {
+  '"': '"', "\\": "\\", "/": "/", b: "\b", f: "\f", n: "\n", r: "\r", t: "\t",
+};
+
+/** Keep every decoded UTF-16 boundary tied to its spelling in the request. */
+function decodeReplayLayer(text: string, toOriginal: (offset: number) => number) {
+  if (!text.includes("\\")) return undefined;
+  const offsets = new Uint32Array(text.length + 1);
+  const parts: string[] = [];
+  let read = 0;
+  let written = 0;
+  let changed = false;
+  let uncertain = false;
+  const copy = (end: number) => {
+    parts.push(text.slice(read, end));
+    while (read < end) offsets[written++] = toOriginal(read++);
+  };
+  for (const { 0: escape, index } of text.matchAll(REPLAY_ESCAPE)) {
+    const value = escape.length === 6 ? String.fromCharCode(Number.parseInt(escape.slice(2), 16))
+      : REPLAY_ESCAPE_VALUES[escape.slice(1)];
+    if (value === undefined) {
+      uncertain = true;
+      continue;
+    }
+    copy(index);
+    parts.push(value);
+    offsets[written++] = toOriginal(read);
+    read += escape.length;
+    changed = true;
+  }
+  if (!changed) return { text, toOriginal, changed, uncertain };
+  copy(text.length);
+  offsets[written] = toOriginal(text.length);
+  return { text: parts.join(""), toOriginal: (offset: number) => offsets[offset]!, changed, uncertain };
+}
+
 function foldIdentity(text: string): string {
   const folded = text.toLowerCase();
   if (folded.length === text.length) return folded;
@@ -442,6 +481,7 @@ const tenantLedgers = new Map<string, Set<ClassificationLedger>>();
 export class ClassificationLedger {
   private readonly values = new Map<Scalar, ValueEntry>();
   private readonly byClass = new Map(DATA_CLASSES_BY_SENSITIVITY.map(kind => [kind, new Set<Scalar>()]));
+  private hasShortReplayValues = false;
   private readonly anchors: Array<AnchorIndex | undefined> = [];
   private readonly foldedAnchors: Array<AnchorIndex | undefined> = [];
   private readonly fences = new Map<string, Fence>();
@@ -997,6 +1037,7 @@ export class ClassificationLedger {
   private index(entry: ValueEntry, text: string, mode: MatchMode, provenance?: RenderProvenance): void {
     if (!text || entry.patterns.some(pattern => pattern.text === text && pattern.mode === mode &&
       pattern.before === provenance?.before && pattern.after === provenance?.after && pattern.key === provenance?.key)) return;
+    if (mode === "replay") this.hasShortReplayValues = true;
     const width = Math.min(text.length, ANCHOR_WIDTH);
     const indexes = mode === "folded" ? this.foldedAnchors : this.anchors;
     const prefixes = indexes[width] ??= new Map();
@@ -1034,6 +1075,7 @@ export class ClassificationLedger {
       this.byClass.get(entry.kind)!.add(value);
       for (const pattern of entry.patterns) {
         const { anchor, mode } = pattern;
+        if (mode === "replay") this.hasShortReplayValues = true;
         const indexes = mode === "folded" ? this.foldedAnchors : this.anchors;
         const prefixes = indexes[anchor.length] ??= new Map();
         const first = anchor.charCodeAt(0);
@@ -1079,6 +1121,7 @@ export class ClassificationLedger {
     replayAt?: (span: TextSpan, evidence: Evidence) => void,
     clippedAt?: (start: number, end: number) => void,
     fieldEvidence?: (span: TextSpan, best: Evidence, bound?: Evidence) => void,
+    replayOnly = false,
   ): boolean {
     for (let at = from; at < to; at++) {
       const first = text.charCodeAt(at);
@@ -1101,7 +1144,7 @@ export class ClassificationLedger {
         if (!matched) continue;
         for (const bucket of matched) {
           for (const { text: value, offset, mode, entry, before, after, key } of bucket) {
-            if (mode === "replay" && !replayAt) continue;
+            if (mode === "replay" ? !replayAt : replayOnly) continue;
             if (--work.remaining < 0) return false;
             const start = at - offset;
             const end = start + value.length;
@@ -1484,6 +1527,46 @@ export class ClassificationLedger {
           // The section-wide detector pass has not examined any of this text.
           ranges.push({ section, start: 0, end: text.length, reason: "match-limit" });
           break;
+        }
+      }
+      // A retained turn may quote JSON, a fenced value, or serialized JSON
+      // inside another string. Decoding can recover a match, but it cannot
+      // establish that the replay used the original field or rendering.
+      let decodeBudget = MAX_REPLAY_DECODE_UNITS;
+      for (const replay of preservedReplays) {
+        if (!retained.some(ledger => ledger.hasShortReplayValues)) break;
+        let reported = false;
+        const unavailable = () => {
+          if (!reported) ranges.push({ section, ...replay, reason: "history-provenance-unavailable" });
+          reported = true;
+        };
+        if (replay.end - replay.start > decodeBudget || work.remaining < 0) {
+          unavailable();
+          continue;
+        }
+        let decoded = text.slice(replay.start, replay.end);
+        let toOriginal = (offset: number) => replay.start + offset;
+        for (let depth = 0; depth <= MAX_REPLAY_DECODE_LAYERS; depth++) {
+          if (!decoded.includes("\\")) break;
+          decodeBudget -= decoded.length;
+          if (decodeBudget < 0) {
+            unavailable();
+            break;
+          }
+          const layer = decodeReplayLayer(decoded, toOriginal);
+          if (!layer) break;
+          if (depth === 0 && layer.uncertain || depth === MAX_REPLAY_DECODE_LAYERS && layer.changed) {
+            unavailable();
+            if (depth === MAX_REPLAY_DECODE_LAYERS) break;
+          }
+          if (!layer.changed) break;
+          ({ text: decoded, toOriginal } = layer);
+          if (!this.scan(rawIndex, decoded, 0, decoded.length, work, collect, wordBoundaries(decoded), undefined,
+            ({ start, end }, evidence) => replayAt?.({ start: toOriginal(start), end: toOriginal(end) }, evidence),
+            undefined, undefined, true)) {
+            unavailable();
+            break;
+          }
         }
       }
       const competing = new Map<string, TextSpan>();

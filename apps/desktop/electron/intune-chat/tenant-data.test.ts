@@ -555,15 +555,18 @@ test("Graph diagnostics retain only static source labels, expire, and clear on D
 for (const voice of [false, true]) {
   test(`replayed short Graph credential hint has incomplete coverage in ${voice ? "Nova" : "Chat"}`, async () => {
     const hint = "qzt";
+    const escapedHint = "qx\u0000z";
+    const serialized = JSON.stringify({ nested: JSON.stringify({ inner: JSON.stringify({ excerpt: escapedHint }) }) });
+    const encodedHint = [...serialized.matchAll(/qx\\+u0000z/g)][0]![0];
     const path = "/applications";
     let originalLedger: ClassificationLedger | undefined;
     const f = await fixture({
-      graphResult: route => ({ value: route === path ? [{ id: "fixture-app", passwordCredentials: [{ hint }] }] : [] }),
+      graphResult: route => ({ value: route === path ? [{ id: "fixture-app", passwordCredentials: [{ hint }, { hint: escapedHint }] }] : [] }),
       respond: (_request, i) => {
         if (i === 0) return JSON.stringify({ kind: "tenant", tool: "graph_get", params: { path } });
         if (i !== 1) return "Reviewed.";
         originalLedger = currentClassificationLedger();
-        return JSON.stringify({ final: true, answer: `The hint was ${hint}.` });
+        return JSON.stringify({ final: true, answer: `The hint was ${hint}. Serialized context ${serialized}` });
       },
     });
     try {
@@ -588,6 +591,8 @@ for (const voice of [false, true]) {
       const request = f.prompts.at(-1)!;
       assert.ok(classification.unexamined.ranges.some(range => range.reason === "history-provenance-unavailable" &&
         request.prompt.slice(range.start, range.end) === hint));
+      assert.ok(classification.unexamined.ranges.some(range => range.reason === "history-provenance-unavailable" &&
+        request.prompt.slice(range.start, range.end) === encodedHint));
     } finally { await f.close(); }
   });
 }

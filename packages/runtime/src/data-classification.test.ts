@@ -1188,6 +1188,58 @@ test("a serialized field keeps the most sensitive competing origin and reports a
   }
 });
 
+test("retained replay resolves escape layers to original UTF-16 ranges and reports the decode limit", async t => {
+  const ledger = new ClassificationLedger();
+  const prior = new ClassificationLedger();
+  t.after(() => { ledger.dispose(); prior.dispose(); });
+  ledger.include(prior);
+  const fixtures = [
+    ['qx"z', String.raw`before qx\"z after`],
+    ["qx\nz", String.raw`before qx\nz after`],
+    ["qx\t\b\fz", String.raw`before qx\t\b\fz after`],
+    ["qx\u0000\u001fz", String.raw`before qx\u0000\u001fz after`],
+    ["qx\ud800z", String.raw`before qx\ud800z after`],
+    ["qx/z", String.raw`before qx\/z after`],
+    ["qx\\z", String.raw`before qx\\z after`],
+    ["qx<z", String.raw`before qx\u003cz after`],
+    ["qxz", String.raw`before\"\n\u0071xz\r\"after`],
+  ];
+  prior.register("fixture", { passwordCredentials: fixtures.map(([hint]) => ({ hint })) }, { graphPath: "/applications" });
+
+  function replay(body: string): string {
+    ledger.registerHistoryReplay(body, [{ start: 0, end: body.length, ledger: prior }]);
+    return withClassificationScope(ledger, () => fenceTenantData(body, "fixture-history"));
+  }
+
+  for (const [hint, escaped] of fixtures) {
+    for (const layers of [1, 2, 3]) {
+      let body = escaped!;
+      let token = body.slice(7, -6);
+      if (hint === "qxz") token = String.raw`\u0071xz`;
+      const serialize = (value: string) => JSON.stringify(value).slice(1, -1);
+      for (let i = 1; i < layers; i++) {
+        body = serialize(body);
+        token = serialize(token);
+      }
+      const prompt = replay("😀 " + body);
+      const start = prompt.indexOf(token);
+      assert.ok(start >= 0);
+      const result = layers === 1 ? ledger.classifyRequest({ prompt }) : await ledger.classifyLargeRequest({ prompt });
+      assert.ok(result.unexamined.ranges.some(range => range.reason === "history-provenance-unavailable" &&
+        range.start === start && range.end === start + token.length), JSON.stringify({ hint, layers, token, ranges: result.unexamined.ranges }));
+    }
+  }
+
+  let overLimit = String.raw`qx\u0000z`;
+  for (let i = 0; i < 3; i++) overLimit = JSON.stringify(overLimit).slice(1, -1);
+  for (const body of [overLimit, String.raw`before \u00qz after`, "a".repeat(128_001)]) {
+    const prompt = replay(body);
+    const result = ledger.classifyRequest({ prompt });
+    assert.ok(result.unexamined.ranges.some(range => range.reason === "history-provenance-unavailable" &&
+      prompt.slice(range.start, range.end) === body));
+  }
+});
+
 test("retained credential evidence competes with a coerced scalar in a replay", t => {
   const ledger = new ClassificationLedger();
   const prior = new ClassificationLedger();
