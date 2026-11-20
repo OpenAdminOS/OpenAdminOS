@@ -364,6 +364,17 @@ the installed app's scheduler, login item or caches.
   once a reset starts and hold it while they run. Muse lows: a reset
   message passes through the sign-in error wording; the token test asserts
   clear and the reopening.
+- Review round 35: Claude, Sol and Muse each found the same class: writers
+  outside the secret stores still wrote by path after the commit. One rule
+  now: every WhatsApp Web client of the process stops for good at the
+  commit (package level stop, checked before every socket, credential, key
+  and auth folder write or removal, also after awaits); the secret stores
+  recheck the seal after awaits; the registry cache, agent manifests and
+  uninstall, the index promotion and the window state check the seal before
+  their last write; their entry points are refused once a reset has started
+  and hold it while they run. Not applied: Muse's low on clearing the
+  Connectors error banner on a successful status poll (it would also clear
+  action errors).
 - Process lesson: twice I edited the tree while a reviewer was reading it;
   parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the
