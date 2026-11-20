@@ -276,6 +276,7 @@ it.each([
   ["AADSTS65001 interaction_required: consent is needed", true],
   ["interaction_required: AADSTS50076: Due to a configuration change made by your administrator, you must use multi-factor authentication.", true],
   ["Microsoft Graph rejected the Teams access token (HTTP 401). Reconnect the tenant.", true],
+  ["Graph responded with HTTP 401 for https://gateway.example/v1/messages: unauthorized", false],
   ['Graph responded with HTTP 403 for https://graph.microsoft.com/v1.0/users/1/authentication/methods: {"error":{"code":"accessDenied","message":"The caller is unauthorized to perform this action."}}', false],
   ["Ollama responded with HTTP 403 at http://gateway.example/api/chat: upstream said AADSTS65001 interaction_required", false],
 ])("gives tenant sign-in advice only for a tenant sign-in failure: %s", (error, tenant) => {

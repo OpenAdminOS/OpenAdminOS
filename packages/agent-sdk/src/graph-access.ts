@@ -264,14 +264,16 @@ function storedText(error: unknown): string {
  * responded with HTTP 401 for ..."), and the connectors ("Microsoft Graph
  * rejected the Teams access token (HTTP 401).").
  */
-const GRAPH_401_START = /^(?:Graph rejected the access token \(HTTP 401\)|Graph responded with HTTP 401 for |Microsoft Graph rejected the (?:\w+ )?access token \(HTTP 401\))/;
+const GRAPH_401_START = /^(?:Graph rejected the access token \(HTTP 401\)|Microsoft Graph rejected the (?:\w+ )?access token \(HTTP 401\))/;
+const ADAPTER_401 = /^Graph responded with HTTP 401 for (\S+?):?(?:\s|$)/;
 
 /**
  * True when Graph rejected the tenant's access token. A 401 or "unauthorized"
  * elsewhere, such as in a Graph 403 body or a provider's response, is not.
  */
 export function errorIsGraphSignInRejection(error: unknown): boolean {
-  return GRAPH_401_START.test(storedText(error));
+  const raw = storedText(error);
+  return GRAPH_401_START.test(raw) || graphHostAfter(raw, ADAPTER_401);
 }
 
 /** True when a stored error message was written by OpenAdminOS's Graph code. */
