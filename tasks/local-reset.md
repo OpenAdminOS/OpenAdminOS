@@ -115,6 +115,13 @@ the installed app's scheduler, login item or caches.
   settling, relaunch of a scheduler-owned process, marker committed between
   the pre-lock read and the lock), all fixed with tests where they can run
   here.
+- Review round 4: Claude no blocking; Sol three blocking: a data folder or
+  token cache that is a link (fixed: refused and skipped), a confirmed apply
+  whose record a disconnect removed (fixed: applies tracked in memory until
+  they settle), and the pre-lock scheduler repair racing a development reset
+  (not changed: a development reset never touches the installed app's
+  scheduler by design, so a repointed registration is the intended outcome;
+  argued in round 5). Login item warning now replaced or cleared by the retry.
 - Found in the end to end run and fixed: the incomplete screen called the
   appearance handler before it was registered, and failure reasons repeated
   full paths.

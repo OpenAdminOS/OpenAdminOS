@@ -2509,8 +2509,9 @@ what stays (the enterprise application and admin consent in each tenant, the IT
 in the main process. Mockup: `docs/mockups/34-local-reset.html`.
 
 - **Two phases.** The request refuses while a confirmed write run is applying
-  (also a cancelled one whose apply has not settled) or a confirmation is in
-  flight, and from then on refuses new confirmations
+  (also a cancelled one, or one whose organization was disconnected, while
+  its apply has not settled; tracked in memory, not in run history) or a
+  confirmation is in flight, and from then on refuses new confirmations
   until the restart. It writes `local-reset-pending.json` into the data folder
   first; the rename is the commit point (if it fails, nothing changed and the
   modal says so; a failed folder flush after it is only logged). It then removes the Microsoft sign-in of
@@ -2532,6 +2533,10 @@ in the main process. Mockup: `docs/mockups/34-local-reset.html`.
   last, so an interrupted wipe resumes at the next launch without repeating
   the Keychain step. External commands are bounded at 5 seconds each, below
   Chromium's wait for a second launch.
+- **Links.** A data folder that is itself a link is refused at the request
+  and never emptied at launch (it may point at a shared folder). Sign-out
+  skips token caches that are links, with a warning; the wipe removes links
+  inside the folder without following them.
 - **Marker writes** go through a new temporary file with a random name,
   created exclusively (`wx`), so a link planted in a restored profile is never
   followed; the temporary file is removed when the rename fails.
