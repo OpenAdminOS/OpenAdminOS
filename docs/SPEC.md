@@ -2649,20 +2649,29 @@ Mockup: `docs/mockups/34-local-reset.html`.
   folder, as written or as the system resolves it through links, is refused
   with "OpenAdminOS is resetting and restarts in a moment. Nothing was
   saved." (`EROFS`; a write stream fails with that error), except the
-  reset's own marker and its temporary files directly in the folder, so the
-  request can still add its warnings. A refused write nobody awaited is
+  reset's own marker and its temporary files directly in the folder (by
+  exact name and temporary file pattern), so the request can still add its
+  warnings. No new hard link to a file inside can be made; a hard link that
+  already exists outside the folder reaches the file without the guard
+  seeing it (accepted, nothing in the app writes through one). A refused write nobody awaited is
   logged while the seal holds. Work that writes on its own (index downloads,
   WhatsApp Web) stops before the guard is installed. A writer that captured
   file system functions at load is not seen: electron-updater is the one
-  known, so no update check starts after the commit (one already running
-  can still write its staging id, which holds no tenant data). Changes through a
+  known, so the updater stops for good at the commit, a channel switch does
+  not start it again, and only a check already running can still write its
+  staging id, which holds no tenant data. Changes through a
   handle opened earlier (SQLite, Chromium's own storage) are not paths and
   are left as they are; the process exits right after the shutdown. A
   refused reset lifts the guard. In the running app, the scheduler and the
   login item are turned off only while the data folder is still the one
-  being reset; otherwise they stay on, with a warning. The restart of a
-  Linux AppImage goes through the AppImage file (`APPIMAGE`), since the
-  mount it runs from goes away with the old process. WhatsApp Web clients leave the connected
+  being reset; otherwise they stay on, with a warning; the retry of the
+  login item after ready at the next launch runs only while the folder is
+  still the one the wipe emptied and holds no `state.json`. The restart of
+  this app's own Linux AppImage (`APPIMAGE`, with the running executable
+  inside `APPDIR`) goes through a detached shell that waits for the old
+  process to exit and starts the AppImage file: the mount it runs from goes
+  away with the old process, and Electron's relaunch helper runs with
+  no_new_privs, under which the new AppImage could not mount itself. WhatsApp Web clients leave the connected
   and QR states when they stop, so a client resumed after a refused reset
   reconnects. The shutdown before the restart leaves the SQLite databases open:
   closing checkpoints the write-ahead log and deletes it by path; the
