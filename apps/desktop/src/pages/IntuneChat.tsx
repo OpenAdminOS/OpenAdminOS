@@ -1253,6 +1253,11 @@ function IntuneChatContent() {
     const destination = await window.openAdminOS?.getProviderDestination?.(choice.providerId).catch(() => undefined);
     // A later choice, or a withdrawn offer, supersedes this lookup.
     if (choiceId !== modelFitChoiceRef.current || modelFitOfferRef.current?.issue.offerId !== offer.issue.offerId) return;
+    // Without a destination the host would refuse the send, so the accept step does not open.
+    if (window.openAdminOS?.getProviderDestination && !destination) {
+      setNotice(MODEL_FIT_COPY.destinationFailedChat(choice.providerName));
+      return;
+    }
     setModelFitAccept({
       offer,
       override: { ...override, ...(destination ? { destination } : {}) },
@@ -1293,7 +1298,8 @@ function IntuneChatContent() {
     setModelFitAccept(null);
     if (!offer) return;
     if (!offer.answered) {
-      setInput(offer.content);
+      // An edit the admin made in the composer while the notice was open is kept.
+      setInput((current) => (current.trim() === "" || current === offer.content ? offer.content : current));
       setNotice(next === "split" ? MODEL_FIT_COPY.splitNotice : MODEL_FIT_COPY.declined(modelFitReturnModel(offer)));
     }
     window.requestAnimationFrame(() => composerRef.current?.focus());
