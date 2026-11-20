@@ -556,12 +556,12 @@ describe("compact budget for a local model in Chat", () => {
         assert.equal(empty.failureReason, "thinking-only");
         assert.equal(empty.fallbackNotice, "The local model returned only its reasoning and no answer. Answered from cached data instead.");
       }
-      const overflow: RunLlmApi = { available: true, async complete() { throw new Error("Ollama: prompt exceeds the model's context length (num_ctx 4096)."); }, async *stream() {} };
+      const overflow: RunLlmApi = { available: true, async complete() { throw new Error("Ollama context size too small: This request needs 40,652 tokens of context, but openadmin-8b supports at most 16,384."); }, async *stream() {} };
       const tooSmall = await runAgenticChat({ ...baseInput(store, overflow), budget: "compact" });
       assert.equal(tooSmall.ok, false);
       if (!tooSmall.ok) assert.equal(tooSmall.failureReason, "context-too-small");
       // Without the compact budget the provider error is the provider's, as before.
-      await assert.rejects(runAgenticChat(baseInput(store, overflow)), /context length/);
+      await assert.rejects(runAgenticChat(baseInput(store, overflow)), /context size too small/);
     } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
   });
 
