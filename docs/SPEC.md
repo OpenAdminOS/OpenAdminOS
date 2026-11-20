@@ -2515,7 +2515,7 @@ adapter's "LM Studio context length too small" message (PR #219), Ollama's HTTP 
 
 The notice replaces the generic error above the composer. It says why in
 plain numbers where known ("This request needs about 40,652 tokens. OpenAdmin
-8B is set to 16,384."), that nothing was sent elsewhere, and lists choices as
+8B is set to 16,384."), that nothing goes to another provider unless the admin chooses one, and lists choices as
 separate buttons with none focused or highlighted: each configured and ready
 hosted provider with its production location label (`providerDataLocation`)
 and a cost note that says where the cost lands (the app knows no plan or

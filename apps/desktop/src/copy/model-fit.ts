@@ -46,7 +46,8 @@ export const MODEL_FIT_COPY = {
     if (issue.limitTokens) return `${what} is larger than the ${tokens(issue.limitTokens)} tokens ${model} ${limitVerb}.`;
     return `${what} is larger than the context ${model} is set to.`;
   },
-  nothingSent: "Nothing was sent to another provider.",
+  // What the retry flow guarantees, rather than a claim about where the failed request went.
+  nothingSent: "Nothing goes to another provider unless you choose one.",
   /** Read out when the notice appears: the heading, and that choices follow. */
   announce: (issue: ModelFitIssue, model: string, surface: Surface) =>
     `${MODEL_FIT_COPY.title(issue, model, surface)}. Choices follow.`,
