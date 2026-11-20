@@ -531,6 +531,9 @@ it("does not start a model fit rerun whose named model the provider no longer li
   const dialog = await screen.findByRole("dialog", { name: /Review run/ });
   // The review would otherwise show a fallback model while Start passes the named one.
   expect(await within(dialog).findByText("Codex no longer lists gpt-4.1, so this run cannot start. Choose a provider again on the run page.")).toBeInTheDocument();
+  // The review names the model this run was set up with, not a fallback it would never use.
+  expect(dialog).toHaveTextContent("gpt-4.1");
+  expect(dialog).not.toHaveTextContent("gpt-5");
   expect(within(dialog).getByRole("button", { name: "Start run" })).toBeDisabled();
   expect(bridge.startRun).not.toHaveBeenCalled();
 });

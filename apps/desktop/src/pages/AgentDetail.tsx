@@ -198,8 +198,12 @@ export default function AgentDetail({
   // A model fit rerun on a hosted provider with no model named (a provider picked in setup) uses the
   // model Chat and the run page would offer for it, so the review, the choices and the host agree.
   const pendingFitLike = Boolean(pendingRunChoice?.modelFit || pendingRunChoice?.safeguards);
+  // A model the choice named is the one the review shows, even when its provider no longer lists it
+  // (the review then says so and Start stays disabled), never a fallback this run would not use.
   const pendingModel =
-    pendingFitLike && !pendingRunChoice?.model && pendingProvider && !pendingProvider.isLocal
+    pendingFitLike && pendingRunChoice?.model
+      ? pendingRunChoice.model
+      : pendingFitLike && pendingProvider && !pendingProvider.isLocal
       ? hostedModelFitModel(pendingProvider, state.activeModelByProviderId)
       : resolveRunModel({
           provider: pendingProvider,
