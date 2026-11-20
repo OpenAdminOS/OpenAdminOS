@@ -11,7 +11,7 @@ import type {
 
 import { ClassificationLedger, withClassificationScope, withRequestClassification, type RequestClassificationEvent } from "./data-classification.js";
 import { createSandboxBroker } from "./sandbox-broker.js";
-import { TENANT_DATA_INSTRUCTIONS } from "./tenant-data.js";
+import { escapeTenantDataBody, TENANT_DATA_INSTRUCTIONS } from "./tenant-data.js";
 
 it("fences the script prompt, keeps the author system prompt, and strips echoed output", async t => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
@@ -48,6 +48,52 @@ it("fences the script prompt, keeps the author system prompt, and strips echoed 
 });
 
 describe("sandbox broker", () => {
+  it("preserves script matches at both edges of fence and JSON escapes", async t => {
+    const path = "/applications";
+    const agent = fakeAgent({ scopes: ["Application.Read.All"], graphOperations: [{ method: "GET", path }] });
+    const ledger = new ClassificationLedger();
+    t.after(() => ledger.dispose());
+    const short = "qxz";
+    const distinctive = "qxz987654321";
+    const events: RequestClassificationEvent[] = [];
+    const requests: LlmOptions[] = [];
+    const ctx = fakeContext(agent, {
+      graphRequest: async () => ({ value: [{ passwordCredentials: [short, distinctive, "nqxz", "u003cqxz"].map(hint => ({ hint })) }] }),
+      llmComplete: async options => {
+        assert.equal(events.length, requests.length);
+        requests.push(options);
+        return { text: "Reviewed", model: "fixture" };
+      },
+    });
+    ctx.llm = withRequestClassification(ctx.llm, "ollama", event => { events.push(event); });
+    const broker = createSandboxBroker({ agent, ctx });
+    await withClassificationScope(ledger, async () => {
+      assert.equal((await broker.handle({ id: "read", method: "graph.request", params: { method: "GET", path } })).ok, true);
+      await ledger.waitForObservations();
+      const brackets = [..."<>＜＞﹤﹥〈〉⟨⟩‹›"];
+      const jsonDelimiters = [...Array.from({ length: 32 }, (_, i) => String.fromCharCode(i)), '"', "\\", "\ud800"]
+        .map(char => JSON.stringify(char).slice(1, -1));
+      const delimiters = [...brackets, ...jsonDelimiters, String.raw`\/`, String.raw`\u00E9`, String.raw`\uD83D\uDE00`];
+      for (const input of [delimiters.slice(0, 1), delimiters]) {
+        const script = `😀 ${input.flatMap(edge => [short, distinctive].map(value => `${edge}${value}${edge}`)).join(" | ")}`;
+        assert.equal((await broker.handle({ id: "model", method: "llm.complete", params: { prompt: script, system: escapeTenantDataBody(script) } })).ok, true);
+        await ledger.waitForObservations();
+        const { classification } = events.at(-1)!;
+        const request = requests.at(-1)!;
+        const expected = (value: string) => (["system", "prompt"] as const).flatMap(section =>
+          [...request[section]!.matchAll(new RegExp(`${value}(?![0-9])`, "g"))].map(match => [section, match.index, match.index + value.length]));
+        assert.deepEqual(classification.unexamined.ranges.map(({ section, start, end }) => [section, start, end]), expected(short));
+        assert.deepEqual(classification.spans.map(({ section, start, end, kind }) => [section, start, end, kind]),
+          expected(distinctive).map(span => [...span, "credential"]));
+        assert.equal(classification.coverageIncomplete, true);
+      }
+      const unrelated = String.raw`Both xqxz and qxzx stay whole beside \n and \u003c.`;
+      assert.equal((await broker.handle({ id: "model", method: "llm.complete", params: { prompt: unrelated, system: unrelated } })).ok, true);
+      await ledger.waitForObservations();
+      assert.equal(events.at(-1)?.classification.coverageIncomplete, false);
+    });
+  });
+
   it("reports prose containing low-specificity Graph values as incomplete after dispatch", async t => {
     const path = "/identity/conditionalAccess/policies";
     const policy = { id: "synthetic-policy-17", grantControls: { operator: "OR", builtInControls: ["mfa"] } };

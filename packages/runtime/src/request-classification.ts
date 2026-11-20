@@ -203,12 +203,35 @@ function fenceEscapes(text: string): string {
 }
 
 const WORD_CHAR = /[\p{L}\p{N}\p{M}_]/u;
+const JSON_ESCAPE = /\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4})/y;
 
-function wordBoundary(text: string, offset: number): boolean {
-  let start = offset;
-  if (/[\udc00-\udfff]/.test(text[start] ?? "")) start--;
-  const point = text.codePointAt(start);
-  return point === undefined || !WORD_CHAR.test(String.fromCodePoint(point));
+function wordBoundaries(text: string): (edge: number, side: -1 | 1) => boolean {
+  let slashRunStart = -1;
+  let slashRunEnd = -1;
+  return (edge, side) => {
+    // Check the provider's spelling in place. Escapes are indivisible: the
+    // last hex digit is not a word character, and matches cannot start in it.
+    for (let slash = edge - 1; slash >= Math.max(0, edge - 6); slash--) {
+      if (text.charCodeAt(slash) !== 92) continue;
+      if (slash < slashRunStart || slash > slashRunEnd) {
+        slashRunStart = slashRunEnd = slash;
+        while (text.charCodeAt(slashRunStart - 1) === 92) slashRunStart--;
+        while (text.charCodeAt(slashRunEnd + 1) === 92) slashRunEnd++;
+      }
+      if ((slash - slashRunStart) % 2 !== 0) continue;
+      JSON_ESCAPE.lastIndex = slash;
+      if (JSON_ESCAPE.test(text) && JSON_ESCAPE.lastIndex >= edge) {
+        if (JSON_ESCAPE.lastIndex > edge) return false;
+        if (side === -1) return true;
+        break;
+      }
+    }
+    let start = side === -1 ? edge - 1 : edge;
+    const unit = text.charCodeAt(start);
+    if (unit >= 0xdc00 && unit <= 0xdfff) start--;
+    const point = text.codePointAt(start);
+    return point === undefined || !WORD_CHAR.test(String.fromCodePoint(point));
+  };
 }
 
 function foldIdentity(text: string): string {
@@ -1043,6 +1066,7 @@ export class ClassificationLedger {
   private scan(
     index: ScanIndex, text: string, from: number, to: number, work: { remaining: number },
     emit: (span: TextSpan, evidence: Evidence, authoritative?: boolean) => void,
+    boundary: ReturnType<typeof wordBoundaries>,
     fieldAt?: (start: number, end: number) => string | undefined,
     replayAt?: (start: number, end: number) => void,
     scriptAt?: (start: number, end: number) => void,
@@ -1081,7 +1105,7 @@ export class ClassificationLedger {
               if (work.remaining < 0) return false;
             }
             if (!text.startsWith(value, start)) continue;
-            if ((mode === "word" || mode === "folded" || mode === "replay" || mode === "script") && (!wordBoundary(text, start - 1) || !wordBoundary(text, end))) continue;
+            if ((mode === "word" || mode === "folded" || mode === "replay" || mode === "script") && (!boundary(start, -1) || !boundary(end, 1))) continue;
             if ((mode === "context" || mode === "clipped") && (before && (start < before.length || !text.startsWith(before, start - before.length)) ||
                 after && !text.startsWith(after, end))) continue;
             if (mode === "clipped") {
@@ -1432,11 +1456,12 @@ export class ClassificationLedger {
         }
       } : undefined;
       const folded = foldedIndex ? foldIdentity(text) : undefined;
+      const boundary = wordBoundaries(text);
       for (let from = 0; from < text.length; from += TEXT_CHUNK) {
         const to = Math.min(text.length, from + TEXT_CHUNK);
-        if (!this.scan(rawIndex, text, from, to, work, collect, fieldAt, replayAt, scriptAt,
+        if (!this.scan(rawIndex, text, from, to, work, collect, boundary, fieldAt, replayAt, scriptAt,
             (start, end) => clipped.set(`${start}:${end}`, { start, end })) ||
-            foldedIndex && folded !== undefined && !this.scan(foldedIndex, folded, from, to, work, collect)) {
+            foldedIndex && folded !== undefined && !this.scan(foldedIndex, folded, from, to, work, collect, boundary)) {
           // The section-wide detector pass has not examined any of this text.
           ranges.push({ section, start: 0, end: text.length, reason: "match-limit" });
           break;
