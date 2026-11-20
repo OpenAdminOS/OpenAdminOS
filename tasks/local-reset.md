@@ -329,6 +329,13 @@ the installed app's scheduler, login item or caches.
   per-user task name follow-up closes it). Muse lows: the folder guard runs
   inside the scheduler step before each removal it makes; an unknown cache
   identity has its own reason.
+- Review round 30: Claude and Muse no blocking; Sol accepted the remaining
+  Windows task window. Sol one blocking (files restored into the same
+  folder during the cleanup outside it; the guard now also requires the
+  folder to hold only the kept files, so the Keychain key stays and the
+  files are listed) and a medium (the Windows folder guard now runs after
+  the second task read). Muse lows: the Linux mount table is read again
+  right before a cache folder's removal; "another item on this disk".
 - Process lesson: twice I edited the tree while a reviewer was reading it;
   parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the
