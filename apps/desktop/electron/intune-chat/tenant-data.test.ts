@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { LlmOptions, RunGraphApi, RunLlmApi } from "@openadminos/agent-sdk";
 import { TENANT_DATA_INSTRUCTIONS } from "@openadminos/runtime";
-import { currentClassificationLedger, type ClassificationLedger, type RequestClassificationEvent } from "@openadminos/runtime/data-classification";
+import { ClassificationLedger, currentClassificationLedger, type RequestClassificationEvent } from "@openadminos/runtime/data-classification";
 import { GRAPH_CACHE_RESOURCES, planChatContext } from "./planner.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 import { AppStateStore } from "../state.js";
@@ -86,6 +86,27 @@ test("Chat fences answer packs, workspace evidence and history and filters every
     const messages = await f.store.getIntuneChatMessages(first.conversation.id);
     for (const message of messages.filter(message => message.role === "assistant")) assert.equal(message.content, "Reviewed");
     assert.doesNotMatch(f.prompts[0]!.prompt, /<\/tenant_data nonce="fake"/);
+  } finally { await f.close(); }
+});
+
+test("Disconnect releases worker identity mirrors even while sign-in cleanup is pending", async () => {
+  const f = await fixture();
+  try {
+    Object.defineProperty(f.store, "removeCachedAccount", { value: async () => { throw new Error("Sign-in unavailable"); } });
+    const cache = f.store["requireIntelligenceStore"]();
+    await cache.waitForCacheClassification();
+    const tenantId = "tenant-a";
+    cache.replaceGraphResources({ tenantId, resource: "users", label: "Users", scopeSet: [],
+      refreshedAt: "2026-11-18T00:00:00.000Z", rows: [{ id: "fixture-user", displayName: "Yelena Fixture" }] });
+    const ledger = new ClassificationLedger(cache.classificationIdentityIndex(tenantId));
+    const request = { prompt: "Yelena" };
+    assert.equal((await ledger.classifyProviderRequest(request)).counts.identity, 1);
+    await f.store.disconnectTenant(tenantId);
+    assert.equal(cache.queryGraphCache({ tenantId, resource: "users" }).rows.length, 1);
+    const result = await ledger.classifyProviderRequest(request);
+    assert.equal(result.counts.identity, 0);
+    assert.equal(result.coverageIncomplete, true);
+    ledger.dispose();
   } finally { await f.close(); }
 });
 

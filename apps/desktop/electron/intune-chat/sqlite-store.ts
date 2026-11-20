@@ -437,8 +437,9 @@ export class IntelligenceSqliteStore {
   private classificationInitialization?: Promise<void>;
   private closed = false;
   private readonly cacheCleared = new Map<string, number>();
+  private readonly disconnectedClassificationTenants = new Set<string>();
 
-  constructor(dbPath: string, options: { backgroundClassification?: boolean } = {}) {
+  constructor(dbPath: string, options: { backgroundClassification?: boolean; beforeClassification?: () => Promise<unknown> } = {}) {
     const root = dirname(dbPath);
     mkdirSync(root, { recursive: true, mode: 0o700 });
     chmodSync(root, 0o700);
@@ -455,7 +456,7 @@ export class IntelligenceSqliteStore {
     }
     this.migrate();
     if (options.backgroundClassification) {
-      this.classificationInitialization = this.initializeCacheClassification();
+      this.classificationInitialization = this.initializeCacheClassification(options.beforeClassification);
     } else {
       for (const _batch of this.cacheClassificationBatches()) { /* Drain synchronously for standalone callers. */ }
     }
@@ -2466,6 +2467,7 @@ export class IntelligenceSqliteStore {
    * and backed by resource snapshots. Callers must not add to it.
    */
   tenantIdentityValues(tenantId: string): TenantValueIndex {
+    if (this.disconnectedClassificationTenants.has(tenantId)) return new TenantValueIndex();
     if (!this.cacheClassificationReady) {
       const index = new TenantValueIndex();
       this.collectTenantIdentityValues(tenantId, index);
@@ -2493,7 +2495,7 @@ export class IntelligenceSqliteStore {
     return {
       matches: text => !TenantValueIndex.spansFor(text, shards()).next().done,
       spans: text => TenantValueIndex.spansFor(text, shards()),
-      isComplete: () => this.cacheClassificationReady,
+      isComplete: () => this.cacheClassificationReady && !this.disconnectedClassificationTenants.has(tenantId),
       workerShards: shards,
     };
   }
@@ -2509,6 +2511,18 @@ export class IntelligenceSqliteStore {
     shards.set(resource, index);
   }
 
+  disconnectClassification(tenantId: string): void {
+    if (this.disconnectedClassificationTenants.has(tenantId)) return;
+    this.disconnectedClassificationTenants.add(tenantId);
+    this.cacheCleared.set(tenantId, (this.cacheCleared.get(tenantId) ?? 0) + 1);
+    this.tenantIdentityIndexes.delete(tenantId);
+    this.releaseIdentityShards(tenantId);
+  }
+
+  reconnectClassification(tenantId: string): void {
+    this.disconnectedClassificationTenants.delete(tenantId);
+  }
+
   private releaseIdentityShards(tenantId: string): void {
     for (const indexes of [this.classificationIndexes, this.tenantIdentityShards]) {
       for (const shard of indexes.get(tenantId)?.values() ?? []) releaseClassificationIdentityShard(shard);
@@ -2520,9 +2534,10 @@ export class IntelligenceSqliteStore {
     return this.classificationInitialization;
   }
 
-  private async initializeCacheClassification(): Promise<void> {
+  private async initializeCacheClassification(beforeClassification?: () => Promise<unknown>): Promise<void> {
     try {
       await yieldToMain();
+      await beforeClassification?.();
       if (this.closed) return;
       for (const _batch of this.cacheClassificationBatches()) {
         await yieldToMain();
@@ -2548,7 +2563,8 @@ export class IntelligenceSqliteStore {
       if (!rows.length) break;
       for (const row of rows) {
         cursor = row.rowid;
-        if (generations.get(row.tenant_id) !== this.cacheCleared.get(row.tenant_id)) continue;
+        if (this.disconnectedClassificationTenants.has(row.tenant_id) ||
+            generations.get(row.tenant_id) !== this.cacheCleared.get(row.tenant_id)) continue;
         const parsed = readJson<unknown>(row.raw_json, null);
         let index = identity.get(row.tenant_id)?.get(row.resource);
         if (!index) this.setIdentityShard(identity, row.tenant_id, row.resource, index = new TenantValueIndex());
@@ -2584,13 +2600,14 @@ export class IntelligenceSqliteStore {
       this.db.exec("BEGIN");
       try {
         for (const row of rows) {
+          cursor = row.rowid;
+          if (this.disconnectedClassificationTenants.has(row.tenant_id)) continue;
           const graphPath = pathForResource(row.resource)?.path;
           const identityIndex = this.classificationIdentityIndex(row.tenant_id);
           update.run(describeCacheRow(readJson<unknown>(row.raw_json, null), {
             ...(graphPath ? { graphPath } : {}),
             ...(row.resource === "users" || row.resource === "groups" ? {} : { identityIndex }),
           }), row.rowid);
-          cursor = row.rowid;
         }
         this.db.exec("COMMIT");
       } catch (error) {

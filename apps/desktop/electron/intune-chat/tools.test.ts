@@ -109,6 +109,29 @@ it("publishes only complete startup identity shards to the request worker", asyn
   }
 });
 
+it("does not repopulate a disconnected tenant while startup is indexing its cache", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-classification-disconnect-"));
+  const path = join(dir, "openadminos.db");
+  const tenantId = "fixture-tenant";
+  let store = new IntelligenceSqliteStore(path);
+  try {
+    store.replaceGraphResources({ tenantId, resource: "users", label: "Users", scopeSet: [],
+      refreshedAt: "2026-11-18T00:00:00.000Z",
+      rows: Array.from({ length: 600 }, (_, i) => ({ id: `user-${i}`, displayName: `Yelena Fixture ${i}` })),
+    });
+    store.close();
+    store = new IntelligenceSqliteStore(path, { backgroundClassification: true });
+    await nextTick();
+    store.disconnectClassification(tenantId);
+    await store.waitForCacheClassification();
+    assert.deepEqual([...store.classificationIdentityIndex(tenantId).workerShards!()], []);
+    assert.equal(store.tenantIdentityValues(tenantId).size, 0);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 it("reuses versioned cache metadata on reopen and backfills rows from older versions", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-cache-classification-version-"));
   const path = join(dir, "openadminos.db");

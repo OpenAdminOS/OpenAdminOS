@@ -2017,7 +2017,9 @@ export class AppStateStore {
       this.sandboxedCodeDefault = options.sandboxedCodeDefault === true;
       this.userDataPath = options.userDataPath;
       this.intelligenceStore = options.userDataPath
-        ? new IntelligenceSqliteStore(join(options.userDataPath, "openadminos.db"), { backgroundClassification: true })
+        ? new IntelligenceSqliteStore(join(options.userDataPath, "openadminos.db"), {
+          backgroundClassification: true, beforeClassification: () => this.read(),
+        })
         : undefined;
       this.intelligenceStore?.setTenantWriteGuard((tenantId, what) => this.tenantLifecycle.assertWritable(tenantId, what));
       this.graphFactory = options.graphFactory;
@@ -8675,6 +8677,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         throw cause;
       }
       this.chatService.clearTenantClassification(id);
+      this.intelligenceStore?.disconnectClassification(id);
     });
     // A license check of the removed connection saves nothing.
     this.supersedeTenantCheck(id, "disconnected");
@@ -8706,6 +8709,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const pending = persisted.tenantRemovals?.find((removal) => removal.tenantId === tenantId);
     if (pending) throw new Error(tenantCleanupPendingMessage(pending));
     this.tenantLifecycle.open(tenantId);
+    this.intelligenceStore?.reconnectClassification(tenantId);
   }
 
   /** Cleanups running now, by tenant, so one tenant is never cleaned twice at once. */
@@ -9474,7 +9478,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         // tenant is closed here, so a read that raced the write dropping
         // the record never closes a tenant whose cleanup just finished.
         for (const removal of tenantRemovals) {
-          if (this.tenantLifecycle.phase(removal.tenantId) === "open") this.tenantLifecycle.close(removal.tenantId);
+          if (this.tenantLifecycle.phase(removal.tenantId) === "open") {
+            this.tenantLifecycle.close(removal.tenantId);
+            this.intelligenceStore?.disconnectClassification(removal.tenantId);
+          }
         }
       }
       if (Array.isArray(parsed.novaConnectorAudit)) {
