@@ -327,6 +327,33 @@ describe("local reset: wipe at launch", () => {
     }
   });
 
+  it("stays incomplete when something is written into the folder during the wipe", async () => {
+    const dir = await tempDir();
+    try {
+      seedDataFolder(dir, DEV_MARKER);
+      let recreated = false;
+      const fs: LocalResetFileSystem = {
+        ...failingFileSystem(() => false),
+        remove: (path) => {
+          rmSync(path, { recursive: true, force: true });
+          // A process left from the last session writes a file after the listing.
+          if (!recreated && path.endsWith("logs")) {
+            recreated = true;
+            writeFileSync(join(dir, "Session Storage"), "x");
+          }
+        },
+      };
+      const report = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", home: dir, env: {}, fs });
+      assert.equal(report?.status, "incomplete");
+      assert.deepEqual(report?.failed, [{ item: "Session Storage", reason: "it was created again during the reset" }]);
+      assert.ok(existsSync(join(dir, LOCAL_RESET_MARKER)));
+      const second = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", home: dir, env: {} });
+      assert.equal(second?.status, "completed");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("keeps the policy file in any letter case", async () => {
     const dir = await tempDir();
     try {

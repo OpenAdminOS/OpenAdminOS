@@ -281,7 +281,7 @@ export function localResetLeftoverPaths(platform: NodeJS.Platform, home: string,
     // policy.json, also on a silent /S uninstall by IT, and leaves this
     // updater cache and the "OpenAdminOS Scheduler" task. Options: keep it
     // off and point to Reset OpenAdminOS (current), or turn it on with a
-    // custom un.onInit that keeps policy.json and removes the task.
+    // customUnInit include that keeps policy.json and removes the task.
     const localAppData = env.LOCALAPPDATA || win32.join(home, "AppData", "Local");
     return [win32.join(localAppData, UPDATER_CACHE_DIR)];
   }
@@ -363,6 +363,17 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
   if (failed.length > 0) return finish("incomplete");
   for (const name of plan.last) removeEntry(fs, userDataDir, name, failed);
   if (failed.length > 0) return finish("incomplete");
+  // A process left from the last session could have written something since
+  // the folder was listed; the reset is done only when nothing but the kept
+  // files is left.
+  try {
+    for (const name of fs.readdir(userDataDir)) {
+      if (!isKeptThroughReset(name)) failed.push({ item: name, reason: "it was created again during the reset" });
+    }
+  } catch (cause) {
+    failed.push({ item: userDataDir, reason: reasonOf(cause) });
+  }
+  if (failed.length > 0) return finish("incomplete");
 
   if (options.packaged && marker.build === "installed") {
     if (!marker.leftoversDone) {
@@ -432,13 +443,17 @@ function recordLeftoversDone(
   fs: LocalResetFileSystem,
   userDataDir: string,
   marker: LocalResetMarker,
-  warnings: readonly LocalResetProblem[],
+  warnings: LocalResetProblem[],
 ): void {
   const next: LocalResetMarker = { ...marker, leftoversDone: true, ...(warnings.length > 0 ? { requestWarnings: [...warnings] } : {}) };
   try {
     fs.writeMarker(join(userDataDir, LOCAL_RESET_MARKER), `${JSON.stringify(next, null, 2)}\n`);
   } catch (cause) {
     console.warn(`[local-reset] could not record that the cleanup outside the data folder ran: ${reasonOf(cause)}`);
+    warnings.push({
+      item: "Reset progress",
+      reason: `could not be recorded (${reasonOf(cause)}). If the reset has to resume, it removes the Keychain item and caches again`,
+    });
   }
 }
 
