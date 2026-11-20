@@ -85,10 +85,10 @@ export interface LocalResetMarker {
   /** The cleanup outside the data folder ran; a resumed wipe never runs it again. */
   leftoversDone?: true;
   /**
-   * The data folder the request was accepted for, by device and inode.
-   * Written by writeLocalResetMarker. A copy of the folder restored or
-   * roamed to another device has another identity, so its marker is not
-   * trusted there.
+   * The data folder the request was accepted for: device, inode and birth
+   * time, written by writeLocalResetMarker and matched by
+   * markerFolderMatches. A copy of the folder restored or roamed to another
+   * device has another identity, so its marker is not trusted there.
    */
   folder?: LocalResetFolderIdentity;
   /** Set when reading, never written: the marker is not trusted, with the reason shown to the admin. */
@@ -747,16 +747,26 @@ export interface LocalResetFolderIdentity {
  */
 export function localResetFolderIdentity(path: string): LocalResetFolderIdentity | undefined {
   try {
-    const stat = lstatSync(path);
-    if (stat.ino === 0 && stat.birthtimeMs === 0) return undefined;
-    return { dev: stat.dev, ino: stat.ino, birth: stat.birthtimeMs };
+    return identityFromStat(lstatSync(path));
   } catch {
     return undefined;
   }
 }
 
+/**
+ * Where statx is blocked, Node reports the change time as the birth time,
+ * and that changes when the marker is written: a birth time equal to the
+ * change time counts as unknown. A data folder in use has been changed
+ * since it was created, so a real birth time differs from it.
+ */
+export function identityFromStat(stat: { dev: number; ino: number; birthtimeMs: number; ctimeMs: number }): LocalResetFolderIdentity | undefined {
+  const birth = stat.birthtimeMs === stat.ctimeMs ? 0 : stat.birthtimeMs;
+  if (stat.ino === 0 && birth === 0) return undefined;
+  return { dev: stat.dev, ino: stat.ino, birth };
+}
+
 /** Within one session: the same device and inode (and birth time where known). */
-function sameSessionFolder(a: LocalResetFolderIdentity, b: LocalResetFolderIdentity): boolean {
+export function sameSessionFolder(a: LocalResetFolderIdentity, b: LocalResetFolderIdentity): boolean {
   return a.dev === b.dev && a.ino === b.ino && (a.birth === 0 || b.birth === 0 || a.birth === b.birth);
 }
 
@@ -768,7 +778,11 @@ function sameSessionFolder(a: LocalResetFolderIdentity, b: LocalResetFolderIdent
 export function markerFolderMatches(stored: LocalResetFolderIdentity, now: LocalResetFolderIdentity): boolean {
   const birthKnown = stored.birth !== 0 && now.birth !== 0;
   if (stored.ino === 0 || now.ino === 0) return birthKnown && stored.birth === now.birth;
-  return stored.ino === now.ino && (!birthKnown || stored.birth === now.birth);
+  if (stored.ino !== now.ino) return false;
+  // Without a birth time the inode alone could match a copy elsewhere, so
+  // the device must match too; after a remount that stops the reset with
+  // nothing removed, which is the safe side.
+  return birthKnown ? stored.birth === now.birth : stored.dev === now.dev;
 }
 
 function isSymbolicLink(path: string): boolean {

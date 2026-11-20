@@ -8,6 +8,7 @@ import {
   LocalResetRequestError,
   localResetDataFolderLinkMessage,
   localResetFolderIdentity,
+  sameSessionFolder,
   type LocalResetFolderIdentity,
   localResetLinkCheck,
   MANAGED_POLICY_FILE,
@@ -5594,10 +5595,15 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
     throw new LocalResetRequestError("A reset is already in progress. OpenAdminOS restarts in a moment.");
   }
   localResetRequested = true;
-  let committedFolder: LocalResetFolderIdentity | undefined;
+  // The folder this reset is for is fixed now, before any check awaits:
+  // a folder restored or swapped in while the checks run gets no marker.
+  let committedFolder: LocalResetFolderIdentity | undefined = localResetFolderIdentity(app.getPath("userData"));
   try {
     await requestLocalReset(confirmation, {
       checkReady: async () => {
+        if (!committedFolder) {
+          throw new LocalResetRequestError("The reset could not start: the data folder could not be read, or it cannot be told apart from another folder on this disk. Nothing was removed.");
+        }
         if (localResetLinkCheck(app.getPath("userData")).dataFolderIsLink) {
           throw new LocalResetRequestError(localResetDataFolderLinkMessage());
         }
@@ -5618,7 +5624,7 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
         }
         // The first write fixes which folder this reset is for; a later
         // write (the warnings) and the sign-out go only to that folder.
-        committedFolder = await writeLocalResetMarker(dataFolder, marker, committedFolder ? { expectFolder: committedFolder } : {});
+        committedFolder = await writeLocalResetMarker(dataFolder, marker, { expectFolder: committedFolder });
       },
       forgetSignIns: async () => {
         // The marker is written, so the reset goes ahead: no connector send
@@ -5632,7 +5638,7 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
         // Sign-out rewrites the token caches, so only in the folder the
         // marker was written for: not one restored or swapped in since.
         const nowFolder = localResetFolderIdentity(app.getPath("userData"));
-        if (!committedFolder || !nowFolder || nowFolder.dev !== committedFolder.dev || nowFolder.ino !== committedFolder.ino) {
+        if (!committedFolder || !nowFolder || !sameSessionFolder(committedFolder, nowFolder)) {
           return [{
             item: "Microsoft sign-ins",
             reason: "not removed from the token caches, because the data folder is no longer the one the reset was accepted for. The reset at the next launch stops before removing anything there",
@@ -7584,7 +7590,9 @@ if (!gotLock) {
     // Fetch or update the documentation index in the background. Never
     // blocks startup and never raises a dialog; Settings shows the state.
     void store.autoInstallRetrievalIndex();
-    void store.autoInstallEmbeddingModel();
+    // Not on the launch right after a reset: it would download a model into
+    // the local runtime's own store before the admin chose anything again.
+    if (localResetReport?.status !== "completed") void store.autoInstallEmbeddingModel();
     debugStartupLog("registered ipc handlers");
     installSecurityGuards();
     Menu.setApplicationMenu(buildAppMenu());
