@@ -2537,10 +2537,13 @@ in the main process. Mockup: `docs/mockups/34-local-reset.html`.
   and never emptied at launch (it may point at a shared folder). Sign-out
   skips token caches that are links or files with more than one hard link,
   with a warning; the wipe removes links inside the folder without following
-  them. Only a plain marker file starts a wipe: a marker that is a link or a
-  shared file leaves the reset incomplete and nothing is removed. The
-  reset-incomplete window runs from a fresh temporary profile, so it never
-  writes into the folder it could not reset.
+  them. Only a plain marker file with a single link starts a wipe: anything
+  else at that path (a link, a shared file, a folder) leaves the reset
+  incomplete and nothing is removed. Sign-out is also skipped when the folder
+  cannot be listed. The reset-incomplete window runs from a fresh temporary
+  profile, removed on quit, so it never writes into the folder it could not
+  reset; if that profile cannot be created, a native notice lists what is not
+  finished and the launch stops, since no window can show yet.
 - **Marker writes** go through a new temporary file with a random name,
   created exclusively (`wx`), so a link planted in a restored profile is never
   followed; the temporary file is removed when the rename fails.
