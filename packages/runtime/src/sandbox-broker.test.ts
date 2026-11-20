@@ -55,18 +55,18 @@ describe("sandbox broker", () => {
     const ledger = new ClassificationLedger();
     t.after(() => ledger.dispose());
     const events: RequestClassificationEvent[] = [];
-    const prompts: string[] = [];
+    const requests: LlmOptions[] = [];
     const ctx = fakeContext(agent, {
       graphRequest: async () => ({ value: [policy] }),
       llmComplete: async options => {
-        assert.equal(events.length, prompts.length);
+        assert.equal(events.length, requests.length);
         assert.deepEqual(Object.keys(options).sort(), ["model", "prompt", "system"]);
-        prompts.push(options.prompt);
+        requests.push(options);
         return { text: "Reviewed", model: "fixture" };
       },
     });
     const observed = withRequestClassification(ctx.llm, "ollama", event => { events.push(event); });
-    ctx.llm = { ...observed, complete: options => observed.complete({ ...options, system: `${options.system}\nOverlay` }) };
+    ctx.llm = { ...observed, complete: options => observed.complete({ ...options, system: `${options.system}\nOverlay OR mfa` }) };
     const broker = createSandboxBroker({ agent, ctx });
 
     await withClassificationScope(ledger, async () => {
@@ -75,19 +75,30 @@ describe("sandbox broker", () => {
       await ledger.waitForObservations();
       const { grantControls, id } = (read.result as { value: typeof policy[] }).value[0]!;
       const prose = `Summarize the policy combination: ${grantControls.operator}; controls: ${grantControls.builtInControls.join(", ")}.`;
-      for (const prompt of [prose, "Summarize supported formats: ORDER, mfactor.", JSON.stringify(grantControls),
-        `Review ${id}. ${"Context ".repeat(80)}`, `${"Context ".repeat(80)}${prose}`]) {
-        assert.equal((await broker.handle({ id: "model", method: "llm.complete", params: { prompt } })).ok, true);
-        assert.equal(prompts.at(-1)?.split("\n")[1], prompt);
+      const unrelated = "Summarize supported formats: ORDER, mfactor.";
+      for (const params of [
+        { prompt: prose },
+        { prompt: unrelated },
+        { prompt: JSON.stringify(grantControls) },
+        { prompt: `Review ${id}. ${"Context ".repeat(80)}` },
+        { prompt: `${"Context ".repeat(80)}${prose}` },
+        { prompt: unrelated, system: prose },
+        { prompt: unrelated, system: JSON.stringify(grantControls) },
+        { prompt: prose, system: `${"Context ".repeat(80)}${prose}` },
+      ]) {
+        assert.equal((await broker.handle({ id: "model", method: "llm.complete", params })).ok, true);
+        assert.equal(requests.at(-1)?.prompt.split("\n")[1], params.prompt);
+        const expectedSystem = params.system ?? "Provide a concise read-only analysis of the supplied tenant data for the admin.";
+        assert.equal(requests.at(-1)?.system, `${expectedSystem}\n${TENANT_DATA_INSTRUCTIONS}\nOverlay OR mfa`);
         await ledger.waitForObservations();
       }
     });
 
-    const [prose, unrelated, structured, distinctive, largeProse] = events.map(event => event.classification);
+    const [prose, unrelated, structured, distinctive, largeProse, systemProse, structuredSystem, both] = events.map(event => event.classification);
     assert.equal(prose?.retainedValues, 3);
     assert.equal(prose?.coverageIncomplete, true);
     assert.equal(prose?.counts.security, 0);
-    assert.deepEqual(prose?.unexamined.ranges.map(({ start, end, reason }) => [prompts[0]!.slice(start, end), reason]), [
+    assert.deepEqual(prose?.unexamined.ranges.map(({ start, end, reason }) => [requests[0]!.prompt.slice(start, end), reason]), [
       ["OR", "script-provenance-unavailable"], ["mfa", "script-provenance-unavailable"],
     ]);
     assert.equal(unrelated?.coverageIncomplete, false);
@@ -97,7 +108,21 @@ describe("sandbox broker", () => {
     assert.equal(distinctive?.coverageIncomplete, false);
     assert.equal(distinctive?.counts.security, 1);
     assert.equal(largeProse?.coverageIncomplete, true);
-    assert.deepEqual(largeProse?.unexamined.ranges.map(({ start, end }) => prompts[4]!.slice(start, end)), ["OR", "mfa"]);
+    assert.deepEqual(largeProse?.unexamined.ranges.map(({ start, end }) => requests[4]!.prompt.slice(start, end)), ["OR", "mfa"]);
+    assert.equal(systemProse?.coverageIncomplete, true);
+    assert.equal(systemProse?.effectiveClass, "credential");
+    assert.equal(systemProse?.counts.security, 0);
+    assert.deepEqual(systemProse?.unexamined.ranges.map(({ section, start, end, reason }) =>
+      [section, requests[5]![section]!.slice(start, end), reason]), [
+      ["system", "OR", "script-provenance-unavailable"], ["system", "mfa", "script-provenance-unavailable"],
+    ]);
+    assert.equal(structuredSystem?.coverageIncomplete, false);
+    assert.equal(structuredSystem?.counts.security, 2);
+    assert.ok(structuredSystem?.spans.every(span => span.section === "system"));
+    assert.equal(both?.coverageIncomplete, true);
+    assert.deepEqual(both?.unexamined.ranges.map(({ section, start, end }) =>
+      [section, requests[7]![section]!.slice(start, end)]),
+    [["system", "OR"], ["system", "mfa"], ["prompt", "OR"], ["prompt", "mfa"]]);
   });
 
   it("allows only manifest-declared Graph GET requests", async () => {

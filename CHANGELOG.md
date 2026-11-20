@@ -18,7 +18,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Chat, agents, Graph paging and cache reads proceed while data classification runs. Local diagnostics flag evidence that is pending or was lost and preserve exact offsets for interpolated policy values.
 - Chat preserves classification when it clips a Graph value before the background scan finishes. Cache sidecars publish without waiting for a database writer, and local diagnostics count omitted offsets.
 - Data policy keeps source field evidence for derived agent template keys and values. Drift baseline creation and tracked cache refresh return promptly when a competing SQLite writer holds the lock.
-- Data policy reports incomplete coverage when a sandboxed script renders Graph values as prose and loses the field context needed to classify them.
+- Data policy reports incomplete coverage when a sandboxed script renders Graph values as prose in its system text or prompt and loses the field context needed to classify them.
 - Data policy preserves field classification for clipped array values in previews and marks unresolved fragments in Chat and Nova as incomplete.
 
 - GitHub Copilot Fusion: the Copilot provider offers Copilot Fusion Standard, High and Max from the CLI's catalog, shows tiers your plan does not include greyed out with the reason, says when several models may see a prompt, and makes Copilot Free accounts usable (they list only Fusion Standard). Copilot models now show their catalog names, such as MAI Code 2 for Microsoft's MAI models, and models your organization's Copilot policy turns off are greyed out with the reason.

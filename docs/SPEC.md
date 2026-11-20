@@ -1875,7 +1875,8 @@ whole-word match for distinctive short identifiers. Boolean and numeric
 values need provenance. Serialized arrays preserve field provenance for all
 elements, including nested arrays. Generic phrases use word boundaries.
 When a sandboxed script uses a Graph value that needs field provenance as
-an unbound word or token in its prompt, the matching range is incomplete.
+an unbound word or token in its system text or prompt, the matching range is
+incomplete. This check covers script text within each section.
 Distinctive values still match across the full request.
 Transformed values carry their original class through clipping, scalar
 interpolation and standalone fences. JSON previews retain the containing field

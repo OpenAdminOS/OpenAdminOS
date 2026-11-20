@@ -149,7 +149,7 @@ type ScanState = {
   incomplete: boolean;
   identityIndex: ClassificationOptions["identityIndex"];
   renderedSpans?: ClassificationSpan[];
-  scriptPrompt?: TextSpan;
+  scriptText?: Partial<Record<ClassificationSpan["section"], TextSpan>>;
 };
 
 type EvidenceSnapshot = {
@@ -177,7 +177,7 @@ export interface WorkerScan {
   sections: Record<ClassificationSpan["section"], EncodedText | undefined>;
   ledgers: number[];
   shards: number[];
-  state: Pick<ScanState, "historyFences" | "promptReplay" | "dropped" | "registrations" | "incomplete" | "renderedSpans" | "scriptPrompt">;
+  state: Pick<ScanState, "historyFences" | "promptReplay" | "dropped" | "registrations" | "incomplete" | "renderedSpans" | "scriptText">;
 }
 
 export interface WorkerResult {
@@ -1131,7 +1131,7 @@ export class ClassificationLedger {
 
   captureEvidence(): EvidenceSnapshot {
     const state = this.scanState();
-    state.scriptPrompt = scriptPrompt.getStore();
+    state.scriptText = scriptText.getStore();
     return { state, revisions: state.retained.map(ledger => ledger.revision),
       shards: [...state.identityIndex?.workerShards?.() ?? []], interpolations: templateInterpolations.getStore() };
   }
@@ -1417,9 +1417,9 @@ export class ClassificationLedger {
       const ambiguous = new Map<string, TextSpan>();
       const ambiguousScript = new Map<string, TextSpan>();
       const clipped = new Map<string, TextSpan>();
-      const scriptPrompt = section === "prompt" ? state.scriptPrompt : undefined;
-      const scriptAt = scriptPrompt && ((start: number, end: number) => {
-        if (scriptPrompt.start <= start && end <= scriptPrompt.end) ambiguousScript.set(`${start}:${end}`, { start, end });
+      const scriptRange = state.scriptText?.[section];
+      const scriptAt = scriptRange && ((start: number, end: number) => {
+        if (scriptRange.start <= start && end <= scriptRange.end) ambiguousScript.set(`${start}:${end}`, { start, end });
       });
       const replayAt = preservedReplays.length ? (start: number, end: number) => {
         if (preservedReplays.some(replay => replay.start <= start && end <= replay.end)) {
@@ -1479,11 +1479,14 @@ export async function clearTenantClassificationLedgers(tenantId: string): Promis
 }
 
 const scopes = new AsyncLocalStorage<ClassificationLedger>();
-const scriptPrompt = new AsyncLocalStorage<TextSpan>();
+const scriptText = new AsyncLocalStorage<ScanState["scriptText"]>();
 
-/** Keep the fenced script body offsets outside the provider options. */
-export function withScriptPrompt<T>(prompt: string, work: () => T): T {
-  return scriptPrompt.run({ start: prompt.indexOf("\n") + 1, end: prompt.lastIndexOf("\n") }, work);
+/** Keep script offsets outside the provider options and exclude host-added text. */
+export function withScriptText<T>(prompt: string, systemLength: number | undefined, work: () => T): T {
+  return scriptText.run({
+    prompt: { start: prompt.indexOf("\n") + 1, end: prompt.lastIndexOf("\n") },
+    ...(systemLength === undefined ? {} : { system: { start: 0, end: systemLength } }),
+  }, work);
 }
 let unscopedRegistrations = 0;
 let unscopedRequests = 0;
