@@ -1646,4 +1646,32 @@ describe("Ollama context for an unpinned model", () => {
       globalThis.fetch = original;
     }
   });
+
+  it("gives an agent run the typed reason for Ollama's overflow wording without counts, on the retry and mid-stream", async () => {
+    const original = globalThis.fetch;
+    const tooLong = JSON.stringify({ error: "the prompt is longer than the context length currently available" });
+    try {
+      for (const mode of ["retry", "stream"] as const) {
+        const ollama = scripted({ showBody: unpinned });
+        if (mode === "retry") {
+          ollama.handlers.push(() => new Response(JSON.stringify({ error: "request (9000 tokens) exceeds the available context size (8192 tokens), try increasing it" }), { status: 400 }));
+          ollama.handlers.push(() => new Response(tooLong, { status: 400 }));
+        } else {
+          ollama.handlers.push(() => new Response(`${tooLong}\n`, { status: 200 }));
+        }
+        globalThis.fetch = ollama.fetchImpl;
+        await assert.rejects(
+          createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: `uncounted-${mode}` }).complete({ prompt: words(5000), maxTokens: 1000, enforceContextWindow: true }),
+          (error: unknown) => {
+            assert.ok(error instanceof ContextTooSmallError, mode);
+            assert.equal(error.failure.sentToProvider, true);
+            assert.ok(error.failure.neededTokens > error.failure.limitTokens);
+            return true;
+          },
+        );
+      }
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
 });
