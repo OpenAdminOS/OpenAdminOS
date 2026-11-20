@@ -639,8 +639,7 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
       failed.push({ item: userDataDir, reason: DATA_FOLDER_CHANGED_REASON });
       return false;
     }
-    removeEntry(fs, userDataDir, name, failed);
-    return true;
+    return removeEntry(fs, userDataDir, name, failed);
   };
   const policyProblem = localResetPolicyProblem(userDataDir);
   if (policyProblem) {
@@ -656,9 +655,23 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
     return finish("incomplete");
   }
   const plan = localResetRemovalPlan(entries);
-  for (const name of plan.first) if (!removeIfSameFolder(name)) break;
-  // The audit side files stay while anything else does, so a database that
-  // could not be removed keeps its anchor and reads as intact next time.
+  // An entry that could not be removed keeps the files that belong to it
+  // (a locked openadminos.db its -wal and -shm, which sort right after it),
+  // so the next try finds an intact database; everything else still goes,
+  // the token files included. The audit side files stay while anything
+  // else does, so a database left behind keeps its anchor too.
+  let keptWith: string | undefined;
+  for (const name of plan.first) {
+    if (keptWith !== undefined && name.startsWith(`${keptWith}-`)) {
+      failed.push({ item: name, reason: `kept with ${keptWith}, which could not be removed` });
+      continue;
+    }
+    if (!sameFolder()) {
+      failed.push({ item: userDataDir, reason: DATA_FOLDER_CHANGED_REASON });
+      break;
+    }
+    keptWith = removeEntry(fs, userDataDir, name, failed) ? undefined : name;
+  }
   if (failed.length > 0) return finish("incomplete");
   for (const name of plan.last) if (!removeIfSameFolder(name)) break;
   if (failed.length > 0) return finish("incomplete");
@@ -802,11 +815,13 @@ function latestPerItem(problems: readonly LocalResetProblem[]): LocalResetProble
   return [...byItem.values()];
 }
 
-function removeEntry(fs: LocalResetFileSystem, dir: string, name: string, failed: LocalResetProblem[]): void {
+function removeEntry(fs: LocalResetFileSystem, dir: string, name: string, failed: LocalResetProblem[]): boolean {
   try {
     fs.remove(join(dir, name));
+    return true;
   } catch (cause) {
     failed.push({ item: name, reason: reasonOf(cause) });
+    return false;
   }
 }
 

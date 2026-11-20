@@ -145,15 +145,26 @@ describe("local reset: wipe at launch", () => {
     }
   });
 
-  it("keeps the audit anchor while the database could not be removed, and keeps the marker", async () => {
+  it("keeps the database's own files and the audit anchor while the database could not be removed, and keeps the marker", async () => {
     const dir = await tempDir();
     try {
       seedDataFolder(dir);
+      writeFileSync(join(dir, "openadminos.db-shm"), "x");
       const fs = failingFileSystem((path) => path.endsWith("openadminos.db"));
       const report = runPendingLocalReset({ userDataDir: dir, packaged: true, platform: "darwin", home: dir, env: {}, fs, run: recordingRun().run });
       assert.equal(report?.status, "incomplete");
-      assert.deepEqual(report?.failed, [{ item: "openadminos.db", reason: "the file is in use by another program or cannot be changed" }]);
+      assert.deepEqual(report?.failed, [
+        { item: "openadminos.db", reason: "the file is in use by another program or cannot be changed" },
+        { item: "openadminos.db-shm", reason: "kept with openadminos.db, which could not be removed" },
+        { item: "openadminos.db-wal", reason: "kept with openadminos.db, which could not be removed" },
+      ]);
+      // The database stays whole for the next try: its write-ahead log and
+      // shared memory file are not removed without it.
       assert.ok(existsSync(join(dir, "openadminos.db")));
+      assert.ok(existsSync(join(dir, "openadminos.db-wal")));
+      assert.ok(existsSync(join(dir, "openadminos.db-shm")));
+      // Everything else still goes, a database sorted after it included.
+      assert.ok(!existsSync(join(dir, "office.db")));
       assert.ok(existsSync(join(dir, "openadminos.db-audit-anchor.json")));
       assert.ok(existsSync(join(dir, "openadminos.db-audit-pending.json")));
       assert.ok(existsSync(join(dir, LOCAL_RESET_MARKER)));
