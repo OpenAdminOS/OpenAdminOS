@@ -1,4 +1,4 @@
-import { managedLockedModel, managedProviderAllowed, resolveProviderDefaultModel } from "@openadminos/agent-sdk";
+import { managedLockedModel, managedProviderAllowed, providerCatalog, resolveProviderDefaultModel } from "@openadminos/agent-sdk";
 import type { ManagedPolicyStatus, ModelFitIssue, ModelFitReason, ProviderId, ProviderSummary } from "./openAdminOS.js";
 import { isProviderReady } from "./provider-detection.js";
 
@@ -207,4 +207,5 @@ export function modelFitChoices(input: {
   return { hosted, local: local.slice(0, 2), hostedBlockedByPolicy };
 }
 
-const HOSTED_PROVIDER_IDS: ReadonlySet<ProviderId> = new Set<ProviderId>(["anthropic", "openai", "azure-openai", "copilot", "gemini"]);
+// The catalog names which providers are hosted; a new one is covered without a change here.
+const HOSTED_PROVIDER_IDS: ReadonlySet<ProviderId> = new Set(providerCatalog.filter((provider) => !provider.isLocal).map((provider) => provider.id));

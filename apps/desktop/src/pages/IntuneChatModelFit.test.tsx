@@ -153,6 +153,24 @@ describe("IntuneChat model fit (mockup 36)", () => {
     expect(within(notice).queryByRole("button", { name: /^Run with/ })).toBeNull();
     expect(within(notice).getByText("Your organization's policy allows only providers on this device, so no hosted provider is offered.")).toBeInTheDocument();
   });
+  it("still says where the request went when the switched answer fails", async () => {
+    const failedSwitch: IntuneChatMessage = {
+      id: "assistant-switch", conversationId: conversation.id, role: "assistant", status: "failed", createdAt: "2026-11-19T09:00:02.000Z",
+      content: "The selected LLM provider failed while answering this chat message.", error: "Codex stopped sending output.",
+      providerId: "openai", model: "gpt-5", switchedFrom: { providerId: "ollama", model: "llama3.1", reason: "context-too-small" },
+    };
+    const bridge = makeMockBridge({
+      listIntuneChatConversations: vi.fn(async () => [conversation]),
+      getIntuneChatMessages: vi.fn(async (): Promise<IntuneChatMessage[]> => [
+        { id: "user-switch", conversationId: conversation.id, role: "user", content: QUESTION, status: "completed", createdAt: conversation.createdAt },
+        failedSwitch,
+      ]),
+    });
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: `/chat/${conversation.id}`, bridge });
+    const line = (await screen.findByText("Sent to")).parentElement!;
+    expect(line).toHaveTextContent("Sent to Codex · location set by your account for this request only. Chat is back on llama3.1.");
+  });
+
   it("withdraws the offer when the active model changes", async () => {
     const user = userEvent.setup();
     const providers = mockProviders.map((provider) => (provider.id === "ollama" ? { ...provider, models: ["llama3.1", "qwen3:8b"] } : provider));

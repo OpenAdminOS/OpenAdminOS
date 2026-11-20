@@ -1817,7 +1817,11 @@ function IntuneChatContent() {
         remember={false}
         onRememberChange={() => undefined}
         modelFit={{ issue: modelFitAccept.offer.issue, returnModel: modelFitReturnModel(modelFitAccept.offer) }}
-        onClose={() => setModelFitAccept(null)}
+        onClose={() => {
+          setModelFitAccept(null);
+          // Back to the notice the admin chose from.
+          window.requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-model-fit]")?.focus());
+        }}
         onConfirm={() => void confirmModelFitAndSend()}
         onUseLocal={() => setModelFitAccept(null)}
       />
@@ -4592,7 +4596,7 @@ function AnswerScopeDisclosure({
 
   return (
     <>
-    {message.switchedFrom && message.providerId && message.status === "completed" ? (
+    {message.switchedFrom && message.providerId && message.status !== "streaming" ? (
       <SwitchedProviderLine message={message} providers={appState.providers} />
     ) : null}
     {docsOnly ? null : (
@@ -4639,7 +4643,7 @@ function SwitchedProviderLine({ message, providers }: { message: IntuneChatMessa
       data-switched-provider=""
       className={`mb-2.5 rounded-lg px-3 py-1.5 text-sm ring-1 ${local ? "bg-[var(--color-success-soft)] ring-[var(--color-success)]/25" : "bg-[var(--color-warning-soft)] ring-[var(--color-warning)]/25"}`}
     >
-      <span className="text-[var(--color-text)]">{MODEL_FIT_COPY.answeredBy}</span>{" "}
+      <span className="text-[var(--color-text)]">{message.status === "completed" ? MODEL_FIT_COPY.answeredBy : MODEL_FIT_COPY.sentTo}</span>{" "}
       <span className={local ? "text-[var(--color-success)]" : "text-[var(--color-warning)]"}>
         {local ? MODEL_FIT_COPY.answeredLocal(message.model ?? name, name) : providerDataLocation({ id: providerId, name })}
       </span>{" "}

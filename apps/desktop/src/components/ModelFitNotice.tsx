@@ -9,7 +9,7 @@ import type { ModelFitIssue } from "../shared/openAdminOS";
 
 /** What the admin knows a model as: "OpenAdmin 8B" for the OpenAdmin model, the name otherwise. */
 export function modelFitModelName(issue: Pick<ModelFitIssue, "model" | "providerId">, providerName?: string): string {
-  return modelDisplayName(issue.model) ?? providerName ?? issue.providerId;
+  return modelDisplayName(issue.model) ?? providerName ?? PROVIDER_TOOL_NAMES[issue.providerId] ?? issue.providerId;
 }
 
 /**
@@ -49,7 +49,9 @@ export function ModelFitNotice({
       role="region"
       aria-labelledby={titleId}
       data-model-fit=""
-      className="mb-3 rounded-[10px] bg-[var(--color-surface)] px-[18px] py-4 text-sm ring-1 ring-[var(--color-border)]"
+      // Focus returns here when the accept step closes with Back or Escape.
+      tabIndex={-1}
+      className="mb-3 rounded-[10px] bg-[var(--color-surface)] px-[18px] py-4 text-sm ring-1 ring-[var(--color-border)] focus-visible:outline-none"
     >
       <h2 id={titleId} className="text-base font-medium text-[var(--color-text)]">
         {MODEL_FIT_COPY.title(issue, model, surface)}
