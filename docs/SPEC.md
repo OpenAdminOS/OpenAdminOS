@@ -2629,8 +2629,9 @@ deployment), and a later phase built for another endpoint fails with nothing
 sent. The run review takes the destination fingerprint when it opens and
 Start passes it (`expectedProviderDestination`); Start stays disabled until
 it is read, a failed read says so in the review, and a change refuses the
-start. A refused start reads the destination again, so Try again sends the
-current one. Start passes the provider and model the review showed, never one the
+start. A refused model fit start is not retried from the same review (no Try
+again): where the provider is reached may have changed to a place the review
+does not show, so the review says to close it and open the run again. Start passes the provider and model the review showed, never one the
 host resolves again. A model the choice named that the provider no longer
 lists keeps Start disabled, and the review says so; the host refuses it too. When the chosen provider is not ready and the review opens setup, a
 provider picked there stays on that run: setup does not change the active
@@ -2653,7 +2654,9 @@ call of a model fit request or rerun is refused when it names another model
 than the reviewed one, and an on-device rerun needs a model named. An open
 accept step closes unsent, with a line saying why, when its provider stops
 being a choice (the offer stays) or when the organization or model changes
-(the offer goes and focus returns to the composer). A multi-tenant review
+(the offer goes and focus returns to the composer). A retry the host refuses
+before any model call shows its choices again, since the refusal says to
+choose again. A multi-tenant review
 withdraws an open offer, and a new offer replaces earlier ones for the same
 conversation.
 An Azure OpenAI model fit request is refused when the deployment configured
