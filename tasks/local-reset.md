@@ -122,6 +122,12 @@ the installed app's scheduler, login item or caches.
   (not changed: a development reset never touches the installed app's
   scheduler by design, so a repointed registration is the intended outcome;
   argued in round 5). Login item warning now replaced or cleared by the retry.
+- Review round 5: Claude and Muse no blocking (follow-ups applied: blocker
+  copy mentions cancelling, handoff exits after the spawn settles, a real
+  drive test for apply tracking, comment placement); Sol withdrew the
+  scheduler race and found three blocking (hard-linked token cache, a marker
+  that is a link, the recovery window writing into a linked profile), all
+  fixed with tests where they can run here.
 - Found in the end to end run and fixed: the incomplete screen called the
   appearance handler before it was registered, and failure reasons repeated
   full paths.
