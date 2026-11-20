@@ -93,6 +93,13 @@ the installed app's scheduler, login item or caches.
   `OpenAdminOS Safe Storage`, so the Keychain, LaunchAgent, login item and
   cache removal ran only in tests with a recorded command runner. Windows was
   not run.
+- The seeded end-to-end profile had Ollama as its provider. No message was
+  sent and `ollama ps` showed no loaded model afterwards; later live checks use
+  a hosted provider only (maintainer rule, 2026-11-19).
+- Review round 1: Claude reviewer no blocking findings; Sol four blocking
+  (approval race, dev and installed builds sharing a profile, marker commit
+  point, Keychain match and retry), all fixed with tests; Muse failed on a
+  transport error and runs again in round 2.
 - Found in the end to end run and fixed: the incomplete screen called the
   appearance handler before it was registered, and failure reasons repeated
   full paths.
