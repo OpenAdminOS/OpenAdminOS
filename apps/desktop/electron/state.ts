@@ -55,6 +55,7 @@ import {
   createAppleFoundationLlm,
   createLmStudioLlm,
   createLemonadeLlm,
+  resolveLemonadeEndpoint,
   DEFAULT_AUTHORITY,
   GRAPH_CLI_CLIENT_ID,
   GRAPH_DEFAULT_SCOPE,
@@ -1790,6 +1791,8 @@ function errorText(cause: unknown): string {
 /** What a model build is bound to: where a provider is reached, as novaProviderEndpoint reads it. */
 export interface ProviderEndpointBinding {
   endpoint: string | undefined;
+  /** A model fit binding also covers Lemonade's address (modelFitProviderEndpoint); a Nova binding keeps its own scope. */
+  scope?: "model-fit";
 }
 
 /** A bound model build found its provider configured for another endpoint; nothing was sent. */
@@ -1817,6 +1820,17 @@ function novaProviderEndpoint(providerId: ProviderId, persisted?: Pick<Persisted
     return azure ? `${azure.endpoint.trim().replace(/\/$/, "")}#${azure.deployment.trim()}` : "azure-openai:unset";
   }
   return undefined;
+}
+
+/**
+ * Where a provider is reached, for a model fit binding: Nova's endpoint plus
+ * Lemonade's address, which can be set outside this device and so makes it a
+ * hosted choice. Nova follow-ups keep novaProviderEndpoint, so their saved
+ * bindings do not change meaning.
+ */
+function modelFitProviderEndpoint(providerId: ProviderId, persisted?: Pick<PersistedState, "providerConfigs">): string | undefined {
+  if (providerId === "lemonade") return resolveLemonadeEndpoint().replace(/\/$/, "");
+  return novaProviderEndpoint(providerId, persisted);
 }
 
 /**
@@ -7404,7 +7418,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
   /** Where a provider is reached and its fingerprint, from one read, so a check and a binding cannot disagree. */
   async providerTarget(providerId: ProviderId): Promise<{ endpoint: string | undefined; destination: string }> {
-    const endpoint = await this.novaProviderEndpoint(providerId);
+    const endpoint = modelFitProviderEndpoint(providerId, providerId === "azure-openai" ? await this.read() : undefined);
     return { endpoint, destination: createHash("sha256").update(`${providerId}\0${endpoint ?? ""}`).digest("hex").slice(0, 32) };
   }
 
@@ -8890,7 +8904,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const requireBound = (endpoint: string | undefined) => {
       if (binding && (endpoint ?? undefined) !== (binding.endpoint ?? undefined)) throw new ProviderEndpointChangedError();
     };
-    if (binding) requireBound(novaProviderEndpoint(providerId, providerId === "azure-openai" ? await this.read() : undefined));
+    if (binding) {
+      const persistedForEndpoint = providerId === "azure-openai" ? await this.read() : undefined;
+      requireBound(binding.scope === "model-fit" ? modelFitProviderEndpoint(providerId, persistedForEndpoint) : novaProviderEndpoint(providerId, persistedForEndpoint));
+    }
     if (this.llmFactory) {
       // Test seam only: it returns before the in-branch endpoint comparison
       // below, so only the check above applies to it. Production adapters
@@ -8930,6 +8947,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       return createLmStudioLlm(options);
     }
     if (providerId === "lemonade") {
+      // A model fit binding is checked on the address the adapter is built with.
+      if (binding?.scope === "model-fit") {
+        const endpoint = resolveLemonadeEndpoint();
+        requireBound(endpoint.replace(/\/$/, ""));
+        return createLemonadeLlm({ endpoint, ...(defaultModel ? { defaultModel } : {}) });
+      }
       return createLemonadeLlm(defaultModel ? { defaultModel } : {});
     }
     if (providerId === "anthropic") {

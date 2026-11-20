@@ -343,7 +343,7 @@ export interface RunServiceHost {
     provider: ProviderSummary | undefined,
   ): provider is ProviderSummary & { status: "connected" | "available" };
   validateOfficeApproval?(run: RunRecord): Promise<void>;
-  buildLlm(providerId: ProviderId, model: string | undefined, binding?: { endpoint: string | undefined }): Promise<RunLlmApi>;
+  buildLlm(providerId: ProviderId, model: string | undefined, binding?: { endpoint: string | undefined; scope?: "model-fit" }): Promise<RunLlmApi>;
   /** Where a provider is reached now (address, or Azure resource and deployment) and its fingerprint, from one read. */
   providerTarget?(providerId: ProviderId): Promise<{ endpoint: string | undefined; destination: string }>;
   buildGraph(
@@ -810,7 +810,7 @@ export class RunService {
         if (options.expectedProviderDestination !== target.destination) {
           throw new Error("The provider's settings changed after this run was reviewed, so it did not start. Review it again.");
         }
-        queuedRun.providerEndpointBinding = { endpoint: target.endpoint };
+        queuedRun.providerEndpointBinding = { endpoint: target.endpoint, scope: "model-fit" };
       } else if (inheritedEndpointBinding) {
         queuedRun.providerEndpointBinding = inheritedEndpointBinding;
       }

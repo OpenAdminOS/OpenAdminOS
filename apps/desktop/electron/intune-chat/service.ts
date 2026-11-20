@@ -446,7 +446,7 @@ export interface ChatServiceHost {
   /** Where a provider is reached now (address, or Azure resource and deployment) and its fingerprint, from one read. */
   providerTarget?(providerId: ProviderId): Promise<{ endpoint: string | undefined; destination: string }>;
   /** With a binding, the model is built only for that endpoint (see ProviderEndpointBinding in state.ts). */
-  buildLlm(providerId: ProviderId, model: string | undefined, binding?: { endpoint: string | undefined }): Promise<RunLlmApi>;
+  buildLlm(providerId: ProviderId, model: string | undefined, binding?: { endpoint: string | undefined; scope?: "model-fit" }): Promise<RunLlmApi>;
   buildGraph(
     pinnedTenantId?: string,
     agentScopes?: string[],
@@ -524,7 +524,7 @@ export interface IntuneChatStreamOptions {
    * OpenAI resource and deployment). A configuration saved after the fire
    * decision makes the build fail before anything is sent.
    */
-  providerBinding?: { endpoint: string | undefined };
+  providerBinding?: { endpoint: string | undefined; scope?: "model-fit" };
 }
 
 /**
@@ -630,7 +630,7 @@ export class IntuneChatService {
    * starts closing, and stops with its signal. Agent Team does the same in
    * its host; runs stop through their lease-cancelled controller.
    */
-  private async tenantLlm(providerId: ProviderId, model: string | undefined, tenantIds: readonly string[], binding?: { endpoint: string | undefined }): Promise<RunLlmApi> {
+  private async tenantLlm(providerId: ProviderId, model: string | undefined, tenantIds: readonly string[], binding?: { endpoint: string | undefined; scope?: "model-fit" }): Promise<RunLlmApi> {
     const llm = await this.host.buildLlm(providerId, model, binding);
     const writable = this.host.tenantWritable;
     if (!writable) return llm;
@@ -2592,7 +2592,7 @@ export class IntuneChatService {
       if (!provider.isLocal && input.modelOverride?.destination !== target.destination) {
         throw new ModelOverrideError(`${provider.name}'s settings changed after you chose it, so nothing was sent. Choose it again to review where the request goes.`);
       }
-      if (!options.providerBinding) options = { ...options, providerBinding: { endpoint: target.endpoint } };
+      if (!options.providerBinding) options = { ...options, providerBinding: { endpoint: target.endpoint, scope: "model-fit" } };
     }
     // Whether a model request of this turn went out, so the answer says "Sent to" only when one did.
     let modelFitDispatched = false;

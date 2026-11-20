@@ -409,7 +409,7 @@ it('binds a model fit rerun to its endpoint and checks the model again when a ph
   await h.host.write({ ...h.state(), installedAgents: [agent], tenants: [] });
   const run = await h.service.startRun('docs', { requireOnDeviceModel: true, bindProviderEndpoint: true, expectedProviderDestination: 'dest-a', providerId: 'ollama', model: 'gpt-oss:20b' });
   assert.equal(run.requireOnDeviceModel, true);
-  assert.deepEqual(run.providerEndpointBinding, { endpoint: 'http://127.0.0.1:11434' });
+  assert.deepEqual(run.providerEndpointBinding, { endpoint: 'http://127.0.0.1:11434', scope: 'model-fit' });
   await settle();
   assert.deepEqual(checks, [true, false]);
   assert.deepEqual(builds, [], 'nothing was built once the model could not be confirmed');
@@ -442,12 +442,12 @@ it('refuses a model fit rerun whose destination changed after its review, and ke
   );
   // A model fit dry run that planned on this device: Run for real keeps the on-device requirement.
   const planned = { id: 'dry-1', agentSlug: 'writer', dryRun: true, status: 'planned', tenantId: 'tenant-a', providerId: 'ollama', model: 'gpt-oss:20b', inputSettings: {},
-    requireOnDeviceModel: true, providerEndpointBinding: { endpoint: 'http://127.0.0.1:11434' }, queuedAt: new Date().toISOString(), steps: [], logs: [] } as unknown as RunRecord;
+    requireOnDeviceModel: true, providerEndpointBinding: { endpoint: 'http://127.0.0.1:11434', scope: 'model-fit' }, queuedAt: new Date().toISOString(), steps: [], logs: [] } as unknown as RunRecord;
   await h.host.write({ ...h.state(), runs: [planned] });
   onDevice = false;
   await assert.rejects(h.service.startRun('writer', { runForRealOfRunId: 'dry-1' }), /could not confirm that gpt-oss:20b runs on this device/);
   onDevice = true;
   const real = await h.service.startRun('writer', { runForRealOfRunId: 'dry-1' });
   assert.equal(real.requireOnDeviceModel, true);
-  assert.deepEqual(real.providerEndpointBinding, { endpoint: 'http://127.0.0.1:11434' });
+  assert.deepEqual(real.providerEndpointBinding, { endpoint: 'http://127.0.0.1:11434', scope: 'model-fit' });
 });

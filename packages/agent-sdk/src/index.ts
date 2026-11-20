@@ -1085,7 +1085,7 @@ export interface RunRecord {
   /** Model fit rerun on a model on this device: every phase checks again that it runs here before building the model. */
   requireOnDeviceModel?: true;
   /** Model fit rerun: where the provider was reached at admission; every phase is built only for it. */
-  providerEndpointBinding?: { endpoint: string | undefined };
+  providerEndpointBinding?: { endpoint: string | undefined; scope?: "model-fit" };
   logs: RunLogRecord[];
   plan?: WritePlan;
   /** Host-produced assessment, retained with the reviewed plan in run history. */
