@@ -632,15 +632,19 @@ describe("Model fit in Chat", () => {
       dispatched: () => { dispatched += 1; },
     });
     await guarded.complete({ prompt: "a" });
-    // A call that is already stopped is not counted as sent.
+    // A call that is already stopped, or is stopped while its check runs, never reaches the adapter.
     const stopped = new AbortController();
     stopped.abort();
-    await guarded.complete({ prompt: "stopped", signal: stopped.signal });
+    await assert.rejects(guarded.complete({ prompt: "stopped", signal: stopped.signal }));
+    const during = new AbortController();
+    const stoppingGuard = guardModelFitLlm(inner, { before: async () => { during.abort(); }, dispatched: () => { dispatched += 1; } });
+    await assert.rejects(stoppingGuard.complete({ prompt: "stopped during check", signal: during.signal }));
+    await assert.rejects((async () => { for await (const _chunk of stoppingGuard.stream({ prompt: "s", signal: during.signal })) { /* drain */ } })());
     assert.equal(dispatched, 1);
     allowed = false;
     await assert.rejects(guarded.complete({ prompt: "b" }), /not on this device/);
     await assert.rejects((async () => { for await (const _chunk of guarded.stream({ prompt: "c" })) { /* drain */ } })(), /not on this device/);
-    assert.deepEqual(calls, ["complete", "complete"]);
+    assert.deepEqual(calls, ["complete"]);
     assert.equal(dispatched, 1);
   });
 
