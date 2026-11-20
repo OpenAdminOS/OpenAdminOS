@@ -295,6 +295,15 @@ the installed app's scheduler, login item or caches.
   state.json after the marker; every write is now refused once the marker is
   committed, a queued one included) and a low (the login keychain is
   recognized by file identity in the other-keychain loop).
+- Review round 26: Claude no blocking. Sol two blocking and a medium. Fixed:
+  on Linux the marker match requires the same device (a Btrfs snapshot
+  restored as the home keeps inode and birth time); the Windows guide no
+  longer says removing `Local State` protects every copy. Declined, with the
+  reasoning in SPEC: a write already running when the reset commits (the
+  running app's own exposure; a drain only moves the window). Muse no
+  blocking; its lows applied: the commit is checked again before the state
+  file rename, an unlistable folder on Windows stays, Windows separators in
+  the listed path.
 - Process lesson: twice I edited the tree while a reviewer was reading it;
   parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the

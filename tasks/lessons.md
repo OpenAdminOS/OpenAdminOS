@@ -72,4 +72,4 @@ Format:
 
 **Why:** In PR #212 I edited files during Muse's rounds 8, 10 and 15 although the brief promised an untouched tree; Muse saw mixed states, one test run failed on a half-applied change, and its results had to be qualified.
 
-**How to apply:** After starting a review round, do not touch tracked files until all reviewers of that round report. If a finding arrives early, save the fix with `git diff > <scratchpad>/patch` and `git checkout -- .`, or prepare it only in notes.
+**How to apply:** After starting a review round, do not touch tracked files until all reviewers of that round report. If a finding arrives early, save the fix with `git diff > <scratchpad>/patch` and `git checkout -- .`, or prepare it only in notes. Before the first edit after any reviewer reports, list which reviewers of the round are still running and edit only when none is; it slipped again in round 26 when one report arrived and the fix felt ready.
