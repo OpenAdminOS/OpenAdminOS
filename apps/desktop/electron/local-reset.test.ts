@@ -938,6 +938,43 @@ describe("local reset: wipe at launch", () => {
     }
   });
 
+  it("on Windows stops when the folder or the entry is replaced during the hard-link check", async () => {
+    for (const swap of ["folder", "entry"] as const) {
+      const dir = await tempDir();
+      try {
+        const profile = join(dir, "profile");
+        mkdirSync(profile);
+        seedDataFolder(profile, DEV_MARKER);
+        const report = runPendingLocalReset({
+          userDataDir: profile,
+          packaged: false,
+          platform: "win32",
+          home: dir,
+          env: {},
+          // A restore lands while "agents" is being checked.
+          scanSharedFiles: (path, label) => {
+            if (label === "agents") {
+              if (swap === "folder") {
+                renameSync(profile, join(dir, "profile-old"));
+                mkdirSync(join(profile, "agents"), { recursive: true });
+              } else {
+                renameSync(path, join(dir, "agents-old"));
+                mkdirSync(path);
+              }
+              writeFileSync(join(path, "restored"), "restored agent");
+            }
+            return undefined;
+          },
+        });
+        assert.equal(report?.status, "incomplete", swap);
+        assert.match(report?.failed.at(-1)?.reason ?? "", /was replaced by another folder or a link/, swap);
+        assert.equal(readFileSync(join(profile, "agents", "restored"), "utf8"), "restored agent", swap);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
   it("writes the warnings only to the folder the reset was accepted for", async () => {
     const dir = await tempDir();
     try {

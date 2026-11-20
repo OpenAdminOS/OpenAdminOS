@@ -428,6 +428,8 @@ export interface LocalResetWipeOptions {
   mountInfo?: () => string;
   /** Removes the OS scheduler registration (LaunchAgent or scheduled task). Installed builds only. */
   removeScheduler?: () => void;
+  /** The Windows hard-link check, for tests. */
+  scanSharedFiles?: typeof sharedReadOnlyFile;
   now?: () => Date;
 }
 
@@ -645,11 +647,23 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
   // On Windows a hard link shares its attributes with every other link to
   // the file, and removing a read-only file clears the attribute first, so
   // a backup's copy would become writable too: such an entry stays.
+  // The check can take seconds on redirected storage, so the data folder
+  // and the entry itself are checked again right before the removal; if
+  // either was replaced meanwhile, the wipe stops.
+  const scanShared = options.scanSharedFiles ?? sharedReadOnlyFile;
+  let folderChanged = false;
   const removeHere = (name: string): boolean => {
     if (options.platform === "win32") {
-      const shared = sharedReadOnlyFile(join(userDataDir, name), name);
+      const path = join(userDataDir, name);
+      const before = entryIdentity(path);
+      const shared = scanShared(path, name);
       if (shared !== undefined) {
         failed.push({ item: name, reason: sharedReadOnlyReason(shared, name) });
+        return false;
+      }
+      if (!sameFolder() || !sameEntry(before, entryIdentity(path))) {
+        failed.push({ item: userDataDir, reason: DATA_FOLDER_CHANGED_REASON });
+        folderChanged = true;
         return false;
       }
     }
@@ -691,7 +705,9 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
       failed.push({ item: userDataDir, reason: DATA_FOLDER_CHANGED_REASON });
       break;
     }
-    keptWith = removeHere(name) ? undefined : name;
+    if (removeHere(name)) keptWith = undefined;
+    else if (folderChanged) break;
+    else keptWith = name;
   }
   if (failed.length > 0) return finish("incomplete");
   for (const name of plan.last) if (!removeIfSameFolder(name)) break;
@@ -874,6 +890,20 @@ export function sharedReadOnlyFile(path: string, label: string): { item: string;
   return undefined;
 }
 
+/** Device and inode of a path itself (a link is not followed); undefined when it is gone. */
+function entryIdentity(path: string): { dev: number; ino: number } | undefined {
+  try {
+    const stat = lstatSync(path);
+    return { dev: stat.dev, ino: stat.ino };
+  } catch {
+    return undefined;
+  }
+}
+
+function sameEntry(a: { dev: number; ino: number } | undefined, b: { dev: number; ino: number } | undefined): boolean {
+  return a === undefined ? b === undefined : b !== undefined && a.dev === b.dev && a.ino === b.ino;
+}
+
 function sharedReadOnlyReason(shared: { item: string; unlisted?: true }, name: string): string {
   const what = shared.item === name ? "it" : shared.item;
   if (shared.unlisted) {
@@ -933,9 +963,15 @@ function removeLeftovers(
       continue;
     }
     if (options.platform === "win32") {
-      const shared = sharedReadOnlyFile(path, basename(path));
+      const before = entryIdentity(path);
+      const shared = (options.scanSharedFiles ?? sharedReadOnlyFile)(path, basename(path));
       if (shared !== undefined) {
         warnings.push({ item: path, reason: sharedReadOnlyReason(shared, basename(path)) });
+        continue;
+      }
+      // Checked again after the scan, as in the data folder.
+      if (!sameEntry(before, entryIdentity(path)) || folderGoesThroughLink(path, { platform: options.platform, mountInfo: options.mountInfo })) {
+        warnings.push({ item: path, reason: "it changed while it was being checked, so it was left in place" });
         continue;
       }
     }
