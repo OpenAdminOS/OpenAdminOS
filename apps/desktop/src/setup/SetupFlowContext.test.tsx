@@ -250,6 +250,24 @@ describe("contextual tenant setup", () => {
     expect(screen.getByRole("button", { name: /Codex/ })).toBeInTheDocument();
   });
 
+  it("does not offer a connected hosted provider without a model the run could name for a model fit rerun", async () => {
+    writePendingIntent(
+      createPendingIntent({
+        kind: "agent-run",
+        slug: "device-offboard",
+        providerId: "anthropic",
+        modelFit: { reason: "context-too-small", providerId: "ollama", model: "llama3.1" },
+        returnTo: "/runs/run-1",
+      }),
+    );
+    // Codex reports only a CLI default placeholder.
+    const providers = mockProviders.map((provider) => (provider.id === "openai" ? { ...provider, models: ["gemini-default"], defaultModel: "gemini-default" } : provider));
+    renderWithAppState(<div>App content</div>, { route: "/chat", bridge: makeMockBridge({}, createMockAppState({ activeProviderId: "ollama", providers })) });
+
+    await screen.findByRole("heading", { name: "Pick an LLM provider" });
+    expect(screen.queryByRole("button", { name: /Codex/ })).toBeNull();
+  });
+
   it("treats a configured Azure provider at available as ready, matching the host", async () => {
     const providers = mockProviders.map((provider) =>
       provider.id === "azure-openai"

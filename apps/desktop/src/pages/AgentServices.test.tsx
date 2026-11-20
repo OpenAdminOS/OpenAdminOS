@@ -630,7 +630,7 @@ it("does not retry a refused model fit start from the same review", async () => 
   expect(reads).toBe(1);
 });
 
-it("does not start a model fit rerun on a hosted provider that reports no model", async () => {
+it("sends a model fit rerun on a hosted provider with no usable model to setup, not to the review", async () => {
   const agent = createMockAgent({ id: "devices", slug: "devices", name: "Inactive devices", mode: "read", scopes: ["DeviceManagementManagedDevices.Read.All"], services: ["intune"] });
   // Codex without its model cache: no listed models, though its config may still name a default.
   const providers = mockProviders.map((provider) => (provider.id === "openai" ? { ...provider, models: [], defaultModel: "gpt-5" } : provider));
@@ -648,9 +648,10 @@ it("does not start a model fit rerun on a hosted provider that reports no model"
     </Routes>,
     { path: "*", route: "/start", bridge },
   );
-  const dialog = await screen.findByRole("dialog", { name: /Review run/ });
-  expect(await within(dialog).findByText("Codex does not report a model yet, so this run cannot start. Check it in Settings, Providers.")).toBeInTheDocument();
-  expect(within(dialog).getByRole("button", { name: "Start run" })).toBeDisabled();
+  // Codex is not ready for this run, so setup opens to pick another provider, and Codex is not offered there.
+  expect(await screen.findByRole("heading", { name: "Pick an LLM provider" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Codex/ })).toBeNull();
+  expect(screen.queryByRole("dialog", { name: /Review run/ })).toBeNull();
   expect(bridge.startRun).not.toHaveBeenCalled();
 });
 

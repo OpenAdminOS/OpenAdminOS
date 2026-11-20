@@ -20,7 +20,7 @@ import type {
   TenantRecord,
 } from "../shared/openAdminOS";
 import { isManagedSettingLocked } from "../shared/openAdminOS";
-import { SELF_HOSTED_PROVIDER_IDS } from "../shared/model-fit";
+import { hostedModelFitModel, SELF_HOSTED_PROVIDER_IDS } from "../shared/model-fit";
 import { useAppState } from "../state";
 import {
   clearPendingIntent,
@@ -108,7 +108,7 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
           : state.activeProviderId;
       const provider = state.providers.find((entry) => entry.id === providerId);
       // A run for one request after a model fit failure never goes to a self-hosted server outside this device.
-      if (isOneRunProviderIntent(candidate) && provider && !modelFitEligible(provider)) return false;
+      if (isOneRunProviderIntent(candidate) && provider && !modelFitUsable(provider, state.activeModelByProviderId)) return false;
       return Boolean(
         provider &&
           isProviderImplemented(provider.id) &&
@@ -119,7 +119,7 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
             (provider.id === "azure-openai" && provider.status === "available")),
       );
     },
-    [state.activeProviderId, state.providers],
+    [state.activeModelByProviderId, state.activeProviderId, state.providers],
   );
   const providerReadyForIntent = providerReady;
 
@@ -398,7 +398,7 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
         activeTenant={connectedTenant ?? activeTenant}
         agentName={pendingAgentName}
         // The picker for one run offers only what the run host admits for it.
-        providers={isOneRunProviderIntent(intent) ? state.providers.filter(modelFitEligible) : state.providers}
+        providers={isOneRunProviderIntent(intent) ? state.providers.filter((provider) => modelFitUsable(provider, state.activeModelByProviderId)) : state.providers}
         activeProviderId={isOneRunProviderIntent(intent) && intent.providerId ? intent.providerId : state.activeProviderId}
         savedRegistrations={state.savedAppRegistrations ?? []}
         registrationLocked={
@@ -435,6 +435,17 @@ export function currentReturnTo(pathname: string, search = ""): string {
 /** A self-hosted server outside this device (LM Studio, Lemonade or Ollama reached elsewhere) is never a model fit choice. */
 function modelFitEligible(provider: ProviderSummary): boolean {
   return provider.isLocal || !SELF_HOSTED_PROVIDER_IDS.has(provider.id);
+}
+
+/**
+ * A connected hosted provider is ready for a model fit rerun only with a model the run could name
+ * (listed, not a placeholder such as Gemini's `gemini-default`, not only a policy lock). One that
+ * still needs setup stays in the picker, so the admin can set it up.
+ */
+function modelFitUsable(provider: ProviderSummary, activeModelByProviderId: Partial<Record<ProviderId, string>> | undefined): boolean {
+  if (!modelFitEligible(provider)) return false;
+  if (provider.isLocal || provider.status !== "connected") return true;
+  return hostedModelFitModel(provider, activeModelByProviderId) !== undefined;
 }
 
 /** A model fit rerun (or Run again of one): the provider it names is for this run only. */
