@@ -18,6 +18,7 @@ import {
   localResetPolicyProblem,
   parseWhoamiUser,
   windowsTaskBelongsToThisAccount,
+  windowsTaskListHas,
   windowsTaskUserId,
   localResetRemovalPlan,
   MACOS_SAFE_STORAGE_ACCOUNT,
@@ -32,6 +33,7 @@ import {
   type LocalResetRequestSteps,
 } from "./local-reset.js";
 import { AppStateStore } from "./state.js";
+import { blockConnectorConfirmations, requestConnectorConfirmation } from "./connector-confirm-bridge.js";
 import { LOCAL_RESET_PHRASE } from "../src/shared/local-reset.js";
 
 /** A reset requested in an installed build. */
@@ -740,6 +742,13 @@ describe("local reset: wipe at launch", () => {
     }
   });
 
+  it("reads task presence from the full task list", () => {
+    const csv = '"\\Microsoft Edge Update","20/11/2026 10:00:00","Ready"\r\n"\\OpenAdminOS Scheduler","N/A","Ready"\r\n';
+    assert.equal(windowsTaskListHas(csv, "OpenAdminOS Scheduler"), true);
+    assert.equal(windowsTaskListHas('"\\OpenAdminOS Scheduler Old","N/A","Ready"\r\n', "OpenAdminOS Scheduler"), false);
+    assert.equal(windowsTaskListHas("", "OpenAdminOS Scheduler"), false);
+  });
+
   it("removes the Windows scheduled task only when it also runs as this account", () => {
     const home = "C:\\Users\\ada";
     const program = "C:\\Users\\ada\\AppData\\Local\\Programs\\OpenAdminOS\\OpenAdminOS.exe";
@@ -979,6 +988,39 @@ describe("local reset: end to end with the store", () => {
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("local reset: runs and connector sends", () => {
+  it("waits while any run is still going, read-only ones included", async () => {
+    const dir = await tempDir();
+    try {
+      const statePath = join(dir, "state.json");
+      await writeFile(statePath, JSON.stringify({
+        activeProviderId: "ollama",
+        installedAgents: [],
+        tenants: [tenant],
+        runs: [{ id: "run-read", agentSlug: "device-report", tenantId: tenant.id, status: "running", queuedAt: "2026-11-19T09:00:00.000Z" }],
+      }), "utf8");
+      const store = new AppStateStore({ filePath: statePath, tokenStore: memoryTokenStore(new Map()), userDataPath: dir, statsApiUrl: "" });
+      try {
+        assert.match((await store.beginLocalReset()) ?? "", /is still running. Wait for it to finish, or cancel it in Runs/);
+      } finally {
+        store.close();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("declines connector sends once a reset has started", async () => {
+    blockConnectorConfirmations("OpenAdminOS is resetting. Nothing was sent.");
+    try {
+      const decision = await requestConnectorConfirmation({ connectorId: "teams", capabilityId: "post-message", args: {}, sideEffect: "notify" } as never);
+      assert.deepEqual(decision, { approved: false, reason: "OpenAdminOS is resetting. Nothing was sent." });
+    } finally {
+      blockConnectorConfirmations(undefined);
     }
   });
 });
