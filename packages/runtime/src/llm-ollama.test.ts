@@ -5,6 +5,7 @@ import { getEventListeners } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
+import { ContextTooSmallError } from "@openadminos/agent-sdk";
 import { classifyOllamaEndpoint, createOllamaLlm, ollamaEndpointOverride, ollamaHostEndpoint, parseContextOverflow } from "./llm-ollama.js";
 
 describe("classifyOllamaEndpoint", () => {
@@ -1277,6 +1278,55 @@ describe("Ollama context for an unpinned model", () => {
       assert.equal(ollama.chats.at(-1), undefined, "the request leaves the pin in charge");
       await llm.complete({ prompt: "short", maxTokens: 100 });
       assert.equal(ollama.chats.at(-1), undefined, "the dropped size is not used again");
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("refuses with the typed reason when an agent run's request exceeds a pin the adapter finds, and sends it for Chat", async () => {
+    const original = globalThis.fetch;
+    const pinnedShow = { parameters: "num_ctx                        16384", model_info: unpinned.model_info };
+    try {
+      for (const enforce of [true, false]) {
+        const ollama = scripted({ showBody: pinnedShow });
+        globalThis.fetch = ollama.fetchImpl;
+        const request = createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: `pinned-${String(enforce)}` })
+          .complete({ prompt: words(18000), maxTokens: 1000, ...(enforce ? { enforceContextWindow: true } : {}) });
+        if (enforce) {
+          await assert.rejects(request, (error: unknown) => {
+            assert.ok(error instanceof ContextTooSmallError);
+            assert.equal(error.failure.limitTokens, 16384);
+            return true;
+          });
+          assert.equal(ollama.chats.length, 0, "nothing reaches /api/chat");
+        } else {
+          await request;
+          assert.deepEqual(ollama.chats, [undefined]);
+        }
+      }
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("drops a kept size when the model is created again, even a size above its new pin", async () => {
+    const original = globalThis.fetch;
+    let show: unknown = { ...unpinned, modified_at: "2026-11-01T00:00:00Z" };
+    const ollama = scripted({ showBody: undefined });
+    globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+      if (new URL(String(input)).pathname === "/api/show") return new Response(JSON.stringify(show), { status: 200 });
+      return ollama.fetchImpl(input, init);
+    }) as typeof fetch;
+    try {
+      const llm = createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "revised" });
+      await llm.complete({ prompt: words(40000), maxTokens: 1000 });
+      assert.equal(ollama.chats.at(-1), 65536);
+      await llm.complete({ prompt: "short", maxTokens: 100 });
+      assert.equal(ollama.chats.at(-1), 65536, "the kept size is reused for the same model");
+      // `ollama create revised` with PARAMETER num_ctx 16384 to save memory.
+      show = { parameters: "num_ctx                        16384", model_info: unpinned.model_info, modified_at: "2026-11-20T00:00:00Z" };
+      await llm.complete({ prompt: "short", maxTokens: 100 });
+      assert.equal(ollama.chats.at(-1), undefined, "the new model's pin applies");
     } finally {
       globalThis.fetch = original;
     }

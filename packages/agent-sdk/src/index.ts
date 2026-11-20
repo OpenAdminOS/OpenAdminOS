@@ -4483,6 +4483,13 @@ export interface LlmOptions {
    * stops. Providers should abort network/process work promptly when set.
    */
   signal?: AbortSignal;
+  /**
+   * Set by agent runs, which check the size before sending: a provider that
+   * learns a context limit the request exceeds (for example a Modelfile pin
+   * the run's own lookup missed) refuses with a ContextTooSmallError instead
+   * of sending. Chat leaves it unset, so a provider may raise its context.
+   */
+  enforceContextWindow?: boolean;
 }
 
 export interface LlmTokenUsage {

@@ -1,6 +1,7 @@
 // Context window lookup for Ollama models, kept apart from llm-ollama.ts so
 // the request path and this lookup can change independently.
 import { modelServerRedirect } from "./llm-openai-compatible.js";
+import type { ContextTooSmallFailure } from "@openadminos/agent-sdk";
 import { checkPromptFit } from "./prompt-fit.js";
 
 const LOOKUP_TIMEOUT_MS = 5000;
@@ -8,6 +9,8 @@ const LOOKUP_TIMEOUT_MS = 5000;
 export interface OllamaShowContext {
   /** `num_ctx` pinned in the model's Modelfile parameters. */
   pinnedNumCtx?: number;
+  /** When the model was last created or pulled; a new value is a new model. */
+  revision?: string;
   /** The architecture's trained maximum, `<architecture>.context_length`. */
   modelMaxContext?: number;
 }
@@ -31,8 +34,9 @@ export interface OllamaContextWindowOptions {
  */
 export function parseOllamaShow(data: unknown): OllamaShowContext {
   if (!data || typeof data !== "object") return {};
-  const record = data as { parameters?: unknown; model_info?: unknown };
+  const record = data as { parameters?: unknown; model_info?: unknown; modified_at?: unknown };
   const out: OllamaShowContext = {};
+  if (typeof record.modified_at === "string" && record.modified_at.length > 0) out.revision = record.modified_at;
   if (typeof record.parameters === "string") {
     const match = /^\s*num_ctx\s+(\d+)\s*$/m.exec(record.parameters);
     const value = match ? Number(match[1]) : NaN;
@@ -70,6 +74,9 @@ function normalizeModelName(name: string): string {
   const trimmed = name.trim().toLowerCase();
   return /:[^/]+$/.test(trimmed) ? trimmed : `${trimmed}:latest`;
 }
+
+/** The model revision each kept size was kept for, per endpoint and model. */
+const keptRevisions = new Map<string, string>();
 
 /** Ollama's smallest default context; a request this size needs no num_ctx. */
 const SMALLEST_DEFAULT_CONTEXT = 2048;
@@ -122,6 +129,8 @@ export interface OllamaRequestContextInput {
   maxTokens?: number;
   /** num_ctx this app already sends for the model, if any. */
   currentNumCtx?: number;
+  /** Refuse a request larger than a pin this lookup finds (agent runs). */
+  enforce?: boolean;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
   signal?: AbortSignal;
@@ -141,23 +150,43 @@ export interface OllamaRequestContextInput {
  */
 export async function ollamaRequestNumCtx(
   input: OllamaRequestContextInput,
-): Promise<{ numCtx: number; neededTokens: number } | { dropKept: true } | undefined> {
+): Promise<{ numCtx: number; neededTokens: number } | { dropKept: true } | { tooLarge: ContextTooSmallFailure } | undefined> {
   // The same count as the run's size check, chat template tokens included.
-  const { neededTokens } = checkPromptFit({
+  const fitInput = {
     ...(input.system ? { system: input.system } : {}),
     prompt: input.prompt,
     ...(input.maxTokens !== undefined ? { maxTokens: input.maxTokens } : {}),
-  });
+    model: input.model,
+  };
+  const { neededTokens } = checkPromptFit(fitInput);
   // A short request with no kept size runs at Ollama's default untouched. A
   // kept size is always checked against the loaded one, whatever the
   // request's size: a larger one loaded since (by another client) must not
   // be reloaded smaller.
   if (neededTokens <= SMALLEST_DEFAULT_CONTEXT && input.currentNumCtx === undefined) return undefined;
+  const key = `${input.endpoint.replace(/\/$/, "")}\0${input.model}`;
   const fetchImpl = input.fetchImpl ?? fetch;
   const timeoutMs = input.timeoutMs ?? LOOKUP_TIMEOUT_MS;
   const base = input.endpoint.replace(/\/$/, "");
   const show = await readShow(fetchImpl, base, input.model, timeoutMs, input.signal);
+  // A kept size belongs to the model it was kept for. A model created again
+  // under the same name (a new revision) starts from its own settings.
+  if (input.currentNumCtx !== undefined && show.revision !== undefined) {
+    const keptFor = keptRevisions.get(key);
+    if (keptFor === undefined) keptRevisions.set(key, show.revision);
+    else if (keptFor !== show.revision) {
+      keptRevisions.delete(key);
+      return { dropKept: true };
+    }
+  }
   if (show.pinnedNumCtx !== undefined) {
+    // The size check holds a pinned model to its pin. If the run's own
+    // lookup could not see the pin (Ollama briefly unavailable), refuse here
+    // with the same typed reason rather than send a request that overflows.
+    if (input.enforce) {
+      const fit = checkPromptFit({ ...fitInput, contextWindow: show.pinnedNumCtx });
+      if (fit.failure) return { tooLarge: fit.failure };
+    }
     // A kept size below the pin (from before the model was created again
     // with a pin) would override it: Ollama applies a request's num_ctx over
     // the Modelfile. Drop it so the pin applies. A kept size at or above the

@@ -921,6 +921,8 @@ function wrapLlmWithThinking(base: RunLlmApi, hooks: ThinkingHooks, signal?: Abo
         ...(window !== undefined ? { contextWindow: window } : {}),
         ...(model ? { model } : {}),
       });
+      // The adapter refuses too if it learns a limit this check could not see.
+      options = { ...options, enforceContextWindow: true };
       const stepId = hooks.getCurrentStepId();
       let usageRecorded = false;
       const reset = () => {
