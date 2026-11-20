@@ -2528,8 +2528,9 @@ Mockup: `docs/mockups/34-local-reset.html`.
   until the restart. It writes `local-reset-pending.json` into the data folder
   first; the rename is the commit point (if it fails, nothing changed and the
   modal says so; a failed folder flush after it is only logged). It then turns off the OS
-  scheduler and the menu bar login item (installed builds), stops the gateway,
-  MCP servers and stores with a bounded wait, and relaunches.
+  scheduler and the menu bar login item (installed builds), stops the gateway
+  and MCP servers and drains every organization's work with a bounded wait
+  (the SQLite databases stay open until the process exits), and relaunches.
 - **No sign-out before the restart** (decided in review round 22; the brief
   listed it as a phase 1 step). Signing out rewrites the token caches in
   place, and that rewrite cannot be bound to the folder the reset was
@@ -2669,12 +2670,13 @@ Mockup: `docs/mockups/34-local-reset.html`.
   still the one the wipe emptied and holds no `state.json`. The restart of
   this app's own Linux AppImage (`APPIMAGE`, with the running executable
   inside `APPDIR` as written or resolved) goes through a detached shell
-  that waits for the old process (in extract-and-run also for the AppImage
-  runtime, its parent, which removes the extracted copy; a mounted
-  runtime replaced itself with the app, so the parent there is the
-  launcher and is not waited for), then starts the AppImage file: the mount it runs from goes away with
-  the old process, and Electron's relaunch helper runs with no_new_privs,
-  under which the new AppImage could not mount itself. When `APPDIR` is not
+  that starts the AppImage file once the old process has exited: the
+  mount it runs from goes away with the old process, and Electron's
+  relaunch helper runs with no_new_privs, under which the new AppImage
+  could not mount itself. In extract-and-run the shell also waits for the
+  AppImage runtime, the parent, which removes the extracted copy; a
+  mounted runtime replaced itself with the app, so the parent there is the
+  launcher and is not waited for. Each wait lasts a minute at most. When `APPDIR` is not
   a mount (extract-and-run, without working FUSE; the runtime strips that
   flag), the new process gets `APPIMAGE_EXTRACT_AND_RUN=1`. An AppImage
   that can no longer be started is logged, and the reset runs at the next
