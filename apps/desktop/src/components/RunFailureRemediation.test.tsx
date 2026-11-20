@@ -210,6 +210,7 @@ it.each([
   ["Anthropic API returned 401 Unauthorized: invalid x-api-key", false],
   ["Ollama responded with HTTP 403: expired token", false],
   ["Graph rejected the access token (HTTP 401). Tenant needs reconnect.", true],
+  ["The plan could not be checked against the tenant before applying, so nothing was applied. Graph rejected the access token (HTTP 401). Tenant needs reconnect.", true],
   ["Graph responded with HTTP 401 for https://graph.microsoft.com/v1.0/users: {\"error\":{\"code\":\"InvalidAuthenticationToken\"}}", true],
   ["AADSTS65001 interaction_required: consent is needed", true],
 ])("gives tenant sign-in advice only for a tenant sign-in failure: %s", (error, tenant) => {
@@ -217,4 +218,10 @@ it.each([
   render(<RunFailureRemediation run={run} />);
   if (tenant) expect(screen.getByText("Tenant token expired")).toBeInTheDocument();
   else expect(screen.queryByText("Tenant token expired")).not.toBeInTheDocument();
+});
+
+it("shows Graph advice for a stored write-plan failure that wraps a Graph 403", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: 'The plan could not be checked against the tenant before applying, so nothing was applied. Graph responded with HTTP 403 for https://graph.microsoft.com/beta/users: {"error":{"code":"Forbidden"}}' };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Graph access cause unverified")).toBeInTheDocument();
 });

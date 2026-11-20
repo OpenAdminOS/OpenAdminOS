@@ -162,6 +162,19 @@ describe("Graph access denial classification", () => {
     assert.equal(storedGraphAccessDenial(legacy, "Graph responded with HTTP 404 for https://graph.microsoft.com/v1.0/users/403: Not Found"), undefined);
   });
 
+  it("reads a stored write-plan failure from the Graph error after the app's wrapper", () => {
+    const graph = 'Graph responded with HTTP 403 for https://graph.microsoft.com/beta/deviceManagement/managedDevices: {"error":{"code":"Forbidden"}}';
+    for (const wrapper of [
+      "The plan could not be checked against the tenant before applying, so nothing was applied. ",
+      "The proposal could not be checked against the tenant before applying, so nothing was applied. ",
+      "Nothing was applied: ",
+    ]) {
+      assert.equal(graphAccessDenialFromStoredText(wrapper + graph)?.cause, "unknown", wrapper);
+      assert.equal(errorComesFromGraph(`${wrapper}Graph rejected the access token (HTTP 401). Tenant needs reconnect.`), true, wrapper);
+      assert.equal(graphAccessDenialFromStoredText(`${wrapper}Ollama responded with HTTP 403: Forbidden`), undefined, wrapper);
+    }
+  });
+
   it("reads a sandboxed script agent's stored failure from its brokered Graph error", () => {
     const graph = 'MXC script agent "intune-device-posture-auditor" failed: file:///agent.mjs:151\n    throw new Error(`${method}: ${message}`);\nError: graph.request: Graph responded with HTTP 403 for https://graph.microsoft.com/beta/deviceManagement/managedDevices: {"error":{"code":"Forbidden"}}';
     assert.equal(graphAccessDenialFromStoredText(graph)?.cause, "unknown");

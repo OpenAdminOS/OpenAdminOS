@@ -230,8 +230,19 @@ function unwrapScriptAgentGraphError(raw: string): string {
   return thrown.startsWith("graph.request: ") ? thrown.slice("graph.request: ".length) : raw;
 }
 
+/**
+ * Wrappers the app puts in front of a Graph error when a write run stops
+ * before apply: a failed check of the reviewed plan or proposal, and a failed
+ * replan. The Graph error follows them unchanged.
+ */
+const APP_FAILURE_WRAPPERS = [
+  /^The (?:plan|proposal) could not be checked against the tenant before applying, so nothing was applied\. /,
+  /^Nothing was applied: /,
+];
+
 function storedText(error: unknown): string {
-  const raw = (error instanceof Error ? error.message : String(error ?? "")).trimStart();
+  let raw = (error instanceof Error ? error.message : String(error ?? "")).trimStart();
+  for (const wrapper of APP_FAILURE_WRAPPERS) raw = raw.replace(wrapper, "");
   return unwrapScriptAgentGraphError(raw);
 }
 
