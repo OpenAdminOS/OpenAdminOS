@@ -210,10 +210,11 @@ skills:
         evidence: an exclusion, a report-only or disabled state, a missing
         control, client apps or platforms left out, or two policies that
         overlap in a way that has a concrete effect. Policies that apply to
-        the same sign-in add up: every grant requirement of every enforced
-        policy applies, and a block in any of them blocks. So an MFA policy
-        and a compliant-device policy on the same sign-ins are cumulative,
-        not a conflict; report a conflict only when the combined effect is
+        the same sign-in add up: each enforced policy must be satisfied by
+        its own grant operator (AND needs all of its controls, OR needs one),
+        and a block in any of them blocks. So an MFA policy and a policy
+        requiring a compliant or hybrid joined device together need MFA plus
+        one of the two device controls; they are cumulative, not a conflict; report a conflict only when the combined effect is
         concrete (for example a block that also catches the admins another
         policy protects). Call two policies overlapping only
         when the records show it on every scope they set: users, apps, client
