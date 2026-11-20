@@ -479,7 +479,7 @@ export async function runAgenticChat(
       // A local prompt that overflowed the context window falls back; any other error is the provider's.
       const detail = caught instanceof Error ? caught.message : String(caught);
       if (!compact || input.signal?.aborted || !CONTEXT_TOO_SMALL.test(detail)) throw caught;
-      input.modelStep?.finish({ kind: "repair", reason: "malformed" });
+      input.modelStep?.finish({ kind: "context-limit" });
       withdrawAnswer();
       if (invalidQueries.size) return blockedAnswer();
       return { ok: false, reason: "context-limit", failureReason: "context-too-small", failureDetail: detail, fallbackNotice: LOCAL_FALLBACK_NOTICES["context-too-small"], toolTrace, iterations: iteration, ...(responseModel ? { model: responseModel } : {}) };

@@ -266,6 +266,22 @@ describe("local model accuracy on the tester's tenant", () => {
     });
   });
 
+  it("keeps the follow-up context of the shortest compliance question, and the previous answer's devices after a refresh changes them", async () => {
+    await withHarness(async ({ store, cache }) => {
+      // "Which devices are noncompliant?" is also a direct evidence question; on a local model code answers it and keeps its result.
+      const first = await store.sendIntuneChatMessage({ content: "Which devices are noncompliant?", refreshIfStale: false });
+      for (const name of NONCOMPLIANT) assert.ok(first.assistantMessage.content.includes(name), name);
+      // WIN-01 is fixed and WIN-02 leaves the cache before the follow-up.
+      cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: new Date().toISOString(),
+        rows: managedDevices.filter((device) => device.id !== "md-w2").map((device) => (device.id === "md-w1" ? { ...device, complianceState: "compliant" } : device)) });
+      const followUp = (await store.sendIntuneChatMessage({ content: "only Windows", conversationId: first.conversation.id, refreshIfStale: false })).assistantMessage;
+      assert.match(followUp.content, /1 of the devices in the previous answer is no longer in the cache\./);
+      assert.match(followUp.content, /Windows among the 6 Intune managed devices not compliant from the previous answer: 3:/);
+      assert.match(followUp.content, /WIN-01 \(Windows, compliant/);
+      assert.ok(!followUp.content.includes("WIN-02"));
+    });
+  });
+
   it("keeps a follow-up to the previous answer's devices after a refresh adds one", async () => {
     await withHarness(async ({ store, cache }) => {
       await store.setChatInvestigationMode("always-deterministic");
@@ -336,7 +352,7 @@ describe("structured device questions", () => {
   });
 
   it("falls back for filters it cannot express and reads negation within its clause", () => {
-    for (const question of ["How many Windows 11 devices are there?", "How many devices are there without Windows?", "How many devices have never synced?", "how many devices are not managed in Intune?", "how many noncompliant devices have not synced", "how many devices have synced?", "how many devices are failing?", "how many devices are not in grace period", "How many devices in Intune are not Windows?", "how many non-Windows devices are there", "How many Windows or macOS devices are there?", "how many devices are not currently compliant", "how many are compliant and how many are not compliant", "which devices are no longer compliant"]) {
+    for (const question of ["How many devices are noncompliant or synced in the last 7 days?", "How many Windows 11 devices are there?", "How many devices are there without Windows?", "How many devices have never synced?", "how many devices are not managed in Intune?", "how many noncompliant devices have not synced", "how many devices have synced?", "how many devices are failing?", "how many devices are not in grace period", "How many devices in Intune are not Windows?", "how many non-Windows devices are there", "How many Windows or macOS devices are there?", "how many devices are not currently compliant", "how many are compliant and how many are not compliant", "which devices are no longer compliant"]) {
       assert.equal(structuredQueryForQuestion({ question, generatedAt: at }), undefined, question);
     }
     const both = structuredQueryForQuestion({ question: "How many devices are not compliant and synced today?", generatedAt: at });
@@ -397,6 +413,8 @@ describe("structured device questions", () => {
     assert.equal(fresh?.ids, undefined);
     assert.deepEqual(fresh?.filters, [{ field: "complianceState", op: "eq", value: "noncompliant" }, { field: "operatingSystem", op: "eq", value: "Windows" }]);
     assert.equal(fresh?.scopeLabel, "Intune managed Windows devices not compliant");
+    // A different compliance value without a switch lead is ambiguous at any size, never a silent swap.
+    assert.equal(structuredQueryForQuestion({ question: "only the compliant ones", generatedAt: at, previous: large }), undefined);
     // Entra devices have no compliance state to narrow by.
     assert.equal(structuredQueryForQuestion({ question: "only the noncompliant ones", generatedAt: at, previous: { ...previous, resource: "entraDevices", filters: [], label: "Entra devices" } }), undefined);
   });

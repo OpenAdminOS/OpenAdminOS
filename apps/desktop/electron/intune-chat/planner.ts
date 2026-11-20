@@ -1802,7 +1802,8 @@ export function buildAnswerPack(input: {
         maxAgentSuggestions === undefined
           ? input.agentSuggestions
           : input.agentSuggestions.slice(0, maxAgentSuggestions),
-      deterministicFindings: buildDeterministicFindings({
+      // The computed result answers the device question; a legacy stale-sync finding over sample rows could contradict it.
+      deterministicFindings: input.computed?.resource === "managedDevices" ? [] : buildDeterministicFindings({
         question: input.question,
         generatedAt,
         rows: input.rows,

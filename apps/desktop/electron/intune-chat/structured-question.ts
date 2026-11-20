@@ -298,7 +298,8 @@ export function structuredQueryForQuestion(input: {
   const constraints = [os, compliance, sync].filter(Boolean).length;
 
   // A word the parser does not know means the question asks something the counts do not answer.
-  if (unknownWords(lower).length > 0 || namesSeveralSystems(lower) || NEGATED_SYSTEM.test(lower) || hasUnreadClause(lower, sync !== undefined)) return undefined;
+  // Filters combine with AND only; "noncompliant or synced this week" is a union the parser does not express.
+  if (unknownWords(lower).length > 0 || namesSeveralSystems(lower) || NEGATED_SYSTEM.test(lower) || /\bor\b/.test(lower) || hasUnreadClause(lower, sync !== undefined)) return undefined;
   const previous = input.previous;
   const wordCount = lower.split(" ").length;
   // A follow-up narrows the previous set: it adds a constraint after a lead such as "only" or "of those",
@@ -312,31 +313,23 @@ export function structuredQueryForQuestion(input: {
       || (anaphora && (count || list || breakdown.length > 0)));
   if (followsUp && previous) {
     const added = [os, compliance, sync].flatMap((entry) => (entry ? [entry] : []));
-    // Without the previous rows (more than CONTEXT_ID_LIMIT matched), the cache is read afresh with the
-    // previous filters and the new ones, and the answer says so instead of claiming the previous set.
-    if (!previous.ids) {
-      if (previous.resource === "entraDevices" && (compliance || sync)) return undefined;
-      const fields = new Set(added.map((entry) => entry.predicate.field));
-      const filters = dedupe([...previous.filters.filter((filter) => !fields.has(filter.field)), ...added.map((entry) => entry.predicate)]);
-      return { kind: "count", resource: previous.resource, scopeLabel: describeFilters(previous.resource, filters), filters, breakdown, list: true };
-    }
     // Entra device objects carry no compliance state and no sync time.
     if (previous.resource === "entraDevices" && (compliance || sync)) return undefined;
-    // A different value on a field already in force ("what about macOS?" after Windows) switches that value:
-    // the same question over a fresh set, not a narrowing of the previous rows to nothing.
+    // A different value on a field already in force ("what about macOS?" after Windows) switches that value
+    // after a switch lead: the same question over a fresh set. Without one ("only the compliant ones" after
+    // the noncompliant list) it is ambiguous and goes to the planner, whatever the size of the previous set.
     const switched = added.filter((entry) => previous.filters.some((filter) => filter.field === entry.predicate.field && JSON.stringify(filter) !== JSON.stringify(entry.predicate)));
     if (switched.length > 0) {
       if (switched.length !== added.length || !SWITCH_LEAD.test(lower)) return undefined;
       const fields = new Set(switched.map((entry) => entry.predicate.field));
       const filters = [...previous.filters.filter((filter) => !fields.has(filter.field)), ...switched.map((entry) => entry.predicate)];
-      return {
-        kind: "count",
-        resource: previous.resource,
-        scopeLabel: describeFilters(previous.resource, filters),
-        filters,
-        breakdown,
-        list: true,
-        };
+      return { kind: "count", resource: previous.resource, scopeLabel: describeFilters(previous.resource, filters), filters, breakdown, list: true };
+    }
+    // Without the previous rows (more than CONTEXT_ID_LIMIT matched), the cache is read afresh with the
+    // previous filters and the new ones, and the answer says so instead of claiming the previous set.
+    if (!previous.ids) {
+      const filters = dedupe([...previous.filters, ...added.map((entry) => entry.predicate)]);
+      return { kind: "count", resource: previous.resource, scopeLabel: describeFilters(previous.resource, filters), filters, breakdown, list: true };
     }
     // A narrowing that repeats a filter already in force adds nothing new; the previous set is listed again.
     const fresh = added.filter((entry) => !previous.filters.some((filter) => JSON.stringify(filter) === JSON.stringify(entry.predicate)));
@@ -480,10 +473,13 @@ export function computeStructuredResult(input: {
 
   const listSet = query.list && !query.focus;
   const ids = query.ids ? { ids: query.ids } : {};
+  // A follow-up's set is the previous answer's rows, by id: a device whose values changed since stays in it,
+  // listed with its current values, so the previous answer's size is never restated from a refresh.
+  const baseFilters = query.ids ? [] : query.filters;
   const counted = store.countGraphCache({
     tenantId,
     resource: query.resource,
-    filters: query.filters,
+    filters: baseFilters,
     groupBy: query.breakdown,
     ...ids,
     ...(listSet ? { listLimit: COMPUTED_LIST_LIMIT } : {}),
@@ -492,7 +488,7 @@ export function computeStructuredResult(input: {
     ? store.countGraphCache({
         tenantId,
         resource: query.resource,
-        filters: [...query.filters, ...query.focus.filters],
+        filters: [...baseFilters, ...query.focus.filters],
         groupBy: query.resource === "managedDevices" ? ["operatingSystem"] : [],
         ...ids,
         listLimit: COMPUTED_LIST_LIMIT,
@@ -502,16 +498,18 @@ export function computeStructuredResult(input: {
   const listedTotal = query.focus && focusCount ? focusCount.total : counted.total;
   // The ids a follow-up narrows: the listed set, when it is small enough to keep.
   const contextIds = listedTotal <= CONTEXT_ID_LIMIT
-    ? (store.countGraphCache({ tenantId, resource: query.resource, filters: listedFilters, ...ids, listLimit: CONTEXT_ID_LIMIT }).rows ?? []).flatMap((row) => listedRow(row)?.id ?? [])
+    ? (store.countGraphCache({ tenantId, resource: query.resource, filters: query.focus ? [...baseFilters, ...query.focus.filters] : baseFilters, ...ids, listLimit: CONTEXT_ID_LIMIT }).rows ?? []).flatMap((row) => listedRow(row)?.id ?? [])
     : undefined;
   const rows = (counted.rows ?? []).flatMap((row) => listedRow(row) ?? []);
   const focusRows = (focusCount?.rows ?? []).flatMap((row) => listedRow(row) ?? []);
 
   const facts: string[] = [];
   const breakdownText = query.breakdown.map((field) => `${FIELD_WORDS[field] ?? `by ${field}`}: ${groupText(counted.groups[field]) || "none reported"}`).join("; ");
-  const previousSet = `the ${counted.total} ${query.scopeLabel} from the previous answer`;
+  const previousSet = `the ${query.ids?.length ?? counted.total} ${query.scopeLabel} from the previous answer`;
+  const gone = query.ids ? query.ids.length - counted.total : 0;
   if (!query.followUp) facts.push(`${query.scopeLabel}: ${counted.total}${breakdownText ? ` (${breakdownText})` : ""}.`);
   else if (!query.focus) facts.push(`${capitalize(previousSet)}${breakdownText ? ` (${breakdownText})` : ""}${listSet && rows.length ? ":" : "."}`);
+  if (gone > 0) facts.push(`${gone} of the devices in the previous answer ${gone === 1 ? "is" : "are"} no longer in the cache.`);
   if (query.focus && focusCount) {
     const os = groupText(focusCount.groups.operatingSystem);
     const subject = query.followUp ? `${capitalize(query.focus.label)} among ${previousSet}` : capitalize(query.focus.label);

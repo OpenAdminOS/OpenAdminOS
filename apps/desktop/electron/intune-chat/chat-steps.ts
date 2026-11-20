@@ -533,7 +533,9 @@ export function toolStepHooks(steps: ChatStepRecorder, mcp: McpChatContext | und
 export type ModelStepOutcome =
   | { kind: "tool"; tool: IntuneChatInvestigationToolName; params: unknown }
   | { kind: "final"; passages: number; trace: readonly IntuneChatToolTraceEntry[] }
-  | { kind: "repair"; reason: "malformed" | "kind" | "sources" | "evidence" | "unfinished" | "lookup" | "empty" | "documentation" | "excerpts" };
+  | { kind: "repair"; reason: "malformed" | "kind" | "sources" | "evidence" | "unfinished" | "lookup" | "empty" | "documentation" | "excerpts" }
+  /** The prompt did not fit the model's context window: the loop ends and Chat answers from cached data. */
+  | { kind: "context-limit" };
 
 export interface ModelStepHooks {
   start(): void;
@@ -612,9 +614,11 @@ export function modelStepHooks(steps: ChatStepRecorder, model: AnswerModel, mcp:
       if (!current) return;
       const title = outcome.kind === "final" ? "Wrote the answer"
         : outcome.kind === "tool" ? toolDecision(outcome.tool, outcome.params, mcp?.tools.find((tool) => tool.name === outcome.tool))
-          : REPAIR[outcome.reason];
+          : outcome.kind === "context-limit" ? "Prompt did not fit the model's context window"
+            : REPAIR[outcome.reason];
       const detail = outcome.kind === "final" ? `${name} · ${answerInputs(outcome.passages, outcome.trace)}`
-        : outcome.kind === "repair" ? `${name} · ${outcome.reason === "excerpts" ? "asked the model to read the best match first" : "asked the model to try again"}` : name;
+        : outcome.kind === "repair" ? `${name} · ${outcome.reason === "excerpts" ? "asked the model to read the best match first" : "asked the model to try again"}`
+          : outcome.kind === "context-limit" ? `${name} · answered from cached data instead` : name;
       steps.finish(current.id, { title, detail: classification ? `${detail} · ${classification}` : detail, durationMs: Math.max(0, Date.now() - current.startedAt) });
       current = undefined;
     },
