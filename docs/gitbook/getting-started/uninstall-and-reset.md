@@ -240,8 +240,11 @@ holds the key too: delete that backup as well if the sign-ins in it must go.
 
 ## Uninstall on Linux
 
-Remove the package (`sudo apt remove openadminos`, your package manager, or
-the AppImage file). Then make the checks in
+Quit OpenAdminOS first, including any copy started from the AppImage
+(`pgrep -fl -i openadminos` lists what is still running): a running copy can
+write new token files into the data folder while you empty it. Then remove the
+package (`sudo apt remove openadminos`, your package manager, or the AppImage
+file), make the checks in
 [Before removing files by hand](#before-removing-files-by-hand), empty the
 data folder while keeping the IT policy file, and remove the update cache:
 

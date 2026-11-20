@@ -2540,8 +2540,9 @@ Mockup: `docs/mockups/34-local-reset.html`.
   start of the checks until the restart, a missing `state.json` is never
   created (the normal first launch rule is off; reads fall back to the state
   the process last knew), and closing and draining organizations uses that
-  in-memory state, not the file. Once the marker is written every state
-  write is refused when it runs ("Nothing was saved"), a write queued before
+  in-memory state, not the file. From the marker's rename (before its
+  folder flush is awaited) every state write is refused when it runs, and
+  again before its own rename and each Windows retry of it ("Nothing was saved"), a write queued before
   that included, before any audit record: an atomic write would put this
   process's state over whatever folder is at the path now. Before the
   marker writes go on as usual, so a refused reset loses nothing. The
@@ -2555,7 +2556,8 @@ Mockup: `docs/mockups/34-local-reset.html`.
   incomplete, stops it with nothing removed and the usual way out (remove
   the marker, reset again).
 - **Accepted limit: a write already running when the reset commits**
-  (raised in review round 26, declined). A state or token cache write that
+  (raised in review round 26, declined; the reviewer withdrew it in round
+  27). A state or token cache write that
   started before the reset request, if the data folder is replaced within
   the milliseconds it runs, lands in the replacement (a state write checks
   the commit again right before its rename, so the window is that rename;
@@ -2588,8 +2590,11 @@ Mockup: `docs/mockups/34-local-reset.html`.
   a read-only file with more than one hard link stays too, and is listed: a
   hard link shares its attributes, and removing a read-only file clears the
   attribute first, which would make a backup's copy writable (a folder that
-  cannot be listed stays too, since its contents cannot be checked); cache folders
-  outside the data folder get the same check, as a warning. The guide's
+  cannot be listed stays too, since its contents cannot be checked). The
+  check can take seconds on redirected storage, so the data folder and the
+  entry are checked again right after it, and the wipe stops if either was
+  replaced meanwhile. Cache folders outside the data folder get the same
+  checks, as a warning. The guide's
   PowerShell script leaves files whose `LinkType` is `HardLink` for the same
   reason. Then,
   installed builds only: the Keychain item by exact service
@@ -2614,8 +2619,9 @@ Mockup: `docs/mockups/34-local-reset.html`.
   and birth time) is taken when the request starts, before any check awaits;
   both marker writes go only to that same folder. At launch
   the wipe runs only when the folder still has that inode and birth time
-  (the device number is not compared, since a reboot or remount can change
-  it, except where no birth time is known): a copy restored or roamed to
+  (on macOS and Windows the device number is not compared, since a reboot
+  or remount can change it, except where no birth time is known; on Linux
+  it must always match too, see below): a copy restored or roamed to
   another device carries the marker but not the identity, so it stops with
   nothing removed and asks for a fresh reset there. A birth time equal to
   the change time counts as unknown (Node reports the change time where
