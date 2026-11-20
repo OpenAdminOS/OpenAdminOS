@@ -3562,10 +3562,11 @@ export interface OpenAdminOSApi {
   /** Reset OpenAdminOS: what the dialog shows. */
   getLocalResetInfo?(): Promise<LocalResetInfo>;
   /**
-   * Reset OpenAdminOS: checks the typed phrase, signs out of every tenant,
-   * turns off background work and restarts the app, which empties the data
-   * folder before anything else runs. Rejects, with nothing removed, when
-   * the reset cannot start.
+   * Reset OpenAdminOS: checks the typed phrase, closes every organization to
+   * new work, turns off background work and restarts the app, which empties
+   * the data folder, token caches included, before anything else runs. The
+   * sign-ins stay in the token caches until that launch. Rejects, with
+   * nothing removed, when the reset cannot start.
    */
   resetOpenAdminOS?(confirmation: string): Promise<void>;
   /** The outcome of a reset that ran at this launch, until it is dismissed. */
