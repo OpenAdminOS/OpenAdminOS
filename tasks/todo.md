@@ -26,6 +26,8 @@
 
   PR #206 review round 7 (2026-11-18). GPT-6.2-Sol on 5c4ef56f, no blocking findings. Fixed, each with a test that fails without the fix, two regressions from the round 6 transport: a gzip, deflate or br answer was no longer decoded, so Chat read invalid JSON, Settings an invalid model list and a failed pull lost its reason; and a model pull had no deadline, where fetch had 5 minute headers and body timeouts, so `directFetch` fails a connection idle for 5 minutes before the answer or while it arrives. A pull whose body read fails now fails instead of succeeding, and its timeout names the recovery.
 
+  PR #206 review round 8 (2026-11-19). Main merged (#211, Ollama context retry; CHANGELOG conflict only, both entries kept). GPT-6.2-Sol on ed48e36b, no blocking findings. Fixed, each with a test that fails without the fix: a stalled local pull reached Settings as registry.ollama.ai not answering, with restart advice that the 24 hour retry wait defeats (P2), so it now says the local Ollama stopped answering and gives `ollama pull` then Refresh; a raw deflate body, which fetch decoded, failed with Z_DATA_ERROR (P3), so the first byte picks zlib or raw; dialling localhost by address sent `Host: 127.0.0.1`, which a server routing on the name refuses (P3), so the Host header keeps the name given.
+
 - [x] Could not check row in Chat's model choice (branch `setup/could-not-check-row`, 2026-11-18). Request: the PR #191 follow-up. When a provider's check fails, Chat's model choice shows no row for LM Studio, Lemonade or Apple Intelligence, and Ollama shows "No model yet" instead of the failure.
 
   Merged as `6dc77828` on 2026-11-18.
