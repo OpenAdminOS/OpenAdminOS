@@ -10,8 +10,11 @@ interface Suggestion {
   body: string;
 }
 
-/** A failed lookup of the model's context limit has its own playbook only. */
-const isContextLimitLookup = (e: string) => /ollama/i.test(e) && /context limit|\/api\/show/i.test(e);
+/**
+ * A failed lookup of the model's context limit has its own playbook only.
+ * `/api/show` must end the path, so an endpoint prefix such as `/api/showroom` is not read as the lookup.
+ */
+const isContextLimitLookup = (e: string) => /ollama/i.test(e) && /context limit|\/api\/show(?![\w/-])/i.test(e);
 
 const SUGGESTIONS: Suggestion[] = [
   {
