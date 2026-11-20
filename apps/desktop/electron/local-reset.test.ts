@@ -884,9 +884,15 @@ describe("local reset: wipe at launch", () => {
     }
   });
 
-  it("matches its folder across a restart even when the device number changed", () => {
+  it("matches its folder across a restart even when the device number changed, except on Linux", () => {
     const stored = { dev: 16777220, ino: 4242, birth: 1763550000000 };
-    assert.equal(markerFolderMatches(stored, { ...stored, dev: 16777231 }), true);
+    assert.equal(markerFolderMatches(stored, { ...stored, dev: 16777231 }, "darwin"), true);
+    assert.equal(markerFolderMatches(stored, { ...stored, dev: 16777231 }, "win32"), true);
+    // A Btrfs snapshot restored as the home keeps inode and birth time; only
+    // the device number differs, so on Linux it never matches.
+    assert.equal(markerFolderMatches(stored, { ...stored, dev: 16777231 }, "linux"), false);
+    assert.equal(markerFolderMatches(stored, stored, "linux"), true);
+    assert.equal(markerFolderMatches({ ...stored, ino: 0 }, { ...stored, ino: 0, dev: 1 }, "linux"), false);
     assert.equal(markerFolderMatches(stored, { ...stored, ino: 4243 }), false);
     assert.equal(markerFolderMatches(stored, { ...stored, birth: 1763559999000 }), false);
     // No birth time on this file system: the inode and the device decide.

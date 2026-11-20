@@ -623,7 +623,7 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
   // The request was accepted for this very folder: a copy restored or
   // roamed to another device carries the marker but not the identity.
   const identity = localResetFolderIdentity(userDataDir);
-  if (!identity || !marker.folder || !markerFolderMatches(marker.folder, identity)) {
+  if (!identity || !marker.folder || !markerFolderMatches(marker.folder, identity, options.platform)) {
     failed.push({ item: LOCAL_RESET_MARKER, reason: MARKER_OTHER_FOLDER_REASON });
     return finish("incomplete");
   }
@@ -778,11 +778,19 @@ export function sameSessionFolder(a: LocalResetFolderIdentity, b: LocalResetFold
 
 /**
  * Across a restart: the device number can change with a reboot or a
- * remount (network homes, btrfs, autofs), so it is compared only where no
- * birth time is known. A copy restored or roamed elsewhere gets a new
- * inode and a new birth time.
+ * remount (network homes, autofs), so on macOS and Windows it is compared
+ * only where no birth time is known. A copy restored or roamed elsewhere
+ * gets a new inode and a new birth time. On Linux the device must always
+ * match: a Btrfs snapshot restored as the home keeps the inode and birth
+ * time of every folder in it, and only the device number tells it apart.
+ * A mismatch stops the reset with nothing removed.
  */
-export function markerFolderMatches(stored: LocalResetFolderIdentity, now: LocalResetFolderIdentity): boolean {
+export function markerFolderMatches(
+  stored: LocalResetFolderIdentity,
+  now: LocalResetFolderIdentity,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  if (platform === "linux" && stored.dev !== now.dev) return false;
   const birthKnown = stored.birth !== 0 && now.birth !== 0;
   if (stored.ino === 0 || now.ino === 0) return birthKnown && stored.birth === now.birth;
   if (stored.ino !== now.ino) return false;
