@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { access, mkdtemp, rm } from "node:fs/promises";
-import { createServer } from "node:http";
+import { createServer, get } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
@@ -225,7 +225,16 @@ it("accepts only the smoke run's own server as ready, never a listener another p
   });
   try {
     await waitForSmokeServer(own, `http://127.0.0.1:${port}`, 20_000);
-    assert.equal(await (await fetch(`http://127.0.0.1:${port}`)).text(), "own");
+    // Read over a direct connection, like the probe, so an inherited proxy cannot answer.
+    const body = await new Promise((resolve, reject) => {
+      get(`http://127.0.0.1:${port}`, { agent: false }, (response) => {
+        let text = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk) => { text += chunk; });
+        response.on("end", () => resolve(text));
+      }).on("error", reject);
+    });
+    assert.equal(body, "own");
   } finally {
     own.kill();
   }
