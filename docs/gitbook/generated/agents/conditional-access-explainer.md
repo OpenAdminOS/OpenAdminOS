@@ -21,7 +21,7 @@ Reviews Conditional Access policies for coverage, exclusions, report-only contro
 | Preferred model | `llama3.1:8b` |
 | Minimum app version | `0.7.3-nightly.99999999999999` |
 | Author | OpenAdminOS · verified |
-| Last changed | 2026-11-19 · `687edae4` |
+| Last changed | 2026-11-19 · `3a7aa1ca` |
 
 ## Execution
 
