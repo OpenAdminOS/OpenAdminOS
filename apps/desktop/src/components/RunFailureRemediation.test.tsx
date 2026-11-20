@@ -109,6 +109,24 @@ it("treats the overall deadline during the context limit lookup as a lookup fail
   expect(screen.queryByText("Request timed out")).not.toBeInTheDocument();
 });
 
+it.each([
+  "Ollama timed out after 180000ms at http://127.0.0.1:11434/api/chat on the retry with a 45,056 token context.",
+  "Ollama timed out after 180000ms at http://127.0.0.1:11434/api/chat with the 45,056 token context kept from an earlier request.",
+])("gives a timed out request with a raised context the generation timeout playbook: %s", (error) => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama generation timed out")).toBeInTheDocument();
+  expect(screen.queryByText("Ollama context too small")).not.toBeInTheDocument();
+  expect(screen.queryByText("Ollama did not report the model's context limit")).not.toBeInTheDocument();
+});
+
+it("gives a memory failure with the kept context the context playbook", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. The next request starts from Ollama's default context size. Ollama said: model requires more system memory (24.1 GiB) than is available (12.0 GiB)" };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama context too small")).toBeInTheDocument();
+  expect(screen.queryByText("Ollama generation timed out")).not.toBeInTheDocument();
+});
+
 it("gives a memory failure on the context retry the context playbook", () => {
   const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama context size too small: This request needs 40,652 tokens of context, but Ollama could not load gpt-oss:20b with 45,056, usually because free memory ran out. Ollama said: model requires more system memory (24.1 GiB) than is available (12.0 GiB)" };
   render(<RunFailureRemediation run={run} />);
