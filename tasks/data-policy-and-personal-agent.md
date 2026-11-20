@@ -417,8 +417,10 @@ the IT policy file.
       (a Conditional Access policy that was renamed or deleted since) is still
       known by its class. A saved message without stored evidence (saved
       before the evidence existed, or evidence that cannot be read) counts as
-      unexamined, as in the budget rule below. `TODO(ugur)`: evidence
-      stored under an older field map version (see open decisions).
+      unexamined, as in the budget rule below. Evidence stored under a field
+      map version older than a map change that raised any class also counts
+      as unexamined; otherwise its stored classes apply (decided by the lead
+      2026-11-20, from the unexamined rule).
 - [ ] Just before each model call, the final request (system text plus
       prompt, including the admin's own words) is scanned against the ledger
       and the detectors, at the one place every provider call is built.
@@ -1058,8 +1060,6 @@ the IT policy file.
 9. The policy key for user-added MCP servers (proposal: `allowedMcpServers`,
    a list of hosts, separate from `allowedPublicReferences`, which covers
    catalog references) (mockup 35, step 1).
-10. Saved Chat evidence stored under an older field map version (A1). The
-    evidence holds classes, not fields, so a later map that raises a field's
-    class cannot be applied to it. Proposal: when the field map version of a
-    message's evidence is older than a map change that raised any class, the
-    message counts as unexamined; otherwise its stored classes apply.
+10. ~~Saved Chat evidence under an older field map version~~ counts as
+    unexamined when a later map change raised any class; otherwise its stored
+    classes apply (lead, 2026-11-20, from the unexamined rule).
