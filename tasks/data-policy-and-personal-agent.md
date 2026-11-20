@@ -217,6 +217,24 @@ built on top of them are planned separately.
   carries, the whole profile block is withheld, not only the notes that carry
   it. The withheld session start says the call opened without the profile.
 
+**Review findings adopted (2026-11-19, round 10 of the design review)**
+- MCP tool review: the admin approves the full definition, which every row
+  shows when expanded (name, title, description, every parameter with type
+  and description, output description, annotations). The write check reads
+  every text field of it, including the title and enum values, and approval
+  is bound to a SHA-256 hash of the whole definition, so any change in any
+  field invalidates it (B5).
+- A connector send rechecks the send grant and the connection for the
+  organization on the card at Confirm; when either is missing the card reads
+  "Not sent" with the reason and the fix, never "posted" (B3).
+- The planning call is described as "Your question, checked by data policy"
+  and records what the request scan did with the admin's own words, such as
+  a typed user name masked as `[USER_1]`.
+- Unexamined content takes the strictest action on its tier on Confidential
+  too: with Credential Allow there (after confirmation) and Identity Block,
+  a call whose scan ran out of budget is withheld, with a smaller question
+  or a local model as the recovery.
+
 ## Why
 
 Today the choice is binary. With a local model the request never leaves the
@@ -592,6 +610,14 @@ the IT policy file.
       Teams), the organization, Confirm and Cancel, and a note that every
       message is confirmed on its own. Nothing is sent before Confirm, and a
       confirmation never covers a later message.
+- [ ] Confirm is a call, so the call-time check runs again at Confirm for the
+      organization named on the card: the send grant (Send to Teams) must
+      still be on and Teams must be connected there. If the grant was turned
+      off in Access after the card was proposed, or the connection is
+      missing, nothing is sent and the card shows a "Not sent" state with the
+      reason and the fix (Turn on Send to Teams, or Reconnect Teams in that
+      organization), never "posted". After the fix the same card can be
+      confirmed again and still covers only its one message.
 - [ ] The contract: a tool is offered and callable only while its grant is on
       and the service it uses is connected in the active organization. A
       granted skill is offered only when every grant it uses (for example
@@ -616,6 +642,11 @@ the IT policy file.
 5. A connector send shows the card with the exact text, destination and
    organization; Cancel sends nothing, and a second message needs its own
    Confirm (test, mockup 35).
+6. Confirm rechecks the send grant and the connection for the organization on
+   the card: with Send to Teams turned off after the card was proposed, or
+   Teams not connected in that organization, Confirm posts nothing and the
+   card reads "Not sent" with the reason and the matching fix, never
+   "posted" (test per cause, mockup 35).
 
 ### Phase B4: Skills
 
@@ -652,23 +683,31 @@ the IT policy file.
       strip popover says why (mockup 35).
 - [ ] A tool review at add time. Only tools the admin approves as read-only
       are allowed; the tool's read-only annotation is shown but not trusted on
-      its own, and a tool annotated as a change cannot be approved. Approval
-      requires a read-only annotation and no documented write behavior: the
-      app checks the whole definition (name, description, and every input
-      parameter's name and description) and flags a tool that describes
-      saving, changing, sending or deleting, in the first review and in every
-      re-review; a flagged tool cannot be approved in any review state, with
-      the reason shown in its row. The
-      approval is enforced at every call, including calls from skills and
-      scheduled checks. A tool that is not approved, or added by the server
-      later and not yet reviewed, is never offered.
-- [ ] An approval belongs to the exact definition the admin approved. Any
-      change to an approved tool's definition (description, input schema,
-      annotations, or name under the same id) invalidates its approval before
-      the tool can be offered or called: the tool returns to review,
-      unchecked, with the old and new definition side by side, and a change
-      that now describes saving, changing, sending or deleting makes it
-      unapprovable (mockup 35, B, "Review 3 changed tools").
+      its own, and a tool annotated as a change cannot be approved. The admin
+      approves the full definition: in the first review and in every
+      re-review, each tool row expands to show its name, title, description,
+      every input parameter with its type and description (and its allowed
+      values), the output description if any, and the annotations.
+- [ ] The write check reads every text field of that definition: name,
+      title, description, parameter names and descriptions, enum values and
+      the output description. A tool that describes saving, changing,
+      sending or deleting in any of them is flagged, in the first review and
+      in every re-review; a flagged tool cannot be approved in any review
+      state, with the reason (the matched words and the fields they are in)
+      shown in its row and marked in its expanded definition. The approval is
+      enforced at every call, including calls from skills and scheduled
+      checks. A tool that is not approved, or added by the server later and
+      not yet reviewed, is never offered.
+- [ ] Approval is bound to a hash (SHA-256) of the whole canonical
+      definition, every field above. The app hashes the definition the
+      server lists before it offers a tool and again at every call; any
+      change at all, in any field (title, description, a parameter, an enum
+      value, the output description, an annotation, or the name under the
+      same id), invalidates the approval before the tool can be offered or
+      called. The tool returns to review, unchecked, with the old and new
+      definition side by side and both hashes, and a change that now
+      describes saving, changing, sending or deleting makes it unapprovable
+      (mockup 35, B, "Review 3 changed tools").
 - [ ] Local stdio servers are out of scope for the first version
       (`TODO(ugur)`: they run code on the device).
 
@@ -695,6 +734,16 @@ the IT policy file.
    a change in its input schema, annotations or name. When the changed
    description says it saves on the server (`compare_baselines`), the tool
    is flagged and cannot be approved again.
+7. Regression test: a write documented outside the description and the
+   parameter descriptions is flagged and cannot be approved. A tool whose
+   name and description read as read-only but whose `title` says "List and
+   apply baselines" (`baseline_versions`), and a tool whose parameter accepts
+   the enum value `apply`, are each flagged, in the first review and in a
+   re-review, with the field named in the reason (mockup 35 shows
+   `baseline_versions` disabled in the first review). A change confined to
+   the title, an enum value, the output description or an annotation of an
+   approved tool invalidates its approval (hash mismatch), so the tool is
+   neither offered nor callable until it is approved again.
 
 ### Phase B6: Learning
 
