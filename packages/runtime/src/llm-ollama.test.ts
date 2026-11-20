@@ -1825,8 +1825,8 @@ describe("Ollama context for an unpinned model", () => {
     const overflow = () => new Response(JSON.stringify({ error: "request (18000 tokens) exceeds the available context size (16384 tokens), try increasing it" }), { status: 400 });
     try {
       // First send: the size check saw the model unpinned, then it was created
-      // again with a pin and the request's lookup answers only in part.
-      {
+      // again with a pin and the request's lookup answers only in part, or fails.
+      for (const lookup of ["partial", "unavailable"] as const) {
         const chats: Array<number | undefined> = [];
         let shows = 0;
         globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
@@ -1834,15 +1834,16 @@ describe("Ollama context for an unpinned model", () => {
           if (path === "/api/ps") return new Response(JSON.stringify({ models: [] }), { status: 200 });
           if (path === "/api/show") {
             shows += 1;
-            return new Response(JSON.stringify(shows === 1 ? fullUnpinned : partial), { status: 200 });
+            if (shows === 1) return new Response(JSON.stringify(fullUnpinned), { status: 200 });
+            return lookup === "partial" ? new Response(JSON.stringify(partial), { status: 200 }) : new Response("unavailable", { status: 503 });
           }
           chats.push((JSON.parse(String(init?.body)) as { options?: { num_ctx?: number } }).options?.num_ctx);
           return overflow();
         }) as typeof fetch;
-        const llm = createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "recreated-first" });
-        assert.equal(await llm.contextWindow?.("recreated-first"), 131072);
+        const llm = createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: `recreated-first-${lookup}` });
+        assert.equal(await llm.contextWindow?.(`recreated-first-${lookup}`), 131072);
         await assert.rejects(llm.complete({ prompt: words(14000), maxTokens: 1000, enforceContextWindow: true }), ContextTooSmallError);
-        assert.deepEqual(chats, [undefined]);
+        assert.deepEqual(chats, [undefined], lookup);
       }
       // Retry: the request's lookup saw the model unpinned and sized it; the
       // retry lookup answers only in part, so the retry does not raise.

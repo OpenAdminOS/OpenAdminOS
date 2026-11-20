@@ -256,7 +256,16 @@ export async function ollamaRequestNumCtx(
   const base = input.endpoint.replace(/\/$/, "");
   const fresh = await readShow(fetchImpl, base, input.model, timeoutMs, input.signal);
   const fallback = input.fallbackShow;
-  let show = ollamaShowKnown(fresh) || !fallback ? fresh : fallback;
+  // A failed lookup falls back to the size check's reading, but not to its
+  // finding that the model is unpinned: the model may have been created
+  // again with a pin since, and only a fresh revision can show it was not.
+  let show: OllamaShowContext;
+  if (ollamaShowKnown(fresh) || !fallback) {
+    show = fresh;
+  } else {
+    const { pinKnown: _unconfirmed, ...seenBefore } = fallback;
+    show = seenBefore;
+  }
   // A partial answer for the same model keeps the pin and maximum the size
   // check saw; a different revision is a new model and does not.
   if (fallback && (show.revision === undefined || show.revision === fallback.revision)) {
@@ -264,7 +273,7 @@ export async function ollamaRequestNumCtx(
     if (fallback.modelMaxContext !== undefined && show.modelMaxContext === undefined) show = { ...show, modelMaxContext: fallback.modelMaxContext };
     // That the model is unpinned carries over only for a revision both
     // readings name: a model created again since may carry a pin.
-    if (fallback.pinKnown && !show.pinKnown && show.revision !== undefined && show.revision === fallback.revision) show = { ...show, pinKnown: true };
+    if (fallback.pinKnown && !show.pinKnown && fresh.revision !== undefined && fresh.revision === fallback.revision) show = { ...show, pinKnown: true };
   }
   if (show.pinnedNumCtx !== undefined && !show.pinKnown) show = { ...show, pinKnown: true };
   const seen = {
