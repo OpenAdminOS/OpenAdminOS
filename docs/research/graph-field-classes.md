@@ -17,12 +17,12 @@ and [the specification](../SPEC.md#data-policy-data-classes-and-classification-2
 - Original research classes: credential, identity, device, activity, configuration, public. The runtime map and SPEC also define Security for policy and posture objects. A `?` after a class marks an ambiguous field explained in the notes. Field paths use dot notation for nested objects and `[]` for arrays.
 - Classing rule applied to log records (signIns, audits, alerts): fields that do not identify a person or device are activity, because the record as a whole says who did what when. In configuration objects, non-identifying fields are configuration. Device posture attributes (OS, version, model, compliance) do not identify a device, so they are configuration.
 
-## Field map version 3
+## Historical field map v3
 
-The runtime records a mask role for each Security leaf. The default role is
+The runtime recorded a mask role for each Security leaf. The default role was
 `setting`. Policy and role names, IDs, descriptions, location IP ranges and
-permission scope names use `nameOrIdentifier`. User and group IDs inside these
-objects stay Identity and secrets stay Credential. For example:
+permission scope names used `nameOrIdentifier`. User and group IDs inside these
+objects stayed Identity and secrets stayed Credential. For example:
 
 | Security resource or property | Name or identifier | Setting |
 |---|---|---|
@@ -32,17 +32,17 @@ objects stay Identity and secrets stay Credential. For example:
 | Application and service principal permissions | `requiredResourceAccess[].resourceAppId`, nested permission IDs, `appRoles[].value`, `oauth2PermissionScopes[].value` | `appRoles[].isEnabled`, `allowedMemberTypes[]`, `requiredResourceAccess[].resourceAccess[].type` |
 | App role assignments and OAuth2 permission grants | `id`, `appRoleId`, `clientId`, `resourceId`, `scope` | `principalType`, `consentType` |
 
-The bundled Graph index lists FileVault under managed devices, co-managed
+The bundled Graph index listed FileVault under managed devices, co-managed
 devices, `/me/managedDevices` and `/users/{id}/managedDevices`. Their function
-result `value` shares the Credential rule. BitLocker navigation under `/me`,
-users, sites and group sites shares the canonical recovery key schema for
-collection and item reads. LAPS has one indexed route family at
-`/directory/deviceLocalCredentials`. Both collection and keyed forms apply its
-`credentials[].passwordBase64` rule. Application `addPassword` returns the
-password credential directly. The same schema covers the service principal
+result `value` shared the Credential rule. BitLocker navigation under `/me`,
+users, sites and group sites shared the canonical recovery key schema for
+collection and item reads. LAPS had one indexed route family at
+`/directory/deviceLocalCredentials`. Both collection and keyed forms applied its
+`credentials[].passwordBase64` rule. Application `addPassword` returned the
+password credential directly. The same schema covered the service principal
 action and the agent identity blueprint cast in the bundled documentation index.
-`removePassword` has no credential response body. These route checks
-use synthetic fixtures and the bundled index.
+`removePassword` had no credential response body. These route checks
+used synthetic fixtures and the bundled index.
 
 ## Endpoints
 
