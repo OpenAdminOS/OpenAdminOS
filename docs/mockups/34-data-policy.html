@@ -864,7 +864,7 @@
           <div class="appmain">
             <div class="topbar" data-top="blocked" style="padding-left:84px"></div>
             <div class="page"><div class="chat" style="padding-left:24px;padding-right:24px">
-              <div class="q">Who signed in from outside Germany this week?</div>
+              <div class="q">Which countries did megan.bowen@woodgrove.example sign in from this week?</div>
               <div class="ans">
                 <div class="block" data-t="blocked">
                   <span class="glyph" data-t="blocked"><svg><use href="#i-stop"/></svg></span>
@@ -872,8 +872,8 @@
                     <h3>This question needs activity data, which your data policy blocks for hosted models</h3>
                     <p>Answering reads sign-in logs from Entra. Sign-in times and locations are activity data, and the rule for Activity on Hosted is Block. This call was not sent to Claude Code.</p>
                     <ul class="calls" aria-label="Model calls for this question">
-                      <li><span class="tm">09:41:02</span><span class="sent">Sent</span><span>Planning the question. Your question only, no tenant data.</span></li>
-                      <li><span class="tm">09:41:04</span><span class="not">Not sent</span><span>Answer from 214 sign-ins. Activity is blocked on Hosted.</span></li>
+                      <li><span class="tm">09:41:02</span><span class="sent">Sent</span><span>Planning the question. Your question, checked by data policy: 1 identity value you typed, megan.bowen@woodgrove.example, masked as <code>[USER_1]</code>.</span></li>
+                      <li><span class="tm">09:41:04</span><span class="not">Not sent</span><span>Answer from 23 sign-ins. Activity is blocked on Hosted.</span></li>
                     </ul>
                     <div class="acts"><button class="bt primary" type="button">Switch to a local model</button><button class="bt secondary" type="button">Change the rule</button></div>
                     <p class="xs muted" style="margin-top:10px">Ollama with gpt-oss:20b is ready on this device, and your rules allow activity data on Local. The question is asked again with it.</p>
@@ -889,7 +889,7 @@
             <span class="glyph" data-t="blocked"><svg><use href="#i-stop"/></svg></span>
             <div>
               <h3>This question needs activity data, which your IT department blocks for hosted models</h3>
-              <p>Answering reads sign-in logs from Entra. The rule for Activity on Hosted is Block and was set in policy.json. This call was not sent to Claude Code; the planning call before it was sent, with your question only.</p>
+              <p>Answering reads sign-in logs from Entra. The rule for Activity on Hosted is Block and was set in policy.json. This call was not sent to Claude Code; the planning call before it was sent, with your question, checked by data policy.</p>
               <div class="acts"><button class="bt primary" type="button">Switch to a local model</button></div>
               <p class="lockline" style="margin-top:10px"><svg><use href="#i-lock"/></svg><span>Set by your IT department in <code>dataPolicy.rules.activity.hosted</code></span></p>
             </div>
@@ -958,6 +958,7 @@
         <li>Switch to a local model changes the model for this conversation only, not the default in Providers, and asks the question again.</li>
         <li>Recovery offers only what would work. A model is offered only when the rules on its tier permit every class the request carries, so a block never offers a switch that would be refused again. When Local blocks the class too, the block says so and offers only Change the rule. When every rule that applies is set by IT, it offers neither a switch nor a change: it names the rule owner, the policy file and each key.</li>
         <li>Change the rule opens Settings, Data policy with the cell focused. Coming back, the question is not re-sent by itself.</li>
+        <li>Decided in round 10: the planning call is listed as "Your question, checked by data policy", never as carrying no tenant data. The admin's own words go through the same request scan as everything else, and the line records what the scan did: here the user name typed into the question was identity, masked as <code>[USER_1]</code> under Identity on Hosted, or "No sensitive values found" when the scan found none.</li>
         <li>For an agent, the preflight refuses before any read, so that block alone can say "nothing was read" and "no call was sent".</li>
       </ul>
     </section>
@@ -993,11 +994,25 @@
               <h3>This call was withheld: part of the request could not be examined</h3>
               <p>Managed devices with 90 days of check-ins had more values than this device examines before a call, and 12,400 were not examined. Values the app has not examined are reported as credential and get the strictest rule any class has on Hosted. Security on Hosted is Block, so this call was not sent to Claude Code, although the part that was examined held only device and activity data.</p>
               <ul class="calls" aria-label="Model calls for this question">
-                <li><span class="tm">10:12:40</span><span class="sent">Sent</span><span>Planning the question. Your question only, no tenant data.</span></li>
+                <li><span class="tm">10:12:40</span><span class="sent">Sent</span><span>Planning the question. Your question, checked by data policy. No sensitive values found.</span></li>
                 <li><span class="tm">10:12:43</span><span class="not">Not sent</span><span>Answer from 412 devices. 12,400 values not examined; Security is Block on Hosted.</span></li>
               </ul>
               <div class="acts"><button class="bt primary" type="button">Ask about the last 30 days</button><button class="bt secondary" type="button">Switch to a local model</button></div>
               <p class="xs muted" style="margin-top:10px">A shorter period fits in what this device examines before a call, so every value is checked and the usual rules apply. Ollama with gpt-oss:20b is ready on this device, and no rule on Local is Block, so the full question can be answered there.</p>
+            </div>
+          </div>
+          <p class="xs muted" style="margin-top:8px">Confidential, after attestation: Credential is Allow, confirmed, and Identity is Block</p>
+          <div class="block" data-t="blocked">
+            <span class="glyph" data-t="blocked"><svg><use href="#i-q"/></svg></span>
+            <div>
+              <h3>This call was withheld: part of the request could not be examined</h3>
+              <p>Configuration policies with 3,200 setting instances had more values than this device examines before a call, and 9,800 were not examined. Values the app has not examined are reported as credential, but they take the strictest action any class has on Confidential, not the Credential rule. Credential on Confidential is Allow, which you confirmed on 18 November, and Identity on Confidential is Block, so this call was not sent to the attested enclave, although the part that was examined held only configuration data.</p>
+              <ul class="calls" aria-label="Model calls for this question">
+                <li><span class="tm">11:05:12</span><span class="sent">Sent</span><span>Planning the question. Your question, checked by data policy. No sensitive values found.</span></li>
+                <li><span class="tm">11:05:15</span><span class="not">Not sent</span><span>Answer from 3,200 setting instances. 9,800 values not examined; Identity is Block on Confidential.</span></li>
+              </ul>
+              <div class="acts"><button class="bt primary" type="button">Ask about the Windows policies only</button><button class="bt secondary" type="button">Switch to a local model</button></div>
+              <p class="xs muted" style="margin-top:10px">The Windows policies fit in what this device examines before a call, so every value is checked and the usual rules apply: configuration is Allow on Confidential. Ollama with gpt-oss:20b is ready on this device, and no rule on Local is Block, so the full question can be answered there.</p>
             </div>
           </div>
           <p class="xs muted" style="margin-top:8px">Classify this field</p>
@@ -1056,6 +1071,7 @@
         <li>Decided: a reclassified field keeps the strictest coverage of every class it has held, never only the original and the latest. The list shows the classes held and the applied coverage per tier under each field the moment it changes, the choice becomes the field's current class, and every class below it is disabled with "IT policy file". Try it: move the custom setting value to Security, then set Configuration on Hosted to Mask in A; the field stays fully masked on Hosted, kept from configuration. Set Security on Hosted to Block in A and the description, moved from configuration to security to identity, reads Blocked on Hosted, kept from security, as the worked example shows.</li>
         <li>Data the check could not examine in time is reported as credential and counted as not examined. Its action on a tier is the strictest action any class has on that tier, so a Block anywhere on the tier withholds the call: the examined part may need only allowed classes, and the unexamined part could hold anything. It is never sent in clear text to a hosted model and never restored into a prompt.</li>
         <li>The withheld call offers only recoveries that work: a smaller question that fits in what the device examines, and a local model when no rule on Local is Block. When a Local rule is Block too, only the smaller question is offered.</li>
+        <li>Decided in round 10: the same holds on Confidential. Allowing credentials there, after the confirmation, lets recognized credentials through and nothing else: unexamined content is not a recognized credential, so it still takes the strictest action of any class on the tier. With Identity on Confidential set to Block, the call is withheld even though Credential is Allow and the examined part needs only configuration, which is Allow there. The Confidential frame appears only once a provider has passed attestation.</li>
         <li>"Sample shape" describes the value's format, never a value.</li>
       </ul>
     </section>
