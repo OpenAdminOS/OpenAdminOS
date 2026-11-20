@@ -147,18 +147,23 @@ skills:
         Sign-in risk condition breakdown: {{ by_signin_risk.output }}.
         User risk condition breakdown: {{ by_user_risk.output }}.
         Policies not modified for a long time, by name: {{ by_modified_age.output }}.
+        In these breakdowns a key such as "high,medium" counts policies with
+        exactly that combination, not each level separately.
 
         Policy records. Fields: name; state; modifiedDaysAgo; users.include and
         users.exclude (users: "All", "None", "GuestsOrExternalUsers" or a count;
         groups: count of groups; roles: directory role names, plus "N other
-        roles" for roles the app does not name; guests: guest types);
-        workloadIdentities (service principals the policy targets instead of
-        users); apps.include and apps.exclude ("All", "None", "Office365", a
-        named app or a count), apps.userActions, apps.agentActions (count of
+        roles" for roles the app does not name; guests: guest types, with
+        "from all tenants" or "from N listed tenants"); workloadIdentities
+        (service principals and agent identities the policy targets instead
+        of users, with include, exclude, filter and agentFilter); apps.include
+        and apps.exclude ("All", "None", "Office365", "MicrosoftAdminPortals",
+        a named app or a count), apps.userActions, apps.agentActions (count of
         agent actions the policy targets), apps.authContexts (count of
-        authentication contexts), apps.appFilter (an app filter narrows the
-        apps); clientAppTypes (absent means all client apps); platforms and
-        locations, each with include and exclude (absent means not limited;
+        authentication contexts), apps.appFilter (mode and rule of an app
+        filter, which narrows the apps); clientAppTypes (absent means all client apps); platforms and
+        locations, each with include and exclude (absent or "all" means not
+        limited;
         locations are "All", "AllTrusted" or a count of named locations);
         signInRisk, userRisk, servicePrincipalRisk and insiderRisk levels;
         deviceStates (include and exclude, such as excluding Compliant or
@@ -175,7 +180,7 @@ skills:
         {{ compact_policies.output }}
 
         Write the review in this exact shape, in plain admin language, in
-        under 700 words. Cite policy names in quotes for every claim the
+        under 550 words, so it is never cut off. Cite policy names in quotes for every claim the
         records support, and name at most three policies per bullet ("and N
         more" for the rest). For a "not proven" line, say what remains
         unresolved and cite the candidate policy (for example an MFA policy
@@ -213,7 +218,9 @@ skills:
         block, device compliance, guest and external access, risky sign-ins
         and users, and session controls. Say covered, partially covered, or
         not proven, and name the policies and the reason (for not proven,
-        what remains unresolved). Under grant, OR
+        what remains unresolved). A policy with otherConditions, an app or
+        workload filter, or a scope given only as counts proves at most
+        partial coverage on its own. Under grant, OR
         means any one listed requirement satisfies the policy, so MFA is
         required only when it is the sole requirement or the operator is AND.
 
@@ -247,7 +254,8 @@ skills:
         authentication, device and app requirements, guests and external
         users, risk-based, session controls, other) that has policies: who
         they apply to, what they require, their state, and up to three
-        example policy names.
+        example policy names. With more than 30 policies, keep each bullet to
+        one short line.
       temperature: 0.2
       maxTokens: 1100
 
