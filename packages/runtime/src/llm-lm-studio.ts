@@ -98,6 +98,8 @@ async function readLmStudioContext(endpoint: string, model: string, signal?: Abo
 
   try {
     let found: LmStudioContextInfo = {};
+    // Several loaded instances of the requested key: no lookup says which one failed.
+    let ambiguous = false;
     const v1 = await getJson(`${base}/api/v1/models`);
     const models = isRecord(v1) && Array.isArray(v1.models) ? v1.models.filter(isRecord) : [];
     const instancesOf = (entry: Record<string, unknown>) =>
@@ -114,6 +116,7 @@ async function readLmStudioContext(endpoint: string, model: string, signal?: Abo
       const byKey = models.find((entry) => entry.key === model);
       if (byKey) {
         const instances = instancesOf(byKey);
+        ambiguous = instances.length > 1;
         found = { ...(instances.length === 1 ? loadedSize(instances[0]) : {}), ...tokenCount("max", byKey.max_context_length) };
       }
     }
@@ -121,7 +124,7 @@ async function readLmStudioContext(endpoint: string, model: string, signal?: Abo
     const v0 = await getJson(`${base}/api/v0/models/${encodeURIComponent(model)}`);
     if (!isRecord(v0)) return found;
     // A model LM Studio reports as not loaded has no loaded size.
-    const loadedV0 = v0.state === undefined || v0.state === "loaded" ? tokenCount("loaded", v0.loaded_context_length) : {};
+    const loadedV0 = !ambiguous && (v0.state === undefined || v0.state === "loaded") ? tokenCount("loaded", v0.loaded_context_length) : {};
     return { ...loadedV0, ...tokenCount("max", v0.max_context_length), ...found };
   } finally {
     clearTimeout(timer);
@@ -170,7 +173,7 @@ async function lmStudioContextOverflowMessage(failure: OpenAiCompatibleFailure):
   if (atModelLimit) {
     parts.push(`${model} supports at most ${n(max)}, so narrow the request or pick a model with a larger context window.`);
   } else {
-    const wanted = requested === undefined ? undefined : roundUp(requested + (failure.maxTokens ?? LM_STUDIO_ANSWER_RESERVE_TOKENS), 1024);
+    const wanted = requested === undefined ? undefined : roundUp(requested + answerReserve(failure.maxTokens), 1024);
     const target = wanted === undefined ? undefined : max === undefined ? wanted : Math.min(wanted, max);
     const size = target === undefined ? "" : ` to at least ${n(target)}`;
     const limit =
@@ -203,6 +206,11 @@ function serverMessage(detail: string): string {
     // Not JSON.
   }
   return detail;
+}
+
+/** Room for the answer: the caller's limit, or the default when it set none or no limit (`-1`). */
+function answerReserve(maxTokens: number | undefined): number {
+  return maxTokens !== undefined && maxTokens > 0 ? maxTokens : LM_STUDIO_ANSWER_RESERVE_TOKENS;
 }
 
 function roundUp(value: number, step: number): number {
