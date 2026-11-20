@@ -6,7 +6,7 @@ import { MarkdownPreview, stripMarkdownToPlainText } from "../components/Markdow
 import { ResultPanel } from "../components/ResultPanel";
 import { RunFailureRemediation } from "../components/RunFailureRemediation";
 import { ModelFitNotice } from "../components/ModelFitNotice";
-import { classifyModelFitFailure, modelFitChoices, type ModelFitChoice, type ModelFitChoices } from "../shared/model-fit";
+import { classifyModelFitFailure, isOnDeviceModel, modelFitChoices, type ModelFitChoice, type ModelFitChoices } from "../shared/model-fit";
 import { RunProgressBar, RunStepTimeline } from "../components/RunProgress";
 import { RunSection } from "../components/RunSection";
 import { useToast } from "../components/Toast";
@@ -136,8 +136,8 @@ function RunResultPage({ run }: { run: RunRecord }) {
       ? classifyModelFitFailure(
           // A typed reason from the runtime's prompt fit check comes first, the error text after.
           (run as { failureReason?: unknown }).failureReason ?? run.error,
-          { providerId: run.providerId, model: run.model, isLocal: runProvider.isLocal },
-        ) ?? classifyModelFitFailure(run.error, { providerId: run.providerId, model: run.model, isLocal: runProvider.isLocal })
+          { providerId: run.providerId, model: run.model, isLocal: isOnDeviceModel(runProvider, run.model) },
+        ) ?? classifyModelFitFailure(run.error, { providerId: run.providerId, model: run.model, isLocal: isOnDeviceModel(runProvider, run.model) })
       : undefined;
   const fitChoices = modelFit
     ? modelFitChoices({ issue: modelFit, providers: state.providers, activeModelByProviderId: state.activeModelByProviderId, managedPolicy: state.managedPolicy })

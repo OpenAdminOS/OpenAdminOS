@@ -10,7 +10,7 @@ import type {
   ProviderSummary,
   RunLlmApi,
 } from "@openadminos/agent-sdk";
-import { classifyModelFitFailure, isRemoteBackedModel } from "../../src/shared/model-fit.js";
+import { classifyModelFitFailure, isOnDeviceModel, isRemoteBackedModel } from "../../src/shared/model-fit.js";
 import { isProviderReady } from "../../src/shared/provider-detection.js";
 
 /**
@@ -214,10 +214,11 @@ export function guardModelFitLlm(llm: RunLlmApi, guard: { before: () => Promise<
 /** What Chat records when the local model rejected a request for its size. */
 export function chatModelFitFailure(
   error: unknown,
-  provider: Pick<ProviderSummary, "id" | "isLocal">,
+  provider: Pick<ProviderSummary, "id" | "isLocal" | "remoteModels">,
   model: string | undefined,
 ): ModelFitIssue | undefined {
-  return classifyModelFitFailure(error, { providerId: provider.id, model, isLocal: provider.isLocal });
+  // A remote-backed model on a local server already sent its prompt elsewhere: no on-device offer.
+  return classifyModelFitFailure(error, { providerId: provider.id, model, isLocal: isOnDeviceModel(provider, model) });
 }
 
 /**
@@ -228,10 +229,10 @@ export function chatModelFitFailure(
  */
 export function loopFailureIssue(
   result: object,
-  provider: Pick<ProviderSummary, "id" | "isLocal">,
+  provider: Pick<ProviderSummary, "id" | "isLocal" | "remoteModels">,
   model: string | undefined,
 ): ModelFitIssue | undefined {
-  if (!provider.isLocal) return undefined;
+  if (!isOnDeviceModel(provider, model)) return undefined;
   const failureReason = (result as { failureReason?: unknown }).failureReason;
   const reason = failureReason === "context-too-small" || failureReason === "thinking-only" ? failureReason : undefined;
   return reason ? { reason, providerId: provider.id, ...(model ? { model } : {}) } : undefined;
@@ -242,7 +243,7 @@ export function loopFailureIssue(
  * trying it and answers from cached data: offer the alternatives with that
  * answer.
  */
-export function repeatedFailureIssue(provider: Pick<ProviderSummary, "id" | "isLocal">, model: string | undefined): ModelFitIssue | undefined {
-  if (!provider.isLocal) return undefined;
+export function repeatedFailureIssue(provider: Pick<ProviderSummary, "id" | "isLocal" | "remoteModels">, model: string | undefined): ModelFitIssue | undefined {
+  if (!isOnDeviceModel(provider, model)) return undefined;
   return { reason: "repeated-failure", providerId: provider.id, ...(model ? { model } : {}) };
 }

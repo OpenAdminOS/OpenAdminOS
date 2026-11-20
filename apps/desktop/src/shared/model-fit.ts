@@ -98,6 +98,12 @@ function contextIssueFromText(text: string): Omit<ModelFitIssue, "providerId" | 
     const limitTokens = count(lmStudioLoaded[1]);
     return { reason: "context-too-small", ...(limitTokens ? { limitTokens } : {}) };
   }
+  // A size kept from an earlier request that this one outgrew.
+  const kept = /context size too small: This request did not fit in the ([\d,]+) token context kept from an earlier request/i.exec(text);
+  if (kept) {
+    const limitTokens = count(kept[1]);
+    return { reason: "context-too-small", ...(limitTokens ? { limitTokens } : {}) };
+  }
   // Any other form of either adapter's context message, without numbers.
   if (/^(?:Error: )?(?:Ollama context size too small|LM Studio context length too small):/i.test(text.trim())) return { reason: "context-too-small" };
   // Ollama's HTTP 400 for a prompt larger than the loaded context.
@@ -163,6 +169,11 @@ export function isOllamaCloudModel(model: string | undefined): boolean {
 export function isRemoteBackedModel(provider: Pick<ProviderSummary, "id" | "remoteModels">, model: string | undefined): boolean {
   if (!model) return false;
   return Boolean(provider.remoteModels?.includes(model)) || (provider.id === "ollama" && isOllamaCloudModel(model));
+}
+
+/** Whether a provider runs this model on this device: a local provider, and not a remote-backed model. */
+export function isOnDeviceModel(provider: Pick<ProviderSummary, "id" | "isLocal" | "remoteModels">, model: string | undefined): boolean {
+  return provider.isLocal && !isRemoteBackedModel(provider, model);
 }
 
 /** The parameter count in a model's name, such as 8 for "openadmin-8b" or 20 for "gpt-oss:20b". */

@@ -908,6 +908,15 @@ describe("Run with another provider after a model fit failure (mockup 36, sectio
     await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({ providerId: "openai", model: "gpt-5" })));
   });
 
+  it("does not offer anything for a run on a remote-backed model of a local server", async () => {
+    const providers = mockProviders.map((provider) => (provider.id === "ollama" ? { ...provider, remoteModels: ["llama3.1"] } : provider));
+    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "ollama", model: "llama3.1", tenantId: "tenant-1", error: CONTEXT_ERROR });
+    const bridge = makeMockBridge({}, createMockAppState({ providers, installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "read" })], runs: [run] }));
+    renderWithPreflight(run.id, bridge);
+    await screen.findByRole("button", { name: "Run again" });
+    expect(screen.queryByRole("region", { name: /cannot fit this run/ })).toBeNull();
+  });
+
   it("does not offer a hosted provider for a failure that is not about the context, or a run on a hosted provider", async () => {
     const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "ollama", model: "llama3.1", tenantId: "tenant-1", error: "Ollama not reachable at http://127.0.0.1:11434: connect ECONNREFUSED" });
     const hosted = createAwaitingConfirmationRun({ id: "run-hosted", status: "failed", plan: undefined, providerId: "openai", model: "gpt-5", tenantId: "tenant-1", error: CONTEXT_ERROR });

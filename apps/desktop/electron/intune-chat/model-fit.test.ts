@@ -14,7 +14,7 @@ import type {
 } from "@openadminos/agent-sdk";
 
 import { classifyModelFitFailure, isOllamaCloudModel, modelFitChoices, modelSizeBillions } from "../../src/shared/model-fit.js";
-import { MODEL_FIT_OFFER_TTL_MS, ModelFitOffers, ModelOverrideError, guardModelFitLlm, loopFailureIssue, resolveChatTurnProvider, type ModelFitOffer } from "./model-fit.js";
+import { MODEL_FIT_OFFER_TTL_MS, ModelFitOffers, ModelOverrideError, chatModelFitFailure, guardModelFitLlm, loopFailureIssue, repeatedFailureIssue, resolveChatTurnProvider, type ModelFitOffer } from "./model-fit.js";
 import { IntuneChatService, type ChatServiceHost } from "./service.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 
@@ -102,7 +102,11 @@ describe("Model fit: classifying a failure", () => {
     const ollamaLoaded = classifyModelFitFailure("Ollama context size too small: This request needs 50,000 tokens of context and did not fit in the 45,056 Ollama loaded for kept-outgrown.", { providerId: "ollama", isLocal: true });
     assert.deepEqual([ollamaLoaded?.neededTokens, ollamaLoaded?.limitTokens], [50000, 45056]);
     const kept = classifyModelFitFailure(new Error("Ollama context size too small: This request did not fit in the 45,056 token context kept from an earlier request. Ollama said: request exceeds"), { providerId: "ollama", isLocal: true });
-    assert.equal(kept?.reason, "context-too-small");
+    assert.deepEqual([kept?.reason, kept?.limitTokens], ["context-too-small", 45056]);
+    // A remote-backed model on a loopback server already sent its prompt elsewhere: no on-device offer.
+    assert.equal(chatModelFitFailure(new Error(OLLAMA_400), { ...ollama, remoteModels: [LOCAL_MODEL] }, LOCAL_MODEL), undefined);
+    assert.equal(chatModelFitFailure(new Error(OLLAMA_400), ollama, "gpt-oss:120b-cloud"), undefined);
+    assert.equal(repeatedFailureIssue({ ...ollama, remoteModels: [LOCAL_MODEL] }, LOCAL_MODEL), undefined);
   });
 
   it("reads a typed failure from the runtime by its shape, and llama.cpp's error", () => {
