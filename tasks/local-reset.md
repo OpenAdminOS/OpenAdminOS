@@ -108,6 +108,13 @@ the installed app's scheduler, login item or caches.
   impact list loads, login item checked, failed progress record reported).
   Sol confirmed from Electron 42.8.1 sources that the main script runs before
   Local State is read.
+- Review round 3: Claude and Muse no blocking (follow-ups applied: yielding
+  wake skips the lock, ticks stop after a request, second folder check before
+  the marker goes, one warning per item, failed progress record tested); Sol
+  four blocking (planted link at the marker temp path, cancelled apply still
+  settling, relaunch of a scheduler-owned process, marker committed between
+  the pre-lock read and the lock), all fixed with tests where they can run
+  here.
 - Found in the end to end run and fixed: the incomplete screen called the
   appearance handler before it was registered, and failure reasons repeated
   full paths.

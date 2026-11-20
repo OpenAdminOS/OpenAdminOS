@@ -2509,7 +2509,8 @@ what stays (the enterprise application and admin consent in each tenant, the IT
 in the main process. Mockup: `docs/mockups/34-local-reset.html`.
 
 - **Two phases.** The request refuses while a confirmed write run is applying
-  or a confirmation is in flight, and from then on refuses new confirmations
+  (also a cancelled one whose apply has not settled) or a confirmation is in
+  flight, and from then on refuses new confirmations
   until the restart. It writes `local-reset-pending.json` into the data folder
   first; the rename is the commit point (if it fails, nothing changed and the
   modal says so; a failed folder flush after it is only logged). It then removes the Microsoft sign-in of
@@ -2531,12 +2532,19 @@ in the main process. Mockup: `docs/mockups/34-local-reset.html`.
   last, so an interrupted wipe resumes at the next launch without repeating
   the Keychain step. External commands are bounded at 5 seconds each, below
   Chromium's wait for a second launch.
+- **Marker writes** go through a new temporary file with a random name,
+  created exclusively (`wx`), so a link planted in a restored profile is never
+  followed; the temporary file is removed when the rename fails.
 - **Scheduler wakes.** A background scheduler launch never runs or resumes a
-  reset: while a marker is pending it exits at once (on macOS it is the
+  reset: while a marker is pending, read before the lock and again under it,
+  it exits at once without taking the lock (on macOS it is the
   LaunchAgent's own job, which the reset unloads) and the pre-lock scheduler
   repair is skipped. A request made from a window that a scheduler-started
   process shows does not unload its own LaunchAgent; the launch that wipes
-  removes it. Removal is checked afterwards (`launchctl print` exit 113, a
+  removes it. That process restarts through a detached shell outside the
+  LaunchAgent's process group, which waits for it to exit and runs `open` on
+  the app bundle, because launchd ends the group, Electron's relaunch helper
+  included, with the job. Removal is checked afterwards (`launchctl print` exit 113, a
   `schtasks /Query` that no longer finds the task), with every command bounded.
 - **Kept names** are matched without regard to letter case, because macOS and
   Windows volumes read `Policy.json` through the path `policy.json`.
