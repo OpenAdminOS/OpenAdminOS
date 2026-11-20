@@ -2472,15 +2472,20 @@ taken by the personal agent mockup in PR #207).
 Signals. Only a provider on this device gets the offer.
 - The prompt does not fit the context window. Today this is the provider's own
   error: the Ollama adapter's "context size too small" message with the tokens
-  needed and the limit (PR #211), Ollama's HTTP 400 ("request (N tokens) exceeds
+  needed and the limit (PR #211), including the form where Ollama could not load
+the model with the larger context for lack of memory, Ollama's HTTP 400 ("request (N tokens) exceeds
   the available context size (L tokens)"), llama.cpp's
   `exceed_context_size_error` (LM Studio, Lemonade) and Apple Foundation's
   context error. A typed runtime failure (`kind` or `code`
-  `context-too-small`, with needed and limit numbers) is read by its shape, so
-  the runtime's prompt fit check slots in without a second estimator.
+  `context-too-small`, with needed and limit numbers, on the error, on its
+  `failure` record or through `cause`) is read by its shape, and a run's
+  typed `failureReason` comes before its error text, so the runtime's prompt
+  fit check slots in without a second estimator.
 - The investigation failed on this local model often enough that Chat stops
   trying it (the in-memory repeated-failure counter); the answer still comes
-  from cached data and carries the offer.
+  from cached data and carries the offer. When the investigation loop reports
+  a finer `failureReason` with its fallback (`context-too-small` or
+  `thinking-only`, from the local model accuracy work), that reason is used.
 - A thinking-only answer that ran out of budget, once the runtime reports it as
   its own typed reason (`thinking-only`). There is no text guessing for it.
 
@@ -2563,7 +2568,13 @@ only, pinned to the organization the review showed (`tenantId`), or with
 `expectNoTenant` when it showed none, so an organization switch before the
 host admits the run refuses it instead of running elsewhere. A failed dry run
 stays a dry run. A larger local model passes `requireOnDeviceModel`, so the
-host makes the same fresh check before it admits the run. A write agent still stops at the diff and its typed confirmation. Team
+host makes the same fresh check before it admits the run, and the run record
+keeps it so every later phase (plan, replan after the diff, apply) checks
+again before it builds the model. Every fit rerun passes
+`bindProviderEndpoint`: the run is bound to where its provider was reached at
+admission (Ollama or LM Studio address, Azure OpenAI resource and
+deployment), and a later phase built for another endpoint fails with nothing
+sent. A model fit request in Chat is bound the same way for its own duration. A write agent still stops at the diff and its typed confirmation. Team
 runs keep their own review in Agent Team.
 
 Open questions (TODO(ugur) in code): a "remember for this conversation"
