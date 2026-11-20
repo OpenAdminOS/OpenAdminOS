@@ -93,6 +93,8 @@ describe("IntuneChat model fit (mockup 36)", () => {
     expect(notice.contains(document.activeElement)).toBe(false);
     expect(runWithCodex).not.toHaveAttribute("aria-pressed");
     expect(within(notice).queryByRole("radio")).toBeNull();
+    // The live region mounts empty and then gets its text, so a screen reader reads it out.
+    await waitFor(() => expect(within(notice).getByRole("status")).toHaveTextContent("llama3.1 cannot fit this request. Choices follow."));
     // The generic error is replaced by the notice.
     expect(screen.queryByRole("alert")).toBeNull();
     expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce();

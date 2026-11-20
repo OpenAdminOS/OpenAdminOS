@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useEffect, useId, useState } from "react";
 import { Button } from "./Button";
 import { MODEL_FIT_COPY } from "../copy/model-fit";
 import { PROVIDER_TOOL_NAMES } from "../copy/providers";
@@ -47,6 +47,14 @@ export function ModelFitNotice({
   const model = modelFitModelName(issue);
   const answered = answeredProp ?? issue.reason === "repeated-failure";
   const rows = [...choices.hosted, ...choices.local];
+  // A live region that mounts with its text is often not read out, so it mounts empty
+  // and gets its text on the next frame, without moving focus.
+  const announcement = MODEL_FIT_COPY.announce(issue, model, surface);
+  const [announced, setAnnounced] = useState("");
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setAnnounced(announcement));
+    return () => window.cancelAnimationFrame(frame);
+  }, [announcement]);
   return (
     <section
       role="region"
@@ -60,7 +68,7 @@ export function ModelFitNotice({
         {MODEL_FIT_COPY.title(issue, model, surface)}
       </h2>
       {/* Announced when the notice replaces the error, so a screen reader hears why and that choices follow. */}
-      <span role="status" className="sr-only">{MODEL_FIT_COPY.announce(issue, model, surface)}</span>
+      <span role="status" className="sr-only">{announced}</span>
       <p className="mt-1 text-[var(--color-text-soft)] tabular-nums">{MODEL_FIT_COPY.why(issue, model, surface)}</p>
       {answered ? null : <p className="mt-1 text-xs text-[var(--color-text-muted)]">{MODEL_FIT_COPY.nothingSent}</p>}
       {rows.length > 0 ? (
