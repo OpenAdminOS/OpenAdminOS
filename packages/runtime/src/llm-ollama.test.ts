@@ -1374,4 +1374,58 @@ describe("Ollama context for an unpinned model", () => {
       globalThis.fetch = original;
     }
   });
+
+  it("binds a size kept by a late response to the revision it was sized for, not a newer one", async () => {
+    const original = globalThis.fetch;
+    const revisionA = { ...unpinned, modified_at: "2026-11-01T00:00:00Z" };
+    const revisionB = { parameters: "num_ctx                        16384", model_info: unpinned.model_info, modified_at: "2026-11-20T00:00:00Z" };
+    let show: unknown = revisionA;
+    const ollama = scripted({ showBody: undefined });
+    globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+      if (new URL(String(input)).pathname === "/api/show") return new Response(JSON.stringify(show), { status: 200 });
+      return ollama.fetchImpl(input, init);
+    }) as typeof fetch;
+    try {
+      const llm = createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "late-answer" });
+      let releaseA!: () => void;
+      const heldA = new Promise<void>((resolve) => { releaseA = resolve; });
+      ollama.handlers.push(async () => { await heldA; return ollama.ok(); });
+      const a = llm.complete({ prompt: words(40000), maxTokens: 1000 });
+      while (ollama.chats.length === 0) await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(ollama.chats[0], 65536);
+      // The model is created again with a 16,384 pin and another request reads it.
+      show = revisionB;
+      await llm.complete({ prompt: words(8000), maxTokens: 1000 });
+      releaseA();
+      await a;
+      // A's 65,536 belongs to revision A, so revision B's pin applies.
+      await llm.complete({ prompt: "short", maxTokens: 100 });
+      assert.equal(ollama.chats.at(-1), undefined);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("refuses an agent run's retry past a pin when Ollama counts more than the estimate, saying the model refused it", async () => {
+    const original = globalThis.fetch;
+    const ollama = scripted({ showBody: { parameters: "num_ctx                        16384", model_info: unpinned.model_info } });
+    ollama.handlers.push(() => new Response(JSON.stringify({ error: "request (16600 tokens) exceeds the available context size (16384 tokens), try increasing it" }), { status: 400 }));
+    globalThis.fetch = ollama.fetchImpl;
+    try {
+      await assert.rejects(
+        createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "undercounted" }).complete({ prompt: words(14000), maxTokens: 1000, enforceContextWindow: true }),
+        (error: unknown) => {
+          assert.ok(error instanceof ContextTooSmallError);
+          assert.equal(error.failure.limitTokens, 16384);
+          assert.equal(error.failure.sentToProvider, true);
+          assert.match(error.message, /refused it before answering/);
+          assert.doesNotMatch(error.message, /Nothing was sent/);
+          return true;
+        },
+      );
+      assert.deepEqual(ollama.chats, [undefined], "no retry past the pin");
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
 });

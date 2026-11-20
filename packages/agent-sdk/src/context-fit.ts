@@ -15,6 +15,11 @@ export interface ContextTooSmallFailure {
   limitTokens: number;
   /** Model the request was meant for, when known. */
   model?: string;
+  /**
+   * True when the provider received the request and refused it (its own
+   * count was larger than the estimate). Unset: nothing was sent.
+   */
+  sentToProvider?: boolean;
 }
 
 /** Machine readable reasons a run failed. Extend with new codes as they appear. */
@@ -44,7 +49,8 @@ export function contextTooSmallMessage(failure: ContextTooSmallFailure): string 
   return (
     `This request needs about ${formatTokens(failure.neededTokens)} tokens of context ` +
     `(${formatTokens(failure.promptTokens)} for the prompt and ${formatTokens(failure.answerTokens)} for the answer), ` +
-    `but ${model} accepts ${formatTokens(failure.limitTokens)}. Nothing was sent to the model. ` +
+    `but ${model} accepts ${formatTokens(failure.limitTokens)}. ` +
+    (failure.sentToProvider ? "The model refused it before answering. " : "Nothing was sent to the model. ") +
     "Pick a model with a larger context window, switch to a hosted provider, or narrow the agent's scope, then re-run."
   );
 }
