@@ -85,10 +85,10 @@ PR #213, based on main (merged up to date four times; workstreams A and B+C
 are on origin but not merged, so this PR reads their typed failures by shape
 instead of stacking on them).
 
-Reviews: ten rounds of Codex gpt-6.2-sol (high), Muse Wonder Full 1.0 (high;
-round 1 failed on a transport error) and a Claude feature-dev evaluator. Muse
-and the Claude evaluator found nothing blocking from round 2 on. Sol's
-blocking findings, each fixed with tests:
+Reviews: seventeen rounds of Codex gpt-6.2-sol (high), Muse Wonder Full 1.0
+(high; round 1 failed on a transport error, round 12 returned no report) and a
+Claude feature-dev evaluator. Muse and the Claude evaluator found nothing
+blocking from round 2 on. Sol's blocking findings, each fixed with tests:
 - round 1: Ollama Cloud models treated as local; approval not bound to the request.
 - round 2: acceptance reusable for another request; two sends from one
   acceptance; remote-backed Ollama aliases; rerun in an unreviewed organization.
@@ -106,6 +106,19 @@ blocking findings, each fixed with tests:
 - round 9: Ollama's own context retry inside one adapter call is not
   re-checked. Not fixable here (packages/runtime/src/llm-ollama.ts is out of
   scope for this workstream and has no hook); recorded as a follow-up.
+- rounds 10 to 13: smaller binding and wording gaps, no blocking finding
+  from round 13.
+- round 14: a provider picked in the setup detour became the active
+  provider; Start let the host resolve a model the review did not show.
+- round 15: Azure deployment change before review; resume opening an
+  ordinary provider picker; hosted reruns without a pinned model; setup
+  stalling on a cached Copilot result.
+- round 16: the host picking an unapproved hosted model; Gemini's
+  `gemini-default` placeholder; Run for real moving to another endpoint
+  after setup.
+- round 17: no blocking finding. Should-fixes from Sol and Muse (one listed
+  hosted model check everywhere, per-call model check, multi-tenant
+  withdrawal, accept step closing when its provider drops out) are fixed.
 
 Live check: real Chat service with the local model mocked and the real
 Claude Code CLI (2.1.328, alias `sonnet`, answered as claude-sonnet-5-5).
@@ -115,7 +128,7 @@ Acceptance criteria 1 to 4 are covered by electron/intune-chat/model-fit.test.ts
 electron/model-fit-binding.test.ts, electron/run-lifecycle.test.ts,
 src/pages/IntuneChatModelFit.test.tsx, src/pages/RunResult.test.tsx and
 src/setup/pending-intent.test.ts. Criterion 5: the full electron suite passes
-under Node 22 (1594 of 1594 at the last run); typecheck is clean; CI green.
+under Node 22 (1602 of 1602 at the last full run; renderer 902 of 902); typecheck is clean.
 
 Open TODO(ugur): remember for this conversation; read local context lengths
 for local choices; cost estimate on hosted rows; label Ollama Cloud and

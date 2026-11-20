@@ -2499,8 +2499,11 @@ offers only from it.
 not load the model with the larger context for lack of memory, the LM Studio
 adapter's "LM Studio context length too small" message (PR #219), Ollama's HTTP 400 ("request (N tokens) exceeds
   the available context size (L tokens)"), llama.cpp's
-  `exceed_context_size_error` (LM Studio, Lemonade) and its "Context size has been exceeded" wording, which Lemonade passes through and Apple Foundation's
-  context error. A typed runtime failure, where `kind`, `code` or `reason`
+  `exceed_context_size_error` (LM Studio, Lemonade) and its "Context size has been exceeded" wording, which Lemonade passes through, Apple Foundation's
+  context error, and the agent runtime's own prompt fit message ("This request
+  needs about N tokens of context (P for the prompt and A for the answer), but
+  <model> accepts L") when only that text survives in a stored run error. The
+  loop's `failureDetail` gives a cached-data fallback its numbers. A typed runtime failure, where `kind`, `code` or `reason`
   carries `context-too-small` with needed and limit numbers, on the error, on
   its `failure` record or through `cause`, is read by its shape, and a run's
   typed `failureReason` comes before its error text, so the runtime's prompt
@@ -2639,7 +2642,14 @@ reports no model, or only a CLI default placeholder such as Gemini's
 for the same thing as Start, and the host refuses a hosted model fit rerun (or
 Run for real of one) unless it names a model the provider lists now, since the
 approval names one model. Run for real of a model fit dry run goes only where
-its dry run planned; a different endpoint after setup refuses it.
+its dry run planned; a different endpoint after setup refuses it. Every model
+call of a model fit request or rerun is refused when it names another model
+than the reviewed one, and an on-device rerun needs a model named. An open
+accept step closes unsent, with a line saying why, when its provider stops
+being a choice (the offer stays) or when the organization or model changes
+(the offer goes and focus returns to the composer). A multi-tenant review
+withdraws an open offer, and a new offer replaces earlier ones for the same
+conversation.
 An Azure OpenAI model fit request is refused when the deployment configured
 now is not the one the admin reviewed.
 Run for real of a model fit dry run keeps the on-device requirement and the
