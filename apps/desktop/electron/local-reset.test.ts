@@ -55,7 +55,13 @@ function seedDataFolder(dir: string, marker: LocalResetMarker = MARKER): void {
     mkdirSync(join(dir, folder), { recursive: true });
     writeFileSync(join(dir, folder, "file"), "x");
   }
-  writeFileSync(join(dir, LOCAL_RESET_MARKER), JSON.stringify(marker));
+  writeFileSync(join(dir, LOCAL_RESET_MARKER), JSON.stringify(markerFor(dir, marker)));
+}
+
+/** A marker as writeLocalResetMarker writes it: bound to this folder's device and inode. */
+function markerFor(dir: string, marker: LocalResetMarker): LocalResetMarker {
+  const stat = lstatSync(dir);
+  return { ...marker, folder: { dev: stat.dev, ino: stat.ino } };
 }
 
 function recordingRun(results: Record<string, CommandResult[]> = {}): { run: (file: string, args: string[]) => CommandResult; calls: string[][] } {
@@ -448,7 +454,7 @@ describe("local reset: wipe at launch", () => {
       symlinkSync(join(dir, "other-cache.bin"), join(profile, "tokens-abc.bin"));
       writeFileSync(join(profile, "tokens.bin"), "x");
       assert.deepEqual(localResetLinkCheck(profile), { dataFolderIsLink: false, linkedTokenCaches: ["tokens-abc.bin"], scanFailed: false });
-      writeFileSync(join(profile, LOCAL_RESET_MARKER), JSON.stringify(DEV_MARKER));
+      writeFileSync(join(profile, LOCAL_RESET_MARKER), JSON.stringify(markerFor(profile, DEV_MARKER)));
       assert.equal(runPendingLocalReset({ userDataDir: profile, packaged: false, platform: "linux", home: dir, env: {} })?.status, "completed");
       assert.equal(readFileSync(join(dir, "other-cache.bin"), "utf8"), "other profile");
     } finally {
@@ -464,7 +470,7 @@ describe("local reset: wipe at launch", () => {
       writeFileSync(join(dir, "backup-tokens.bin"), "backup bytes");
       linkSync(join(dir, "backup-tokens.bin"), join(profile, "tokens.bin"));
       assert.deepEqual(localResetLinkCheck(profile).linkedTokenCaches, ["tokens.bin"]);
-      writeFileSync(join(profile, LOCAL_RESET_MARKER), JSON.stringify(DEV_MARKER));
+      writeFileSync(join(profile, LOCAL_RESET_MARKER), JSON.stringify(markerFor(profile, DEV_MARKER)));
       assert.equal(runPendingLocalReset({ userDataDir: profile, packaged: false, platform: "linux", home: dir, env: {} })?.status, "completed");
       assert.equal(readFileSync(join(dir, "backup-tokens.bin"), "utf8"), "backup bytes");
     } finally {
@@ -652,10 +658,12 @@ describe("local reset: wipe at launch", () => {
       "{not json",
       "",
       "null",
-      JSON.stringify({ version: 1, requestedAt: "2026-11-19T10:00:00.000Z" }),
-      JSON.stringify({ version: 2, requestedAt: "2026-11-19T10:00:00.000Z", build: "installed" }),
-      JSON.stringify({ version: 1, requestedAt: "not a date", build: "development" }),
-      JSON.stringify({ version: 1, build: "development" }),
+      JSON.stringify({ version: 1, requestedAt: "2026-11-19T10:00:00.000Z", folder: { dev: 1, ino: 1 } }),
+      JSON.stringify({ version: 2, requestedAt: "2026-11-19T10:00:00.000Z", build: "installed", folder: { dev: 1, ino: 1 } }),
+      JSON.stringify({ version: 1, requestedAt: "not a date", build: "development", folder: { dev: 1, ino: 1 } }),
+      JSON.stringify({ version: 1, build: "development", folder: { dev: 1, ino: 1 } }),
+      // Everything but the folder it was written for.
+      JSON.stringify({ version: 1, requestedAt: "2026-11-19T10:00:00.000Z", build: "development" }),
     ]) {
       const dir = await tempDir();
       try {
@@ -764,6 +772,66 @@ describe("local reset: wipe at launch", () => {
       assert.ok(!existsSync(join(archive, "@openadminosdesktop-updater")));
       assert.equal(readFileSync(join(archive, "other-app.cache"), "utf8"), "keep");
       assert.ok(report?.warnings.some((warning) => /Preferences/.test(warning.item) && /still there/.test(warning.reason)));
+
+      // A read that fails says the removal could not be confirmed.
+      const data2 = join(dir, "data2");
+      mkdirSync(data2);
+      seedDataFolder(data2, MARKER);
+      const failing = recordingRun({ "/usr/bin/security": [keychainNotFound], "/usr/bin/defaults": [{ status: 1 }, { status: null, error: new Error("timed out") }] });
+      const report2 = runPendingLocalReset({ userDataDir: data2, packaged: true, platform: "darwin", home, env: {}, run: failing.run });
+      assert.ok(report2?.warnings.some((warning) => /Preferences/.test(warning.item) && /could not be confirmed/.test(warning.reason)));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("never wipes a copy of the folder restored or roamed elsewhere", async () => {
+    const dir = await tempDir();
+    try {
+      const original = join(dir, "original");
+      const restored = join(dir, "restored");
+      mkdirSync(original);
+      mkdirSync(restored);
+      seedDataFolder(original, MARKER);
+      // The restored copy carries the marker written for the original folder.
+      writeFileSync(join(restored, "state.json"), "{}");
+      writeFileSync(join(restored, LOCAL_RESET_MARKER), readFileSync(join(original, LOCAL_RESET_MARKER)));
+      const { run, calls } = recordingRun();
+      const report = runPendingLocalReset({ userDataDir: restored, packaged: true, platform: "darwin", home: join(dir, "home"), env: {}, run });
+      assert.equal(report?.status, "incomplete");
+      assert.match(report?.failed[0]?.reason ?? "", /written for this data folder on another device/);
+      assert.ok(existsSync(join(restored, "state.json")));
+      assert.deepEqual(calls, []);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("stops before the next removal when the folder is swapped in the middle of the wipe", async () => {
+    const dir = await tempDir();
+    try {
+      const data = join(dir, "data");
+      const other = join(dir, "other-workspace");
+      mkdirSync(data);
+      mkdirSync(join(other, "logs"), { recursive: true });
+      writeFileSync(join(other, "logs", "keep.txt"), "keep");
+      seedDataFolder(data, DEV_MARKER);
+      let swapped = false;
+      const fs: LocalResetFileSystem = {
+        ...failingFileSystem(() => false),
+        remove: (path) => {
+          rmSync(path, { recursive: true, force: true });
+          // After the first removal another process swaps the folder for a link.
+          if (!swapped) {
+            swapped = true;
+            renameSync(data, `${data}-old`);
+            symlinkSync(other, data);
+          }
+        },
+      };
+      const report = runPendingLocalReset({ userDataDir: data, packaged: false, platform: "linux", home: dir, env: {}, fs });
+      assert.equal(report?.status, "incomplete");
+      assert.equal(readFileSync(join(other, "logs", "keep.txt"), "utf8"), "keep");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
