@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-11-18T21:00:47.679Z",
+  "updatedAt": "2026-11-20T10:00:47.260Z",
   "agents": {
     "find-inactive-devices": {
       "installs": 36,
@@ -31,11 +31,11 @@
     },
     "conditional-access-explainer": {
       "installs": 61,
-      "installs7d": 3
+      "installs7d": 1
     },
     "dormant-app-registrations": {
       "installs": 44,
-      "installs7d": 3
+      "installs7d": 2
     },
     "risky-sign-in-triage": {
       "installs": 25,
@@ -51,7 +51,7 @@
     },
     "stale-guest-cleanup": {
       "installs": 26,
-      "installs7d": 2
+      "installs7d": 1
     },
     "tenant-change-audit": {
       "installs": 23,
@@ -62,8 +62,8 @@
       "installs7d": 1
     },
     "team-script-draft": {
-      "installs": 14,
-      "installs7d": 1
+      "installs": 15,
+      "installs7d": 2
     }
   }
 }
