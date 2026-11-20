@@ -4660,6 +4660,11 @@ function buildGraphCachePredicateSql(predicate: GraphCacheQueryPredicate): {
 } {
   const field = graphCacheFieldSql(predicate.field);
   const value = predicate.value;
+  // Timestamps are compared as times, not text: "12:00:00Z" sorts after "12:00:00.500Z" as text though it is earlier.
+  if (["lt", "lte", "gt", "gte"].includes(predicate.op) && typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)) {
+    const op = { lt: "<", lte: "<=", gt: ">", gte: ">=" }[predicate.op as "lt" | "lte" | "gt" | "gte"];
+    return { sql: `julianday(${field}) ${op} julianday(?)`, args: [value] };
+  }
   switch (predicate.op) {
     case "eq":
       return value === null ? { sql: `${field} IS NULL`, args: [] } : { sql: `${field} = ?`, args: [sqlScalar(value)] };

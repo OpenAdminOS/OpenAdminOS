@@ -1198,6 +1198,15 @@ describe("count_cached", () => {
       const invalid = await executeIntuneChatTool(ctx, "count_cached", { resource: "managedDevices", groupBy: ["noSuchField"] });
       assert.match(invalid.trace.error ?? "", /Unsupported managedDevices field: noSuchField/);
 
+      // Times compare as times: a sync half a second before the cutoff is before it, whatever the text sorts.
+      store.replaceGraphResources({
+        tenantId: "tenant-1", resource: "entraDevices", label: "Entra devices", scopeSet: [], refreshedAt: "2026-11-19T10:00:00.000Z",
+        rows: [{ id: "e-1", displayName: "E-1", lastSyncDateTime: "2026-11-12T12:00:00Z" }, { id: "e-2", displayName: "E-2", lastSyncDateTime: "2026-11-12T12:00:01.2345678Z" }],
+      });
+      const after = (await executeIntuneChatTool(ctx, "count_cached", { resource: "entraDevices", filters: [{ field: "lastSyncDateTime", op: "gte", value: "2026-11-12T12:00:00.500Z" }], list: true })).result as { totalCount: number; rows: Array<Record<string, unknown>> };
+      assert.equal(after.totalCount, 1);
+      assert.equal(after.rows[0]?.displayName, "E-2");
+
       // Never refreshed: no count, not a zero that reads as an empty tenant.
       const uncached = await executeIntuneChatTool(ctx, "count_cached", { resource: "users" });
       assert.equal((uncached.result as { cached?: boolean }).cached, false);

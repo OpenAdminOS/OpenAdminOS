@@ -63,7 +63,7 @@ export interface ChatResultContext {
   /** The rows the answer matched, when at most CONTEXT_ID_LIMIT: a follow-up narrows these, not a re-read of the cache. */
   ids?: string[];
   /** The question's shape (its set, subset, split and list), so "what about macOS?" asks it again with macOS. */
-  shape?: { filters: GraphCacheQueryPredicate[]; focus?: { label: string; filters: GraphCacheQueryPredicate[] }; breakdown: string[]; list: boolean };
+  shape?: { filters: GraphCacheQueryPredicate[]; focus?: { label: string; filters: GraphCacheQueryPredicate[] }; breakdown: string[]; list: boolean; breakdownOnSubset?: boolean };
   computedAt: string;
 }
 
@@ -105,9 +105,9 @@ export const COMPUTED_LIST_LIMIT = 50;
 const OS_FILTERS: Array<{ pattern: RegExp; label: string; predicate: GraphCacheQueryPredicate }> = [
   { pattern: /\bwindows\b/, label: "Windows", predicate: { field: "operatingSystem", op: "eq", value: "Windows" } },
   { pattern: /\bmac ?os\b|\bmacs?\b|\bos x\b/, label: "macOS", predicate: { field: "operatingSystem", op: "eq", value: "macOS" } },
-  // Intune reports iPhones as iOS and iPads as iPadOS; each word counts only its own platform.
-  { pattern: /\bios\b|\biphones?\b/, label: "iOS", predicate: { field: "operatingSystem", op: "eq", value: "iOS" } },
-  { pattern: /\bipad ?os\b|\bipads?\b/, label: "iPadOS", predicate: { field: "operatingSystem", op: "eq", value: "iPadOS" } },
+  // "iOS" is Intune's iOS/iPadOS platform. Whether an iPad reports operatingSystem "iOS" or "iPadOS" is not
+  // documented and could not be checked on a tenant, so iPad and iPhone words are not read as a filter.
+  { pattern: /\bios\b/, label: "iOS/iPadOS", predicate: { field: "operatingSystem", op: "in", value: ["iOS", "iPadOS"] } },
   { pattern: /\bandroid\b/, label: "Android", predicate: { field: "operatingSystem", op: "startsWith", value: "Android" } },
   { pattern: /\blinux\b|\bubuntu\b/, label: "Linux", predicate: { field: "operatingSystem", op: "eq", value: "Linux" } },
 ];
@@ -158,7 +158,7 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const SYNC_NEGATION = /(?:\b(?:not|never|no longer|without)|n't)\s+(?:(?:been|had|yet|recently|once|a|any)\s+){0,2}(?:sync(?:ed|ing|s)?|checked in|check-?in|contacted|seen)\b|\bno (?:recent )?(?:sync|check-?in)\b/;
 
 /** A sync window named in the question, as a predicate on lastSyncDateTime. */
-export function syncFilter(lower: string, generatedAt: string): { label: string; predicate: GraphCacheQueryPredicate } | undefined {
+function syncFilter(lower: string, generatedAt: string): { label: string; predicate: GraphCacheQueryPredicate } | undefined {
   if (!/\b(sync(?:ed|ing|s)?|checked in|check-?in|last seen|contacted)\b/.test(lower)) return undefined;
   const now = new Date(generatedAt);
   if (!Number.isFinite(now.getTime())) return undefined;
@@ -202,7 +202,7 @@ export function syncFilter(lower: string, generatedAt: string): { label: string;
  * answer itself, so a misread is a confident wrong answer. The shapes below
  * are a closed list; any other question goes to the planner, as before.
  */
-const OS_WORDS = "windows|macos|ios|ipados|android|linux";
+const OS_WORDS = "windows|macos|ios|android|linux";
 const STATE_WORDS = "not compliant|noncompliant|compliant|in grace period";
 const SYNC_WINDOW = "in the last \\d{1,4} days|within the last \\d{1,4} days|in the past \\d{1,4} days|this month|this week|today";
 const SYNCED = `(?<sneg>have not |has not |did not |that have not |that have |have )?(?:synced|checked in) (?<swin>${SYNC_WINDOW})`;
@@ -223,7 +223,7 @@ const LIST_SYNC = new RegExp(`^(?:which|list|show(?: me)?)(?: all)?(?: the)?(?: 
 /** The clauses a count may add, each whole: a per OS or per state split, the subset to list, or "list them". */
 const CLAUSE_BREAK_OS = /^(?:show |list |give me |with )?(?:them |it |the |a )?(?:split |breakdown )?(?:per|by|split by|broken down by) (?:os|operating system|platform)s?$/;
 const CLAUSE_BREAK_STATE = /^(?:show |list )?(?:them |it )?(?:per|by) compliance(?: state| status)?$/;
-const CLAUSE_FOCUS_STATE = new RegExp(`^(?:(?:show|list|tell)(?: me)? )?(?:which (?:ones |of them |devices )?are|how many (?:of them |of those )?are) (?<state>${STATE_WORDS})$|^(?:show|list)(?: me)? the (?<state2>${STATE_WORDS}) ones$`);
+const CLAUSE_FOCUS_STATE = new RegExp(`^(?:(?:show|list|tell)(?: me)? )?(?:which (?:ones |of them )?are|how many (?:of them |of those )?are) (?<state>${STATE_WORDS})$|^(?:show|list)(?: me)? the (?<state2>${STATE_WORDS}) ones$`);
 const CLAUSE_FOCUS_OS = new RegExp(`^(?:(?:show|list)(?: me)? )?(?:which (?:ones |of them )?are|how many (?:of them |of those )?are) (?<os>${OS_WORDS})(?: devices)?$`);
 const CLAUSE_LIST = /^(?:show|list)(?: me)? (?:them|the devices|the list|their names)$/;
 
@@ -372,32 +372,32 @@ function followUpQuery(text: string, previous: ChatResultContext, generatedAt: s
   } else return "none";
   if (added.length !== 1) return undefined;
   const part = added[0]!;
-  // A different value on a field already in force: "what about macOS?" after Windows asks the same question of
-  // macOS; "only the compliant ones" after the noncompliant list is ambiguous and goes to the planner.
-  if (previous.filters.some((filter) => filter.field === part.predicate.field && JSON.stringify(filter) !== JSON.stringify(part.predicate))) {
-    if (!switching) return undefined;
-    // The switch asks the previous question again with the new value, in its shape: its split, its subset, a count or a list.
+  // "what about macOS?" asks the stored question again for macOS, in its shape: its split, its subset, a count
+  // or a list, with the OS swapped in or added. A shape whose split was over a follow-up's subset is not rebuilt.
+  if (switching) {
     const shape = previous.shape;
-    if (!shape) return undefined;
-    const swap = (filters: readonly GraphCacheQueryPredicate[]) => filters.map((filter) => (filter.field === part.predicate.field ? part.predicate : filter));
-    const inFocus = shape.focus?.filters.some((filter) => filter.field === part.predicate.field) ?? false;
-    const filters = swap(shape.filters);
+    if (!shape || shape.breakdownOnSubset) return undefined;
+    const field = part.predicate.field;
+    const inFocus = shape.focus?.filters.some((filter) => filter.field === field) ?? false;
+    const swap = (filters: readonly GraphCacheQueryPredicate[]) => filters.map((filter) => (filter.field === field ? part.predicate : filter));
+    const filters = inFocus ? [...shape.filters] : shape.filters.some((filter) => filter.field === field) ? swap(shape.filters) : [...shape.filters, part.predicate];
     return {
       kind: "count",
       resource: previous.resource,
       scopeLabel: describeFilters(filters),
       filters,
-      breakdown: shape.breakdown,
+      // A per OS split of one OS says nothing; it is dropped once the set is one OS.
+      breakdown: inFocus ? shape.breakdown : shape.breakdown.filter((entry) => entry !== field),
       ...(shape.focus ? { focus: inFocus ? { label: part.label, filters: swap(shape.focus.filters) } : shape.focus } : {}),
       list: shape.list,
     };
   }
-  // More than CONTEXT_ID_LIMIT rows matched before: no ids were kept, so the cache is read afresh with both
-  // filters, and the answer does not claim the previous set.
-  if (!previous.ids) {
-    const filters = dedupe([...previous.filters, part.predicate]);
-    return { kind: "count", resource: previous.resource, scopeLabel: describeFilters(filters), filters, breakdown, list: true };
-  }
+  // A different value on a field already in force without a switch lead ("only the compliant ones" after the
+  // noncompliant list) is ambiguous and goes to the planner.
+  if (previous.filters.some((filter) => filter.field === part.predicate.field && JSON.stringify(filter) !== JSON.stringify(part.predicate))) return undefined;
+  // "of those" needs the previous rows: an answer of more than CONTEXT_ID_LIMIT rows kept none, so the cache
+  // could only be read afresh, which may count devices added since. Such a follow-up goes to the planner.
+  if (!previous.ids) return undefined;
   return {
     kind: "count",
     resource: previous.resource,
@@ -476,7 +476,7 @@ function snapshotOf(status: GraphCacheResourceStatus | undefined): ComputedResul
 }
 
 /** "Windows 5, macOS 2, Android 2", largest first. */
-export function groupText(group: Record<string, number> | undefined): string {
+function groupText(group: Record<string, number> | undefined): string {
   return Object.entries(group ?? {}).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([value, count]) => `${value} ${count}`).join(", ");
 }
 
@@ -520,7 +520,7 @@ export function computeStructuredResult(input: {
         resource: query.resource,
         filters: [...baseFilters, ...query.focus.filters],
         // A follow-up's requested breakdown ("of those, Windows by compliance state") is over the narrowed rows.
-        groupBy: [...new Set([...(query.resource === "managedDevices" ? ["operatingSystem"] : []), ...(query.followUp ? query.breakdown : [])])],
+        groupBy: [...new Set(["operatingSystem", ...(query.followUp ? query.breakdown : [])])],
         ...ids,
         listLimit: COMPUTED_LIST_LIMIT,
       })
@@ -585,7 +585,7 @@ export function computeStructuredResult(input: {
       label: listedLabel,
       total: listedTotal,
       ...(contextIds ? { ids: contextIds } : {}),
-      shape: { filters: query.filters, ...(query.focus ? { focus: query.focus } : {}), breakdown: query.breakdown, list: query.list },
+      shape: { filters: query.filters, ...(query.focus ? { focus: query.focus } : {}), breakdown: query.breakdown, list: query.list, ...(query.followUp && query.focus && query.breakdown.length > 0 ? { breakdownOnSubset: true } : {}) },
     },
   };
 }
@@ -597,7 +597,9 @@ function computeDeviceDetail(
   snapshot: ComputedResult["snapshot"],
   generatedAt: string,
 ): ComputedResult | undefined {
-  const counted = store.countGraphCache({ tenantId, resource: "managedDevices", filters: [{ field: "id", op: "eq", value: query.deviceId }], listLimit: 1 });
+  // The name is resolved again in the snapshot that answers: a refresh in this turn can have renamed the device.
+  const counted = store.countGraphCache({ tenantId, resource: "managedDevices", filters: [{ field: "displayName", op: "eq", value: query.deviceName }], listLimit: 2 });
+  if (counted.total !== 1) return undefined;
   const raw = counted.rows?.[0] as Record<string, unknown> | undefined;
   const row = listedRow(raw);
   if (!row) return undefined;
@@ -632,8 +634,9 @@ function computeDeviceDetail(
   };
 }
 
+/** "not compliant" becomes "Not compliant"; a label with its own capitals ("macOS", "iOS/iPadOS") is kept as it is. */
 function capitalize(text: string): string {
-  return text ? `${text[0]!.toUpperCase()}${text.slice(1)}` : text;
+  return text && text === text.toLowerCase() ? `${text[0]!.toUpperCase()}${text.slice(1)}` : text;
 }
 
 /** The trace entry of a code-rendered answer, so What ran shows the cache read. */
@@ -700,7 +703,7 @@ export const QUESTION_WORDS: ReadonlySet<string> = new Set([
  * "Windows compliance policies" still matches Windows policies.
  */
 export const DEVICE_FIELD_WORDS: ReadonlySet<string> = new Set([
-  "compliant", "noncompliant", "non-compliant", "compliance", "devices", "device", "managed", "intune", "entra",
+  "compliant", "noncompliant", "non-compliant", "compliance", "devices", "device", "managed", "intune",
   "operating", "system", "systems", "platform", "platforms", "synced", "sync", "last", "month", "week", "today", "days",
   "windows", "macos", "ios", "ipados", "android", "linux", "state", "status", "tenant",
 ]);

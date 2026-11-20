@@ -259,6 +259,13 @@ describe("local model accuracy on the tester's tenant", () => {
         rows: [...managedDevices, { id: "md-nc-1", deviceName: "NON-COMPLIANT", operatingSystem: "Windows", complianceState: "noncompliant", lastSyncDateTime: recent }, { id: "md-nc-2", deviceName: "NONCOMPLIANT", operatingSystem: "Windows", complianceState: "compliant", lastSyncDateTime: recent }] });
       assert.equal(deviceComplianceReasonQuery("Why is NON-COMPLIANT not compliant?", cache, tenant.id)?.deviceId, "md-nc-1");
       cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: new Date().toISOString(), rows: managedDevices });
+      // A refresh between the lookup and the answer renames MAC-02's device: the answer reads the device now named MAC-02.
+      const lookup = deviceComplianceReasonQuery("why is MAC-02 not compliant?", cache, tenant.id)!;
+      cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: new Date().toISOString(),
+        rows: managedDevices.map((device) => (device.id === "md-m2" ? { ...device, deviceName: "MAC-02-OLD" } : device.id === "md-m1" ? { ...device, deviceName: "MAC-02" } : device)) });
+      const renamed = computeStructuredResult({ store: cache, tenantId: tenant.id, query: lookup, cacheStatus: cache.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]), generatedAt: new Date().toISOString() });
+      assert.match(renamed?.facts[0] ?? "", /^MAC-02 \(macOS\) is marked compliant/);
+      cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: new Date().toISOString(), rows: managedDevices });
 
       // Always investigative, the loop fails, and the model writes a blank deterministic answer: nothing was shown.
       await store.setChatInvestigationMode("always-agentic");
@@ -405,8 +412,14 @@ describe("structured device questions", () => {
     assert.deepEqual(bound?.filters, [{ field: "complianceState", op: "eq", value: "noncompliant" }]);
     assert.deepEqual(bound?.focus?.filters, [{ field: "operatingSystem", op: "eq", value: "Windows" }]);
     assert.equal(bound?.scopeLabel, "Intune managed devices not compliant");
-    // iPadOS counts iPads only, and a clause after a space is read like one after a comma.
-    assert.deepEqual(structuredQueryForQuestion({ question: "How many iPadOS devices are there in Intune?", generatedAt: at })?.filters, [{ field: "operatingSystem", op: "eq", value: "iPadOS" }]);
+    // "iOS" is Intune's iOS/iPadOS platform; whether iPads report "iPadOS" is unverified, so "iPadOS" goes to the planner.
+    const ios = structuredQueryForQuestion({ question: "How many iOS devices are there in Intune?", generatedAt: at });
+    assert.deepEqual(ios?.filters, [{ field: "operatingSystem", op: "in", value: ["iOS", "iPadOS"] }]);
+    assert.equal(ios?.scopeLabel, "Intune managed iOS/iPadOS devices");
+    assert.equal(structuredQueryForQuestion({ question: "How many iPadOS devices are there in Intune?", generatedAt: at }), undefined);
+    // A second sentence with its own subject is its own question, not a subset of the first.
+    assert.equal(structuredQueryForQuestion({ question: "How many Windows devices are there? Which devices are not compliant?", generatedAt: at }), undefined);
+    // A clause after a space is read like one after a comma.
     assert.deepEqual(structuredQueryForQuestion({ question: "how many devices are there per OS", generatedAt: at })?.breakdown, ["operatingSystem"]);
     // A list is labelled in the question's words.
     assert.equal(structuredQueryForQuestion({ question: "Which managed devices have not synced in the last 7 days?", generatedAt: at })?.scopeLabel, "Intune managed devices not synced in the last 7 days");
@@ -451,16 +464,19 @@ describe("structured device questions", () => {
     assert.deepEqual(same?.filters, [{ field: "operatingSystem", op: "eq", value: "macOS" }]);
     assert.deepEqual(same?.breakdown, ["complianceState"]);
     assert.equal(same?.list, false);
+    // Also when the stored question covered every platform: the OS is added, the split kept.
+    const fleetByState = { ...previous, filters: [], label: "Intune managed devices", ids: ["md-w1"], shape: { filters: [], breakdown: ["complianceState"], list: false } };
+    const macByState = structuredQueryForQuestion({ question: "Same for macOS?", generatedAt: at, previous: fleetByState });
+    assert.deepEqual(macByState?.filters, [{ field: "operatingSystem", op: "eq", value: "macOS" }]);
+    assert.deepEqual(macByState?.breakdown, ["complianceState"]);
+    // A split that was over a follow-up's subset is not rebuilt as a split over a new set.
+    assert.equal(structuredQueryForQuestion({ question: "what about macOS?", generatedAt: at, previous: { ...fleetByState, shape: { ...fleetByState.shape, focus: { label: "Windows", filters: [{ field: "operatingSystem", op: "eq" as const, value: "Windows" }] }, breakdownOnSubset: true } } }), undefined);
     // Without a switch lead it is not read as one.
     assert.equal(structuredQueryForQuestion({ question: "only macOS", generatedAt: at, previous: windows }), undefined);
     assert.equal(structuredQueryForQuestion({ question: "only the compliant ones", generatedAt: at, previous }), undefined);
-    // More than the kept row ids: the cache is read afresh with both filters, and the answer does not claim the previous set.
+    // More than the kept row ids: "of those" cannot be reproduced from the current cache, so it goes to the planner.
     const large = { ...previous, ids: undefined, total: 900 };
-    const fresh = structuredQueryForQuestion({ question: "only Windows", generatedAt: at, previous: large });
-    assert.equal(fresh?.followUp, undefined);
-    assert.equal(fresh?.ids, undefined);
-    assert.deepEqual(fresh?.filters, [{ field: "complianceState", op: "eq", value: "noncompliant" }, { field: "operatingSystem", op: "eq", value: "Windows" }]);
-    assert.equal(fresh?.scopeLabel, "Intune managed Windows devices not compliant");
+    assert.equal(structuredQueryForQuestion({ question: "only Windows", generatedAt: at, previous: large }), undefined);
     // A different compliance value without a switch lead is ambiguous at any size, never a silent swap.
     assert.equal(structuredQueryForQuestion({ question: "only the compliant ones", generatedAt: at, previous: large }), undefined);
   });
