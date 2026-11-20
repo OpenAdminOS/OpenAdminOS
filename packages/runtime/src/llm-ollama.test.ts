@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
+import { getEventListeners } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
@@ -91,6 +92,8 @@ describe("Ollama context size", () => {
     requested?: (prompt: string) => number;
     stallOverflowBody?: (res: ServerResponse) => void;
     delayRetryMs?: (prompt: string) => number;
+    /** Send one chunk on the first request or the retry, then keep the stream open. */
+    stallStream?: { on: "first" | "retry"; open: ServerResponse[] };
   }) {
     const chats: Array<{ num_ctx?: number }> = [];
     const shows: string[] = [];
@@ -161,6 +164,12 @@ describe("Ollama context size", () => {
         }
         if (numCtx !== undefined && options.retryStreamError) {
           res.end(`${JSON.stringify({ model: "m", message: { content: "partial" }, done: false })}\n${JSON.stringify({ error: "model runner has unexpectedly stopped" })}\n`);
+          return;
+        }
+        if (options.stallStream && (numCtx === undefined) === (options.stallStream.on === "first")) {
+          res.writeHead(200, { "content-type": "application/x-ndjson" });
+          res.write(`${JSON.stringify({ model: "m", message: { content: "partial" }, done: false })}\n`);
+          options.stallStream.open.push(res);
           return;
         }
         const delay = numCtx === undefined ? 0 : options.delayRetryMs?.(prompt) ?? 0;
@@ -491,6 +500,58 @@ describe("Ollama context size", () => {
         await assert.rejects(llm.complete({ prompt: "big" }));
         assert.deepEqual(fake.chats.at(-2), {});
       } finally {
+        await fake.close();
+      }
+    });
+  }
+
+  for (const on of ["first", "retry"] as const) {
+    const request = on === "first" ? "a request" : "the context retry";
+    const limit = on === "first" ? () => 131072 : (numCtx: number | undefined) => numCtx ?? 16384;
+
+    it(`reports a stop after the first chunk of ${request} as stopped by the user`, async () => {
+      const stop = new AbortController();
+      const open: ServerResponse[] = [];
+      const fake = await fakeOllama({ modelMax: 131072, limit, stallStream: { on, open } });
+      try {
+        const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: `stall-${on}` });
+        const seen: string[] = [];
+        await assert.rejects(
+          (async () => {
+            for await (const chunk of llm.stream({ prompt: "big", signal: stop.signal })) {
+              seen.push(chunk.delta);
+              stop.abort();
+            }
+          })(),
+          /^Error: Ollama request stopped by user\.$/,
+        );
+        assert.deepEqual(seen, ["partial"]);
+        assert.equal(fake.chats.length, on === "first" ? 1 : 2);
+        assert.equal(getEventListeners(stop.signal, "abort").length, 0);
+      } finally {
+        for (const res of open) res.destroy();
+        await fake.close();
+      }
+    });
+
+    it(`reports the overall deadline after the first chunk of ${request} as a timeout`, async () => {
+      const caller = new AbortController();
+      const open: ServerResponse[] = [];
+      const fake = await fakeOllama({ modelMax: 131072, limit, stallStream: { on, open } });
+      try {
+        const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: `deadline-${on}`, timeoutMs: 1000 });
+        const seen: string[] = [];
+        await assert.rejects(
+          (async () => {
+            for await (const chunk of llm.stream({ prompt: "big", signal: caller.signal })) seen.push(chunk.delta);
+          })(),
+          /^Error: Ollama timed out after 1000ms at http:\/\/127\.0\.0\.1:\d+\/api\/chat\.$/,
+        );
+        assert.deepEqual(seen, ["partial"]);
+        assert.equal(fake.chats.length, on === "first" ? 1 : 2);
+        assert.equal(getEventListeners(caller.signal, "abort").length, 0);
+      } finally {
+        for (const res of open) res.destroy();
         await fake.close();
       }
     });
