@@ -10,8 +10,14 @@ interface Suggestion {
   body: string;
 }
 
-/** A failed lookup of the model's context limit has its own playbook only. */
-const isContextLimitLookup = (e: string) => /ollama/i.test(e) && /context limit|\/api\/show/i.test(e);
+/**
+ * A failed lookup of the model's context limit has its own playbook only.
+ * Only the app's own text counts: what Ollama said, quoted after "Ollama said:", may mention a context limit too.
+ */
+const isContextLimitLookup = (e: string) => {
+  const own = e.split("Ollama said:")[0] ?? e;
+  return /ollama/i.test(own) && /context limit|\/api\/show/i.test(own);
+};
 
 const SUGGESTIONS: Suggestion[] = [
   {
