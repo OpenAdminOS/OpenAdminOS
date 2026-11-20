@@ -2373,7 +2373,11 @@ export class AppStateStore {
 
   async localResetBlocker(): Promise<string | undefined> {
     const persisted = await this.read();
-    const applying = persisted.runs.find((run) => run.status === "running" && run.confirmedAt);
+    // A cancelled apply can still be settling a request it already sent and
+    // recording the outcome, so a confirmed run counts until its work ends.
+    const applying = persisted.runs.find(
+      (run) => run.confirmedAt && (run.status === "running" || this.runService.isDriving(run.id)),
+    );
     if (!applying) return undefined;
     const name = persisted.installedAgents.find((agent) => agent.slug === applying.agentSlug)?.name ?? "A write run";
     return `${name} is applying a confirmed change. Wait for it to finish, then reset. Nothing was removed.`;

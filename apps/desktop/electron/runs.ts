@@ -397,6 +397,11 @@ export class RunService {
    * Drive a run under its tenant's lease. When the tenant starts closing,
    * the lease signal cancels the run and Disconnect waits for the drive.
    */
+  /** The run's work, such as an apply, has not settled yet, even when its record already reads cancelled. */
+  isDriving(runId: string): boolean {
+    return this.drives.has(runId);
+  }
+
   private track(runId: string, tenantId: string | undefined, start: () => Promise<void>): void {
     const leased = tenantId && this.host.tenantLease
       ? this.host.tenantLease(tenantId, async (signal) => {
