@@ -1031,7 +1031,7 @@ function removeMacosKeychainItem(
     return;
   }
   for (const other of parseKeychainList(list.stdout ?? "")) {
-    if (other === keychain) continue;
+    if (sameKeychainFile(other, keychain)) continue;
     const lookup = run("/usr/bin/security", ["find-generic-password", "-s", MACOS_SAFE_STORAGE_SERVICE, "-a", MACOS_SAFE_STORAGE_ACCOUNT, other]);
     if (lookup.status === SECURITY_ITEM_NOT_FOUND) continue;
     warnings.push({
@@ -1040,6 +1040,21 @@ function removeMacosKeychainItem(
         ? "not removed: the reset removes it from the login keychain only. If OpenAdminOS used this keychain, remove the item there with Keychain Access"
         : "this keychain could not be checked for it",
     });
+  }
+}
+
+/**
+ * The same keychain file however its path is spelled (a linked home, letter
+ * case on a case-insensitive volume); by name, ignoring case, when either
+ * cannot be read.
+ */
+function sameKeychainFile(a: string, b: string): boolean {
+  try {
+    const x = statSync(a);
+    const y = statSync(b);
+    return x.dev === y.dev && x.ino === y.ino;
+  } catch {
+    return a.toLowerCase() === b.toLowerCase();
   }
 }
 
