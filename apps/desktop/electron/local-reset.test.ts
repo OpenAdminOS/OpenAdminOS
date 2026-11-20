@@ -1245,6 +1245,36 @@ describe("local reset: end to end with the store", () => {
     }
   });
 
+  it("refuses every state write once the reset is committed, a queued one included", async () => {
+    const dir = await tempDir();
+    try {
+      const statePath = join(dir, "state.json");
+      await writeFile(statePath, JSON.stringify({ activeProviderId: "ollama", installedAgents: [], runs: [], tenants: [tenant] }), "utf8");
+      const store = new AppStateStore({ filePath: statePath, tokenStore: memoryTokenStore(new Map()), userDataPath: dir, statsApiUrl: "" });
+      try {
+        assert.equal(await store.beginLocalReset(), undefined);
+        // Before the marker, the app still saves: a refused reset loses nothing.
+        await store.setUpdateChannel("nightly");
+        assert.match(readFileSync(statePath, "utf8"), /nightly/);
+        // A write queued before the commit runs after it and is refused too.
+        const queued = store.setUpdateChannel("stable");
+        await store.closeAllTenantWork();
+        await assert.rejects(queued, /OpenAdminOS is resetting.*Nothing was saved/);
+        rmSync(statePath);
+        await assert.rejects(store.setUpdateChannel("nightly"), /Nothing was saved/);
+        assert.ok(!existsSync(statePath));
+        // A request refused after the commit (not reachable today) saves again.
+        store.cancelLocalReset();
+        await store.setUpdateChannel("nightly");
+        assert.ok(existsSync(statePath));
+      } finally {
+        store.close();
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("never creates a missing state file while the reset is being checked", async () => {
     const dir = await tempDir();
     try {

@@ -110,8 +110,8 @@ export class OrganizationBoundaryError extends Error {
  * due slot is kept, so a reset that is then refused leaves no false failure.
  */
 export class LocalResetInProgressError extends OrganizationBoundaryError {
-  constructor() {
-    super("OpenAdminOS is resetting and restarts in a moment. The run did not start.");
+  constructor(message = "OpenAdminOS is resetting and restarts in a moment. The run did not start.") {
+    super(message);
   }
 }
 

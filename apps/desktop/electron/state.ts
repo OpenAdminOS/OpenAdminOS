@@ -2376,6 +2376,7 @@ export class AppStateStore {
 
   cancelLocalReset(): void {
     this.localResetStarted = false;
+    this.localResetCommitted = false;
     // A request refused after its checks (the marker could not be written)
     // gives every organization its work back, as an undone Disconnect does.
     if (this.localResetClosedTenants.length > 0) {
@@ -2427,6 +2428,10 @@ export class AppStateStore {
    * gets its signal; the shutdown before the restart waits for it.
    */
   async closeAllTenantWork(): Promise<void> {
+    // From here no state write reaches the file: the folder at the data path
+    // may no longer be the one the marker was written to, and an atomic
+    // write would put this process's state over whatever is there now.
+    this.localResetCommitted = true;
     for (const tenantId of this.localResetTenantIds()) {
       if (this.tenantLifecycle.phase(tenantId) !== "open") continue;
       this.tenantLifecycle.close(tenantId);
@@ -2443,6 +2448,9 @@ export class AppStateStore {
   private localResetTenantIds(): string[] {
     return (this.lastReadSnapshot?.tenants ?? []).map((tenant) => tenant.id);
   }
+
+  /** Set once the reset's marker is written; every state write is refused from then on. */
+  private localResetCommitted = false;
 
   /** Organizations a reset request closed, so a refused request can reopen them. */
   private localResetClosedTenants: string[] = [];
@@ -10086,6 +10094,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   private async writeNow(unfiltered: PersistedState, audit: WriteAudit): Promise<void> {
+    // Checked when the write runs, so one already queued when the reset was
+    // committed is refused too, before any audit record is written.
+    if (this.localResetCommitted) {
+      throw new LocalResetInProgressError("OpenAdminOS is resetting and restarts in a moment. Nothing was saved.");
+    }
     // The persistence choke point of the state file: a write may remove
     // anything, but never adds or changes a record of a tenant that is
     // being disconnected, or one written by work of an older generation.
