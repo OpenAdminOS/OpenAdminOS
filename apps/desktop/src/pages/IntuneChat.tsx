@@ -4245,7 +4245,7 @@ function HostedChatConsentPanel({
       aria-labelledby={titleId}
       ref={panelRef}
       {...(modelFit ? { tabIndex: -1, "data-model-fit-accept": "" } : {})}
-      className="hosted-confirm mb-3 rounded-lg bg-[var(--color-surface)] px-[18px] py-4 shadow-[var(--shadow-pop)] focus-visible:outline-none"
+      className="hosted-confirm mb-3 rounded-lg bg-[var(--color-surface)] px-[18px] py-4 shadow-[var(--shadow-pop)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)]"
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           event.preventDefault();
@@ -4271,10 +4271,12 @@ function HostedChatConsentPanel({
             : HOSTED_CONFIRM_COPY.bodyTenant(tool, apiName, tenant)}
       </p>
       {modelFit ? (
-        <blockquote data-model-fit-question="" className="mt-3 max-h-32 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border)]">
-          <span className="sr-only">{MODEL_FIT_COPY.questionLabel}: </span>
-          {prompt.content}
-        </blockquote>
+        <figure className="mt-3">
+          <figcaption className="mb-1 text-xs text-[var(--color-text-muted)]">{MODEL_FIT_COPY.questionLabel}</figcaption>
+          <blockquote data-model-fit-question="" className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border)]">
+            {prompt.content}
+          </blockquote>
+        </figure>
       ) : null}
       <dl className="mt-3 grid grid-cols-[88px_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
         {facts.map(([term, value, hosted]) => (
@@ -4659,6 +4661,13 @@ function AnswerScopeDisclosure({
     <>
     {message.switchedFrom && message.providerId && message.status !== "streaming" ? (
       <SwitchedProviderLine message={message} providers={appState.providers} />
+    ) : null}
+    {message.modelFit && message.status !== "streaming" ? (
+      // The reason stays with the stored answer after a reload; the choices live only with the request that failed.
+      <div data-model-fit-reason="" className="mb-2.5 rounded-lg bg-[var(--color-surface)] px-3 py-2 text-sm ring-1 ring-[var(--color-border)]">
+        <span className="font-medium text-[var(--color-text)]">{MODEL_FIT_COPY.title(message.modelFit, modelFitModelName(message.modelFit), "chat")}.</span>{" "}
+        <span className="text-[var(--color-text-soft)] tabular-nums">{MODEL_FIT_COPY.why(message.modelFit, modelFitModelName(message.modelFit), "chat")}</span>
+      </div>
     ) : null}
     {docsOnly ? null : (
       <div className="mb-2.5 flex flex-wrap items-center gap-2 text-sm text-[var(--color-text-muted)]">

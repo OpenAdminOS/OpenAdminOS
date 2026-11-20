@@ -44,6 +44,9 @@ export const MODEL_FIT_COPY = {
     return `${what} is larger than the context ${model} is set to.`;
   },
   nothingSent: "Nothing was sent to another provider.",
+  /** Read out when the notice appears: the heading, and that choices follow. */
+  announce: (issue: ModelFitIssue, model: string, surface: Surface) =>
+    `${MODEL_FIT_COPY.title(issue, model, surface)}. Choices follow.`,
   /** `answered`: Chat already answered from cached data, so the offer asks again. */
   groupLabel(issue: ModelFitIssue, surface: Surface, answered = issue.reason === "repeated-failure"): string {
     if (surface === "run") return "Run again with";

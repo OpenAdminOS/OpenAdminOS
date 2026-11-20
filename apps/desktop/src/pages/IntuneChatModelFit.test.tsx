@@ -187,6 +187,26 @@ describe("IntuneChat model fit (mockup 36)", () => {
     expect(line).toHaveTextContent("Sent to Codex · location set by your account for this request only. Chat is back on llama3.1.");
   });
 
+  it("keeps the reason on a stored failed answer after a reload, without the choices", async () => {
+    const stored: IntuneChatMessage = {
+      id: "assistant-stored", conversationId: conversation.id, role: "assistant", status: "failed", createdAt: "2026-11-19T09:00:01.000Z",
+      content: "The selected LLM provider failed while answering this chat message.", error: "Ollama context size too small",
+      providerId: "ollama", model: "llama3.1",
+      modelFit: { reason: "context-too-small", providerId: "ollama", model: "llama3.1", neededTokens: 40652, limitTokens: 16384 },
+    };
+    const bridge = makeMockBridge({
+      listIntuneChatConversations: vi.fn(async () => [conversation]),
+      getIntuneChatMessages: vi.fn(async (): Promise<IntuneChatMessage[]> => [
+        { id: "user-stored", conversationId: conversation.id, role: "user", content: QUESTION, status: "completed", createdAt: conversation.createdAt },
+        stored,
+      ]),
+    });
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: `/chat/${conversation.id}`, bridge });
+    const reason = await screen.findByText("This request needs about 40,652 tokens. llama3.1 is set to 16,384.");
+    expect(reason.closest("[data-model-fit-reason]")).toHaveTextContent("llama3.1 cannot fit this request.");
+    expect(screen.queryByRole("button", { name: /^Run with/ })).toBeNull();
+  });
+
   it("withdraws the offer when the active model changes", async () => {
     const user = userEvent.setup();
     const providers = mockProviders.map((provider) => (provider.id === "ollama" ? { ...provider, models: ["llama3.1", "qwen3:8b"] } : provider));

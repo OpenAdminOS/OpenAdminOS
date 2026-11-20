@@ -60,8 +60,8 @@ export function ModelFitNotice({
         {MODEL_FIT_COPY.title(issue, model, surface)}
       </h2>
       {/* Announced when the notice replaces the error, so a screen reader hears why and that choices follow. */}
-      <span role="status" className="sr-only">{`${MODEL_FIT_COPY.title(issue, model, surface)}. ${MODEL_FIT_COPY.why(issue, model, surface)}`}</span>
-      <p className="mt-1 text-[var(--color-text-soft)]">{MODEL_FIT_COPY.why(issue, model, surface)}</p>
+      <span role="status" className="sr-only">{MODEL_FIT_COPY.announce(issue, model, surface)}</span>
+      <p className="mt-1 text-[var(--color-text-soft)] tabular-nums">{MODEL_FIT_COPY.why(issue, model, surface)}</p>
       {answered ? null : <p className="mt-1 text-xs text-[var(--color-text-muted)]">{MODEL_FIT_COPY.nothingSent}</p>}
       {rows.length > 0 ? (
         <>
@@ -72,7 +72,7 @@ export function ModelFitNotice({
               return (
                 <li key={`${choice.providerId}:${choice.model ?? ""}`} className="flex flex-wrap items-center gap-3 bg-[var(--color-bg)] px-3 py-2.5">
                   <div className="min-w-0 flex-1">
-                    <div className="font-medium text-[var(--color-text)]">{choice.isLocal ? choice.model : tool}</div>
+                    <div className="break-words font-medium text-[var(--color-text)]">{choice.isLocal ? choice.model : tool}</div>
                     {choice.isLocal ? (
                       <>
                         <div className="text-xs text-[var(--color-success)]">{MODEL_FIT_COPY.localWhere(choice.providerName)}</div>
@@ -85,7 +85,7 @@ export function ModelFitNotice({
                       </>
                     )}
                   </div>
-                  <Button size="sm" variant="secondary" onClick={() => onChoose(choice)}>
+                  <Button size="sm" variant="secondary" className="max-w-full !whitespace-normal break-all text-left" onClick={() => onChoose(choice)}>
                     {choice.isLocal ? MODEL_FIT_COPY.useLocal(choice.model ?? choice.providerName) : MODEL_FIT_COPY.runWith(tool)}
                   </Button>
                 </li>

@@ -2477,7 +2477,7 @@ the model with the larger context for lack of memory, Ollama's HTTP 400 ("reques
   the available context size (L tokens)"), llama.cpp's
   `exceed_context_size_error` (LM Studio, Lemonade) and Apple Foundation's
   context error. A typed runtime failure (`kind` or `code`
-  `context-too-small`, with needed and limit numbers, on the error, on its
+  `context-too-small` (`kind`, `code` or `reason`), with needed and limit numbers, on the error, on its
   `failure` record or through `cause`) is read by its shape, and a run's
   typed `failureReason` comes before its error text, so the runtime's prompt
   fit check slots in without a second estimator.
@@ -2551,6 +2551,10 @@ Apple Foundation reports the prompt's own tokens and the model's total; the
 helper also reserves room for the answer, so a prompt below the total reads
 "uses about N of the M tokens <model> supports, which leaves too little room
 for an answer."
+
+A failed answer keeps its reason in history: after a reload or a switch of
+conversation, its bubble shows the notice's title and why line, without the
+choices, which belong to the live request only.
 
 After. The stored answer carries `switchedFrom` (the provider and model it
 replaced, why, and whether the provider that took it was on this device when
