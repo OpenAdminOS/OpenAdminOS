@@ -143,6 +143,19 @@ describe("compactConditionalAccessPolicy", () => {
     assert.deepEqual(all.workloadIdentities, { include: "ServicePrincipalsInMyTenant" });
   });
 
+    it("keeps device states set without a filter, current and deprecated names", () => {
+    const current = compactConditionalAccessPolicy({
+      displayName: "Exclude compliant", state: "enabled",
+      conditions: { devices: { includeDevices: ["All"], excludeDevices: ["Compliant", "DomainJoined"], deviceFilter: null } },
+    }, NOW);
+    assert.deepEqual(current.deviceStates, { include: "All", exclude: "Compliant, DomainJoined" });
+    const legacy = compactConditionalAccessPolicy({
+      displayName: "Legacy", state: "enabled",
+      conditions: { devices: { includeDeviceStates: ["All"], excludeDeviceStates: ["Compliant"] } },
+    }, NOW);
+    assert.deepEqual(legacy.deviceStates, { include: "All", exclude: "Compliant" });
+  });
+
     it("survives malformed input", () => {
     assert.deepEqual(compactConditionalAccessPolicy(null, NOW), { name: "(unnamed policy)", state: "unknown" });
   });

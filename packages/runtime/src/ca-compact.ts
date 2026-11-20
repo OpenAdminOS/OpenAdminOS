@@ -49,7 +49,7 @@ const APP_NAMES: Record<string, string> = {
 };
 
 /** Special values Graph uses in include and exclude lists. */
-const KEYWORDS = new Set(["All", "None", "GuestsOrExternalUsers", "Office365", "MicrosoftAdminPortals", "AllTrusted", "ServicePrincipalsInMyTenant"]);
+const KEYWORDS = new Set(["All", "None", "GuestsOrExternalUsers", "Office365", "MicrosoftAdminPortals", "AllTrusted", "ServicePrincipalsInMyTenant", "Compliant", "DomainJoined"]);
 
 type Json = Record<string, unknown>;
 
@@ -278,7 +278,17 @@ export function compactConditionalAccessPolicy(policy: unknown, now = Date.now()
   if (userRisk.length) out.userRisk = userRisk;
   const servicePrincipalRisk = asStrings(conditions.servicePrincipalRiskLevels);
   if (servicePrincipalRisk.length) out.servicePrincipalRisk = servicePrincipalRisk;
-  const deviceFilter = asRecord(asRecord(conditions.devices)?.deviceFilter);
+  // Device states set without a filter (Compliant, DomainJoined): the
+  // current includeDevices and excludeDevices and their deprecated names.
+  const devices = asRecord(conditions.devices);
+  const deviceStates = compactIncludeExclude(
+    devices && (asStrings(devices.includeDevices).length || asStrings(devices.excludeDevices).length)
+      ? { includeDevices: devices.includeDevices, excludeDevices: devices.excludeDevices }
+      : { includeDevices: devices?.includeDeviceStates, excludeDevices: devices?.excludeDeviceStates },
+    "includeDevices", "excludeDevices", "device state",
+  );
+  if (deviceStates) out.deviceStates = deviceStates;
+  const deviceFilter = asRecord(devices?.deviceFilter);
   if (deviceFilter && typeof deviceFilter.mode === "string") {
     out.deviceFilter = typeof deviceFilter.rule === "string"
       ? `${deviceFilter.mode}: ${truncate(deviceFilter.rule, 160)}`
