@@ -757,7 +757,7 @@
       <h3 id="b-add" style="margin:32px 0 6px;font-size:var(--text-base);font-weight:500">Adding a server by URL</h3>
       <p>Step 1 takes the address and how the app signs in to the server, checks the host against your IT department's list before anything connects, and says what the server will receive. Step 2 is the tool review.</p>
       <div class="tsend">
-        <p class="trvcap" style="margin:0">The address is checked as you type. Try an address on a host IT lists, another path on the same host, or a host IT does not list, then Continue: step 2 follows the full address, path included.</p>
+        <p class="trvcap" style="margin:0">The address is checked as you type. Try an address on a host IT lists, another path on the same host, or a host IT does not list, then Continue: step 2 follows the full address, path and query string included.</p>
         <span class="seg" role="group" aria-label="Server address to try" id="addseg">
           <button type="button" data-url="https://tools.contoso.example/mcp" aria-pressed="true">Listed by IT</button>
           <button type="button" data-url="https://tools.contoso.example/baselines/mcp" aria-pressed="false">Same host, another path</button>
@@ -820,6 +820,7 @@
           <li>The disclosure says what the server receives in the words of the grant copy in Access: listing its tools sends the credential chosen here and nothing from the tenant or the conversation, and each call sends a query with recognized tenant data removed, while text the app cannot recognize can still reach it. It follows the authentication choice.</li>
           <li>Continue connects to exactly this address, lists its tools and opens step 2, the tool review below, with every tool unchecked. Step 2 names the host from this address and shows the full address it listed. Change the address here and step 2 is cleared until Continue lists the new one; press Continue again and the review starts unchecked again. An approval belongs to the endpoint it was given for and never carries over to another, even for a tool with the same name and definition.</li>
           <li>Decided in round 13: the endpoint is the full address, path included. <code>https://tools.contoso.example/mcp</code> lists the 11 policy settings tools, and <code>https://tools.contoso.example/baselines/mcp</code> on the same host lists 4 different baseline history tools; change only the path and Continue shows the other list, unchecked. The allowlist check is by host, so both pass it; a path on a listed host that lists no tools gets its own error in step 2 with nothing to approve.</li>
+          <li>Decided in round 19: the endpoint is the full URL without the fragment: scheme, host, port, path and query string. <code>https://tools.contoso.example/mcp?tenant=a</code> and <code>https://tools.contoso.example/mcp?tenant=b</code> are two endpoints with separate reviews and approvals. The fragment is never sent to the server, so it is not part of the endpoint.</li>
           <li>Decided in round 14: the three read tools on that path describe versions "on record", never "stored" versions, because the write check here matches words, not meaning, and would flag the adjective as a write. They are labelled read-only, pass the check and can be approved. <code>restore_version</code> stays disabled: the server labels it a change, and its description says it restores a version.</li>
           <li><code>allowedMcpServers</code> is a proposed key name (open question in the plan). The Access frame above opens this step from Add a server by URL.</li>
         </ul>
@@ -927,7 +928,7 @@
       </ul>
 
       <h3 id="b-redirect" style="margin:32px 0 6px;font-size:var(--text-base);font-weight:500">A redirect to another address</h3>
-      <p>Tools are reviewed and approved for one address. When the server answers with a redirect that changes the address, a different scheme, host, port or path, the app does not follow it, while listing tools or while calling one. Here <code>https://tools.contoso.example/mcp</code> redirects to <code>/baselines/mcp</code> on the same host.</p>
+      <p>Tools are reviewed and approved for one address. When the server answers with a redirect that changes the address, a different scheme, host, port, path or query string, the app does not follow it, while listing tools or while calling one. A redirect that changes only the query string is refused the same way. Here <code>https://tools.contoso.example/mcp</code> redirects to <code>/baselines/mcp</code> on the same host.</p>
       <div class="two">
         <div style="display:grid;gap:8px;align-content:start">
           <p class="trvcap">Step 2, when listing the tools returns a redirect</p>
@@ -961,11 +962,21 @@
           </div>
         </div>
       </div>
+      <p class="trvcap" style="margin:16px 0 8px">Only the query string changes, while listing tools or calling one</p>
+      <div class="block" data-t="blocked">
+        <span class="glyph" data-t="blocked"><svg><use href="#i-plug"/></svg></span>
+        <div>
+          <h3>The server redirected to another address, so the app did not follow it</h3>
+          <p>A request to <code>https://tools.contoso.example/mcp?tenant=a</code> returned a redirect to <code>https://tools.contoso.example/mcp?tenant=b</code>. Scheme, host, port and path are the same, but the query string is not, so it is a different address. No request went there: in step 2 no tools were listed, and for an approved server the call was not made, so neither the header secret nor the tool parameters reached it. The approvals for <code>?tenant=a</code> do not apply at <code>?tenant=b</code>.</p>
+          <div class="acts"><button class="bt primary sm" type="button">Add https://tools.contoso.example/mcp?tenant=b</button><button class="bt secondary sm" type="button">Use another address</button></div>
+        </div>
+      </div>
       <ul class="notes">
         <li>Decided in round 18: a redirect that changes the endpoint, any change of scheme, host, port or path, is refused during tool listing and every tool call. The target is never requested, so nothing reaches it: not the credential, not the tool parameters. A path on the same host counts, as here, because an approval belongs to the full address.</li>
+        <li>Decided in round 19: the query string is part of the endpoint too, so a redirect that changes only the query string is refused the same way, in step 2 and in every call. The fragment is not part of the endpoint, because it is never sent.</li>
         <li>The state names the redirect target in full and offers to add it as its own server. Adding it starts at step 1 with that address filled in, so it gets the allowlist check and a fresh review with every tool unchecked. An approval never follows a redirect.</li>
         <li>While the server redirects, its tools cannot be listed and hashed, so none is offered, and the strip leaves out the host as it does for a server whose tools are all in review.</li>
-        <li>This is stricter than the transport today, which follows a redirect within the same origin (<code>sameOriginFetch</code> in <code>apps/desktop/electron/mcp/host.ts</code>). The plan governs (B5, Your own MCP servers).</li>
+        <li>This is stricter than the transport today, which follows a redirect within the same origin (<code>sameOriginFetch</code> in <code>apps/desktop/electron/mcp/host.ts</code>), so a path or query string redirect on the same host is refused as well. The plan governs (B5, Your own MCP servers).</li>
       </ul>
 
       <h3 id="b-send" style="margin:32px 0 6px;font-size:var(--text-base);font-weight:500">Sending to Teams: the confirmation card</h3>
@@ -1714,6 +1725,9 @@ identities with graph_get. Nothing else.
       "https://kql.contoso.example/mcp": { slug: "kql-reference", tools: KQL_TOOLS },
     };
     const LISTED_HOSTS = [...new Set(Object.keys(ENDPOINTS).map((e) => new URL(e).hostname))];
+    // The endpoint is the full URL without the fragment: scheme, host, port, path and query string.
+    // The fragment is never sent, so it is not part of the endpoint; any other difference is another endpoint.
+    function endpointOf(u) { const c = new URL(u.href); c.hash = ""; return c.href; }
     const APPROVED_AFTER = ["search_settings", "get_setting", "get_baseline", "list_platforms", "list_baselines", "compare_baselines"];
     const byName = (n) => TOOLS.find((x) => x.name === n);
     // A copy of an approved definition with one value changed at a path, the way the server lists it a week later.
@@ -2023,17 +2037,18 @@ identities with graph_get. Nothing else.
     // Step 2 reviews exactly the endpoint step 1 continued with, and always opens with every tool unchecked.
     let lastReviewed = "";
     function openReview(u) {
-      const srv = ENDPOINTS[u.href];
-      openTrv.dataset.endpoint = lastReviewed = u.href;
+      const ep = endpointOf(u);
+      const srv = ENDPOINTS[ep];
+      openTrv.dataset.endpoint = lastReviewed = ep;
       openHost.textContent = `Step 2 of 2, ${u.hostname}`;
       if (!srv) {
         // The host is listed by IT, but nothing at this path answered tools/list: a designed error, nothing to approve.
-        openEp.innerHTML = `No tools listed by <code>${esc(u.href)}</code>`;
+        openEp.innerHTML = `No tools listed by <code>${esc(ep)}</code>`;
         openLead.textContent = "The server did not list any tools at this address.";
-        clearTrv(openTrv, `<code>tools/list</code> at <code>${esc(u.href)}</code> returned 404 Not Found, so there is nothing to review and nothing was approved. Check the path in step 1; another path on ${esc(u.hostname)} is another endpoint with its own review.`);
+        clearTrv(openTrv, `<code>tools/list</code> at <code>${esc(ep)}</code> returned 404 Not Found, so there is nothing to review and nothing was approved. Check the path and query string in step 1; another path or query string on ${esc(u.hostname)} is another endpoint with its own review.`);
         return;
       }
-      openEp.innerHTML = `Tools listed by <code>${esc(u.href)}</code>`;
+      openEp.innerHTML = `Tools listed by <code>${esc(ep)}</code>`;
       openLead.textContent = `The server offers ${srv.tools.length} tools at this address, and none is approved yet.`;
       fillTrv(openTrv, { tools: srv.tools, slug: srv.slug });
     }
@@ -2115,7 +2130,7 @@ identities with graph_get. Nothing else.
         next.disabled = st === "bad";
         current = st === "ok" ? u : null;
         // A different endpoint clears step 2: its tools are listed only by Continue, and nothing carries over.
-        const href = u ? u.href : v;
+        const href = u ? endpointOf(u) : v;
         if (openTrv.dataset.endpoint !== href) resetReview(href);
       }
       url.addEventListener("input", check);
