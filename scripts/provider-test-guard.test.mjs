@@ -133,6 +133,8 @@ it("installs the smoke guard only for the flag combinations the app treats as sm
     ]) {
       const result = await run(extra);
       assert.notEqual(result.code, 0, JSON.stringify(extra));
+      // The failure comes from loading the guard, so the flag check let it through.
+      assert.match(result.stderr, /ERR_REQUIRE_ESM/, JSON.stringify(extra));
     }
   } finally {
     await rm(directory, { recursive: true, force: true });
