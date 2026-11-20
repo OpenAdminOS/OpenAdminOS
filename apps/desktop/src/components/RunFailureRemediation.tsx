@@ -94,7 +94,7 @@ export function RunFailureRemediation({ run }: { run: RunRecord }) {
   const matched = lookup
     ? SUGGESTIONS.filter((suggestion) => suggestion.match === isContextLimitLookup)
     : SUGGESTIONS.filter((suggestion) => suggestion.match(own));
-  const accessDenial = lookup ? undefined : run.accessDenial ?? graphAccessDenialFromError(run.error);
+  const accessDenial = lookup ? undefined : run.accessDenial ?? graphAccessDenialFromError(own);
   if (accessDenial) {
     matched.unshift({ match: () => true, title: accessDenial.title, body: `${accessDenial.message} ${accessDenial.recovery}` });
   }
