@@ -188,12 +188,14 @@ skills:
         "add exchangeActiveSync and other to client apps and grant Block", or
         "require the Phishing-resistant MFA authentication strength for the
         privileged roles"), and why. For any change that enforces something,
-        add the check to do first: where report-only applies, run it in
-        report-only and review sign-in impact; for user actions such as
+        add the check to do first, and keep the existing policy enforced
+        while you check: test a proposed edit as a new report-only copy of
+        the policy and review its sign-in impact; for user actions such as
         registering security info, which report-only does not show, test
-        with an approved pilot group first. Keep emergency access accounts
-        excluded. Do not claim a change is safe to enforce from this
-        inventory alone.
+        with a separately scoped, approved pilot group. Never suggest
+        switching an enforced policy to report-only. Keep emergency access
+        accounts excluded. Do not claim a change is safe to enforce from
+        this inventory alone.
 
         3. Coverage.
         One bullet each for admin MFA, all-user MFA, legacy authentication
@@ -207,7 +209,13 @@ skills:
         Three to six bullets. Each names the policies involved and the
         evidence: an exclusion, a report-only or disabled state, a missing
         control, client apps or platforms left out, or two policies that
-        overlap with different controls. Call two policies overlapping only
+        overlap in a way that has a concrete effect. Policies that apply to
+        the same sign-in add up: every grant requirement of every enforced
+        policy applies, and a block in any of them blocks. So an MFA policy
+        and a compliant-device policy on the same sign-ins are cumulative,
+        not a conflict; report a conflict only when the combined effect is
+        concrete (for example a block that also catches the admins another
+        policy protects). Call two policies overlapping only
         when the records show it on every scope they set: users, apps, client
         app types, platforms, locations and conditions each match or are
         "All" in one of them, and neither excludes what the other includes.
