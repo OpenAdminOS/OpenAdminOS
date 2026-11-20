@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { access, mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { waitForSmokeServer } from "./smoke-provider-isolation.mjs";
 
 const preload = fileURLToPath(new URL("../tests/provider-test-setup.mjs", import.meta.url));
 const fixture = fileURLToPath(new URL("../tests/fixtures/provider-test-guard.mjs", import.meta.url));
@@ -192,5 +193,38 @@ it("sends approved requests directly despite inherited proxy settings and a prei
     assert.equal(connections, 0);
   } finally {
     await new Promise((resolve, reject) => proxy.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+it("accepts only the smoke run's own server as ready, never a listener another process holds", async () => {
+  // A foreign server already answers on the port the smoke wants.
+  const foreign = createServer((_request, response) => response.end("foreign"));
+  await new Promise((resolve) => foreign.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${foreign.address().port}`;
+  const serve = `const { createServer } = require("node:http");
+    const server = createServer((_q, r) => r.end("own"));
+    server.on("error", (error) => { console.error(error.code); process.exit(1); });
+    server.listen(Number(process.env.PORT), "127.0.0.1", () => console.log("ready at " + process.env.URL));`;
+  try {
+    const clash = spawn(process.execPath, ["-e", serve], {
+      env: { ...process.env, PORT: String(foreign.address().port), URL: url }, stdio: ["ignore", "pipe", "pipe"],
+    });
+    await assert.rejects(waitForSmokeServer(clash, url, 20_000), /exited .* before it was ready/);
+  } finally {
+    await new Promise((resolve) => foreign.close(resolve));
+  }
+
+  const probe = createServer();
+  await new Promise((resolve) => probe.listen(0, "127.0.0.1", resolve));
+  const port = probe.address().port;
+  await new Promise((resolve) => probe.close(resolve));
+  const own = spawn(process.execPath, ["-e", serve], {
+    env: { ...process.env, PORT: String(port), URL: `http://127.0.0.1:${port}` }, stdio: ["ignore", "pipe", "pipe"],
+  });
+  try {
+    await waitForSmokeServer(own, `http://127.0.0.1:${port}`, 20_000);
+    assert.equal(await (await fetch(`http://127.0.0.1:${port}`)).text(), "own");
+  } finally {
+    own.kill();
   }
 });

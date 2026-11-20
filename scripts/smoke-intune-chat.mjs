@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { isolateSmokeProviders, terminateSmokeChild } from "./smoke-provider-isolation.mjs";
+import { isolateSmokeProviders, terminateSmokeChild, waitForSmokeServer } from "./smoke-provider-isolation.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const electronBinary = createRequire(import.meta.url)("electron");
@@ -31,7 +31,7 @@ try {
     },
   );
   pipeProcess(renderer, "renderer");
-  await waitForHttp(rendererUrl, 20_000);
+  await waitForSmokeServer(renderer, rendererUrl, 20_000);
 
   providerIsolation = await isolateSmokeProviders(rendererUrl);
   const electronArgs = ["apps/desktop"];
@@ -73,19 +73,6 @@ function pipeProcess(child, label) {
   });
 }
 
-async function waitForHttp(url, timeoutMs) {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    try {
-      const response = await fetch(url);
-      if (response.ok) return;
-    } catch {
-      // Server is still starting.
-    }
-    await delay(200);
-  }
-  throw new Error(`Timed out waiting for ${url}.`);
-}
 
 function waitForExit(child, timeoutMs) {
   return new Promise((resolveExit, rejectExit) => {
