@@ -7,7 +7,7 @@ import type {
 } from "@openadminos/agent-sdk";
 import { ContextTooSmallError } from "@openadminos/agent-sdk";
 import { isRefusedRedirect, modelServerRedirect, redirectRefusedDetail } from "./llm-openai-compatible.js";
-import { bindKeptOllamaSize, ollamaRequestNumCtx, parseOllamaShow, readOllamaContextWindow, type OllamaShowContext } from "./ollama-context.js";
+import { keepOllamaSize, ollamaRequestNumCtx, parseOllamaShow, readOllamaContextWindow, type OllamaShowContext } from "./ollama-context.js";
 import { DEFAULT_ANSWER_RESERVE_TOKENS } from "./prompt-fit.js";
 
 export interface OllamaProviderOptions {
@@ -273,6 +273,11 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           cachedCtx = undefined;
           numCtx = undefined;
         }
+        if (sized?.skipKept) {
+          // This request only: the kept size stays for Chat.
+          cachedCtx = undefined;
+          numCtx = undefined;
+        }
         if (sized?.numCtx !== undefined) {
           numCtx = sized.numCtx;
           raisedCtx = sized.numCtx;
@@ -404,8 +409,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
               // Kept only once the stream finished cleanly, and before the
               // caller sees the last chunk and may stop reading. Concurrent
               // requests can raise it at once; keep the largest that worked.
-              ollamaContextOverrides.set(cacheKey, Math.max(ollamaContextOverrides.get(cacheKey) ?? 0, raisedCtx));
-              bindKeptOllamaSize(endpoint, model, requestRevision);
+              keepOllamaSize(ollamaContextOverrides, cacheKey, endpoint, model, raisedCtx, requestRevision);
             }
             if (typeof chunk.model === "string" && chunk.model.length > 0) {
               actualModel = chunk.model;

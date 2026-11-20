@@ -80,14 +80,32 @@ const keptRevisions = new Map<string, string>();
 const revisionKey = (endpoint: string, model: string) => `${endpoint.replace(/\/$/, "")}\0${model}`;
 
 /**
- * Tie a size the adapter keeps now to the model revision the lookup that
+ * Keep a size that worked, together with the model revision the lookup that
  * chose it saw. A request that finishes after the model was created again
- * still binds its size to the revision it was sized for, never the newer one.
+ * keeps its size under the revision it was sized for, never the newer one.
  */
-export function bindKeptOllamaSize(endpoint: string, model: string, revision: string | undefined): void {
+export function keepOllamaSize(
+  overrides: Map<string, number>,
+  cacheKey: string,
+  endpoint: string,
+  model: string,
+  size: number,
+  revision: string | undefined,
+): void {
   const key = revisionKey(endpoint, model);
+  const keptFor = keptRevisions.get(key);
+  if (revision !== undefined && keptFor !== undefined && keptFor !== revision) {
+    // A size from another revision of the model: an older one never replaces
+    // a newer one, and a newer one replaces it outright (no maximum across
+    // revisions, which would carry an old size into the new model).
+    if (Date.parse(revision) < Date.parse(keptFor)) return;
+    overrides.set(cacheKey, size);
+    keptRevisions.set(key, revision);
+    return;
+  }
+  // The same revision (or one unknown): keep the largest size that worked.
+  overrides.set(cacheKey, Math.max(overrides.get(cacheKey) ?? 0, size));
   if (revision !== undefined) keptRevisions.set(key, revision);
-  else keptRevisions.delete(key);
 }
 
 /**
@@ -100,6 +118,8 @@ export interface OllamaRequestContext {
   /** The model revision this lookup saw, to bind a size kept from it. */
   revision?: string;
   dropKept?: boolean;
+  /** Send no num_ctx this time, but leave the kept size for other callers. */
+  skipKept?: boolean;
   tooLarge?: ContextTooSmallFailure;
 }
 
@@ -224,7 +244,11 @@ export async function ollamaRequestNumCtx(
     // request's num_ctx over the Modelfile. Drop it so the pin applies. A
     // kept size at or above the pin, raised for an earlier overflow, stays.
     if (current !== undefined && current < show.pinnedNumCtx) dropKept = true;
-    return { neededTokens, ...seen, ...(dropKept ? { dropKept: true } : {}) };
+    // An agent run is held to the pin, so it does not send a larger size
+    // that Chat kept for this model (Chat may raise past the pin). The kept
+    // size stays for Chat.
+    const skipKept = !dropKept && input.enforce === true && current !== undefined && current > show.pinnedNumCtx;
+    return { neededTokens, ...seen, ...(dropKept ? { dropKept: true } : {}), ...(skipKept ? { skipKept: true } : {}) };
   }
   // An unpinned model whose kept size was dropped is still sized, so it is
   // never served at Ollama's own default.
