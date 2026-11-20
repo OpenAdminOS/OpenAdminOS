@@ -98,11 +98,13 @@ built on top of them are planned separately.
   work budget are counted as unexamined, with `credential` as their effective
   class, and the scan reports that the budget ran out. Their action on a tier
   is the strictest action of any class on that tier (round 4).
-- The credential promise, in every place it appears: values the app
-  recognizes as credentials never reach a hosted model in clear text. A secret
-  written into a free-text field in a form the app does not recognize can
-  still be sent. On Confidential, `credential` defaults to Mask; Allow is
-  possible only after the confirmation dialog, and IT can lock it.
+- The credential promise, in every place it appears, names the tier and
+  states the Confidential exception next to it: values the app recognizes as
+  credentials never reach a model on the Hosted tier in clear text. On the
+  Confidential tier, `credential` defaults to Mask; Allow there is possible
+  only after the confirmation dialog, and IT can lock it. A secret written
+  into a free-text field in a form the app does not recognize can still be
+  sent (round 22).
 
 **Decisions (Ugur, 2026-11-19, hosted voice and session start)**
 - Hosted voice is honest about its boundary. What the admin says aloud goes to
@@ -116,7 +118,8 @@ built on top of them are planned separately.
   session opens without the whole profile block (not per note), consistent
   with how other transfers are withheld. Round 21 widens the scan to the
   complete instructions, tenant and greeting values included, with a
-  rescanned fallback or no call.
+  rescanned fallback or no call; round 22 requires every scan that could
+  open the session, the first one included, to cover the whole text.
 
 **Decisions (Ugur, 2026-11-19, round 4 of the design review)**
 - Confirmations that loosen `security` name what masking replaces (policy
@@ -280,7 +283,8 @@ built on top of them are planned separately.
 - Saved Chat history after a restart: each saved Chat message stores its
   classification evidence next to it in the local database (spans as
   offsets, lengths and classes, and the effective field map revision, as
-  round 16 names it, and the unexamined ranges, as round 21 adds; no new
+  round 16 names it, kept per span as the revision that classed it since
+  round 22, and the unexamined ranges, as round 21 adds; no new
   copy of the values). Reopening a conversation rebuilds the ledger from it before
   any follow-up. A saved message without readable evidence counts as
   unexamined, takes the strictest action on the tier, and the follow-up says
@@ -346,8 +350,10 @@ built on top of them are planned separately.
 - Evidence is versioned by the effective field map revision, which changes
   whenever the shipped map, a Settings reclassification or an IT policy
   reclassification raises any class (round 20: changes any class). Saved
-  evidence stores that revision, and evidence from before any class raise,
-  from any source, counts as unexamined. A restart regression test covers a
+  evidence stores that revision (round 22: per span, the revision under
+  which the span was classified, not the one in force at save), and
+  evidence from before any class raise, from any source, counts as
+  unexamined. A restart regression test covers a
   field raised from `configuration` to `security` in Settings after the
   answer was saved (A1, A3).
 - Mockup 34: the strip reads "security names masked" for Mask and "security
@@ -476,7 +482,8 @@ built on top of them are planned separately.
   wording. The rebuilt instructions are scanned again before the call
   opens. When that scan still finds blocked content, or does not cover the
   whole text, the call does not open, nothing is sent to OpenAI, and the
-  designed state says why. A regression criterion covers an empty profile
+  designed state says why (round 22 adds the same coverage rule for the
+  first scan). A regression criterion covers an empty profile
   with a greeting name the tenant value index recognizes as `identity`,
   with Identity on Hosted at Block (A3, mockup 34, B).
 - Saved Chat evidence also stores the unexamined ranges of each message
@@ -500,6 +507,34 @@ built on top of them are planned separately.
 - Mockup 35, E: the learning example no longer sets an answer language,
   which IT locks in A; it proposes a preference unrelated to language.
 
+**Review findings adopted (2026-11-20, round 22 of the design review)**
+- Hosted voice requires complete coverage on every scan that could open the
+  session, the first scan included, not only the fallback's rescan. When
+  the first scan of the session instructions does not cover the whole text,
+  the session does not open on it: the app builds the fallback without the
+  parts the scan did not examine and rescans it in full, or shows "Hosted
+  voice did not start" when the unexamined part is one the fallback keeps.
+  Unexamined start text is never masked one way and sent, also under the
+  defaults with no Block. Criterion 29 covers an incomplete first scan with
+  the default rules (A3, mockup 34, B).
+- Saved Chat evidence keeps each span's own classification revision, the
+  effective field map revision under which that span's classes were
+  computed, never the revision in force at save time. On reopening and
+  before every request, a span whose revision is older than the revision in
+  force counts as unexamined with its message, since saved evidence keeps no
+  field path. Criterion 30 covers an IT remap from `configuration` to
+  `security` while the answer streams (A1, A3, mockup 34, F).
+- Mockup 34, B: the voice fixture gives the organization name and the
+  tenant id their own classes, and a popover shows a fallback that opened
+  with neutral wording in place of the tenant id and the greeting name.
+- Mockup 34, F: a conversation reopened at the current revision whose saved
+  message has an unexamined tail, withheld on the Confidential tier with
+  Credential at Allow and Identity at Block, as criterion 26 sets it.
+- The credential promise names its tier: values the app recognizes as
+  credentials never reach a model on the Hosted tier in clear text, and the
+  Confidential exception (Allow only after the confirmation dialog, which IT
+  can lock) is stated next to it, in the plan and mockup 34.
+
 ## Why
 
 Today the choice is binary. With a local model the request never leaves the
@@ -509,7 +544,9 @@ the rules decide which values a hosted model receives as is, which are masked
 and which are withheld. Identities the app recognizes can be masked, while
 configuration values and names the app does not recognize, such as a person
 typed for the first time, may still be sent. Values the app recognizes as
-credentials never reach a hosted model in clear text. Purview cannot do this for us because it
+credentials never reach a model on the Hosted tier in clear text; on the
+Confidential tier they are masked unless the admin allows them after a
+confirmation dialog, a rule IT can lock. Purview cannot do this for us because it
 sees opaque text after the fact; we know the shape of every response at the
 moment it arrives.
 
@@ -591,10 +628,11 @@ Default rules (decided 2026-11-18):
 
 Actions are allow, mask and block. The admin and IT may tighten any rule and
 loosen all but one: values the app recognizes as credentials never reach a
-hosted model in clear text, so `credential` on Hosted has no Allow. A secret
+model on the Hosted tier in clear text, so `credential` on Hosted has no
+Allow. On the Confidential tier, `credential` defaults to Mask; Allow there is
+possible only after the confirmation dialog, and IT can lock it. A secret
 written into a free-text field in a form the app does not recognize can still
-be sent, and the docs say so. `credential` on Confidential defaults to Mask;
-Allow there is possible only after the confirmation dialog, and IT can lock it.
+be sent, and the docs say so.
 Loosening from Settings asks for confirmation first, and never applies to a rule
 IT locked; a reset that mixes tightening and loosening applies nothing until the
 admin accepts. In Settings a field moves only to a class higher in the order,
@@ -644,8 +682,12 @@ the IT policy file.
       2026-11-20, round 18; any class change, not only a raise, round 20).
 - [ ] Saved Chat history keeps its classification evidence. Each saved Chat
       message stores, next to it in the local database, the spans the ledger
-      found in its text and the effective field map revision that classed
-      them (defined below). Each
+      found in its text. Each span keeps its own classification revision:
+      the effective field map revision (defined below) under which that
+      span's classes were computed, copied from its ledger entry, never the
+      revision in force when the message is saved. A class change between
+      classification and save, such as an IT policy file remap while the
+      answer streams, leaves the span at the older revision (round 22). Each
       span keeps its offset, its length and the full set of classes that
       applied to it when the message was saved, never one class alone: its
       field's class history at that time (the mapped class and every later
@@ -676,12 +718,15 @@ the IT policy file.
       examine, and a range is never treated as examined because no span was
       stored for it (round 21). A saved message without stored evidence (saved
       before the evidence existed, or evidence that cannot be read) counts as
-      unexamined, as in the budget rule below. Evidence stored under an
-      effective field map revision older than any later class change also
-      counts as unexamined, whatever the source of the change and whether
+      unexamined, as in the budget rule below. On reopening and again before
+      every request, each span's classification revision is compared with
+      the effective field map revision in force. A span classified under an
+      older revision would be reclassified from its field path, but saved
+      evidence stores no field path, so it counts as unexamined, and so does
+      the rest of its message, whatever the source of the change and whether
       it raised or lowered the class; otherwise its stored classes apply
       (decided by the lead 2026-11-20, from the unexamined rule; any change
-      since round 20).
+      since round 20; the span's own revision, round 22).
 - [ ] The effective field map revision versions the field map the app
       actually applies, not only the map it ships. It is one number kept in
       the local database that changes whenever any source changes the
@@ -693,12 +738,15 @@ the IT policy file.
       `configuration` in the IT policy file blocks a value that was sent
       before. A change that leaves every field's classes as they were, such
       as an IT policy file reloaded with the same mappings, leaves it as it
-      is. Saved evidence stores the revision in force when the message was
-      saved, and a reopened conversation compares it with the revision in
-      force: evidence saved before any class change, from any of the three
-      sources, counts as unexamined, even when the message used no field
-      that changed. The shipped map version alone never decides it (any
-      change, not only a raise, decided by the lead 2026-11-20, round 20).
+      is. Saved evidence stores each span's classification revision, the
+      revision under which its classes were computed, never the revision in
+      force at save, and a reopened conversation compares it with the
+      revision in force on reopening and before every request: a span
+      classified before any class change, from any of the three sources,
+      counts as unexamined with the rest of its message, even when the
+      message used no field that changed. The shipped map version alone
+      never decides it (any change, not only a raise, decided by the lead
+      2026-11-20, round 20; per span, round 22).
 - [ ] Just before each model call, the final request (system text plus
       prompt, including the admin's own words) is scanned against the ledger
       and the detectors, in the gate every model request passes: the
@@ -744,9 +792,10 @@ the IT policy file.
 10. Stored evidence: a saved Chat message keeps its spans (offset, length,
     and the full set of classes that applied to the span when the message
     was saved: every class its field had held and every class a value
-    detector assigned), its unexamined ranges (offset and length) and the
-    effective field map revision in the local database and no other
-    copy of its values; Disconnect and deleting the conversation remove the
+    detector assigned, and its own classification revision, the effective
+    field map revision under which its classes were computed, not the one
+    in force at save), its unexamined ranges (offset and length) in the
+    local database and no other copy of its values; Disconnect and deleting the conversation remove the
     evidence with the messages (test). When the unexamined ranges cannot be
     stored for a message, the evidence marks the whole message as
     unexamined (test).
@@ -888,31 +937,46 @@ the IT policy file.
       provider and model names, the profile block with standing instructions
       and confirmed notes, and every other line. It goes through the same
       scan and rules as every later context transfer, and the voice popover
-      lists it as its own transfer. When a rule blocks a class anywhere in
+      lists it as its own transfer. Every scan that could open the session
+      must cover the whole text, the first scan included (round 22): the
+      session never opens on a scan whose work budget ran out, that timed
+      out or that failed, also when no rule on Hosted is Block and the
+      strictest action there is Mask, so unexamined start text is never
+      masked one way and sent. When the first scan does not cover the whole
+      text, the session does not open on it. The app either builds the
+      fallback below without the parts the scan did not examine, by the same
+      rules as for a blocked class (the profile block whole when an
+      unexamined range falls in it; the tenant name, the tenant id or the
+      greeting name replaced by neutral wording when a range covers it), and
+      rescans it in full, or, when an unexamined range falls in a part the
+      fallback keeps (the fixed rules, the provider and model names), shows
+      the designed state "Hosted voice did not start" without sending
+      anything. When a rule blocks a class anywhere in
       the instructions, the app builds a fallback without the blocked parts:
       - the profile block is left out whole when it carries a blocked class
         (decided 2026-11-19, not per note);
       - the tenant name, the tenant id and the greeting name are each
         replaced by neutral wording where the rule covers the class the scan
         gave them ("an organization is selected; its name is withheld by
-        data policy", "no greeting name in this call"), so the voice model
+        data policy", "the organization's tenant id is withheld by data policy", "no
+        greeting name in this call"), so the voice model
         still knows that a tenant is connected and does not greet by name;
       - nothing else is changed.
       The fallback is scanned again, in full, before the call opens. When the
       rescan finds no blocked content and covers the whole text, the call
       opens with the fallback, and the voice model, the transcript and the
       popover say what the call opened without (the profile, the
-      organization name, the greeting name). When the rescan still finds
+      organization name, the tenant id, the greeting name). When the rescan still finds
       blocked content, or does not cover the whole text (its budget ran out,
       it timed out or it failed), the call does not open: nothing is sent to
       OpenAI, no audio is streamed, and the designed state says why. Its
       recovery offers only what would work: for blocked content, it names the
       rule and the part it could not leave out and offers voice on this
       device and Change the rule, or the policy file and key instead of
-      Change the rule when IT set the rule; for a rescan that did not finish,
-      it offers voice on this device and Start the call again, which scans
-      the whole start request again before anything is sent (mockup 34, B,
-      "Hosted voice did not start"). A scan of the profile block alone would send a greeting name
+      Change the rule when IT set the rule; for a scan that did not finish
+      (the first scan or the rescan), it offers voice on this device and
+      Start the call again, which scans the whole start request again before
+      anything is sent (mockup 34, B, "Hosted voice did not start"). A scan of the profile block alone would send a greeting name
       or a tenant name a rule blocks, and is not enough. The voice model speaks roles
       where a value is masked, and the transcript restores only reversible
       placeholders (identity, device and security names and identifiers, the
@@ -951,10 +1015,11 @@ the IT policy file.
       local model only when no Local rule is Block.
 - [ ] Saved history in a follow-up. History whose evidence was rebuilt (A1) is
       routed and masked like any other part of the request, by its stored
-      classes and by the scan of the final request, unless its effective
-      field map revision is older than a later class change from any source,
-      a raise or a remap to a lower class (A1), in which case it counts as
-      unexamined. Each span's action is the
+      classes and by the scan of the final request, unless a span's
+      classification revision (the revision its classes were computed under,
+      A1, round 22) is older than a later class change from any source, a
+      raise or a remap to a lower class, checked on reopening and before
+      every request, in which case its message counts as unexamined. Each span's action is the
       strictest across every class in its stored set (its field's class
       history and every class a value detector assigned to it when saved),
       recomputed under the rules in force at the follow-up, so a span whose
@@ -1081,8 +1146,8 @@ the IT policy file.
    configuration, and the test fails on it.
 15. Restart regression test for a raise in Settings: a local Chat answer
    restores the name of a Conditional Access policy from a field that is
-   `configuration` at the time, and the answer is saved with the current
-   effective field map revision. The admin then raises that field to
+   `configuration` at the time, and the answer is saved with its span
+   classified under the current effective field map revision. The admin then raises that field to
    `security` in Settings, which changes the revision. The name is later
    gone from the tenant value index, the app restarts, the conversation is
    reopened, and a hosted follow-up is asked with Security on Hosted at
@@ -1234,6 +1299,45 @@ the IT policy file.
    checked on the query as written would refuse the first search, a cap
    that cut the string would send the second, and the test fails on
    either.
+29. Voice session start coverage regression test, default rules: no rule on
+   Hosted is Block, so the strictest action on Hosted is Mask. The test sets
+   the first scan's work budget below the length of the complete
+   instructions, so the first scan examines the fixed lines, the tenant
+   name, the tenant id and the greeting name and stops inside the profile
+   block. No session request is sent and no audio is streamed on that scan.
+   The app builds the fallback without the profile block and rescans it. In
+   a first case the rescan covers the whole fallback and finds nothing
+   blocked: the fake session receives the fallback, which holds no part of
+   the profile, and the popover says the call opened without the profile
+   because part of it could not be examined. In a second case the rescan's
+   budget is also below the fallback's length: the fake session receives no
+   request, no audio is streamed, and "Hosted voice did not start" offers
+   Start the call again and voice on this device. In a third case the first
+   scan stops inside the fixed rules, which the fallback keeps: the fake
+   session receives no request, no audio is streamed, and the same designed
+   state shows. A gate that opened the session on the first scan with the
+   unexamined tail masked one way, Mask being the strictest action on Hosted
+   under the defaults, would send a request, and the test fails on it
+   (renderer test).
+30. Classification revision regression test, a remap between classification
+   and save: a local Chat answer restores the description of a
+   configuration profile from a field mapped `configuration`, and its ledger
+   entry is classed under effective field map revision 41. While the answer
+   streams, the IT policy file maps that field to `security`, which makes
+   revision 42, and the answer is saved after that, so 42 is in force at
+   save. The stored span keeps revision 41, the revision its classes were
+   computed under, and its stored set holds `configuration` only. The
+   description is later gone from the tenant value index, the app restarts,
+   the conversation is reopened, and a hosted follow-up is asked with
+   Security on Hosted at Block. The span's revision 41 is older than 42, so
+   the message counts as unexamined and is withheld, the description
+   reaches no provider request, and the follow-up shows the designed state.
+   Evidence that stored the revision in force at save (42) would read the
+   span as current and `configuration`, which Hosted allows, and send it,
+   and the test fails on it. In a second case the answer is saved with its
+   span classed under revision 42, the conversation is reopened, and only
+   then does a Settings move change a class (revision 43): the check before
+   the next follow-up counts the message as unexamined in the same way.
 
 ### Phase A4: Masking
 
