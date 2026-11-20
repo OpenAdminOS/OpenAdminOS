@@ -85,7 +85,7 @@ PR #213, based on main (merged up to date four times; workstreams A and B+C
 are on origin but not merged, so this PR reads their typed failures by shape
 instead of stacking on them).
 
-Reviews: seventeen rounds of Codex gpt-6.2-sol (high), Muse Wonder Full 1.0
+Reviews: eighteen rounds of Codex gpt-6.2-sol (high), Muse Wonder Full 1.0
 (high; round 1 failed on a transport error, round 12 returned no report) and a
 Claude feature-dev evaluator. Muse and the Claude evaluator found nothing
 blocking from round 2 on. Sol's blocking findings, each fixed with tests:
@@ -119,6 +119,10 @@ blocking from round 2 on. Sol's blocking findings, each fixed with tests:
 - round 17: no blocking finding. Should-fixes from Sol and Muse (one listed
   hosted model check everywhere, per-call model check, multi-tenant
   withdrawal, accept step closing when its provider drops out) are fixed.
+- round 18: no blocking finding. Should-fixes fixed: a policy-supplied
+  model is not counted as reported (`modelsFromPolicy`); a hosted choice
+  falls back to a listed model when the default is not listed, the same in
+  the run review; a refused fit start reads its destination again.
 
 Live check: real Chat service with the local model mocked and the real
 Claude Code CLI (2.1.328, alias `sonnet`, answered as claude-sonnet-5-5).

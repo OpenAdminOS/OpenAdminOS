@@ -2629,7 +2629,8 @@ deployment), and a later phase built for another endpoint fails with nothing
 sent. The run review takes the destination fingerprint when it opens and
 Start passes it (`expectedProviderDestination`); Start stays disabled until
 it is read, a failed read says so in the review, and a change refuses the
-start. Start passes the provider and model the review showed, never one the
+start. A refused start reads the destination again, so Try again sends the
+current one. Start passes the provider and model the review showed, never one the
 host resolves again. A model the choice named that the provider no longer
 lists keeps Start disabled, and the review says so; the host refuses it too. When the chosen provider is not ready and the review opens setup, a
 provider picked there stays on that run: setup does not change the active
@@ -2639,7 +2640,11 @@ from setup opens only its own review, and setup moves on from a provider
 picked for one run only once its full check is done. A hosted provider that
 reports no model, or only a CLI default placeholder such as Gemini's
 `gemini-default`, or only the model a managed policy lock put in its empty
-list (`modelsFromPolicy`: allowed, not reported), is not offered; its review does not start, Try again waits
+list (`modelsFromPolicy`: allowed, not reported), is not offered. A hosted
+choice names its pinned or default model when the provider lists it, else the
+first model the provider lists (a CLI's configured default can be one it does
+not list); Chat, the run page, the run review and the Chat host use that same
+rule. For a hosted provider that cannot be offered, the review does not start, Try again waits
 for the same thing as Start, and the host refuses a hosted model fit rerun (or
 Run for real of one) unless it names a model the provider lists now, since the
 approval names one model. Run for real of a model fit dry run goes only where
