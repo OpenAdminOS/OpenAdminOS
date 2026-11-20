@@ -14,9 +14,9 @@ export interface OllamaShowContext {
 export interface OllamaContextWindowOptions {
   /**
    * True when the app itself sends a larger `num_ctx` for a request that
-   * needs it, as createOllamaLlm does on a context overflow. Then the
-   * model's maximum is the limit. Without it Ollama serves the pinned
-   * `num_ctx` (or its own default), so that size wins.
+   * needs it, as createOllamaLlm does on a context overflow. Then a model
+   * without a pinned `num_ctx` is limited by its maximum rather than the
+   * size Ollama happened to load it with. A pinned `num_ctx` wins either way.
    */
   appRaisesNumCtx?: boolean;
   fetchImpl?: typeof fetch;
@@ -72,9 +72,9 @@ function normalizeModelName(name: string): string {
 
 /**
  * The context window a request to `model` gets from this Ollama server.
- * The pinned `num_ctx` wins while the app cannot raise it; a model without
- * one runs at the size Ollama loaded it with, which /api/ps reports. The
- * trained maximum is the answer only when nothing smaller applies.
+ * A pinned `num_ctx` wins. A model without one is limited by its maximum
+ * when the app raises `num_ctx`, else by the size Ollama loaded it with,
+ * which /api/ps reports, else by its maximum.
  * `undefined` when Ollama does not answer, so the request goes ahead.
  */
 export async function readOllamaContextWindow(
@@ -103,8 +103,11 @@ export async function readOllamaContextWindow(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ model }),
   }));
-  if (options.appRaisesNumCtx) return show.modelMaxContext;
+  // A pinned num_ctx is the model author's choice (OpenAdmin 8B pins the
+  // 16,384 its rope scaling was trained at) and is what the first request
+  // gets, so it is the limit even where the app could raise num_ctx.
   if (show.pinnedNumCtx !== undefined) return Math.min(show.pinnedNumCtx, show.modelMaxContext ?? Infinity);
+  if (options.appRaisesNumCtx) return show.modelMaxContext;
   const loaded = parseOllamaLoadedContext(await call("/api/ps", { method: "GET" }), model);
   return loaded ?? show.modelMaxContext;
 }

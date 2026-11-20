@@ -71,7 +71,8 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
     available: true,
     defaultModel,
     streamsIncrementally: true,
-    // The retry below raises num_ctx up to the model's maximum, so that maximum is the limit.
+    // The retry below raises num_ctx for a model without a pinned one, so
+    // that model's maximum is its limit; a pinned num_ctx is the limit.
     contextWindow: (model) => readOllamaContextWindow(endpoint, model ?? defaultModel, { appRaisesNumCtx: true }),
     async complete(opts: LlmOptions): Promise<LlmCompletion> {
       let last: LlmStreamChunk | undefined;

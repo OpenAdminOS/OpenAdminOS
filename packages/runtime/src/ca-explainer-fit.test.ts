@@ -13,6 +13,7 @@ import {
 
 import { checkPromptFit, estimateTokens } from "./prompt-fit.js";
 import { createQueuedRun, executeRun } from "./index.js";
+import { createOllamaLlm } from "./llm-ollama.js";
 import { syntheticConditionalAccessPolicies } from "./test-fixtures/conditional-access.js";
 
 const LOCAL_CONTEXT = 16_384;
@@ -161,5 +162,47 @@ describe("Conditional Access explainer prompt size", () => {
     });
     assert.equal(result.status, "completed", result.error);
     assert.equal(sent.length, 1);
+  });
+
+  it("through the real Ollama adapter, never sends an oversized request to /api/chat", async () => {
+    // Mocked Ollama: the /api/show shape OpenAdmin 8B returns, and a chat
+    // endpoint that records every call. No local model is involved.
+    const chats: unknown[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/api/show") {
+        return new Response(JSON.stringify({
+          parameters: "num_ctx                        16384\ntemperature                    0.2",
+          model_info: { "general.architecture": "mistral3", "mistral3.context_length": 262144, "mistral3.rope.scaling.original_context_length": 16384 },
+        }), { status: 200 });
+      }
+      if (path === "/api/chat") {
+        chats.push(JSON.parse(String(init?.body)));
+        return new Response(`${JSON.stringify({ model: "openadminos/openadmin-8b:latest", message: { content: "Review" }, done: true })}\n`, { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    }) as typeof fetch;
+    try {
+      const run = async (count: number) => executeRun({
+        run: createQueuedRun({ agent, providerId: "ollama" }),
+        agent,
+        providerId: "ollama",
+        llm: createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "openadminos/openadmin-8b:latest" }),
+        createGraph: () => graphReturning(syntheticConditionalAccessPolicies(count)),
+        onProgress: () => {},
+      });
+      const large = await run(250);
+      assert.equal(chats.length, 0, "an oversized request reached /api/chat");
+      assert.equal(large.status, "failed");
+      assert.equal(large.failureReason?.code, "context-too-small");
+      assert.equal(large.failureReason?.limitTokens, 16_384);
+
+      const fits = await run(33);
+      assert.equal(fits.status, "completed", fits.error);
+      assert.equal(chats.length, 1);
+    } finally {
+      globalThis.fetch = original;
+    }
   });
 });

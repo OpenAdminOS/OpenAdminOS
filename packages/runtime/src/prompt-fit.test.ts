@@ -137,9 +137,13 @@ describe("Ollama context window", () => {
     assert.equal(window, 16384);
   });
 
-  it("uses the model maximum when the app raises num_ctx", async () => {
-    const window = await readOllamaContextWindow("http://127.0.0.1:11434", "m", { appRaisesNumCtx: true, fetchImpl: fakeFetch({ "/api/show": SHOW }) });
-    assert.equal(window, 262144);
+  it("keeps the pinned num_ctx when the app raises num_ctx, and uses the maximum only for an unpinned model", async () => {
+    const pinned = await readOllamaContextWindow("http://127.0.0.1:11434", "m", { appRaisesNumCtx: true, fetchImpl: fakeFetch({ "/api/show": SHOW }) });
+    assert.equal(pinned, 16384);
+    const unpinned = { model_info: SHOW.model_info };
+    const ps = { models: [{ name: "m:latest", context_length: 4096 }] };
+    const raised = await readOllamaContextWindow("http://127.0.0.1:11434", "m", { appRaisesNumCtx: true, fetchImpl: fakeFetch({ "/api/show": unpinned, "/api/ps": ps }) });
+    assert.equal(raised, 262144);
   });
 
   it("uses the loaded size for a model without a pinned num_ctx", async () => {
@@ -149,11 +153,13 @@ describe("Ollama context window", () => {
     assert.equal(await readOllamaContextWindow("http://127.0.0.1:11434", "gpt-oss:20b", { fetchImpl: fakeFetch({ "/api/show": show }) }), 131072);
   });
 
-  it("the Ollama adapter reports the model maximum, because it raises num_ctx on an overflow", async () => {
+  it("the Ollama adapter reports a pinned num_ctx, and an unpinned model's maximum because it raises num_ctx", async () => {
     const original = globalThis.fetch;
-    globalThis.fetch = fakeFetch({ "/api/show": SHOW });
     try {
+      globalThis.fetch = fakeFetch({ "/api/show": SHOW });
       const llm = createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "openadminos/openadmin-8b" });
+      assert.equal(await llm.contextWindow?.(), 16384);
+      globalThis.fetch = fakeFetch({ "/api/show": { model_info: SHOW.model_info }, "/api/ps": { models: [{ name: "openadminos/openadmin-8b:latest", context_length: 4096 }] } });
       assert.equal(await llm.contextWindow?.(), 262144);
     } finally {
       globalThis.fetch = original;
