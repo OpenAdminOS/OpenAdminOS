@@ -1631,4 +1631,19 @@ describe("Ollama context for an unpinned model", () => {
       globalThis.fetch = original;
     }
   });
+
+  it("gives an agent run the typed reason for an overflow Ollama reports mid-stream", async () => {
+    const original = globalThis.fetch;
+    const ollama = scripted({ showBody: unpinned });
+    ollama.handlers.push(() => new Response(`${JSON.stringify({ error: "request (9000 tokens) exceeds the available context size (8192 tokens), try increasing it" })}\n`, { status: 200 }));
+    globalThis.fetch = ollama.fetchImpl;
+    try {
+      await assert.rejects(
+        createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "mid-stream" }).complete({ prompt: words(5000), maxTokens: 1000, enforceContextWindow: true }),
+        (error: unknown) => error instanceof ContextTooSmallError && error.failure.sentToProvider === true && error.failure.limitTokens === 8192,
+      );
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
 });

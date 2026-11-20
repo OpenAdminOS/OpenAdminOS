@@ -86,16 +86,16 @@ function normalizeModelName(name: string): string {
 const keptRevisions = new Map<string, string>();
 const revisionKey = (endpoint: string, model: string) => `${endpoint.replace(/\/$/, "")}\0${model}`;
 
-/**
- * Keep a size that worked, together with the model revision the lookup that
- * chose it saw. A request that finishes after the model was created again
- * keeps its size under the revision it was sized for, never the newer one.
- */
 /** The revision a kept size belongs to, read with the size at request start. */
 export function keptOllamaRevision(endpoint: string, model: string): string | undefined {
   return keptRevisions.get(revisionKey(endpoint, model));
 }
 
+/**
+ * Keep a size that worked, together with the model revision the lookup that
+ * chose it saw. A request that finishes after the model was created again
+ * keeps its size under the revision it was sized for, never the newer one.
+ */
 export function keepOllamaSize(
   overrides: Map<string, number>,
   cacheKey: string,
