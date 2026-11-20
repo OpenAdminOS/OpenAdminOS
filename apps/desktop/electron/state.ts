@@ -2435,6 +2435,7 @@ export class AppStateStore {
    */
   markLocalResetCommitted(): void {
     this.localResetCommitted = true;
+    this.auditLog.freezeSideFiles();
   }
 
   async closeAllTenantWork(): Promise<void> {

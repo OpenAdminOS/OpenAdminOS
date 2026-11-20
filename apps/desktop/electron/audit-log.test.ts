@@ -597,3 +597,22 @@ describe("Graph write results the audit log could not record", () => {
     store.close();
   });
 });
+
+describe("audit log during a reset", () => {
+  it("writes no side file once the reset froze them, so a restored sidecar stays as it is", async () => {
+    await withDatabase((path) => {
+      const log = new AuditLogStore(path);
+      // Results kept in memory only, as after a storage error.
+      const internals = log as unknown as { pending: AuditLogEventSeed[]; pendingOnDisk: boolean };
+      internals.pending = [event("kept-in-memory")];
+      internals.pendingOnDisk = false;
+      log.freezeSideFiles();
+      // A restore puts another profile's sidecars at the same paths.
+      writeFileSync(`${path}-audit-pending.json`, "restored pending\n");
+      writeFileSync(`${path}-audit-anchor.json`, "restored anchor\n");
+      log.close();
+      assert.equal(readFileSync(`${path}-audit-pending.json`, "utf8"), "restored pending\n");
+      assert.equal(readFileSync(`${path}-audit-anchor.json`, "utf8"), "restored anchor\n");
+    });
+  });
+});

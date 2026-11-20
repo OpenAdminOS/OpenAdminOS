@@ -217,6 +217,18 @@ export class AuditLogStore {
     this.loadPending();
   }
 
+  /**
+   * Reset OpenAdminOS committed: the side files (anchor and pending file)
+   * are written by path, and the folder at that path may no longer be the
+   * one being reset, so they are not written again. The reset removes the
+   * whole log, so events held in memory only are dropped with it.
+   */
+  freezeSideFiles(): void {
+    this.sideFilesFrozen = true;
+  }
+
+  private sideFilesFrozen = false;
+
   /** Tries once more to save results only in memory, then closes the database. */
   close(): void {
     if (this.closed) return;
@@ -552,7 +564,7 @@ export class AuditLogStore {
    * once the admin has moved it away, the next try writes a new one.
    */
   private persistPending(): void {
-    if (!this.pendingPath) return;
+    if (!this.pendingPath || this.sideFilesFrozen) return;
     if (this.pendingUnreadable) {
       if (existsSync(this.pendingPath)) {
         this.pendingOnDisk = this.pending.length === 0;
@@ -596,7 +608,7 @@ export class AuditLogStore {
    * removed, which an empty table stays chained to.
    */
   private writeAnchor(emptiedAfter?: string): void {
-    if (!this.anchorPath) return;
+    if (!this.anchorPath || this.sideFilesFrozen) return;
     const first = this.db.prepare("SELECT seq, previous_sha256 FROM audit_log ORDER BY seq ASC LIMIT 1").get() as { seq: number; previous_sha256: string } | undefined;
     const last = this.db.prepare("SELECT seq, sha256 FROM audit_log ORDER BY seq DESC LIMIT 1").get() as { seq: number; sha256: string } | undefined;
     const empty = emptiedAfter ?? AUDIT_CHAIN_START_HASH;
