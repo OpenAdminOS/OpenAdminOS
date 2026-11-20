@@ -28,15 +28,18 @@ function positive(value: unknown): number | undefined {
 /**
  * A typed failure from the runtime, read by its shape so this module does
  * not depend on one class: `kind` or `code` names the reason, with the
- * numbers as `neededTokens`/`limitTokens` or `needed`/`limit`.
+ * numbers as `neededTokens`/`limitTokens` or `needed`/`limit`, on the error
+ * or on its `failure` record (the agent runtime's prompt fit check), and
+ * through `cause` when a wrapper adds context to the message.
  */
-function typedIssue(error: unknown): Omit<ModelFitIssue, "providerId" | "model"> | undefined {
-  if (!error || typeof error !== "object") return undefined;
-  const record = error as Record<string, unknown>;
+function typedIssue(error: unknown, depth = 0): Omit<ModelFitIssue, "providerId" | "model"> | undefined {
+  if (!error || typeof error !== "object" || depth > 4) return undefined;
+  const outer = error as Record<string, unknown>;
+  const record = outer.failure && typeof outer.failure === "object" ? { ...(outer.failure as Record<string, unknown>), code: outer.code ?? (outer.failure as Record<string, unknown>).code } : outer;
   const reason = [record.kind, record.code, record.reason].find(
     (value): value is ModelFitReason => typeof value === "string" && (FIT_REASONS as readonly string[]).includes(value),
   );
-  if (!reason || reason === "repeated-failure") return undefined;
+  if (!reason || reason === "repeated-failure") return typedIssue(outer.cause, depth + 1);
   const neededTokens = positive(record.neededTokens) ?? positive(record.needed);
   const limitTokens = positive(record.limitTokens) ?? positive(record.limit);
   return {
@@ -63,6 +66,17 @@ function contextIssueFromText(text: string): Omit<ModelFitIssue, "providerId" | 
       ...(neededTokens ? { neededTokens } : {}),
       ...(limitTokens ? { limitTokens } : {}),
       ...(modelMax ? { limitIsModelMax: true as const } : {}),
+    };
+  }
+  // The adapter could not load the model with the larger context it asked for, usually for lack of memory.
+  const memory = /context size too small: This request needs ([\d,]+) tokens of context, but Ollama could not load .+? with ([\d,]+), usually/i.exec(text);
+  if (memory) {
+    const neededTokens = count(memory[1]);
+    const limitTokens = count(memory[2]);
+    return {
+      reason: "context-too-small",
+      ...(neededTokens ? { neededTokens } : {}),
+      ...(limitTokens ? { limitTokens, limitIsMemory: true as const } : {}),
     };
   }
   // Ollama's HTTP 400 for a prompt larger than the loaded context.

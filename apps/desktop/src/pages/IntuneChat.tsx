@@ -157,6 +157,8 @@ type ModelFitOffer = {
   /** The provider and model active when the offer was made; a change withdraws it. */
   activeProviderId: ProviderId;
   activeModel?: string;
+  /** Chat answered from cached data already (a fallback), so the offer is to ask again. */
+  answered?: boolean;
   /** The workspace selection the request was sent with; the host binds the offer to it. */
   workspaceContext?: WorkspacePromptContextInput;
   workspaceContextSummary?: WorkspacePromptContextSummary;
@@ -1102,6 +1104,7 @@ function IntuneChatContent() {
                 ...(sendTenantId ? { tenantId: sendTenantId } : {}),
                 activeProviderId: provider?.id ?? state.activeProviderId,
                 ...(activeModel ? { activeModel } : {}),
+                ...(event.type === "completed" ? { answered: true } : {}),
                 ...(workspaceContext ? { workspaceContext } : {}),
                 ...(workspaceContext && (workspaceSummary ?? workspaceContextSummary) ? { workspaceContextSummary: workspaceSummary ?? workspaceContextSummary } : {}),
               });
@@ -1276,7 +1279,7 @@ function IntuneChatContent() {
     setModelFitOffer(null);
     setModelFitAccept(null);
     if (!offer) return;
-    if (offer.issue.reason !== "repeated-failure") {
+    if (!offer.answered) {
       setInput(offer.content);
       setNotice(next === "split" ? MODEL_FIT_COPY.splitNotice : MODEL_FIT_COPY.declined(modelFitReturnModel(offer)));
     }
@@ -1858,6 +1861,7 @@ function IntuneChatContent() {
         })}
         surface="chat"
         returnModel={modelFitReturnModel(modelFitOffer)}
+        answered={modelFitOffer.answered === true}
         onChoose={(choice) => chooseModelFit(modelFitOffer, choice)}
         onSplit={() => closeModelFit("split")}
         onKeep={() => closeModelFit("keep")}

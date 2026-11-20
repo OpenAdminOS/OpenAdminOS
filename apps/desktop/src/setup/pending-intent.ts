@@ -154,7 +154,8 @@ function isModelFitIssue(value: unknown): value is ModelFitIssue {
     count(value.neededTokens) &&
     count(value.limitTokens) &&
     (value.limitIsModelMax === undefined || value.limitIsModelMax === true) &&
-    onlyKnownKeys(value, ["reason", "providerId", "model", "neededTokens", "limitTokens", "limitIsModelMax"])
+    (value.limitIsMemory === undefined || value.limitIsMemory === true) &&
+    onlyKnownKeys(value, ["reason", "providerId", "model", "neededTokens", "limitTokens", "limitIsModelMax", "limitIsMemory"])
   );
 }
 

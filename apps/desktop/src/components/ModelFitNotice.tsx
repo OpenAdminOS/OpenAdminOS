@@ -28,7 +28,10 @@ export function ModelFitNotice({
   onKeep,
   onOpenProviders,
   returnModel,
+  answered: answeredProp,
 }: {
+  /** Chat answered from cached data already; the offer asks again instead of retrying a failure. */
+  answered?: boolean;
   /** The active model Chat stays on; defaults to the model that failed. */
   returnModel?: string;
   issue: ModelFitIssue;
@@ -42,7 +45,7 @@ export function ModelFitNotice({
 }) {
   const titleId = useId();
   const model = modelFitModelName(issue);
-  const answered = issue.reason === "repeated-failure";
+  const answered = answeredProp ?? issue.reason === "repeated-failure";
   const rows = [...choices.hosted, ...choices.local];
   return (
     <section
@@ -62,7 +65,7 @@ export function ModelFitNotice({
       {answered ? null : <p className="mt-1 text-xs text-[var(--color-text-muted)]">{MODEL_FIT_COPY.nothingSent}</p>}
       {rows.length > 0 ? (
         <>
-          <div className="mb-1.5 mt-3.5 text-xs text-[var(--color-text-muted)]">{MODEL_FIT_COPY.groupLabel(issue, surface)}</div>
+          <div className="mb-1.5 mt-3.5 text-xs text-[var(--color-text-muted)]">{MODEL_FIT_COPY.groupLabel(issue, surface, answered)}</div>
           <ul className="divide-y divide-[var(--color-border)] overflow-hidden rounded-lg ring-1 ring-[var(--color-border)]">
             {rows.map((choice) => {
               const tool = PROVIDER_TOOL_NAMES[choice.providerId] ?? choice.providerName;

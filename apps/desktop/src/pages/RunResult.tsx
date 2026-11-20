@@ -133,7 +133,11 @@ function RunResultPage({ run }: { run: RunRecord }) {
   // (mockup 36, section F). Team runs keep their own review in Agent Team.
   const modelFit =
     run.status === "failed" && !isSystemRun && !run.officeContext && run.providerId && runProvider
-      ? classifyModelFitFailure(run.error, { providerId: run.providerId, model: run.model, isLocal: runProvider.isLocal })
+      ? classifyModelFitFailure(
+          // A typed reason from the runtime's prompt fit check comes first, the error text after.
+          (run as { failureReason?: unknown }).failureReason ?? run.error,
+          { providerId: run.providerId, model: run.model, isLocal: runProvider.isLocal },
+        ) ?? classifyModelFitFailure(run.error, { providerId: run.providerId, model: run.model, isLocal: runProvider.isLocal })
       : undefined;
   const fitChoices = modelFit
     ? modelFitChoices({ issue: modelFit, providers: state.providers, activeModelByProviderId: state.activeModelByProviderId, managedPolicy: state.managedPolicy })

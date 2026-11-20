@@ -29,6 +29,9 @@ export const MODEL_FIT_COPY = {
     if (issue.reason === "thinking-only") return `${model} spent its whole answer budget on reasoning.`;
     const what = `This ${noun(surface)}`;
     const limitVerb = issue.limitIsModelMax ? "supports at most" : "is set to";
+    if (issue.neededTokens && issue.limitTokens && issue.limitIsMemory) {
+      return `${what} needs about ${tokens(issue.neededTokens)} tokens. ${model} could not load with ${tokens(issue.limitTokens)} on this device, usually because free memory ran out.`;
+    }
     if (issue.neededTokens && issue.limitTokens && issue.neededTokens < issue.limitTokens) {
       // The count is the prompt alone (Apple Foundation): it fits, but leaves no room for an answer.
       return `${what} uses about ${tokens(issue.neededTokens)} of the ${tokens(issue.limitTokens)} tokens ${model} ${limitVerb}, which leaves too little room for an answer.`;
@@ -41,9 +44,10 @@ export const MODEL_FIT_COPY = {
     return `${what} is larger than the context ${model} is set to.`;
   },
   nothingSent: "Nothing was sent to another provider.",
-  groupLabel(issue: ModelFitIssue, surface: Surface): string {
+  /** `answered`: Chat already answered from cached data, so the offer asks again. */
+  groupLabel(issue: ModelFitIssue, surface: Surface, answered = issue.reason === "repeated-failure"): string {
     if (surface === "run") return "Run again with";
-    return issue.reason === "repeated-failure" ? "Ask this again with" : "Run this one request with";
+    return answered ? "Ask this again with" : "Run this one request with";
   },
   runWith: (tool: string) => `Run with ${tool}`,
   useLocal: (model: string) => `Use ${model}`,
