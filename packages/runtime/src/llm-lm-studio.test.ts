@@ -1,9 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
 
 import {
   classifyLmStudioEndpoint,
   createLmStudioLlm,
+  parseLmStudioContextOverflow,
   probeLmStudioLlm,
 } from "./llm-lm-studio.js";
 
@@ -161,3 +164,526 @@ function jsonResponse(body: unknown): Response {
     headers: { "content-type": "application/json" },
   });
 }
+
+interface FakeRequest {
+  method: string;
+  url: string;
+  body: string;
+}
+
+interface FakeLmStudio {
+  endpoint: string;
+  requests: FakeRequest[];
+  close: () => Promise<void>;
+}
+
+/** A local HTTP server standing in for LM Studio; `handle` answers each request. */
+async function fakeLmStudio(
+  handle: (req: FakeRequest, res: ServerResponse) => void,
+): Promise<FakeLmStudio> {
+  const requests: FakeRequest[] = [];
+  const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+    let body = "";
+    req.on("data", (part) => (body += part));
+    req.on("end", () => {
+      const entry = { method: req.method ?? "", url: req.url ?? "", body };
+      requests.push(entry);
+      handle(entry, res);
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  return {
+    endpoint: `http://127.0.0.1:${port}/v1`,
+    requests,
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
+  };
+}
+
+function sendJson(res: ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, { "content-type": "application/json" });
+  res.end(JSON.stringify(body));
+}
+
+const OLD_OVERFLOW =
+  "<LM Studio error> Trying to keep the first 15857 tokens when context the overflows. However, the model is loaded with context length of only 4096 tokens, which is not enough. Try to load the model with a larger context length, or provide a shorter input. Error Data: n/a, Additional Data: n/a";
+const NEW_OVERFLOW =
+  "The number of tokens to keep from the initial prompt is greater than the context length. Try to load the model with a larger context length, or provide a shorter input. Error Data: n/a, Additional Data: n/a";
+
+function v1Models(model: string, loaded: number, max: number) {
+  return {
+    models: [
+      { type: "llm", key: "other/model", loaded_instances: [], max_context_length: 8192 },
+      {
+        type: "llm",
+        key: model,
+        loaded_instances: [{ id: model, config: { context_length: loaded, eval_batch_size: 512 } }],
+        max_context_length: max,
+      },
+    ],
+  };
+}
+
+describe("LM Studio context length too small", () => {
+  const collect = async (llm: ReturnType<typeof createLmStudioLlm>, opts: Parameters<typeof llm.complete>[0]) => {
+    let text = "";
+    for await (const chunk of llm.stream!(opts)) text = chunk.accumulated;
+    return text;
+  };
+
+  it("sends a request that fits unchanged and makes no other call", async () => {
+    const server = await fakeLmStudio((req, res) => {
+      const body = JSON.parse(req.body) as { stream: boolean };
+      if (body.stream) {
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.end('data: {"model":"qwen3-8b","choices":[{"delta":{"content":"OK"}}]}\n\ndata: [DONE]\n\n');
+        return;
+      }
+      sendJson(res, 200, { model: "qwen3-8b", choices: [{ message: { content: "OK" } }] });
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b" });
+      assert.equal((await llm.complete({ prompt: "hi", system: "sys", maxTokens: 64 })).text, "OK");
+      assert.equal(await collect(llm, { prompt: "hi", maxTokens: 64 }), "OK");
+      assert.deepEqual(server.requests.map((r) => `${r.method} ${r.url}`), ["POST /v1/chat/completions", "POST /v1/chat/completions"]);
+      assert.deepEqual(JSON.parse(server.requests[0]!.body), {
+        model: "qwen3-8b",
+        messages: [{ role: "system", content: "sys" }, { role: "user", content: "hi" }],
+        stream: false,
+        max_tokens: 64,
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("names both token counts and the size to load with, from the 0.3 error", async () => {
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url === "/api/v1/models") return sendJson(res, 200, v1Models("qwen3-8b", 4096, 32768));
+      sendJson(res, 400, { error: OLD_OVERFLOW });
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b" });
+      await assert.rejects(llm.complete({ prompt: "big" }), (error: Error) => {
+        assert.match(error.message, /^LM Studio context length too small: This request needs 15,857 tokens of context, but qwen3-8b is loaded in LM Studio with a context length of 4,096\./);
+        assert.match(error.message, /Raise Context Length to at least 20,480 \(qwen3-8b supports up to 32,768\)/);
+        assert.match(error.message, /in the model's load settings in LM Studio \(My Models, or the loaded model in the Developer tab\) and reload it, then re-run\./);
+        assert.doesNotMatch(error.message, /lms (un)?load/);
+        assert.match(error.message, /LM Studio said: <LM Studio error> Trying to keep the first 15857 tokens/);
+        return true;
+      });
+      // Only reads: OpenAdminOS never loads, unloads or reloads the model.
+      assert.deepEqual(server.requests.map((r) => `${r.method} ${r.url}`), ["POST /v1/chat/completions", "GET /api/v1/models"]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("uses the caller's answer limit for the suggested size, capped at the model's limit", async () => {
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url === "/api/v1/models") return sendJson(res, 200, v1Models("qwen3-8b", 4096, 16384));
+      sendJson(res, 400, { error: OLD_OVERFLOW });
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b" });
+      await assert.rejects(llm.complete({ prompt: "big", maxTokens: 512 }), (error: Error) => {
+        assert.match(error.message, /Raise Context Length to at least 16,384 \(qwen3-8b supports up to 16,384\)/);
+        assert.doesNotMatch(error.message, /tokens for the answer/);
+        return true;
+      });
+      // Without a caller limit, 15,857 plus the 4,096 answer reserve is above the model's limit.
+      await assert.rejects(llm.complete({ prompt: "big" }), /Raise Context Length to at least 16,384 .* That leaves 527 tokens for the answer\./);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("reads the loaded size from /api/v1/models when the 0.4 error has no counts", async () => {
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url === "/api/v1/models") return sendJson(res, 200, v1Models("qwen3-8b", 8192, 40960));
+      sendJson(res, 400, { error: { message: NEW_OVERFLOW } });
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b" });
+      await assert.rejects(llm.complete({ prompt: "big" }), (error: Error) => {
+        assert.match(error.message, /^LM Studio context length too small: This request does not fit in the 8,192 tokens of context qwen3-8b is loaded with in LM Studio\./);
+        assert.match(error.message, /Raise Context Length \(qwen3-8b supports up to 40,960\)/);
+        assert.doesNotMatch(error.message, /lms (un)?load/);
+        return true;
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("falls back to /api/v0/models/{model} on a server without the v1 REST API", async () => {
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url === "/api/v1/models") return sendJson(res, 404, { error: "Unexpected endpoint" });
+      if (req.url === "/api/v0/models/qwen%2Fqwen3-8b") {
+        return sendJson(res, 200, { id: "qwen/qwen3-8b", state: "loaded", loaded_context_length: 4096, max_context_length: 32768 });
+      }
+      sendJson(res, 400, { error: { message: NEW_OVERFLOW } });
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen/qwen3-8b" });
+      await assert.rejects(llm.complete({ prompt: "big" }), /does not fit in the 4,096 tokens of context qwen\/qwen3-8b is loaded with in LM Studio\. Raise Context Length \(qwen\/qwen3-8b supports up to 32,768\)/);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("reads the loaded size of the instance the request named", async () => {
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url === "/api/v1/models") {
+        return sendJson(res, 200, {
+          models: [{ type: "llm", key: "qwen3-8b", loaded_instances: [{ id: "qwen3-8b", config: { context_length: 32768 } }, { id: "qwen3-8b:2", config: { context_length: 4096 } }], max_context_length: 32768 }],
+        });
+      }
+      sendJson(res, 400, { error: OLD_OVERFLOW });
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b:2" });
+      await assert.rejects(llm.complete({ prompt: "big" }), (error: Error) => {
+        assert.match(error.message, /but qwen3-8b:2 is loaded in LM Studio with a context length of 4,096/);
+        assert.doesNotMatch(error.message, /lms (un)?load/);
+        return true;
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("asks /api/v0 when /api/v1 lists the model without its loaded size", async () => {
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url === "/api/v1/models") {
+        return sendJson(res, 200, { models: [{ type: "llm", key: "qwen3-8b", loaded_instances: [{ id: "qwen3-8b", config: {} }], max_context_length: 40960 }] });
+      }
+      if (req.url === "/api/v0/models/qwen3-8b") return sendJson(res, 200, { id: "qwen3-8b", loaded_context_length: 8192 });
+      sendJson(res, 400, { error: { message: NEW_OVERFLOW } });
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b" });
+      await assert.rejects(llm.complete({ prompt: "big" }), /does not fit in the 8,192 tokens of context qwen3-8b is loaded with in LM Studio\. Raise Context Length \(qwen3-8b supports up to 40,960\)/);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("does not guess between several loaded instances of the requested key", async () => {
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url === "/api/v1/models") {
+        return sendJson(res, 200, {
+          models: [{ type: "llm", key: "qwen3-8b", loaded_instances: [{ id: "qwen3-8b:2", config: { context_length: 4096 } }, { id: "qwen3-8b:3", config: { context_length: 32768 } }], max_context_length: 32768 }],
+        });
+      }
+      // v0 answers for the key, but cannot say which instance failed.
+      if (req.url === "/api/v0/models/qwen3-8b") return sendJson(res, 200, { id: "qwen3-8b", state: "loaded", loaded_context_length: 32768, max_context_length: 32768 });
+      sendJson(res, 400, { error: { message: NEW_OVERFLOW } });
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b" });
+      await assert.rejects(llm.complete({ prompt: "big" }), /does not fit in the context length qwen3-8b is loaded with in LM Studio\. Raise Context Length \(qwen3-8b supports up to 32,768\)/);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("keeps the model's limit when several instances leave the loaded size unknown", async () => {
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url === "/api/v1/models") {
+        return sendJson(res, 200, {
+          models: [{ type: "llm", key: "qwen3-8b", loaded_instances: [{ id: "qwen3-8b:2", config: { context_length: 4096 } }, { id: "qwen3-8b:3", config: { context_length: 4096 } }], max_context_length: 8192 }],
+        });
+      }
+      if (req.url?.startsWith("/api/v0/")) return sendJson(res, 404, { error: "Model not found" });
+      sendJson(res, 400, { error: OLD_OVERFLOW });
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b" });
+      await assert.rejects(llm.complete({ prompt: "big" }), (error: Error) => {
+        assert.match(error.message, /qwen3-8b supports at most 8,192, so narrow the request/);
+        assert.doesNotMatch(error.message, /20,480/);
+        return true;
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("ignores a loaded size /api/v0 reports for a model that is not loaded", async () => {
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url === "/api/v1/models") return sendJson(res, 404, { error: "Unexpected endpoint" });
+      if (req.url === "/api/v0/models/qwen3-8b") return sendJson(res, 200, { id: "qwen3-8b", state: "not-loaded", loaded_context_length: 2048, max_context_length: 32768 });
+      sendJson(res, 400, { error: { message: NEW_OVERFLOW } });
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b" });
+      await assert.rejects(llm.complete({ prompt: "big" }), (error: Error) => {
+        assert.doesNotMatch(error.message, /2,048/);
+        assert.match(error.message, /qwen3-8b supports up to 32,768/);
+        return true;
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("gives only the load settings steps when LM Studio reports no sizes", async () => {
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url?.startsWith("/api/")) return sendJson(res, 404, { error: "Unexpected endpoint" });
+      sendJson(res, 400, { error: OLD_OVERFLOW });
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b:2" });
+      await assert.rejects(llm.complete({ prompt: "big" }), (error: Error) => {
+        assert.match(error.message, /Raise Context Length to at least 20,480 if the model supports that many in the model's load settings in LM Studio \(My Models, or the loaded model in the Developer tab\) and reload it, then re-run\./);
+        assert.doesNotMatch(error.message, /lms (un)?load/);
+        return true;
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("never puts a model identifier into a shell command", async () => {
+    for (const id of ["QA model", "qwen;rm -rf ~", "$(id)"]) {
+      const server = await fakeLmStudio((req, res) => {
+        if (req.url === "/api/v1/models") return sendJson(res, 200, v1Models(id, 4096, 32768));
+        sendJson(res, 400, { error: OLD_OVERFLOW });
+      });
+      try {
+        const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: id });
+        await assert.rejects(llm.complete({ prompt: "big" }), (error: Error) => {
+          assert.match(error.message, /Raise Context Length to at least 20,480/);
+          assert.doesNotMatch(error.message, /lms (un)?load/);
+          return true;
+        });
+      } finally {
+        await server.close();
+      }
+    }
+  });
+
+  it("keeps the shorter-input fallback when LM Studio refuses or ignores a larger size", async () => {
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url === "/api/v1/models") return sendJson(res, 200, v1Models("qwen3-8b", 4096, 32768));
+      sendJson(res, 400, { error: OLD_OVERFLOW });
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b" });
+      await assert.rejects(llm.complete({ prompt: "big" }), /If LM Studio refuses the larger size or keeps the smaller one, narrow the request or pick a model with a larger context window\./);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("keeps the default answer room when the caller sets no answer limit (-1)", async () => {
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url === "/api/v1/models") return sendJson(res, 200, v1Models("qwen3-8b", 4096, 32768));
+      sendJson(res, 400, { error: OLD_OVERFLOW.replace("15857", "8193") });
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b" });
+      await assert.rejects(llm.complete({ prompt: "big", maxTokens: -1 }), /This request needs 8,193 tokens of context.* Raise Context Length to at least 13,312 /);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("treats a request equal to the model's limit as not fitting", async () => {
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url === "/api/v1/models") return sendJson(res, 200, v1Models("qwen3-8b", 4096, 8192));
+      sendJson(res, 400, { error: { message: "The number of tokens to keep from the initial prompt is greater than the context length (n_keep: 8192 >= n_ctx: 4096)." } });
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b" });
+      await assert.rejects(llm.complete({ prompt: "big" }), (error: Error) => {
+        assert.match(error.message, /qwen3-8b supports at most 8,192, so narrow the request/);
+        assert.doesNotMatch(error.message, /Raise Context Length/);
+        return true;
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("says the suggested size is subject to the model's limit when LM Studio does not report it", async () => {
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url?.startsWith("/api/")) return sendJson(res, 404, { error: "Unexpected endpoint" });
+      sendJson(res, 400, { error: OLD_OVERFLOW });
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b" });
+      await assert.rejects(llm.complete({ prompt: "big" }), /Raise Context Length to at least 20,480 if the model supports that many in the model's load settings/);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("reads the sizes for an endpoint on LM Studio's REST v0 base", async () => {
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url === "/api/v1/models") return sendJson(res, 404, { error: "Unexpected endpoint" });
+      if (req.url === "/api/v0/models/qwen3-8b") return sendJson(res, 200, { id: "qwen3-8b", state: "loaded", loaded_context_length: 4096, max_context_length: 32768 });
+      assert.equal(req.url, "/api/v0/chat/completions");
+      sendJson(res, 400, { error: { message: NEW_OVERFLOW } });
+    });
+    try {
+      const endpoint = server.endpoint.replace(/\/v1$/, "/api/v0");
+      const llm = createLmStudioLlm({ endpoint, defaultModel: "qwen3-8b" });
+      await assert.rejects(llm.complete({ prompt: "big" }), /does not fit in the 4,096 tokens of context qwen3-8b is loaded with in LM Studio\. Raise Context Length \(qwen3-8b supports up to 32,768\)/);
+    } finally {
+      await server.close();
+    }
+  });
+
+  // A synthetic stream: LM Studio issue #2256 shows these counts only in its
+  // own log, so this checks the parsing when a server does send them.
+  it("reads the counts from an error sent inside the stream", async () => {
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url === "/api/v1/models") return sendJson(res, 200, v1Models("qwen3-8b", 8192, 32768));
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.end(`data: ${JSON.stringify({ error: { message: "The number of tokens to keep from the initial prompt is greater than the context length (n_keep: 8485 >= n_ctx: 8192). Try to load the model with a larger context length, or provide a shorter input." } })}\n\n`);
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b" });
+      await assert.rejects(collect(llm, { prompt: "big" }), /This request needs 8,485 tokens of context, but qwen3-8b is loaded in LM Studio with a context length of 8,192\. Raise Context Length to at least 13,312/);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("reads llama.cpp's own overflow wording sent inside the stream", async () => {
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url === "/api/v1/models") return sendJson(res, 200, v1Models("qwen3-8b", 104192, 131072));
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.end(`data: ${JSON.stringify({ error: { message: "request (106724 tokens) exceeds the available context size (104192 tokens), try increasing it" } })}\n\n`);
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b" });
+      await assert.rejects(collect(llm, { prompt: "big" }), /This request needs 106,724 tokens of context, but qwen3-8b is loaded in LM Studio with a context length of 104,192\. Raise Context Length to at least 111,616 \(qwen3-8b supports up to 131,072\)/);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("reads a streamed request's HTTP 400 overflow", async () => {
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url === "/api/v1/models") return sendJson(res, 200, v1Models("qwen3-8b", 4096, 32768));
+      sendJson(res, 400, { error: OLD_OVERFLOW });
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b" });
+      await assert.rejects(collect(llm, { prompt: "big" }), /This request needs 15,857 tokens of context/);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("says the model's limit is the problem when the request is larger than it", async () => {
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url === "/api/v1/models") return sendJson(res, 200, v1Models("qwen3-8b", 4096, 8192));
+      sendJson(res, 400, { error: OLD_OVERFLOW });
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b" });
+      await assert.rejects(llm.complete({ prompt: "big" }), (error: Error) => {
+        assert.match(error.message, /qwen3-8b supports at most 8,192, so narrow the request or pick a model with a larger context window\./);
+        assert.doesNotMatch(error.message, /Raise Context Length/);
+        return true;
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("says the model's limit is the problem when it is already loaded at its maximum", async () => {
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url === "/api/v1/models") return sendJson(res, 200, v1Models("qwen3-8b", 8192, 8192));
+      sendJson(res, 400, { error: { message: NEW_OVERFLOW } });
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b" });
+      await assert.rejects(llm.complete({ prompt: "big" }), /qwen3-8b supports at most 8,192, so narrow the request/);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("does not follow a redirect from the lookup and still reports the overflow", async () => {
+    const elsewhere = await fakeLmStudio((_req, res) => sendJson(res, 200, v1Models("qwen3-8b", 4096, 32768)));
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url?.startsWith("/api/")) {
+        res.writeHead(307, { location: `${elsewhere.endpoint.replace(/\/v1$/, "")}/api/v1/models` });
+        res.end();
+        return;
+      }
+      sendJson(res, 400, { error: { message: NEW_OVERFLOW } });
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b" });
+      await assert.rejects(llm.complete({ prompt: "big" }), /LM Studio context length too small: This request does not fit in the context length qwen3-8b is loaded with in LM Studio\./);
+      assert.equal(elsewhere.requests.length, 0);
+    } finally {
+      await server.close();
+      await elsewhere.close();
+    }
+  });
+
+  it("still refuses a redirect from the chat endpoint", async () => {
+    const server = await fakeLmStudio((_req, res) => {
+      res.writeHead(307, { location: "http://example.com/v1/chat/completions" });
+      res.end();
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b" });
+      await assert.rejects(llm.complete({ prompt: "hi" }), /answered with a redirect to another address/);
+      await assert.rejects(collect(llm, { prompt: "hi" }), /answered with a redirect to another address/);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("reports a stop during the lookup as a stop", async () => {
+    const controller = new AbortController();
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url === "/api/v1/models") {
+        controller.abort();
+        return; // never answers
+      }
+      sendJson(res, 400, { error: { message: NEW_OVERFLOW } });
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b" });
+      await assert.rejects(llm.complete({ prompt: "big", signal: controller.signal }), /LM Studio request stopped by user\./);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("keeps the plain HTTP error for a failure that is not an overflow", async () => {
+    const server = await fakeLmStudio((_req, res) => sendJson(res, 400, { error: { message: "Invalid model identifier" } }));
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b" });
+      await assert.rejects(llm.complete({ prompt: "hi" }), /LM Studio responded with HTTP 400: .*Invalid model identifier/);
+      assert.equal(server.requests.length, 1);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+describe("parseLmStudioContextOverflow", () => {
+  it("reads each known wording", () => {
+    assert.deepEqual(parseLmStudioContextOverflow(OLD_OVERFLOW), { requested: 15857, loaded: 4096 });
+    assert.deepEqual(parseLmStudioContextOverflow(NEW_OVERFLOW), {});
+    assert.deepEqual(parseLmStudioContextOverflow("greater than the context length (n_keep: 8485 >= n_ctx: 8192)"), { requested: 8485, loaded: 8192 });
+    assert.deepEqual(parseLmStudioContextOverflow("Context size has been exceeded."), {});
+    assert.deepEqual(parseLmStudioContextOverflow("Reached context length of 4096 tokens with model (arch: qwen3vlmoe) that does not currently support mid-generation context overflow."), { loaded: 4096 });
+    assert.deepEqual(parseLmStudioContextOverflow("request (106724 tokens) exceeds the available context size (104192 tokens), try increasing it"), { requested: 106724, loaded: 104192 });
+    assert.equal(parseLmStudioContextOverflow("Invalid model identifier"), undefined);
+  });
+});

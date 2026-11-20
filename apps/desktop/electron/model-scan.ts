@@ -229,6 +229,7 @@ export function scanProbeFromProvider(
           ...provider.models.slice(0, 4),
         ],
         ...(provider.id === "ollama" ? { hasOpenAdmin8B: openAdmin } : {}),
+        ...(provider.capabilityWarning ? { warning: provider.capabilityWarning } : {}),
       };
     }
     if (provider.status === "connected" && provider.id === "lemonade") {
@@ -281,6 +282,9 @@ export function scanProbeFromProvider(
   }
   const version = provider.cli?.version ? [`Version ${provider.cli.version}`] : [];
   if (ready) return { ...base, state: "found", ready, summary: "Signed in", facts: version };
+  if (cliState === "ready" && provider.status === "error") {
+    return { ...base, state: "unavailable", ready: false, summary: "Unavailable", facts: provider.detail ? [provider.detail] : [] };
+  }
   if (cliState === "check-required" && provider.id === "copilot") {
     return { ...base, state: "found", ready: false, summary: "Installed", facts: [...version, "OpenAdminOS checks its sign-in when you select it."] };
   }

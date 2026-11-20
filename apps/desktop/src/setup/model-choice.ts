@@ -74,15 +74,17 @@ export function optionsFromProbes(
   for (const probe of probes) {
     if (probe.state === "checking" || probe.state === "not-found" || probe.notContacted) continue;
     const name = toolName(probe.providerId, probe.name);
-    if (probe.state === "could-not-check") {
+    if (probe.state === "could-not-check" || probe.state === "unavailable") {
+      const unavailable = probe.state === "unavailable";
       options.push({
         providerId: probe.providerId,
         name,
         where: probe.where,
-        whereLine: probe.facts[0] ?? MODEL_CHOICE_COPY.couldNotCheckLine(name),
-        state: MODEL_CHOICE_COPY.couldNotCheck,
+        whereLine: probe.facts[0] ?? (unavailable ? MODEL_CHOICE_COPY.unavailableLine(name) : MODEL_CHOICE_COPY.couldNotCheckLine(name)),
+        state: unavailable ? MODEL_CHOICE_COPY.unavailable : MODEL_CHOICE_COPY.couldNotCheck,
         action: probe.where === "local" ? "start" : "use",
         unavailable: true,
+        ...(unavailable ? { noRetry: true as const } : {}),
       });
       continue;
     }
