@@ -610,14 +610,28 @@ the IT policy file.
       Teams), the organization, Confirm and Cancel, and a note that every
       message is confirmed on its own. Nothing is sent before Confirm, and a
       confirmation never covers a later message.
-- [ ] Confirm is a call, so the call-time check runs again at Confirm for the
-      organization named on the card: the send grant (Send to Teams) must
-      still be on and Teams must be connected there. If the grant was turned
-      off in Access after the card was proposed, or the connection is
+- [ ] Confirm is a call, so the call-time checks run again at Confirm, in
+      this order: the organization named on the card must still be the
+      active organization (the existing `assertStillActive` guard in
+      `apps/desktop/electron/nova-actions.ts`), the send grant (Send to
+      Teams) must still be on, and Teams must be connected in that
+      organization. If the admin switched organization after the card was
+      proposed, the grant was turned off in Access, or the connection is
       missing, nothing is sent and the card shows a "Not sent" state with the
-      reason and the fix (Turn on Send to Teams, or Reconnect Teams in that
-      organization), never "posted". After the fix the same card can be
-      confirmed again and still covers only its one message.
+      reason and the fix (Switch back to Woodgrove Bank, Turn on Send to
+      Teams, or Reconnect Teams in that organization), never "posted". After
+      the fix the same card can be confirmed again and still covers only its
+      one message.
+- [ ] Every outgoing post has its own confirmation. The existing path that
+      splits a long result into several numbered posts after one
+      confirmation (`novaMessageParts` and the send loop in
+      `nova-actions.ts`) is replaced. A message longer than the app's limit
+      for one message on that connector (for Teams, the existing 4 KB
+      budget, which leaves room for HTML expansion; Microsoft documents about
+      100 KB per channel post) is not split and gets no Confirm: the card
+      says it is too long and offers Send a shorter summary (the agent
+      proposes a shorter message on a new card with its own Confirm) or Save
+      the full report (kept on this device, nothing sent) (mockup 35).
 - [ ] The contract: a tool is offered and callable only while its grant is on
       and the service it uses is connected in the active organization. A
       granted skill is offered only when every grant it uses (for example
@@ -647,6 +661,15 @@ the IT policy file.
    Teams not connected in that organization, Confirm posts nothing and the
    card reads "Not sent" with the reason and the matching fix, never
    "posted" (test per cause, mockup 35).
+7. Organization switch: a card proposed in Woodgrove Bank, with the active
+   organization switched to another one before Confirm, posts nothing in
+   either organization; the card reads "Not sent" and offers Switch back to
+   Woodgrove Bank, and after switching back the same card posts its one
+   message (test, mockup 35).
+8. Too long: a report over the Teams message limit produces no post and no
+   Confirm, and never a series of numbered posts; the card offers Send a
+   shorter summary, which yields a new card whose Confirm posts exactly one
+   message, and Save the full report, which sends nothing (test, mockup 35).
 
 ### Phase B4: Skills
 
@@ -669,9 +692,17 @@ the IT policy file.
 
 ### Phase B5: Your own MCP servers
 
-- [ ] Add a remote MCP server by URL, with headers or sign-in secrets in the
-      keychain, the existing egress checks and query-writer boundary, and an IT
-      allowlist key.
+- [ ] Add a remote MCP server by URL (mockup 35, step 1): the URL, the
+      authentication (none, a header with its secret stored in the keychain,
+      or the server's sign-in with its token in the keychain), and the IT
+      allowlist check on the host, run before any request, with a designed
+      refusal for a host that is not listed (nothing is sent to it) and for
+      an address that is not https. Step 1 states what the server will
+      receive: listing its tools sends the chosen credential and nothing from
+      the tenant or the conversation, and each call sends a query with
+      recognized tenant data removed. The existing egress checks and
+      query-writer boundary apply. Allowlist key: `allowedMcpServers`
+      (`TODO(ugur)`: proposed name, see open decisions).
 - [ ] The boundary, stated in the grant copy: the server receives a query
       written from the admin's question with every value the app recognizes as
       tenant data removed. Text the app cannot recognize, such as an internal
@@ -682,32 +713,44 @@ the IT policy file.
       review, the grant stays on, the host is left out of the strip, and the
       strip popover says why (mockup 35).
 - [ ] A tool review at add time. Only tools the admin approves as read-only
-      are allowed; the tool's read-only annotation is shown but not trusted on
-      its own, and a tool annotated as a change cannot be approved. The admin
-      approves the full definition: in the first review and in every
-      re-review, each tool row expands to show its name, title, description,
-      every input parameter with its type and description (and its allowed
-      values), the output description if any, and the annotations.
-- [ ] The write check reads every text field of that definition: name,
-      title, description, parameter names and descriptions, enum values and
-      the output description. A tool that describes saving, changing,
-      sending or deleting in any of them is flagged, in the first review and
-      in every re-review; a flagged tool cannot be approved in any review
-      state, with the reason (the matched words and the fields they are in)
-      shown in its row and marked in its expanded definition. The approval is
-      enforced at every call, including calls from skills and scheduled
-      checks. A tool that is not approved, or added by the server later and
-      not yet reviewed, is never offered.
-- [ ] Approval is bound to a hash (SHA-256) of the whole canonical
-      definition, every field above. The app hashes the definition the
-      server lists before it offers a tool and again at every call; any
-      change at all, in any field (title, description, a parameter, an enum
-      value, the output description, an annotation, or the name under the
-      same id), invalidates the approval before the tool can be offered or
-      called. The tool returns to review, unchecked, with the old and new
-      definition side by side and both hashes, and a change that now
-      describes saving, changing, sending or deleting makes it unapprovable
-      (mockup 35, B, "Review 3 changed tools").
+      are allowed. Approval requires a positive `annotations.readOnlyHint:
+      true` from the server; the label is required but never sufficient on
+      its own. A tool annotated as a change (`readOnlyHint: false`) cannot be
+      approved, and neither can a tool with no annotations or no
+      `readOnlyHint` (the protocol's default for a missing `readOnlyHint` is
+      false): its row is disabled with "No read-only label from the server".
+- [ ] The admin approves the complete tool object the server lists in
+      `tools/list`, not a projection of it: `name`, `title`, `description`,
+      `inputSchema` and `outputSchema` with every nested property,
+      `annotations` with every field (`title`, `readOnlyHint`,
+      `destructiveHint`, `idempotentHint`, `openWorldHint`), and any other
+      field such as `icons`, `execution`, `_meta` or one the app does not
+      know. In the first review and in every re-review each tool row expands
+      to a readable view of that object (nested schema properties included)
+      and, alongside it, the raw JSON of the whole object.
+- [ ] The write check walks the whole object recursively and reads every
+      string in it, object keys included, at every depth, annotations
+      included. A tool that describes saving, changing, sending or deleting
+      anywhere in it is flagged, in the first review and in every re-review;
+      a flagged tool cannot be approved in any review state, with the reason
+      (the matched words and the JSON path of each, for example
+      `annotations.title` or `inputSchema.properties.mode.enum[1]`) shown in
+      its row and marked in both views. The approval is enforced at every
+      call, including calls from skills and scheduled checks. A tool that is
+      not approved, or added by the server later and not yet reviewed, is
+      never offered.
+- [ ] Approval is bound to a SHA-256 hash of the canonical serialization of
+      the complete object: keys sorted at every level (RFC 8785 JSON
+      Canonicalization Scheme), serialized and hashed; the raw view shows
+      that canonical form. The app hashes the object the server lists before
+      it offers a tool and again at every call; any change anywhere (a
+      nested schema property, an enum value, `annotations.title`, `_meta`,
+      an unknown field, or the name under the same id) invalidates the
+      approval before the tool can be offered or called. The tool returns to
+      review, unchecked, with the old and new definition side by side and
+      both hashes, and a change that now describes saving, changing, sending
+      or deleting makes it unapprovable (mockup 35, B, "Review 5 changed
+      tools").
 - [ ] Local stdio servers are out of scope for the first version
       (`TODO(ugur)`: they run code on the device).
 
@@ -744,6 +787,25 @@ the IT policy file.
    the title, an enum value, the output description or an annotation of an
    approved tool invalidates its approval (hash mismatch), so the tool is
    neither offered nor callable until it is approved again.
+8. Regression test: an approved tool (`get_baseline`) whose only change is
+   `annotations.title`, now "Apply baselines", is back in review (hash
+   mismatch) and flagged by the write check with `annotations.title` named
+   in the reason, so it cannot be approved again (mockup 35).
+9. Regression test: an approved tool (`search_settings`) whose only change
+   is a nested schema property
+   (`inputSchema.properties.filter.properties.category.description`) is
+   back in review, unchecked, neither offered nor callable until approved
+   again, and can be approved again because the change only reads; a
+   change to `_meta` or to a field the app does not know does the same
+   (mockup 35).
+10. A tool with no annotations, or with annotations but no `readOnlyHint`
+    (`list_categories`), cannot be approved in any review state and its row
+    reads "No read-only label from the server" (test, mockup 35).
+11. Step 1: a host that is not on `allowedMcpServers` is refused before any
+    request (test asserts no connection is opened), the refusal names the
+    key, and Continue stays disabled; a header secret or sign-in token is
+    stored in the keychain and appears in no settings file, export or run
+    log (test, mockup 35).
 
 ### Phase B6: Learning
 
@@ -828,3 +890,6 @@ the IT policy file.
 7. Per-organization data policy rules, for example stricter ones for a customer
    tenant (mockup 34).
 8. Whether skill import accepts a URL as well as a file (mockup 35).
+9. The policy key for user-added MCP servers (proposal: `allowedMcpServers`,
+   a list of hosts, separate from `allowedPublicReferences`, which covers
+   catalog references) (mockup 35, step 1).
