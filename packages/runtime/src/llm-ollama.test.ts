@@ -712,6 +712,21 @@ describe("Ollama context size", () => {
     }
   });
 
+  it("does not blame memory when Ollama gave all of the kept context and the request outgrew it", async () => {
+    const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384 });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "kept-outgrown" });
+      await llm.complete({ prompt: "big" });
+      fake.options.retryPartialError = "request (50000 tokens) exceeds the available context size (45056 tokens), try increasing it";
+      await assert.rejects(llm.complete({ prompt: "big" }), /^Error: Ollama context size too small: This request needs 50,000 tokens of context, more than the 45,056 Ollama loaded for kept-outgrown\.$/);
+      fake.options.retryPartialError = undefined;
+      await llm.complete({ prompt: "big" });
+      assert.deepEqual(fake.chats.at(-1), { num_ctx: 45056 });
+    } finally {
+      await fake.close();
+    }
+  });
+
   it("gives a retry that gets Ollama's overflow without token counts a context size message", async () => {
     const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384, retryPromptTooLong: true });
     try {
