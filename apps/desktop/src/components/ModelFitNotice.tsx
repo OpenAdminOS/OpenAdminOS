@@ -66,7 +66,8 @@ export function ModelFitNotice({
       {rows.length > 0 ? (
         <>
           <div className="mb-1.5 mt-3.5 text-xs text-[var(--color-text-muted)]">{MODEL_FIT_COPY.groupLabel(issue, surface, answered)}</div>
-          <ul className="divide-y divide-[var(--color-border)] overflow-hidden rounded-lg ring-1 ring-[var(--color-border)]">
+          {/* Bounded and scrolling, so Split and Keep stay in view above the composer with many choices. */}
+          <ul className="max-h-56 divide-y divide-[var(--color-border)] overflow-y-auto rounded-lg ring-1 ring-[var(--color-border)]">
             {rows.map((choice) => {
               const tool = PROVIDER_TOOL_NAMES[choice.providerId] ?? choice.providerName;
               return (

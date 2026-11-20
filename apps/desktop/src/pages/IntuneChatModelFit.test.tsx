@@ -212,6 +212,26 @@ describe("IntuneChat model fit (mockup 36)", () => {
     expect(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel })).toHaveValue("List devices by owner.");
   });
 
+  it("keeps a cleared draft cleared when a larger local model fails too", async () => {
+    const providers = mockProviders.map((provider) => (provider.id === "ollama" ? { ...provider, models: ["llama3.1:8b", "gpt-oss:20b"], defaultModel: "llama3.1:8b" } : provider));
+    const bridge = fitBridge(createMockAppState({ providers, activeModelByProviderId: { ollama: "llama3.1:8b" } }), "llama3.1:8b");
+    const stream = bridge.streamIntuneChatMessage;
+    bridge.streamIntuneChatMessage = vi.fn<OpenAdminOSApi["streamIntuneChatMessage"]>(async (input, onEvent, options) =>
+      input.modelOverride?.providerId === "ollama" ? stream({ ...input, modelOverride: undefined }, onEvent, options) : stream(input, onEvent, options));
+    const user = userEvent.setup();
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+    await user.click(await screen.findByRole("combobox", { name: CHAT_COPY.composerLabel }));
+    await user.paste(QUESTION);
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await screen.findByDisplayValue(QUESTION);
+    fireEvent.change(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel }), { target: { value: "" } });
+    await user.click(within(await screen.findByRole("region", { name: "llama3.1:8b cannot fit this request" })).getByRole("button", { name: "Use gpt-oss:20b" }));
+    await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledTimes(2));
+    await screen.findByRole("region", { name: "llama3.1:8b cannot fit this request" });
+    expect(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel })).toHaveValue("");
+    expect(readChatDraft(conversation.id)).toBe("");
+  });
+
   it("asks for the accept even when hosted sends to Codex were remembered for this tenant", async () => {
     window.localStorage.setItem(`openadminos:intune-chat-hosted-consent:v1:${tenantId}:openai`, "true");
     const bridge = fitBridge();

@@ -986,7 +986,8 @@ function IntuneChatContent() {
       pendingAssistantMessage,
     ]);
     // A model fit retry sends the original question; a different draft the admin typed since stays.
-    const keepDraft = Boolean(modelOverride) && input.trim() !== "" && input.trim() !== content;
+    // An emptied composer counts as an edit too: a later failure does not put the question back.
+    const keepDraft = Boolean(modelOverride) && input.trim() !== content.trim();
     if (!keepDraft) {
       setInput("");
       clearChatDraft(targetConversationId);
