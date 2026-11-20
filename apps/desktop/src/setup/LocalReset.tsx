@@ -106,8 +106,15 @@ export function LocalResetNotice() {
             <p className="mt-0.5 text-[var(--color-text-soft)]">{LOCAL_RESET_COPY.noticeBody}</p>
             {report.warnings.length > 0 ? (
               <div className="mt-2">
-                <h3 className="font-medium text-[var(--color-warning)]">{LOCAL_RESET_COPY.noticeWarningsTitle}</h3>
-                <ul className="mt-0.5 space-y-0.5 text-[var(--color-text-soft)]">
+                <h3 id="local-reset-notice-warnings" className="font-medium text-[var(--color-warning)]">
+                  {LOCAL_RESET_COPY.noticeWarningsTitle}
+                </h3>
+                {/* Bounded to the window, so every warning can be read and Dismiss stays in view at the smallest height. */}
+                <ul
+                  tabIndex={0}
+                  aria-labelledby="local-reset-notice-warnings"
+                  className="mt-0.5 max-h-[max(4rem,calc(100vh-14rem))] space-y-0.5 overflow-y-auto pr-1 text-[var(--color-text-soft)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]"
+                >
                   {report.warnings.map((entry) => (
                     <li key={`${entry.item}:${entry.reason}`}>
                       <span className="break-all">{entry.item}</span>: {entry.reason}

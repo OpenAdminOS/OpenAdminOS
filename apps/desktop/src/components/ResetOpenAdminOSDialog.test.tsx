@@ -141,6 +141,11 @@ describe("after a reset", () => {
     render(<LocalResetNotice />);
     expect(await screen.findByText("OpenAdminOS was reset")).toBeInTheDocument();
     expect(screen.getByText(/security exited with code 51/)).toBeInTheDocument();
+    // The warnings scroll inside a bounded list that the keyboard can reach.
+    const warnings = screen.getByRole("list", { name: "Could not remove" });
+    expect(warnings).toHaveAttribute("tabindex", "0");
+    expect(warnings.className).toMatch(/overflow-y-auto/);
+    expect(warnings.className).toMatch(/max-h-/);
     expect(screen.getByRole("status")).toHaveTextContent("Admin consent stays in each tenant");
     await userEvent.setup().click(screen.getByRole("button", { name: "Dismiss" }));
     expect(screen.queryByText("OpenAdminOS was reset")).not.toBeInTheDocument();
