@@ -1885,8 +1885,10 @@ Distinctive values still match across the full request.
 Transformed values carry their original class through clipping, scalar
 interpolation and standalone fences. JSON previews retain the containing field
 when a cut falls inside an array element, including in nested arrays. A clipped
-value in a preview, compacted observation or replayed message has an unexamined
-range when the observer cannot recover its original field or value.
+preview also retains the last scalar's field when the cut falls in whitespace
+before its delimiter. A clipped value in a preview, compacted observation or
+replayed message has an unexamined range when the observer cannot recover its
+original field or value.
 Template joins, samples, bounded JSON
 and case changes preserve source fields and individual element offsets.
 Keys and counts derived from source values, mapped scalars and correlated

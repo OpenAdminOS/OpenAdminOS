@@ -800,6 +800,49 @@ test("recovers preview cuts in arrays and marks unresolved ranges", async t => {
   }
 });
 
+test("keeps the last preview scalar's credential provenance until its delimiter is visible", async () => {
+  const path = "/applications";
+  const hint = "qxz";
+  for (const [data, closingDelimiter] of [
+    [{ passwordCredentials: [{ hint }] }, "}"],
+    [{ passwordCredentials: [{ hint, displayName: "Fixture" }] }, ","],
+    [{ passwordCredentials: [{ hint: [[hint]] }] }, "]"],
+  ] as const) {
+    for (const indent of [0, 2]) {
+      const original = JSON.stringify(data, null, indent);
+      const quote = original.indexOf(hint) + hint.length;
+      const delimiter = original.indexOf(closingDelimiter, quote + 1);
+      assert.match(original.slice(quote, delimiter), /^"\s*$/);
+      for (let cut = quote; cut <= delimiter + 1; cut++) {
+        for (const hasEvidence of cut <= delimiter ? [true, false] : [true]) {
+          const ledger = new ClassificationLedger();
+          try {
+            if (hasEvidence) ledger.register(`graph:${path}`, data, { graphPath: path });
+            const prompt = withClassificationScope(ledger, () => fenceTenantData({
+              excerpt: registerRenderedFragment(original, original.slice(0, cut), { jsonPrefix: true }),
+            }, "preview"));
+            await ledger.waitForObservations();
+            const result = await ledger.classifyProviderRequest({ prompt });
+            const start = prompt.indexOf(hint);
+            const end = start + hint.length;
+            const detail = JSON.stringify({ closingDelimiter, indent, offset: cut - quote, hasEvidence });
+            assert.ok(start >= 0, detail);
+            assert.equal(result.effectiveClass, "credential", detail);
+            assert.equal(result.coverageIncomplete, !hasEvidence, detail);
+            if (hasEvidence) {
+              assert.deepEqual(result.spans, [{ section: "prompt", start, end, kind: "credential", source: `graph:${path}` }], detail);
+            } else {
+              assert.deepEqual(result.unexamined.ranges, [{ section: "prompt", start, end, reason: "clipped-provenance-unavailable" }], detail);
+            }
+          } finally {
+            ledger.dispose();
+          }
+        }
+      }
+    }
+  }
+});
+
 test("request detectors see identifier spans without registration", () => {
   const pieces = ["8bdd9e58-aa93-4032-b2cf-2d0bf207005c", "192.168.1.50", "AA:BB:CC:DD:EE:FF", "C02XL0ABJ1H0", "bob%40example.com", "+1 206-555-0134"];
   const prompt = `Device ${pieces[0]} at ${pieces[1]} MAC ${pieces[2]} serial ${pieces[3]} user ${pieces[4]} phone ${pieces[5]}`;

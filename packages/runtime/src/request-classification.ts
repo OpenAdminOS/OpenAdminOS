@@ -776,6 +776,11 @@ export class ClassificationLedger {
     let cut = 0;
     while (cut < fragment.length && original[cut] === fragment[cut]) cut++;
     if (cut === 0 || cut === original.length) return;
+    // The normal field matcher needs a visible delimiter. A cut after the
+    // scalar's closing quote can still hide that delimiter in formatted JSON.
+    const whitespace = /[ \t\r\n]/;
+    let lastVisibleTokenEnd = cut;
+    while (lastVisibleTokenEnd > 0 && whitespace.test(original[lastVisibleTokenEnd - 1]!)) lastVisibleTokenEnd--;
     // The original is serialized JSON. A property supplies the next value's
     // key, and arrays pass their containing key to their elements.
     const stack: Array<{ array: boolean; key: string | undefined }> = [];
@@ -794,7 +799,7 @@ export class ClassificationLedger {
         const quoted = literal.startsWith('"');
         colon.lastIndex = end;
         const property = quoted && frame && !frame.array && colon.test(original);
-        if (end < cut || property && end === cut) {
+        if (end < lastVisibleTokenEnd || property && end <= cut) {
           if (property) frame.key = JSON.parse(literal) as string;
           continue;
         }
