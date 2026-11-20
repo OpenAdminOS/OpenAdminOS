@@ -60,6 +60,9 @@ type Scalar = string | number | boolean;
 export interface TemplateInterpolation extends TextSpan {
   key: string;
   value?: Scalar;
+  incomplete?: boolean;
+  requireEvidence?: boolean;
+  trace?: () => Generator<TemplateInterpolation | undefined, boolean>;
 }
 export const MAX_TEMPLATE_INTERPOLATIONS = 1024;
 const templateInterpolations = new AsyncLocalStorage<Partial<Record<ClassificationSpan["section"], readonly TemplateInterpolation[]>>>();
@@ -1059,16 +1062,17 @@ export class ClassificationLedger {
       shards: [...state.identityIndex?.workerShards?.() ?? []], interpolations: templateInterpolations.getStore() };
   }
 
-  private renderedState({ state, interpolations }: EvidenceSnapshot): ScanState {
+  private *renderedStateSteps({ state, interpolations }: EvidenceSnapshot): Generator<void, ScanState> {
     if (!interpolations) return state;
     const renderedSpans: ClassificationSpan[] = [];
     let incomplete = state.incomplete;
     for (const section of ["system", "prompt"] as const) {
       const entries = interpolations[section];
       if (!entries) continue;
-      incomplete ||= entries.length > MAX_TEMPLATE_INTERPOLATIONS;
-      for (const { start, end, key, value } of entries.slice(0, MAX_TEMPLATE_INTERPOLATIONS)) {
-        if (value === undefined || start >= end) continue;
+      let remaining = MAX_TEMPLATE_INTERPOLATIONS;
+      let traceWork = 8 * MAX_TEMPLATE_INTERPOLATIONS;
+      const collect = ({ start, end, key, value, requireEvidence }: TemplateInterpolation) => {
+        if (value === undefined || start >= end) return;
         let best: Evidence | undefined;
         for (const ledger of state.retained) {
           const entry = ledger.values.get(value);
@@ -1077,9 +1081,59 @@ export class ClassificationLedger {
         }
         if (best) renderedSpans.push({ section, start, end, kind: best.kind, source: best.source,
           ...(best.maskRole ? { maskRole: best.maskRole } : {}) });
+        else if (requireEvidence && (typeof value !== "string" || value.length > 32_768 || value.trim())) incomplete = true;
+      };
+      sectionEntries: for (const entry of entries) {
+        if (--remaining < 0) {
+          incomplete = true;
+          break;
+        }
+        incomplete ||= Boolean(entry.incomplete);
+        if (!entry.trace) {
+          collect(entry);
+          yield;
+          continue;
+        }
+        const trace = entry.trace();
+        for (;;) {
+          if (--traceWork < 0) {
+            incomplete = true;
+            break sectionEntries;
+          }
+          const next = trace.next();
+          if (next.done) {
+            incomplete ||= !next.value;
+            break;
+          }
+          if (next.value) {
+            if (--remaining < 0) {
+              incomplete = true;
+              break sectionEntries;
+            }
+            collect(next.value);
+          }
+          yield;
+        }
       }
     }
     return { ...state, renderedSpans, incomplete };
+  }
+
+  private renderedState(evidence: EvidenceSnapshot): ScanState {
+    const steps = this.renderedStateSteps(evidence);
+    for (;;) {
+      const next = steps.next();
+      if (next.done) return next.value;
+    }
+  }
+
+  private async renderedStateInSlices(evidence: EvidenceSnapshot, slice: ClassificationSlice): Promise<ScanState> {
+    const steps = this.renderedStateSteps(evidence);
+    for (;;) {
+      const next = steps.next();
+      if (next.done) return next.value;
+      if (slice.elapsed) await slice.yield();
+    }
   }
 
   private evidenceCurrent({ state, revisions, shards }: EvidenceSnapshot, latest: ScanState): boolean {
@@ -1108,7 +1162,7 @@ export class ClassificationLedger {
     // No arbitrary-sized lookup or folding work enters the main-thread path.
     if (length <= MAIN_SCAN_LIMIT && retainedUnits <= 4_096 && !this.identityIndex?.workerShards) {
       const slice = new ClassificationSlice(request.signal);
-      const result = this.scanRequest(request, this.renderedState(evidence));
+      const result = this.scanRequest(request, await this.renderedStateInSlices(evidence, slice));
       if (slice.elapsed) await slice.yield();
       return this.withCurrentCoverage(result, evidence);
     }
@@ -1167,7 +1221,7 @@ export class ClassificationLedger {
       const slice = new ClassificationSlice(signal);
       const sections = { system: await encodeSection(request.system, slice), prompt: await encodeSection(request.prompt, slice) };
       const transfers = Object.values(sections).flatMap(section => section ? [section.buffer] : []);
-      const { retained, identityIndex, ...state } = this.renderedState(evidence);
+      const { retained, identityIndex, ...state } = await this.renderedStateInSlices(evidence, slice);
       const ledgers: number[] = [];
       for (const ledger of retained) {
         const id = await ledger.syncLedger(client, slice);

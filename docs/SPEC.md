@@ -1832,14 +1832,15 @@ snapshot ID on every attempt. Busy writes retry in the background with a
 bounded backoff and a zero SQLite busy timeout. Drift pruning uses a deferred
 transaction so it can return promptly when another connection holds the lock.
 Backfill skips rows larger than 256 KiB of raw JSON or with a sidecar above the
-decode budget. Missing sidecars leave coverage incomplete. The worker transfers startup identity entries in batches of up to 16 KiB, even
-when one row needs multiple batches. The main process applies the batches in
-yielding slices before publishing the shard. If an entry or page exceeds the
-transfer budget, classification reports incomplete identity coverage. Chat and MCP can reuse their raw identity lookup until the tenant
-cache changes, even while classification is still pending.
-The request scanner marks coverage incomplete if the worker lacks the current
-identity index. A detector match can raise a mapped class when it identifies more sensitive
-data. Generic syntax such as an unconfirmed GUID uses the type of the field
+decode budget. Missing sidecars leave coverage incomplete. The worker transfers
+startup identity entries in batches of up to 16 KiB, even when one row needs
+multiple batches. The main process applies the batches in yielding slices
+before publishing the shard. If an entry or page exceeds the transfer budget,
+classification reports incomplete identity coverage. Chat and MCP can reuse
+their raw identity lookup until the tenant cache changes, even while
+classification is still pending. The request scanner marks coverage incomplete
+if the worker lacks the current identity index. A detector match can raise a
+mapped class when it identifies more sensitive data. Generic syntax such as an unconfirmed GUID uses the type of the field
 when known. Field map v6 classifies group mail addresses, mail nicknames and
 proxy addresses as Identity.
 
@@ -1872,10 +1873,12 @@ and low-specificity values need field or rendering provenance, or a
 whole-word match for distinctive short identifiers. Boolean and numeric
 values need provenance. Serialized arrays preserve field provenance for all
 elements, including nested arrays. Generic phrases use word boundaries.
-Transformed values carry their original class through
-clipping, scalar interpolation and standalone fences. Rendering records
-bounded provenance while ingress is pending and resolves it after the
-evidence settles. Pending or discarded mappings leave coverage incomplete.
+Transformed values carry their original class through clipping, scalar
+interpolation and standalone fences. Template joins, samples, bounded JSON
+and case changes preserve source fields and individual element offsets.
+Classification resolves bounded template provenance off the provider call
+path. Missing evidence, unsupported coercions, collection aggregates that
+lose per-element provenance and exceeded trace limits leave coverage incomplete.
 An unfamiliar name or an opaque unlabeled secret can evade detection.
 
 A turn keeps up to two million units for values and provenance, favoring

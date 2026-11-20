@@ -419,6 +419,75 @@ test("rendering binds standalone booleans and adjacent scalars to their exact re
   } finally { ledger.dispose(); }
 });
 
+test("template filters carry source field evidence to emitted scalar and array offsets", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const ledger = new ClassificationLedger();
+  const graphPath = "/identity/conditionalAccess/namedLocations";
+  const location = { countriesAndRegions: ["DE", "US", ["İ<", true, 7]] };
+  ledger.register("graph:locations", location, { graphPath });
+  const ctx = { location, missing: null };
+  const cases: Array<[string, string, string[]]> = [
+    ['location.countriesAndRegions | sample(2) | join(", ")', "DE, US", ["DE", "US"]],
+    ['location.countriesAndRegions | join(", ")', "DE, US, İ\\u003c,true,7", ["DE", "US", "İ\\u003c", "true", "7"]],
+    ['location.countriesAndRegions | sample(1)', '["DE"]', ["DE"]],
+    ['location.countriesAndRegions | sample(1) | lower', '["DE"]', ["DE"]],
+    ['location.countriesAndRegions.2 | lower', '["İ\\u003c",true,7]', ["İ\\u003c", "true", "7"]],
+    ['location.countriesAndRegions | join(", ") | lower', "de, us, i\u0307\\u003c,true,7",
+      ["de", "us", "i\u0307\\u003c", "true", "7"]],
+    ['location.countriesAndRegions | sample(2) | boundedJson(512) | lower',
+      '{"totalrecords":2,"includedrecords":2,"omittedrecords":0,"coverage":"complete","records":["de","us"]}', ["de", "us"]],
+    ['location.countriesAndRegions.0 | upper', "DE", ["DE"]],
+    ['location.countriesAndRegions.0 | length', "2", ["2"]],
+    ['location.countriesAndRegions.0 | type', "string", ["string"]],
+    ['location.countriesAndRegions.0 | default("unused")', "DE", ["DE"]],
+    ['missing | default("DE")', "DE", []],
+  ];
+  const promptEntries: TemplateInterpolation[] = [];
+  const render = (expression: string, text: string) => {
+    promptEntries.length = 0;
+    const template = `literal DE {{ ${expression} }} literal US`;
+    const prompt = renderPromptTemplate(template, ctx, entry => promptEntries.push(entry));
+    const withoutNonces = (rendered: string) => rendered.replace(/nonce="[a-f0-9]+"/g, 'nonce="fixture"');
+    assert.equal(withoutNonces(prompt), withoutNonces(renderPromptTemplate(template, ctx)), expression);
+    assert.ok(prompt.includes(text), expression);
+    return prompt;
+  };
+  try {
+    for (const [expression, text, expectedSpans] of cases) {
+      const prompt = render(expression, text);
+      const result = withTemplateInterpolations({ prompt: promptEntries }, () => ledger.classifyRequest({ prompt }));
+      assert.equal(result.coverageIncomplete, false, expression);
+      assert.deepEqual(result.spans.filter(span => span.kind === "security")
+        .map(span => prompt.slice(span.start, span.end)), expectedSpans, expression);
+    }
+    const prompt = render('location.countriesAndRegions | sample(2) | join(", ")', "DE, US");
+    const result = await withTemplateInterpolations({ prompt: promptEntries }, () => ledger.classifyLargeRequest({ prompt }));
+    assert.equal(result.coverageIncomplete, false);
+    assert.deepEqual(result.spans.map(span => prompt.slice(span.start, span.end)), ["DE", "US"]);
+  } finally {
+    ledger.dispose();
+  }
+});
+
+test("template coverage is incomplete when a filter loses provenance or source evidence is missing", () => {
+  const ledger = new ClassificationLedger();
+  const ctx = { location: { countriesAndRegions: ["DE", "US"], entries: [{ code: "DE" }] } };
+  for (const expression of [
+    "location.countriesAndRegions | size",
+    "location.countriesAndRegions | total",
+    "location.countriesAndRegions | type",
+    "location.entries | join",
+    "location.countriesAndRegions | join",
+  ]) {
+    const entries: TemplateInterpolation[] = [];
+    const prompt = renderPromptTemplate(`{{ ${expression} }}`, ctx, entry => entries.push(entry));
+    const result = withTemplateInterpolations({ prompt: entries }, () => ledger.classifyRequest({ prompt }));
+    assert.equal(result.coverageIncomplete, true, expression);
+    assert.equal(result.effectiveClass, "credential", expression);
+  }
+  ledger.dispose();
+});
+
 test("case normalization keeps matching unaffected offsets and applies word boundaries", () => {
   const ledger = new ClassificationLedger();
   ledger.register("directory", { displayName: "Ada Lovelace" }, { graphPath: "/users" });

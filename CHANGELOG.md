@@ -91,6 +91,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Data policy classification preserves template field evidence, recognizes group mail aliases as Identity, and prepares cache classifications without waiting for SQLite writers.
 - Chat's model choice shows a provider whose check failed as Could not check with its reason and Retry, as the model scan does, instead of leaving LM Studio, Lemonade, Apple Intelligence or a hosted CLI out and showing Ollama as having no model; an endpoint outside this device that the scan did not contact shows as Not checked, without Retry; a signed-in tool that cannot answer, such as a Copilot model set by IT that the account cannot use, shows as Unavailable with the reason instead of Signed in.
 - Sign-in logs, directory audit logs and Intune audit events sync in large tenants: every refresh collects the last 7 days, newest first, up to 10,000 entries, instead of every retained entry, which failed on throttling or the memory limit. A window at the limit shows as capped, not as an error, and Settings, Data and Chat say which window the data covers.
 

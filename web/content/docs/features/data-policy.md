@@ -46,7 +46,10 @@ incomplete coverage if evidence for that request is still pending or was
 lost during synchronization, or if the scan fails or its worker times out.
 This includes pending classification of a value clipped for Chat, and
 cache classification that is still pending while the app retries a busy
-database, or is missing after those retries end.
+database, or is missing after those retries end. Template filters preserve
+source classes when the app can trace the rendered values to their original
+fields. When a transformation loses that link, the scan reports incomplete
+coverage.
 Local diagnostics keep the total counts and report how many offsets were
 omitted when a record reaches its size limit.
 The local evidence budget favors credentials and identity
