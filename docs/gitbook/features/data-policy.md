@@ -50,9 +50,10 @@ follow-up repeats it outside its original field. Cancelling a turn clears
 its active observations. Deleting the conversation or switching organizations
 also releases associated observations. Disconnect clears the organization's
 classification observations, identity indexes and local classification
-diagnostics when the removal is saved, even if local cleanup needs a retry.
-Classification diagnostics use static Graph route labels and expire after
-15 minutes.
+diagnostics, including indexes still being built at startup. Disconnect
+waits for the worker holding the removed organization's data to exit, even
+if other local cleanup needs a retry. Classification diagnostics use static
+Graph route labels and expire after 15 minutes.
 
 Desktop Nova command routing uses the connected organization's identity
 index. A previous request included for context has incomplete coverage

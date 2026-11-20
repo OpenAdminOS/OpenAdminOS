@@ -375,6 +375,8 @@ async function unpackWorkerResult({ classification, offsets, sources }: WorkerRe
 }
 
 /** Memory-only plaintext evidence. Each ledger owns one turn or run. */
+const tenantLedgers = new Map<string, Set<ClassificationLedger>>();
+
 export class ClassificationLedger {
   private readonly values = new Map<Scalar, ValueEntry>();
   private readonly byClass = new Map(DATA_CLASSES_BY_SENSITIVITY.map(kind => [kind, new Set<Scalar>()]));
@@ -395,10 +397,25 @@ export class ClassificationLedger {
   private readonly observations = new Set<Promise<void>>();
 
   observeRequest(work: (signal: AbortSignal) => Promise<void>): void {
-    const pending = yieldToMain().then(() => work(this.observationLifetime.signal));
+    this.trackObservation(yieldToMain().then(() => work(this.observationLifetime.signal)));
+  }
+
+  private trackObservation(pending: Promise<void>): void {
     this.observations.add(pending);
-    const remove = () => { this.observations.delete(pending); };
+    const remove = () => {
+      this.observations.delete(pending);
+      this.releaseTenantReferences();
+    };
     void pending.then(remove, remove);
+  }
+
+  private releaseTenantReferences(): void {
+    if (!this.disposed || this.observations.size) return;
+    for (const id of this.tenantIds) {
+      const ledgers = tenantLedgers.get(id);
+      ledgers?.delete(this);
+      if (!ledgers?.size) tenantLedgers.delete(id);
+    }
   }
 
   async waitForObservations(): Promise<void> {
@@ -413,6 +430,11 @@ export class ClassificationLedger {
     readonly tenantIds: readonly string[] = [],
   ) {
     this.scopeId = scopeId;
+    for (const id of tenantIds) {
+      let ledgers = tenantLedgers.get(id);
+      if (!ledgers) tenantLedgers.set(id, ledgers = new Set());
+      ledgers.add(this);
+    }
   }
 
   get expired(): boolean { return this.disposed; }
@@ -425,6 +447,7 @@ export class ClassificationLedger {
   }
 
   dispose(): void {
+    if (this.disposed) return;
     clearTimeout(this.expiry);
     this.disposed = true;
     this.observationLifetime.abort();
@@ -442,6 +465,7 @@ export class ClassificationLedger {
     delete this.promptReplay;
     this.prior = [];
     this.discardTransient();
+    this.releaseTenantReferences();
   }
 
   /** A shallow reference to earlier turns. Each turn owns its own budget and expiry. */
@@ -492,6 +516,13 @@ export class ClassificationLedger {
 
   async registerGraph(graphPath: string, data: unknown, signal?: AbortSignal): Promise<void> {
     if (this.disposed) return;
+    const lifetime = this.observationLifetime.signal;
+    const observation = this.observeGraph(graphPath, data, signal ? AbortSignal.any([signal, lifetime]) : lifetime);
+    this.trackObservation(observation);
+    await observation;
+  }
+
+  private async observeGraph(graphPath: string, data: unknown, signal: AbortSignal): Promise<void> {
     try {
       const source = graphClassificationSource(graphPath);
       let indexCurrent = () => true;
@@ -499,6 +530,7 @@ export class ClassificationLedger {
       const classified = await requestWorker().run<"graph">(bytes, async client => {
         const { shards, isCurrent } = await syncIdentityShards(client, this.identityIndex, new ClassificationSlice());
         indexCurrent = isCurrent;
+        signal.throwIfAborted();
         const record = data !== null && typeof data === "object" && !Array.isArray(data) ? data as Record<string, unknown> : undefined;
         const field = record && Object.keys(record).find(key => key.toLowerCase() === "value" && Array.isArray(record[key]));
         const rows = Array.isArray(data) ? data : field ? record![field] as unknown[] : undefined;
@@ -914,7 +946,8 @@ export class ClassificationLedger {
     return this.classifyLargeRequest(request, request.signal);
   }
 
-  private async syncLedger(client: ClassificationWorker, slice: ClassificationSlice): Promise<number> {
+  private async syncLedger(client: ClassificationWorker, slice: ClassificationSlice): Promise<number | undefined> {
+    if (this.disposed) return undefined;
     const initial = this.workerState?.client !== client;
     const state = initial ? { client, id: client.id(this), dirty: new Set<Scalar>(), mirrored: new Set<Scalar>() } : this.workerState!;
     this.workerState = state;
@@ -969,7 +1002,7 @@ export class ClassificationLedger {
       const ledgers: number[] = [];
       for (const ledger of retained) {
         const id = await ledger.syncLedger(client, slice);
-        if (!ledger.disposed) ledgers.push(id);
+        if (id !== undefined && !ledger.disposed) ledgers.push(id);
       }
       const { shards, isCurrent } = await syncIdentityShards(client, identityIndex, slice);
       indexCurrent = isCurrent;
@@ -1110,6 +1143,12 @@ export class ClassificationLedger {
   }
 }
 
+export async function clearTenantClassificationLedgers(tenantId: string): Promise<void> {
+  const ledgers = [...tenantLedgers.get(tenantId) ?? []];
+  for (const ledger of ledgers) ledger.dispose();
+  await Promise.all(ledgers.map(ledger => ledger.waitForObservations()));
+}
+
 const scopes = new AsyncLocalStorage<ClassificationLedger>();
 let unscopedRegistrations = 0;
 let unscopedRequests = 0;
@@ -1184,6 +1223,7 @@ export function withRequestClassification(
     if (!llm.available) return;
     if (!scoped) unscopedRequests++;
     const ledger = scoped ?? new ClassificationLedger();
+    if (ledger.expired) return;
     const { scopeId, tenantIds } = ledger;
     const { prompt, system } = options;
     ledger.observeRequest(async scanSignal => {
@@ -1200,6 +1240,7 @@ export function withRequestClassification(
         }
         result = classification([], ranges, 0, 0, 0, true);
       }
+      if (ledger.expired) return;
       try {
         observe({ providerId, method, fieldMapVersion: GRAPH_FIELD_CLASSES_VERSION, timestamp: new Date().toISOString(),
           ...(scopeId ? { scopeId } : {}), scopePresent: scoped !== undefined,

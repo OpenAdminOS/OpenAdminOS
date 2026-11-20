@@ -808,7 +808,7 @@ test("a stalled classifier cannot consume the provider deadline or replace its s
   await sent;
   t.mock.timers.tick(250);
   assert.equal(request.signal.aborted, true);
-  assert.deepEqual(events, []);
+  assert.equal(events.length, 0);
   t.mock.timers.tick(2_750);
   await ledger.waitForObservations();
   clearTimeout(deadline);
@@ -821,35 +821,43 @@ test("a stalled classifier cannot consume the provider deadline or replace its s
 test("the classification queue bounds job count and unlinks cancelled jobs before the active scan settles", async t => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const client = new ClassificationWorker();
-  const stalled = new Promise<never>(() => {});
-  const start = client.run<"scan">(1, () => stalled);
+  t.mock.method(client, "post", () => {});
+  const stalled = async () => ({
+    message: { type: "scan" as const, sections: { system: undefined, prompt: undefined }, ledgers: [], shards: [],
+      state: { historyFences: new Map(), dropped: 0, registrations: 0, incomplete: false } },
+  });
+  const start = client.run<"scan">(1, stalled);
   const active = assert.rejects(start, /fixture shutdown/);
   const cancel = new AbortController();
   let prepared = 0;
   const queued = Array.from({ length: CLASSIFICATION_QUEUE_MAX_JOBS - 1 }, () =>
-    assert.rejects(client.run<"scan">(1, () => { prepared++; return stalled; }, cancel.signal), /cancelled/));
-  await assert.rejects(client.run<"scan">(1, () => stalled), /queue is full/);
+    assert.rejects(client.run<"scan">(1, () => { prepared++; return stalled(); }, cancel.signal), /cancelled/));
+  await assert.rejects(client.run<"scan">(1, stalled), /queue is full/);
   cancel.abort();
   await Promise.all(queued);
-  const next = assert.rejects(client.run<"scan">(1, () => stalled), /fixture shutdown/);
+  const next = assert.rejects(client.run<"scan">(1, stalled), /fixture shutdown/);
   await client.stop(new Error("fixture shutdown"));
   await Promise.all([active, next]);
   assert.equal(prepared, 0);
-  await assert.rejects(client.run<"scan">(1, () => stalled), /fixture shutdown/);
+  await assert.rejects(client.run<"scan">(1, stalled), /fixture shutdown/);
 });
 
 test("cancelling a queued classification releases its byte budget promptly", async t => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const client = new ClassificationWorker();
-  const stalled = new Promise<never>(() => {});
+  t.mock.method(client, "post", () => {});
+  const stalled = async () => ({
+    message: { type: "scan" as const, sections: { system: undefined, prompt: undefined }, ledgers: [], shards: [],
+      state: { historyFences: new Map(), dropped: 0, registrations: 0, incomplete: false } },
+  });
   const half = CLASSIFICATION_QUEUE_MAX_BYTES / 2;
-  const active = assert.rejects(client.run<"scan">(half, () => stalled), /fixture shutdown/);
+  const active = assert.rejects(client.run<"scan">(half, stalled), /fixture shutdown/);
   const cancel = new AbortController();
-  const pending = assert.rejects(client.run<"scan">(half, () => stalled, cancel.signal), /cancelled/);
-  await assert.rejects(client.run<"scan">(1, () => stalled), /queue is full/);
+  const pending = assert.rejects(client.run<"scan">(half, stalled, cancel.signal), /cancelled/);
+  await assert.rejects(client.run<"scan">(1, stalled), /queue is full/);
   cancel.abort();
   await pending;
-  const next = assert.rejects(client.run<"scan">(half, () => stalled), /fixture shutdown/);
+  const next = assert.rejects(client.run<"scan">(half, stalled), /fixture shutdown/);
   await client.stop(new Error("fixture shutdown"));
   await Promise.all([active, next]);
 });

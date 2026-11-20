@@ -110,23 +110,49 @@ it("publishes only complete startup identity shards to the request worker", asyn
   }
 });
 
-it("does not repopulate a disconnected tenant while startup is indexing its cache", async () => {
+it("Disconnect clears staged shards while startup is waiting on a different tenant", async t => {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-classification-disconnect-"));
   const path = join(dir, "openadminos.db");
-  const tenantId = "fixture-tenant";
+  const tenantId = "fixture-tenant-a";
+  const otherId = "fixture-tenant-b";
   let store = new IntelligenceSqliteStore(path);
   try {
-    store.replaceGraphResources({ tenantId, resource: "users", label: "Users", scopeSet: [],
-      refreshedAt: "2026-11-18T00:00:00.000Z",
-      rows: Array.from({ length: 600 }, (_, i) => ({ id: `user-${i}`, displayName: `Yelena Fixture ${i}` })),
-    });
+    const snapshot = { resource: "users" as const, label: "Users", scopeSet: [], refreshedAt: "2026-11-18T00:00:00.000Z" };
+    store.replaceGraphResources({ ...snapshot, tenantId, rows: [{ id: "user-a", displayName: "Yelena Fixture" }] });
+    store.replaceGraphResources({ ...snapshot, tenantId: otherId, rows: [{ id: "user-b", displayName: "Cassandra Another" }] });
     store.close();
+
+    let unblock!: () => void;
+    const started = new Promise<void>(resolve => { unblock = resolve; });
+    let blocked = false;
+    const post = Worker.prototype.postMessage;
+    t.mock.method(Worker.prototype, "postMessage", function (this: Worker, ...args: Parameters<Worker["postMessage"]>) {
+      const message = args[0] as { startup?: { tenantId: string; indexOnly: boolean } };
+      if (!blocked && message.startup?.tenantId === otherId && message.startup.indexOnly) {
+        blocked = true;
+        unblock();
+        return;
+      }
+      post.apply(this, args);
+    });
     store = new IntelligenceSqliteStore(path, { backgroundClassification: true });
-    await nextTick();
-    store.disconnectClassification(tenantId);
+    await started;
+
+    const stagedIdentity = store["stagedIdentityShards"].get(tenantId)?.get("users");
+    const stagedFirstName = store["stagedFirstNames"].get(tenantId)?.get("users");
+    assert.ok(stagedIdentity?.matches("Yelena Fixture"));
+    assert.ok(stagedFirstName?.matches("Yelena"));
+    assert.deepEqual([...store.classificationIdentityIndex(tenantId).workerShards!()], []);
+    await store.disconnectClassification(tenantId);
+
+    assert.equal(store["stagedIdentityShards"].has(tenantId), false);
+    assert.equal(store["stagedFirstNames"].has(tenantId), false);
+    assert.equal(stagedIdentity.size, 0);
+    assert.equal(stagedFirstName.size, 0);
     await store.waitForCacheClassification();
     assert.deepEqual([...store.classificationIdentityIndex(tenantId).workerShards!()], []);
     assert.equal(store.tenantIdentityValues(tenantId).size, 0);
+    assert.equal(store.classificationIdentityIndex(otherId).matches("Cassandra"), true);
   } finally {
     store.close();
     await rm(dir, { recursive: true, force: true });

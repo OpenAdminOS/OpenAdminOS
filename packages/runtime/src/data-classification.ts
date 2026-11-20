@@ -12,8 +12,8 @@ import {
 } from "./graph-field-classes.js";
 
 export { GRAPH_FIELD_CLASSES_VERSION } from "./graph-field-classes.js";
-export { releaseClassificationIdentityShard, shutdownClassificationWorker } from "./classification-worker-client.js";
-export { CLASSIFICATION_TTL_MS, ClassificationLedger, currentClassificationLedger, classificationDiagnostics, collectClassifiedValues, registerClassifiedValues, registerGraphTenantData, registerRenderedFragment, registerTenantData, registerTransientTenantData, withTransientClassificationScope, withClassificationScope, withRequestClassification } from "./request-classification.js";
+export { ClassificationWorkerRetiredError, releaseClassificationIdentityShard, retireClassificationWorker, shutdownClassificationWorker } from "./classification-worker-client.js";
+export { CLASSIFICATION_TTL_MS, ClassificationLedger, clearTenantClassificationLedgers, currentClassificationLedger, classificationDiagnostics, collectClassifiedValues, registerClassifiedValues, registerGraphTenantData, registerRenderedFragment, registerTenantData, registerTransientTenantData, withTransientClassificationScope, withClassificationScope, withRequestClassification } from "./request-classification.js";
 export type { ClassifiedValues, ClassificationSpan, RequestClassification, RequestClassificationEvent } from "./request-classification.js";
 
 export { ClassificationSlice, classifyCacheRows } from "./classification-worker-client.js";

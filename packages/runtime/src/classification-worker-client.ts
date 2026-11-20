@@ -32,6 +32,8 @@ const WORKER_TIMEOUT_MS = 3_000;
 export const CLASSIFICATION_QUEUE_MAX_JOBS = 24;
 export const CLASSIFICATION_QUEUE_MAX_BYTES = 128 * 1024 * 1024;
 
+export class ClassificationWorkerRetiredError extends Error {}
+
 interface QueuedJob {
   start(): void;
   reject(error: Error): void;
@@ -54,6 +56,7 @@ export class ClassificationWorker {
   private readonly garbage: FinalizationRegistry<number>;
   private readonly queue = new Set<QueuedJob>();
   private active?: QueuedJob;
+  private preparation?: Promise<void>;
   private reply?: (result: WorkerReply) => void;
   private failure?: Error;
   private nextId = 0;
@@ -105,8 +108,12 @@ export class ClassificationWorker {
     this.failure = error;
     if (worker === this) worker = undefined;
     this.termination = this.worker.terminate();
+    const retired = Promise.all([this.termination, this.preparation]);
+    retirements.add(retired);
+    const released = () => { retirements.delete(retired); };
+    void retired.then(released, released);
     this.active?.reject(error);
-    for (const job of this.queue) job.reject(error);
+    for (const job of this.queue) job.reject(new ClassificationWorkerRetiredError(error.message, { cause: error }));
     return this.termination;
   }
 
@@ -159,12 +166,16 @@ export class ClassificationWorker {
             finish();
             resolve(result as WorkerReplies[T]);
           };
-          void Promise.resolve().then(() => {
+          const preparation = Promise.resolve().then(() => {
             if (this.failure) throw this.failure;
             return prepare(this);
           }).then(({ message, transfers }) => this.post(message, transfers)).catch(error => {
             // A partially synchronized matcher is unsafe to reuse.
             void this.stop(error instanceof Error ? error : new Error("Classification worker failed."));
+          });
+          this.preparation = preparation;
+          void preparation.then(() => {
+            if (this.preparation === preparation) delete this.preparation;
           });
         },
         reject(error) {
@@ -181,7 +192,6 @@ export class ClassificationWorker {
       this.startNext();
     });
   }
-
 }
 
 const IDENTITY_BATCH_UNITS = 16_384;
@@ -237,11 +247,19 @@ export async function classifyCacheRows(
 }
 
 let worker: ClassificationWorker | undefined;
+const retirements = new Set<Promise<unknown>>();
 let shutDown = false;
 
 export function requestWorker(): ClassificationWorker {
   if (shutDown) throw new Error("Classification worker shut down.");
   return worker ??= new ClassificationWorker();
+}
+
+export async function retireClassificationWorker(): Promise<void> {
+  // Drop messages normally bypass the job queue. Disconnect can also have
+  // an active scan or staged messages, so retire and wait for actual exit.
+  void worker?.stop(new ClassificationWorkerRetiredError("Classification worker retired for tenant removal."));
+  await Promise.all(retirements);
 }
 
 export function shutdownClassificationWorker(): void {

@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { Worker } from "node:worker_threads";
 import type { LlmOptions, RunGraphApi, RunLlmApi } from "@openadminos/agent-sdk";
 import { TENANT_DATA_INSTRUCTIONS } from "@openadminos/runtime";
 import { ClassificationLedger, currentClassificationLedger, type RequestClassificationEvent } from "@openadminos/runtime/data-classification";
@@ -103,7 +104,7 @@ test("Chat fences answer packs, workspace evidence and history and filters every
   } finally { await f.close(); }
 });
 
-test("Disconnect releases worker identity mirrors even while sign-in cleanup is pending", async () => {
+test("Disconnect releases worker identity mirrors even while sign-in cleanup is pending", async t => {
   const f = await fixture();
   try {
     Object.defineProperty(f.store, "removeCachedAccount", { value: async () => { throw new Error("Sign-in unavailable"); } });
@@ -112,13 +113,44 @@ test("Disconnect releases worker identity mirrors even while sign-in cleanup is 
     const tenantId = "tenant-a";
     cache.replaceGraphResources({ tenantId, resource: "users", label: "Users", scopeSet: [],
       refreshedAt: "2026-11-18T00:00:00.000Z", rows: [{ id: "fixture-user", displayName: "Yelena Fixture" }] });
-    const ledger = new ClassificationLedger(cache.classificationIdentityIndex(tenantId));
-    const request = { prompt: "Yelena" };
-    assert.equal((await ledger.classifyProviderRequest(request)).counts.identity, 1);
+    const index = cache.classificationIdentityIndex(tenantId);
+    const shards = [...index.workerShards!()];
+    const ledger = new ClassificationLedger(index, "fixture-disconnect", [tenantId]);
+    ledger.register("fixture", { secretText: "example-credential-from-this-organization" });
+    const request = { prompt: "Yelena example-credential-from-this-organization" };
+    const first = await ledger.classifyProviderRequest(request);
+    assert.equal(first.counts.identity, 1);
+    assert.equal(first.counts.credential, 1);
+
+    let started!: () => void;
+    const sent = new Promise<void>(resolve => { started = resolve; });
+    let exited = false;
+    let scans = 0;
+    const post = Worker.prototype.postMessage;
+    const intercept = t.mock.method(Worker.prototype, "postMessage", function (this: Worker, ...args: Parameters<Worker["postMessage"]>) {
+      if ((args[0] as { type?: string }).type === "scan") {
+        scans++;
+        this.once("exit", () => { exited = true; });
+        started();
+        return;
+      }
+      post.apply(this, args);
+    });
+    const blocked = assert.rejects(ledger.classifyProviderRequest(request), /retired|cancelled/);
+    await sent;
+    const queued = assert.rejects(ledger.classifyProviderRequest(request), /retired|cancelled/);
     await f.store.disconnectTenant(tenantId);
+    await Promise.all([blocked, queued]);
+    assert.equal(exited, true);
+    assert.equal(scans, 1);
+    assert.equal(ledger.expired, true);
+    assert.ok(shards.every(shard => shard.size === 0));
+    assert.equal(index.matches("Yelena"), false);
+    intercept.mock.restore();
     assert.equal(cache.queryGraphCache({ tenantId, resource: "users" }).rows.length, 1);
     const result = await ledger.classifyProviderRequest(request);
     assert.equal(result.counts.identity, 0);
+    assert.equal(result.counts.credential, 0);
     assert.equal(result.coverageIncomplete, true);
     ledger.dispose();
   } finally { await f.close(); }

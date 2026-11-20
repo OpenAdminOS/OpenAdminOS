@@ -1,5 +1,6 @@
 import {
-  CLASSIFICATION_TTL_MS, ClassificationLedger, classificationDiagnostics, registerTenantData, withTransientClassificationScope,
+  CLASSIFICATION_TTL_MS, ClassificationLedger, classificationDiagnostics, clearTenantClassificationLedgers, registerTenantData,
+  retireClassificationWorker, withTransientClassificationScope,
   withRequestClassification, type RequestClassificationEvent,
 } from "@openadminos/runtime/data-classification";
 import { OfficeService } from "./office.js";
@@ -8712,8 +8713,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         throw cause;
       }
       this.chatService.clearTenantClassification(id);
-      this.intelligenceStore?.disconnectClassification(id);
+      const releaseClassification = this.intelligenceStore?.disconnectClassification(id) ??
+        Promise.all([retireClassificationWorker(), clearTenantClassificationLedgers(id)]);
       this.pruneRequestClassifications(id);
+      await releaseClassification;
     });
     // A license check of the removed connection saves nothing.
     this.supersedeTenantCheck(id, "disconnected");
@@ -9519,7 +9522,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         for (const removal of tenantRemovals) {
           if (this.tenantLifecycle.phase(removal.tenantId) === "open") {
             this.tenantLifecycle.close(removal.tenantId);
-            this.intelligenceStore?.disconnectClassification(removal.tenantId);
+            await this.intelligenceStore?.disconnectClassification(removal.tenantId);
           }
         }
       }

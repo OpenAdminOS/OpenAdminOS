@@ -1837,8 +1837,10 @@ in each of eight conversations, with a 15-minute maximum lifetime per ledger.
 Cancellation disposes of the active turn. Conversation deletion and switching
 organizations release the corresponding observations. Disconnect releases them
 when the organization is removed, even if subsequent cleanup needs a retry.
-Disconnect also clears the organization's worker identity shards and keeps
-pending removals out of startup indexing. Temporary history evidence is
+Disconnect clears staged and published identity shards, disposes active
+classification ledgers and waits for the worker generation to exit. Startup
+skips pending removals and resumes indexing other organizations on the new
+generation. Temporary history evidence is
 disposed of after the current turn. Chat and desktop Nova reasoning mark
 replayed ranges incomplete if the original observations were dropped, expired
 or otherwise unavailable. Text detectors and the cache index still identify

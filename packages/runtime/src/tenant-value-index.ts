@@ -57,7 +57,7 @@ export class TenantValueIndex {
   private compactMaxLength = 0;
   private count = 0;
 
-  constructor(private readonly parts: readonly TenantValueIndex[] = []) {}
+  constructor(private parts: readonly TenantValueIndex[] = []) {}
 
   static fromWorkerSnapshot(snapshot: TenantValueIndexSnapshot): TenantValueIndex {
     return Object.assign(new TenantValueIndex(), snapshot);
@@ -68,6 +68,16 @@ export class TenantValueIndex {
       longestSequence: this.longestSequence, buckets: this.buckets, compact: this.compact,
       compactPrefixes: this.compactPrefixes, compactMaxLength: this.compactMaxLength, count: this.count,
     };
+  }
+
+  clear(): void {
+    this.longestSequence.clear();
+    this.buckets.clear();
+    this.compact.clear();
+    this.compactPrefixes.clear();
+    this.compactMaxLength = 0;
+    this.count = 0;
+    this.parts = [];
   }
 
   get size(): number {
