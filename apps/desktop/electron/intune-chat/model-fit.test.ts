@@ -517,10 +517,15 @@ describe("Model fit in Chat", () => {
       dispatched: () => { dispatched += 1; },
     });
     await guarded.complete({ prompt: "a" });
+    // A call that is already stopped is not counted as sent.
+    const stopped = new AbortController();
+    stopped.abort();
+    await guarded.complete({ prompt: "stopped", signal: stopped.signal });
+    assert.equal(dispatched, 1);
     allowed = false;
     await assert.rejects(guarded.complete({ prompt: "b" }), /not on this device/);
     await assert.rejects((async () => { for await (const _chunk of guarded.stream({ prompt: "c" })) { /* drain */ } })(), /not on this device/);
-    assert.deepEqual(calls, ["complete"]);
+    assert.deepEqual(calls, ["complete", "complete"]);
     assert.equal(dispatched, 1);
   });
 
