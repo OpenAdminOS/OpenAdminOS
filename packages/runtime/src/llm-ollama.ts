@@ -376,7 +376,24 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           // Ollama sizes the context from its own default and free memory,
           // not from the model's limit. Ask for enough room for this prompt
           // plus the answer, up to what the model supports, and retry once.
-          const retryShow = await readOllamaShowForRetry(endpoint, model, opts.signal ?? new AbortController().signal, lookupTimeoutMs);
+          let retryShow: OllamaShowContext | undefined;
+          try {
+            retryShow = await readOllamaShowForRetry(endpoint, model, opts.signal ?? new AbortController().signal, lookupTimeoutMs);
+          } catch (error) {
+            if (opts.signal?.aborted) throw stoppedByUser();
+            // An agent run does not raise without the lookup, and Ollama's
+            // own count is the typed reason; Chat keeps the lookup's error.
+            if (!opts.enforceContextWindow) throw error;
+            throw new ContextTooSmallError({
+              code: "context-too-small",
+              promptTokens: overflow.requested,
+              answerTokens: answerBudget,
+              neededTokens: overflow.requested + answerBudget,
+              limitTokens: overflow.available,
+              model,
+              sentToProvider: true,
+            });
+          }
           if (opts.signal?.aborted) throw stoppedByUser();
           // A retry lookup for the same revision that omits something keeps
           // what the first lookup saw.
@@ -389,7 +406,10 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           // A retry lookup without a pin for the same revision keeps the pin the
           // first lookup saw.
           const pin = retryShow?.pinnedNumCtx ?? (sameRevision ? sized?.pinnedNumCtx : undefined);
-          const pinKnown = pin !== undefined || retryShow?.pinKnown === true || (sameRevision && sized?.pinKnown === true);
+          // That the model is unpinned carries over from the first lookup only
+          // for a revision both lookups name.
+          const pinKnown = pin !== undefined || retryShow?.pinKnown === true ||
+            (retryShow?.revision !== undefined && retryShow.revision === sized?.revision && sized?.pinKnown === true);
           // An agent run that never learned whether the model is pinned does
           // not raise num_ctx, which would override a pin: the size Ollama
           // ran it with is the limit it gets.

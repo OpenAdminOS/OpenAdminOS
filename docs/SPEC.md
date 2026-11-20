@@ -576,9 +576,9 @@ Agent prompts carry summaries, not inventories. The runtime's
 into one short record (scope as counts or `All`, built-in role names,
 conditions, grant and session controls), and `group-by-age` can keep names
 only (`pick`). The explainer manifest that uses them (1.2.0) ships in a
-follow-up change; with it, 100 policies need about 14,000 estimated tokens
-(about 11,000 real) with an 1,100 token answer and fit a 16k local model, and
-about 120 fit by the estimate. Grouped
+follow-up change; with it, 100 policies of the test fixture need about
+15,500 estimated tokens with an 1,100 token answer and fit a 16k local model,
+and up to 107 fit by the estimate. Grouped
 records reach prompts only as counts (`count-by-field` steps), and breakdowns
 by high-cardinality fields keep their largest buckets (the `top` setting of
 `count-by-field`, which moves them under `top` with `otherValues` and
