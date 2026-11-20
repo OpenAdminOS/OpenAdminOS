@@ -169,7 +169,7 @@ export function resolveChatTurnProvider(input: {
       consent.providerId !== chosen.id ||
       consent.remember === true ||
       consent.modelFitOfferId !== offer.id ||
-      (consent.model !== undefined && consent.model !== model) ||
+      consent.model !== model ||
       !(acknowledged >= offer.createdAt - ACKNOWLEDGED_CLOCK_SLACK_MS)
     ) {
       throw new ModelOverrideError(`Running this request with ${chosen.name} needs your approval for this request, so nothing was sent. Choose it again in Chat.`);

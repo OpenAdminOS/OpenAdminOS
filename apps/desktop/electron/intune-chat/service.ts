@@ -2605,22 +2605,6 @@ export class IntuneChatService {
       consentVerified = true;
     };
     if (reachesModel) verifyConsent();
-    // The consent audit is per tenant; a no-tenant send has none to record against.
-    // A follow-up's consent was recorded when it was set; the fire time adds none.
-    if (provider?.isLocal === false && input.hostedProviderConsent && !noTenant && !options.scheduledConsent) {
-      this.recordHostedProviderConsentSafely({
-        tenantIds: [tenant.id],
-        providerId,
-        providerName: provider.name,
-        ...(selectedModel ? { model: selectedModel } : {}),
-        acknowledgedAt: input.hostedProviderConsent.acknowledgedAt,
-        remember: input.hostedProviderConsent.remember,
-        scope: "single-tenant-chat",
-        ...(workspaceContext?.summary
-          ? { workspaceContext: workspaceContext.summary }
-          : {}),
-      });
-    }
     const now = new Date().toISOString();
 
     let conversation = input.conversationId
@@ -2639,6 +2623,23 @@ export class IntuneChatService {
     if (fitOffer) {
       if (!conversation || conversation.id !== fitOffer.conversationId) throw new ModelOverrideError("That conversation was deleted, so nothing was sent.");
       this.modelFitOffers.claim(fitOffer.id);
+    }
+    // Audited once the send is cleared: a refused send records no consent.
+    // The consent audit is per tenant; a no-tenant send has none to record against.
+    // A follow-up's consent was recorded when it was set; the fire time adds none.
+    if (provider?.isLocal === false && input.hostedProviderConsent && !noTenant && !options.scheduledConsent) {
+      this.recordHostedProviderConsentSafely({
+        tenantIds: [tenant.id],
+        providerId,
+        providerName: provider.name,
+        ...(selectedModel ? { model: selectedModel } : {}),
+        acknowledgedAt: input.hostedProviderConsent.acknowledgedAt,
+        remember: input.hostedProviderConsent.remember,
+        scope: "single-tenant-chat",
+        ...(workspaceContext?.summary
+          ? { workspaceContext: workspaceContext.summary }
+          : {}),
+      });
     }
     // A new chat is named after the question until the answer gives it a title.
     const newConversationTitle = conversation ? undefined : chatTitleForPrompt(content);
