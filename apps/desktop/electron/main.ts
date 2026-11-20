@@ -5578,14 +5578,18 @@ function relaunchInteractive(): void {
     relaunchOutsideLaunchAgent();
     return;
   }
-  app.relaunch(
-    relaunchTarget({
-      platform: process.platform,
-      env: process.env,
-      argv: process.argv,
-      dropArgs: [BACKGROUND_SCHEDULER_ARG, MENU_BAR_ARG],
-    }),
-  );
+  const target = relaunchTarget({
+    platform: process.platform,
+    env: process.env,
+    argv: process.argv,
+    execPath: process.execPath,
+    dropArgs: [BACKGROUND_SCHEDULER_ARG, MENU_BAR_ARG],
+  });
+  if (target.execPath) {
+    relaunchAppImage(target.execPath, target.args);
+    return;
+  }
+  app.relaunch(target);
   app.exit(0);
 }
 
@@ -5604,6 +5608,30 @@ function relaunchOutsideLaunchAgent(): void {
     child.unref();
     // Exit once the shell has started, or once its failure is known; the
     // marker stays either way, so a failed handoff resets at the next launch.
+    child.once("spawn", () => app.exit(0));
+    child.once("error", (error) => {
+      console.warn("[local-reset] could not start the app again after the reset request; it resets at the next launch", error);
+      app.exit(0);
+    });
+    setTimeout(() => app.exit(0), 2_000);
+    return;
+  } catch (error) {
+    console.warn("[local-reset] could not start the app again after the reset request; it resets at the next launch", error);
+  }
+  app.exit(0);
+}
+
+/**
+ * A Linux AppImage is started again by a detached shell, not Electron's
+ * relaunch helper: that helper runs with no_new_privs, so the new AppImage
+ * could not mount itself through the setuid fusermount. The shell waits for
+ * this process to exit, at most a minute, then starts the AppImage file.
+ */
+function relaunchAppImage(appImage: string, args: string[]): void {
+  const script = 'pid="$1"; shift; i=0; while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 300 ]; do sleep 0.2; i=$((i+1)); done; exec "$@"';
+  try {
+    const child = spawn("/bin/sh", ["-c", script, "sh", String(process.pid), appImage, ...args], { detached: true, stdio: "ignore" });
+    child.unref();
     child.once("spawn", () => app.exit(0));
     child.once("error", (error) => {
       console.warn("[local-reset] could not start the app again after the reset request; it resets at the next launch", error);

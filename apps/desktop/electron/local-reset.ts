@@ -248,12 +248,21 @@ export function relaunchTarget(input: {
   platform: NodeJS.Platform;
   env: NodeJS.ProcessEnv;
   argv: readonly string[];
+  execPath: string;
   dropArgs: readonly string[];
 }): { execPath?: string; args: string[] } {
   const args = input.argv.slice(1).filter((arg) => !input.dropArgs.includes(arg));
+  // Only this app's own AppImage: the runtime sets APPDIR to the folder it
+  // runs from, and APPIMAGE can be inherited from a parent that is another
+  // AppImage (an installed package started from such a shell).
   const appImage = input.platform === "linux" ? input.env.APPIMAGE : undefined;
-  return appImage ? { execPath: appImage, args } : { args };
+  const appDir = input.env.APPDIR;
+  const ownAppImage = Boolean(appImage && appDir && input.execPath.startsWith(`${appDir.replace(/\/+$/, "")}/`));
+  return ownAppImage ? { execPath: appImage, args } : { args };
 }
+
+/** The marker and the temporary files its writes go through, by name. */
+export const LOCAL_RESET_MARKER_FILES = /^local-reset-pending\.json(\.[0-9a-f]{16}\.tmp)?$/i;
 
 /** A fresh, unpredictable temporary name for a marker write in the data folder. */
 function markerTempPath(userDataDir: string): string {
