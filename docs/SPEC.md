@@ -542,10 +542,14 @@ error. A caller that does not raise `num_ctx` gets the size Ollama loaded the
 model with (`/api/ps`) instead. Agent runs also set
 `LlmOptions.enforceContextWindow`: if the run's own lookup missed a pin (Ollama
 briefly unavailable) and the adapter's lookup finds it, the adapter refuses
-with the same `ContextTooSmallError` instead of sending. Chat leaves it unset,
+with the same `ContextTooSmallError` instead of sending, and an overflow retry
+on an agent run never asks for more than the pin (when Ollama counts more than
+the estimate, the run fails with the typed reason, `sentToProvider: true`,
+whose message says the model refused the request). Chat leaves it unset,
 so #211's raise still serves a larger request there. A kept `num_ctx` belongs
-to the model revision it was kept for (`/api/show` `modified_at`); a model
-created again under the same name starts from its own settings. LM Studio reports none for now because its
+to the model revision the lookup that chose it saw (`/api/show`
+`modified_at`), even when the request finishes after the model was created
+again; a model created again under the same name starts from its own settings. LM Studio reports none for now because its
 context fields could not be verified.
 
 The runtime's `estimateTokens` counts letters, digits, mixed ids,
