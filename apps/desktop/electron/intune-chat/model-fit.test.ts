@@ -13,8 +13,8 @@ import type {
   RunLlmApi,
 } from "@openadminos/agent-sdk";
 
-import { classifyModelFitFailure, modelFitChoices, modelSizeBillions } from "../../src/shared/model-fit.js";
-import { ModelOverrideError, resolveChatTurnProvider } from "./model-fit.js";
+import { classifyModelFitFailure, isOllamaCloudModel, modelFitChoices, modelSizeBillions } from "../../src/shared/model-fit.js";
+import { MODEL_FIT_OFFER_TTL_MS, ModelFitOffers, ModelOverrideError, resolveChatTurnProvider, type ModelFitOffer } from "./model-fit.js";
 import { IntuneChatService, type ChatServiceHost } from "./service.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 
@@ -84,6 +84,14 @@ describe("Model fit: classifying a failure", () => {
     assert.deepEqual([llamaCpp?.neededTokens, llamaCpp?.limitTokens], [20000, 8192]);
   });
 
+  it("keeps Apple Foundation's prompt count and context size", () => {
+    const apple = classifyModelFitFailure(
+      "Apple Foundation context window is too small for this prompt. The prompt uses 3900 tokens before response generation; the model supports 4096 tokens total. Reduce the answer pack or switch to a larger-context provider.",
+      { providerId: "apple-foundation", isLocal: true },
+    );
+    assert.deepEqual([apple?.neededTokens, apple?.limitTokens, apple?.limitIsModelMax], [3900, 4096, true]);
+  });
+
   it("ignores hosted providers and errors that are not about the context", () => {
     assert.equal(classifyModelFitFailure(new Error(OLLAMA_400), { providerId: "ollama", isLocal: false }), undefined);
     assert.equal(classifyModelFitFailure(new Error("Ollama not reachable at http://127.0.0.1:11434: connect ECONNREFUSED"), { providerId: "ollama", isLocal: true }), undefined);
@@ -109,6 +117,14 @@ describe("Model fit: the choices", () => {
     assert.equal(choices.hostedBlockedByPolicy, false);
   });
 
+  it("never offers an Ollama Cloud model as a model on this device", () => {
+    assert.equal(isOllamaCloudModel("gpt-oss:120b-cloud"), true);
+    assert.equal(isOllamaCloudModel("glm-4.6:cloud"), true);
+    assert.equal(isOllamaCloudModel("gpt-oss:20b"), false);
+    const choices = modelFitChoices({ issue, providers: [{ ...ollama, models: [LOCAL_MODEL, "gpt-oss:120b-cloud", "gpt-oss:20b"] }] });
+    assert.deepEqual(choices.local.map((choice) => choice.model), ["gpt-oss:20b"]);
+  });
+
   it("offers no hosted provider when the managed policy allows only local ones, and says the policy is why", () => {
     const policy: ManagedPolicyStatus = { files: [], values: { allowedProviders: ["ollama"] }, sources: {}, locked: [], issues: [] };
     // The main process leaves disallowed providers out of the list; even a stale one is not offered.
@@ -122,16 +138,22 @@ describe("Model fit: the choices", () => {
 });
 
 describe("Model fit: the per-request override", () => {
-  const base = { providers: [ollama, claude], active: ollama, activeModel: LOCAL_MODEL, nova: false };
-  const override = { providerId: "anthropic" as const, model: "claude-sonnet-5-5", fromProviderId: "ollama" as const, fromModel: LOCAL_MODEL, reason: "context-too-small" as const };
+  const offer: ModelFitOffer = {
+    id: "fit_1", conversationId: "chat_1", tenantId: undefined, content: "q",
+    anchor: { providerId: "ollama", model: LOCAL_MODEL }, failed: { providerId: "ollama", model: LOCAL_MODEL },
+    reason: "context-too-small", createdAt: 0,
+  };
+  const base = { providers: [ollama, claude], active: ollama, activeModel: LOCAL_MODEL, nova: false, offer };
+  const override = { offerId: "fit_1", providerId: "anthropic" as const, model: "claude-sonnet-5-5" };
 
   it("keeps the active provider without an override", () => {
-    const turn = resolveChatTurnProvider({ ...base, override: undefined, consent: undefined });
+    const turn = resolveChatTurnProvider({ ...base, offer: undefined, override: undefined, consent: undefined });
     assert.equal(turn.provider.id, "ollama");
     assert.equal(turn.switchedFrom, undefined);
   });
 
-  it("refuses a hosted override without an acceptance, or with a remembered one", () => {
+  it("refuses an override without its offer, without an acceptance, or with a remembered one", () => {
+    assert.throws(() => resolveChatTurnProvider({ ...base, offer: undefined, override, consent: freshConsent("anthropic", "claude-sonnet-5-5") }), /no longer available/);
     assert.throws(() => resolveChatTurnProvider({ ...base, override, consent: undefined }), ModelOverrideError);
     assert.throws(() => resolveChatTurnProvider({ ...base, override, consent: freshConsent("anthropic", "claude-sonnet-5-5", true) }), /needs your approval for this request/);
     assert.throws(() => resolveChatTurnProvider({ ...base, override, consent: freshConsent("openai") }), /needs your approval/);
@@ -146,15 +168,40 @@ describe("Model fit: the per-request override", () => {
 
   it("refuses a provider that is not listed (left out by policy) or not ready, a stale offer, and Nova", () => {
     assert.throws(() => resolveChatTurnProvider({ ...base, providers: [ollama], override, consent: freshConsent("anthropic") }), /not available on this device/);
-    assert.throws(() => resolveChatTurnProvider({ ...base, providers: [ollama, codexSignedOut], override: { ...override, providerId: "openai", model: undefined }, consent: freshConsent("openai") }), /not ready/);
+    assert.throws(() => resolveChatTurnProvider({ ...base, providers: [ollama, codexSignedOut], override: { offerId: "fit_1", providerId: "openai" }, consent: freshConsent("openai") }), /not ready/);
     assert.throws(() => resolveChatTurnProvider({ ...base, activeModel: "gpt-oss:20b", override, consent: freshConsent("anthropic") }), /changed since this request failed/);
     assert.throws(() => resolveChatTurnProvider({ ...base, nova: true, override, consent: freshConsent("anthropic") }), /Nova/);
   });
 
-  it("runs on a larger local model without a hosted acceptance", () => {
-    const turn = resolveChatTurnProvider({ ...base, override: { ...override, providerId: "ollama", model: "gpt-oss:20b" }, consent: undefined });
-    assert.equal(turn.provider.id, "ollama");
+  it("runs on a larger local model without a hosted acceptance, but never on an Ollama Cloud model", () => {
+    const turn = resolveChatTurnProvider({ ...base, override: { offerId: "fit_1", providerId: "ollama", model: "gpt-oss:20b" }, consent: undefined });
     assert.equal(turn.model, "gpt-oss:20b");
+    const withCloud = { ...ollama, models: [...ollama.models, "gpt-oss:120b-cloud"] };
+    assert.throws(
+      () => resolveChatTurnProvider({ ...base, providers: [withCloud, claude], override: { offerId: "fit_1", providerId: "ollama", model: "gpt-oss:120b-cloud" }, consent: undefined }),
+      /runs on Ollama's servers/,
+    );
+  });
+
+  it("keeps the active model as the anchor after a larger local model also failed", () => {
+    const retried: ModelFitOffer = { ...offer, failed: { providerId: "ollama", model: "gpt-oss:20b" } };
+    const turn = resolveChatTurnProvider({ ...base, offer: retried, override, consent: freshConsent("anthropic", "claude-sonnet-5-5") });
+    assert.deepEqual(turn.switchedFrom, { providerId: "ollama", model: LOCAL_MODEL, reason: "context-too-small" });
+    assert.throws(() => resolveChatTurnProvider({ ...base, offer: retried, override: { offerId: "fit_1", providerId: "ollama", model: "gpt-oss:20b" }, consent: undefined }), /already could not do this request/);
+  });
+});
+
+describe("Model fit: offers", () => {
+  it("binds an offer to its conversation, organization and question, and lets it expire", () => {
+    let now = 1_000;
+    const offers = new ModelFitOffers(() => now);
+    const id = offers.issue({ conversationId: "chat_1", tenantId: "tenant-1", content: "q", anchor: { providerId: "ollama", model: LOCAL_MODEL }, failed: { providerId: "ollama", model: LOCAL_MODEL }, reason: "context-too-small" });
+    assert.equal(offers.check(id, { conversationId: "chat_1", tenantId: "tenant-1", content: "q" }).id, id);
+    assert.throws(() => offers.check(id, { conversationId: "chat_2", tenantId: "tenant-1", content: "q" }), /another question/);
+    assert.throws(() => offers.check(id, { conversationId: "chat_1", tenantId: undefined, content: "q" }), /another question/);
+    assert.throws(() => offers.check(id, { conversationId: "chat_1", tenantId: "tenant-1", content: "other" }), /another question/);
+    now += MODEL_FIT_OFFER_TTL_MS + 1;
+    assert.throws(() => offers.check(id, { conversationId: "chat_1", tenantId: "tenant-1", content: "q" }), /no longer available/);
   });
 });
 
@@ -205,9 +252,9 @@ describe("Model fit in Chat", () => {
       const events: IntuneChatStreamEvent[] = [];
       const result = await service.streamIntuneChatMessage({ content: QUESTION }, (event) => events.push(event));
       assert.equal(result.assistantMessage.status, "failed");
-      assert.deepEqual(result.assistantMessage.modelFit, {
-        reason: "context-too-small", neededTokens: 40652, limitTokens: 16384, providerId: "ollama", model: LOCAL_MODEL,
-      });
+      const { offerId, ...issue } = result.assistantMessage.modelFit!;
+      assert.deepEqual(issue, { reason: "context-too-small", neededTokens: 40652, limitTokens: 16384, providerId: "ollama", model: LOCAL_MODEL });
+      assert.match(offerId!, /^fit_/);
       assert.ok(events.some((event) => event.type === "failed"));
       assert.ok(built.length > 0 && built.every((id) => id === "ollama"), `built ${built.join(", ")}`);
       // Stored with the answer, so a reload keeps the offer's reason.
@@ -215,40 +262,80 @@ describe("Model fit in Chat", () => {
     });
   });
 
-  it("refuses the hosted override without a per-request acceptance, before any model is built", async () => {
+  it("refuses an override with no offer from a failed answer, and a hosted one without a per-request acceptance, before any model is built", async () => {
     await withStore(async (store) => {
       const built: string[] = [];
       const service = new IntuneChatService(chatHost(store, built));
-      const modelOverride = { providerId: "anthropic" as const, model: "claude-sonnet-5-5", fromProviderId: "ollama" as const, fromModel: LOCAL_MODEL, reason: "context-too-small" as const };
-      await assert.rejects(service.streamIntuneChatMessage({ content: QUESTION, modelOverride }, () => undefined), /needs your approval for this request/);
+      // No failure came first: there is no offer to take up.
       await assert.rejects(
-        service.streamIntuneChatMessage({ content: QUESTION, modelOverride, hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5", true) }, () => undefined),
+        service.streamIntuneChatMessage({ content: QUESTION, modelOverride: { offerId: "fit_made_up", providerId: "anthropic", model: "claude-sonnet-5-5" }, hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5") }, () => undefined),
+        /no longer available/,
+      );
+      assert.deepEqual(built, []);
+      const failed = await service.streamIntuneChatMessage({ content: QUESTION }, () => undefined);
+      const offerId = failed.assistantMessage.modelFit!.offerId!;
+      built.length = 0;
+      const modelOverride = { offerId, providerId: "anthropic" as const, model: "claude-sonnet-5-5" };
+      const conversationId = failed.conversation.id;
+      await assert.rejects(service.streamIntuneChatMessage({ content: QUESTION, conversationId, modelOverride }, () => undefined), /needs your approval for this request/);
+      await assert.rejects(
+        service.streamIntuneChatMessage({ content: QUESTION, conversationId, modelOverride, hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5", true) }, () => undefined),
         /needs your approval for this request/,
+      );
+      // The offer is for this question in this conversation only.
+      await assert.rejects(
+        service.streamIntuneChatMessage({ content: "Another question about Autopilot", conversationId, modelOverride, hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5") }, () => undefined),
+        /another question/,
       );
       assert.deepEqual(built, []);
     });
   });
 
-  it("answers this one request with the chosen provider after the acceptance and names what it replaced", async () => {
+  it("answers this one request with the chosen provider after the acceptance, names what it replaced, and uses the offer up", async () => {
     await withStore(async (store) => {
       const built: string[] = [];
       const service = new IntuneChatService(chatHost(store, built));
-      const result = await service.streamIntuneChatMessage(
-        {
-          content: QUESTION,
-          modelOverride: { providerId: "anthropic", model: "claude-sonnet-5-5", fromProviderId: "ollama", fromModel: LOCAL_MODEL, reason: "context-too-small" },
-          hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5"),
-        },
-        () => undefined,
-      );
+      const failed = await service.streamIntuneChatMessage({ content: QUESTION }, () => undefined);
+      const offerId = failed.assistantMessage.modelFit!.offerId!;
+      const conversationId = failed.conversation.id;
+      built.length = 0;
+      const accepted = {
+        content: QUESTION,
+        conversationId,
+        modelOverride: { offerId, providerId: "anthropic" as const, model: "claude-sonnet-5-5" },
+        hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5"),
+      };
+      const result = await service.streamIntuneChatMessage(accepted, () => undefined);
       assert.equal(result.assistantMessage.status, "completed", result.assistantMessage.error);
       assert.equal(result.assistantMessage.providerId, "anthropic");
       assert.deepEqual(result.assistantMessage.switchedFrom, { providerId: "ollama", model: LOCAL_MODEL, reason: "context-too-small" });
-      assert.ok(built.every((id) => id === "anthropic"), `built ${built.join(", ")}`);
+      assert.ok(built.length > 0 && built.every((id) => id === "anthropic"), `built ${built.join(", ")}`);
+      // Single use: the same acceptance cannot send it again.
+      await assert.rejects(service.streamIntuneChatMessage({ ...accepted, hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5") }, () => undefined), /no longer available/);
       // The next request goes to the active local model again.
-      const next = await service.streamIntuneChatMessage({ content: QUESTION, conversationId: result.conversation.id }, () => undefined);
+      const next = await service.streamIntuneChatMessage({ content: QUESTION, conversationId }, () => undefined);
       assert.equal(next.assistantMessage.providerId, "ollama");
       assert.equal(next.assistantMessage.switchedFrom, undefined);
+    });
+  });
+
+  it("refuses an offer whose conversation was deleted", async () => {
+    await withStore(async (store) => {
+      const built: string[] = [];
+      const service = new IntuneChatService(chatHost(store, built));
+      const failed = await service.streamIntuneChatMessage({ content: QUESTION }, () => undefined);
+      await service.deleteIntuneChatConversation(failed.conversation.id);
+      built.length = 0;
+      await assert.rejects(
+        service.streamIntuneChatMessage({
+          content: QUESTION,
+          conversationId: failed.conversation.id,
+          modelOverride: { offerId: failed.assistantMessage.modelFit!.offerId!, providerId: "anthropic", model: "claude-sonnet-5-5" },
+          hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5"),
+        }, () => undefined),
+        /deleted/,
+      );
+      assert.deepEqual(built, []);
     });
   });
 });

@@ -125,7 +125,6 @@ import type {
   SetRunHistoryRetentionSettingsInput,
   SendIntuneChatMessageInput,
   ChatModelOverride,
-  ModelFitReason,
   SupportBundleInput,
   SupportIssueSubmissionInput,
   SupportIssueSubmissionResult,
@@ -4027,19 +4026,13 @@ function validateSendIntuneChatMessageInput(value: unknown): SendIntuneChatMessa
   };
 }
 
-const MODEL_FIT_REASONS: readonly ModelFitReason[] = ["context-too-small", "repeated-failure", "thinking-only"];
-
-/** One request on another provider after the local model could not do it; the service checks it against the live state. */
+/** One request on another provider after the local model could not do it; the service checks it against its offer. */
 function validateChatModelOverride(value: unknown): ChatModelOverride {
   if (!isPlainRecord(value)) throw new Error("modelOverride must be an object.");
-  const reason = requireBoundedString(value.reason, "modelOverride.reason", 32);
-  if (!(MODEL_FIT_REASONS as readonly string[]).includes(reason)) throw new Error("modelOverride.reason is not a known reason.");
   return {
+    offerId: requireBoundedString(value.offerId, "modelOverride.offerId", 128),
     providerId: validateProviderId(value.providerId, "modelOverride.providerId"),
     ...(value.model !== undefined ? { model: requireBoundedString(value.model, "modelOverride.model", 256) } : {}),
-    fromProviderId: validateProviderId(value.fromProviderId, "modelOverride.fromProviderId"),
-    ...(value.fromModel !== undefined ? { fromModel: requireBoundedString(value.fromModel, "modelOverride.fromModel", 256) } : {}),
-    reason: reason as ModelFitReason,
   };
 }
 

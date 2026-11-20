@@ -169,7 +169,7 @@ import {
   type DocsIndexPassage,
 } from "./chat-steps.js";
 import { TenantValueIndex } from "./tenant-values.js";
-import { chatModelFitFailure, ModelOverrideError, repeatedFailureIssue, resolveChatTurnProvider } from "./model-fit.js";
+import { chatModelFitFailure, ModelFitOffers, ModelOverrideError, repeatedFailureIssue, resolveChatTurnProvider } from "./model-fit.js";
 import { usedTenantEvidence } from "../../src/shared/chat-steps.js";
 
 type WorkspacePromptContextPayload = {
@@ -537,6 +537,8 @@ export function deterministicChatSystemPrompt(isLocalProvider: boolean, voice: b
 }
 
 export class IntuneChatService {
+  /** Requests the local model could not do, each of which may be run again once with another provider. */
+  private readonly modelFitOffers = new ModelFitOffers();
   private readonly preloadJobs = new Map<
     string,
     {
@@ -2553,9 +2555,17 @@ export class IntuneChatService {
     if (leaseSignal) options = { ...options, signal: leaseSignal };
     const providers = await this.host.listProviders();
     const activeProvider = this.resolveActiveProvider(providers, persisted.activeProviderId);
-    // One request may run on a provider the admin chose after the local model could not do it (model-fit.ts).
+    // One request may run on a provider the admin chose after the local model could not do it (model-fit.ts),
+    // once, for the offer the host made with that failed answer.
+    const fitOffer = input.modelOverride
+      ? this.modelFitOffers.check(input.modelOverride.offerId, { conversationId: input.conversationId, tenantId: persisted.activeTenantId ?? undefined, content })
+      : undefined;
+    if (fitOffer && !store.getConversation(fitOffer.conversationId)) {
+      throw new ModelOverrideError("That conversation was deleted, so nothing was sent.");
+    }
     const turn = resolveChatTurnProvider({
       override: input.modelOverride,
+      offer: fitOffer,
       providers,
       active: activeProvider,
       activeModel: resolveProviderDefaultModel(activeProvider, persisted.activeModelByProviderId).model,
@@ -2595,6 +2605,8 @@ export class IntuneChatService {
       consentVerified = true;
     };
     if (reachesModel) verifyConsent();
+    // The offer is used up once this request is cleared to send.
+    if (fitOffer) this.modelFitOffers.consume(fitOffer.id);
     // The consent audit is per tenant; a no-tenant send has none to record against.
     // A follow-up's consent was recorded when it was set; the fire time adds none.
     if (provider?.isLocal === false && input.hostedProviderConsent && !noTenant && !options.scheduledConsent) {
@@ -3231,7 +3243,7 @@ export class IntuneChatService {
                 emitDelta(assistantContent);
               } else {
                 // The investigation failed on this local model often enough that Chat stops trying it.
-                if (agentic.reason !== "context-limit" && agenticModelHasFailedRepeatedly(providerId, selectedModel ?? llm.defaultModel)) modelFit = repeatedFailureIssue(provider, selectedModel ?? llm.defaultModel);
+                if (!options.voice && agentic.reason !== "context-limit" && agenticModelHasFailedRepeatedly(providerId, selectedModel ?? llm.defaultModel)) modelFit = repeatedFailureIssue(provider, selectedModel ?? llm.defaultModel);
                 await streamDeterministicAnswer(agentic.fallbackNotice);
               }
             }
@@ -3334,7 +3346,22 @@ export class IntuneChatService {
       providerId,
       ...(responseModel ? { model: responseModel } : {}),
       ...(engineNotice ? { engineNotice } : {}),
-      ...(modelFit ? { modelFit } : {}),
+      ...(modelFit
+        ? {
+            modelFit: {
+              ...modelFit,
+              offerId: this.modelFitOffers.issue({
+                conversationId: conversation.id,
+                tenantId: noTenant ? undefined : tenant.id,
+                content,
+                // A failed one-request retry keeps the active model as the one it stands in for.
+                anchor: turn.switchedFrom ? { providerId: turn.switchedFrom.providerId, model: turn.switchedFrom.model } : { providerId, model: selectedModel },
+                failed: { providerId, model: selectedModel },
+                reason: modelFit.reason,
+              }),
+            },
+          }
+        : {}),
       ...(turn.switchedFrom ? { switchedFrom: turn.switchedFrom } : {}),
       ...(answerPlan ? { questionKind: answerPlan.sources.kind } : {}),
       ...(notConnectedFor(accessBlockedMessage, restriction, Boolean(namedAgent) || planned.hasWriteIntent)),

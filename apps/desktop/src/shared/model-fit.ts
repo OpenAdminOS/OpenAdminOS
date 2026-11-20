@@ -75,8 +75,17 @@ function contextIssueFromText(text: string): Omit<ModelFitIssue, "providerId" | 
     const limitTokens = count(/"n_ctx"\s*:\s*(\d+)/.exec(text)?.[1]);
     return { reason: "context-too-small", ...(neededTokens ? { neededTokens } : {}), ...(limitTokens ? { limitTokens } : {}) };
   }
-  // Apple Foundation's helper (SPEC.md, Apple Foundation is a small-context provider).
-  if (/context window is too small for this prompt/i.test(text)) return { reason: "context-too-small" };
+  // Apple Foundation's helper (SPEC.md, Apple Foundation is a small-context provider). Its count is
+  // the prompt alone; the helper also reserves room for the answer, so the prompt can be below the limit.
+  if (/context window is too small for this prompt/i.test(text)) {
+    const neededTokens = count(/The prompt (?:uses|is estimated at) (\d+) tokens/i.exec(text)?.[1]);
+    const limitTokens = count(/the model supports (\d+) tokens total/i.exec(text)?.[1]);
+    return {
+      reason: "context-too-small",
+      ...(neededTokens ? { neededTokens } : {}),
+      ...(limitTokens ? { limitTokens, limitIsModelMax: true as const } : {}),
+    };
+  }
   return undefined;
 }
 
@@ -95,6 +104,18 @@ export function classifyModelFitFailure(
   const found = typed ?? (text ? contextIssueFromText(text) : undefined);
   if (!found) return undefined;
   return { ...found, providerId: context.providerId, ...(context.model ? { model: context.model } : {}) };
+}
+
+/**
+ * An Ollama Cloud model, such as "gpt-oss:120b-cloud" or "glm-4.6:cloud".
+ * A loopback Ollama that is signed in to ollama.com lists these with its
+ * local models, but their prompts are processed on Ollama's servers, so
+ * they are never offered or accepted as a model on this device.
+ * TODO(ugur): Ollama's /api/tags also marks them with `remote_host`; should
+ * provider detection read that and label cloud models everywhere?
+ */
+export function isOllamaCloudModel(model: string | undefined): boolean {
+  return Boolean(model && /[:-]cloud$/i.test(model.trim()));
 }
 
 /** The parameter count in a model's name, such as 8 for "openadmin-8b" or 20 for "gpt-oss:20b". */
@@ -155,6 +176,7 @@ export function modelFitChoices(input: {
       if (!provider.isLocal || !isProviderReady(provider) || !managedProviderAllowed(input.managedPolicy, provider.id)) continue;
       for (const model of provider.models) {
         if (provider.id === issue.providerId && model === issue.model) continue;
+        if (provider.id === "ollama" && isOllamaCloudModel(model)) continue;
         const size = modelSizeBillions(model);
         if (size !== undefined && size > currentSize) {
           local.push({ providerId: provider.id, providerName: provider.name, isLocal: true, model });

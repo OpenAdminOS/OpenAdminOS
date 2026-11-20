@@ -1477,6 +1477,12 @@ export interface ModelFitIssue {
   limitTokens?: number;
   /** The limit is the most the model supports, not the size it was loaded with. */
   limitIsModelMax?: true;
+  /**
+   * Host-issued and single use: the one request this issue may be run again
+   * for, bound to its conversation, organization, question and the active
+   * model. Absent when the request cannot be offered again (Nova, a run).
+   */
+  offerId?: string;
 }
 
 /**
@@ -1486,12 +1492,10 @@ export interface ModelFitIssue {
  * fresh `hostedProviderConsent` for it that is not a remembered one.
  */
 export interface ChatModelOverride {
+  /** The host's offer from the failed answer (`ModelFitIssue.offerId`); used once. */
+  offerId: string;
   providerId: ProviderId;
   model?: string;
-  /** The active local provider and model this request was first sent to. */
-  fromProviderId: ProviderId;
-  fromModel?: string;
-  reason: ModelFitReason;
 }
 
 /**

@@ -1,13 +1,15 @@
+import { randomUUID } from "node:crypto";
 import { resolveProviderDefaultModel } from "@openadminos/agent-sdk";
 import type {
   ChatModelOverride,
   HostedProviderChatConsent,
   IntuneChatMessage,
   ModelFitIssue,
+  ModelFitReason,
   ProviderId,
   ProviderSummary,
 } from "@openadminos/agent-sdk";
-import { classifyModelFitFailure } from "../../src/shared/model-fit.js";
+import { classifyModelFitFailure, isOllamaCloudModel } from "../../src/shared/model-fit.js";
 import { isProviderReady } from "../../src/shared/provider-detection.js";
 
 /**
@@ -23,6 +25,67 @@ export class ModelOverrideError extends Error {
   override readonly name = "ModelOverrideError";
 }
 
+/** How long an offer from a failed answer can be taken up. */
+export const MODEL_FIT_OFFER_TTL_MS = 15 * 60_000;
+const MAX_OFFERS = 50;
+
+/** A request the local model could not do, which may be run again once with another provider. */
+export interface ModelFitOffer {
+  id: string;
+  conversationId: string;
+  /** Undefined for a request with no organization. */
+  tenantId: string | undefined;
+  /** The question, exactly as it was sent. */
+  content: string;
+  /** The active provider and model when the request failed; an override needs them still active. */
+  anchor: { providerId: ProviderId; model: string | undefined };
+  /** The model that could not do it: the anchor, or a larger local model tried for this request. */
+  failed: { providerId: ProviderId; model: string | undefined };
+  reason: ModelFitReason;
+  createdAt: number;
+}
+
+/**
+ * Offers the host issued with failed answers. An override must name one,
+ * for the same conversation, organization and question, while the same
+ * model is active, and uses it up. In memory only: after a restart the
+ * question is sent again.
+ */
+export class ModelFitOffers {
+  private readonly offers = new Map<string, ModelFitOffer>();
+
+  constructor(private readonly now: () => number = () => Date.now()) {}
+
+  issue(input: Omit<ModelFitOffer, "id" | "createdAt">): string {
+    this.prune();
+    while (this.offers.size >= MAX_OFFERS) this.offers.delete(this.offers.keys().next().value!);
+    const id = `fit_${randomUUID()}`;
+    this.offers.set(id, { ...input, id, createdAt: this.now() });
+    return id;
+  }
+
+  /** The offer an override names, checked against this request. Not used up yet. */
+  check(id: string, request: { conversationId: string | undefined; tenantId: string | undefined; content: string }): ModelFitOffer {
+    this.prune();
+    const offer = this.offers.get(id);
+    if (!offer) throw new ModelOverrideError("This choice is no longer available, so nothing was sent. Send the question again.");
+    if (offer.conversationId !== request.conversationId || offer.tenantId !== request.tenantId || offer.content !== request.content) {
+      throw new ModelOverrideError("This choice belongs to another question, so nothing was sent. Send the question again.");
+    }
+    return offer;
+  }
+
+  /** Uses up an offer once its request is cleared to send. */
+  consume(id: string): void {
+    this.offers.delete(id);
+  }
+
+  private prune(): void {
+    const cutoff = this.now() - MODEL_FIT_OFFER_TTL_MS;
+    for (const [id, offer] of this.offers) if (offer.createdAt < cutoff) this.offers.delete(id);
+  }
+}
+
 export interface ChatTurnProvider {
   provider: ProviderSummary;
   model: string | undefined;
@@ -32,11 +95,13 @@ export interface ChatTurnProvider {
 
 /**
  * The provider and model of one Chat request. Without an override, the
- * active ones. With an override, the chosen provider, after checking that:
- * - the active provider is the local one the request first went to, with
- *   the same model, so a stale offer cannot apply to another setup;
+ * active ones. With an override and its checked offer, the chosen provider,
+ * after checking that:
+ * - the active provider and model are still the ones the offer was made
+ *   for, so a stale offer cannot apply to another setup;
  * - the chosen provider is in the provider list (which the managed policy
- *   already filtered) and ready, and the model is one it lists;
+ *   already filtered) and ready, lists the model, and is not the model that
+ *   failed; a model on this device is not an Ollama Cloud model;
  * - a hosted provider comes with an acceptance for it that is not a
  *   remembered one. Its age, model and tenant are checked later by the
  *   same consent check every hosted send passes.
@@ -44,6 +109,7 @@ export interface ChatTurnProvider {
  */
 export function resolveChatTurnProvider(input: {
   override: ChatModelOverride | undefined;
+  offer: ModelFitOffer | undefined;
   providers: readonly ProviderSummary[];
   active: ProviderSummary;
   activeModel: string | undefined;
@@ -51,10 +117,13 @@ export function resolveChatTurnProvider(input: {
   consent: HostedProviderChatConsent | undefined;
   nova: boolean;
 }): ChatTurnProvider {
-  const { override, active, activeModel } = input;
+  const { override, offer, active, activeModel } = input;
   if (!override) return { provider: active, model: activeModel };
   if (input.nova) throw new ModelOverrideError("Nova answers with its own provider only. Ask this in Chat to choose another one.");
-  if (!active.isLocal || active.id !== override.fromProviderId || (override.fromModel ?? undefined) !== activeModel) {
+  if (!offer || offer.id !== override.offerId) {
+    throw new ModelOverrideError("This choice is no longer available, so nothing was sent. Send the question again.");
+  }
+  if (active.id !== offer.anchor.providerId || activeModel !== offer.anchor.model) {
     throw new ModelOverrideError("The model in Chat changed since this request failed, so it was not sent. Send the question again.");
   }
   const chosen = input.providers.find((provider) => provider.id === override.providerId);
@@ -68,8 +137,12 @@ export function resolveChatTurnProvider(input: {
     throw new ModelOverrideError(`${chosen.name} does not list ${override.model}, so nothing was sent. Choose it again in Chat.`);
   }
   const model = override.model ?? resolveProviderDefaultModel(chosen, input.activeModelByProviderId).model;
-  if (chosen.id === active.id && model === activeModel) {
-    throw new ModelOverrideError("That is the model this request already used. Choose another one, or narrow the question.");
+  if ((chosen.id === offer.failed.providerId && model === offer.failed.model) || (chosen.id === active.id && model === activeModel)) {
+    throw new ModelOverrideError("That model already could not do this request. Choose another one, or narrow the question.");
+  }
+  if (chosen.isLocal && chosen.id === "ollama" && isOllamaCloudModel(model)) {
+    // A cloud model on a loopback Ollama sends the prompt to ollama.com.
+    throw new ModelOverrideError(`${model} runs on Ollama's servers, not on this device, so nothing was sent. Choose another model.`);
   }
   if (!chosen.isLocal) {
     const consent = input.consent;
@@ -81,7 +154,7 @@ export function resolveChatTurnProvider(input: {
   return {
     provider: chosen,
     model,
-    switchedFrom: { providerId: active.id, ...(activeModel ? { model: activeModel } : {}), reason: override.reason },
+    switchedFrom: { providerId: offer.anchor.providerId, ...(offer.anchor.model ? { model: offer.anchor.model } : {}), reason: offer.reason },
   };
 }
 
