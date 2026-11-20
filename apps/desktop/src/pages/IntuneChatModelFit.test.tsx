@@ -124,6 +124,22 @@ describe("IntuneChat model fit (mockup 36)", () => {
     expect(answeredBy).toHaveTextContent("Answered by Codex · location set by your account for this request only. Chat is back on llama3.1.");
   });
 
+  it("shows the exact question in the accept step and closes it unsent when the composer changes", async () => {
+    const bridge = fitBridge();
+    const { user, notice } = await sendTooLarge(bridge);
+    await user.click(within(notice).getByRole("button", { name: "Run with Codex" }));
+    const accept = await screen.findByRole("dialog", { name: "Run this request with Codex?" });
+    expect(accept.querySelector("[data-model-fit-question]")).toHaveTextContent(QUESTION);
+    // The admin removes part of the question while the accept step is open.
+    const composer = screen.getByRole("combobox", { name: CHAT_COPY.composerLabel });
+    await user.clear(composer);
+    await user.click(composer);
+    await user.paste("List devices grouped by owner.");
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Run this request with Codex?" })).toBeNull());
+    expect(screen.getByText(/^Your question or attachments changed, so nothing was sent\./)).toBeInTheDocument();
+    expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce();
+  });
+
   it("asks for the accept even when hosted sends to Codex were remembered for this tenant", async () => {
     window.localStorage.setItem(`openadminos:intune-chat-hosted-consent:v1:${tenantId}:openai`, "true");
     const bridge = fitBridge();

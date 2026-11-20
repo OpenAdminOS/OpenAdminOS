@@ -388,6 +388,8 @@ export default function AgentDetail({
               ...(choice.runForRealOfRunId ? { runForRealOfRunId: choice.runForRealOfRunId } : {}),
               ...(choice.retryOfRunId ? { retryOfRunId: choice.retryOfRunId } : {}),
               ...pinTenant,
+              // A model on this device is checked again by the host before the run is admitted.
+              ...(choice.modelFit && pendingProvider?.isLocal ? { requireOnDeviceModel: true } : {}),
               ...(choice.providerId ? { providerId: choice.providerId } : {}),
               ...(choice.model ? { model: choice.model } : {}),
             }

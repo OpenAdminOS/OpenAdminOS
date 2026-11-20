@@ -167,6 +167,9 @@ type ModelFitAccept = {
   offer: ModelFitOffer;
   override: ChatModelOverride;
   prompt: HostedChatConsentPrompt;
+  /** The composer and attachments when the accept step opened; a change closes it unsent. */
+  composerAtOpen: string;
+  attachmentsAtOpen: string;
 };
 
 type HostedProviderConsentInput = NonNullable<
@@ -433,6 +436,8 @@ function IntuneChatContent() {
       ...(workspaceContextSummary.includesInstructions ? { includeInstructions: true } : {}),
     };
   };
+  // What the next send would attach, to notice a change while a model fit accept is open.
+  const currentAttachmentsKey = JSON.stringify(buildWorkspaceContextInput() ?? null);
 
   useEffect(() => {
     const api = window.openAdminOS;
@@ -902,6 +907,8 @@ function IntuneChatContent() {
     workspaceContext?: WorkspacePromptContextInput,
     /** This request only, on the provider the admin chose after the local model could not do it. */
     modelOverride?: ChatModelOverride,
+    /** The summary of `workspaceContext` as the admin saw it; defaults to the composer's. */
+    workspaceSummary?: WorkspacePromptContextSummary,
   ) => {
     const api = window.openAdminOS;
     if (!api || !content || sending) return;
@@ -1094,7 +1101,7 @@ function IntuneChatContent() {
                 activeProviderId: provider?.id ?? state.activeProviderId,
                 ...(activeModel ? { activeModel } : {}),
                 ...(workspaceContext ? { workspaceContext } : {}),
-                ...(workspaceContext && workspaceContextSummary ? { workspaceContextSummary } : {}),
+                ...(workspaceContext && (workspaceSummary ?? workspaceContextSummary) ? { workspaceContextSummary: workspaceSummary ?? workspaceContextSummary } : {}),
               });
             }
             if (event.type === "failed") {
@@ -1224,7 +1231,7 @@ function IntuneChatContent() {
     // The request exactly as it failed, with the workspace selection it had.
     const workspaceContext = offer.workspaceContext;
     if (choice.isLocal) {
-      void executeSend(offer.content, undefined, offer.conversationId, workspaceContext, override);
+      void executeSend(offer.content, undefined, offer.conversationId, workspaceContext, override, offer.workspaceContextSummary);
       return;
     }
     const contextSummary = offer.workspaceContextSummary;
@@ -1242,6 +1249,8 @@ function IntuneChatContent() {
         ...(contextSummary ? { workspaceContextSummary: contextSummary } : {}),
         toolHosts: chatToolHosts(state),
       },
+      composerAtOpen: input,
+      attachmentsAtOpen: currentAttachmentsKey,
     });
   };
 
@@ -1256,6 +1265,7 @@ function IntuneChatContent() {
       pending.prompt.conversationId,
       pending.prompt.workspaceContext,
       pending.override,
+      pending.prompt.workspaceContextSummary,
     );
   };
 
@@ -1276,6 +1286,16 @@ function IntuneChatContent() {
   // waits for its id there; any other conversation, or a change of model or
   // organization, withdraws it.
   const modelFitOfferShown = modelFitOffer !== null && activeConversationId === modelFitOffer.conversationId;
+  // The accept step sends the question it shows. Editing the composer or the
+  // attachments while it is open closes it unsent, so nothing changed goes out
+  // under an acceptance of something else.
+  useEffect(() => {
+    if (!modelFitAccept) return;
+    if (input !== modelFitAccept.composerAtOpen || currentAttachmentsKey !== modelFitAccept.attachmentsAtOpen) {
+      setModelFitAccept(null);
+      setNotice(MODEL_FIT_COPY.acceptWithdrawn);
+    }
+  }, [currentAttachmentsKey, input, modelFitAccept]);
   useEffect(() => {
     if (!modelFitOffer) return;
     const otherConversation = activeConversationId !== null && activeConversationId !== modelFitOffer.conversationId;
@@ -4215,6 +4235,12 @@ function HostedChatConsentPanel({
             ? HOSTED_CONFIRM_COPY.bodyNoTenant(tool, apiName)
             : HOSTED_CONFIRM_COPY.bodyTenant(tool, apiName, tenant)}
       </p>
+      {modelFit ? (
+        <blockquote data-model-fit-question="" className="mt-3 max-h-32 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border)]">
+          <span className="sr-only">{MODEL_FIT_COPY.questionLabel}: </span>
+          {prompt.content}
+        </blockquote>
+      ) : null}
       <dl className="mt-3 grid grid-cols-[88px_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
         {facts.map(([term, value, hosted]) => (
           <div key={term} className="contents">
@@ -4635,8 +4661,9 @@ function SwitchedProviderLine({ message, providers }: { message: IntuneChatMessa
   const switchedFrom = message.switchedFrom!;
   const provider = providers.find((entry) => entry.id === providerId);
   const name = provider?.name ?? PROVIDER_TOOL_NAMES[providerId] ?? providerId;
-  // A provider no longer listed is named with its location label: saying less than where data went is not an option.
-  const local = provider?.isLocal === true;
+  // Where it went is what was recorded when it was sent; a provider no longer
+  // listed, or an older answer without the record, is named with its location label.
+  const local = switchedFrom.toOnDevice ?? provider?.isLocal === true;
   const back = modelFitModelName({ providerId: switchedFrom.providerId, ...(switchedFrom.model ? { model: switchedFrom.model } : {}) });
   return (
     <div

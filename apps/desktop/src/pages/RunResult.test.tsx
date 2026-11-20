@@ -11,6 +11,7 @@ import {
   createMockAgent,
   createMockAppState,
   makeMockBridge,
+  mockProviders,
   renderRoute,
   renderWithAppState,
 } from "../test/test-utils";
@@ -832,6 +833,18 @@ describe("Run with another provider after a model fit failure (mockup 36, sectio
     await user.click(within(dialog).getByRole("button", { name: "Start run" }));
     // Pinned to the organization the review showed, so a switch before admission cannot move it.
     await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({ providerId: "openai", model: "gpt-5", tenantId: "tenant-1" })));
+  });
+
+  it("asks the host to check a larger local model again before the rerun", async () => {
+    const user = userEvent.setup();
+    const providers = mockProviders.map((provider) => (provider.id === "ollama" ? { ...provider, models: ["llama3.1", "gpt-oss:20b"] } : provider));
+    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "ollama", model: "openadmin-8b", tenantId: "tenant-1", error: CONTEXT_ERROR });
+    const bridge = makeMockBridge({}, createMockAppState({ providers, installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "read" })], runs: [run] }));
+    renderWithPreflight(run.id, bridge);
+    await user.click(within(await screen.findByRole("region", { name: "OpenAdmin 8B cannot fit this run" })).getByRole("button", { name: "Use gpt-oss:20b" }));
+    const dialog = await screen.findByRole("dialog", { name: /Review run/ });
+    await user.click(within(dialog).getByRole("button", { name: "Start run" }));
+    await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({ providerId: "ollama", model: "gpt-oss:20b", requireOnDeviceModel: true })));
   });
 
   it("keeps a failed dry run a dry run when it is run again with another provider", async () => {
