@@ -8,6 +8,20 @@ import { LOCAL_RESET_PHRASE } from "../shared/local-reset";
 import type { LocalResetInfo } from "../shared/openAdminOS";
 
 const REMOTE_ERROR_PREFIX = /^Error invoking remote method ['"][^'"]+['"]: (?:\w*Error: )?/;
+const RESET_REFUSAL_PREFIX = /^Error invoking remote method ['"][^'"]+['"]: LocalResetRequestError: /;
+
+/**
+ * A refusal the main process wrote for this dialog is shown in full, however
+ * long, since it says what to do; any other error goes through the general
+ * filter that keeps stack traces and paths out of the UI.
+ */
+function resetErrorText(raw: string): string {
+  if (RESET_REFUSAL_PREFIX.test(raw)) {
+    const message = raw.replace(RESET_REFUSAL_PREFIX, "").trim();
+    if (message && message.length <= 800 && !/[\r\n]/.test(message)) return message;
+  }
+  return userFacingErrorReason(raw.replace(REMOTE_ERROR_PREFIX, "")) ?? LOCAL_RESET_COPY.failedFallback;
+}
 
 type Phase = "idle" | "resetting" | "restarting";
 
@@ -73,7 +87,7 @@ export function ResetOpenAdminOSDialog({ open, onClose }: { open: boolean; onClo
       setPhase("restarting");
     } catch (caught) {
       const raw = caught instanceof Error ? caught.message : String(caught);
-      setError(userFacingErrorReason(raw.replace(REMOTE_ERROR_PREFIX, "")) ?? LOCAL_RESET_COPY.failedFallback);
+      setError(resetErrorText(raw));
       setPhase("idle");
     }
   };
@@ -86,7 +100,8 @@ export function ResetOpenAdminOSDialog({ open, onClose }: { open: boolean; onClo
         badge={<Badge tone="danger">{LOCAL_RESET_COPY.dialogBadge}</Badge>}
         onClose={close}
       />
-      <div className="space-y-4 p-6">
+      {/* The list scrolls and the buttons stay in view, also at the smallest window height. */}
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-6">
         <section aria-labelledby="local-reset-removed" className="text-sm leading-relaxed">
           <h3 id="local-reset-removed" className="font-medium text-[var(--color-text)]">
             {LOCAL_RESET_COPY.removedTitle}
@@ -179,15 +194,14 @@ export function ResetOpenAdminOSDialog({ open, onClose }: { open: boolean; onClo
             </button>
           </div>
         ) : null}
-
-        <div className="flex justify-end gap-2 pt-1">
-          <Button variant="ghost" disabled={busy} onClick={close}>
-            Cancel
-          </Button>
-          <Button variant="danger" disabled={!armed || busy} onClick={() => void reset()}>
-            {busy ? LOCAL_RESET_COPY.busyAction : LOCAL_RESET_COPY.action}
-          </Button>
-        </div>
+      </div>
+      <div className="flex shrink-0 justify-end gap-2 border-t border-[var(--color-border-soft)] px-6 py-4">
+        <Button variant="ghost" disabled={busy} onClick={close}>
+          Cancel
+        </Button>
+        <Button variant="danger" disabled={!armed || busy} onClick={() => void reset()}>
+          {busy ? LOCAL_RESET_COPY.busyAction : LOCAL_RESET_COPY.action}
+        </Button>
       </div>
     </Modal>
   );

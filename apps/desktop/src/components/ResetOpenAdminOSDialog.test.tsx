@@ -111,6 +111,22 @@ describe("Reset OpenAdminOS dialog", () => {
   });
 });
 
+describe("long refusals", () => {
+  it("shows a refusal from the main process in full, however long", async () => {
+    const reason = "The reset could not start: the data folder is a link, holds another mount, or could not be read in full, so emptying it could reach files elsewhere and OpenAdminOS does not empty it. Remove its files by hand, as described in Uninstall and reset. Nothing was removed.";
+    expect(reason.length).toBeGreaterThan(240);
+    const { user } = renderDialog({
+      resetOpenAdminOS: vi.fn(async () => {
+        throw new Error(`Error invoking remote method 'openadminos:reset-openadminos': LocalResetRequestError: ${reason}`);
+      }),
+    });
+    await screen.findByText(DATA_FOLDER);
+    await user.type(screen.getByLabelText(`Type ${PHRASE} to confirm`), PHRASE);
+    await user.click(screen.getByRole("button", { name: "Reset and restart" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(reason);
+  });
+});
+
 describe("after a reset", () => {
   it("shows what was removed and what could not be, and dismisses", async () => {
     const bridge = installMockBridge(makeMockBridge({
