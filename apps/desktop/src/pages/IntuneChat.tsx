@@ -973,6 +973,8 @@ function IntuneChatContent() {
     dispatchSend({ type: "send" });
     setSending(true);
     setFailedRequest(null);
+    // A retry the host refuses before sending anything gets its choices back (below).
+    const offerBeforeRetry = modelOverride ? modelFitOfferRef.current : null;
     setModelFitOffer(null);
     setModelFitAccept(null);
     setError(null);
@@ -1185,6 +1187,10 @@ function IntuneChatContent() {
       const errorMessage = caught instanceof Error ? caught.message : String(caught);
       if (!reachedTerminal) dispatchSend({ type: "fail" });
       setError(errorMessage);
+      // The host refused the retry before any model call, so the choices it tells the admin to make
+      // again are shown again. The withdrawal checks still drop them if the conversation, organization
+      // or model changed, and an offer the host already used is refused when chosen.
+      if (offerBeforeRetry && !reachedTerminal) setModelFitOffer(offerBeforeRetry);
       setFailedRequest({ content, conversationId: targetConversationId });
       if (!keepDraft) setInput(content);
       setChatProgress({

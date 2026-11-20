@@ -209,6 +209,8 @@ describe("IntuneChat model fit (mockup 36)", () => {
     await screen.findByText(/settings changed after you chose it, so nothing was sent/);
     expect(screen.queryByText("Attempted through")).toBeNull();
     expect(screen.queryByText("Sending to")).toBeNull();
+    // The error says to choose again, so the choices are there to choose from.
+    expect(await screen.findByRole("region", { name: "llama3.1 cannot fit this request" })).toBeInTheDocument();
   });
 
   it("keeps the admin's narrower draft stored when a larger local model fails too", async () => {
