@@ -3840,7 +3840,13 @@ the format. Decisions:
   planner as before. An open reading of the words was tried first and kept
   computing answers to other questions (a dropped "not", "or" read as "and",
   "Windows 11" read as Windows, independent clauses read as a subset), so the
-  list is closed and grows only by adding a tested shape. The deterministic
+  list is closed and grows only by adding a tested shape. Only "devices" (or
+  "Macs") names the inventory, since "computers" would also count phones; iOS
+  and iPadOS are separate platforms; a sync window must be one day to ten
+  years; "list their names" together with a subset asks for two lists and goes
+  to the planner; "what about macOS" asks the stored question again with
+  macOS in the same shape (its split, subset, count or list); Entra device
+  questions always go to the planner. The deterministic
   answer pack carries the result as an authoritative `computedResult` (exact
   counts, the full filtered list, plain fact lines) and no sample rows for
   that resource, only for a tenant or mixed question whose resource the tenant

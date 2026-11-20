@@ -17,7 +17,8 @@ import type { GraphCacheQueryPredicate, IntelligenceSqliteStore } from "./sqlite
  * a hosted model writes it from them as authoritative evidence.
  */
 
-export type StructuredDeviceResource = "managedDevices" | "entraDevices";
+/** Code answers questions about the Intune device inventory only; Entra device questions go to the planner. */
+export type StructuredDeviceResource = "managedDevices";
 
 export interface StructuredDeviceQuery {
   kind: "count";
@@ -61,6 +62,8 @@ export interface ChatResultContext {
   total: number;
   /** The rows the answer matched, when at most CONTEXT_ID_LIMIT: a follow-up narrows these, not a re-read of the cache. */
   ids?: string[];
+  /** The question's shape (its set, subset, split and list), so "what about macOS?" asks it again with macOS. */
+  shape?: { filters: GraphCacheQueryPredicate[]; focus?: { label: string; filters: GraphCacheQueryPredicate[] }; breakdown: string[]; list: boolean };
   computedAt: string;
 }
 
@@ -102,7 +105,9 @@ export const COMPUTED_LIST_LIMIT = 50;
 const OS_FILTERS: Array<{ pattern: RegExp; label: string; predicate: GraphCacheQueryPredicate }> = [
   { pattern: /\bwindows\b/, label: "Windows", predicate: { field: "operatingSystem", op: "eq", value: "Windows" } },
   { pattern: /\bmac ?os\b|\bmacs?\b|\bos x\b/, label: "macOS", predicate: { field: "operatingSystem", op: "eq", value: "macOS" } },
-  { pattern: /\bios\b|\bipad ?os\b|\biphones?\b|\bipads?\b/, label: "iOS", predicate: { field: "operatingSystem", op: "in", value: ["iOS", "iPadOS"] } },
+  // Intune reports iPhones as iOS and iPads as iPadOS; each word counts only its own platform.
+  { pattern: /\bios\b|\biphones?\b/, label: "iOS", predicate: { field: "operatingSystem", op: "eq", value: "iOS" } },
+  { pattern: /\bipad ?os\b|\bipads?\b/, label: "iPadOS", predicate: { field: "operatingSystem", op: "eq", value: "iPadOS" } },
   { pattern: /\bandroid\b/, label: "Android", predicate: { field: "operatingSystem", op: "startsWith", value: "Android" } },
   { pattern: /\blinux\b|\bubuntu\b/, label: "Linux", predicate: { field: "operatingSystem", op: "eq", value: "Linux" } },
 ];
@@ -177,7 +182,9 @@ export function syncFilter(lower: string, generatedAt: string): { label: string;
       // period, which one cutoff cannot express, so it stays unread and the question goes to the planner.
       ?? (/\b(?:in|within|over|during) the (?:last|past) week\b|\bthe past week\b/.test(lower) ? "7" : /\b(?:in|within|over|during) the (?:last|past) month\b/.test(lower) ? "30" : undefined);
     if (days === undefined) return undefined;
-    const count = Math.max(1, Math.min(3650, Number(days)));
+    // A window outside one day to ten years is not shortened to fit: the question goes to the planner.
+    const count = Number(days);
+    if (!(count >= 1 && count <= 3650)) return undefined;
     since = new Date(now.getTime() - count * MS_PER_DAY);
     label = `in the last ${count} ${count === 1 ? "day" : "days"}`;
   }
@@ -204,7 +211,8 @@ const WHERE = "(?: in intune| in our tenant| in the tenant| in total)?";
 
 /** Intune devices, optionally of one OS: "devices", "managed Windows devices", "Macs". */
 function devicesSlot(name: string): string {
-  return `(?:(?:intune |managed |intune managed )?(?:(?<${name}>${OS_WORDS}) )?(?:intune |managed )?(?:devices|machines|computers|endpoints)|(?<${name}Macs>macs))`;
+  // Only "devices" names the whole inventory: "computers" or "machines" would also count phones.
+  return `(?:(?:intune |managed |intune managed )?(?:(?<${name}>${OS_WORDS}) )?(?:intune |managed )?devices|(?<${name}Macs>macs))`;
 }
 
 const COUNT_HEAD = new RegExp(`^how many (?:(?<pre>noncompliant|compliant) )?${devicesSlot("os")}(?: (?:are|that are) (?<post>${STATE_WORDS})| ${SYNCED})?${THERE}${WHERE}(?<rest>.*)$`);
@@ -228,6 +236,13 @@ const F_OF_THOSE_SYNC = new RegExp(`^(?:which|how many) of (?:those|them|these) 
 const F_SWITCH_OS = new RegExp(`^(?:what|how) about (?:(?<os>${OS_WORDS})(?: devices)?|(?<osMacs>macs))$|^(?:same )?for (?<os2>${OS_WORDS})$`);
 
 type Part = { label: string; predicate: GraphCacheQueryPredicate };
+
+/** A fresh question's label in its own words: "Intune managed Windows devices not synced in the last 7 days". */
+function partsLabel(scope: readonly Part[]): string {
+  const os = scope.find((part) => part.predicate.field === "operatingSystem")?.label;
+  const rest = scope.filter((part) => part.predicate.field !== "operatingSystem").map((part) => part.label);
+  return `Intune managed ${os ? `${os} ` : ""}devices${rest.length ? ` ${rest.join(", ")}` : ""}`;
+}
 
 /** The question in the form the shapes read: lower case, contractions and spellings made plain, no lead or end mark. */
 function shapeText(question: string): string {
@@ -293,7 +308,7 @@ function countQuery(text: string, generatedAt: string): StructuredDeviceQuery | 
   const breakdown: string[] = [];
   let focus: Part | undefined;
   let listed = false;
-  for (const clause of (groups.rest ?? "").split(/\s*(?:[?,;.]|\band\b)\s*/).filter(Boolean)) {
+  for (const clause of (groups.rest ?? "").split(/\s*(?:[?,;.]|\band\b)\s*/).map((part) => part.trim()).filter(Boolean)) {
     if (CLAUSE_BREAK_OS.test(clause) && !breakdown.includes("operatingSystem")) breakdown.push("operatingSystem");
     else if (CLAUSE_BREAK_STATE.test(clause) && !breakdown.includes("complianceState")) breakdown.push("complianceState");
     else if (CLAUSE_LIST.test(clause)) listed = true;
@@ -306,6 +321,8 @@ function countQuery(text: string, generatedAt: string): StructuredDeviceQuery | 
       focus = next;
     }
   }
+  // "List their names, and show which are not compliant" asks for two lists; the computed answer holds one.
+  if (listed && focus) return undefined;
   const fields = new Set(scope.map((part) => part.predicate.field));
   // A subset or a split on a field the counted set already fixes ("how many Windows devices, per OS") is not answered.
   if ((focus && fields.has(focus.predicate.field)) || breakdown.some((field) => fields.has(field))) return undefined;
@@ -313,7 +330,7 @@ function countQuery(text: string, generatedAt: string): StructuredDeviceQuery | 
   return {
     kind: "count",
     resource: "managedDevices",
-    scopeLabel: describeFilters("managedDevices", filters),
+    scopeLabel: partsLabel(scope),
     filters,
     breakdown,
     ...(focus ? { focus: { label: focus.label, filters: [focus.predicate] } } : {}),
@@ -331,7 +348,7 @@ function listQuery(text: string, generatedAt: string): StructuredDeviceQuery | u
       : [];
   if (scope.length === 0 || (groups && !scope.some((part) => part.predicate.field === "complianceState")) || (syncGroups && !scope.some((part) => part.predicate.field === "lastSyncDateTime"))) return undefined;
   const filters = scope.map((part) => part.predicate);
-  return { kind: "count", resource: "managedDevices", scopeLabel: describeFilters("managedDevices", filters), filters, breakdown: [], list: true };
+  return { kind: "count", resource: "managedDevices", scopeLabel: partsLabel(scope), filters, breakdown: [], list: true };
 }
 
 /** A follow-up query, undefined for a follow-up the shapes cannot answer, or "none" when the text is no follow-up. */
@@ -355,20 +372,31 @@ function followUpQuery(text: string, previous: ChatResultContext, generatedAt: s
   } else return "none";
   if (added.length !== 1) return undefined;
   const part = added[0]!;
-  // Entra device objects carry no compliance state and no sync time.
-  if (previous.resource === "entraDevices" && part.predicate.field !== "operatingSystem") return undefined;
   // A different value on a field already in force: "what about macOS?" after Windows asks the same question of
   // macOS; "only the compliant ones" after the noncompliant list is ambiguous and goes to the planner.
   if (previous.filters.some((filter) => filter.field === part.predicate.field && JSON.stringify(filter) !== JSON.stringify(part.predicate))) {
     if (!switching) return undefined;
-    const filters = [...previous.filters.filter((filter) => filter.field !== part.predicate.field), part.predicate];
-    return { kind: "count", resource: previous.resource, scopeLabel: describeFilters(previous.resource, filters), filters, breakdown, list: true };
+    // The switch asks the previous question again with the new value, in its shape: its split, its subset, a count or a list.
+    const shape = previous.shape;
+    if (!shape) return undefined;
+    const swap = (filters: readonly GraphCacheQueryPredicate[]) => filters.map((filter) => (filter.field === part.predicate.field ? part.predicate : filter));
+    const inFocus = shape.focus?.filters.some((filter) => filter.field === part.predicate.field) ?? false;
+    const filters = swap(shape.filters);
+    return {
+      kind: "count",
+      resource: previous.resource,
+      scopeLabel: describeFilters(filters),
+      filters,
+      breakdown: shape.breakdown,
+      ...(shape.focus ? { focus: inFocus ? { label: part.label, filters: swap(shape.focus.filters) } : shape.focus } : {}),
+      list: shape.list,
+    };
   }
   // More than CONTEXT_ID_LIMIT rows matched before: no ids were kept, so the cache is read afresh with both
   // filters, and the answer does not claim the previous set.
   if (!previous.ids) {
     const filters = dedupe([...previous.filters, part.predicate]);
-    return { kind: "count", resource: previous.resource, scopeLabel: describeFilters(previous.resource, filters), filters, breakdown, list: true };
+    return { kind: "count", resource: previous.resource, scopeLabel: describeFilters(filters), filters, breakdown, list: true };
   }
   return {
     kind: "count",
@@ -384,11 +412,11 @@ function followUpQuery(text: string, previous: ChatResultContext, generatedAt: s
 }
 
 /** A plain label for a filtered device set, such as "Intune managed macOS devices not compliant". */
-function describeFilters(resource: StructuredDeviceResource, filters: readonly GraphCacheQueryPredicate[]): string {
+function describeFilters(filters: readonly GraphCacheQueryPredicate[]): string {
   const os = OS_FILTERS.find((entry) => filters.some((filter) => JSON.stringify(filter) === JSON.stringify(entry.predicate)))?.label;
   const state = filters.find((filter) => filter.field === "complianceState")?.value;
   const sync = filters.find((filter) => filter.field === "lastSyncDateTime");
-  const base = resource === "managedDevices" ? `Intune managed ${os ? `${os} ` : ""}devices` : `Entra ${os ? `${os} ` : ""}devices`;
+  const base = `Intune managed ${os ? `${os} ` : ""}devices`;
   const parts = [
     state === "noncompliant" ? "not compliant" : state === "inGracePeriod" ? "in grace period" : state === "compliant" ? "compliant" : undefined,
     sync && typeof sync.value === "string" ? `${sync.op === "lt" ? "not synced" : "synced"} since ${sync.value.slice(0, 10)}` : undefined,
@@ -407,11 +435,12 @@ function dedupe(filters: GraphCacheQueryPredicate[]): GraphCacheQueryPredicate[]
 }
 
 /** "why is LAPTOP-07 not compliant", read whole; the name must be one cached managed device's, exactly. */
-const WHY_NOT_COMPLIANT = /^why (?:is|does) (?:the device |device )?(?<name>[a-z0-9][a-z0-9._-]{2,62}) (?:not compliant|noncompliant|marked noncompliant|marked as noncompliant|show as noncompliant|failing compliance|fail compliance|out of compliance)$/;
+const WHY_NOT_COMPLIANT = /^why (?:is|does) (?:the device |device )?(?<name>[a-z0-9][a-z0-9._-]{2,62}) (?:not compliant|noncompliant|non-compliant|non compliant|marked (?:as )?(?:noncompliant|non-compliant)|show as (?:noncompliant|non-compliant)|failing compliance|fail compliance|out of compliance)$/;
 
 /** Whether a question asks why a named managed device is not compliant. */
 export function deviceComplianceReasonQuery(question: string, store: IntelligenceSqliteStore, tenantId: string): DeviceDetailQuery | undefined {
-  const name = WHY_NOT_COMPLIANT.exec(shapeText(question))?.groups?.name;
+  // Read from the question as typed, not shapeText: its rewrites ("non-compliant" to "noncompliant") would change a device name.
+  const name = WHY_NOT_COMPLIANT.exec(normalize(question).replace(/[?!.]+$/, ""))?.groups?.name;
   if (!name) return undefined;
   const matches = store.findGraphRowsNamedIn({ tenantId, resource: "managedDevices", text: name, limit: 5 }).filter((entry) => entry.name.toLowerCase() === name);
   // None, or two records with this name: their states can differ, so code does not pick one. The planner path answers.
@@ -451,7 +480,7 @@ export function groupText(group: Record<string, number> | undefined): string {
   return Object.entries(group ?? {}).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([value, count]) => `${value} ${count}`).join(", ");
 }
 
-const FIELD_WORDS: Record<string, string> = { operatingSystem: "per OS", complianceState: "per compliance state", managedDeviceOwnerType: "per ownership" };
+const FIELD_WORDS: Record<string, string> = { operatingSystem: "per OS", complianceState: "per compliance state" };
 
 function rowLine(row: ComputedListedRow): string {
   const details = [row.operatingSystem, row.complianceState, row.lastSyncDateTime ? `last sync ${row.lastSyncDateTime.slice(0, 10)}` : undefined].filter(Boolean);
@@ -531,10 +560,10 @@ export function computeStructuredResult(input: {
   }
   // A failed latest refresh is said, as the direct answers say it: these counts are older evidence.
   if (snapshot?.lastError) facts.unshift(`The latest refresh failed, so these counts are from the snapshot refreshed ${snapshot.refreshedAt ?? "earlier"}.`);
-  facts.push(`Counted from the ${query.resource === "managedDevices" ? "Intune" : "Entra"} device cache${snapshot?.refreshedAt ? ` refreshed ${snapshot.refreshedAt}` : ""}${snapshot?.partial ? "; the cache does not hold every device, so these counts cover the cached part only" : ""}.`);
+  facts.push(`Counted from the Intune device cache${snapshot?.refreshedAt ? ` refreshed ${snapshot.refreshedAt}` : ""}${snapshot?.partial ? "; the cache does not hold every device, so these counts cover the cached part only" : ""}.`);
 
   // Built from the filters, so a chain of follow-ups reads "Intune managed Windows devices not compliant".
-  const listedLabel = describeFilters(query.resource, dedupe(listedFilters));
+  const listedLabel = describeFilters(dedupe(listedFilters));
   return {
     kind: "count",
     resource: query.resource,
@@ -556,6 +585,7 @@ export function computeStructuredResult(input: {
       label: listedLabel,
       total: listedTotal,
       ...(contextIds ? { ids: contextIds } : {}),
+      shape: { filters: query.filters, ...(query.focus ? { focus: query.focus } : {}), breakdown: query.breakdown, list: query.list },
     },
   };
 }
@@ -691,7 +721,7 @@ export function planStructuredQuery(input: {
 export function readChatResultContext(store: IntelligenceSqliteStore, conversationId: string, tenantId: string): ChatResultContext | undefined {
   const value = store.getChatResultContext(conversationId) as Partial<ChatResultContext> | undefined;
   if (!value || value.version !== 1 || value.tenantId !== tenantId || typeof value.question !== "string" || typeof value.label !== "string" || !Array.isArray(value.filters)) return undefined;
-  if (value.resource !== "managedDevices" && value.resource !== "entraDevices") return undefined;
+  if (value.resource !== "managedDevices") return undefined;
   return value as ChatResultContext;
 }
 
