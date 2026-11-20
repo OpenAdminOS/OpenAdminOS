@@ -859,6 +859,7 @@
         <li>The approval is bound to the JCS SHA-256 hash of the whole object: the object in the RFC 8785 JSON Canonicalization Scheme (JCS), then SHA-256 over its UTF-8 bytes. JCS sorts object keys by UTF-16 code units at every level and writes numbers and strings in its own fixed form. The raw view prints that order. <code>search_settings</code> carries <code>_meta</code> keys "10" and "2", and "10" comes first, as JCS requires. Before a tool is offered and again at every call, the app hashes the object the server lists now; any difference anywhere, a nested schema property, <code>annotations.title</code>, <code>_meta</code> or a field the app does not know, invalidates the approval. Each row shows the short form of the hash; the definition shows the full hash with Copy.</li>
         <li>Decided in round 14: the readable view shows the same complete object as the raw JSON, nothing only in one of them. Every other field is written out with its nested values (both <code>_meta</code> keys of <code>search_settings</code> and the two page sizes under <code>contoso.example/pageSizes</code>, in JCS order), and each input and output schema shows its own type and every keyword, on the schema, on each property and on array items, with its value.</li>
         <li>Decided in round 15: one recursive layout reads every schema node at any depth, the root, each property, array items and items of items. A keyword it lays out (a string description, an enum list, properties, required names, a single items schema) gets its own line; every other keyword, and any keyword in another shape, is written out with its value. <code>list_platforms</code> shows both: its input schema has a root <code>enum</code> whose only value is an empty object, and its output schema has a description at <code>outputSchema.properties.families.items.items.description</code>, "A platform id, such as windows10", in the readable view as in the raw JSON.</li>
+        <li>Decided in round 16: an enum value that is not a string, such as the empty object here or <code>{"mode": "apply"}</code>, is written out by the same path-aware value renderer as any other nested value, so a re-review that changed <code>inputSchema.enum[1].mode</code> marks that key in the readable view and in the raw JSON alike. A required name counts as present only when the schema's <code>properties</code> has it as its own key: a name such as <code>constructor</code> is listed as required with no property, never found on the object prototype.</li>
         <li>The write check and the hash on this page are scripts that illustrate the plan, which governs (B5, Your own MCP servers). The write check here matches a short word list: save, change, send, delete, edit, update, modify, set, write, create, assign, remove, revoke and similar words. The implementation treats any write the definition documents as disqualifying, whatever words it uses and whatever its read-only label says. The hash here is a small JCS serializer and SHA-256, the same rule the plan names.</li>
         <li>A tool that is not approved is never offered to the model. The approval is checked again at every call, whether it comes from Chat, a skill or a scheduled check, so a skill that names <code>mcp__policy-settings__export_report</code> cannot use it.</li>
         <li>When the server later adds a tool, the new tool stays off until the admin reviews it here. The review can be reopened from the server's row in Access; approving a tool later is the same step.</li>
@@ -905,7 +906,7 @@
       <p>With Send to Teams granted, <span data-name>Nova</span> can propose a message but never posts one on its own. The card shows the exact text that will be posted, where it goes and for which organization. Nothing is sent until Confirm, each post gets its own card, and Confirm checks the organization, the grant and the connection again before anything posts. A report too long for one message is never split into several posts.</p>
       <div class="tsend">
         <p class="trvcap" style="margin:0">Confirm reads the live Send to Teams switch in Access above. Use it, or the controls here, then press Confirm.</p>
-        <span class="seg" role="group" aria-label="What Nova proposes" id="varseg">
+        <span class="seg" role="group" aria-label="What Nova proposes" data-name-label="What {name} proposes" id="varseg">
           <button type="button" data-var="short" aria-pressed="true">A short message</button>
           <button type="button" data-var="long" aria-pressed="false">The full report</button>
         </span>
@@ -1509,6 +1510,8 @@ identities with graph_get. Nothing else.
       lastGood = n;
       document.querySelectorAll("[data-name]").forEach((el) => { el.textContent = n; });
       document.querySelectorAll("[data-initial]").forEach((el) => { el.textContent = n[0].toUpperCase(); });
+      // Accessible names that carry the agent's name are templates, so a rename reaches screen readers too.
+      document.querySelectorAll("[data-name-label]").forEach((el) => { el.setAttribute("aria-label", el.dataset.nameLabel.replace("{name}", n)); });
       renderSample();
     };
     nameInput.addEventListener("input", applyName);
@@ -1768,10 +1771,13 @@ identities with graph_get. Nothing else.
       // Required names with no property of that name are listed too.
       const strayReq = (s) => {
         if (!laid(s, "required")) return "";
-        const missing = s.required.filter((n) => !(isObj(s.properties) && s.properties[n]));
+        // Own properties only: a name such as "constructor" must not be found on the object prototype.
+        const missing = s.required.filter((n) => !(isObj(s.properties) && Object.hasOwn(s.properties, n)));
         return missing.length ? `<span class="ds">Required with no property: ${missing.map((n) => `<code>${hl(n)}</code>`).join(" ")}</span>` : "";
       };
-      const enumView = (s, base, lead) => `<span class="ds ev">${lead}: ${s.enum.map((v, i) => mk(`${base}.enum[${i}]`, typeof v === "string" ? `<code>${hl(v)}</code>` : `<code>${esc(jcs(v))}</code>`)).join("")}</span>`;
+      // A string enum value is shown inline; any other value goes through the recursive renderer with its own path,
+      // so a nested key such as enum[1].mode is marked in the readable view as it is in the raw JSON.
+      const enumView = (s, base, lead) => `<span class="ds ev">${lead}: ${s.enum.map((v, i) => typeof v === "string" ? mk(`${base}.enum[${i}]`, `<code>${hl(v)}</code>`) : val(v, `${base}.enum[${i}]`)).join("")}</span>`;
       // Everything inside one schema node except its type, which the line that introduces the node already shows.
       const nodeBody = (s, base, lead = "Values") => {
         if (!isObj(s)) return `<span class="ds">${val(s, base)}</span>`;
