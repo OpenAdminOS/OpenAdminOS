@@ -369,3 +369,11 @@ it("refuses to start an agent whose service is not connected for the tenant", as
   const queued = await h.service.startRun("score", {});
   assert.equal(queued.status, "queued");
 });
+
+it('refuses a run reviewed with no organization once an organization became active (model fit rerun)', async () => {
+  const h = harness();
+  const agent = { id: 'docs', slug: 'docs', name: 'Docs', description: 'No service calls', requiresEntraTier: 'free', version: '1.0.0', mode: 'read', category: 'devices', tier: 'agent', scopes: [], author: { name: 'Test' }, installedAt: new Date().toISOString() } as AgentSummary;
+  await h.host.write({ ...h.state(), installedAgents: [agent], tenants: [{ id: 'tenant-b' }] as any, activeTenantId: 'tenant-b' });
+  await assert.rejects(h.service.startRun('docs', { expectNoTenant: true, providerId: 'anthropic' }), /organization became active after you reviewed this run/);
+  assert.equal(h.state().runs.length, 0);
+});

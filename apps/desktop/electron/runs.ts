@@ -536,6 +536,10 @@ export class RunService {
       // manually, from Chat or from a schedule.
       const manifestError = this.host.agentManifestError?.(agent);
       if (manifestError) throw new Error(invalidAgentManifestCopy(agent.name, manifestError));
+      // A run reviewed with no organization does not start in one that became active since.
+      if (options.expectNoTenant && persisted.activeTenantId) {
+        throw new OrganizationBoundaryError("An organization became active after you reviewed this run, so it did not start. Review it again.");
+      }
       const requestedTenantId =
         typeof options.tenantId === "string" ? options.tenantId : persisted.activeTenantId;
       // Admission closes before a disconnect drains its work, under this lock.

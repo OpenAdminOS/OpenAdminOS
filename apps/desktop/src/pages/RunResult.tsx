@@ -370,6 +370,7 @@ function RunResultPage({ run }: { run: RunRecord }) {
                   providerId: choice.providerId,
                   ...(choice.model ? { model: choice.model } : {}),
                   modelFit,
+                  ...(run.dryRun ? { dryRun: true } : {}),
                 };
                 reRun();
               },

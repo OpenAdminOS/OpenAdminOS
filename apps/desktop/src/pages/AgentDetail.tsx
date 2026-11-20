@@ -281,6 +281,8 @@ export default function AgentDetail({
       ...(runChoice?.providerId ? { providerId: runChoice.providerId } : {}),
       ...(typeof runChoice?.model === "string" ? { model: runChoice.model } : {}),
       ...(runChoice?.modelFit ? { modelFit: runChoice.modelFit } : {}),
+      // A model fit rerun of a dry run stays a dry run.
+      ...(runChoice?.modelFit && runChoice.dryRun ? { dryRun: true } : {}),
     });
     // Only the first open reads the route state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -367,18 +369,25 @@ export default function AgentDetail({
     tenantId?: string;
     providerId?: ProviderId;
     model?: string;
+    modelFit?: ModelFitIssue;
   }) => {
     if (!agent) return;
     setRunError(null);
     try {
       await waitForDeliverySaves();
+      // A Run with <provider> after a model fit failure starts only in the
+      // organization this review showed, or in none if it showed none, so a
+      // switch before the host admits it cannot send another organization's data.
+      const pinTenant = choice?.modelFit
+        ? pendingTenant ? { tenantId: choice.tenantId ?? pendingTenant.id } : { expectNoTenant: true as const }
+        : choice?.tenantId ? { tenantId: choice.tenantId } : {};
       const options =
-        choice && (choice.dryRun || choice.runForRealOfRunId || choice.retryOfRunId || choice.tenantId || choice.providerId || choice.model)
+        choice && (choice.dryRun || choice.runForRealOfRunId || choice.retryOfRunId || choice.tenantId || choice.providerId || choice.model || choice.modelFit)
           ? {
               ...(choice.dryRun ? { dryRun: true } : {}),
               ...(choice.runForRealOfRunId ? { runForRealOfRunId: choice.runForRealOfRunId } : {}),
               ...(choice.retryOfRunId ? { retryOfRunId: choice.retryOfRunId } : {}),
-              ...(choice.tenantId ? { tenantId: choice.tenantId } : {}),
+              ...pinTenant,
               ...(choice.providerId ? { providerId: choice.providerId } : {}),
               ...(choice.model ? { model: choice.model } : {}),
             }
@@ -2692,6 +2701,8 @@ export interface RerunChoice {
   model?: string;
   /** Set by Run with <provider> on a run the local model could not fit (mockup 36, section F). */
   modelFit?: ModelFitIssue;
+  /** The failed run was a dry run; a model fit rerun keeps it one. */
+  dryRun?: boolean;
 }
 
 function RunPreflightModal({

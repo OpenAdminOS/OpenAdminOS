@@ -830,7 +830,19 @@ describe("Run with another provider after a model fit failure (mockup 36, sectio
     expect(within(dialog).getByText("Pauses for a diff and typed confirmation before anything is applied.")).toBeInTheDocument();
     expect(bridge.startRun).not.toHaveBeenCalled();
     await user.click(within(dialog).getByRole("button", { name: "Start run" }));
-    await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({ providerId: "openai", model: "gpt-5" })));
+    // Pinned to the organization the review showed, so a switch before admission cannot move it.
+    await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({ providerId: "openai", model: "gpt-5", tenantId: "tenant-1" })));
+  });
+
+  it("keeps a failed dry run a dry run when it is run again with another provider", async () => {
+    const user = userEvent.setup();
+    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, dryRun: true, providerId: "ollama", model: "llama3.1", tenantId: "tenant-1", error: CONTEXT_ERROR });
+    const bridge = makeMockBridge({}, createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "write" })], runs: [run] }));
+    renderWithPreflight(run.id, bridge);
+    await user.click(within(await screen.findByRole("region", { name: "llama3.1 cannot fit this run" })).getByRole("button", { name: "Run with Codex" }));
+    const dialog = await screen.findByRole("dialog", { name: /Review dry run/ });
+    await user.click(within(dialog).getByRole("button", { name: /Start/ }));
+    await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({ dryRun: true, providerId: "openai" })));
   });
 
   it("keeps Run again on the run's own provider", async () => {
