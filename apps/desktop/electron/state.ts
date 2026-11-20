@@ -10154,6 +10154,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       }
       // Flushed through the handle that wrote it: Windows needs write access to flush.
       await writeFileDurably(tmpPath, serialized, { durable, mode: 0o600 });
+      // Checked again before the rename: a write that was already under way
+      // when the reset was committed does not replace the file either.
+      if (this.localResetCommitted) {
+        throw new LocalResetInProgressError("OpenAdminOS is resetting and restarts in a moment. Nothing was saved.");
+      }
       await atomicRename(tmpPath, this.filePath);
       this.writeGeneration += 1;
       this.lastReadSnapshot = state;
