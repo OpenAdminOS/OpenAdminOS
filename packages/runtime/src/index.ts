@@ -1310,6 +1310,27 @@ export function compareSemver(a: string, b: string): number {
   return 0;
 }
 
+const NIGHTLY_VERSION = /^(\d+\.\d+\.\d+)-nightly\.(\d+)$/;
+
+/**
+ * Whether an app version meets an agent's minAppVersion. A plain minimum
+ * keeps the compareSemver rule, where a nightly previews its release. A
+ * nightly minimum, such as 0.7.3-nightly.20261120040000, names the first
+ * nightly with the runtime features the manifest uses: an earlier nightly of
+ * that release does not meet it, a later one does, and the stable release
+ * always does. Released apps read the same minimum with compareSemver, which
+ * also refuses the earlier nightlies.
+ */
+export function appVersionSatisfies(appVersion: string, minAppVersion: string): boolean {
+  const min = NIGHTLY_VERSION.exec(minAppVersion.trim());
+  if (!min) return compareSemver(appVersion, minAppVersion) >= 0;
+  const app = NIGHTLY_VERSION.exec(appVersion.trim());
+  const release = compareSemver(app ? app[1]! : appVersion, min[1]!);
+  if (release !== 0) return release > 0;
+  if (!app) return true;
+  return BigInt(app[2]!) >= BigInt(min[2]!);
+}
+
 function resolveAgentDirectory(agent: AgentSummary | RegistryAgentSummary): string {
   // 0. OTA-updated manifest (if any) overrides the bundled copy. User-
   //    authored agents with an absolute registryPath still take precedence
