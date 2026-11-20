@@ -3,10 +3,11 @@ import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { setImmediate as yieldToMain } from "node:timers/promises";
+import { inflateSync } from "node:zlib";
 import { collectTenantValues, TenantValueIndex } from "./tenant-values.js";
 import {
   addCacheIdentity, addUserFirstName, ClassificationSlice, classifyCacheRows, currentClassificationLedger,
-  GRAPH_FIELD_CLASSES_VERSION, prepareCacheClassification, registerClassifiedValues, yieldClassificationTurn,
+  GRAPH_FIELD_CLASSES_VERSION, MAX_READ_SIDECAR_UNITS, prepareCacheClassification, registerClassifiedValues, yieldClassificationTurn,
   ClassificationWorkerRetiredError, clearTenantClassificationLedgers, releaseClassificationIdentityShard, retireClassificationWorker,
   type CacheClassificationResult, type ClassificationOptions, type ClassifiedValues,
 } from "@openadminos/runtime/data-classification";
@@ -864,11 +865,9 @@ export class IntelligenceSqliteStore {
           pageLimitReached: input.pageLimitReached === true,
         });
       }
-      this.db
-        .prepare(
-          `DELETE FROM graph_resources
-           WHERE tenant_id = ? AND resource = ?`,
-        )
+      this.db.prepare("DELETE FROM graph_classification_sidecars WHERE tenant_id = ? AND resource = ?")
+        .run(input.tenantId, input.resource);
+      this.db.prepare("DELETE FROM graph_resources WHERE tenant_id = ? AND resource = ?")
         .run(input.tenantId, input.resource);
       const insert = this.db.prepare(
         `INSERT INTO graph_resources (
@@ -2266,6 +2265,7 @@ export class IntelligenceSqliteStore {
   clearGraphCache(tenantId: string): void {
     this.db.exec("BEGIN");
     try {
+      this.db.prepare("DELETE FROM graph_classification_sidecars WHERE tenant_id = ?").run(tenantId);
       this.db
         .prepare(`DELETE FROM graph_resources WHERE tenant_id = ?`)
         .run(tenantId);
@@ -2315,6 +2315,7 @@ export class IntelligenceSqliteStore {
     try {
       for (const table of [
         "graph_resources",
+        "graph_classification_sidecars",
         "graph_cache_status",
         "drift_object_versions",
         "drift_snapshots",
@@ -2438,25 +2439,20 @@ export class IntelligenceSqliteStore {
         where.push("search_text LIKE ?");
         args.push(`%${term}%`);
       }
-      let rows = this.db
-        .prepare(
-          `SELECT rowid, snapshot_id, raw_json
-           FROM graph_resources
-           WHERE ${where.join(" AND ")}
-           ORDER BY COALESCE(last_seen_at, refreshed_at) DESC
-           LIMIT ?`,
+      // Sort row IDs without pulling all raw JSON into SQLite's sort table.
+      const select = (predicate: string, params: (string | number)[]) => this.db.prepare(`
+        WITH selected AS MATERIALIZED (
+          SELECT rowid, COALESCE(last_seen_at, refreshed_at) AS seen
+          FROM graph_resources WHERE ${predicate}
+          ORDER BY seen DESC LIMIT ?
         )
-        .all(...args, input.limitPerResource) as unknown as SnapshotResourceRow[];
+        SELECT g.rowid, g.snapshot_id, g.raw_json
+        FROM selected JOIN graph_resources g ON g.rowid = selected.rowid
+        ORDER BY selected.seen DESC`)
+        .all(...params, input.limitPerResource) as unknown as SnapshotResourceRow[];
+      let rows = select(where.join(" AND "), args);
       if (rows.length === 0 && terms.length > 0) {
-        rows = this.db
-          .prepare(
-            `SELECT rowid, snapshot_id, raw_json
-             FROM graph_resources
-             WHERE tenant_id = ? AND resource = ?
-             ORDER BY COALESCE(last_seen_at, refreshed_at) DESC
-             LIMIT ?`,
-          )
-          .all(input.tenantId, resource, input.limitPerResource) as unknown as SnapshotResourceRow[];
+        rows = select("tenant_id = ? AND resource = ?", [input.tenantId, resource]);
       }
       const parsed = rows.map(row => readJson<unknown>(row.raw_json, {}));
       this.observeCacheRows(resource, rows, parsed);
@@ -2716,17 +2712,24 @@ export class IntelligenceSqliteStore {
           }
         }
       } else if (result.startupSidecars?.length) {
-        const update = this.db.prepare(`UPDATE graph_resources SET classification_json = ?
+        const publish = this.db.prepare(`INSERT INTO graph_classification_sidecars
+          (cache_rowid, snapshot_id, tenant_id, resource, field_map_version, compressed)
+          SELECT rowid, snapshot_id, tenant_id, resource, ?, ? FROM graph_resources
           WHERE rowid = ? AND snapshot_id = ? AND tenant_id = ? AND resource = ?
-          AND (classification_json IS NULL OR classification_json NOT LIKE ?)`);
-        for (const { rowid, snapshotId, sidecar } of result.startupSidecars) {
+          AND (classification_json IS NULL OR classification_json NOT LIKE ?)
+          ON CONFLICT(cache_rowid) DO UPDATE SET snapshot_id = excluded.snapshot_id, tenant_id = excluded.tenant_id,
+            resource = excluded.resource, field_map_version = excluded.field_map_version, compressed = excluded.compressed
+          WHERE graph_classification_sidecars.snapshot_id <> excluded.snapshot_id
+            OR graph_classification_sidecars.field_map_version <> excluded.field_map_version`);
+        const prefix = `[${GRAPH_FIELD_CLASSES_VERSION},%`;
+        for (const { rowid, snapshotId, compressed } of result.startupSidecars) {
           await yieldClassificationTurn();
           if (!current()) return;
           // The classification observer never waits for another SQLite writer.
           // Each autocommit ends before the next tick or a Chat write can run.
           this.db.exec("PRAGMA busy_timeout = 0");
           try {
-            update.run(sidecar, rowid, snapshotId, tenantId, resource, `[${GRAPH_FIELD_CLASSES_VERSION},%`);
+            publish.run(GRAPH_FIELD_CLASSES_VERSION, compressed, rowid, snapshotId, tenantId, resource, prefix);
           } catch (error) {
             if (!(error instanceof Error) || !("errcode" in error) || typeof error.errcode !== "number" ||
                 (error.errcode & 255) !== 5) throw error;
@@ -2888,9 +2891,18 @@ export class IntelligenceSqliteStore {
     let sidecar: ReturnType<DatabaseSync["prepare"]> | undefined;
     registerCacheRows(resource, rows, parsed, originals, index => {
       const row = rows[index]!;
-      sidecar ??= this.db.prepare(`SELECT classification_json FROM graph_resources
-        WHERE rowid = ? AND snapshot_id = ? AND length(CAST(classification_json AS BLOB)) <= ?`);
-      return (sidecar.get(row.rowid, row.snapshot_id, 128 * 1024) as { classification_json?: string } | undefined)?.classification_json;
+      sidecar ??= this.db.prepare(`SELECT
+        CASE WHEN length(s.compressed) <= ? THEN s.compressed END AS compressed,
+        CASE WHEN s.cache_rowid IS NULL AND length(CAST(g.classification_json AS BLOB)) <= ?
+          THEN g.classification_json END AS classification_json
+        FROM graph_resources g LEFT JOIN graph_classification_sidecars s
+          ON s.cache_rowid = g.rowid AND s.snapshot_id = g.snapshot_id AND s.field_map_version = ?
+        WHERE g.rowid = ? AND g.snapshot_id = ?`);
+      const record = sidecar.get(MAX_READ_SIDECAR_UNITS, MAX_READ_SIDECAR_UNITS, GRAPH_FIELD_CLASSES_VERSION,
+        row.rowid, row.snapshot_id) as { compressed?: Uint8Array; classification_json?: string } | undefined;
+      if (!record?.compressed) return record?.classification_json;
+      try { return inflateSync(record.compressed, { maxOutputLength: MAX_READ_SIDECAR_UNITS }).toString(); }
+      catch { return undefined; }
     });
   }
 
@@ -4023,6 +4035,17 @@ export class IntelligenceSqliteStore {
         ON graph_resources (tenant_id, resource, refreshed_at);
       CREATE INDEX IF NOT EXISTS idx_graph_resources_search
         ON graph_resources (tenant_id, resource, search_text);
+
+      CREATE TABLE IF NOT EXISTS graph_classification_sidecars (
+        cache_rowid INTEGER PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        resource TEXT NOT NULL,
+        snapshot_id TEXT NOT NULL,
+        field_map_version INTEGER NOT NULL,
+        compressed BLOB NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_graph_classification_scope
+        ON graph_classification_sidecars (tenant_id, resource);
 
       CREATE TABLE IF NOT EXISTS graph_cache_status (
         tenant_id TEXT NOT NULL,

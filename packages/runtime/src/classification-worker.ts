@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import { parentPort } from "node:worker_threads";
+import { deflateSync } from "node:zlib";
 import type { WorkerMessage } from "./classification-worker-client.js";
 import { ClassificationLedger, decodeWorkerLargeValue } from "./request-classification.js";
 import { packWorkerGraphResult } from "./graph-ingress-classification.js";
@@ -22,13 +23,16 @@ function classifyStartupPage(
   try {
     db.exec("PRAGMA busy_timeout = 5000;");
     const prefix = `[${GRAPH_FIELD_CLASSES_VERSION},%`;
-    const select = db.prepare(`SELECT rowid, snapshot_id AS snapshotId, graph_id AS graphId, display_name AS displayName, raw_json AS rawJson
-      FROM graph_resources WHERE tenant_id = ? AND resource = ? AND rowid > ?
-      ${page.snapshotId === undefined ? "" : "AND snapshot_id = ?"}
-      ${page.indexOnly ? "" : "AND length(CAST(raw_json AS BLOB)) <= 262144 AND (classification_json IS NULL OR classification_json NOT LIKE ?)"}
-      ORDER BY rowid LIMIT ?`);
+    const select = db.prepare(`SELECT g.rowid, g.snapshot_id AS snapshotId, g.graph_id AS graphId, g.display_name AS displayName, g.raw_json AS rawJson
+      FROM graph_resources g
+      ${page.indexOnly ? "" : "LEFT JOIN graph_classification_sidecars s ON s.cache_rowid = g.rowid AND s.snapshot_id = g.snapshot_id"}
+      WHERE g.tenant_id = ? AND g.resource = ? AND g.rowid > ?
+      ${page.snapshotId === undefined ? "" : "AND g.snapshot_id = ?"}
+      ${page.indexOnly ? "" : `AND length(CAST(g.raw_json AS BLOB)) <= 262144
+        AND COALESCE(s.field_map_version, 0) <> ? AND COALESCE(g.classification_json, '') NOT LIKE ?`}
+      ORDER BY g.rowid LIMIT ?`);
     const params = [page.tenantId, page.resource, page.afterRowId, ...(page.snapshotId === undefined ? [] : [page.snapshotId])];
-    const rows = select.all(...params, ...(page.indexOnly ? [64] : [prefix, 8])) as
+    const rows = select.all(...params, ...(page.indexOnly ? [64] : [GRAPH_FIELD_CLASSES_VERSION, prefix, 8])) as
       unknown as Array<CacheClassificationRow & { rowid: number; snapshotId: string }>;
     if (!rows.length) return { sidecars: [] };
     const result = prepareCacheClassification(rows, options, page.indexOnly, indexNames, page.indexOnly);
@@ -36,7 +40,7 @@ function classifyStartupPage(
       ...(page.indexOnly ? {} : {
         startupSidecars: rows.flatMap(({ rowid, snapshotId }, i) => {
           const sidecar = result.sidecars[i]!;
-          return sidecar.length <= MAX_READ_SIDECAR_UNITS ? [{ rowid, snapshotId, sidecar }] : [];
+          return Buffer.byteLength(sidecar) <= MAX_READ_SIDECAR_UNITS ? [{ rowid, snapshotId, compressed: deflateSync(sidecar) }] : [];
         }),
       }),
     };

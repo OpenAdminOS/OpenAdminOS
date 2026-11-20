@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { setImmediate as nextTick } from "node:timers/promises";
 import { Worker } from "node:worker_threads";
 import { DatabaseSync } from "node:sqlite";
+import { inflateSync } from "node:zlib";
 import { describe, it } from "node:test";
 
 import {
@@ -282,7 +283,7 @@ it("background backfill leaves a removed database absent", async t => {
 it("computes a backfill page under a held writer and lets Chat write before publication", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-cache-writer-"));
   const path = join(dir, "openadminos.db");
-  const store = new IntelligenceSqliteStore(path);
+  let store = new IntelligenceSqliteStore(path);
   const writer = new DatabaseSync(path);
   const tenantId = "tenant-1";
   const now = "2026-11-18T00:00:00.000Z";
@@ -299,7 +300,16 @@ it("computes a backfill page under a held writer and lets Chat write before publ
     assert.equal(computed.startupSidecars?.length, 1);
     assert.equal(writer.prepare("SELECT classification_json FROM graph_resources").get()?.classification_json, null);
     writer.exec("COMMIT");
-    assert.equal(store.createConversation({ id: "fixture-chat", title: "Secure Score", tenantId, now }).id, "fixture-chat");
+    await store.close();
+    store = new IntelligenceSqliteStore(path, { backgroundClassification: true });
+    writer.exec("BEGIN IMMEDIATE");
+    // The store can finish its attempt while an unrelated connection is
+    // still holding the lock, and it leaves the missing evidence visible.
+    await store.waitForCacheClassification();
+    assert.equal(writer.prepare("SELECT COUNT(*) AS sidecars FROM graph_classification_sidecars").get()?.sidecars, 0);
+    writer.exec("COMMIT");
+    const conversation = store.createConversation({ id: "fixture-chat", title: "Secure Score", tenantId, now });
+    assert.equal(conversation.id, "fixture-chat");
   } finally {
     if (writer.isTransaction) writer.exec("ROLLBACK");
     writer.close();
@@ -344,11 +354,16 @@ it("backfills a stale Secure Score page through bounded worker jobs", async t =>
     assert.deepEqual(cursors, [0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 90]);
     const check = new DatabaseSync(path);
     try {
-      assert.equal(check.prepare("SELECT COUNT(*) AS missing FROM graph_resources WHERE classification_json IS NULL").get()?.missing, 0);
-      const record = check.prepare("SELECT classification_json FROM graph_resources WHERE graph_id = 'score-89'").get();
-      const [, incomplete, fields] = JSON.parse(String(record?.classification_json));
+      assert.equal(check.prepare("SELECT COUNT(*) AS sidecars FROM graph_classification_sidecars").get()?.sidecars, 90);
+      const record = check.prepare(`SELECT s.compressed FROM graph_classification_sidecars s
+        JOIN graph_resources g ON g.rowid = s.cache_rowid AND g.snapshot_id = s.snapshot_id
+        WHERE g.graph_id = 'score-89'`).get();
+      const [, incomplete, fields] = JSON.parse(inflateSync(record?.compressed as Uint8Array).toString());
       assert.equal(incomplete, false);
       assert.deepEqual(fields.at(-1), [["controlScores", "241", "description"], "description", "public"]);
+      store.replaceGraphResources({ tenantId, resource, label: "Secure Score", scopeSet: [],
+        refreshedAt: "2026-11-19T00:00:00.000Z", rows: [rows[0]] });
+      assert.equal(check.prepare("SELECT COUNT(*) AS sidecars FROM graph_classification_sidecars").get()?.sidecars, 0);
     } finally { check.close(); }
   } finally {
     store.close();
@@ -424,10 +439,14 @@ it("defers sidecar reads for deterministic Chat and keys them to the selected sn
   const ledger = new ClassificationLedger();
   const tenantId = "tenant-1";
   const date = "2026-11-18T00:00:00.000Z";
-  const score = { id: "score", currentScore: 30 };
+  const scores = [
+    { id: "score-old", currentScore: 25, createdDateTime: "2026-11-17T00:00:00.000Z" },
+    { id: "score-1", currentScore: 30, createdDateTime: date },
+    { id: "score-2", currentScore: 35, createdDateTime: date },
+  ];
   const device = { id: "device", lastSyncDateTime: date, activationLockBypassCode: "q7z" };
   const resources = [
-    { resource: "secureScores", label: "Secure Score", rows: [score] },
+    { resource: "secureScores", label: "Secure Score", rows: scores },
     { resource: "managedDevices", label: "Devices", rows: [device] },
   ] as const;
   const seed = () => {
@@ -445,14 +464,14 @@ it("defers sidecar reads for deterministic Chat and keys them to the selected sn
       score: store.readGraphRows({ tenantId, resources: ["secureScores"], searchTerms: ["no match"], limitPerResource: 5 }).secureScores,
       devices: store.readManagedDevicesLastSyncBefore({ tenantId, thresholdIso: "2026-11-19T00:00:00.000Z", limit: 5 }),
     }));
-    assert.deepEqual(result, { score: [score], devices: [device] });
-    assert.deepEqual(sidecarReads, []);
+    assert.deepEqual(result, { score: [scores[1], scores[2], scores[0]], devices: [device] });
+    assert.equal(sidecarReads.length, 0);
     seed(); // Same row IDs and values, different snapshots.
     await ledger.waitForObservations();
     assert.equal(sidecarReads.length, 2);
     assert.ok(sidecarReads.every(sql => sql.includes("snapshot_id = ?")));
     const observation = ledger.classifyRequest({ prompt: JSON.stringify(result) });
-    assert.equal(observation.unexamined.registrations, 2);
+    assert.equal(observation.unexamined.registrations, 4);
     assert.ok(!observation.spans.some(span => span.source === "cache:managedDevices"));
     assert.equal(observation.coverageIncomplete, true);
   } finally {

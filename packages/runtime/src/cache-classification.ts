@@ -78,7 +78,7 @@ export interface CacheStartupPage {
 
 export interface CacheClassificationResult {
   sidecars: string[];
-  startupSidecars?: Array<{ rowid: number; snapshotId: string; sidecar: string }>;
+  startupSidecars?: Array<{ rowid: number; snapshotId: string; compressed: Uint8Array }>;
   nextRowId?: number;
   egressIndex?: TenantValueIndexSnapshot;
   firstNames?: TenantValueIndexSnapshot;
