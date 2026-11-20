@@ -107,6 +107,37 @@ test("Chat fences answer packs, workspace evidence and history and filters every
   } finally { await f.close(); }
 });
 
+test("workspace excerpts preserve a classified field when their JSON budget cuts an array element", async () => {
+  let ledger: ClassificationLedger | undefined;
+  const f = await fixture({ respond: () => { ledger = currentClassificationLedger(); return "Reviewed."; } });
+  try {
+    const workspace = await f.store.createWorkspace({ title: "Review", tenantId: "tenant-a" });
+    const noteContent = "opaque workspace note. ".repeat(100);
+    const note = await f.store.addWorkspaceNote(workspace.id, noteContent);
+    const value = "2e649073-17e6-4c99-bde9-70f77734caec";
+    const fragment = value.slice(0, 13);
+    const prefix = JSON.stringify({ padding: "", includeUsers: [[value]] }).indexOf(value);
+    const evidence = await f.store.pinWorkspaceEvidence({ workspaceId: workspace.id, sourceType: "manual",
+      sourceRef: { id: "source" }, title: "Pinned record", content: {
+        padding: "x".repeat(2800 - 32 - prefix - fragment.length), includeUsers: [[value]], tail: "x".repeat(200),
+      } });
+    await f.store.sendIntuneChatMessage({ content: "Which users should I review?", workspaceContext: {
+      workspaceId: workspace.id, evidenceIds: [evidence.id], noteIds: [note.id], includeInstructions: false,
+    } });
+    assert.ok(ledger);
+    await ledger.waitForObservations();
+    const request = f.prompts.find(entry => entry.prompt.includes(fragment));
+    assert.ok(request);
+    assert.ok(!request.prompt.includes(value));
+    const result = await ledger.classifyProviderRequest(request);
+    assert.ok(result.spans.some(span => span.section === "prompt" && span.kind === "identity" &&
+      span.source === "workspace:evidence" && request.prompt.slice(span.start, span.end) === fragment));
+    const noteExcerpt = `${noteContent.slice(0, 1400 - 32).trimEnd()}\n[truncated locally]`;
+    assert.ok(result.spans.some(span => span.section === "prompt" && span.source === "workspace:note" &&
+      request.prompt.slice(span.start, span.end) === noteExcerpt));
+  } finally { await f.close(); }
+});
+
 test("Disconnect releases worker identity mirrors even while sign-in cleanup is pending", async t => {
   const f = await fixture();
   try {

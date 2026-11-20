@@ -9,7 +9,8 @@ import {
   tokenCacheForPartition,
   tokenCachePartition,
 } from "./state-helpers.js";
-import { GRAPH_CLI_CLIENT_ID, OPENADMINOS_CLIENT_ID } from "@openadminos/runtime";
+import { fenceTenantData, GRAPH_CLI_CLIENT_ID, OPENADMINOS_CLIENT_ID } from "@openadminos/runtime";
+import { ClassificationLedger, withClassificationScope } from "@openadminos/runtime/data-classification";
 
 describe("Graph cache nextLink validation", () => {
   it("keeps beta paths, query values, and caller headers", () => {
@@ -399,6 +400,28 @@ describe("chat sources come from executed tools, not the plan", () => {
     assert.match(mixedMemory, /Kept question/);
     assert.doesNotMatch(mixedMemory, /Abandoned prompt/);
     assert.equal(boundedConversationMemory(cancelled), undefined);
+  });
+
+  it("reports a truncated history message when its source values cannot be traced", async t => {
+    const ledger = new ClassificationLedger();
+    t.after(() => ledger.dispose());
+    const opaque = "a".repeat(987) + "2e649073-17e6-4c99-bde9-70f77734caec";
+    const credential = "opaque synthetic secret ".repeat(50);
+    const prior = new ClassificationLedger();
+    t.after(() => prior.dispose());
+    prior.register("fixture", { secretText: credential });
+    ledger.include(prior);
+    const messages: IntuneChatMessage[] = [opaque, credential].map((content, index) => ({
+      id: `msg-${index}`, conversationId: "chat-1", role: index === 0 ? "user" : "assistant",
+      content, status: "completed", createdAt: "2026-11-19T00:00:00Z",
+    }));
+    const prompt = withClassificationScope(ledger, () => fenceTenantData(boundedConversationMemory(messages), "chat:history"));
+    await ledger.waitForObservations();
+    const result = await ledger.classifyProviderRequest({ prompt });
+    assert.deepEqual(result.unexamined.ranges.map(range => [prompt.slice(range.start, range.end), range.reason]), [
+      [opaque.slice(0, 1000) + " [truncated]", "clipped-provenance-unavailable"],
+    ]);
+    assert.ok(result.spans.some(span => span.kind === "credential" && prompt.slice(span.start, span.end) === credential.slice(0, 1000) + " [truncated]"));
   });
 
   it("falls back to planned resources when no trace exists (deterministic path)", () => {

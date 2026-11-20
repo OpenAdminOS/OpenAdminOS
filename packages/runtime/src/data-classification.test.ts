@@ -690,15 +690,56 @@ test("case normalization keeps matching unaffected offsets and applies word boun
   assert.deepEqual(result.spans.map(span => prompt.slice(span.start, span.end)), ["ada lovelace"]);
 });
 
-test("keeps provenance for a credential clipped inside a serialized preview", () => {
+test("keeps provenance for a credential clipped inside a serialized preview", async t => {
   const ledger = new ClassificationLedger();
+  t.after(() => ledger.dispose());
   ledger.register("tenant:fixture", { hint: "ab9-secret-fixture" }, { graphPath: "/applications/app/addPassword" });
   const original = '{"hint":"ab9-secret-fixture"}';
   const preview = withClassificationScope(ledger, () =>
     fenceTenantData({ excerpt: registerRenderedFragment(original, original.slice(0, 12), { jsonPrefix: true }) }, "preview"));
   const prompt = `General text ab9. ${preview}`;
+  assert.equal(ledger.classifyRequest({ prompt }).coverageIncomplete, true);
+  await ledger.waitForObservations();
   const result = ledger.classifyRequest({ prompt });
+  assert.equal(result.coverageIncomplete, false);
   assert.deepEqual(result.spans.filter(span => span.kind === "credential").map(span => prompt.slice(span.start, span.end)), ["ab9"]);
+});
+
+test("recovers preview cuts in arrays and marks unresolved ranges", async t => {
+  const id = "2e649073-17e6-4c99-bde9-70f77734caec";
+  const fragment = id.slice(0, 13);
+  const cases = [
+    { data: { includeUsers: ["all", id] }, visible: fragment, evidence: true, kind: "identity" },
+    { data: { includeUsers: [["all"], [[id]]] }, visible: fragment, evidence: true, kind: "identity", suffix: "\n[truncated locally]" },
+    { data: { includeUsers: ["prefix\\opaque"] }, visible: "prefix\\", evidence: true, kind: "identity" },
+    { data: { operator: ["OR"] }, visible: 'OR"', evidence: true, kind: "security" },
+    { data: { operator: [[987654321]] }, visible: "98765", evidence: true, kind: "security" },
+    { data: { includeUsers: [[id]] }, visible: fragment, evidence: false },
+    { data: { includeUsers: [id] }, visible: "includeUs", evidence: true },
+  ] as const;
+  for (const fixture of cases) {
+    const ledger = new ClassificationLedger();
+    t.after(() => ledger.dispose());
+    const original = JSON.stringify(fixture.data);
+    const cut = original.indexOf(fixture.visible) + fixture.visible.length;
+    assert.ok(cut >= fixture.visible.length);
+    if (fixture.evidence) ledger.register("fixture", { conditions: { users: fixture.data }, grantControls: fixture.data }, {
+      graphPath: "/identity/conditionalAccess/policies",
+    });
+    const prompt = withClassificationScope(ledger, () => {
+      const preview = registerRenderedFragment(original, original.slice(0, cut) + ("suffix" in fixture ? fixture.suffix : ""), { jsonPrefix: true });
+      return fenceTenantData({ excerpt: preview }, "preview");
+    });
+    await ledger.waitForObservations();
+    const displayed = JSON.stringify(fixture.visible.replace(/"$/, "")).slice(1, -1);
+    const start = prompt.indexOf(displayed);
+    const end = start + displayed.length;
+    assert.ok(start >= 0);
+    const result = await ledger.classifyProviderRequest({ prompt: prompt + "Context. ".repeat(80) });
+    assert.equal(result.coverageIncomplete, !("kind" in fixture), original);
+    if ("kind" in fixture) assert.ok(result.spans.some(span => span.start === start && span.end === end && span.kind === fixture.kind), original);
+    else assert.deepEqual(result.unexamined.ranges, [{ section: "prompt", start, end, reason: "clipped-provenance-unavailable" }]);
+  }
 });
 
 test("request detectors see identifier spans without registration", () => {

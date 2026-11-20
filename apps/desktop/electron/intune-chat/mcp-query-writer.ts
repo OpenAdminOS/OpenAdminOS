@@ -67,7 +67,8 @@ export class McpQueryWriterError extends Error {}
 export function buildMcpQueryWriterPrompt(input: Omit<McpQueryWriterInput, "llm" | "model" | "signal">): string {
   const question = input.question.trim();
   const cut = registerRenderedFragment(input.question,
-    question.length > QUESTION_CHARS ? `${question.slice(0, QUESTION_CHARS)} [...]` : question);
+    question.length > QUESTION_CHARS ? `${question.slice(0, QUESTION_CHARS)} [...]` : question,
+    { requireEvidence: question.length > QUESTION_CHARS });
   const results = input.earlierResults.slice(0, EARLIER_RESULT_LIMIT).map((item) => ({ server: item.serverName, title: item.title, ...(item.url ? { url: item.url } : {}), ...(item.id ? { id: item.id } : {}) }));
   const itemParams = input.tool.itemIds?.params ?? [];
   const itemFilter = input.tool.itemIds?.filter;

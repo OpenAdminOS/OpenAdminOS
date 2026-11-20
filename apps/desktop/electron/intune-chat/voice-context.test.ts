@@ -161,6 +161,8 @@ it("observes clipped voice history only for the active turn", async t => {
   assert.equal(ledger.classifyRequest(probe).coverageIncomplete, true);
   await ledger.waitForObservations();
   assert.ok(ledger.classifyRequest(probe).spans.some(span => span.kind === "credential" && span.source === "nova:history"));
+  assert.deepEqual(ledger.classifyRequest(probe).unexamined.ranges.filter(range => range.reason === "clipped-provenance-unavailable")
+    .map(range => history.slice(range.start, range.end)), [text.slice(0, 128)]);
   ledger.discardTransient();
   assert.equal(ledger.classifyRequest(probe).spans.some(span => span.source === "nova:history"), false);
 });

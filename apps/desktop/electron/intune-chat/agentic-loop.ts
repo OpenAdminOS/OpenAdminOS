@@ -854,7 +854,8 @@ export function numberedMcpResults(results: readonly McpResultItem[], cites: rea
   results.forEach((item, index) => {
     const cite = cites[index]!;
     const group = groups.get(cite) ?? { title: item.title, head: `${cite} ${item.title}${item.url ? `, ${item.url}` : ""}`, excerpts: [] };
-    const excerpt = item.excerpt && item.excerpt.length > each ? registerRenderedFragment(item.excerpt, `${item.excerpt.slice(0, each).trimEnd()} [...]`, { key: "excerpt" }) : item.excerpt;
+    const excerpt = item.excerpt && item.excerpt.length > each ? registerRenderedFragment(item.excerpt,
+      `${item.excerpt.slice(0, each).trimEnd()} [...]`, { key: "excerpt", before: "\n", requireEvidence: true }) : item.excerpt;
     const own = item.title !== group.title ? item.title : undefined;
     if (own || excerpt) group.excerpts.push([own, excerpt].filter(Boolean).join("\n"));
     groups.set(cite, group);
@@ -1229,7 +1230,7 @@ function trimObservation(value: string, limit: number,
     if (typeof item === "string") {
       if (item.length <= stringLimit) return item;
       const clipped = `${item.slice(0, stringLimit)} [truncated]`;
-      return register ? registerRenderedFragment(item, clipped, key ? { key } : {}) : clipped;
+      return register ? registerRenderedFragment(item, clipped, { key: key ?? "observation", requireEvidence: true }) : clipped;
     }
     if (Array.isArray(item)) return item.slice(0, entries).map(child => compact(child, register, key));
     if (item && typeof item === "object") return Object.fromEntries(Object.entries(item)

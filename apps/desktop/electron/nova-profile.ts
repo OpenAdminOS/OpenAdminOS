@@ -686,8 +686,10 @@ export function novaProfilePromptParts(input: NovaProfilePromptInput): { block: 
     return `${NOVA_PROFILE_BLOCK_INTRO}\n${JSON.stringify(data)}`;
   };
   const register = () => {
-    if (standing) registerRenderedFragment(input.effective.instructions, standing, { before: '"text":"', after: '"' });
-    if (addendum) registerRenderedFragment(input.effective.addendum, addendum, { before: '"organizationAddendum":"', after: '"' });
+    if (standing) registerRenderedFragment(input.effective.instructions, standing,
+      { before: '"text":"', after: '"', requireEvidence: standing !== instructions });
+    if (addendum) registerRenderedFragment(input.effective.addendum, addendum,
+      { before: '"organizationAddendum":"', after: '"', requireEvidence: addendum !== input.effective.addendum.trim() });
     let before = '"confirmedNotes":["';
     for (const [index, text] of notes.entries()) {
       const original = noteEntries[index]!.original;

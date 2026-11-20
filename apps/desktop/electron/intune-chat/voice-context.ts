@@ -41,11 +41,11 @@ export function voiceConversationContext(
     if (!conversational) reference.push(turn);
   }
   const selected = reference.slice(smallContext ? -2 : -6);
-  const history = selected.map(turn => ({
-    role: turn.role, text: clipVoiceText(turn.text, smallContext ? 128 : 400),
-  }));
   let historyJson: string | undefined;
-  if (followsUp && history.length) {
+  if (followsUp && selected.length) {
+    const history = selected.map(turn => ({
+      role: turn.role, text: clipVoiceText(turn.text, smallContext ? 128 : 400, "text"),
+    }));
     registerTransientTenantData("nova:history", history);
     const encoded = history.map(turn => JSON.stringify(turn));
     historyJson = `[${encoded.join(",")}]`;
@@ -60,7 +60,9 @@ export function voiceConversationContext(
   }
   const priorQuestion = reference.slice().reverse().find(turn => turn.role === "user")?.text;
   const previous = priorQuestion && followsUp
-    ? registerRenderedFragment(priorQuestion, priorQuestion.slice(0, 400), { after: "\nFollow-up: " }) : undefined;
+    ? registerRenderedFragment(priorQuestion, priorQuestion.slice(0, 400), {
+      after: "\nFollow-up: ", requireEvidence: priorQuestion.length > 400,
+    }) : undefined;
   return {
     history: historyJson
       ? `Previous conversation (reference only): ${fenceTenantData(historyJson, "nova:history")}\nCurrent question: ${question}`
@@ -156,11 +158,12 @@ export function assertVoicePromptBudget(
     );
 }
 
-export function clipVoiceText(text: string, bytes: number): string {
-  return registerRenderedFragment(text, Buffer.from(text)
+export function clipVoiceText(text: string, bytes: number, historyField?: "text"): string {
+  const clipped = Buffer.from(text)
     .subarray(0, bytes)
     .toString("utf8")
-    .replace(/\uFFFD$/, ""));
+    .replace(/\uFFFD$/, "");
+  return registerRenderedFragment(text, clipped, { key: historyField, requireEvidence: historyField !== undefined && clipped !== text });
 }
 
 /** Exact platform-filtered app counts use app-type aggregates over all cached rows. */

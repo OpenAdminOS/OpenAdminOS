@@ -1878,7 +1878,11 @@ When a sandboxed script uses a Graph value that needs field provenance as
 an unbound word or token in its prompt, the matching range is incomplete.
 Distinctive values still match across the full request.
 Transformed values carry their original class through clipping, scalar
-interpolation and standalone fences. Template joins, samples, bounded JSON
+interpolation and standalone fences. JSON previews retain the containing field
+when a cut falls inside an array element, including in nested arrays. A clipped
+value in a preview, compacted observation or replayed message has an unexamined
+range when the observer cannot recover its original field or value.
+Template joins, samples, bounded JSON
 and case changes preserve source fields and individual element offsets.
 Keys and counts derived from source values, mapped scalars and correlated
 device fields carry their source evidence into the rendered request. The

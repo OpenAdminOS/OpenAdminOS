@@ -376,7 +376,7 @@ function factText(value: unknown): string | undefined {
     ? value.map(flat).filter(Boolean).join(value.some((entry) => entry && typeof entry === "object") ? "; " : ", ")
     : flat(value);
   if (!text) return undefined;
-  return text.length > FACT_CHARS ? registerRenderedFragment(text, `${text.slice(0, FACT_CHARS)} [...]`) : text;
+  return text.length > FACT_CHARS ? registerRenderedFragment(text, `${text.slice(0, FACT_CHARS)} [...]`, { requireEvidence: true }) : text;
 }
 
 function httpsLink(record: Record<string, unknown>, keys: readonly string[] | undefined): string | undefined {
@@ -482,7 +482,10 @@ export function parseMcpResults(text: string, call: { structured?: unknown; args
  * name with a link, as below.
  */
 export function readMcpResult(text: string, call: { structured?: unknown; args?: Record<string, unknown>; host?: string; tool?: string; format?: McpResultFormat } = {}): McpReadResult {
-  const clean = (value: string) => registerRenderedFragment(value, value.replace(/\s+/g, " ").trim().slice(0, 200));
+  const clean = (value: string) => {
+    const normalized = value.replace(/\s+/g, " ").trim();
+    return registerRenderedFragment(value, normalized.slice(0, 200), { requireEvidence: normalized.length > 200 });
+  };
   if (!text.trim() && call.structured === undefined) return { items: [], empty: true };
   if (call.format) {
     let data = call.structured;
@@ -2008,7 +2011,8 @@ export function summarizeToolCallForProgress(
 
 function compactValue(value: unknown, depth = 0, field?: string): unknown {
   if (value === null || value === undefined) return value;
-  if (typeof value === "string") return value.length > 800 ? registerRenderedFragment(value, `${value.slice(0, 800)}...`, field ? { key: field } : {}) : value;
+  if (typeof value === "string") return value.length > 800 ? registerRenderedFragment(value,
+    `${value.slice(0, 800)}...`, { key: field, requireEvidence: true }) : value;
   if (typeof value === "number" || typeof value === "boolean") return value;
   if (Array.isArray(value)) {
     return value.slice(0, 25).map((item) => compactValue(item, depth + 1, field));

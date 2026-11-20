@@ -1492,7 +1492,8 @@ export class IntuneChatService {
       lines.push("", "Workspace notes:");
       notes.slice(0, 12).forEach((note, index) => {
         registerTenantData("workspace:note", note.content);
-        const content = registerRenderedFragment(note.content, trimForPrompt(note.content, 1400));
+        const excerpt = trimForPrompt(note.content, 1400);
+        const content = registerRenderedFragment(note.content, excerpt, { requireEvidence: excerpt.endsWith("\n[truncated locally]") });
         lines.push(`${index + 1}. ${fenceTenantData(content, "workspace:note")}`);
       });
     }

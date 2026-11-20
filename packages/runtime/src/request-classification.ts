@@ -15,7 +15,7 @@ export interface ClassificationSpan extends TextSpan {
 
 interface UnexaminedRange extends TextSpan {
   section: ClassificationSpan["section"];
-  reason: "text-limit" | "match-limit" | "history-evidence-unavailable" | "history-provenance-unavailable" | "script-provenance-unavailable" | "failure";
+  reason: "text-limit" | "match-limit" | "history-evidence-unavailable" | "history-provenance-unavailable" | "script-provenance-unavailable" | "clipped-provenance-unavailable" | "failure";
 }
 
 interface HistoryReplay extends TextSpan {
@@ -95,6 +95,7 @@ export function collectClassifiedValues(data: unknown, options: ClassificationOp
 
 interface RenderProvenance {
   jsonPrefix?: boolean;
+  requireEvidence?: boolean;
   key?: string;
   fence?: string;
   before?: string;
@@ -112,12 +113,12 @@ interface ValueEntry {
   mode?: MatchMode;
   folded?: boolean;
   fields: Map<string, Evidence>;
-  best: Evidence;
+  best?: Evidence;
   patterns: MatchPattern[];
   fenceIds?: Set<string>;
   cost: number;
 }
-type MatchMode = "text" | "word" | "field" | "context" | "folded" | "replay" | "script";
+type MatchMode = "text" | "word" | "field" | "context" | "folded" | "replay" | "script" | "clipped";
 interface MatchPattern {
   text: string;
   offset: number;
@@ -126,6 +127,7 @@ interface MatchPattern {
   entry: ValueEntry;
   before?: string;
   after?: string;
+  key?: string;
 }
 
 type AnchorIndex = Map<number, Map<string, Set<MatchPattern>>>;
@@ -333,8 +335,8 @@ async function encodeLargeValue([value, entry, fences]: WorkerValue, slice: Clas
   if (entry) {
     const { patterns, ...metadata } = entry;
     packed.entry = metadata;
-    for (const { text, offset, anchor, mode, before, after } of patterns) {
-      packed.patterns.push({ text: await encode(text), offset, anchor, mode,
+    for (const { text, before, after, entry: _entry, ...pattern } of patterns) {
+      packed.patterns.push({ ...pattern, text: await encode(text),
         ...(before === undefined ? {} : { before: await encode(before) }),
         ...(after === undefined ? {} : { after: await encode(after) }),
       });
@@ -661,7 +663,8 @@ export class ClassificationLedger {
   rendered(original: unknown, fragment: Scalar, provenance: RenderProvenance): void {
     if (this.disposed || (typeof original !== "string" && typeof original !== "number" && typeof original !== "boolean")) return;
     try {
-      if (this.pendingRegistrations || this.pendingRenderings.length) {
+      const deferred = provenance.jsonPrefix || provenance.requireEvidence;
+      if (deferred || this.pendingRegistrations || this.pendingRenderings.length) {
         const units = (typeof original === "string" ? original.length : 16) +
           (typeof fragment === "string" ? fragment.length : 16) + 64 + (provenance.key?.length ?? 0) +
           (provenance.before?.length ?? 0) + (provenance.after?.length ?? 0) + (provenance.fence?.length ?? 0);
@@ -671,7 +674,16 @@ export class ClassificationLedger {
           this.pendingRenderUnits += units;
           this.pendingRenderings.push([original, fragment, provenance]);
         }
-        if (provenance.jsonPrefix) return;
+        if (deferred) {
+          if (!this.pendingRegistrations && !this.resolvingRenderings && this.pendingRenderings.length) {
+            this.trackObservation(this.resolveRenderings());
+          }
+          if (provenance.jsonPrefix) return;
+          // Preserve already known source evidence while the deferred pass
+          // checks whether missing provenance needs an incomplete range.
+          this.recordRendering(original, fragment, { ...provenance, requireEvidence: false });
+          return;
+        }
       }
       this.recordRendering(original, fragment, provenance);
     }
@@ -693,7 +705,12 @@ export class ClassificationLedger {
           index = 0;
         }
         if (index === this.pendingRenderings.length) break;
-        try { this.recordRendering(...this.pendingRenderings[index++]!); }
+        const [original, fragment, provenance] = this.pendingRenderings[index++]!;
+        try {
+          if (provenance.jsonPrefix && typeof original === "string" && typeof fragment === "string") {
+            await this.recordClippedJsonValue(original, fragment, slice);
+          } else this.recordRendering(original, fragment, provenance);
+        }
         catch { this.incompleteRegistrations++; }
         if (slice.elapsed) await slice.yield();
       }
@@ -732,9 +749,7 @@ export class ClassificationLedger {
       }
     }
     if (!best) {
-      if (provenance.jsonPrefix && typeof original === "string" && typeof fragment === "string") {
-        this.recordClippedJsonValue(original, fragment);
-      }
+      if (provenance.requireEvidence && typeof fragment === "string") this.recordClippedGap(fragment, provenance);
       return;
     }
     if (provenance.fence && typeof fragment === "string") {
@@ -757,26 +772,47 @@ export class ClassificationLedger {
   }
 
   /** Intact fields still match their original patterns. Carry the value cut by a serialized preview. */
-  private recordClippedJsonValue(original: string, fragment: string): void {
+  private async recordClippedJsonValue(original: string, fragment: string, slice: ClassificationSlice): Promise<void> {
     let cut = 0;
     while (cut < fragment.length && original[cut] === fragment[cut]) cut++;
-    if (cut === original.length) return;
-    let prior: RegExpMatchArray | undefined;
-    for (const token of original.matchAll(/"(?:[^"\\]|\\.)*"/gs)) {
-      const start = token.index!;
+    if (cut === 0 || cut === original.length) return;
+    // The original is serialized JSON. A property supplies the next value's
+    // key, and arrays pass their containing key to their elements.
+    const stack: Array<{ array: boolean; key: string | undefined }> = [];
+    for (const token of original.matchAll(/"(?:[^"\\]|\\.)*"|[{}\[\]:,]|true|false|null|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/gs)) {
+      const start = token.index;
       if (start >= cut) break;
-      const end = start + token[0].length;
-      if (end <= cut) { prior = token; continue; }
-      if (!prior || !/^\s*:\s*$/.test(original.slice(prior.index! + prior[0].length, start))) break;
-      try {
-        const key = JSON.parse(prior[0]) as string;
-        const value = JSON.parse(token[0]) as string;
-        const before = original.slice(Math.max(prior.index!, start - 48), start + 1);
-        const after = fragment.slice(cut, cut + 48);
-        this.recordRendering(value, original.slice(start + 1, cut), { key, before, ...(after ? { after } : {}) });
-      } catch { /* A malformed preview still uses plain request detectors. */ }
-      break;
+      if (slice.elapsed) await slice.yield();
+      const literal = token[0];
+      const end = start + literal.length;
+      const frame = stack.at(-1);
+      if (literal === "[" || literal === "{") {
+        stack.push({ array: literal === "[", key: literal === "[" ? frame?.key : undefined });
+      } else if (literal === "]" || literal === "}") stack.pop();
+      else if (literal !== ":" && literal !== "," && literal !== "null") {
+        const quoted = literal.startsWith('"');
+        const property = quoted && frame && !frame.array && original[end] === ":";
+        if (end < cut || property && end === cut) {
+          if (property) frame.key = JSON.parse(literal) as string;
+          continue;
+        }
+        const begin = start + Number(quoted);
+        const finish = Math.min(cut, end - Number(quoted));
+        const part = fragment.slice(begin, finish);
+        if (!part) break;
+        const before = original.slice(Math.max(0, start - 48), begin);
+        const after = fragment.slice(finish, finish + 48);
+        if (frame?.key !== undefined && !property) {
+          this.recordRendering(JSON.parse(literal) as Scalar, part, { key: frame.key, before, after, requireEvidence: true });
+        } else this.recordClippedGap(part, { before, after });
+        break;
+      }
     }
+  }
+
+  private recordClippedGap(fragment: string, provenance: RenderProvenance): void {
+    const entry = this.add(fragment);
+    if (entry) this.indexContext(entry, fragment, provenance, "clipped");
   }
 
   private reserve(cost: number, kind: DataClass): boolean {
@@ -818,10 +854,14 @@ export class ClassificationLedger {
     this.dropped++;
   }
 
-  private add(value: Scalar, evidence: Evidence, contextOnly = false): ValueEntry | undefined {
+  private add(value: Scalar, evidence?: Evidence, contextOnly = evidence === undefined): ValueEntry | undefined {
     this.revision++;
     let entry = this.values.get(value);
     if (entry) {
+      if (!evidence) {
+        this.workerState?.dirty.add(value);
+        return entry;
+      }
       const previous = entry.fields.get(evidence.key);
       if (preferEvidence(previous, evidence)) {
         if (!previous) {
@@ -842,13 +882,14 @@ export class ClassificationLedger {
       return entry;
     }
     const scalarText = String(value);
-    const cost = scalarText.length + evidence.key.length + 48;
-    if (!this.reserve(cost, evidence.kind)) return;
-    entry = { kind: evidence.kind, best: evidence, fields: new Map([[evidence.key, evidence]]), patterns: [], cost };
+    const cost = scalarText.length + (evidence?.key.length ?? 0) + 48;
+    const kind = evidence?.kind ?? "credential";
+    if (!this.reserve(cost, kind)) return;
+    entry = { kind, best: evidence, fields: new Map(evidence ? [[evidence.key, evidence]] : []), patterns: [], cost };
     this.values.set(value, entry);
-    this.byClass.get(evidence.kind)!.add(value);
+    this.byClass.get(kind)!.add(value);
 
-    if (!contextOnly) this.indexValue(entry, value, evidence);
+    if (evidence && !contextOnly) this.indexValue(entry, value, evidence);
     this.workerState?.dirty.add(value);
     return entry;
   }
@@ -886,18 +927,20 @@ export class ClassificationLedger {
     }
   }
 
-  private indexContext(entry: ValueEntry, text: string, provenance: RenderProvenance): void {
+  private indexContext(entry: ValueEntry, text: string, provenance: RenderProvenance, mode: "context" | "clipped" = "context"): void {
+    const key = mode === "clipped" && !provenance.before && !provenance.after ? provenance.key?.toLowerCase() : undefined;
+    if (key) text = JSON.stringify(text);
     const escape = (value: string) => JSON.stringify(value).slice(1, -1);
     for (const encode of [(value: string) => value, fenceEscapes, escape, (value: string) => fenceEscapes(escape(value))]) {
       const value = encode(text);
       const before = encode(provenance.before ?? "");
       const after = encode(provenance.after ?? "");
-      if (entry.patterns.some(pattern => pattern.mode === "context" && pattern.text === value &&
+      if (entry.patterns.some(pattern => pattern.mode === mode && pattern.text === value && pattern.key === key &&
           (pattern.before ?? "") === before && (pattern.after ?? "") === after)) continue;
-      const cost = before.length + after.length + 24;
+      const cost = before.length + after.length + (key?.length ?? 0) + 24;
       if (!this.reserve(cost, entry.kind)) return;
       entry.cost += cost;
-      this.index(entry, value, "context", { before, after });
+      this.index(entry, value, mode, { before, after, key });
     }
   }
 
@@ -915,7 +958,7 @@ export class ClassificationLedger {
 
   private index(entry: ValueEntry, text: string, mode: MatchMode, provenance?: RenderProvenance): void {
     if (!text || entry.patterns.some(pattern => pattern.text === text && pattern.mode === mode &&
-      pattern.before === provenance?.before && pattern.after === provenance?.after)) return;
+      pattern.before === provenance?.before && pattern.after === provenance?.after && pattern.key === provenance?.key)) return;
     const width = Math.min(text.length, ANCHOR_WIDTH);
     const indexes = mode === "folded" ? this.foldedAnchors : this.anchors;
     const prefixes = indexes[width] ??= new Map();
@@ -937,6 +980,7 @@ export class ClassificationLedger {
     const pattern: MatchPattern = { text, offset, anchor, mode, entry,
       ...(provenance?.before ? { before: provenance.before } : {}),
       ...(provenance?.after ? { after: provenance.after } : {}),
+      ...(provenance?.key ? { key: provenance.key } : {}),
     };
     bucket.add(pattern);
     entry.patterns.push(pattern);
@@ -995,6 +1039,7 @@ export class ClassificationLedger {
     fieldAt?: (start: number, end: number) => string | undefined,
     replayAt?: (start: number, end: number) => void,
     scriptAt?: (start: number, end: number) => void,
+    clippedAt?: (start: number, end: number) => void,
   ): boolean {
     for (let at = from; at < to; at++) {
       const first = text.charCodeAt(at);
@@ -1016,7 +1061,7 @@ export class ClassificationLedger {
         }
         if (!matched) continue;
         for (const bucket of matched) {
-          for (const { text: value, offset, mode, entry, before, after } of bucket) {
+          for (const { text: value, offset, mode, entry, before, after, key } of bucket) {
             if (mode === "replay" && !replayAt) continue;
             if (mode === "script" && (!scriptAt || entry.mode !== "field")) continue;
             if (--work.remaining < 0) return false;
@@ -1030,8 +1075,14 @@ export class ClassificationLedger {
             }
             if (!text.startsWith(value, start)) continue;
             if ((mode === "word" || mode === "folded" || mode === "replay" || mode === "script") && (!wordBoundary(text, start - 1) || !wordBoundary(text, end))) continue;
-            if (mode === "context" && (before && (start < before.length || !text.startsWith(before, start - before.length)) ||
+            if ((mode === "context" || mode === "clipped") && (before && (start < before.length || !text.startsWith(before, start - before.length)) ||
                 after && !text.startsWith(after, end))) continue;
+            if (mode === "clipped") {
+              if (key && fieldAt?.(start, end) !== key) continue;
+              const quoteWidth = key ? value.startsWith('\\"') ? 2 : 1 : 0;
+              clippedAt?.(start + quoteWidth, end - quoteWidth);
+              continue;
+            }
             if (mode === "replay") {
               replayAt?.(start, end);
               continue;
@@ -1363,6 +1414,7 @@ export class ClassificationLedger {
       }
       const ambiguous = new Map<string, TextSpan>();
       const ambiguousScript = new Map<string, TextSpan>();
+      const clipped = new Map<string, TextSpan>();
       const scriptPrompt = section === "prompt" ? state.scriptPrompt : undefined;
       const scriptAt = scriptPrompt && ((start: number, end: number) => {
         if (scriptPrompt.start <= start && end <= scriptPrompt.end) ambiguousScript.set(`${start}:${end}`, { start, end });
@@ -1375,7 +1427,8 @@ export class ClassificationLedger {
       const folded = foldedIndex ? foldIdentity(text) : undefined;
       for (let from = 0; from < text.length; from += TEXT_CHUNK) {
         const to = Math.min(text.length, from + TEXT_CHUNK);
-        if (!this.scan(rawIndex, text, from, to, work, collect, fieldAt, replayAt, scriptAt) ||
+        if (!this.scan(rawIndex, text, from, to, work, collect, fieldAt, replayAt, scriptAt,
+            (start, end) => clipped.set(`${start}:${end}`, { start, end })) ||
             foldedIndex && folded !== undefined && !this.scan(foldedIndex, folded, from, to, work, collect)) {
           // The section-wide detector pass has not examined any of this text.
           ranges.push({ section, start: 0, end: text.length, reason: "match-limit" });
@@ -1394,18 +1447,21 @@ export class ClassificationLedger {
       for (const [key, span] of ambiguous) {
         if (found.get(key)?.kind !== "credential") ranges.push({ section, ...span, reason: "history-provenance-unavailable" });
       }
-      let scriptRanges = 0;
-      let overflow: UnexaminedRange | undefined;
-      for (const [key, span] of ambiguousScript) {
-        if (found.get(key)?.authoritative) continue;
-        if (++scriptRanges <= 256) ranges.push({ section, ...span, reason: "script-provenance-unavailable" });
-        else if (!overflow) overflow = { section, ...span, reason: "script-provenance-unavailable" };
-        else {
-          overflow.start = Math.min(overflow.start, span.start);
-          overflow.end = Math.max(overflow.end, span.end);
+      for (const [matches, reason] of [[ambiguousScript, "script-provenance-unavailable"],
+        [clipped, "clipped-provenance-unavailable"]] as const) {
+        let reported = 0;
+        let overflow: UnexaminedRange | undefined;
+        for (const [key, span] of matches) {
+          if (reason === "script-provenance-unavailable" && found.get(key)?.authoritative) continue;
+          if (++reported <= 256) ranges.push({ section, ...span, reason });
+          else if (!overflow) overflow = { section, ...span, reason };
+          else {
+            overflow.start = Math.min(overflow.start, span.start);
+            overflow.end = Math.max(overflow.end, span.end);
+          }
         }
+        if (overflow) ranges.push(overflow);
       }
-      if (overflow) ranges.push(overflow);
       const ordered = [...found.values()].sort((a, b) => a.start - b.start || a.end - b.end);
       for (const { authoritative: _, ...span } of ordered) spans.push(span);
     }

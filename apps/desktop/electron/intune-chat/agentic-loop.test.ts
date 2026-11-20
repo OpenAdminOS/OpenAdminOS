@@ -15,7 +15,7 @@ import {
 import { MAX_AGENTIC_ITERATIONS, partialFinalAnswer, runAgenticChat } from "./agentic-loop.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 import type { IntuneChatToolContext } from "./tools.js";
-import { executeIntuneChatTool } from "./tools.js";
+import { executeIntuneChatTool, GRAPH_GET_PAYLOAD_BYTE_CAP } from "./tools.js";
 import { ClassificationLedger, withClassificationScope, withRequestClassification, type RequestClassificationEvent } from "@openadminos/runtime/data-classification";
 import { TENANT_DATA_INSTRUCTIONS } from "@openadminos/runtime";
 import { VOICE_ANSWER_INSTRUCTIONS } from "./voice-context.js";
@@ -166,6 +166,87 @@ it("keeps a clipped Graph credential classified after deferred ingress settles",
     store.close();
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+it("classifies the identity cut inside a Graph preview array in the next Chat request", async t => {
+  const dir = await mkdtemp(join(tmpdir(), "chat-preview-array-"));
+  const store = seededStore(dir);
+  const ledger = new ClassificationLedger();
+  t.after(async () => { ledger.dispose(); store.close(); await rm(dir, { recursive: true, force: true }); });
+  const path = "/identity/conditionalAccess/policies";
+  const userId = "2e649073-17e6-4c99-bde9-70f77734caec";
+  const padding = Object.fromEntries(Array.from({ length: 29 }, (_, i) => [`padding${i}`, "x".repeat(790)]));
+  const shape = (length: number) => ({ value: [{ ...padding, lastPadding: "y".repeat(length),
+    conditions: { users: { includeUsers: [userId] } }, description: "p".repeat(550) }] });
+  let response = shape(300);
+  const tools = toolContext(store);
+  tools.grantedScopes = new Set([...tools.grantedScopes, "Policy.Read.All"]);
+  tools.graphForScopes = async () => ({ request: async () => response } as RunGraphApi);
+  const probe = await executeIntuneChatTool(tools, "graph_get", { path });
+  const preview = (probe.result as { valuePreview: string }).valuePreview;
+  const marker = '"includeUsers":["';
+  const at = preview.indexOf(marker) + marker.length;
+  assert.ok(at > marker.length);
+  const partial = userId.slice(0, 13);
+  response = shape(300 - (at + partial.length - GRAPH_GET_PAYLOAD_BYTE_CAP));
+
+  const requests: LlmOptions[] = [];
+  const events: RequestClassificationEvent[] = [];
+  const llm: RunLlmApi = { available: true, async complete(options) {
+    requests.push(options);
+    if (requests.length === 2) await ledger.waitForObservations();
+    return { model: "fixture", text: JSON.stringify(requests.length === 1 ? { tool: "graph_get", params: { path } }
+      : requests.length === 2 ? { tool: "list_cached_resources", params: {} } : { final: true, answer: "Reviewed." }) };
+  }, async *stream() {} };
+  const result = await withClassificationScope(ledger, () => runAgenticChat({
+    ...baseInput(store, withRequestClassification(llm, "ollama", event => events.push(event))), tools,
+    question: "Inspect Conditional Access policies.", plannedResources: ["conditionalAccessPolicies"],
+  }));
+  assert.equal(result.ok, true);
+  await ledger.waitForObservations();
+  assert.equal(requests.length, 3);
+  const { prompt } = requests[2]!;
+  const start = prompt.indexOf(partial);
+  assert.ok(start >= 0);
+  assert.equal(prompt.lastIndexOf(partial), start);
+  assert.ok(!prompt.includes(userId));
+  const classification = events.sort((a, b) => b.requestSequence - a.requestSequence)[0]!.classification;
+  assert.equal(classification.coverageIncomplete, false);
+  assert.ok(classification.spans.some(span => span.section === "prompt" && span.kind === "identity" &&
+    span.source === `graph:${path}` && span.start === start && span.end === start + partial.length));
+});
+
+it("keeps the containing field when the observation budget shortens an array value", async t => {
+  const dir = await mkdtemp(join(tmpdir(), "chat-observation-array-"));
+  const store = seededStore(dir);
+  const ledger = new ClassificationLedger();
+  t.after(async () => { ledger.dispose(); store.close(); await rm(dir, { recursive: true, force: true }); });
+  const path = "/groups";
+  const label = "opaque-group-alias-".repeat(45).slice(0, 800);
+  const response = { value: [{ proxyAddresses: [[label]] }] };
+  const tools = toolContext(store);
+  tools.grantedScopes = new Set([...tools.grantedScopes, "Group.Read.All"]);
+  tools.graphForScopes = async () => ({ request: async () => response } as RunGraphApi);
+  const requests: LlmOptions[] = [];
+  const llm: RunLlmApi = { available: true, async complete(options) {
+    requests.push(options);
+    return { model: "fixture", text: JSON.stringify(requests.length === 1 ? { tool: "graph_get", params: { path } }
+      : { final: true, answer: "Reviewed." }) };
+  }, async *stream() {} };
+  const result = await withClassificationScope(ledger, () => runAgenticChat({
+    ...baseInput(store, llm), tools, observationCharBudget: 1540,
+    question: "Inspect group aliases.", plannedResources: ["groups"],
+  }));
+  assert.equal(result.ok, true);
+  await ledger.waitForObservations();
+  const { prompt } = requests[1]!;
+  const clipped = /opaque-group-alias-[\w-]+ \[truncated\]/.exec(prompt)?.[0];
+  assert.ok(clipped);
+  assert.ok(!prompt.includes(label));
+  const classification = await ledger.classifyProviderRequest({ prompt });
+  assert.equal(classification.coverageIncomplete, false);
+  assert.ok(classification.spans.some(span => span.section === "prompt" && span.kind === "identity" &&
+    span.source === `graph:${path}` && prompt.slice(span.start, span.end) === clipped));
 });
 
 it("classifies the fenced Splashtop organization name in the first model request", async () => {

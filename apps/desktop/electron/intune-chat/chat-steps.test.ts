@@ -28,10 +28,10 @@ import {
   validTitle,
 } from "./chat-steps.js";
 import { classifyChatQuestion, hasTenantReference, planChatContext, resolveQuestionKind } from "./planner.js";
-import { isMcpQueryWriterRequest } from "./mcp-query-writer.js";
+import { buildMcpQueryWriterPrompt, isMcpQueryWriterRequest } from "./mcp-query-writer.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 import { TenantValueIndex } from "./tenant-values.js";
-import { mcpChatToolName, mcpPrivateTermsForTenant, parseMcpResults, type McpChatContext, type McpChatServer, type McpChatTool } from "./tools.js";
+import { mcpChatToolName, mcpPrivateTermsForTenant, parseMcpResults, readMcpResult, type McpChatContext, type McpChatServer, type McpChatTool } from "./tools.js";
 
 const tenant: TenantRecord = { id: "tenant-1", displayName: "Contoso", username: "admin@contoso.example", homeAccountId: "home-1", addedAt: "2026-06-01T10:00:00.000Z" };
 
@@ -240,6 +240,32 @@ describe("citations and MCP results", () => {
     ] })), [{ title: "Defender for Endpoint on Mac", url: "https://learn.microsoft.com/defender-endpoint/mac", excerpt: "..." }]);
     assert.deepEqual(parseMcpResults("See [Failed sign-ins](https://www.kqlsearch.com/query/1) and [x](ftp://a)."), [{ title: "Failed sign-ins", url: "https://www.kqlsearch.com/query/1" }]);
     assert.equal(parseMcpResults(JSON.stringify(Array.from({ length: 30 }, (_, i) => ({ name: `Q${i}`, url: `https://example.com/${i}` })))).length, 10);
+  });
+
+  it("reports unrecoverable clipping in model-facing MCP titles, excerpts and questions", async t => {
+    const ledger = new ClassificationLedger();
+    t.after(() => ledger.dispose());
+    const title = "title-with-unknown-origin-".repeat(30);
+    const excerpt = "opaque-source-response-".repeat(1200);
+    const question = "opaque-question-context-".repeat(1000);
+    const fact = "combined-fact-data-".repeat(100);
+    const [result, prompt] = withClassificationScope(ledger, () => {
+      const items = parseMcpResults(JSON.stringify({ results: [{ title, content: excerpt, contentUrl: "https://example.invalid/a" }] }));
+      const { items: withFacts } = readMcpResult("", {
+        structured: { title: "Facts", facts: [fact.slice(0, 1000), fact.slice(1000)] },
+        format: { items: [{ title: [["title"]], facts: ["facts"] }] },
+      });
+      const result = numberedMcpResults([...items, ...withFacts], ["[1]", "[2]"]);
+      return [result, buildMcpQueryWriterPrompt({ tool: learnTool, question, earlierResults: [], sentQueries: [] })];
+    });
+    await ledger.waitForObservations();
+    assert.ok(!result.includes(title) && !result.includes(excerpt) && !prompt.includes(question));
+    const observed = await ledger.classifyProviderRequest({ prompt: `${result}\n${prompt}` });
+    const fragments = observed.unexamined.ranges.map(range => `${result}\n${prompt}`.slice(range.start, range.end));
+    assert.ok(fragments.includes(title.slice(0, 200)));
+    assert.ok(fragments.some(fragment => fragment.endsWith(" [...]") && excerpt.startsWith(fragment.slice(0, -6))));
+    assert.ok(fragments.some(fragment => fragment.endsWith(" [...]") && question.startsWith(fragment.slice(0, -6))));
+    assert.ok(fragments.includes(`${(fact.slice(0, 1000) + ", " + fact.slice(1000)).slice(0, 1500)} [...]`));
   });
 
   it("reads a recorded Microsoft Learn search by its structure, even when the text the model sees is capped", async () => {

@@ -1457,7 +1457,9 @@ export function boundedConversationMemory(
       const text = message.content.trim();
       const prefix = message.role === "user" ? "User: " : "Assistant: ";
       const fragment = format(message).slice(prefix.length);
-      registerRenderedFragment(message.content, fragment, { before: prefix, after: "\n" });
+      registerRenderedFragment(message.content, fragment, {
+        before: prefix, after: "\n", requireEvidence: text.length > CHAT_MEMORY_MAX_MESSAGE_CHARS,
+      });
       if (message.content !== text) registerRenderedFragment(text, fragment, { before: prefix, after: "\n" });
     }
   }
