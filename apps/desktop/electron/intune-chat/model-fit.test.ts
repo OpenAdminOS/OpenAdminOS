@@ -256,6 +256,13 @@ describe("Model fit: the per-request override", () => {
       /does not report a model yet/,
     );
     assert.deepEqual(modelFitChoices({ issue: { reason: "context-too-small", providerId: "ollama", model: LOCAL_MODEL }, providers: [ollama, unpinned] }).hosted, []);
+    // A CLI default placeholder is not a model: the CLI could answer with another one.
+    const gemini: ProviderSummary = { ...claude, id: "gemini", name: "Gemini CLI", models: ["gemini-default"], defaultModel: "gemini-default" };
+    assert.deepEqual(modelFitChoices({ issue: { reason: "context-too-small", providerId: "ollama", model: LOCAL_MODEL }, providers: [ollama, gemini] }).hosted, []);
+    assert.throws(
+      () => resolveChatTurnProvider({ ...base, providers: [ollama, gemini], override: { offerId: "fit_1", providerId: "gemini", model: "gemini-default" }, consent: freshConsent("gemini", "gemini-default") }),
+      /does not report a model yet/,
+    );
   });
 
   it("refuses a provider that is not listed (left out by policy) or not ready, a stale offer, and Nova", () => {

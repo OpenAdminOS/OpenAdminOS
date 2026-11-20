@@ -176,6 +176,17 @@ export function classifyModelFitFailure(
 }
 
 /**
+ * A model name that stands for "the CLI's own default" rather than a model:
+ * the Gemini adapter sends no `--model` for it (GEMINI_DEFAULT_MODEL in
+ * packages/runtime/src/llm-gemini.ts), so the CLI may answer with whatever
+ * it is set to when the request runs. A model fit approval names one model,
+ * so such a name is never a model fit choice.
+ */
+export function isPlaceholderModel(model: string | undefined): boolean {
+  return model === "gemini-default";
+}
+
+/**
  * An Ollama Cloud model, such as "gpt-oss:120b-cloud" or "glm-4.6:cloud".
  * A loopback Ollama that is signed in to ollama.com lists these with its
  * local models, but their prompts are processed on Ollama's servers, so
@@ -251,7 +262,7 @@ export function modelFitChoices(input: {
     .flatMap((provider) => {
       // The accept step names the exact model, so a provider that reports none yet is not offered.
       const model = resolveProviderDefaultModel(provider, input.activeModelByProviderId).model;
-      return model ? [{ providerId: provider.id, providerName: provider.name, isLocal: false, model }] : [];
+      return model && !isPlaceholderModel(model) ? [{ providerId: provider.id, providerName: provider.name, isLocal: false, model }] : [];
     });
   const currentSize = modelSizeBillions(issue.model);
   const local: ModelFitChoice[] = [];

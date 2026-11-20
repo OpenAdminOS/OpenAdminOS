@@ -10,6 +10,7 @@ import { InvalidAgentNotice } from "../components/InvalidAgentNotice";
 import { AGENT_COPY, PROVIDER_TOOL_NAMES, modelTrustNote, promptsGoTo, providerDataLocationDetail } from "../copy";
 import { MODEL_FIT_COPY } from "../copy/model-fit";
 import { modelFitModelName } from "../components/ModelFitNotice";
+import { isPlaceholderModel } from "../shared/model-fit";
 import {
   DeclaredGraphOperations,
   ManifestPreview,
@@ -1129,7 +1130,7 @@ export default function AgentDetail({
           // A model fit rerun starts only once the review knows where its provider is reached.
           {...((pendingRunChoice?.modelFit || pendingRunChoice?.safeguards) && pendingRunChoice.model && pendingProvider && pendingProvider.models.length > 0 && !pendingProvider.models.includes(pendingRunChoice.model)
             ? { destinationState: "model-gone" as const, missingModel: pendingRunChoice.model }
-            : (pendingRunChoice?.modelFit || pendingRunChoice?.safeguards) && pendingProvider && !pendingProvider.isLocal && !pendingModel
+            : (pendingRunChoice?.modelFit || pendingRunChoice?.safeguards) && pendingProvider && !pendingProvider.isLocal && (!pendingModel || isPlaceholderModel(pendingModel))
             ? { destinationState: "no-model" as const }
             : (pendingRunChoice?.modelFit || pendingRunChoice?.safeguards) && pendingRunChoice.destinationFailed
             ? { destinationState: "failed" as const }
@@ -2864,6 +2865,13 @@ function RunPreflightModal({
     !scopeBlockCopy;
   const firstNeeded = agentServiceIds(agent)[0];
   const neededText = neededTitles.length > 0 ? formatServiceList(neededTitles) : "Microsoft 365";
+  // Why a model fit rerun cannot start yet; Start and Try again wait for the same thing.
+  const fitHint =
+    destinationState === "model-gone" ? MODEL_FIT_COPY.modelGone(missingModel ?? "", providerName)
+    : destinationState === "no-model" ? MODEL_FIT_COPY.modelMissing(providerName)
+    : destinationState === "failed" ? MODEL_FIT_COPY.destinationFailed(providerName)
+    : destinationState === "pending" ? MODEL_FIT_COPY.destinationPending(providerName)
+    : undefined;
   // One blocker at a time, the first that stops this run. Its fix is the
   // only filled button in the review.
   const blocker: PreflightBlocker | null = startError
@@ -2871,9 +2879,9 @@ function RunPreflightModal({
         tone: "danger",
         title: "The run did not start.",
         body: startError,
-        primary: { label: "Try again", onClick: onConfirm },
+        ...(fitHint ? {} : { primary: { label: "Try again", onClick: onConfirm } }),
         ...(onOpenProviderSettings ? { secondary: { label: "Open provider settings", onClick: onOpenProviderSettings } } : {}),
-        hint: "Fix the reason above, then try again.",
+        hint: fitHint ?? "Fix the reason above, then try again.",
       }
     : !activeTenant && !serviceFree
       ? {
@@ -2907,7 +2915,7 @@ function RunPreflightModal({
             ? { tone: "danger", title: "This agent cannot start as declared.", body: scopeBlockCopy, hint: "Fix the agent's declared permissions to start it." }
             : null;
   const missingServicesBlock = !blocker && activeTenant && missingServices.length > 0;
-  const hint = blocker?.hint ?? (missingServicesBlock ? `Connect ${formatServiceList(missingServices.map((service) => service.title))} to start this run.` : deliverySaving ? "Saving connector delivery changes before the run starts." : destinationState === "model-gone" ? MODEL_FIT_COPY.modelGone(missingModel ?? "", providerName) : destinationState === "no-model" ? MODEL_FIT_COPY.modelMissing(providerName) : destinationState === "failed" ? MODEL_FIT_COPY.destinationFailed(providerName) : destinationState === "pending" ? MODEL_FIT_COPY.destinationPending(providerName) : undefined);
+  const hint = blocker?.hint ?? (missingServicesBlock ? `Connect ${formatServiceList(missingServices.map((service) => service.title))} to start this run.` : deliverySaving ? "Saving connector delivery changes before the run starts." : fitHint);
   const locationDetail = providerDataLocationDetail({ id: providerId });
   const changes = dryRun
     ? "None. This run only prepares a plan. Graph writes, connector changes and automatic result delivery are blocked."

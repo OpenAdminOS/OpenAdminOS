@@ -10,7 +10,7 @@ import type {
   ProviderSummary,
   RunLlmApi,
 } from "@openadminos/agent-sdk";
-import { classifyModelFitFailure, isOnDeviceModel, isRemoteBackedModel, SELF_HOSTED_PROVIDER_IDS } from "../../src/shared/model-fit.js";
+import { classifyModelFitFailure, isOnDeviceModel, isPlaceholderModel, isRemoteBackedModel, SELF_HOSTED_PROVIDER_IDS } from "../../src/shared/model-fit.js";
 import { isProviderReady } from "../../src/shared/provider-detection.js";
 
 /**
@@ -167,7 +167,7 @@ export function resolveChatTurnProvider(input: {
   if ((chosen.id === offer.failed.providerId && model === offer.failed.model) || (chosen.id === active.id && model === activeModel)) {
     throw new ModelOverrideError("That model already could not do this request. Choose another one, or narrow the question.");
   }
-  if (!chosen.isLocal && !model) {
+  if (!chosen.isLocal && (!model || isPlaceholderModel(model))) {
     // The approval names one model; a provider that reports none could pick its own after it.
     throw new ModelOverrideError(`${chosen.name} does not report a model yet, so nothing was sent. Check it in Settings, Providers, then choose it again.`);
   }

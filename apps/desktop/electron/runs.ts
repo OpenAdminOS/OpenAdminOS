@@ -1,5 +1,5 @@
 import { guardModelFitLlm } from "./intune-chat/model-fit.js";
-import { classifyModelFitFailure, isOnDeviceModel, SELF_HOSTED_PROVIDER_IDS } from "../src/shared/model-fit.js";
+import { classifyModelFitFailure, isOnDeviceModel, isPlaceholderModel, SELF_HOSTED_PROVIDER_IDS } from "../src/shared/model-fit.js";
 import { TENANT_CLOSED_COPY } from "./tenant-lifecycle.js";
 import { createHash, randomUUID } from "node:crypto";
 
@@ -713,10 +713,16 @@ export class RunService {
         );
       }
 
-      // A model fit rerun on a hosted provider runs the model its review named, never one the
-      // provider picks after the approval.
-      if (options.bindProviderEndpoint && activeProvider && !activeProvider.isLocal && !model) {
-        throw new Error(`${activeProvider.name} does not report a model yet, so the run did not start. Check it in Settings, Providers, then review the run again.`);
+      // A model fit rerun on a hosted provider (and Run for real of one) runs the model its review
+      // named and the provider reports now, never a default the host or the provider picks after the approval.
+      const modelFitStart = options.bindProviderEndpoint === true || inheritedEndpointBinding?.scope === "model-fit";
+      if (modelFitStart && activeProvider && !activeProvider.isLocal) {
+        if (!explicitModel || isPlaceholderModel(explicitModel)) {
+          throw new Error(`${activeProvider.name} does not report a model yet, so the run did not start. Check it in Settings, Providers, then review the run again.`);
+        }
+        if (!knownModels.includes(explicitModel)) {
+          throw new Error(`${activeProvider.name} no longer lists ${explicitModel}, so the run did not start. Choose a provider again on the run page.`);
+        }
       }
 
       // A model fit rerun on a model on this device is admitted only after a fresh check that it runs here.
