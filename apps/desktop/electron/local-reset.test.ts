@@ -1082,6 +1082,52 @@ describe("local reset: wipe at launch", () => {
     }
   });
 
+  it("keeps the Keychain key when the profile is replaced while the guard lists it", async () => {
+    const dir = await tempDir();
+    try {
+      const profile = join(dir, "profile");
+      mkdirSync(profile);
+      seedDataFolder(profile, MARKER);
+      const calls: string[][] = [];
+      let leftoversStarted = false;
+      let swapped = false;
+      const base = failingFileSystem(() => false);
+      const report = runPendingLocalReset({
+        userDataDir: profile,
+        packaged: true,
+        platform: "darwin",
+        home: join(dir, "home"),
+        env: {},
+        run: (file, args) => { calls.push([file, ...args]); return { status: 44 }; },
+        removeScheduler: () => { leftoversStarted = true; },
+        fs: {
+          ...base,
+          // The listing reads the old folder; a backup tool swaps in the
+          // restored profile before the listing returns.
+          readdir: (path) => {
+            const names = base.readdir(path);
+            if (path === profile && leftoversStarted && !swapped) {
+              swapped = true;
+              renameSync(profile, join(dir, "profile-old"));
+              mkdirSync(profile);
+              writeFileSync(join(profile, "tokens.bin"), "restored tokens");
+            }
+            return names;
+          },
+        },
+      });
+      assert.ok(swapped);
+      assert.equal(report?.status, "incomplete");
+      assert.match(report?.failed.at(-1)?.reason ?? "", /was replaced by another folder or a link/);
+      assert.ok(!calls.some((call) => call[1] === "delete-generic-password"));
+      assert.equal(readFileSync(join(profile, "tokens.bin"), "utf8"), "restored tokens");
+      // No progress record went into the restored profile.
+      assert.deepEqual(readdirSync(profile), ["tokens.bin"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("leaves a cache folder replaced while the data folder is listed before its removal", async () => {
     const dir = await tempDir();
     try {

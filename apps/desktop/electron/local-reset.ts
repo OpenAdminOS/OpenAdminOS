@@ -760,6 +760,9 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
         const appeared: LocalResetProblem[] = [];
         checkFolderEmpty(fs, userDataDir, appeared, () => true);
         if (appeared.length > 0) throw new FolderChangedDuringReset(appeared);
+        // Again after the listing: a folder swapped in while it ran would
+        // otherwise pass with the old folder's contents.
+        if (!sameFolder()) throw new FolderChangedDuringReset([{ item: userDataDir, reason: DATA_FOLDER_CHANGED_REASON }]);
       };
       try {
         removeLeftovers(options, fs, run, warnings, guard);
