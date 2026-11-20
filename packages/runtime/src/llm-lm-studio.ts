@@ -48,9 +48,11 @@ const LM_STUDIO_LOOKUP_TIMEOUT_MS = 3000;
  * greater than the context length" with an optional "(n_keep: N >= n_ctx: M)"
  * (0.4.x), "Context size has been exceeded." (MLX) and "Reached context
  * length of M tokens with model ... that does not currently support
- * mid-generation context overflow".
+ * mid-generation context overflow". The llama.cpp engine can also pass on
+ * llama.cpp's own "request (N tokens) exceeds the available context size
+ * (M tokens)".
  */
-const LM_STUDIO_OVERFLOW = /greater than the context length|when context the overflows|loaded with context length of only|context size has been exceeded|reached context length of \d+ tokens?/i;
+const LM_STUDIO_OVERFLOW = /greater than the context length|when context the overflows|loaded with context length of only|context size has been exceeded|reached context length of \d+ tokens?|exceeds the available context size/i;
 
 /** The token counts LM Studio's overflow error names, when it names them. */
 export function parseLmStudioContextOverflow(detail: string): { requested?: number; loaded?: number } | undefined {
@@ -59,6 +61,8 @@ export function parseLmStudioContextOverflow(detail: string): { requested?: numb
   if (keep) return { requested: Number(keep[1]), loaded: Number(keep[2]) };
   const nKeep = /n_keep:\s*(\d+)\s*>=?\s*n_ctx:\s*(\d+)/i.exec(detail);
   if (nKeep) return { requested: Number(nKeep[1]), loaded: Number(nKeep[2]) };
+  const llamaCpp = /request \((\d+) tokens?\) exceeds the available context size \((\d+) tokens?\)/i.exec(detail);
+  if (llamaCpp) return { requested: Number(llamaCpp[1]), loaded: Number(llamaCpp[2]) };
   const reached = /reached context length of (\d+) tokens?/i.exec(detail);
   if (reached) return { loaded: Number(reached[1]) };
   return {};

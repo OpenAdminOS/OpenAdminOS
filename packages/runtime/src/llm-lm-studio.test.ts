@@ -540,6 +540,20 @@ describe("LM Studio context length too small", () => {
     }
   });
 
+  it("reads llama.cpp's own overflow wording sent inside the stream", async () => {
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url === "/api/v1/models") return sendJson(res, 200, v1Models("qwen3-8b", 104192, 131072));
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.end(`data: ${JSON.stringify({ error: { message: "request (106724 tokens) exceeds the available context size (104192 tokens), try increasing it" } })}\n\n`);
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b" });
+      await assert.rejects(collect(llm, { prompt: "big" }), /This request needs 106,724 tokens of context, but qwen3-8b is loaded in LM Studio with a context length of 104,192\. Raise Context Length to at least 111,616 \(qwen3-8b supports up to 131,072\)/);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("reads a streamed request's HTTP 400 overflow", async () => {
     const server = await fakeLmStudio((req, res) => {
       if (req.url === "/api/v1/models") return sendJson(res, 200, v1Models("qwen3-8b", 4096, 32768));
@@ -653,6 +667,7 @@ describe("parseLmStudioContextOverflow", () => {
     assert.deepEqual(parseLmStudioContextOverflow("greater than the context length (n_keep: 8485 >= n_ctx: 8192)"), { requested: 8485, loaded: 8192 });
     assert.deepEqual(parseLmStudioContextOverflow("Context size has been exceeded."), {});
     assert.deepEqual(parseLmStudioContextOverflow("Reached context length of 4096 tokens with model (arch: qwen3vlmoe) that does not currently support mid-generation context overflow."), { loaded: 4096 });
+    assert.deepEqual(parseLmStudioContextOverflow("request (106724 tokens) exceeds the available context size (104192 tokens), try increasing it"), { requested: 106724, loaded: 104192 });
     assert.equal(parseLmStudioContextOverflow("Invalid model identifier"), undefined);
   });
 });
