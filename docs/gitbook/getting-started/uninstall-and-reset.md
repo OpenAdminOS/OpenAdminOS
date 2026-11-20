@@ -234,8 +234,9 @@ removing through it would delete files wherever it points, and it removes
 links inside the folders as links, without entering them. If no one manages
 the device and the folder is not a link, you can remove the whole
 `%APPDATA%\OpenAdminOS` folder. The encryption key that protects the sign-ins
-is in that folder (`Local State`), so removing the folder also makes any
-copied token files unreadable.
+is in that folder (`Local State`), so removing the folder also makes token
+files copied elsewhere without it unreadable. A backup of the whole folder
+holds the key too: delete that backup as well if the sign-ins in it must go.
 
 ## Uninstall on Linux
 

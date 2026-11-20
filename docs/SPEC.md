@@ -2548,6 +2548,22 @@ Mockup: `docs/mockups/34-local-reset.html`.
   SQLite stores write through handles opened on the original files. The restart puts the sandbox flag in the
   environment back to how the launch found it, so the setting removed with
   `state.json` does not come back as the next launch's default.
+- **Linux binds the marker to the device too** (review round 26). A Btrfs
+  snapshot restored as the home keeps every folder's inode and birth time,
+  so on Linux the device number must also match; a mismatch, for example a
+  Btrfs device number that changed with a reboot while a reset was
+  incomplete, stops it with nothing removed and the usual way out (remove
+  the marker, reset again).
+- **Accepted limit: a write already running when the reset commits**
+  (raised in review round 26, declined). A state or token cache write that
+  started before the reset request, if the data folder is replaced within
+  the milliseconds it runs, lands in the replacement (a state write checks
+  the commit again right before its rename, so the window is that rename;
+  a token cache write keeps its full duration). That exposure is the
+  running app's own, with or without a reset; draining writes before the
+  marker would only move the window to writes started before the drain.
+  What the reset guarantees: nothing it does, and no state write that
+  starts after the marker, reaches a folder swapped in.
 - **Accepted limit: a folder replaced during one removal** (raised in review
   round 23, declined). The folder's identity is checked before every
   top-level removal and before every write, but a recursive removal and the
@@ -2571,7 +2587,8 @@ Mockup: `docs/mockups/34-local-reset.html`.
   intact database; everything else still goes. On Windows an entry holding
   a read-only file with more than one hard link stays too, and is listed: a
   hard link shares its attributes, and removing a read-only file clears the
-  attribute first, which would make a backup's copy writable; cache folders
+  attribute first, which would make a backup's copy writable (a folder that
+  cannot be listed stays too, since its contents cannot be checked); cache folders
   outside the data folder get the same check, as a warning. The guide's
   PowerShell script leaves files whose `LinkType` is `HardLink` for the same
   reason. Then,
