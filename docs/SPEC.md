@@ -2602,7 +2602,9 @@ for this request only."
 After. The stored answer carries `switchedFrom` (the provider and model it
 replaced, why, and whether the provider that took it was on this device when
 it was sent, so later settings cannot relabel it) and shows "Answered by <location label> for this request
-only. Chat is back on <model>." A failed answer carries `modelFit` with the
+only. Chat is back on <model>." The last sentence shows only while Chat still
+uses the model it left; read later, after the admin changed the provider or
+model, the line ends at "for this request only." A failed answer carries `modelFit` with the
 reason and numbers, kept in the answer metadata.
 
 Agent runs. A run that failed on a local provider with a context failure shows
@@ -2624,7 +2626,11 @@ deployment), and a later phase built for another endpoint fails with nothing
 sent. The run review takes the destination fingerprint when it opens and
 Start passes it (`expectedProviderDestination`); Start stays disabled until
 it is read, a failed read says so in the review, and a change refuses the
-start.
+start. Start passes the provider and model the review showed, never one the
+host resolves again, and the host refuses a model the provider no longer
+reports. When the chosen provider is not ready and the review opens setup, a
+provider picked there stays on that run: setup does not change the active
+provider for a model fit rerun.
 Run for real of a model fit dry run keeps the on-device requirement and the
 endpoint binding, and so does Run again of a model fit rerun. A model fit request in Chat is bound the same way for its
 own duration, and its answer names where it went only once a model request
