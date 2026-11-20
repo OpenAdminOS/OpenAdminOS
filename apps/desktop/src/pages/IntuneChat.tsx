@@ -985,8 +985,12 @@ function IntuneChatContent() {
       pendingUserMessage,
       pendingAssistantMessage,
     ]);
-    setInput("");
-    clearChatDraft(targetConversationId);
+    // A model fit retry sends the original question; a different draft the admin typed since stays.
+    const keepDraft = Boolean(modelOverride) && input.trim() !== "" && input.trim() !== content;
+    if (!keepDraft) {
+      setInput("");
+      clearChatDraft(targetConversationId);
+    }
     let failed = false;
     let cancelled = false;
     let reachedTerminal = false;
@@ -1137,7 +1141,7 @@ function IntuneChatContent() {
               dispatchSend({ type: "fail" });
               if (!offerId) setError(event.error);
               setFailedRequest({ content, conversationId: targetConversationId });
-              setInput(content);
+              if (!keepDraft) setInput(content);
             }
             if (event.type === "completed") {
               reachedTerminal = true;
@@ -1176,7 +1180,7 @@ function IntuneChatContent() {
       if (!reachedTerminal) dispatchSend({ type: "fail" });
       setError(errorMessage);
       setFailedRequest({ content, conversationId: targetConversationId });
-      setInput(content);
+      if (!keepDraft) setInput(content);
       setChatProgress({
         message: "Chat answer failed.",
         progressPercent: 100,
@@ -1199,7 +1203,8 @@ function IntuneChatContent() {
             providerId: provider?.id ?? state.activeProviderId,
             ...(activeModel ? { model: activeModel } : {}),
           },
-          (existing) => ({
+          // A send the host refused never reached a provider, so the optimistic destination goes.
+          ({ switchedFrom: _optimistic, ...existing }) => ({
             ...existing,
             content: existing.content.trim()
               ? existing.content

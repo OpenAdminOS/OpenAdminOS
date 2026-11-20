@@ -82,7 +82,7 @@ describe("IntuneChat model fit (mockup 36)", () => {
     const bridge = fitBridge();
     const { notice } = await sendTooLarge(bridge);
     expect(within(notice).getByText("This request needs about 40,652 tokens. llama3.1 is set to 16,384.")).toBeInTheDocument();
-    expect(within(notice).getByText("Nothing was sent to another provider.")).toBeInTheDocument();
+    expect(within(notice).getByText("Nothing goes to another provider unless you choose one.")).toBeInTheDocument();
     expect(within(notice).getByText("Codex · location set by your account")).toBeInTheDocument();
     expect(within(notice).getByText("Uses your Codex sign-in. The request counts toward that account's usage or bill.")).toBeInTheDocument();
     // Claude Code is not installed in this state, so it is not offered.
@@ -157,6 +157,19 @@ describe("IntuneChat model fit (mockup 36)", () => {
     expect(line).toHaveTextContent("Sending to Codex · location set by your account for this request only.");
     release();
     expect(await screen.findByText("Answered by")).toBeInTheDocument();
+  });
+
+  it("keeps a narrower draft the admin typed when the original question is retried", async () => {
+    const bridge = fitBridge();
+    const { user } = await sendTooLarge(bridge);
+    await screen.findByDisplayValue(QUESTION);
+    fireEvent.change(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel }), { target: { value: "List devices by owner." } });
+    await user.click(within(await screen.findByRole("region", { name: "llama3.1 cannot fit this request" })).getByRole("button", { name: "Run with Codex" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "Run this request with Codex?" })).getByRole("button", { name: "Send through Codex" }));
+    await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(bridge.streamIntuneChatMessage).mock.calls[1]![0].content).toBe(QUESTION);
+    await screen.findByText("Answered by");
+    expect(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel })).toHaveValue("List devices by owner.");
   });
 
   it("asks for the accept even when hosted sends to Codex were remembered for this tenant", async () => {
