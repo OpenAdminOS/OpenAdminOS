@@ -522,6 +522,93 @@ deterministic counts/findings. If the prompt still exceeds the on-device
 context window, the provider fails with explicit recovery copy instead of a
 generic model error.
 
+#### Prompt size preflight for agent runs (2026-11-19)
+
+Every LLM call in an agent run is size-checked before anything is sent.
+`RunLlmApi.contextWindow(model)` is an optional provider capability; a
+provider that cannot report a window leaves it out, and its requests are
+never blocked. Hosted providers (Claude Code, Codex, Copilot, Gemini, Azure
+OpenAI) report none. Ollama reports it from `/api/show` in
+`ollama-context.ts`. A `num_ctx` pinned in the Modelfile is the model
+author's choice and what the first request gets, so it is the limit:
+OpenAdmin 8B pins 16,384, the size its rope scaling was trained at. A model
+without a pinned `num_ctx` is limited by its architecture `context_length`,
+because the adapter raises `num_ctx` on an overflow up to that maximum
+(PR #211). Such a model's first send already carries an explicit `num_ctx`
+covering the estimated request (a power of two, never below the size it is
+loaded with), because Ollama loads it at its own default, reloads it there
+after an eviction, and an older Ollama shortens a longer prompt without an
+error. A caller that does not raise `num_ctx` gets the size Ollama loaded the
+model with (`/api/ps`) instead. Agent runs also set
+`LlmOptions.enforceContextWindow`: if the run's own lookup missed a pin (Ollama
+briefly unavailable) and the adapter's lookup finds it, the adapter refuses
+with the same `ContextTooSmallError` instead of sending, and an overflow retry
+on an agent run never asks for more than the pin (when Ollama counts more than
+the estimate, the run fails with the typed reason, `sentToProvider: true`,
+whose message says the model refused the request or stopped partway). An
+agent run sends a `num_ctx` only when a lookup established whether the model
+is pinned: the answer carried the parameters or the Modelfile (whose
+`PARAMETER num_ctx` lines Ollama always includes). After a failed or partial
+lookup it sends none, so a pin applies, and an overflow fails with the typed
+reason at the size Ollama ran it with. Chat keeps a size that worked when a
+lookup fails. Chat leaves it unset,
+so #211's raise still serves a larger request there. A kept `num_ctx` belongs
+to the model revision the lookup that chose it saw (`/api/show`
+`modified_at`), even when the request finishes after the model was created
+again; a model created again under the same name starts from its own settings. LM Studio reports none for now because its
+context fields could not be verified.
+
+The runtime's `estimateTokens` counts letters, digits, mixed ids,
+punctuation and line breaks separately. Calibrated against OpenAdmin 8B
+(Mistral tokenizer) and gpt-oss 20B, it overestimates by 3% to 43% and never
+underestimates, so it refuses early rather than late. `checkPromptFit`
+compares system text, prompt and answer budget (`maxTokens`, else 1,024
+tokens) with the window. A request that does not fit fails with a
+`ContextTooSmallError`; the run record carries `failureReason`
+(`code: "context-too-small"`, prompt, answer, needed and limit tokens, model)
+so the run failure playbook and the provider switch flow act on numbers, not
+on message text. The message names the size needed, the limit, that nothing
+was sent, and the ways out: a larger local model, a hosted provider, or a
+narrower scope.
+
+Agent prompts carry summaries, not inventories. The runtime's
+`compact-conditional-access` transform turns each Conditional Access policy
+into one short record (scope as counts or `All`, built-in role names,
+conditions, grant and session controls), and `group-by-age` can keep names
+only (`pick`). The explainer manifest that uses them (1.2.0) ships in a
+follow-up change; with it, 100 policies of the test fixture need about
+15,500 estimated tokens with an 1,100 token answer and fit a 16k local model,
+and up to 107 fit by the estimate. Grouped
+records reach prompts only as counts (`count-by-field` steps), and breakdowns
+by high-cardinality fields keep their largest buckets (the `top` setting of
+`count-by-field`, which moves them under `top` with `otherValues` and
+`otherCount` beside them so no tenant value collides with the summary). Bundled
+agents use settings, not the `counts` and `top(n)` filters, because an older
+app ignores an unknown setting and still runs the agent with every bucket,
+while an unknown filter stops the run.
+The self-training overlay wrapper names its text as `RunLlmApi.systemSuffix`,
+so the run's single check counts it as prompt and keeps the model's real
+limit. The typed reason survives write revalidation (as
+the error's `cause`) and sandboxed script agents (the broker answers
+`context-too-small` and the script run fails with the typed error).
+
+A bundled manifest that needs a runtime feature older apps do not have ships
+in two steps, because released apps fetch registry manifests from main and
+take the registry entry's `minAppVersion` even for a copy already installed.
+First the runtime ships while the registry still serves the old manifest.
+Then the manifest follows with `minAppVersion` set to the first published
+build that has the runtime, normally a nightly such as
+`0.7.3-nightly.<stamp>`, so no build without it can accept the manifest.
+Nightlies compare as their release under `compareSemver`; `appVersionSatisfies`
+reads a nightly minimum exactly (earlier nightlies of that release refused,
+later ones and the stable release accepted), and released apps refuse it with
+`compareSemver` too. A 0.7.2 app that has the agent installed then shows it as
+needing an app update. From this release on, an installed agent's own
+manifest decides whether it runs, and the registry entry only decides whether
+its update can be installed (`updateAvailable.supported`). Agents that can be
+bounded with steps every app version has (`count-by-field`, and its `top`
+setting, which older apps ignore) keep their old minimum and ship at once.
+
 Per-agent model overrides are required: an agent's manifest can specify a preferred model and the user can override it.
 
 Desktop CLI provider discovery appends known install folders to the child PATH

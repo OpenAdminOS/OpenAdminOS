@@ -157,8 +157,10 @@ export type AgentMode = "read" | "write";
 
 export * from "./write-limits.js";
 export * from "./graph-access.js";
+export * from "./context-fit.js";
 import type { WriteLimits } from "./write-limits.js";
 import type { GraphAccessDenial } from "./graph-access.js";
+import type { RunFailureReason } from "./context-fit.js";
 import type {
   ConnectSplashtopInput,
   PrepareSplashtopChangeInput,
@@ -400,6 +402,8 @@ export interface AgentUpdateInfo {
   manifestSha256: string;
   /** Minimum OpenAdminOS version required by the registry entry. */
   minAppVersion?: string;
+  /** Whether this app version meets `minAppVersion`, computed by the host. */
+  supported?: boolean;
 }
 
 export interface AgentCompatibility {
@@ -1055,6 +1059,8 @@ export interface RunRecord {
   error?: string;
   steps: RunStepRecord[];
   accessDenial?: GraphAccessDenial;
+  /** Machine readable reason for a failed run, such as `context-too-small`. */
+  failureReason?: RunFailureReason;
   /**
    * True on a failure classified from its typed error, with or without a
    * Graph denial. Its message is then never read for Graph advice; only
@@ -4483,6 +4489,13 @@ export interface LlmOptions {
    * stops. Providers should abort network/process work promptly when set.
    */
   signal?: AbortSignal;
+  /**
+   * Set by agent runs, which check the size before sending: a provider that
+   * learns a context limit the request exceeds (for example a Modelfile pin
+   * the run's own lookup missed) refuses with a ContextTooSmallError instead
+   * of sending. Chat leaves it unset, so a provider may raise its context.
+   */
+  enforceContextWindow?: boolean;
 }
 
 export interface LlmTokenUsage {
@@ -4531,6 +4544,17 @@ export interface RunLlmApi {
    */
   complete(options: LlmOptions): Promise<LlmCompletion>;
   stream(options: LlmOptions): AsyncIterable<LlmStreamChunk>;
+  /**
+   * The context window in tokens that a request to `model` gets, when the
+   * provider can report it. `undefined` means unknown, and callers then send
+   * the request without a size check. Hosted providers leave this out.
+   */
+  contextWindow?(model?: string): Promise<number | undefined>;
+  /**
+   * Text this adapter appends to every system prompt, after a blank line
+   * (for example approved self-training instructions). Size checks count it.
+   */
+  readonly systemSuffix?: string;
 }
 
 export type SandboxBrokerRequest =

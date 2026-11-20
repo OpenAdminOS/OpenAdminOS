@@ -1402,16 +1402,15 @@ export function withSelfTrainingOverlay(base: RunLlmApi, overlay: string): RunLl
     get defaultModel() {
       return base.defaultModel;
     },
-    complete: (options) =>
-      base.complete({
-        ...options,
-        system: composeSystem(options.system),
-      }),
+    get streamsIncrementally() {
+      return base.streamsIncrementally;
+    },
+    ...(base.contextWindow ? { contextWindow: (model?: string) => base.contextWindow!(model) } : {}),
+    // The run's size check counts this, so it sees the request as sent.
+    systemSuffix: [base.systemSuffix, overlay].filter(Boolean).join("\n\n"),
+    complete: (options) => base.complete({ ...options, system: composeSystem(options.system) }),
     async *stream(options) {
-      yield* base.stream({
-        ...options,
-        system: composeSystem(options.system),
-      });
+      yield* base.stream({ ...options, system: composeSystem(options.system) });
     },
   };
 }

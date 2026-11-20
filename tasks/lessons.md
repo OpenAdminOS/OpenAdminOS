@@ -53,3 +53,13 @@ Format:
 **Why:** For PR #205 two WebFetch summaries of docs.github.com said Fusion Max was not included in Copilot Pro+. The github/docs source shows Pro+ includes it. The wrong plan names shipped in the unavailable-tier reason and the docs until a reviewer (Muse, round 2) checked the source; a Pro user would have been told to buy a larger plan than needed.
 
 **How to apply:** Any user-facing sentence naming plans, tiers, prices or regions gets a source-level check, and a test that asserts the exact sentence.
+
+---
+
+## Never load a local model on the maintainer's Mac
+
+**Pattern:** Do not send `/api/chat` or `/api/generate` requests to a local Ollama or LM Studio, do not run `ollama run`, and do not run live app checks against a local model. Mock `/api/show` and `/api/tags`.
+
+**Why:** On 2026-11-19 the prompt size estimator was calibrated by sending synthetic prompts to OpenAdmin 8B and gpt-oss 20B through the local Ollama. Loading models makes the machine unusable, and the maintainer forbade it.
+
+**How to apply:** Use recorded counts or mocked responses for tokenizer and model metadata work. Live checks use a hosted provider (Claude Code or Codex CLI). If a model gets loaded anyway, run `ollama stop <model>` right away. Pass this rule to every delegated child and reviewer.

@@ -13,7 +13,7 @@ Builds a conservative stale-device offboarding plan from Intune sync, Entra sign
 | Field | Value |
 | --- | --- |
 | Agent ID | `offboarding-agent` |
-| Version | `1.1.0` |
+| Version | `1.2.0` |
 | Mode | `write` |
 | Tier | `agent` |
 | Category | `devices` |
@@ -21,7 +21,7 @@ Builds a conservative stale-device offboarding plan from Intune sync, Entra sign
 | Preferred model | `llama3.1:8b` |
 | Minimum app version | `0.1.0` |
 | Author | OpenAdminOS · verified |
-| Last changed | 2026-11-04 · `46d71704` |
+| Last changed | 2026-11-19 · `230e66e4` |
 
 ## Execution
 

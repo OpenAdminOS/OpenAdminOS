@@ -30,9 +30,13 @@ describe("registry manifest integrity and update lifecycle", () => {
       join(repoRoot, "agents", "find-inactive-devices", "manifest.yaml"),
       "utf8",
     );
+    let nextVersion = "";
     const updatedManifest = originalManifest.replace(
-      "version: 1.1.0",
-      "version: 1.2.0",
+      /^  version: (\d+)\.(\d+)\.(\d+)$/m,
+      (_line, major: string, minor: string) => {
+        nextVersion = `${major}.${Number(minor) + 1}.0`;
+        return `  version: ${nextVersion}`;
+      },
     );
     assert.notEqual(updatedManifest, originalManifest);
 
@@ -83,12 +87,12 @@ describe("registry manifest integrity and update lifecycle", () => {
       currentManifest = updatedManifest;
       currentEntry = {
         ...currentEntry,
-        version: "1.2.0",
+        version: nextVersion,
         manifestSha256: digest(updatedManifest),
       };
       await store.initRegistry();
       const review = await store.getAgentUpdateReview("find-inactive-devices");
-      assert.equal(review.toVersion, "1.2.0");
+      assert.equal(review.toVersion, nextVersion);
       await store.updateAgent("find-inactive-devices");
       assert.equal(await readFile(manifestPath, "utf8"), updatedManifest);
 
@@ -102,6 +106,40 @@ describe("registry manifest integrity and update lifecycle", () => {
   });
 
   }
+
+  it("keeps an installed agent runnable when its registry update needs a newer app", async () => {
+    const repoRoot = await findRepoRoot();
+    const source = "https://registry.example/agents";
+    const index = JSON.parse(await readFile(join(repoRoot, "agents", "index.json"), "utf8")) as { agents: Array<Record<string, unknown>> };
+    const entry = index.agents.find((item) => item.slug === "find-inactive-devices");
+    assert.ok(entry);
+    const manifest = await readFile(join(repoRoot, "agents", "find-inactive-devices", "manifest.yaml"), "utf8");
+    let current: Record<string, unknown> = { ...entry, manifestUrl: `${source}/find-inactive-devices/manifest.yaml`, manifestSha256: digest(manifest) };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+      if (url === `${source}/index.json`) return new Response(JSON.stringify({ schemaVersion: 1, revision: 1, agents: [current] }), { status: 200 });
+      if (url === current.manifestUrl) return new Response(manifest, { status: 200 });
+      return new Response("not found", { status: 404 });
+    };
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agent-gate-"));
+    const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, tokenStore, statsApiUrl: "", appVersion: "0.7.3-nightly.20261119222839" });
+    try {
+      await store.setRegistrySource(source, { confirmExternalSource: true });
+      await store.installAgent("find-inactive-devices");
+      // The registry now offers a version that needs a later nightly.
+      current = { ...current, version: "9.0.0", minAppVersion: "0.7.3-nightly.20261120040000" };
+      await store.initRegistry();
+      const installed = (await store.getAppState()).installedAgents.find((agent) => agent.slug === "find-inactive-devices");
+      assert.equal(installed?.compatibility?.supported, true, "the installed copy still runs");
+      assert.equal(installed?.updateAvailable?.version, "9.0.0");
+      assert.equal(installed?.updateAvailable?.supported, false, "the update needs a newer app");
+    } finally {
+      store.close();
+      globalThis.fetch = originalFetch;
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 
   it("rejects a manifest whose bytes do not match the registry digest", async () => {
     const repoRoot = await findRepoRoot();
