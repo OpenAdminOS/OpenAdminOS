@@ -2472,8 +2472,9 @@ taken by the personal agent mockup in PR #207).
 Signals. Only a provider on this device gets the offer.
 - The prompt does not fit the context window. Today this is the provider's own
   error: the Ollama adapter's "context size too small" message with the tokens
-  needed and the limit (PR #211), including the form where Ollama could not load
-the model with the larger context for lack of memory, Ollama's HTTP 400 ("request (N tokens) exceeds
+  needed and the limit (PR #211 and later), including the form where Ollama could
+not load the model with the larger context for lack of memory, the LM Studio
+adapter's "LM Studio context length too small" message (PR #219), Ollama's HTTP 400 ("request (N tokens) exceeds
   the available context size (L tokens)"), llama.cpp's
   `exceed_context_size_error` (LM Studio, Lemonade) and Apple Foundation's
   context error. A typed runtime failure, where `kind`, `code` or `reason`

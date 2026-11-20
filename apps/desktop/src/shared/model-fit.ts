@@ -79,6 +79,27 @@ function contextIssueFromText(text: string): Omit<ModelFitIssue, "providerId" | 
       ...(limitTokens ? { limitTokens, limitIsMemory: true as const } : {}),
     };
   }
+  // The Ollama adapter when a request did not fit the size Ollama had loaded.
+  const loadedFor = /context size too small: This request needs ([\d,]+) tokens of context and did not fit in the ([\d,]+) Ollama loaded for /i.exec(text);
+  if (loadedFor) {
+    const neededTokens = count(loadedFor[1]);
+    const limitTokens = count(loadedFor[2]);
+    return { reason: "context-too-small", ...(neededTokens ? { neededTokens } : {}), ...(limitTokens ? { limitTokens } : {}) };
+  }
+  // The LM Studio adapter (packages/runtime/src/llm-lm-studio.ts).
+  const lmStudio = /LM Studio context length too small: This request needs ([\d,]+) tokens of context, but .+? is loaded in LM Studio with a context length of ([\d,]+)\./i.exec(text);
+  if (lmStudio) {
+    const neededTokens = count(lmStudio[1]);
+    const limitTokens = count(lmStudio[2]);
+    return { reason: "context-too-small", ...(neededTokens ? { neededTokens } : {}), ...(limitTokens ? { limitTokens } : {}) };
+  }
+  const lmStudioLoaded = /LM Studio context length too small: This request does not fit in the ([\d,]+) tokens of context/i.exec(text);
+  if (lmStudioLoaded) {
+    const limitTokens = count(lmStudioLoaded[1]);
+    return { reason: "context-too-small", ...(limitTokens ? { limitTokens } : {}) };
+  }
+  // Any other form of either adapter's context message, without numbers.
+  if (/^(?:Error: )?(?:Ollama context size too small|LM Studio context length too small):/i.test(text.trim())) return { reason: "context-too-small" };
   // Ollama's HTTP 400 for a prompt larger than the loaded context.
   const ollama = /request \((\d+) tokens\) exceeds the available context size \((\d+) tokens\)/i.exec(text);
   if (ollama) {

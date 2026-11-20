@@ -92,6 +92,19 @@ describe("Model fit: classifying a failure", () => {
     assert.equal(loopFailureIssue({ failureReason: "context-too-small" }, claude, "claude-sonnet-5-5"), undefined);
   });
 
+  it("reads the LM Studio adapter's messages and the newer Ollama forms, as the runtime words them", () => {
+    const local = { providerId: "lm-studio" as const, model: "qwen3-8b", isLocal: true };
+    const needs = classifyModelFitFailure("LM Studio context length too small: This request needs 15,857 tokens of context, but qwen3-8b is loaded in LM Studio with a context length of 4,096. Reload the model in LM Studio with a context length to at least 17,408.", local);
+    assert.deepEqual([needs?.neededTokens, needs?.limitTokens], [15857, 4096]);
+    const loadedOnly = classifyModelFitFailure("LM Studio context length too small: This request does not fit in the 8,192 tokens of context qwen3-8b is loaded with in LM Studio.", local);
+    assert.deepEqual([loadedOnly?.reason, loadedOnly?.neededTokens, loadedOnly?.limitTokens], ["context-too-small", undefined, 8192]);
+    assert.equal(classifyModelFitFailure("LM Studio context length too small: This request does not fit in the context length qwen3-8b is loaded with in LM Studio.", local)?.reason, "context-too-small");
+    const ollamaLoaded = classifyModelFitFailure("Ollama context size too small: This request needs 50,000 tokens of context and did not fit in the 45,056 Ollama loaded for kept-outgrown.", { providerId: "ollama", isLocal: true });
+    assert.deepEqual([ollamaLoaded?.neededTokens, ollamaLoaded?.limitTokens], [50000, 45056]);
+    const kept = classifyModelFitFailure(new Error("Ollama context size too small: This request did not fit in the 45,056 token context kept from an earlier request. Ollama said: request exceeds"), { providerId: "ollama", isLocal: true });
+    assert.equal(kept?.reason, "context-too-small");
+  });
+
   it("reads a typed failure from the runtime by its shape, and llama.cpp's error", () => {
     const typed = Object.assign(new Error("too big"), { kind: "context-too-small", needed: 9000, limit: 4096 });
     assert.equal(classifyModelFitFailure(typed, { providerId: "lm-studio", isLocal: true })?.neededTokens, 9000);
