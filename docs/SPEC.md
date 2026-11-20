@@ -2506,8 +2506,8 @@ Ollama, LM Studio or Lemonade server outside this device is not offered and
 the host refuses it, because its location is not stated and its adapter
 follows redirects; up to two installed local models with a larger parameter count in
 their name, marked as on this device and not checked against the request
-size; Split the question (the question goes back to the composer with a
-hint); and Keep on the local model, which leaves "Kept on <model>. Nothing was
+size; Split the question (a hint, and the question back in an empty
+composer); and Keep on the local model, which leaves "Kept on <model>. Nothing was
 sent. Narrow the question ... then send again." Providers the managed policy
 does not allow are not in the provider list, so they are never offered; when
 the policy allows no hosted provider the notice says so, and with none set up

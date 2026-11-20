@@ -4235,10 +4235,12 @@ function HostedChatConsentPanel({
   // Focus starts on the primary action, so Enter sends and Escape cancels.
   // A model fit accept starts on the panel itself: the admin chose this
   // provider a moment ago, and the send needs its own click.
+  // Keyed on the offer, so a re-render while the step is open does not pull focus back.
+  const modelFitOfferId = modelFit?.issue.offerId;
   useEffect(() => {
-    if (modelFit) panelRef.current?.focus();
+    if (modelFitOfferId !== undefined) panelRef.current?.focus();
     else panelRef.current?.querySelector<HTMLButtonElement>("[data-hosted-send]")?.focus();
-  }, [modelFit]);
+  }, [modelFitOfferId]);
   const noTenant = !prompt.tenantId;
   const company = PROVIDER_COMPANIES[prompt.providerId] ?? prompt.providerName;
   const tool = PROVIDER_TOOL_NAMES[prompt.providerId] ?? prompt.providerName;

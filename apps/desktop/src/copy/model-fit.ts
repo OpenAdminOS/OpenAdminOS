@@ -77,7 +77,7 @@ export const MODEL_FIT_COPY = {
   },
   split: "Split the question",
   splitNotice:
-    "Your question is back in the composer. Ask about one part at a time, for example one platform or one group.",
+    "Ask about one part at a time, for example one platform or one group, so each part fits the model on this device.",
   keep: (model: string) => `Keep on ${model}`,
   keepAnswer: "Keep this answer",
   declined: (model: string) =>
