@@ -321,6 +321,14 @@ the installed app's scheduler, login item or caches.
   the birth time and an entry with neither inode nor birth time counts as
   replaced, a cache recheck test, a failing commit callback is only logged,
   the SPEC cross reference.
+- Review round 29: Claude and Muse no blocking. Sol two blocking: on Linux
+  the mount table is read again before every removal in the data folder; on
+  Windows the account is looked up before the task, the task definition is
+  read again right before the delete and the delete runs only when it is
+  unchanged (the window between that read and the delete is accepted, the
+  per-user task name follow-up closes it). Muse lows: the folder guard runs
+  inside the scheduler step before each removal it makes; an unknown cache
+  identity has its own reason.
 - Process lesson: twice I edited the tree while a reviewer was reading it;
   parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the
