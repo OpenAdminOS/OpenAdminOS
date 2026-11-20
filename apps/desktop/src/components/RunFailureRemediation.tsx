@@ -10,19 +10,39 @@ interface Suggestion {
   body: string;
 }
 
+/**
+ * A failed lookup of the model's context limit has its own playbook only.
+ * The runtime names the lookup URL followed by a final ".", by ": " or by " answered ", so an
+ * endpoint prefix such as `/api/showroom` or `/api/show.v1` in front of `/api/chat` is not read as the lookup.
+ */
+const isContextLimitLookup = (e: string) => /ollama/i.test(e) && /context limit|\/api\/show(?=\.$|:\s| answered )/i.test(e);
+
 const SUGGESTIONS: Suggestion[] = [
   {
-    match: (e) => /ollama/i.test(e) && /(not reachable|connect|refused|econnrefused)/i.test(e),
+    match: (e) => /ollama/i.test(e) && /(not reachable|connect|refused|econnrefused)/i.test(e) && !isContextLimitLookup(e),
     title: "Ollama isn't running",
     body: "Start it from a terminal with `ollama serve`, confirm it's reachable at http://127.0.0.1:11434, then re-run.",
   },
   {
-    match: (e) => /ollama/i.test(e) && /(not pulled|pull|model)/i.test(e),
+    match: (e) => /ollama/i.test(e) && /context size/i.test(e),
+    title: "Ollama context too small",
+    body: "The request did not fit in the context Ollama loaded for this model. OpenAdminOS raises that context up to the model's limit when the model allows it, and the error names the limit that stopped it. Narrow the question or the agent's scope, close other apps to free memory, or pick a model with a larger context window in Settings → LLM Providers, then re-run.",
+  },
+  {
+    match: isContextLimitLookup,
+    title: "Ollama did not report the model's context limit",
+    body: "The request did not fit in the context Ollama loaded, and Ollama did not answer when OpenAdminOS asked for the model's limit before raising it. Check that Ollama is responsive with `ollama ps`, restart it if it is stuck, then re-run.",
+  },
+  {
+    match: (e) =>
+      !isContextLimitLookup(e) &&
+      (/Ollama model "[^"]+" is not pulled\. Run `ollama pull [^`]+`\./.test(e) ||
+        /No Ollama model available\. Pull a model with `ollama pull <model>`\./.test(e)),
     title: "Model not pulled",
     body: "Run `ollama pull <model>` for the model you selected in Settings → LLM Providers, then try again.",
   },
   {
-    match: (e) => /ollama/i.test(e) && /timed out|timeout|aborted/i.test(e),
+    match: (e) => /ollama/i.test(e) && /timed out|timeout|aborted/i.test(e) && !isContextLimitLookup(e),
     title: "Ollama generation timed out",
     body: "The local model did not finish in time. OpenAdminOS now waits up to 3 minutes by default; restart the app to pick up that change. For very large local models, set `OPENAGENTS_OLLAMA_TIMEOUT_MS` higher or pick a smaller model.",
   },
@@ -37,12 +57,12 @@ const SUGGESTIONS: Suggestion[] = [
     body: "The provider was still producing output when it reached the limit for one request. Narrow the agent's scope or pick a faster model, then re-run. To allow longer requests, set `OPENADMINOS_CLAUDE_CODE_TIMEOUT_MS` or `OPENADMINOS_CODEX_TIMEOUT_MS` higher, in milliseconds, and restart the app.",
   },
   {
-    match: (e) => /timed out|timeout|aborted/i.test(e),
+    match: (e) => /timed out|timeout|aborted/i.test(e) && !isContextLimitLookup(e),
     title: "Request timed out",
     body: "The LLM or Microsoft Graph took longer than expected. Try a smaller model, narrow the agent's scope, or check your network.",
   },
   {
-    match: (e) => /401|unauthor|expired token|interaction_required/i.test(e),
+    match: (e) => /401|unauthor|expired token|interaction_required/i.test(e) && !isContextLimitLookup(e),
     title: "Tenant token expired",
     body: "Disconnect and reconnect the tenant from Connections. MSAL caches a refresh token but Graph can revoke it independently.",
   },
@@ -52,7 +72,7 @@ const SUGGESTIONS: Suggestion[] = [
     body: "Choose an organization in the organization switcher, or connect a Microsoft 365 tenant in Connections, before running agents.",
   },
   {
-    match: (e) => /yaml|manifest|schema|invalid/i.test(e),
+    match: (e) => /yaml|manifest|schema|invalid/i.test(e) && !isContextLimitLookup(e),
     title: "Manifest validation failed",
     body: "The agent's manifest didn't validate against the schema. If you authored it, re-open the New Agent flow and re-draft; if it's a registry agent, check for a newer version.",
   },
@@ -61,8 +81,13 @@ const SUGGESTIONS: Suggestion[] = [
 export function RunFailureRemediation({ run }: { run: RunRecord }) {
   const openReportIssue = useReportIssue();
   if (run.status !== "failed" || !run.error) return null;
-  const matched = SUGGESTIONS.filter((suggestion) => suggestion.match(run.error!));
-  const accessDenial = run.accessDenial ?? graphAccessDenialFromError(run.error);
+  // A failed lookup of the Ollama model's context limit has one cause and
+  // one recovery; its HTTP status (for example 403) is not a Graph denial.
+  const lookup = isContextLimitLookup(run.error);
+  const matched = lookup
+    ? SUGGESTIONS.filter((suggestion) => suggestion.match === isContextLimitLookup)
+    : SUGGESTIONS.filter((suggestion) => suggestion.match(run.error!));
+  const accessDenial = lookup ? undefined : run.accessDenial ?? graphAccessDenialFromError(run.error);
   if (accessDenial) {
     matched.unshift({ match: () => true, title: accessDenial.title, body: `${accessDenial.message} ${accessDenial.recovery}` });
   }

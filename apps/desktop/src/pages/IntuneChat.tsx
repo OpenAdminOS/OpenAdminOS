@@ -330,6 +330,8 @@ function IntuneChatContent() {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const [choiceDoneProviderId, setChoiceDoneProviderId] = useState<ProviderId | null>(null);
+  const [modelReadyAnnouncement, setModelReadyAnnouncement] = useState<{ providerId: ProviderId; text: string } | null>(null);
   const sendInFlightRef = useRef(false);
   const activeStreamIdRef = useRef<string | null>(null);
   // A run keeps going after the admin leaves Chat. Its end must not bring them back.
@@ -1916,6 +1918,26 @@ function IntuneChatContent() {
     displayedMessages.length === 0 &&
     !shownProgress;
 
+  // A model that stops being ready, or a switch to another provider, clears the line, so it is never announced again by a later refresh.
+  useEffect(() => {
+    if (!modelReady || provider?.id !== modelReadyAnnouncement?.providerId) {
+      setModelReadyAnnouncement((current) => (current ? null : current));
+    }
+  }, [modelReady, provider?.id, modelReadyAnnouncement?.providerId]);
+
+  // The model choice can unmount as soon as the provider is ready, after a Retry, Scan again, Start or Use.
+  // The Chat home keeps the live region and composer available across that change.
+  useEffect(() => {
+    if (!choiceDoneProviderId) return;
+    setChoiceDoneProviderId(null);
+    if (homeOpen && !activeTenant && modelReady && provider?.id === choiceDoneProviderId) {
+      setModelReadyAnnouncement({ providerId: provider.id, text: FIRST_RUN_CHAT_COPY.modelReadyAfterChoice(provider.name) });
+      // Only when focus went down with the closed choice: an admin who moved on keeps their place.
+      const active = document.activeElement;
+      if (!active || active === document.body) composerRef.current?.focus();
+    }
+  }, [choiceDoneProviderId, homeOpen, activeTenant, modelReady, provider]);
+
   const calmTopBar = shellChrome ? (
     <>
       <TopBarTitle>
@@ -2025,7 +2047,12 @@ function IntuneChatContent() {
             )}
             {!activeTenant && !modelReady ? (
               <div className="mb-6">
-                <ModelChoice providers={state.providers} activeProviderId={state.activeProviderId} onSelectProvider={setActiveProvider} />
+                <ModelChoice
+                  providers={state.providers}
+                  activeProviderId={state.activeProviderId}
+                  onSelectProvider={setActiveProvider}
+                  onChoiceDone={setChoiceDoneProviderId}
+                />
               </div>
             ) : null}
             {state.providerAutoSelectNotice ? (
@@ -2045,6 +2072,10 @@ function IntuneChatContent() {
               onDismissError={() => setError(null)}
               onDismissNotice={() => setNotice(null)}
             />
+            <p role="status" aria-live="polite" className="sr-only">
+              {/* Only for the provider it was about: a switch to another ready provider drops it. */}
+              {modelReady && modelReadyAnnouncement && modelReadyAnnouncement.providerId === provider?.id ? modelReadyAnnouncement.text : ""}
+            </p>
             {renderComposer("home")}
             {needsYouCount > 0 ? (
               <section className="mt-[30px]" aria-labelledby="needs-you-heading">

@@ -980,6 +980,10 @@ describe("an Ollama whose capability read redirects, and Start against a redirec
       const summary = await checkOllama(providerCatalog.find((provider) => provider.id === "ollama")!, { localOnly: true });
       assert.deepEqual(summary.models, ["good-model:1"]);
       assert.match(summary.detail ?? "", /answered with a redirect to another address/);
+      const probe = scanProbeFromProvider(summary);
+      assert.equal(probe.ready, true);
+      assert.match(summary.capabilityWarning ?? "", /answered with a redirect to another address/);
+      assert.equal(probe.warning, summary.capabilityWarning);
       assert.equal(pair.hits(), 0);
     } finally {
       for (const [key, value] of [["OPENAGENTS_OLLAMA_URL", original.ollama], ["OLLAMA_HOST", original.host]] as const) {

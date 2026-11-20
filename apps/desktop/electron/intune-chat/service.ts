@@ -3497,15 +3497,15 @@ export class IntuneChatService {
    */
   private async retrieveDocumentationSafely(
     query: string,
+    onFailure?: (reason: string) => void,
   ): Promise<Array<{ file: string; title?: string; text: string; score: number }>> {
     if (!this.host.retrieveDocumentation) return [];
     try {
       return await this.host.retrieveDocumentation(query);
     } catch (error) {
-      console.info(
-        "[intune-chat] documentation retrieval unavailable:",
-        error instanceof Error ? error.message : error,
-      );
+      const reason = error instanceof Error ? error.message : String(error);
+      console.info("[intune-chat] documentation retrieval unavailable:", reason);
+      onFailure?.(reason);
       return [];
     }
   }
@@ -3568,7 +3568,17 @@ export class IntuneChatService {
     const title = `Searched the local docs index${because}`;
     const step = () => ({ kind: "docs-index" as const, title, origin: "device" as const, originLabel: ON_DEVICE });
     const id = version ? steps.start({ ...step(), title: `Searching the local docs index${because}` }) : undefined;
-    const passages: DocsIndexPassage[] = (await this.retrieveDocumentationSafely(query)).map((passage) => ({
+    let failure: string | undefined;
+    const retrieved = await this.retrieveDocumentationSafely(query, (reason) => { failure = reason; });
+    if (failure !== undefined) {
+      steps.finish(id ?? steps.start(step()), {
+        status: "failed",
+        title: `Could not search the local docs index${because}`,
+        detail: `${failure} Check the local documentation index in Settings, Privacy, then ask again.`,
+      });
+      return [];
+    }
+    const passages: DocsIndexPassage[] = retrieved.map((passage) => ({
       file: passage.file,
       ...(passage.title ? { title: passage.title } : {}),
       text: passage.text,

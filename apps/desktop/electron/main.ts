@@ -5978,11 +5978,13 @@ function registerIpcHandlers() {
   );
   ipcMain.handle(
     "openadminos:set-retrieval-auto-install",
-    handleTrusted((_event, enabled: unknown) => {
+    handleTrusted(async (_event, enabled: unknown) => {
       if (typeof enabled !== "boolean") {
         throw new Error("Automatic index install must be a boolean.");
       }
-      return store.setRetrievalAutoInstallEnabled(enabled);
+      // Settings replaces its status with the reply: keep the embedding model's state in it.
+      await store.setRetrievalAutoInstallEnabled(enabled);
+      return store.getRetrievalStatusWithEmbedding();
     }),
   );
   ipcMain.handle(
@@ -5993,12 +5995,14 @@ function registerIpcHandlers() {
     "openadminos:install-retrieval-index",
     handleTrusted(async (_event, input: unknown) => {
       const record = isPlainRecord(input) ? input : {};
+      // Settings replaces its status with the reply: every reply carries the embedding model's state.
       if (record.source === "download") {
-        return store.installRetrievalIndex(
+        await store.installRetrievalIndex(
           typeof record.baseUrl === "string" && record.baseUrl.length > 0
             ? { baseUrl: requireBoundedString(record.baseUrl, "baseUrl", 2048) }
             : {},
         );
+        return store.getRetrievalStatusWithEmbedding();
       }
       const parent = mainWindow ?? undefined;
       const options = {
@@ -6009,8 +6013,9 @@ function registerIpcHandlers() {
         ? await dialog.showOpenDialog(parent, options)
         : await dialog.showOpenDialog(options);
       const sourceDir = picked.filePaths[0];
-      if (picked.canceled || !sourceDir) return store.getRetrievalStatus();
-      return store.installRetrievalIndex({ sourceDir });
+      if (picked.canceled || !sourceDir) return store.getRetrievalStatusWithEmbedding();
+      await store.installRetrievalIndex({ sourceDir });
+      return store.getRetrievalStatusWithEmbedding();
     }),
   );
   ipcMain.handle(
