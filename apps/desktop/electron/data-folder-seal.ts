@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
-import { resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import { Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 
 /**
@@ -46,24 +47,28 @@ export function sealDataFolder(root?: string, options: { allowNamePrefixes?: str
     installGuard();
     // A refused write that nobody awaited (a background save) is logged,
     // never raised as an error of the main process in the moment before
-    // the restart.
-    if (!rejectionLogInstalled) {
-      rejectionLogInstalled = true;
-      process.on("unhandledRejection", (reason) => {
+    // the restart. Removed again when the seal is lifted.
+    if (!rejectionLog) {
+      rejectionLog = (reason) => {
         if (reason instanceof DataFolderSealedError) console.warn("[local-reset] a write was refused after the reset committed");
         else console.error("[local-reset] unhandled rejection while resetting", reason);
-      });
+      };
+      process.on("unhandledRejection", rejectionLog);
     }
   }
 }
 
-let rejectionLogInstalled = false;
+let rejectionLog: ((reason: unknown) => void) | undefined;
 
 /** A reset refused after all: the data folder is written again. */
 export function unsealDataFolder(): void {
   sealed = false;
   sealedRoots = [];
   allowedNamePrefixes = [];
+  if (rejectionLog) {
+    process.off("unhandledRejection", rejectionLog);
+    rejectionLog = undefined;
+  }
 }
 
 export function dataFolderSealed(): boolean {
@@ -92,7 +97,29 @@ export function isSealedPath(target: unknown): boolean {
   else if (target instanceof URL) path = fileURLToPath(target);
   else if (Buffer.isBuffer(target)) path = target.toString("utf8");
   else return false; // A file descriptor: a handle opened earlier.
-  const full = normalize(resolve(path));
+  const lexical = resolve(path);
+  // Also the path as the system resolves it: a link elsewhere that points
+  // into the data folder reaches the same files.
+  return [lexical, realLocation(lexical)].some((candidate) => insideSealedRoot(normalize(candidate)));
+}
+
+/** The real location of a path whose last parts may not exist yet. */
+function realLocation(path: string): string {
+  const rest: string[] = [];
+  let current = path;
+  for (;;) {
+    try {
+      return join(fs.realpathSync(current), ...rest.reverse());
+    } catch {
+      const parent = dirname(current);
+      if (parent === current) return path;
+      rest.push(basename(current));
+      current = parent;
+    }
+  }
+}
+
+function insideSealedRoot(full: string): boolean {
   const separator = process.platform === "win32" ? "\\" : "/";
   return sealedRoots.some((root) => {
     if (full === root) return true;
@@ -157,7 +184,17 @@ function installGuard(): void {
     const flags = typeof options === "object" && options !== null ? (options as { flags?: unknown }).flags : undefined;
     return isSealedPath(args[0]) && (flags === undefined || opensForWriting(flags));
   };
-  wrapSync(callbacks, "createWriteStream", streamRefused);
+  // A refused stream fails as a stream does, with an error event, instead of
+  // throwing where it is created.
+  const createWriteStream = callbacks.createWriteStream;
+  if (typeof createWriteStream === "function") {
+    callbacks.createWriteStream = function sealedStream(this: unknown, ...args: unknown[]) {
+      if (!streamRefused(args)) return createWriteStream.apply(this, args);
+      const stream = new Writable({ write: (_chunk, _encoding, done) => done(new DataFolderSealedError()) });
+      process.nextTick(() => stream.destroy(new DataFolderSealedError()));
+      return stream;
+    };
+  }
   syncBuiltinESMExports();
 }
 
