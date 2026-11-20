@@ -1418,7 +1418,7 @@ describe("Ollama context for an unpinned model", () => {
           assert.ok(error instanceof ContextTooSmallError);
           assert.equal(error.failure.limitTokens, 16384);
           assert.equal(error.failure.sentToProvider, true);
-          assert.match(error.message, /refused it before answering/);
+          assert.match(error.message, /refused it or stopped before finishing the answer/);
           assert.doesNotMatch(error.message, /Nothing was sent/);
           return true;
         },
@@ -1657,7 +1657,7 @@ describe("Ollama context for an unpinned model", () => {
           ollama.handlers.push(() => new Response(JSON.stringify({ error: "request (9000 tokens) exceeds the available context size (8192 tokens), try increasing it" }), { status: 400 }));
           ollama.handlers.push(() => new Response(tooLong, { status: 400 }));
         } else {
-          ollama.handlers.push(() => new Response(`${tooLong}\n`, { status: 200 }));
+          ollama.handlers.push(() => new Response(`${JSON.stringify({ model: "m", message: { content: "Partial" }, done: false })}\n${tooLong}\n`, { status: 200 }));
         }
         globalThis.fetch = ollama.fetchImpl;
         await assert.rejects(
