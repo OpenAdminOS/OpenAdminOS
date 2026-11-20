@@ -102,6 +102,8 @@ export const MODEL_FIT_COPY = {
   answeredBy: "Answered by",
   /** A switched request that failed or was stopped: the prompt still left this device. */
   sentTo: "Sent to",
+  /** The accepted request while it runs. */
+  sendingTo: "Sending to",
   answeredRest: (model: string) => `for this request only. Chat is back on ${model}.`,
   answeredLocal: (model: string, providerName: string) => `${model} on this device (${providerName})`,
 

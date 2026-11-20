@@ -947,7 +947,19 @@ function IntuneChatContent() {
       status: "streaming",
       createdAt: pendingCreatedAt,
       ...(modelOverride
-        ? { providerId: modelOverride.providerId, ...(modelOverride.model ? { model: modelOverride.model } : {}) }
+        ? {
+            providerId: modelOverride.providerId,
+            ...(modelOverride.model ? { model: modelOverride.model } : {}),
+            // While it runs, the turn says where the accepted request is going; the host's answer replaces this.
+            ...(modelFitOfferRef.current
+              ? { switchedFrom: {
+                  providerId: modelFitOfferRef.current.activeProviderId,
+                  ...(modelFitOfferRef.current.activeModel ? { model: modelFitOfferRef.current.activeModel } : {}),
+                  reason: modelFitOfferRef.current.issue.reason,
+                  toOnDevice: state.providers.find((entry) => entry.id === modelOverride.providerId)?.isLocal === true,
+                } }
+              : {}),
+          }
         : { providerId: provider?.id ?? state.activeProviderId, ...(activeModel ? { model: activeModel } : {}) }),
     };
 
@@ -4617,7 +4629,10 @@ function ChatMessageBubble({
   return (
     <article className="group mb-[34px] w-full" title={`Answered ${timestamp}`}>
       {progress ? (
-        <PendingAnswer tenant={tenant} steps={message.steps} {...(stopping ? { stopping: progress.message } : {})} />
+        <>
+          {message.switchedFrom && message.providerId ? <SwitchedProviderLine message={message} /> : null}
+          <PendingAnswer tenant={tenant} steps={message.steps} {...(stopping ? { stopping: progress.message } : {})} />
+        </>
       ) : (
         <>
           <AnswerScopeDisclosure tenant={tenant} multiTenant={multiTenant} message={message} liveModelFit={liveModelFit} />
@@ -4679,7 +4694,6 @@ function AnswerScopeDisclosure({
   const notice = message.engineNotice;
   const sources = message.sources ?? [];
   const docsOnly = !multiTenant && tenantNotUsed(message);
-  const { state: appState } = useAppState();
   // Older answers stored tenant rows as sources without a tenant marker.
   const tenantUsed = usedTenantEvidence(message) || ((message.steps ?? []).length === 0 && sources.some((source) => source.rows > 0 && !source.error));
   // The stalest source bounds how current the answer can be. Showing
@@ -4692,7 +4706,7 @@ function AnswerScopeDisclosure({
   return (
     <>
     {message.switchedFrom && message.providerId && message.status !== "streaming" ? (
-      <SwitchedProviderLine message={message} providers={appState.providers} />
+      <SwitchedProviderLine message={message} />
     ) : null}
     {message.modelFit && message.status !== "streaming" && !liveModelFit ? (
       // The reason stays with the stored answer after a reload; the choices live only with the request that failed.
@@ -4732,7 +4746,8 @@ function AnswerScopeDisclosure({
  * Which provider answered a request the admin moved off the local model
  * (mockup 36, section C). A hosted one is named with its location label.
  */
-function SwitchedProviderLine({ message, providers }: { message: IntuneChatMessage; providers: readonly ProviderSummary[] }) {
+function SwitchedProviderLine({ message }: { message: IntuneChatMessage }) {
+  const { state: { providers } } = useAppState();
   const providerId = message.providerId!;
   const switchedFrom = message.switchedFrom!;
   const provider = providers.find((entry) => entry.id === providerId);
@@ -4746,7 +4761,7 @@ function SwitchedProviderLine({ message, providers }: { message: IntuneChatMessa
       data-switched-provider=""
       className={`mb-2.5 rounded-lg px-3 py-1.5 text-sm ring-1 ${local ? "bg-[var(--color-success-soft)] ring-[var(--color-success)]/25" : "bg-[var(--color-warning-soft)] ring-[var(--color-warning)]/25"}`}
     >
-      <span className="text-[var(--color-text)]">{message.status === "completed" ? MODEL_FIT_COPY.answeredBy : MODEL_FIT_COPY.sentTo}</span>{" "}
+      <span className="text-[var(--color-text)]">{message.status === "streaming" ? MODEL_FIT_COPY.sendingTo : message.status === "completed" ? MODEL_FIT_COPY.answeredBy : MODEL_FIT_COPY.sentTo}</span>{" "}
       <span className={local ? "text-[var(--color-success)]" : "text-[var(--color-warning)]"}>
         {local ? MODEL_FIT_COPY.answeredLocal(message.model ?? name, name) : providerDataLocation({ id: providerId, name })}
       </span>{" "}

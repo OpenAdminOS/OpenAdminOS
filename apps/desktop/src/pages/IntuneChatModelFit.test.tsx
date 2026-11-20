@@ -140,6 +140,25 @@ describe("IntuneChat model fit (mockup 36)", () => {
     expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce();
   });
 
+  it("says where the accepted request is going while it runs", async () => {
+    const bridge = fitBridge();
+    let release: () => void = () => undefined;
+    const stream = bridge.streamIntuneChatMessage;
+    // The accepted request stays in progress until released.
+    bridge.streamIntuneChatMessage = vi.fn<OpenAdminOSApi["streamIntuneChatMessage"]>(async (input, onEvent, options) => {
+      if (input.modelOverride) await new Promise<void>((resolve) => { release = resolve; });
+      return stream(input, onEvent, options);
+    });
+    const { user, notice } = await sendTooLarge(bridge);
+    await user.click(within(notice).getByRole("button", { name: "Run with Codex" }));
+    const accept = await screen.findByRole("dialog", { name: "Run this request with Codex?" });
+    await user.click(within(accept).getByRole("button", { name: "Send through Codex" }));
+    const line = (await screen.findByText("Sending to")).parentElement!;
+    expect(line).toHaveTextContent("Sending to Codex · location set by your account for this request only.");
+    release();
+    expect(await screen.findByText("Answered by")).toBeInTheDocument();
+  });
+
   it("asks for the accept even when hosted sends to Codex were remembered for this tenant", async () => {
     window.localStorage.setItem(`openadminos:intune-chat-hosted-consent:v1:${tenantId}:openai`, "true");
     const bridge = fitBridge();
