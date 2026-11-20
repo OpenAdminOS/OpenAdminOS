@@ -2,8 +2,9 @@ import { createHash } from "node:crypto";
 import {
   OPENADMINOS_CLIENT_ID,
   TENANT_DATA_INSTRUCTIONS,
+  assertPromptFits,
   defaultClientId,
-  estimateTokens,
+  resolveContextWindow,
   tenantAuthority,
   type ExpectedTenantAccount,
 } from "@openadminos/runtime";
@@ -34,6 +35,7 @@ import type {
   ProviderId,
   RegistryAgentSummary,
   RunGraphApi,
+  LlmOptions,
   RunLlmApi,
   RunRecord,
   SelfTrainingSuggestion,
@@ -1369,6 +1371,27 @@ export function buildIntuneChatSystemPrompt(isLocalProvider: boolean, publicRese
 export function withSelfTrainingOverlay(base: RunLlmApi, overlay: string): RunLlmApi {
   const composeSystem = (system: string | undefined) =>
     [system, overlay].filter((part): part is string => Boolean(part)).join("\n\n");
+  // The run checks the size before this overlay is appended, so check the
+  // composed request again: the typed reason then counts the overlay as
+  // prompt and keeps the model's real limit.
+  const windows = new Map<string, Promise<number | undefined>>();
+  const assertComposedFits = async (options: LlmOptions, system: string) => {
+    if (!base.contextWindow) return;
+    const model = options.model ?? base.defaultModel;
+    let window = windows.get(model ?? "");
+    if (!window) {
+      window = resolveContextWindow(base, model);
+      windows.set(model ?? "", window);
+    }
+    const contextWindow = await window;
+    assertPromptFits({
+      system,
+      prompt: options.prompt,
+      ...(options.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
+      ...(contextWindow !== undefined ? { contextWindow } : {}),
+      ...(model ? { model } : {}),
+    });
+  };
   return {
     get available() {
       return base.available;
@@ -1379,26 +1402,16 @@ export function withSelfTrainingOverlay(base: RunLlmApi, overlay: string): RunLl
     get streamsIncrementally() {
       return base.streamsIncrementally;
     },
-    // The overlay is appended after the run's size check, so it is taken
-    // off the window the check sees.
-    ...(base.contextWindow
-      ? {
-          contextWindow: async (model?: string) => {
-            const window = await base.contextWindow!(model);
-            return window === undefined ? undefined : Math.max(1, window - estimateTokens(`\n\n${overlay}`));
-          },
-        }
-      : {}),
-    complete: (options) =>
-      base.complete({
-        ...options,
-        system: composeSystem(options.system),
-      }),
+    ...(base.contextWindow ? { contextWindow: (model?: string) => base.contextWindow!(model) } : {}),
+    complete: async (options) => {
+      const system = composeSystem(options.system);
+      await assertComposedFits(options, system);
+      return base.complete({ ...options, system });
+    },
     async *stream(options) {
-      yield* base.stream({
-        ...options,
-        system: composeSystem(options.system),
-      });
+      const system = composeSystem(options.system);
+      await assertComposedFits(options, system);
+      yield* base.stream({ ...options, system });
     },
   };
 }

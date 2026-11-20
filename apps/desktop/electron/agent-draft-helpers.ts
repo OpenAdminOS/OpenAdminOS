@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { relative, resolve, sep } from "node:path";
 import {
+  appVersionSatisfies,
   compareSemver,
   listRegisteredConnectors,
   ManifestValidationError,
@@ -1295,7 +1296,7 @@ export function withAgentCompatibility<T extends { minAppVersion?: string; name?
   appVersion: string,
 ): T & { compatibility: NonNullable<AgentSummary["compatibility"]> } {
   const minAppVersion = agent.minAppVersion ?? "0.1.0";
-  const supported = compareSemver(appVersion, minAppVersion) >= 0;
+  const supported = appVersionSatisfies(appVersion, minAppVersion);
   return {
     ...agent,
     minAppVersion,
