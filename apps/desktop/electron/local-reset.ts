@@ -218,17 +218,20 @@ const DATA_FOLDER_LINK_REASON =
 export function localResetLinkCheck(userDataDir: string, fs: Pick<LocalResetFileSystem, "isLink" | "isShared" | "readdir"> = nodeFileSystem): {
   dataFolderIsLink: boolean;
   linkedTokenCaches: string[];
+  /** The folder could not be listed, so its token caches could not be checked. */
+  scanFailed: boolean;
 } {
-  if (fs.isLink(userDataDir)) return { dataFolderIsLink: true, linkedTokenCaches: [] };
-  let entries: string[] = [];
+  if (fs.isLink(userDataDir)) return { dataFolderIsLink: true, linkedTokenCaches: [], scanFailed: false };
+  let entries: string[];
   try {
     entries = fs.readdir(userDataDir);
   } catch {
-    entries = [];
+    return { dataFolderIsLink: false, linkedTokenCaches: [], scanFailed: true };
   }
   return {
     dataFolderIsLink: false,
     linkedTokenCaches: entries.filter((name) => /^tokens.*\.bin$/i.test(name) && fs.isShared(join(userDataDir, name))),
+    scanFailed: false,
   };
 }
 
@@ -258,9 +261,11 @@ export interface LocalResetFileSystem {
   /** The path itself is a symbolic link (not followed). */
   isLink(path: string): boolean;
   /**
-   * The path is a symbolic link, or a file with more than one hard link:
-   * writing it in place, or trusting its content, would reach a file that
-   * lives somewhere else too.
+   * Something is at the path but it is not a plain file of its own: a
+   * symbolic link, a file with more than one hard link, a folder or anything
+   * else, or its details cannot be read. Writing it in place, or trusting
+   * its content, could reach something that lives somewhere else too.
+   * A missing path is not shared.
    */
   isShared(path: string): boolean;
 }
@@ -290,9 +295,10 @@ const nodeFileSystem: LocalResetFileSystem = {
   isShared: (path) => {
     try {
       const stat = lstatSync(path);
-      return stat.isSymbolicLink() || (stat.isFile() && stat.nlink > 1) || (!stat.isFile() && !stat.isDirectory());
-    } catch {
-      return false;
+      return !(stat.isFile() && stat.nlink === 1);
+    } catch (cause) {
+      // Missing is not shared; details that cannot be read count as shared.
+      return (cause as NodeJS.ErrnoException).code !== "ENOENT";
     }
   },
   exists: existsSync,
@@ -550,6 +556,12 @@ function removeLeftovers(
 ): void {
   try {
     options.removeScheduler?.();
+    // Removed now: a warning from the request about it no longer holds.
+    if (options.removeScheduler) {
+      for (let index = warnings.length - 1; index >= 0; index -= 1) {
+        if (warnings[index]!.item === "Background scheduler") warnings.splice(index, 1);
+      }
+    }
   } catch (cause) {
     warnings.push({ item: "Background scheduler", reason: reasonOf(cause) });
   }
