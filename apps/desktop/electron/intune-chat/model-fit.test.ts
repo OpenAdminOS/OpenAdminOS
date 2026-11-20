@@ -374,7 +374,7 @@ describe("Model fit in Chat", () => {
       const bindings: Array<{ endpoint: string | undefined } | undefined> = [];
       const service = new IntuneChatService(chatHost(store, built, () => true, bindings));
       const failed = await service.streamIntuneChatMessage({ content: QUESTION }, () => undefined);
-      assert.ok(bindings.every((binding) => binding === undefined), "an ordinary send is not bound");
+      assert.ok(bindings.every((binding): boolean => binding === undefined), "an ordinary send is not bound");
       bindings.length = 0;
       const offerId = failed.assistantMessage.modelFit!.offerId!;
       await service.streamIntuneChatMessage({
@@ -384,6 +384,40 @@ describe("Model fit in Chat", () => {
         hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5", false, offerId),
       }, () => undefined);
       assert.ok(bindings.length > 0 && bindings.every((binding) => binding?.endpoint === "claude-code"), JSON.stringify(bindings));
+    });
+  });
+
+  it("keeps where a stopped request went", async () => {
+    await withStore(async (store) => {
+      const built: string[] = [];
+      const host = chatHost(store, built);
+      const controller = new AbortController();
+      // The hosted model starts answering, then the admin stops the response.
+      const stalling: RunLlmApi = {
+        available: true,
+        defaultModel: "claude-sonnet-5-5",
+        complete: (options) => new Promise((_resolve, reject) => {
+          controller.abort();
+          options.signal?.addEventListener("abort", () => reject(new Error("stopped")), { once: true });
+          if (options.signal?.aborted) reject(new Error("stopped"));
+        }),
+        // eslint-disable-next-line require-yield
+        async *stream(options) { controller.abort(); if (options.signal?.aborted) throw new Error("stopped"); },
+      };
+      const buildLlm = host.buildLlm.bind(host);
+      host.buildLlm = async (providerId, model, binding) => (providerId === "anthropic" ? (built.push(providerId), stalling) : buildLlm(providerId, model, binding));
+      const service = new IntuneChatService(host);
+      const failed = await service.streamIntuneChatMessage({ content: QUESTION }, () => undefined);
+      const offerId = failed.assistantMessage.modelFit!.offerId!;
+      const stopped = await service.streamIntuneChatMessage({
+        content: QUESTION,
+        conversationId: failed.conversation.id,
+        modelOverride: { offerId, providerId: "anthropic", model: "claude-sonnet-5-5" },
+        hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5", false, offerId),
+      }, () => undefined, { signal: controller.signal });
+      assert.equal(stopped.assistantMessage.status, "cancelled");
+      assert.equal(stopped.assistantMessage.providerId, "anthropic");
+      assert.deepEqual(stopped.assistantMessage.switchedFrom, { providerId: "ollama", model: LOCAL_MODEL, reason: "context-too-small", toOnDevice: false });
     });
   });
 
