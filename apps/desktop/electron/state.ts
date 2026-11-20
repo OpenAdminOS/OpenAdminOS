@@ -2342,10 +2342,6 @@ export class AppStateStore {
     this.auditLog.close();
   }
 
-  /**
-   * Reset OpenAdminOS waits while a confirmed change is being applied, so a
-   * restart never cuts an apply off halfway.
-   */
   /** Set once Reset OpenAdminOS has started: no confirmed change starts before the restart. */
   private localResetStarted = false;
   /** Confirmations accepted but not yet recorded as an applying run. */
@@ -2371,6 +2367,10 @@ export class AppStateStore {
     this.localResetStarted = false;
   }
 
+  /**
+   * Reset OpenAdminOS waits while a confirmed change is being applied, so a
+   * restart never cuts an apply off halfway.
+   */
   async localResetBlocker(): Promise<string | undefined> {
     const persisted = await this.read();
     const applying = persisted.runs.find((run) => run.status === "running" && run.confirmedAt);
@@ -2378,11 +2378,11 @@ export class AppStateStore {
       // A cancelled apply can still be settling a request it already sent,
       // and a disconnected organization's apply can outlive its record.
       return this.runService.hasActiveApply()
-        ? "A confirmed change is still finishing. Wait for it to finish, then reset. Nothing was removed."
+        ? "A confirmed change is still finishing. Wait for it to finish, or cancel it in Runs, then reset. Nothing was removed."
         : undefined;
     }
     const name = persisted.installedAgents.find((agent) => agent.slug === applying.agentSlug)?.name ?? "A write run";
-    return `${name} is applying a confirmed change. Wait for it to finish, then reset. Nothing was removed.`;
+    return `${name} is applying a confirmed change. Wait for it to finish, or cancel it in Runs, then reset. Nothing was removed.`;
   }
 
   /**

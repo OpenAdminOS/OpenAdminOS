@@ -394,10 +394,6 @@ export class RunService {
   }
 
   /**
-   * Drive a run under its tenant's lease. When the tenant starts closing,
-   * the lease signal cancels the run and Disconnect waits for the drive.
-   */
-  /**
    * Confirmed applies whose work has not settled, kept here rather than in
    * run history: a cancel marks the record cancelled while a sent request
    * still settles, and a disconnect removes the record before its work stops.
@@ -416,6 +412,10 @@ export class RunService {
     this.track(runId, tenantId, start, () => this.activeApplies.delete(runId));
   }
 
+  /**
+   * Drive a run under its tenant's lease. When the tenant starts closing,
+   * the lease signal cancels the run and Disconnect waits for the drive.
+   */
   private track(runId: string, tenantId: string | undefined, start: () => Promise<void>, onSettled?: () => void): void {
     const leased = tenantId && this.host.tenantLease
       ? this.host.tenantLease(tenantId, async (signal) => {
