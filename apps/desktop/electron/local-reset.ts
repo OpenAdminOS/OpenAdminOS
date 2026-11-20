@@ -1032,8 +1032,14 @@ function removeLeftovers(
         continue;
       }
     }
-    if (!sameEntry(before, entryIdentity(path))) {
-      warnings.push({ item: path, reason: "it was replaced while it was being checked, so it was left in place" });
+    const after = entryIdentity(path);
+    if (!sameEntry(before, after)) {
+      warnings.push({
+        item: path,
+        reason: before === "unknown" || after === "unknown"
+          ? "it cannot be told apart from another folder on this disk, so it was left in place"
+          : "it was replaced while it was being checked, so it was left in place",
+      });
       continue;
     }
     guard();
