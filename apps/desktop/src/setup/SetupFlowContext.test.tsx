@@ -199,6 +199,31 @@ describe("contextual tenant setup", () => {
     expect(recheckProvider).toHaveBeenCalledWith("openai");
   });
 
+  it("moves a one-run provider pick on only once its full check is done", async () => {
+    const user = userEvent.setup();
+    writePendingIntent(
+      createPendingIntent({
+        kind: "agent-run",
+        slug: "device-offboard",
+        providerId: "anthropic",
+        modelFit: { reason: "context-too-small", providerId: "ollama", model: "llama3.1" },
+        returnTo: "/runs/run-1",
+      }),
+    );
+    let finish: () => void = () => undefined;
+    const recheckProvider = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const bridge = makeMockBridge({ recheckProvider }, createMockAppState({ activeProviderId: "ollama" }));
+    renderWithAppState(<div>App content</div>, { route: "/chat", bridge });
+
+    await screen.findByRole("heading", { name: "Pick an LLM provider" });
+    await user.click(screen.getByRole("button", { name: /Codex/ }));
+    await waitFor(() => expect(recheckProvider).toHaveBeenCalledWith("openai"));
+    // Codex shows as connected from the cached result, but setup waits for its check.
+    expect(screen.getByRole("heading", { name: "Pick an LLM provider" })).toBeInTheDocument();
+    finish();
+    expect(await screen.findByRole("heading", { name: "Tenant connected" })).toBeInTheDocument();
+  });
+
   it("treats a configured Azure provider at available as ready, matching the host", async () => {
     const providers = mockProviders.map((provider) =>
       provider.id === "azure-openai"
