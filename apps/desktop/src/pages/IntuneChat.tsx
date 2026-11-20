@@ -341,6 +341,8 @@ function IntuneChatContent() {
   const [choiceDoneProviderId, setChoiceDoneProviderId] = useState<ProviderId | null>(null);
   const [modelReadyAnnouncement, setModelReadyAnnouncement] = useState<{ providerId: ProviderId; text: string } | null>(null);
   const sendInFlightRef = useRef(false);
+  // Model fit offers already shown again after a refused retry.
+  const restoredOfferIdsRef = useRef(new Set<string>());
   const activeStreamIdRef = useRef<string | null>(null);
   // A run keeps going after the admin leaves Chat. Its end must not bring them back.
   const mountedRef = useRef(true);
@@ -1193,7 +1195,12 @@ function IntuneChatContent() {
       // The host refused the retry before it started (and before it used the offer), so the choices
       // it tells the admin to make again are shown again. The withdrawal checks still drop them if
       // the conversation, organization or model changed.
-      if (offerBeforeRetry && !reachedTerminal && !startedSeen) setModelFitOffer(offerBeforeRetry);
+      // Each offer comes back once: if the host had used it before refusing, choosing it again is
+      // refused too, and the admin is not looped through the same refusal.
+      if (offerBeforeRetry && !reachedTerminal && !startedSeen && !restoredOfferIdsRef.current.has(offerBeforeRetry.issue.offerId)) {
+        restoredOfferIdsRef.current.add(offerBeforeRetry.issue.offerId);
+        setModelFitOffer(offerBeforeRetry);
+      }
       setFailedRequest({ content, conversationId: targetConversationId });
       if (!keepDraft) setInput(content);
       setChatProgress({
