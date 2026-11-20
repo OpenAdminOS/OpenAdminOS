@@ -1212,6 +1212,7 @@ test("retained replay resolves escape layers to original UTF-16 ranges and repor
   ];
   prior.register("fixture", { passwordCredentials: fixtures.map(([hint]) => ({ hint })) }, { graphPath: "/applications" });
 
+  prior.register("policy", { grantControls: { operator: "OR" } }, { graphPath: "/identity/conditionalAccess/policies" });
   function replay(body: string): string {
     ledger.registerHistoryReplay(body, [{ start: 0, end: body.length, ledger: prior }]);
     return withClassificationScope(ledger, () => fenceTenantData(body, "fixture-history"));
@@ -1235,6 +1236,13 @@ test("retained replay resolves escape layers to original UTF-16 ranges and repor
         range.start === start && range.end === start + token.length), JSON.stringify({ hint, layers, token, ranges: result.unexamined.ranges }));
     }
   }
+
+  const escapedOperator = String.raw`\u004fR`;
+  const escapedPolicy = replay(`Operator: ${escapedOperator}.`);
+  assert.ok(ledger.classifyRequest({ prompt: escapedPolicy }).unexamined.ranges.some(range =>
+    escapedPolicy.slice(range.start, range.end) === escapedOperator));
+  const malformed = JSON.stringify(String.raw`before \u00qz after`);
+  assert.equal(ledger.classifyRequest({ prompt: replay(malformed) }).coverageIncomplete, true);
 
   let overLimit = String.raw`qx\u0000z`;
   for (let i = 0; i < 3; i++) overLimit = JSON.stringify(overLimit).slice(1, -1);

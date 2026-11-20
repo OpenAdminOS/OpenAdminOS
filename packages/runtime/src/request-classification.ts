@@ -123,6 +123,7 @@ interface ValueEntry {
   kind: DataClass;
   mode?: MatchMode;
   folded?: boolean;
+  replayEscapes?: boolean;
   fields: Map<string, Evidence>;
   best?: Evidence;
   patterns: MatchPattern[];
@@ -493,7 +494,6 @@ const tenantLedgers = new Map<string, Set<ClassificationLedger>>();
 export class ClassificationLedger {
   private readonly values = new Map<Scalar, ValueEntry>();
   private readonly byClass = new Map(DATA_CLASSES_BY_SENSITIVITY.map(kind => [kind, new Set<Scalar>()]));
-  private hasShortReplayValues = false;
   private readonly anchors: Array<AnchorIndex | undefined> = [];
   private readonly foldedAnchors: Array<AnchorIndex | undefined> = [];
   private readonly fences = new Map<string, Fence>();
@@ -1033,11 +1033,15 @@ export class ClassificationLedger {
       }
       entry.mode = mode;
     }
-    if (mode === "field" && entry.kind === "credential" && typeof value === "string" &&
-        value.length <= 22 && [...value].length < 12 && !entry.patterns.some(pattern => pattern.mode === "replay")) {
-      const escaped = JSON.stringify(value).slice(1, -1);
-      for (const text of new Set([value, escaped, fenceEscapes(value), fenceEscapes(escaped)])) {
-        this.index(entry, text, "replay");
+    if (mode === "field" && entry.kind !== "public" && typeof value === "string" &&
+        value.length <= 22 && [...value].length < 12) {
+      // Raw prose needs stronger evidence for low-specificity non-credentials.
+      // The decoded replay path also checks that the occurrence crosses an escape.
+      if (!entry.patterns.some(pattern => pattern.mode === "replay")) this.index(entry, value, "replay");
+      if (entry.kind === "credential" && !entry.replayEscapes) {
+        entry.replayEscapes = true;
+        const escaped = JSON.stringify(value).slice(1, -1);
+        for (const text of new Set([escaped, fenceEscapes(value), fenceEscapes(escaped)])) this.index(entry, text, "replay");
       }
     }
     if (!entry.folded && typeof value === "string" && evidence.kind === "identity" &&
@@ -1069,7 +1073,6 @@ export class ClassificationLedger {
   private index(entry: ValueEntry, text: string, mode: MatchMode, provenance?: RenderProvenance): void {
     if (!text || entry.patterns.some(pattern => pattern.text === text && pattern.mode === mode &&
       pattern.before === provenance?.before && pattern.after === provenance?.after && pattern.key === provenance?.key)) return;
-    if (mode === "replay") this.hasShortReplayValues = true;
     const width = Math.min(text.length, ANCHOR_WIDTH);
     const indexes = mode === "folded" ? this.foldedAnchors : this.anchors;
     const prefixes = indexes[width] ??= new Map();
@@ -1107,7 +1110,6 @@ export class ClassificationLedger {
       this.byClass.get(entry.kind)!.add(value);
       for (const pattern of entry.patterns) {
         const { anchor, mode } = pattern;
-        if (mode === "replay") this.hasShortReplayValues = true;
         const indexes = mode === "folded" ? this.foldedAnchors : this.anchors;
         const prefixes = indexes[anchor.length] ??= new Map();
         const first = anchor.charCodeAt(0);
@@ -1176,7 +1178,8 @@ export class ClassificationLedger {
         if (!matched) continue;
         for (const bucket of matched) {
           for (const { text: value, offset, mode, entry, before, after, key } of bucket) {
-            if (mode === "replay" ? !replayAt : replayOnly) continue;
+            if (mode === "replay" && (!replayAt || !replayOnly && entry.kind !== "credential") ||
+                replayOnly && mode !== "replay" && mode !== "word" && mode !== "text") continue;
             if (--work.remaining < 0) return false;
             const start = at - offset;
             const end = start + value.length;
@@ -1564,7 +1567,7 @@ export class ClassificationLedger {
           }
         }
       }
-      const ambiguous = new Map<string, TextSpan>();
+      const ambiguous = new Map<string, TextSpan & { kind: DataClass }>();
       const clipped = new Map<string, TextSpan>();
       const scriptRange = state.scriptText?.[section];
       if (state.scriptReadClass && scriptRange && scriptRange.start < scriptRange.end) {
@@ -1572,7 +1575,9 @@ export class ClassificationLedger {
       }
       const replayAt = preservedReplays.length ? (span: TextSpan, evidence: Evidence) => {
         if (preservedReplays.some(replay => replay.start <= span.start && span.end <= replay.end)) {
-          ambiguous.set(`${span.start}:${span.end}`, span);
+          const key = `${span.start}:${span.end}`;
+          const previous = ambiguous.get(key);
+          ambiguous.set(key, { ...span, kind: previous ? maxDataClass(previous.kind, evidence.kind) : evidence.kind });
           collectCandidate(span, evidence);
         }
       } : undefined;
@@ -1593,7 +1598,6 @@ export class ClassificationLedger {
       // establish that the replay used the original field or rendering.
       let decodeBudget = MAX_REPLAY_DECODE_UNITS;
       for (const replay of preservedReplays) {
-        if (!retained.some(ledger => ledger.hasShortReplayValues)) break;
         let reported = false;
         const unavailable = () => {
           if (!reported) ranges.push({ section, start: replay.start, end: replay.end, reason: "history-provenance-unavailable" });
@@ -1615,15 +1619,21 @@ export class ClassificationLedger {
           }
           const layer = decodeReplayLayer(decoded, toOriginal);
           if (!layer) break;
-          if (depth === 0 && layer.uncertain || depth === maxLayers && layer.changed) {
+          if (layer.uncertain || depth === maxLayers && layer.changed) {
             unavailable();
             if (depth === maxLayers) break;
           }
           if (!layer.changed) break;
           ({ text: decoded, toOriginal } = layer);
-          if (!this.scan(rawIndex, decoded, 0, decoded.length, work, collect, wordBoundaries(decoded), undefined,
-            ({ start, end }, evidence) => replayAt?.({ start: toOriginal(start), end: toOriginal(end) }, evidence),
-            undefined, undefined, true)) {
+          const map = ({ start, end }: TextSpan) => ({ start: toOriginal(start), end: toOriginal(end) });
+          if (!this.scan(rawIndex, decoded, 0, decoded.length, work, (span, evidence) => collect(map(span), evidence),
+            wordBoundaries(decoded), undefined, ({ start, end }, evidence) => {
+              const before = Math.max(0, start - 1);
+              const after = Math.min(decoded.length, end + 1);
+              if (evidence.kind === "credential" || toOriginal(after) - toOriginal(before) > after - before) {
+                replayAt?.(map({ start, end }), evidence);
+              }
+            }, undefined, undefined, true)) {
             unavailable();
             break;
           }
@@ -1652,8 +1662,11 @@ export class ClassificationLedger {
         }
         collect(match, { kind: match.kind, source: match.source, key: "" });
       }
-      for (const [key, span] of ambiguous) {
-        if (found.get(key)?.kind !== "credential") ranges.push({ section, ...span, reason: "history-provenance-unavailable" });
+      for (const [key, { start, end, kind }] of ambiguous) {
+        const observed = found.get(key);
+        if (!competing.has(key) && (!observed || !observed.authoritative || maxDataClass(observed.kind, kind) !== observed.kind)) {
+          ranges.push({ section, start, end, reason: "history-provenance-unavailable" });
+        }
       }
       for (const [matches, reason] of [[competing, "competing-provenance"],
         [clipped, "clipped-provenance-unavailable"]] as const) {
