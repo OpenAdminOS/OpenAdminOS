@@ -262,7 +262,9 @@ export async function ollamaRequestNumCtx(
   if (fallback && (show.revision === undefined || show.revision === fallback.revision)) {
     if (fallback.pinnedNumCtx !== undefined && show.pinnedNumCtx === undefined) show = { ...show, pinnedNumCtx: fallback.pinnedNumCtx };
     if (fallback.modelMaxContext !== undefined && show.modelMaxContext === undefined) show = { ...show, modelMaxContext: fallback.modelMaxContext };
-    if (fallback.pinKnown && !show.pinKnown) show = { ...show, pinKnown: true };
+    // That the model is unpinned carries over only for a revision both
+    // readings name: a model created again since may carry a pin.
+    if (fallback.pinKnown && !show.pinKnown && show.revision !== undefined && show.revision === fallback.revision) show = { ...show, pinKnown: true };
   }
   if (show.pinnedNumCtx !== undefined && !show.pinKnown) show = { ...show, pinKnown: true };
   const seen = {
