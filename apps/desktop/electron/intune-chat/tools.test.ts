@@ -208,6 +208,55 @@ it("Disconnect clears staged shards while startup is waiting on a different tena
   }
 });
 
+it("transfers one alias-heavy startup row in bounded batches and publishes its complete shard", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-startup-identity-batches-"));
+  const path = join(dir, "openadminos.db");
+  const tenantId = "fixture-tenant";
+  const resource = "users";
+  const aliases = Array.from({ length: 800 }, (_, i) => `smtp:fixture-alias-${i}@example.invalid`);
+  let store = new IntelligenceSqliteStore(path);
+  try {
+    const snapshot = { tenantId, resource, label: "Users",
+      refreshedAt: "2026-11-18T00:00:00.000Z" };
+    store.replaceGraphResources({ ...snapshot, scopeSet: [], rows: [
+      { id: "user-fixture", displayName: "Yelena Fixture", proxyAddresses: aliases },
+    ] });
+    const result = await classifyCacheRows([], "/users", undefined, true, true, undefined, {
+      dbPath: path, tenantId, resource, afterRowId: 0, indexOnly: true,
+    });
+    assert.equal(result.egressIndex, undefined);
+    assert.equal(result.firstNames, undefined);
+    assert.ok(result.identityBatches);
+    assert.equal(result.identityBatches.incomplete, false);
+    assert.ok(result.identityBatches.egress.length > 1);
+    assert.ok([...result.identityBatches.egress, ...result.identityBatches.firstNames]
+      .every(batch => batch instanceof ArrayBuffer && batch.byteLength <= 16 * 1024));
+
+    await store.close();
+    store = new IntelligenceSqliteStore(path, { backgroundClassification: true });
+    const index = store.classificationIdentityIndex(tenantId);
+    assert.equal(index.isComplete?.(), false);
+    await store.waitForCacheClassification();
+    assert.equal(index.isComplete?.(), true);
+    assert.equal(index.matches("Yelena"), true);
+    assert.ok(aliases.every(alias => index.matches(alias)));
+
+    store.replaceGraphResources({ ...snapshot, scopeSet: [], rows: [
+      { id: "oversized-fixture", proxyAddresses: ["a".repeat(18 * 1024), aliases[0]!] },
+    ] });
+    await store.close();
+    store = new IntelligenceSqliteStore(path, { backgroundClassification: true });
+    await store.waitForCacheClassification();
+    const partial = store.classificationIdentityIndex(tenantId);
+    assert.equal(partial.isComplete?.(), false);
+    assert.equal(partial.matches(aliases[0]!), true);
+    assert.equal(new ClassificationLedger(partial).classifyRequest({ prompt: "fixture" }).coverageIncomplete, true);
+  } finally {
+    await store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 it("reuses versioned cache metadata on reopen and backfills rows from older versions", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-cache-classification-version-"));
   const path = join(dir, "openadminos.db");

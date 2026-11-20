@@ -1,6 +1,6 @@
 import { walkDataClasses, type ClassifiedValues, type ClassificationOptions } from "./data-classification.js";
 import { GRAPH_FIELD_CLASSES_VERSION } from "./graph-field-classes.js";
-import { TenantValueIndex, type TenantValueIndexSnapshot } from "./tenant-value-index.js";
+import { TenantValueIndex, type TenantMatchEntry, type TenantValueIndexSnapshot } from "./tenant-value-index.js";
 import { collectTenantValues } from "./tenant-values.js";
 import type { DataClass } from "@openadminos/agent-sdk";
 
@@ -80,8 +80,52 @@ export interface CacheClassificationResult {
   sidecars: string[];
   startupSidecars?: Array<{ rowid: number; snapshotId: string; compressed: Uint8Array }>;
   nextRowId?: number;
+  identityBatches?: { egress: ArrayBuffer[]; firstNames: ArrayBuffer[]; incomplete: boolean };
   egressIndex?: TenantValueIndexSnapshot;
   firstNames?: TenantValueIndexSnapshot;
+}
+
+const IDENTITY_BATCH_BYTES = 16 * 1024;
+const IDENTITY_PAGE_BYTES = 4 * 1024 * 1024;
+
+export function packCacheIdentity(snapshot: TenantValueIndexSnapshot | undefined): {
+  batches: ArrayBuffer[]; incomplete: boolean;
+} {
+  const batches: ArrayBuffer[] = [];
+  if (!snapshot) return { batches, incomplete: false };
+  const encoder = new TextEncoder();
+  let parts: string[] = [];
+  let bytes = 2; // JSON array brackets
+  let total = 0;
+  let incomplete = false;
+  const flush = () => {
+    if (!parts.length) return;
+    batches.push(encoder.encode(`[${parts.join(",")}]`).buffer as ArrayBuffer);
+    total += bytes;
+    parts = [];
+    bytes = 2;
+  };
+  for (const entry of TenantValueIndex.fromWorkerSnapshot(snapshot).workerEntries()) {
+    const encoded = JSON.stringify(entry);
+    const size = Buffer.byteLength(encoded);
+    if (size + 2 > IDENTITY_BATCH_BYTES) {
+      incomplete = true;
+      continue;
+    }
+    if (bytes + size + Number(parts.length > 0) > IDENTITY_BATCH_BYTES) flush();
+    if (total + bytes + size + Number(parts.length > 0) > IDENTITY_PAGE_BYTES) {
+      incomplete = true;
+      break;
+    }
+    bytes += size + Number(parts.length > 0);
+    parts.push(encoded);
+  }
+  flush();
+  return { batches, incomplete };
+}
+
+export function decodeCacheIdentityBatch(batch: ArrayBuffer): TenantMatchEntry[] {
+  return JSON.parse(Buffer.from(batch).toString("utf8")) as TenantMatchEntry[];
 }
 
 export const INCOMPLETE_CACHE_CLASSIFICATION = JSON.stringify([GRAPH_FIELD_CLASSES_VERSION, true, []] satisfies RowClassification);

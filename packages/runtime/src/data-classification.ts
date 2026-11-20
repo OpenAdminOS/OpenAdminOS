@@ -19,7 +19,7 @@ export type { ClassifiedValues, ClassificationSpan, RequestClassification, Reque
 export { ClassificationSlice, classifyCacheRows, yieldClassificationTurn } from "./classification-worker-client.js";
 export {
   addCacheIdentity, addUserFirstName, describeCacheRow, INCOMPLETE_CACHE_CLASSIFICATION, MAX_READ_SIDECAR_UNITS,
-  prepareCacheClassification, cacheClassificationFields, type CacheClassificationResult,
+  prepareCacheClassification, cacheClassificationFields, decodeCacheIdentityBatch, type CacheClassificationResult,
 } from "./cache-classification.js";
 export { collectTenantValues } from "./tenant-values.js";
 

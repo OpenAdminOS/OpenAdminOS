@@ -5,7 +5,7 @@ import { deflateSync } from "node:zlib";
 import type { WorkerMessage } from "./classification-worker-client.js";
 import { ClassificationLedger, decodeWorkerLargeValue } from "./request-classification.js";
 import { packWorkerGraphResult } from "./graph-ingress-classification.js";
-import { MAX_READ_SIDECAR_UNITS, prepareCacheClassification, type CacheStartupPage, type CacheClassificationRow } from "./cache-classification.js";
+import { MAX_READ_SIDECAR_UNITS, packCacheIdentity, prepareCacheClassification, type CacheStartupPage, type CacheClassificationRow } from "./cache-classification.js";
 import { GRAPH_FIELD_CLASSES_VERSION } from "./graph-field-classes.js";
 import { TenantValueIndex } from "./tenant-value-index.js";
 
@@ -36,14 +36,18 @@ function classifyStartupPage(
       unknown as Array<CacheClassificationRow & { rowid: number; snapshotId: string }>;
     if (!rows.length) return { sidecars: [] };
     const result = prepareCacheClassification(rows, options, page.indexOnly, indexNames, page.indexOnly);
-    return { ...result, sidecars: [], nextRowId: rows.at(-1)!.rowid,
-      ...(page.indexOnly ? {} : {
-        startupSidecars: rows.flatMap(({ rowid, snapshotId }, i) => {
-          const sidecar = result.sidecars[i]!;
-          return Buffer.byteLength(sidecar) <= MAX_READ_SIDECAR_UNITS ? [{ rowid, snapshotId, compressed: deflateSync(sidecar) }] : [];
-        }),
-      }),
-    };
+    const nextRowId = rows.at(-1)!.rowid;
+    if (page.indexOnly) {
+      const egress = packCacheIdentity(result.egressIndex);
+      const firstNames = packCacheIdentity(result.firstNames);
+      return { sidecars: [], nextRowId, identityBatches: {
+        egress: egress.batches, firstNames: firstNames.batches, incomplete: egress.incomplete || firstNames.incomplete,
+      } };
+    }
+    return { sidecars: [], nextRowId, startupSidecars: rows.flatMap(({ rowid, snapshotId }, i) => {
+      const sidecar = result.sidecars[i]!;
+      return Buffer.byteLength(sidecar) <= MAX_READ_SIDECAR_UNITS ? [{ rowid, snapshotId, compressed: deflateSync(sidecar) }] : [];
+    }) };
   } finally {
     db.close();
   }
@@ -87,8 +91,10 @@ port.on("message", (message: WorkerMessage) => {
         const result = packWorkerGraphResult(data, options);
         port.postMessage(result, result.batches);
       } else {
-        port.postMessage(message.startup ? classifyStartupPage(message.startup, options, message.indexNames)
-          : prepareCacheClassification(message.rows, options, message.indexValues, message.indexNames));
+        const result = message.startup ? classifyStartupPage(message.startup, options, message.indexNames)
+          : prepareCacheClassification(message.rows, options, message.indexValues, message.indexNames);
+        const identity = result.identityBatches;
+        port.postMessage(result, identity ? [...identity.egress, ...identity.firstNames] : []);
       }
       break;
     }

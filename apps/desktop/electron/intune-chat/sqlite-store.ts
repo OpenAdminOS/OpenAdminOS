@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { inflate } from "node:zlib";
 import { collectTenantValues, TenantValueIndex } from "./tenant-values.js";
 import {
-  addCacheIdentity, addUserFirstName, ClassificationSlice, classifyCacheRows, currentClassificationLedger,
+  addCacheIdentity, addUserFirstName, ClassificationSlice, classifyCacheRows, currentClassificationLedger, decodeCacheIdentityBatch,
   GRAPH_FIELD_CLASSES_VERSION, MAX_READ_SIDECAR_UNITS, prepareCacheClassification, registerClassifiedValues, yieldClassificationTurn,
   ClassificationWorkerRetiredError, clearTenantClassificationLedgers, releaseClassificationIdentityShard, retireClassificationWorker,
   type CacheClassificationResult, type ClassificationOptions, type ClassifiedValues,
@@ -452,7 +452,7 @@ export class IntelligenceSqliteStore {
   private startupIdentityTenants?: Set<string>;
   private readonly cacheSnapshots = new Map<string, Map<GraphCacheResourceKind, string>>();
   private readonly cacheClassifications = new Map<string, Set<Promise<void>>>();
-  private startupClassification?: { tenantId: string; done: Promise<void> };
+  private startupClassification?: { tenantId: string; done: Promise<boolean | undefined> };
   private readonly classificationDisconnects = new Map<string, Promise<void>>();
   private closed = false;
   private readonly cacheCleared = new Map<string, number>();
@@ -2614,14 +2614,14 @@ export class IntelligenceSqliteStore {
       if (identityResources.has(resource)) {
         const identity = new Map<string, Map<GraphCacheResourceKind, TenantValueIndex>>();
         const firstNames = new Map<string, Map<GraphCacheResourceKind, TenantValueIndex>>();
-        await this.classifyStartupRows(tenantId, resource, true, current, identity, firstNames, snapshotId);
+        const incomplete = await this.classifyStartupRows(tenantId, resource, true, current, identity, firstNames, snapshotId);
         if (!current()) return;
         this.setIdentityShard(this.tenantIdentityShards, tenantId, resource, identity.get(tenantId)?.get(resource) ?? new TenantValueIndex());
         if (resource === "users") {
           this.setIdentityShard(this.classificationIndexes, tenantId, resource, firstNames.get(tenantId)?.get(resource) ?? new TenantValueIndex());
         }
         const unavailable = this.unavailableIdentityResources.get(tenantId);
-        unavailable?.delete(resource);
+        if (!incomplete) unavailable?.delete(resource);
         if (!unavailable?.size) this.unavailableIdentityResources.delete(tenantId);
       }
       await this.classifyStartupRows(tenantId, resource, false, current, undefined, undefined, snapshotId);
@@ -2647,10 +2647,16 @@ export class IntelligenceSqliteStore {
       const current = (tenantId: string) => !this.closed && !this.disconnectedClassificationTenants.has(tenantId) &&
         generations.get(tenantId) === this.cacheCleared.get(tenantId);
       const process = async (tenantId: string, resource: GraphCacheResourceKind, indexOnly: boolean) => {
-        const done = this.classifyStartupRows(tenantId, resource, indexOnly,
-          () => current(tenantId) && !this.cacheSnapshots.get(tenantId)?.has(resource));
+        const isCurrent = () => current(tenantId) && !this.cacheSnapshots.get(tenantId)?.has(resource);
+        const done = this.classifyStartupRows(tenantId, resource, indexOnly, isCurrent);
         this.startupClassification = { tenantId, done };
-        try { await done; } finally { delete this.startupClassification; }
+        try {
+          if (await done && isCurrent()) {
+            let unavailable = this.unavailableIdentityResources.get(tenantId);
+            if (!unavailable) this.unavailableIdentityResources.set(tenantId, unavailable = new Set());
+            unavailable.add(resource);
+          }
+        } finally { delete this.startupClassification; }
       };
       for (const { tenant_id: tenantId, resource } of resources) {
         if (current(tenantId) && identityResources.has(resource)) await process(tenantId, resource, true);
@@ -2681,9 +2687,10 @@ export class IntelligenceSqliteStore {
   private async classifyStartupRows(
     tenantId: string, resource: GraphCacheResourceKind, indexOnly: boolean, current: () => boolean,
     identityShards = this.stagedIdentityShards, firstNameShards = this.stagedFirstNames, snapshotId?: string,
-  ): Promise<void> {
+  ): Promise<boolean | undefined> {
     const graphPath = pathForResource(resource)?.path ?? "";
     let cursor = 0;
+    let incomplete = false;
     while (current()) {
       const identity = indexOnly || resource === "users" || resource === "groups" ? undefined : this.classificationIdentityIndex(tenantId);
       const startup = { dbPath: this.dbPath, tenantId, resource, afterRowId: cursor, indexOnly, snapshotId };
@@ -2695,21 +2702,29 @@ export class IntelligenceSqliteStore {
         if (error instanceof ClassificationWorkerRetiredError) continue;
         throw error;
       }
-      if (!current() || result.nextRowId === undefined) return;
+      if (!current()) return;
+      if (result.nextRowId === undefined) return incomplete;
       await yieldClassificationTurn();
       if (!current()) return;
       cursor = result.nextRowId;
-      if (indexOnly) {
+      if (result.identityBatches) {
         const slice = new ClassificationSlice();
-        for (const [snapshot, staged] of [[result.egressIndex, identityShards],
-          [result.firstNames, firstNameShards]] as const) {
-          if (!snapshot) continue;
+        const { egress, firstNames } = result.identityBatches;
+        incomplete ||= result.identityBatches.incomplete;
+        for (const [batches, staged] of [[egress, identityShards], [firstNames, firstNameShards]] as const) {
+          if (!batches.length) continue;
           let shard = staged.get(tenantId)?.get(resource);
           if (!shard) this.setIdentityShard(staged, tenantId, resource, shard = new TenantValueIndex());
-          for (const entry of TenantValueIndex.fromWorkerSnapshot(snapshot).workerEntries()) {
-            if (!current()) return;
-            shard.addWorkerEntry(entry);
+          for (const batch of batches) {
             if (slice.elapsed) await slice.yield();
+            if (!current()) return;
+            for (const entry of decodeCacheIdentityBatch(batch)) {
+              shard.addWorkerEntry(entry);
+              if (slice.elapsed) {
+                await slice.yield();
+                if (!current()) return;
+              }
+            }
           }
         }
       } else if (result.startupSidecars?.length) {

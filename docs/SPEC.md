@@ -1830,9 +1830,10 @@ connection, one row per scheduled turn. Compressed sidecars live in a separate
 table so publication does not rewrite the raw rows. The write checks the row ID and
 snapshot ID again and skips publication if SQLite reports a busy writer.
 Backfill skips rows larger than 256 KiB of raw JSON or with a sidecar above the
-decode budget. Missing sidecars leave coverage incomplete. The main process
-builds staged identity indexes in yielding slices and publishes only finished
-shards. Chat and MCP can reuse their raw identity lookup until the tenant
+decode budget. Missing sidecars leave coverage incomplete. The worker transfers startup identity entries in batches of up to 16 KiB, even
+when one row needs multiple batches. The main process applies the batches in
+yielding slices before publishing the shard. If an entry or page exceeds the
+transfer budget, classification reports incomplete identity coverage. Chat and MCP can reuse their raw identity lookup until the tenant
 cache changes, even while classification is still pending.
 The request scanner marks coverage incomplete if the worker lacks the current
 identity index. A detector match can raise a mapped class when it identifies more sensitive
