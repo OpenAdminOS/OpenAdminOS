@@ -212,7 +212,7 @@ it("transfers one alias-heavy startup row in bounded batches and publishes its c
   const dir = await mkdtemp(join(tmpdir(), "openadminos-startup-identity-batches-"));
   const path = join(dir, "openadminos.db");
   const tenantId = "fixture-tenant";
-  const resource = "users";
+  const resource = "users" as const;
   const aliases = Array.from({ length: 800 }, (_, i) => `smtp:fixture-alias-${i}@example.invalid`);
   let store = new IntelligenceSqliteStore(path);
   try {
