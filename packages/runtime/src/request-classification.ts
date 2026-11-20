@@ -61,7 +61,7 @@ export interface TemplateInterpolation extends TextSpan {
   key: string;
   value?: Scalar;
 }
-const MAX_TEMPLATE_INTERPOLATIONS = 1024;
+export const MAX_TEMPLATE_INTERPOLATIONS = 1024;
 const templateInterpolations = new AsyncLocalStorage<Partial<Record<ClassificationSpan["section"], readonly TemplateInterpolation[]>>>();
 
 export function withTemplateInterpolations<T>(
@@ -1348,7 +1348,8 @@ export function withRequestClassification(
   };
   const recordUnavailable = (
     ledger: ClassificationLedger, metadata: EventMetadata, systemLength: number, promptLength: number,
-  ) => ledger.observeMetadata(() => publish(ledger, metadata, failure(systemLength, promptLength), true));
+  ) => templateInterpolations.exit(() =>
+    ledger.observeMetadata(() => publish(ledger, metadata, failure(systemLength, promptLength), true)));
 
   const classify = (
     scoped: ClassificationLedger | undefined, method: RequestClassificationEvent["method"], options: LlmOptions, sequence: number,
@@ -1385,9 +1386,9 @@ export function withRequestClassification(
     }
   };
   return {
-    get available() { return llm.available; },
-    get defaultModel() { return llm.defaultModel; },
-    get streamsIncrementally() { return llm.streamsIncrementally; },
+    available: llm.available,
+    defaultModel: llm.defaultModel,
+    streamsIncrementally: llm.streamsIncrementally,
     async complete(options) {
       const ledger = scopes.getStore();
       const sequence = ++requestSequence;

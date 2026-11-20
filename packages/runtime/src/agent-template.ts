@@ -39,7 +39,7 @@ import {
 
 import { PROMPT_INSTRUCTION_ROOTS, renderDeep, renderTemplate, renderPromptTemplate, type TemplateContext } from "./template-engine.js";
 import { registerGraphTenantData, registerTenantData } from "./data-classification.js";
-import { withTemplateInterpolations, type TemplateInterpolation } from "./request-classification.js";
+import { MAX_TEMPLATE_INTERPOLATIONS, withTemplateInterpolations, type TemplateInterpolation } from "./request-classification.js";
 import { stripTenantDataFences, withTenantDataInstructions } from "./tenant-data.js";
 import { confirmationPhraseProblem } from "./confirmation-phrase.js";
 
@@ -1634,9 +1634,13 @@ async function runLlmSkill(
   const settings = renderDeep(skill.settings, context);
   const promptInterpolations: TemplateInterpolation[] = [];
   const systemInterpolations: TemplateInterpolation[] = [];
-  const prompt = renderPromptTemplate(skill.settings.prompt, context, span => promptInterpolations.push(span));
+  const capture = (spans: TemplateInterpolation[]) => (span: TemplateInterpolation) => {
+    // Keep one excess offset so the observer can report incomplete coverage.
+    if (spans.length <= MAX_TEMPLATE_INTERPOLATIONS) spans.push(span);
+  };
+  const prompt = renderPromptTemplate(skill.settings.prompt, context, capture(promptInterpolations));
   const system = withTenantDataInstructions(skill.settings.system
-    ? renderPromptTemplate(skill.settings.system, context, span => systemInterpolations.push(span)) : undefined);
+    ? renderPromptTemplate(skill.settings.system, context, capture(systemInterpolations)) : undefined);
   const completion = await withTemplateInterpolations({ prompt: promptInterpolations, system: systemInterpolations }, () =>
     ctx.llm.complete({
       prompt, system,
