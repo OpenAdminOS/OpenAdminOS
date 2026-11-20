@@ -192,6 +192,13 @@ the installed app's scheduler, login item or caches.
   folders, the task must also run as this account (name or SID), the guide
   decodes mount targets and stops when the check fails, the fences are
   fixed, and a policy.json that is not a plain file refuses.
+- Review round 14: Claude and Muse no blocking (Muse: docs did not name the
+  non-plain-file policy case, fixed); Sol two blocking (a connector send in
+  flight during a reset, a failed `findmnt` hidden by the pipeline) plus a
+  medium (a Task Scheduler error read as absent). Fixed: the reset waits for
+  any running or queued run and declines connector approvals from the
+  request on, the guide's Linux check reports "No mount found" or STOP
+  explicitly, and task presence comes from the full task list.
 - Found in the end to end run and fixed: the incomplete screen called the
   appearance handler before it was registered, and failure reasons repeated
   full paths.

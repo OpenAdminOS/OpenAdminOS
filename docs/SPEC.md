@@ -2512,8 +2512,10 @@ Mockup: `docs/mockups/34-local-reset.html`.
 
 - **Two phases.** The request refuses while a confirmed write run is applying
   (also a cancelled one, or one whose organization was disconnected, while
-  its apply has not settled; tracked in memory, not in run history) or a
-  confirmation is in flight, and from then on refuses new confirmations
+  its apply has not settled; tracked in memory, not in run history), while
+  any other run is running or queued (a run can send through a connector
+  after its approval), or while a confirmation is in flight. From the request
+  on, connector approvals are declined ("Nothing was sent"), and from then on refuses new confirmations
   until the restart. It writes `local-reset-pending.json` into the data folder
   first; the rename is the commit point (if it fails, nothing changed and the
   modal says so; a failed folder flush after it is only logged). It then removes the Microsoft sign-in of
@@ -2547,7 +2549,8 @@ Mockup: `docs/mockups/34-local-reset.html`.
   or, on Linux, when a mount sits at or inside it (a bind mount; an
   unreadable mount table counts too). Cache folders outside the data folder
   are skipped with a warning on the same checks, on every platform. A
-  `policy.json` that is a link at all, or a folder at that name, stops the
+  `policy.json` that is a link at all, a folder or anything else than a
+  plain file at that name, stops the
   reset at the request and at launch: a chain of links can always be built
   that a check cannot follow the way the system does, so the reset does not
   try to vouch for one. Only a plain marker file with a single
@@ -2578,8 +2581,9 @@ Mockup: `docs/mockups/34-local-reset.html`.
   this account's profile (the default per-user install) and the account it
   runs as (`<Principal><UserId>`) is this one by name or SID (`whoami
   /user`); otherwise, also for a copy installed for all users or when either
-  side is unknown, it leaves the task with a warning. A per-user task name
-  is a follow-up.
+  side is unknown, it leaves the task with a warning. Presence is read from
+  the full task list, so a Task Scheduler error counts as unknown, never as
+  absent. A per-user task name is a follow-up.
   The LaunchAgent is unloaded by its exact service
   label, never by path (a path can name other jobs), and only a plain file
   at the plist path is deleted. Removal is checked afterwards (`launchctl print` exit 113, a
