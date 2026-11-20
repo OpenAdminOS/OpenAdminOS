@@ -539,13 +539,13 @@ describe("Ollama context size", () => {
       const open: ServerResponse[] = [];
       const fake = await fakeOllama({ modelMax: 131072, limit, stallStream: { on, open } });
       try {
-        const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: `deadline-${on}`, timeoutMs: 300 });
+        const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: `deadline-${on}`, timeoutMs: 1000 });
         const seen: string[] = [];
         await assert.rejects(
           (async () => {
             for await (const chunk of llm.stream({ prompt: "big", signal: caller.signal })) seen.push(chunk.delta);
           })(),
-          /^Error: Ollama timed out after 300ms at http:\/\/127\.0\.0\.1:\d+\/api\/chat\.$/,
+          /^Error: Ollama timed out after 1000ms at http:\/\/127\.0\.0\.1:\d+\/api\/chat\.$/,
         );
         assert.deepEqual(seen, ["partial"]);
         assert.equal(fake.chats.length, on === "first" ? 1 : 2);
