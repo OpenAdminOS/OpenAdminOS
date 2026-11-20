@@ -34,6 +34,9 @@ describe("Model fit endpoint binding", () => {
       // The review listed deployment A, but B is configured: the adapter would send to B.
       await assert.rejects(build("azure-openai", "dep-a", { endpoint: reviewed.endpoint, scope: "model-fit" }), (error: Error) => error.name === "ProviderEndpointChangedError");
       await build("azure-openai", "dep-b", { endpoint: reviewed.endpoint, scope: "model-fit" });
+      // The same deployment with padding, or no model at all (the adapter uses the configured one), is not refused.
+      await build("azure-openai", " dep-b ", { endpoint: reviewed.endpoint, scope: "model-fit" });
+      await build("azure-openai", undefined, { endpoint: reviewed.endpoint, scope: "model-fit" });
     } finally {
       state.close();
       await rm(dir, { recursive: true, force: true });
