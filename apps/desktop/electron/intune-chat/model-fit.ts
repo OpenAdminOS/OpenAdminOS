@@ -209,15 +209,17 @@ export function guardModelFitLlm(llm: RunLlmApi, guard: { before: () => Promise<
   return {
     ...llm,
     // A call that is already stopped reaches the adapter with an aborted signal and sends nothing,
-    // so it is not counted as dispatched.
+    // and an adapter that is not available sends nothing either, so neither is counted as dispatched.
+    // An adapter that throws while building its request is still counted; the answer then says
+    // "Attempted through", not that it was sent.
     complete: async (options) => {
       await guard.before();
-      if (!options.signal?.aborted) guard.dispatched();
+      if (!options.signal?.aborted && llm.available) guard.dispatched();
       return llm.complete(options);
     },
     stream: async function* (options) {
       await guard.before();
-      if (!options.signal?.aborted) guard.dispatched();
+      if (!options.signal?.aborted && llm.available) guard.dispatched();
       yield* llm.stream(options);
     },
   };

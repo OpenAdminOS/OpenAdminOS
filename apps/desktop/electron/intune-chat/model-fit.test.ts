@@ -535,6 +535,19 @@ describe("Model fit in Chat", () => {
     assert.equal(dispatched, 1);
   });
 
+  it("does not count a call to a model that is not available as dispatched", async () => {
+    const inner: RunLlmApi = {
+      available: false,
+      async complete() { throw new Error("no model"); },
+      async *stream() { throw new Error("no model"); },
+    };
+    let dispatched = 0;
+    const guarded = guardModelFitLlm(inner, { before: async () => undefined, dispatched: () => { dispatched += 1; } });
+    await assert.rejects(guarded.complete({ prompt: "a" }), /no model/);
+    await assert.rejects((async () => { for await (const _chunk of guarded.stream({ prompt: "b" })) { /* drain */ } })(), /no model/);
+    assert.equal(dispatched, 0);
+  });
+
   it("stops a model fit request whose provider address moves while it runs", async () => {
     await withStore(async (store) => {
       const built: string[] = [];
