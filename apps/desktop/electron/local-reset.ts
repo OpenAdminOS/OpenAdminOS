@@ -84,8 +84,8 @@ export interface LocalResetMarker {
   requestWarnings?: LocalResetProblem[];
   /** The cleanup outside the data folder ran; a resumed wipe never runs it again. */
   leftoversDone?: true;
-  /** Set when reading, never written: the marker is a link or a shared file and is not trusted. */
-  unusable?: true;
+  /** Set when reading, never written: the marker is not trusted, with the reason shown to the admin. */
+  unusable?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -221,7 +221,8 @@ export function localResetLinkCheck(userDataDir: string, fs: Pick<LocalResetFile
   /** The folder could not be listed, so its token caches could not be checked. */
   scanFailed: boolean;
 } {
-  if (fs.isLink(userDataDir)) return { dataFolderIsLink: true, linkedTokenCaches: [], scanFailed: false };
+  // "folder-link/" would make lstat look through the link; check the bare name.
+  if (fs.isLink(withoutTrailingSeparators(userDataDir))) return { dataFolderIsLink: true, linkedTokenCaches: [], scanFailed: false };
   let entries: string[];
   try {
     entries = fs.readdir(userDataDir);
@@ -233,6 +234,12 @@ export function localResetLinkCheck(userDataDir: string, fs: Pick<LocalResetFile
     linkedTokenCaches: entries.filter((name) => /^tokens.*\.bin$/i.test(name) && fs.isShared(join(userDataDir, name))),
     scanFailed: false,
   };
+}
+
+/** "/a/b/" and "C:\\a\\b\\" name the folder itself, so lstat does not look through a link at "b". */
+export function withoutTrailingSeparators(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, "");
+  return trimmed === "" || /^[A-Za-z]:$/.test(trimmed) ? path : trimmed;
 }
 
 /** The request refuses a data folder that is a link; nothing is removed. */
@@ -388,25 +395,43 @@ export function localResetLeftoverPaths(platform: NodeJS.Platform, home: string,
 /** Reads the marker; a marker that cannot be parsed still means a reset is pending. */
 export function readLocalResetMarker(userDataDir: string, fs: LocalResetFileSystem = nodeFileSystem): LocalResetMarker | undefined {
   const path = join(userDataDir, LOCAL_RESET_MARKER);
-  // Only a plain file OpenAdminOS wrote starts a wipe. A link or shared file
-  // in a restored profile is never followed: it stops the launch instead.
-  if (fs.isShared(path)) return { version: 1, requestedAt: "", unusable: true };
+  // Only a complete marker in a plain file OpenAdminOS wrote starts a wipe.
+  // A link, a shared file or content that is not a whole reset request (for
+  // example from a restored backup) stops the launch instead, with nothing
+  // removed: the marker is written atomically, so it is never half written.
+  if (fs.isShared(path)) return { version: 1, requestedAt: "", unusable: MARKER_SHARED_REASON };
   if (!fs.exists(path)) return undefined;
+  let parsed: Partial<LocalResetMarker>;
   try {
-    const parsed = JSON.parse(fs.readFile(path)) as Partial<LocalResetMarker>;
-    return {
-      version: 1,
-      requestedAt: typeof parsed.requestedAt === "string" ? parsed.requestedAt : "",
-      ...(parsed.build === "installed" || parsed.build === "development" ? { build: parsed.build } : {}),
-      ...(parsed.leftoversDone === true ? { leftoversDone: true as const } : {}),
-      ...(Array.isArray(parsed.requestWarnings)
-        ? { requestWarnings: parsed.requestWarnings.filter(isProblem) }
-        : {}),
-    };
+    parsed = JSON.parse(fs.readFile(path)) as Partial<LocalResetMarker>;
   } catch {
-    return { version: 1, requestedAt: "" };
+    return { version: 1, requestedAt: "", unusable: MARKER_INVALID_REASON };
   }
+  if (parsed === null || typeof parsed !== "object") {
+    return { version: 1, requestedAt: "", unusable: MARKER_INVALID_REASON };
+  }
+  const build = parsed.build === "installed" || parsed.build === "development" ? parsed.build : undefined;
+  if (
+    parsed.version !== 1 || !build
+    || typeof parsed.requestedAt !== "string" || Number.isNaN(Date.parse(parsed.requestedAt))
+  ) {
+    return { version: 1, requestedAt: "", unusable: MARKER_INVALID_REASON };
+  }
+  return {
+    version: 1,
+    requestedAt: parsed.requestedAt,
+    build,
+    ...(parsed.leftoversDone === true ? { leftoversDone: true as const } : {}),
+    ...(Array.isArray(parsed.requestWarnings)
+      ? { requestWarnings: parsed.requestWarnings.filter(isProblem) }
+      : {}),
+  };
 }
+
+const MARKER_SHARED_REASON =
+  "it is not a plain file OpenAdminOS wrote (it is a link, a shared file or a folder), so nothing was removed. Remove it from the data folder, then open OpenAdminOS again";
+const MARKER_INVALID_REASON =
+  "it is not a complete reset request, so nothing was removed. To keep this data, remove that file from the data folder and open OpenAdminOS again; to reset, remove it and choose Reset OpenAdminOS again";
 
 function isProblem(value: unknown): value is LocalResetProblem {
   return typeof value === "object" && value !== null
@@ -432,10 +457,7 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
       status: "incomplete",
       finishedAt: (options.now?.() ?? new Date()).toISOString(),
       dataFolder: userDataDir,
-      failed: [{
-        item: LOCAL_RESET_MARKER,
-        reason: "it is a link or a shared file, not one OpenAdminOS wrote, so nothing was removed. Remove it from the data folder, then open OpenAdminOS again",
-      }],
+      failed: [{ item: LOCAL_RESET_MARKER, reason: marker.unusable }],
       warnings: [],
     };
   }
@@ -462,7 +484,7 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
 
   // A data folder that is a link may point at a folder other things share;
   // its entries are never listed or removed through it.
-  if (fs.isLink(userDataDir)) {
+  if (fs.isLink(withoutTrailingSeparators(userDataDir))) {
     failed.push({ item: userDataDir, reason: DATA_FOLDER_LINK_REASON });
     return finish("incomplete");
   }
@@ -498,9 +520,7 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
   } else if (options.packaged) {
     warnings.push({
       item: "Keychain item, background scheduler and cached updates",
-      reason: marker.build === "development"
-        ? "not removed, because the reset was requested in a development build"
-        : "not removed, because the reset request could not be read",
+      reason: "not removed, because the reset was requested in a development build",
     });
   }
 
