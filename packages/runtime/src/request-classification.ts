@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { DATA_CLASSES_BY_SENSITIVITY, maxDataClass, type DataClass, type DataClassCounts, type LlmOptions, type ProviderId, type RunLlmApi } from "@openadminos/agent-sdk";
-import { emptyDataClassCounts, labeledCredentials, requestTextSpans, walkDataClasses, type ClassificationOptions, type TextSpan } from "./data-classification.js";
+import { emptyDataClassCounts, requestTextSpans, walkDataClasses, type ClassificationOptions, type TextSpan } from "./data-classification.js";
 import { GRAPH_FIELD_CLASSES_VERSION, type SecurityMaskRole } from "./graph-field-classes.js";
 import { ClassificationSlice, requestWorker, type ClassificationWorker } from "./classification-worker-client.js";
 import { TenantValueIndex, type TenantMatchEntry } from "./tenant-value-index.js";
@@ -158,7 +158,6 @@ export interface WorkerResult {
 const VALUE_BUDGET = 2_000_000;
 export const REQUEST_CLASSIFICATION_MAX_SECTION = 16_000_000;
 const TEXT_CHUNK = 128_000;
-const DETECTOR_OVERLAP = 32_768;
 const MATCH_BUDGET = 200_000;
 const ANCHOR_WIDTH = 8;
 const MAIN_SCAN_LIMIT = 512;
@@ -1000,28 +999,15 @@ export class ClassificationLedger {
           ranges.push({ section, start: from, end: text.length, reason: "match-limit" });
           break;
         }
-        // Keep original offsets and look across chunk edges for bounded detectors.
-        const begin = Math.max(0, from - DETECTOR_OVERLAP);
-        const end = Math.min(text.length, to + DETECTOR_OVERLAP);
-        for (const match of requestTextSpans(text.slice(begin, end), identityIndex)) {
-          const start = match.start + begin;
-          if (start < from || start >= to) continue;
-          if (--work.remaining < 0) break;
-          collect({ start, end: match.end + begin }, { kind: match.kind, source: match.source, key: "" });
-        }
-        if (work.remaining < 0) {
-          ranges.push({ section, start: from, end: text.length, reason: "match-limit" });
-          break;
-        }
       }
-      // Scan labels after the ledger so a detector cannot replace Graph
-      // provenance for the same span. A full section keeps long gaps intact.
-      if (work.remaining >= 0) for (const span of labeledCredentials(text)) {
+      // Detector grammar can span an arbitrarily long gap or token. Run on
+      // the bounded section so the ledger's chunks do not clip its input.
+      if (work.remaining >= 0) for (const match of requestTextSpans(text, identityIndex)) {
         if (--work.remaining < 0) {
           ranges.push({ section, start: 0, end: text.length, reason: "match-limit" });
           break;
         }
-        collect(span, { kind: "credential", source: "detector:credential", key: "" });
+        collect(match, { kind: match.kind, source: match.source, key: "" });
       }
       const ordered = [...found.values()].sort((a, b) => a.start - b.start || a.end - b.end);
       for (const { authoritative: _, ...span } of ordered) spans.push(span);

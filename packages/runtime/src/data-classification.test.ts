@@ -650,6 +650,23 @@ test("credential labels and values can be separated by whitespace across scan ch
   assert.equal(result.spans[0]?.end, prompt.length);
 });
 
+test("section detectors preserve full spans beyond the former chunk overlap", () => {
+  const gap = " ".repeat(43_000);
+  const fixtures = [
+    ["Bearer" + gap + "opaque_fixture_token", "credential"],
+    ["-----BEGIN PRIVATE KEY-----\n" + gap + "\n-----END PRIVATE KEY-----", "credential"],
+    ["serial:" + gap + "AT998822", "device"],
+    ["sk-proj-" + "q".repeat(45_000), "credential"],
+  ] as const;
+  for (const [fixture, kind] of fixtures) {
+    const prompt = " ".repeat(127_990) + fixture;
+    const result = new ClassificationLedger().classifyRequest({ prompt });
+    assert.equal(result.coverageIncomplete, false);
+    const expected = kind === "device" ? "AT998822" : fixture;
+    assert.ok(result.spans.some(span => span.kind === kind && prompt.slice(span.start, span.end) === expected), fixture.slice(0, 30));
+  }
+});
+
 test("worker keeps scoped matcher changes and returns offsets for the unchanged UTF-16 request", async () => {
   const shard = new TenantValueIndex();
   shard.add("Aymeric Ouellet", "name");
