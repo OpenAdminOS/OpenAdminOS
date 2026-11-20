@@ -363,7 +363,9 @@ ${"z".repeat(REQUEST_CLASSIFICATION_MAX_SECTION)}`;
     end: prompt.length, reason: "text-limit" }]);
   const busy = ledger.classifyRequest({ prompt: 'x"abc"'.repeat(200_001) });
   assert.equal(busy.coverageIncomplete, true);
-  assert.equal(busy.unexamined.ranges[0]?.reason, "match-limit");
+  assert.deepEqual(busy.unexamined.ranges[0], {
+    section: "prompt", start: 0, end: 'x"abc"'.length * 200_001, reason: "match-limit",
+  });
   assert.equal(busy.counts.credential, 0);
 });
 

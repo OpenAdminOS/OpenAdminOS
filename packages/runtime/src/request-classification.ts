@@ -1010,7 +1010,8 @@ export class ClassificationLedger {
         const to = Math.min(text.length, from + TEXT_CHUNK);
         if (!this.scan(rawIndex, text, from, to, work, collect, fieldAt) ||
             foldedIndex && folded !== undefined && !this.scan(foldedIndex, folded, from, to, work, collect)) {
-          ranges.push({ section, start: from, end: text.length, reason: "match-limit" });
+          // The section-wide detector pass has not examined any of this text.
+          ranges.push({ section, start: 0, end: text.length, reason: "match-limit" });
           break;
         }
       }
