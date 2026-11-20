@@ -512,30 +512,38 @@ transform: scope as counts or `All`, built-in role names, conditions, grant
 and session controls) and policy names in its age groups, so 100 policies
 need about 14,000 estimated tokens (about 11,000 real) with an 1,100 token
 answer and fit a 16k local model; about 120 fit by the estimate. Grouped
-records reach prompts only as counts (`counts` filter or `count-by-field`
-steps), and breakdowns by high-cardinality fields keep their largest buckets
-(`top(n)` filter, which moves them under `top` with `otherValues` and
-`otherCount` beside them so no tenant value collides with the summary).
-The self-training overlay is appended after the run's check, so its wrapper
-checks the composed request again; the typed reason then counts the overlay as
-prompt and keeps the model's real limit. The typed reason survives write revalidation (as
+records reach prompts only as counts (`count-by-field` steps), and breakdowns
+by high-cardinality fields keep their largest buckets (the `top` setting of
+`count-by-field`, which moves them under `top` with `otherValues` and
+`otherCount` beside them so no tenant value collides with the summary). Bundled
+agents use settings, not the `counts` and `top(n)` filters, because an older
+app ignores an unknown setting and still runs the agent with every bucket,
+while an unknown filter stops the run.
+The self-training overlay wrapper names its text as `RunLlmApi.systemSuffix`,
+so the run's single check counts it as prompt and keeps the model's real
+limit. The typed reason survives write revalidation (as
 the error's `cause`) and sandboxed script agents (the broker answers
 `context-too-small` and the script run fails with the typed error).
 
-A bundled manifest that uses a transform or filter added in a release sets
+A bundled manifest that needs a runtime feature older apps do not have sets
 `minAppVersion` to the first build that has it, because released apps fetch
 registry manifests from main. Nightlies of the next release compare as that
-release, so a feature that lands between nightlies takes a nightly minimum:
-the Conditional Access explainer and agents that use `top(n)` need
-`0.7.3-nightly.20261120040000`, a stamp after the last nightly without them.
-`appVersionSatisfies` reads a nightly minimum exactly: earlier nightlies of that
-release are refused, later ones and the stable release are accepted.
-Released apps compare it with `compareSemver`, which also refuses 0.7.2 and
-the earlier nightlies. A nightly built from main after that stamp but before
-this change merges would still accept these manifests; that window closes at
-the first nightly after the merge. Agents that can be bounded with older steps
-(`count-by-field`) keep their old minimum. A build from source reports 0.7.2
-until the version bump and shows these agents as needing an update.
+release, so a feature that lands between nightlies takes a nightly minimum.
+Only the Conditional Access explainer needs one
+(`0.7.3-nightly.20261120040000`, a stamp after the last nightly without the
+`compact-conditional-access` transform); every other agent changed here runs
+on its old minimum. `appVersionSatisfies` reads a nightly minimum exactly:
+earlier nightlies of that release are refused, later ones and the stable
+release are accepted. Released apps compare it with `compareSemver`, which also
+refuses 0.7.2 and the earlier nightlies. From this release on, an installed
+agent's own manifest decides whether it runs, and the registry entry only
+decides whether its update can be installed (`updateAvailable.supported`).
+Released apps still take the registry entry's minimum for the installed copy,
+so after the merge a 0.7.2 app shows its installed Conditional Access explainer
+as needing an app update. A nightly built from main after the stamp but before
+this change merges would still accept the new manifest. A build from source
+reports 0.7.2 until the version bump and shows the explainer as needing an
+update.
 
 Per-agent model overrides are required: an agent's manifest can specify a preferred model and the user can override it.
 

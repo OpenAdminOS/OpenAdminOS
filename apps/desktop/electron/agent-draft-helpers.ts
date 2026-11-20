@@ -1007,7 +1007,7 @@ Hard rules:
 - Write-action kinds available: \`graph-write\` (the generic kind for any POST/PATCH/PUT/DELETE Graph endpoint, with typed-confirmation diff) and \`retire-managed-device\` (legacy alias for POST /deviceManagement/managedDevices/{id}/retire). Always prefer \`graph-write\` for new agents. For write agents, the LLM step should explain the planned actions in plain language and the write step's actionTemplate.label / actionTemplate.description should make every individual action self-explanatory. \`severity: destructive\` is the safe default unless the action is plainly reversible.
 - The confirmationPhrase must spell out the operation count and noun in CAPS, e.g. "DISABLE {{ actions | size }} GUEST ACCOUNTS" or "REVOKE {{ actions | size }} SESSIONS". This is what the admin types to approve the plan.
 - Templating uses Liquid-subset {{ path.expr | filter }}. Filters available: size, total, sample(n), default("…"), join(", "), counts, top(n), boundedJson(maxChars).
-- Keep LLM prompts small enough for local models: send counts or a bounded sample, never a whole Graph collection. Use count-by-field or \`| counts\` for breakdowns, \`| top(25)\` for fields with many values, and sort-by with take plus \`| boundedJson(6000)\` for samples.
+- Keep LLM prompts small enough for local models: send counts or a bounded sample, never a whole Graph collection. Use count-by-field for breakdowns, add top: 25 to a count-by-field step for fields with many values, and use sort-by with take plus \`| boundedJson(6000)\` for samples.
 - Always include a top-level "# yaml-language-server: $schema=../../schemas/agent-template.schema.json" comment.
 
 Reserved slugs you must not use:
