@@ -2464,19 +2464,24 @@ A local choice sends at once, since nothing leaves the device.
 
 Host checks (`apps/desktop/electron/intune-chat/model-fit.ts`). A failed
 answer that may be run again carries a host-issued, single-use `offerId`,
-bound to its conversation, organization, the exact question and the provider
-and model active at the time; offers live in memory for 15 minutes. The
+bound to its conversation, organization, the exact question, its workspace
+selection and the provider and model active at the time; offers live in
+memory for 15 minutes. The
 renderer sends `modelOverride` (`offerId`, chosen provider and model) on
 `SendIntuneChatMessageInput`. The service refuses it unless the offer exists
 for this conversation (not deleted), organization and question, the same
 provider and model are still active, the chosen provider is listed and ready,
 lists the model and is not the model that failed, a model on this device is
-not an Ollama Cloud model (`name:tag-cloud` or `name:cloud`, whose prompts go
-to ollama.com), and a hosted one comes with a `hostedProviderConsent` for it
-that is not a remembered one. The usual consent check (age, tenant, model,
+not remote-backed (Ollama marks those with `remote_host` or `remote_model` in
+`/api/tags`, kept as `remoteModels` on the provider; an Ollama Cloud name,
+`name:tag-cloud` or `name:cloud`, counts too), and a hosted one comes with a
+`hostedProviderConsent` for that offer (`modelFitOfferId`), acknowledged after
+the offer was made, for that model, and not a remembered one. Choices also
+follow a managed model lock. The usual consent check (age, tenant, model,
 workspace selection) and `buildLlm`'s policy check then apply as for any
-hosted send, the consent is audited, and the offer is used up once the request
-is cleared to send. A larger local model tried for one request that fails too
+hosted send, the consent is audited, and the offer is claimed once the
+request is cleared to send: the claim is synchronous and re-reads the
+conversation, so of two concurrent sends only one gets it. A larger local model tried for one request that fails too
 gets a new offer that still names the active model as the one it stands in
 for. The override changes nothing persistent: the next send uses the active
 provider. Nova and the non-streaming send refuse an override. Masking from the
@@ -2501,7 +2506,10 @@ the run review with that provider and model, which is the run's accept step:
 it names where prompts go and says "<model> could not fit the last run, so
 this run uses <provider>. This run only: the agent keeps its model for later
 runs." Start run starts the agent with `providerId` and `model` for that run
-only. A write agent still stops at the diff and its typed confirmation. Team
+only, pinned to the organization the review showed (`tenantId`), or with
+`expectNoTenant` when it showed none, so an organization switch before the
+host admits the run refuses it instead of running elsewhere. A failed dry run
+stays a dry run. A write agent still stops at the diff and its typed confirmation. Team
 runs keep their own review in Agent Team.
 
 Open questions (TODO(ugur) in code): a "remember for this conversation"
