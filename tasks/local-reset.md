@@ -227,6 +227,16 @@ the installed app's scheduler, login item or caches.
   folder that became a link, linked parent folders such as ~/Library/Caches)
   and two mediums (plan starters checked again before saving, `defaults
   delete` failures), all fixed.
+- Review round 18: Claude and Muse no blocking; Sol four blocking. Three were
+  about links and mounts above the data folder or caches (outside the home
+  folder, a mount on ~/.config, the Windows script). Reverted the round 17
+  ancestor check instead: a link or mount above the OpenAdminOS folder does
+  not widen what a reset removes (only that folder's contents at its real
+  location, which the app has been using), and the check blocked dotfile
+  manager setups. The fourth (a folder swapped mid wipe) is fixed: the wipe
+  keeps the folder's device and inode and stops before the progress record
+  and the marker removal if they change. Also: a failed `defaults read`
+  warns, the chmod test is POSIX only.
 - Process lesson: twice I edited the tree while a reviewer was reading it;
   parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the

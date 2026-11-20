@@ -83,9 +83,8 @@ A few details:
 Removing folders by hand skips the checks the in-app reset makes. Check first,
 and stop if any of these applies:
 
-- The data folder or a cache folder is a link, a folder above it (below your
-  home folder, such as `Library` or `Caches`) is a link, or something is
-  mounted at it or inside it. Removing through it would delete files wherever it points.
+- The data folder or a cache folder is a link, or something is mounted at it
+  or inside it. Removing through it would delete files wherever it points.
   On macOS check with `ls -ld <folder>` and `mount | grep -i openadmin`. On
   Linux check with `ls -ld <folder>` and the command below, which lists
   every mount at or inside the folder (`findmnt` writes a space in a path as

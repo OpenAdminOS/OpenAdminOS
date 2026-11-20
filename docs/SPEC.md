@@ -2548,6 +2548,12 @@ Mockup: `docs/mockups/34-local-reset.html`.
   Chromium's wait for a second launch, except the Windows task list (15
   seconds), which reads every task; a wipe killed by a second launch resumes
   from the marker.
+- **Folders above** the data folder or a cache are not checked (decided in
+  review round 18, after round 17 had added it): whatever `~/Library`,
+  `~/.config` or `%APPDATA%` resolve to, the OpenAdminOS folder at its real
+  location is the one the app has used, and only its contents go, so a link
+  or mount above it does not widen what is removed; checking them refused
+  resets for people who link `~/.config` with a dotfile manager.
 - **Links.** A data folder that is itself a link is refused at the request
   and never emptied at launch (it may point at a shared folder). Sign-out
   skips token caches that are links or files with more than one hard link,
@@ -2555,8 +2561,8 @@ Mockup: `docs/mockups/34-local-reset.html`.
   them. The folder counts as a link when its path has `.` or `..` segments,
   when its real location is not its real parent plus its own name (so
   `link/` is caught too; compared by device and inode, so letter case does
-  not matter), when a folder between the home folder and it is a link (also
-  for the caches and the LaunchAgent plist; each marker write checks again), when it or any folder inside it is on another device (a
+  not matter; each marker write checks again, and the launch wipe stops if
+  the folder is swapped for another while it runs), when it or any folder inside it is on another device (a
   mounted volume or disk image; a folder that cannot be read counts too),
   or, on Linux, when a mount sits at or inside it (a bind mount; an
   unreadable mount table counts too). Cache folders outside the data folder
