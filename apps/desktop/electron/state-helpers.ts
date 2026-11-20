@@ -109,9 +109,12 @@ export function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 export function humanizeScheduledRunError(message: string, accessDenial?: GraphAccessDenial): string {
   const raw = message.trim();
   const lower = raw.toLowerCase();
-  if (accessDenial) return graphAccessDenialText(accessDenial);
-  // Only the app's own words count: a "403 MiB" in what Ollama said is not a Graph denial.
-  const unknownDenial = graphAccessDenialFromError(raw.split("Ollama said:")[0] ?? raw);
+  // Only the app's own words count: a "403 MiB" in what Ollama said is not a
+  // Graph denial, and a run saved by an older build can carry one read from it.
+  const own = raw.split("Ollama said:")[0] ?? raw;
+  const quotesOllama = own !== raw && /^Ollama /.test(raw);
+  if (accessDenial && !quotesOllama) return graphAccessDenialText(accessDenial);
+  const unknownDenial = quotesOllama ? undefined : graphAccessDenialFromError(own);
   if (unknownDenial) return graphAccessDenialText(unknownDenial);
   if (lower.includes("graph request failed") && lower.includes("fetch failed")) {
     return "Microsoft Graph request failed. Check network or VPN connectivity, then rerun the schedule.";

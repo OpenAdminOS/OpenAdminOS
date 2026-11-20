@@ -11,6 +11,7 @@ import {
   tokenCachePartition,
 } from "./state-helpers.js";
 import { GRAPH_CLI_CLIENT_ID, OPENADMINOS_CLIENT_ID } from "@openadminos/runtime";
+import { classifyGraphAccessDenied, graphAccessDenialText } from "@openadminos/agent-sdk";
 
 describe("Graph cache nextLink validation", () => {
   it("keeps beta paths, query values, and caller headers", () => {
@@ -618,6 +619,17 @@ describe("humanizeScheduledRunError", () => {
     const text = humanizeScheduledRunError(message);
     assert.ok(text.startsWith("Ollama could not load gpt-oss:20b"), text);
     assert.doesNotMatch(text, /Graph/);
+  });
+
+  it("ignores a Graph denial an older build saved from what Ollama said", () => {
+    const message = "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. Ollama said: cudaMalloc failed: out of memory (403 MiB)";
+    const text = humanizeScheduledRunError(message, classifyGraphAccessDenied({}));
+    assert.ok(text.startsWith("Ollama could not load gpt-oss:20b"), text);
+  });
+
+  it("keeps a stored Graph denial for an error that is not Ollama's", () => {
+    const denial = classifyGraphAccessDenied({});
+    assert.equal(humanizeScheduledRunError("Graph responded with HTTP 403 for GET /users", denial), graphAccessDenialText(denial));
   });
 
   it("still reads a Graph 403 in the app's own words", () => {
