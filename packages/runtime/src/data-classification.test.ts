@@ -2,6 +2,7 @@ import { withTemplateInterpolations, type TemplateInterpolation } from "./reques
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
+import { setImmediate as nextTick } from "node:timers/promises";
 import { DATA_CLASSES_BY_SENSITIVITY, highestDataClass, maxDataClass, type DataClass } from "@openadminos/agent-sdk";
 import { ClassificationLedger, classificationDiagnostics, classifyData, hasGraphFieldClasses, registerGraphTenantData, registerRenderedFragment, registerTenantData, withClassificationScope, withRequestClassification, type RequestClassificationEvent } from "./data-classification.js";
 import { GRAPH_FIELD_CLASSES, GRAPH_FIELD_CLASSES_VERSION, GRAPH_ROUTE_ALIASES } from "./graph-field-classes.js";
@@ -9,7 +10,7 @@ import { GRAPH_CLASSIFICATION_FIXTURES } from "./graph-classification.fixtures.j
 import { fenceTenantData } from "./tenant-data.js";
 import { renderPromptTemplate } from "./template-engine.js";
 import { REQUEST_CLASSIFICATION_MAX_SECTION } from "./request-classification.js";
-import { CLASSIFICATION_QUEUE_MAX_BYTES, CLASSIFICATION_QUEUE_MAX_JOBS, ClassificationWorker, reserveClassificationRequest } from "./classification-worker-client.js";
+import { CLASSIFICATION_QUEUE_MAX_BYTES, CLASSIFICATION_QUEUE_MAX_JOBS, ClassificationSlice, ClassificationWorker, reserveClassificationRequest } from "./classification-worker-client.js";
 import { TenantValueIndex } from "./tenant-value-index.js";
 import { agentTemplateToRegistrySummary, parseAgentTemplate } from "./agent-template.js";
 
@@ -813,7 +814,7 @@ test("provider dispatch preserves incomplete coverage while scoped ingress is pe
   const events: RequestClassificationEvent[] = [];
   let resolveFinished!: () => void;
   const finished = new Promise<void>(resolve => { resolveFinished = resolve; });
-  const pending = ledger.scheduleRegistration(() => finished);
+  const pending = ledger.scheduleRegistration(1, () => finished);
   const request = { prompt: "A short request" };
   const model = withRequestClassification({
     available: true,
@@ -961,6 +962,38 @@ test("request observation reserves capacity before scheduling and cancels withou
   } finally {
     for (const job of jobs) job.release();
     ledger.dispose();
+  }
+});
+
+test("pending ingress reserves capacity across ledgers before starting and shares one continuation per turn", async () => {
+  const ledgers = Array.from({ length: 14 }, () => new ClassificationLedger());
+  const entries: string[] = [];
+  const cost = Math.floor(CLASSIFICATION_QUEUE_MAX_BYTES / 12);
+  const jobs = ledgers.map((ledger, index) => ledger.scheduleRegistration(cost, async signal => {
+    entries.push(`start ${index}`);
+    await new ClassificationSlice(signal).yield();
+    entries.push(`resume ${index}`);
+  }));
+  try {
+    assert.equal(entries.length, 0);
+    assert.equal(reserveClassificationRequest(32), undefined);
+    assert.equal(ledgers[12]!.classifyRequest({ prompt: "fixture" }).coverageIncomplete, true);
+    assert.equal(ledgers[13]!.classifyRequest({ prompt: "fixture" }).effectiveClass, "credential");
+    await nextTick();
+    assert.deepEqual(entries, ["start 0"]);
+    await nextTick();
+    assert.deepEqual(entries, ["start 0", "start 1"]);
+    ledgers[11]!.dispose();
+    const reused = reserveClassificationRequest(cost);
+    assert.ok(reused);
+    reused.release();
+    await Promise.all(jobs);
+    assert.equal(entries.length, 22);
+    assert.ok(!entries.includes("start 11"));
+    assert.equal(ledgers[12]!.classifyRequest({ prompt: "fixture" }).unexamined.registrations, 1);
+  } finally {
+    for (const ledger of ledgers) ledger.dispose();
+    await Promise.all(jobs);
   }
 });
 

@@ -1,5 +1,5 @@
 import { walkDataClasses, type ClassificationOptions } from "./data-classification.js";
-import { CLASSIFICATION_QUEUE_MAX_BYTES, ClassificationSlice } from "./classification-worker-client.js";
+import { ClassificationSlice } from "./classification-worker-client.js";
 import type { ClassifiedValues } from "./request-classification.js";
 
 export interface WorkerGraphResult {
@@ -11,6 +11,8 @@ export interface WorkerGraphResult {
 type GraphObservation = ClassifiedValues["fields"][number];
 const MAX_GRAPH_MATCH_VALUE = 32_768;
 const RESULT_BATCH_UNITS = 16_384;
+export const MAX_GRAPH_INPUT_BYTES = 16 * 1024 * 1024;
+const MAX_GRAPH_MESSAGE_BYTES = 512 * 1024;
 
 /** Transfer bounded chunks without cloning the field objects on the main thread. */
 export function packWorkerGraphResult(data: unknown, options: ClassificationOptions): WorkerGraphResult {
@@ -41,22 +43,66 @@ export function packWorkerGraphResult(data: unknown, options: ClassificationOpti
   return { batches, dropped, incomplete: result.budgetExhausted };
 }
 
-/** Estimate retained JSON input bytes without constructing a second copy of the page. */
-export async function graphClassificationBytes(data: unknown, signal?: AbortSignal): Promise<number> {
-  const slice = new ClassificationSlice();
-  let bytes = 0;
-  for (const amount of graphValueBytes(data, new Set())) {
-    bytes += amount;
-    if (bytes > CLASSIFICATION_QUEUE_MAX_BYTES) throw new Error("Graph classification input exceeds the worker queue budget.");
-    if (slice.elapsed) {
-      signal?.throwIfAborted();
-      await slice.yield();
+/** Size retained input and plan bounded worker messages without copying the page. */
+export async function graphClassificationInput(data: unknown, signal: AbortSignal): Promise<{
+  bytes: number;
+  header: unknown;
+  collection?: string | true;
+  rows?: unknown[];
+  batches: Array<[start: number, end: number]>;
+}> {
+  const slice = new ClassificationSlice(signal);
+  const record = data !== null && typeof data === "object" && !Array.isArray(data) ? data as Record<string, unknown> : undefined;
+  let field: string | undefined;
+  if (record) {
+    for (const key in record) {
+      if (Object.hasOwn(record, key) && key.toLowerCase() === "value" && Array.isArray(record[key])) {
+        field = key;
+        break;
+      }
+      if (slice.elapsed) await slice.yield();
     }
   }
-  return bytes;
+  const rows = Array.isArray(data) ? data : field ? record![field] as unknown[] : undefined;
+  let bytes = 0;
+  const add = (amount: number) => {
+    bytes += amount;
+    if (bytes > MAX_GRAPH_INPUT_BYTES) throw new Error("Graph classification input exceeds the worker queue budget.");
+    return slice.elapsed;
+  };
+  if (!Array.isArray(data)) {
+    for (const amount of graphValueBytes(data, new Set(), field)) {
+      if (add(amount)) await slice.yield();
+      if (bytes > MAX_GRAPH_MESSAGE_BYTES) throw new Error("Graph classification header exceeds the message budget.");
+    }
+  }
+  const batches: Array<[number, number]> = [];
+  let first = 0;
+  let batchBytes = 0;
+  if (rows) {
+    bytes += 32;
+    for (let index = 0; index < rows.length; index++) {
+      const before = bytes;
+      if (add(32)) await slice.yield();
+      for (const amount of graphValueBytes(rows[index], new Set())) {
+        if (add(amount)) await slice.yield();
+        if (bytes - before > MAX_GRAPH_MESSAGE_BYTES) throw new Error("Graph classification row exceeds the message budget.");
+      }
+      const rowBytes = bytes - before;
+      if (index - first >= 4 || batchBytes + rowBytes > MAX_GRAPH_MESSAGE_BYTES) {
+        batches.push([first, index]);
+        first = index;
+        batchBytes = 0;
+      }
+      batchBytes += rowBytes;
+    }
+    if (first < rows.length) batches.push([first, rows.length]);
+  }
+  const header = field ? { ...record, [field]: [] } : rows ? undefined : data;
+  return { bytes, header, ...(rows ? { rows, collection: field || true } : {}), batches };
 }
 
-function* graphValueBytes(value: unknown, active: Set<object>): Iterable<number> {
+function* graphValueBytes(value: unknown, active: Set<object>, skip?: string): Iterable<number> {
   yield typeof value === "string" ? 32 + 2 * value.length : 32;
   if (!value || typeof value !== "object" || active.has(value)) return;
   if (active.size >= 128) throw new Error("Graph classification input exceeds the supported nesting depth.");
@@ -64,6 +110,7 @@ function* graphValueBytes(value: unknown, active: Set<object>): Iterable<number>
   for (const key in value) {
     if (!Object.hasOwn(value, key)) continue;
     yield 16 + 2 * key.length;
+    if (key === skip) continue;
     yield* graphValueBytes((value as Record<string, unknown>)[key], active);
   }
   active.delete(value);

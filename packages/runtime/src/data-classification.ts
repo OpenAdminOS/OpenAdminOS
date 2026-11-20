@@ -16,7 +16,7 @@ export { ClassificationWorkerRetiredError, releaseClassificationIdentityShard, r
 export { CLASSIFICATION_TTL_MS, ClassificationLedger, clearTenantClassificationLedgers, currentClassificationLedger, classificationDiagnostics, collectClassifiedValues, registerClassifiedValues, registerGraphTenantData, registerRenderedFragment, registerTenantData, registerTransientTenantData, withTransientClassificationScope, withClassificationScope, withRequestClassification } from "./request-classification.js";
 export type { ClassifiedValues, ClassificationSpan, RequestClassification, RequestClassificationEvent } from "./request-classification.js";
 
-export { ClassificationSlice, classifyCacheRows } from "./classification-worker-client.js";
+export { ClassificationSlice, classifyCacheRows, yieldClassificationTurn } from "./classification-worker-client.js";
 export {
   addCacheIdentity, addUserFirstName, describeCacheRow, INCOMPLETE_CACHE_CLASSIFICATION,
   prepareCacheClassification, cacheClassificationFields, type CacheClassificationResult,

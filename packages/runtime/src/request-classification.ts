@@ -1,10 +1,9 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { setImmediate as yieldToMain } from "node:timers/promises";
 import { DATA_CLASSES_BY_SENSITIVITY, maxDataClass, type DataClass, type DataClassCounts, type LlmOptions, type ProviderId, type RunLlmApi } from "@openadminos/agent-sdk";
 import { emptyDataClassCounts, graphClassificationSource, requestTextSpans, walkDataClasses, type ClassificationOptions, type TextSpan } from "./data-classification.js";
 import { GRAPH_FIELD_CLASSES_VERSION, type SecurityMaskRole } from "./graph-field-classes.js";
-import { CLASSIFICATION_QUEUE_MAX_JOBS, ClassificationSlice, requestWorker, reserveClassificationRequest, syncIdentityShards, type ClassificationReservation, type ClassificationWorker } from "./classification-worker-client.js";
-import { graphClassificationBytes } from "./graph-ingress-classification.js";
+import { ClassificationSlice, requestWorker, reserveClassificationRequest, syncIdentityShards, yieldClassificationTurn, type ClassificationReservation, type ClassificationWorker } from "./classification-worker-client.js";
+import { graphClassificationInput, MAX_GRAPH_INPUT_BYTES } from "./graph-ingress-classification.js";
 import { TenantValueIndex } from "./tenant-value-index.js";
 
 export interface ClassificationSpan extends TextSpan {
@@ -381,9 +380,9 @@ function packWorkerResult(spans: readonly ClassificationSpan[], classification: 
   return { classification, offsets, sources: [...sources.keys()] };
 }
 
-async function unpackWorkerResult({ classification, offsets, sources }: WorkerResult): Promise<RequestClassification> {
+async function unpackWorkerResult({ classification, offsets, sources }: WorkerResult, signal?: AbortSignal): Promise<RequestClassification> {
   const spans: ClassificationSpan[] = [];
-  const slice = new ClassificationSlice();
+  const slice = new ClassificationSlice(signal);
   for (let at = 0; at < offsets.length; at += 6) {
     const role = offsets[at + 5];
     spans.push({ start: offsets[at]!, end: offsets[at + 1]!,
@@ -433,7 +432,7 @@ export class ClassificationLedger {
       return;
     }
     signal.addEventListener("abort", release, { once: true });
-    this.trackObservation(yieldToMain(undefined, { signal }).then(() => work(signal)).finally(() => {
+    this.trackObservation(yieldClassificationTurn(signal).then(() => work(signal)).finally(() => {
       signal.removeEventListener("abort", release);
       release();
     }));
@@ -444,20 +443,27 @@ export class ClassificationLedger {
   }
 
   /** Mark pending evidence before returning its input to the caller. */
-  scheduleRegistration(work: (signal: AbortSignal) => Promise<void>): Promise<void> {
+  scheduleRegistration(bytes: number, work: (signal: AbortSignal, reservation: ClassificationReservation) => Promise<void>): Promise<void> {
     if (this.disposed) return Promise.resolve();
-    if (this.pendingRegistrations >= CLASSIFICATION_QUEUE_MAX_JOBS) {
+    const reservation = reserveClassificationRequest(bytes);
+    if (!reservation) {
       this.incompleteRegistrations++;
       return Promise.resolve();
     }
     this.pendingRegistrations++;
     this.registrationGeneration++;
     const signal = this.observationLifetime.signal;
-    const observation = yieldToMain(undefined, { signal }).then(() => work(signal))
+    const release = reservation.release;
+    signal.addEventListener("abort", release, { once: true });
+    const observation = yieldClassificationTurn(signal).then(() => work(signal, reservation))
       .catch(() => { if (!this.disposed) this.incompleteRegistrations++; })
       .finally(async () => {
         this.pendingRegistrations--;
-        await this.resolveRenderings();
+        try { await this.resolveRenderings(); }
+        finally {
+          signal.removeEventListener("abort", release);
+          release();
+        }
       });
     this.trackObservation(observation);
     return observation;
@@ -571,7 +577,7 @@ export class ClassificationLedger {
     if (this.disposed) return;
     this.transient ??= new ClassificationLedger(this.identityIndex);
     const transient = this.transient;
-    void this.scheduleRegistration(signal => transient.observeIngress(source, data, {}, signal));
+    void this.scheduleRegistration(MAX_GRAPH_INPUT_BYTES, (signal, reservation) => transient.observeIngress(source, data, {}, signal, reservation));
   }
 
   register(source: string, data: unknown, options: ClassificationOptions = {}): void {
@@ -585,46 +591,43 @@ export class ClassificationLedger {
   }
 
   registerIngress(source: string, data: unknown, options: ClassificationOptions): void {
-    void this.scheduleRegistration(signal => this.observeIngress(
-      source.startsWith("graph:") && options.graphPath ? graphClassificationSource(options.graphPath) : source, data, options, signal,
+    void this.scheduleRegistration(MAX_GRAPH_INPUT_BYTES, (signal, reservation) => this.observeIngress(
+      source.startsWith("graph:") && options.graphPath ? graphClassificationSource(options.graphPath) : source, data, options, signal, reservation,
     ));
   }
 
   registerGraph(graphPath: string, data: unknown, signal?: AbortSignal): Promise<void> {
-    return this.scheduleRegistration(lifetime => this.observeIngress(
-      graphClassificationSource(graphPath), data, { graphPath }, signal ? AbortSignal.any([signal, lifetime]) : lifetime,
+    return this.scheduleRegistration(MAX_GRAPH_INPUT_BYTES, (lifetime, reservation) => this.observeIngress(
+      graphClassificationSource(graphPath), data, { graphPath }, signal ? AbortSignal.any([signal, lifetime]) : lifetime, reservation,
     ));
   }
 
-  private async observeIngress(source: string, data: unknown, options: ClassificationOptions, signal: AbortSignal): Promise<void> {
+  private async observeIngress(source: string, data: unknown, options: ClassificationOptions, signal: AbortSignal, reservation: ClassificationReservation): Promise<void> {
     if (this.disposed) return;
     const { identityIndex = this.identityIndex, ...settings } = options;
     let indexCurrent = () => true;
-    const bytes = await graphClassificationBytes(data, signal);
+    const { bytes, header, rows, collection, batches } = await graphClassificationInput(data, signal);
+    reservation.shrink(bytes);
     const classified = await requestWorker().run<"graph">(bytes, async client => {
-      const { shards, isCurrent } = await syncIdentityShards(client, identityIndex, new ClassificationSlice());
+      const slice = new ClassificationSlice(signal);
+      const { shards, isCurrent } = await syncIdentityShards(client, identityIndex, slice);
       indexCurrent = isCurrent;
       signal.throwIfAborted();
-      const record = data !== null && typeof data === "object" && !Array.isArray(data) ? data as Record<string, unknown> : undefined;
-      const field = record && Object.keys(record).find(key => key.toLowerCase() === "value" && Array.isArray(record[key]));
-      const rows = Array.isArray(data) ? data : field ? record![field] as unknown[] : undefined;
-      if (!rows || rows.length < 2) return { message: { type: "graph", data, settings, shards } };
       // Preserve the root wrapper and order for the worker's single field-map walk.
       // Small input messages also avoid a page-sized main-thread clone.
-      const slice = new ClassificationSlice();
-      for (let offset = 0; offset < rows.length; offset += 4) {
-        signal?.throwIfAborted();
+      for (const [start, end] of batches) {
+        signal.throwIfAborted();
         if (this.disposed) throw new Error("Graph classification evidence was released.");
-        client.post({ type: "graph-rows", rows: rows.slice(offset, offset + 4) });
+        client.post({ type: "graph-rows", rows: rows!.slice(start, end) });
         if (slice.elapsed) await slice.yield();
       }
-      const header = field ? { ...record, [field]: [] } : undefined;
-      return { message: { type: "graph", data: header, settings, shards, collection: field || true } };
-    }, signal);
+      return { message: { type: "graph", data: header, settings, shards, collection } };
+    }, signal, reservation);
     if (this.disposed) return;
+    await yieldClassificationTurn(signal);
     this.dropped += classified.dropped;
     if (classified.incomplete || !indexCurrent()) this.incompleteRegistrations++;
-    const slice = new ClassificationSlice();
+    const slice = new ClassificationSlice(signal);
     const decoder = new TextDecoder();
     for (const batch of classified.batches) {
       const fields = JSON.parse(decoder.decode(batch)) as ClassifiedValues["fields"];
@@ -673,7 +676,9 @@ export class ClassificationLedger {
     if (this.resolvingRenderings || this.pendingRegistrations || !this.pendingRenderings.length) return;
     this.resolvingRenderings = true;
     try {
-      const slice = new ClassificationSlice();
+      const signal = this.observationLifetime.signal;
+      await yieldClassificationTurn(signal);
+      const slice = new ClassificationSlice(signal);
       let generation = this.registrationGeneration;
       for (let index = 0;;) {
         if (this.pendingRegistrations || this.disposed) return;
@@ -688,6 +693,8 @@ export class ClassificationLedger {
       }
       this.pendingRenderings.length = 0;
       this.pendingRenderUnits = 0;
+    } catch {
+      if (!this.disposed) this.incompleteRegistrations++;
     } finally {
       this.resolvingRenderings = false;
     }
@@ -1099,7 +1106,7 @@ export class ClassificationLedger {
       this.prior.reduce((sum, ledger) => sum + ledgerUnits(ledger), 0);
     // No arbitrary-sized lookup or folding work enters the main-thread path.
     if (length <= MAIN_SCAN_LIMIT && retainedUnits <= 4_096 && !this.identityIndex?.workerShards) {
-      const slice = new ClassificationSlice();
+      const slice = new ClassificationSlice(request.signal);
       const result = this.scanRequest(request, this.renderedState(evidence));
       if (slice.elapsed) await slice.yield();
       return this.withCurrentCoverage(result, evidence);
@@ -1156,7 +1163,7 @@ export class ClassificationLedger {
     let indexCurrent = () => true;
     const bytes = 128 + 2 * ((request.system?.length ?? 0) + request.prompt.length);
     const result = await requestWorker().run<"scan">(bytes, async client => {
-      const slice = new ClassificationSlice();
+      const slice = new ClassificationSlice(signal);
       const sections = { system: await encodeSection(request.system, slice), prompt: await encodeSection(request.prompt, slice) };
       const transfers = Object.values(sections).flatMap(section => section ? [section.buffer] : []);
       const { retained, identityIndex, ...state } = this.renderedState(evidence);
@@ -1180,7 +1187,8 @@ export class ClassificationLedger {
         transfers,
       };
     }, signal, reservation);
-    const classification = await unpackWorkerResult(result);
+    await yieldClassificationTurn(signal);
+    const classification = await unpackWorkerResult(result, signal);
     if (!wasDisposed && this.disposed) throw new Error("Request classification evidence was released.");
     return indexCurrent() ? classification : { ...classification, coverageIncomplete: true, effectiveClass: "credential" };
   }

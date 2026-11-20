@@ -1,5 +1,4 @@
 import { performance } from "node:perf_hooks";
-import { setImmediate as yieldToMain } from "node:timers/promises";
 import { Worker } from "node:worker_threads";
 import type { ClassificationOptions } from "./data-classification.js";
 import type { CacheStartupPage, CacheClassificationRow, CacheClassificationResult } from "./cache-classification.js";
@@ -27,12 +26,13 @@ type WorkerMessage =
   | { type: "drop"; id: number }
   | WorkerJob;
 
-const MAIN_SLICE_MS = 2;
+const MAIN_SLICE_MS = 1.5;
 const WORKER_TIMEOUT_MS = 3_000;
 export const CLASSIFICATION_QUEUE_MAX_JOBS = 24;
 export const CLASSIFICATION_QUEUE_MAX_BYTES = 128 * 1024 * 1024;
 
 export interface ClassificationReservation {
+  shrink(bytes: number): void;
   release(): void;
 }
 
@@ -45,12 +45,19 @@ class ClassificationAdmission {
     this.jobs++;
     this.bytes += bytes;
     let released = false;
-    return { release: () => {
-      if (released) return;
-      released = true;
-      this.jobs--;
-      this.bytes -= bytes;
-    } };
+    return {
+      shrink: measured => {
+        if (released || measured >= bytes) return;
+        this.bytes -= bytes - measured;
+        bytes = measured;
+      },
+      release: () => {
+        if (released) return;
+        released = true;
+        this.jobs--;
+        this.bytes -= bytes;
+      },
+    };
   }
 }
 
@@ -67,13 +74,49 @@ interface QueuedJob {
   reject(error: Error): void;
 }
 
+const mainTurns = new Set<() => void>();
+let dispatchTurn: ReturnType<typeof setImmediate> | undefined;
+
+function scheduleMainTurn(): void {
+  if (dispatchTurn || !mainTurns.size) return;
+  dispatchTurn = setImmediate(() => {
+    dispatchTurn = undefined;
+    const next = mainTurns.values().next().value;
+    if (next) {
+      mainTurns.delete(next);
+      next();
+    }
+    scheduleMainTurn();
+  });
+}
+
+/** Only one observer continuation runs per main-loop turn across all scopes. */
+export function yieldClassificationTurn(signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(signal.reason);
+  return new Promise((resolve, reject) => {
+    const resume = () => {
+      signal?.removeEventListener("abort", cancel);
+      resolve();
+    };
+    const cancel = () => {
+      mainTurns.delete(resume);
+      reject(signal?.reason);
+    };
+    signal?.addEventListener("abort", cancel, { once: true });
+    mainTurns.add(resume);
+    scheduleMainTurn();
+  });
+}
+
 export class ClassificationSlice {
   private deadline = performance.now() + MAIN_SLICE_MS;
+
+  constructor(private readonly signal?: AbortSignal) {}
 
   get elapsed(): boolean { return performance.now() >= this.deadline; }
 
   async yield(): Promise<void> {
-    await yieldToMain();
+    await yieldClassificationTurn(this.signal);
     this.deadline = performance.now() + MAIN_SLICE_MS;
   }
 }
@@ -191,7 +234,7 @@ export class ClassificationWorker {
             finish();
             resolve(result as WorkerReplies[T]);
           };
-          const preparation = Promise.resolve().then(() => {
+          const preparation = yieldClassificationTurn(jobSignal).then(() => {
             if (this.failure) throw this.failure;
             return prepare(this);
           }).then(({ message, transfers }) => this.post(message, transfers)).catch(error => {

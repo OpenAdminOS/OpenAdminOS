@@ -1104,7 +1104,7 @@ describe("Intune Chat read-only tools", () => {
     const gate = new Promise<void>(resolve => { resolveGate = resolve; });
     const registrations: Promise<void>[] = [];
     t.mock.method(ledger, "registerGraph", () => {
-      const job = ledger.scheduleRegistration(() => gate);
+      const job = ledger.scheduleRegistration(1, () => gate);
       registrations.push(job);
       return job;
     });

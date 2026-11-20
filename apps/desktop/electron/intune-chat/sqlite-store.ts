@@ -6,7 +6,7 @@ import { setImmediate as yieldToMain } from "node:timers/promises";
 import { collectTenantValues, TenantValueIndex } from "./tenant-values.js";
 import {
   addCacheIdentity, addUserFirstName, ClassificationSlice, classifyCacheRows, currentClassificationLedger,
-  GRAPH_FIELD_CLASSES_VERSION, prepareCacheClassification, registerClassifiedValues,
+  GRAPH_FIELD_CLASSES_VERSION, prepareCacheClassification, registerClassifiedValues, yieldClassificationTurn,
   ClassificationWorkerRetiredError, clearTenantClassificationLedgers, releaseClassificationIdentityShard, retireClassificationWorker,
   type CacheClassificationResult, type ClassificationOptions, type ClassifiedValues,
 } from "@openadminos/runtime/data-classification";
@@ -812,11 +812,14 @@ export class IntelligenceSqliteStore {
     signal?.throwIfAborted();
     this.assertTenantWritable(input.tenantId, "graph cache");
     const rows: NormalizedGraphResourceRow[] = [];
-    const slice = new ClassificationSlice();
+    let deadline = performance.now() + 2;
     for (const row of input.rows) {
       signal?.throwIfAborted();
       rows.push(prepareGraphResource(row));
-      if (slice.elapsed) await slice.yield();
+      if (performance.now() >= deadline) {
+        await yieldToMain();
+        deadline = performance.now() + 2;
+      }
     }
     signal?.throwIfAborted();
     if (this.cacheCleared.get(input.tenantId) !== cacheGeneration) {
@@ -2609,7 +2612,7 @@ export class IntelligenceSqliteStore {
     let jobs = this.cacheClassifications.get(tenantId);
     if (!jobs) this.cacheClassifications.set(tenantId, jobs = new Set());
     const pending = jobs;
-    const job = yieldToMain().then(async () => {
+    const job = yieldClassificationTurn().then(async () => {
       if (!current()) return;
       if (identityResources.has(resource)) {
         const identity = new Map<string, Map<GraphCacheResourceKind, TenantValueIndex>>();
@@ -2638,6 +2641,7 @@ export class IntelligenceSqliteStore {
     try {
       await yieldToMain();
       await beforeClassification?.();
+      await yieldClassificationTurn();
       if (this.closed) return;
       const resources = this.db.prepare("SELECT DISTINCT tenant_id, resource FROM graph_resources ORDER BY tenant_id, resource").all() as
         unknown as Array<{ tenant_id: string; resource: GraphCacheResourceKind }>;
@@ -2695,6 +2699,8 @@ export class IntelligenceSqliteStore {
         throw error;
       }
       if (!current() || result.nextRowId === undefined) return;
+      await yieldClassificationTurn();
+      if (!current()) return;
       cursor = result.nextRowId;
       if (indexOnly) {
         const slice = new ClassificationSlice();
@@ -2714,7 +2720,7 @@ export class IntelligenceSqliteStore {
           WHERE rowid = ? AND snapshot_id = ? AND tenant_id = ? AND resource = ?
           AND (classification_json IS NULL OR classification_json NOT LIKE ?)`);
         for (const { rowid, snapshotId, sidecar } of result.startupSidecars) {
-          await yieldToMain();
+          await yieldClassificationTurn();
           if (!current()) return;
           // The classification observer never waits for another SQLite writer.
           // Each autocommit ends before the next tick or a Chat write can run.
@@ -2729,7 +2735,6 @@ export class IntelligenceSqliteStore {
           }
         }
       }
-      await yieldToMain();
     }
   }
 
@@ -5071,8 +5076,10 @@ function registerCacheRows(
     registerClassifiedValues(source, { fields: [], incomplete: false });
     return;
   }
-  void ledger.scheduleRegistration(async signal => {
-    const slice = new ClassificationSlice();
+  // Reserve raw text, parsed rows and their projected views before retaining them.
+  const bytes = rows.reduce((total, row) => total + 128 + 12 * row.raw_json.length, 0);
+  void ledger.scheduleRegistration(bytes, async signal => {
+    const slice = new ClassificationSlice(signal);
     for (let index = 0; index < rows.length; index++) {
       signal.throwIfAborted();
       const fields = cacheClassificationFields(parsed[index], sidecar(index), originals[index]);
