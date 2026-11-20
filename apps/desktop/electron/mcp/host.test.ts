@@ -652,7 +652,11 @@ describe("MCP installs in app state", () => {
       assert.match(mcpCalls[0]!.error!, /contained tenant data from this conversation/);
       assert.equal(mcpCalls[1]?.mcpSource?.blocked, undefined);
       assert.equal(mcpCalls[1]?.error, undefined);
-    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+    } finally {
+      await store["requireIntelligenceStore"]().waitForCacheClassification();
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   for (const revoke of ["disable", "uninstall"] as const) {
