@@ -24,6 +24,84 @@ import type {
 } from "@openadminos/agent-sdk";
 
 describe("Intune Chat SQLite store", () => {
+  for (const operation of ["baseline", "refresh", "backfill", "clear", "purge"] as const) {
+    it(`preserves cache transaction behavior under a competing writer during ${operation}`, async t => {
+      const dir = await mkdtemp(join(tmpdir(), "openadminos-cache-locked-"));
+      const path = join(dir, "openadminos.db");
+      const store = new IntelligenceSqliteStore(path, { backgroundClassification: true });
+      const writer = new DatabaseSync(path);
+      try {
+        const snapshot = {
+          tenantId: "tenant-1", resource: "conditionalAccessPolicies" as const, label: "Policies",
+          scopeSet: [], rows: [{ id: "policy", state: "enabled" }], refreshedAt: "2026-01-01T00:00:00.000Z",
+        };
+        await store.waitForCacheClassification();
+        await store.replaceGraphResourcesInBatches(snapshot);
+        await store.waitForCacheClassification();
+        const db = store["db"];
+        db.exec("PRAGMA busy_timeout = 50");
+        const prepare = db.prepare.bind(db);
+        let readInTransaction = false;
+        let sawFirstDelete = false;
+        t.mock.method(db, "prepare", (sql: string) => {
+          const statement = prepare(sql);
+          if (sql.includes("SELECT v.tenant_id") || sql.includes("SELECT rowid, tenant_id, resource, raw_json")) {
+            const all = statement.all.bind(statement);
+            t.mock.method(statement, "all", (...args: Parameters<typeof statement.all>) => {
+              readInTransaction ||= db.isTransaction && writer.isTransaction;
+              return all(...args);
+            });
+          }
+          if (sql.startsWith("DELETE FROM graph_resources")) sawFirstDelete = true;
+          return statement;
+        });
+        const refresh = { ...snapshot, rows: [{ id: "policy", state: "disabled" }],
+          refreshedAt: "2026-01-02T00:00:00.000Z" };
+        const operations = {
+          baseline: () => store.createDriftBaseline({
+            tenantId: snapshot.tenantId, name: "Fixture", now: refresh.refreshedAt, resources: [snapshot.resource],
+          }),
+          refresh: () => store.replaceGraphResourcesInBatches(refresh),
+          backfill: () => [...store["backfillCacheClassifications"]()],
+          clear: () => store.clearGraphCache(snapshot.tenantId),
+          purge: () => store.purgeTenant(snapshot.tenantId),
+        };
+
+        writer.exec("BEGIN IMMEDIATE");
+        if (operation === "backfill") {
+          operations.backfill();
+        } else {
+          await assert.rejects(async () => operations[operation](), { errcode: 5 });
+        }
+        if (operation === "clear") assert.equal(sawFirstDelete, true);
+        if (operation === "baseline" || operation === "refresh" || operation === "backfill") {
+          // A successful read inside the transaction forces a deferred
+          // upgrade. BEGIN IMMEDIATE fails before reaching this read.
+          assert.equal(readInTransaction, true);
+        }
+        assert.equal(db.isTransaction, false);
+        assert.equal(writer.prepare("SELECT COUNT(*) AS count FROM graph_resources").get()?.count, 1);
+        assert.equal(writer.prepare("SELECT COUNT(*) AS count FROM drift_baselines").get()?.count, 0);
+        if (operation === "backfill") {
+          assert.equal(writer.prepare("SELECT classification_json FROM graph_resources").get()?.classification_json, null);
+        }
+
+        writer.exec("ROLLBACK");
+        t.mock.restoreAll();
+        await operations[operation]();
+        const count = writer.prepare("SELECT COUNT(*) AS count FROM graph_resources").get()?.count;
+        assert.equal(count, operation === "clear" || operation === "purge" ? 0 : 1);
+        if (operation === "baseline") assert.ok(store.getActiveDriftBaseline(snapshot.tenantId));
+        if (operation === "refresh") assert.match(String(writer.prepare("SELECT raw_json FROM graph_resources").get()?.raw_json), /disabled/);
+        if (operation === "backfill") assert.equal(typeof writer.prepare("SELECT classification_json FROM graph_resources").get()?.classification_json, "string");
+      } finally {
+        writer.close();
+        await store.close();
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+  }
+
   it("reads drift history before trying to upgrade a transaction while another writer holds the lock", async t => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-drift-locked-"));
     const path = join(dir, "openadminos.db");

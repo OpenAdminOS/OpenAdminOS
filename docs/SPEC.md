@@ -1829,8 +1829,9 @@ connection. The main process publishes sidecars through the existing SQLite
 connection, one row per scheduled turn. Compressed sidecars live in a separate
 table so publication does not rewrite the raw rows. The write checks the row ID and
 snapshot ID on every attempt. Busy writes retry in the background with a
-bounded backoff and a zero SQLite busy timeout. Drift pruning uses a deferred
-transaction so it can return promptly when another connection holds the lock.
+bounded backoff and a zero SQLite busy timeout. Drift pruning, drift baseline
+creation and tracked cache refresh read inside deferred transactions so they
+can return promptly when another connection holds the writer lock.
 Backfill skips rows larger than 256 KiB of raw JSON or with a sidecar above the
 decode budget. Missing sidecars leave coverage incomplete. The worker transfers
 startup identity entries in batches of up to 16 KiB, even when one row needs

@@ -854,7 +854,8 @@ export class IntelligenceSqliteStore {
   ): string {
     this.assertTenantWritable(input.tenantId, "graph cache");
     const snapshotId = `${input.resource}-${input.refreshedAt}-${randomUUID().slice(0, 8)}`;
-    this.db.exec("BEGIN IMMEDIATE");
+    // Tracked refreshes read drift state before upgrading to a writer.
+    this.db.exec("BEGIN");
     try {
       if (DRIFT_TRACKED_RESOURCES.has(input.resource)) {
         this.captureDriftSnapshot({
@@ -1730,16 +1731,16 @@ export class IntelligenceSqliteStore {
   }): DriftBaselineRecord {
     this.assertTenantWritable(input.tenantId, "drift baseline");
     const name = normalizeDriftBaselineName(input.name);
-    const existing = this.getActiveDriftBaseline(input.tenantId);
-    if (existing) {
-      throw new Error(
-        `An active baseline already exists for this tenant ("${existing.name}"). Retire it before creating a new one.`,
-      );
-    }
-
     const id = `baseline-${input.now}-${randomUUID().slice(0, 8)}`;
-    this.db.exec("BEGIN IMMEDIATE");
+    this.db.exec("BEGIN");
     try {
+      const existing = this.getActiveDriftBaseline(input.tenantId);
+      if (existing) {
+        throw new Error(
+          `An active baseline already exists for this tenant ("${existing.name}"). Retire it before creating a new one.`,
+        );
+      }
+
       const insertPin = this.db.prepare(
         `INSERT INTO drift_baseline_pins (
           baseline_id, tenant_id, resource, graph_id, version, content_hash
@@ -2266,10 +2267,10 @@ export class IntelligenceSqliteStore {
   clearGraphCache(tenantId: string): void {
     this.db.exec("BEGIN");
     try {
-      this.db.prepare("DELETE FROM graph_classification_sidecars WHERE tenant_id = ?").run(tenantId);
       this.db
         .prepare(`DELETE FROM graph_resources WHERE tenant_id = ?`)
         .run(tenantId);
+      this.db.prepare("DELETE FROM graph_classification_sidecars WHERE tenant_id = ?").run(tenantId);
       this.db
         .prepare(`DELETE FROM graph_cache_status WHERE tenant_id = ?`)
         .run(tenantId);
@@ -2752,8 +2753,7 @@ export class IntelligenceSqliteStore {
             try {
               publish.run(GRAPH_FIELD_CLASSES_VERSION, compressed, rowid, snapshotId, tenantId, resource, prefix);
             } catch (error) {
-              if (!(error instanceof Error) || !("errcode" in error) || typeof error.errcode !== "number" ||
-                  (error.errcode & 255) !== 5) throw error;
+              if (!isSqliteBusy(error)) throw error;
               busy.push(sidecar);
             } finally {
               this.db.exec("PRAGMA busy_timeout = 5000");
@@ -2812,10 +2812,9 @@ export class IntelligenceSqliteStore {
     const update = this.db.prepare("UPDATE graph_resources SET classification_json = ? WHERE rowid = ?");
     let cursor = 0;
     for (;;) {
-      const rows = select.all(cursor, prefix, CLASSIFICATION_BATCH_ROWS) as unknown as Array<CachedGraphResourceRow & { tenant_id: string; rowid: number }>;
-      if (!rows.length) return;
       this.db.exec("BEGIN");
       try {
+        const rows = select.all(cursor, prefix, CLASSIFICATION_BATCH_ROWS) as unknown as Array<CachedGraphResourceRow & { tenant_id: string; rowid: number }>;
         for (const row of rows) {
           cursor = row.rowid;
           if (this.disconnectedClassificationTenants.has(row.tenant_id)) continue;
@@ -2827,8 +2826,11 @@ export class IntelligenceSqliteStore {
           }), row.rowid);
         }
         this.db.exec("COMMIT");
+        if (!rows.length) return;
       } catch (error) {
         this.db.exec("ROLLBACK");
+        // A concurrent write leaves the sidecars missing and coverage incomplete.
+        if (isSqliteBusy(error)) return;
         throw error;
       }
       yield;
@@ -5187,6 +5189,11 @@ function ensureColumn(
       throw error;
     }
   }
+}
+
+function isSqliteBusy(error: unknown): boolean {
+  return error instanceof Error && "errcode" in error && typeof error.errcode === "number" &&
+    (error.errcode & 255) === 5;
 }
 
 function normalizeGraphObject(value: unknown, rawJson: string): NormalizedGraphObject {
