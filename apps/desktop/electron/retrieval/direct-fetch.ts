@@ -51,14 +51,14 @@ export function directFetch(input: string | URL | Request, init: RequestInit = {
           reading = stream ?? response;
           reading.once("close", release);
           if (reading.destroyed) release();
-          resolve(new Response(stream ? (Readable.toWeb(stream) as ReadableStream<Uint8Array>) : null, { status, headers: responseHeaders }));
+          return new Response(stream ? (Readable.toWeb(stream) as ReadableStream<Uint8Array>) : null, { status, headers: responseHeaders });
         },
-        (error: unknown) => {
-          release();
-          response.destroy();
-          reject(error);
-        },
-      );
+      ).then(resolve, (error: unknown) => {
+        // Also a Response that could not be built: the request fails instead of staying pending.
+        release();
+        response.destroy();
+        reject(error);
+      });
     });
     // Idle before the headers fails the request; idle while the body is read fails the read.
     request.setTimeout(idleMs, () => {
@@ -90,7 +90,9 @@ async function answer(response: IncomingMessage, method: string): Promise<{ stre
   else if (encoding === "deflate") {
     // Meant to be zlib-wrapped, but some servers send it raw; fetch takes both, so the first byte picks, as fetch does.
     const first = await peekFirstByte(response);
-    if (first !== undefined) decoder = (first & 0x0f) === 0x08 ? createInflate() : createInflateRaw();
+    // An empty body was read to its end by the peek, so it is answered as empty rather than wrapped.
+    if (first === undefined) return { stream: undefined, status, headers };
+    decoder = (first & 0x0f) === 0x08 ? createInflate() : createInflateRaw();
   }
   if (!decoder) return { stream: response, status, headers };
   // The decoded body has another length and no encoding, as fetch reports it.

@@ -471,12 +471,15 @@ name is refused. Retrieval connects directly, with its own HTTP agent per reques
 never through the global fetch or HTTP agents, which send to an environment proxy
 when `NODE_USE_ENV_PROXY` is set: a loopback address missing from `NO_PROXY`
 would otherwise reach the proxy, question included. Like fetch, it decodes a
-gzip, deflate (zlib-wrapped or raw) or br answer and fails a connection that
+gzip, deflate (zlib-wrapped or raw, an empty body read as empty) or br answer and fails a connection that
 sends nothing for 5 minutes, before the answer or while it arrives. A budget
 that runs out also stops a decoded body that is still being decoded after the
 connection closed. A stalled model download says in Settings that the local
 Ollama stopped answering, not the registry, and like an unreachable Ollama it
-does not count as the day's attempt, so the next launch downloads it again. Settings never runs Check for index and an index install at
+does not count as the day's attempt, so the next launch downloads it again. When
+Chat finds the embedding model missing, its `ollama pull` advice names
+`OLLAMA_HOST` for any endpoint other than 127.0.0.1:11434, where the CLI would
+otherwise pull into another Ollama. Settings never runs Check for index and an index install at
 once, so neither reply replaces the other's. A query vector is scaled before
 scoring, so a huge but finite one cannot overflow and rank every passage as 0. A connection reset reads as a failed request with its
 code, not as a stopped Ollama. A vector with an entry that is not a finite

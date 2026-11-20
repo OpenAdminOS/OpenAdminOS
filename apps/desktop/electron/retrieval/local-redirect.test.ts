@@ -77,7 +77,9 @@ describe("local documentation retrieval never follows a redirect from this devic
     const request = t.mock.method(loopbackTransport, "fetch", async (_url: Parameters<typeof fetch>[0], _options?: RequestInit) =>
       Response.json({ error: "model 'nomic-embed-text' not found" }, { status: 404 }),
     );
-    await assert.rejects(ollamaEmbedQuery(endpoint)("test"), /HTTP 404.*ollama pull nomic-embed-text/i);
+    await assert.rejects(ollamaEmbedQuery(endpoint)("test"), /HTTP 404\. The embedding model nomic-embed-text is missing\. Run `ollama pull nomic-embed-text`\.$/);
+    // Elsewhere the CLI's default would pull into another Ollama, so the advice names this one (PR #206 review round 10).
+    await assert.rejects(ollamaEmbedQuery("http://127.0.0.1:11435")("test"), /Run `ollama pull nomic-embed-text` with OLLAMA_HOST set to http:\/\/127\.0\.0\.1:11435\.$/);
     request.mock.mockImplementation(async () => new Response("", { status: 503 }));
     await assert.rejects(ollamaEmbedQuery(endpoint)("test"), (error: Error) =>
       /HTTP 503/.test(error.message) && !error.message.includes("ollama pull"));
@@ -324,6 +326,17 @@ describe("local documentation retrieval never follows a redirect from this devic
     await ollamaEmbedQuery("https://localhost:8443")("test");
     await ollamaEmbedQuery("http://localhost:8443")("test");
     assert.deepEqual(sent, [null, "localhost:8443"]);
+  });
+
+  it("answers an empty deflate body as empty instead of staying pending (PR #206 review round 10)", async (t) => {
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json", "content-encoding": "deflate", "content-length": 0 }).end();
+    });
+    await listen(server);
+    t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/embed`;
+    const response = await directFetch(url, { signal: AbortSignal.timeout(5_000) });
+    assert.equal(await response.text(), "");
   });
 
   it("stops decoding a compressed answer when its budget runs out, also after the connection has closed (PR #206 review round 9)", async (t) => {

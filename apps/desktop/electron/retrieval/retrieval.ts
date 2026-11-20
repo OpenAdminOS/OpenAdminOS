@@ -368,7 +368,7 @@ export function ollamaEmbedQuery(
           }) as { error?: unknown } | undefined
           : undefined;
         const missing = typeof details?.error === "string" && /model.*not found/i.test(details.error);
-        const recovery = missing ? ` The embedding model ${model} is missing. Run \`ollama pull ${model}\`.` : "";
+        const recovery = missing ? ` The embedding model ${model} is missing. ${pullAdvice(endpoint, model)}` : "";
         throw new EmbeddingQueryError(`Ollama's embedding request returned HTTP ${response.status}.${recovery}`);
       }
       const payload = (await response.json()) as { embeddings?: number[][] };
@@ -379,6 +379,17 @@ export function ollamaEmbedQuery(
       return embedding;
     });
   };
+}
+
+/**
+ * How to pull a model into the Ollama at this endpoint. The Ollama CLI talks to
+ * 127.0.0.1:11434 unless OLLAMA_HOST says otherwise, so for any other endpoint
+ * the advice names it, or the pull would land in another Ollama.
+ */
+export function pullAdvice(endpoint: string, model: string): string {
+  const url = new URL(endpoint);
+  const standard = url.protocol === "http:" && url.port === "11434" && /^(127\.0\.0\.1|localhost\.?)$/i.test(url.hostname);
+  return standard ? `Run \`ollama pull ${model}\`.` : `Run \`ollama pull ${model}\` with OLLAMA_HOST set to ${url.origin}.`;
 }
 
 /**
