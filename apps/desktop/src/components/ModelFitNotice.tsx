@@ -73,19 +73,22 @@ export function ModelFitNotice({
       {answered ? null : <p className="mt-1 text-xs text-[var(--color-text-muted)]">{MODEL_FIT_COPY.nothingSent}</p>}
       {rows.length > 0 ? (
         <>
-          <div className="mb-1.5 mt-3.5 text-xs text-[var(--color-text-muted)]">{MODEL_FIT_COPY.groupLabel(issue, surface, answered)}</div>
+          <div id={`${titleId}-group`} className="mb-1.5 mt-3.5 text-xs text-[var(--color-text-muted)]">{MODEL_FIT_COPY.groupLabel(issue, surface, answered)}</div>
           {/* Bounded and scrolling, so Split and Keep stay in view above the composer with many choices. */}
-          <ul className="max-h-56 divide-y divide-[var(--color-border)] overflow-y-auto rounded-lg ring-1 ring-[var(--color-border)]">
-            {rows.map((choice) => {
+          <ul aria-labelledby={`${titleId}-group`} className="max-h-56 divide-y divide-[var(--color-border)] overflow-y-auto rounded-lg ring-1 ring-[var(--color-border)]">
+            {rows.map((choice, index) => {
               const tool = PROVIDER_TOOL_NAMES[choice.providerId] ?? choice.providerName;
+              const detailId = `${titleId}-choice-${index}`;
               return (
                 <li key={`${choice.providerId}:${choice.model ?? ""}`} className="flex flex-wrap items-center gap-3 bg-[var(--color-bg)] px-3 py-2.5">
-                  <div className="min-w-0 flex-1">
+                  <div id={detailId} className="min-w-0 flex-1">
                     <div className="break-words font-medium text-[var(--color-text)]">{choice.isLocal ? choice.model : tool}</div>
                     {choice.isLocal ? (
                       <>
                         <div className="text-xs text-[var(--color-success)]">{MODEL_FIT_COPY.localWhere(choice.providerName)}</div>
                         <div className="text-xs text-[var(--color-text-muted)]">{MODEL_FIT_COPY.localNote(surface)}</div>
+                        {/* A model on this device needs no accept step, so its button sends straight away. */}
+                        {surface === "chat" ? <span className="sr-only">{MODEL_FIT_COPY.localSendsNow}</span> : null}
                       </>
                     ) : (
                       <>
@@ -94,7 +97,7 @@ export function ModelFitNotice({
                       </>
                     )}
                   </div>
-                  <Button size="sm" variant="secondary" className="max-w-full !whitespace-normal break-all text-left" onClick={() => onChoose(choice)}>
+                  <Button size="sm" variant="secondary" className="max-w-full !whitespace-normal break-all text-left" aria-describedby={detailId} onClick={() => onChoose(choice)}>
                     {choice.isLocal ? MODEL_FIT_COPY.useLocal(choice.model ?? choice.providerName) : MODEL_FIT_COPY.runWith(tool)}
                   </Button>
                 </li>

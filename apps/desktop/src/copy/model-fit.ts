@@ -59,6 +59,11 @@ export const MODEL_FIT_COPY = {
   runWith: (tool: string) => `Run with ${tool}`,
   useLocal: (model: string) => `Use ${model}`,
   localWhere: (providerName: string) => `${providerName} · on this device`,
+  localSendsNow: "Choosing it sends this request again now.",
+  /** The accept step closed because the provider it named is no longer a choice. */
+  acceptProviderGone: (provider: string) => `${provider} is no longer available for this request, so nothing was sent. Choose another option.`,
+  /** The offer was withdrawn because the organization, conversation or model changed. */
+  offerWithdrawn: "The organization or model changed, so this choice was withdrawn and nothing was sent. Send the question again.",
   localNote: (surface: Surface) =>
     `A larger model on this device. Its context size is not checked before the ${noun(surface)}.`,
   /**

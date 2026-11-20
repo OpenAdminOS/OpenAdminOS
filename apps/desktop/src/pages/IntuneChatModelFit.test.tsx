@@ -15,6 +15,7 @@ import type {
   SendIntuneChatMessageResult,
 } from "../shared/openAdminOS";
 import { CHAT_COPY } from "../copy";
+import { MODEL_FIT_COPY } from "../copy/model-fit";
 import { readChatDraft } from "../shared/chat-drafts";
 
 const QUESTION = "List every device with its compliance policies, profiles and last sign-in, grouped by owner.";
@@ -379,6 +380,39 @@ describe("IntuneChat model fit (mockup 36)", () => {
     await user.click(screen.getByRole("button", { name: "Switch model" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Run this request with Codex?" })).toBeNull());
     expect(screen.queryByRole("region", { name: "llama3.1 cannot fit this request" })).toBeNull();
+    // The open accept step says why it closed, and the keyboard lands in the composer.
+    expect(screen.getByText(MODEL_FIT_COPY.offerWithdrawn)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel })).toHaveFocus());
+    expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce();
+  });
+
+  it("closes the accept step unsent when its provider stops being a choice, and keeps the offer", async () => {
+    const user = userEvent.setup();
+    const state = createMockAppState();
+    const bridge = fitBridge(state);
+    function DropCodex() {
+      const { refresh } = useAppState();
+      return (
+        <button type="button" onClick={() => {
+          state.providers = state.providers.map((entry) => (entry.id === "openai" ? { ...entry, status: "error" as const } : entry));
+          void refresh();
+        }}>Drop Codex</button>
+      );
+    }
+    renderWithAppState(
+      <Routes><Route path="/chat/:conversationId?" element={<><IntuneChat /><DropCodex /></>} /></Routes>,
+      { route: "/chat", bridge },
+    );
+    await user.click(await screen.findByRole("combobox", { name: CHAT_COPY.composerLabel }));
+    await user.paste(QUESTION);
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    const notice = await screen.findByRole("region", { name: "llama3.1 cannot fit this request" });
+    await user.click(within(notice).getByRole("button", { name: "Run with Codex" }));
+    expect(await screen.findByRole("dialog", { name: "Run this request with Codex?" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Drop Codex" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Run this request with Codex?" })).toBeNull());
+    expect(screen.getByText(MODEL_FIT_COPY.acceptProviderGone("Codex"))).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "llama3.1 cannot fit this request" })).toBeInTheDocument();
     expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce();
   });
 });

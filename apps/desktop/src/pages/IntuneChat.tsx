@@ -828,6 +828,9 @@ function IntuneChatContent() {
   const prepareMultiTenantReview = async (content: string) => {
     const api = window.openAdminOS;
     if (!api || runningMultiTenant) return;
+    // A batch across organizations replaces the one-request offer, so two sends never run at once.
+    setModelFitOffer(null);
+    setModelFitAccept(null);
     setError(null);
     setNotice(null);
     setMultiTenantPreflight(null);
@@ -1352,9 +1355,30 @@ function IntuneChatContent() {
     const otherModel = (provider?.id ?? state.activeProviderId) !== modelFitOffer.activeProviderId || activeModel !== modelFitOffer.activeModel;
     if (otherConversation || otherTenant || otherModel) {
       setModelFitOffer(null);
+      // An open accept step says why it closed and gives the keyboard a place to land.
+      if (modelFitAccept && !otherConversation) {
+        setNotice(MODEL_FIT_COPY.offerWithdrawn);
+        window.requestAnimationFrame(() => composerRef.current?.focus());
+      }
       setModelFitAccept(null);
     }
-  }, [activeConversationId, activeModel, modelFitOffer, provider?.id, state.activeProviderId, state.activeTenantId]);
+  }, [activeConversationId, activeModel, modelFitAccept, modelFitOffer, provider?.id, state.activeProviderId, state.activeTenantId]);
+  // The accept step names one provider and model. When that is no longer a choice (a policy refresh,
+  // a failed check), it closes unsent and the offer stays, so the admin can choose another option.
+  useEffect(() => {
+    if (!modelFitAccept) return;
+    const current = modelFitChoices({
+      issue: modelFitAccept.offer.issue,
+      providers: state.providers,
+      activeModelByProviderId: state.activeModelByProviderId,
+      managedPolicy: state.managedPolicy,
+    });
+    const still = current.hosted.some((choice) => choice.providerId === modelFitAccept.prompt.providerId && choice.model === modelFitAccept.prompt.model);
+    if (!still) {
+      setModelFitAccept(null);
+      setNotice(MODEL_FIT_COPY.acceptProviderGone(modelFitAccept.prompt.providerName));
+    }
+  }, [modelFitAccept, state.activeModelByProviderId, state.managedPolicy, state.providers]);
 
   const confirmHostedBatchConsentAndRun = async () => {
     const prompt = hostedBatchConsentPrompt;
