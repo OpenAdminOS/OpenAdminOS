@@ -291,6 +291,10 @@ export default function AgentDetail({
   useEffect(() => {
     if (!startRunOnOpen || consumedStartRunOnOpen.current || !agent) return;
     consumedStartRunOnOpen.current = true;
+    // A run resumed from setup opens its own review below; an empty review here
+    // could open setup again with an ordinary provider picker.
+    const resumed = (location.state as { resumePendingIntent?: PendingIntent } | null)?.resumePendingIntent;
+    if (resumed?.kind === "agent-run" && resumed.slug === agent.slug) return;
     // Run again passes the original run's provider and model.
     const runChoice = (location.state as { runChoice?: RerunChoice } | null)?.runChoice;
     queueRunPreflight({

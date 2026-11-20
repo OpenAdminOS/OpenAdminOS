@@ -559,6 +559,30 @@ it("does not start a model fit rerun on a hosted provider that reports no model"
   expect(bridge.startRun).not.toHaveBeenCalled();
 });
 
+it("opens only the resumed model fit review on the confirm route, not an ordinary one first", async () => {
+  const agent = createMockAgent({ id: "devices", slug: "devices", name: "Inactive devices", mode: "read", scopes: ["DeviceManagementManagedDevices.Read.All"], services: ["intune"] });
+  // The active provider is not ready, so an ordinary review would open setup with a provider picker.
+  const providers = mockProviders.map((provider) => (provider.id === "ollama" ? { ...provider, status: "error" as const } : provider));
+  const state = createMockAppState({ installedAgents: [agent], activeProviderId: "ollama", providers });
+  const intent = {
+    kind: "agent-run", slug: "devices", tenantId: state.activeTenantId, providerId: "openai", model: "gpt-5",
+    modelFit: { reason: "context-too-small", providerId: "ollama", model: "llama3.1" },
+    returnTo: "/agents/devices", createdAt: new Date().toISOString(),
+  };
+  const bridge = makeMockBridge({}, state);
+  renderRoute(
+    <Routes>
+      <Route path="/start" element={<Navigate to="/agents/devices/confirm" state={{ resumePendingIntent: intent }} />} />
+      <Route path="/agents/:slug/confirm" element={<Agents startRunOnOpen />} />
+    </Routes>,
+    { path: "*", route: "/start", bridge },
+  );
+  const dialog = await screen.findByRole("dialog", { name: /Review run/ });
+  expect(dialog).toHaveTextContent("Codex");
+  expect(screen.queryByRole("heading", { name: "Pick an LLM provider" })).toBeNull();
+  expect(bridge.setActiveProvider).not.toHaveBeenCalled();
+});
+
 describe("start errors inside the run review (review round 3)", () => {
   const draft = () => createMockAgent({ id: "draft", slug: "draft", name: "Script draft", mode: "read", scopes: [], services: [] });
 
