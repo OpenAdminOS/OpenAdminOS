@@ -2603,7 +2603,16 @@ Mockup: `docs/mockups/34-local-reset.html`.
   preferences; each cache folder), and the reset stops there, incomplete,
   if it was replaced or holds anything but the kept files again: a profile
   restored meanwhile, as a new folder or file by file into the same one,
-  keeps its Keychain key, and the files that came back are listed.
+  keeps its Keychain key, and the files that came back are listed. The same
+  check runs once more after the last step, before the cleanup is recorded
+  as done, so files that came back during it make the next try repeat all
+  of it. A restore that lands between the last check and the `security`
+  command itself remains (accepted, the same single operation limit). A
+  cache folder's identity is compared last, after this check and the Linux
+  mount check, right before its removal. From the commit on, the audit
+  log's side files (anchor and pending file, written by path) are not
+  written again, also not when it closes; events kept only in memory go
+  with the log the reset removes.
   On Linux the mount table is read again before every removal in the data
   folder and right before a cache folder's removal, so a bind mount added
   under either while the wipe runs is never removed through. On Windows the
