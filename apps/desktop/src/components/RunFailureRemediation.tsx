@@ -13,6 +13,15 @@ interface Suggestion {
 /** A failed lookup of the model's context limit has its own playbook only. */
 const isContextLimitLookup = (e: string) => /ollama/i.test(e) && /context limit|\/api\/show/i.test(e);
 
+/**
+ * LM Studio's context error from the runtime. It quotes LM Studio and token
+ * counts, so no other playbook and no Graph denial is read from its text.
+ */
+const isLmStudioContextTooSmall = (e: string) => e.includes("LM Studio context length too small:");
+
+/** Errors with one cause and one recovery: only their own playbook is shown. */
+const EXCLUSIVE = [isContextLimitLookup, isLmStudioContextTooSmall];
+
 const SUGGESTIONS: Suggestion[] = [
   {
     match: (e) => /ollama/i.test(e) && /(not reachable|connect|refused|econnrefused)/i.test(e) && !isContextLimitLookup(e),
@@ -28,6 +37,11 @@ const SUGGESTIONS: Suggestion[] = [
     match: isContextLimitLookup,
     title: "Ollama did not report the model's context limit",
     body: "The request did not fit in the context Ollama loaded, and Ollama did not answer when OpenAdminOS asked for the model's limit before raising it. Check that Ollama is responsive with `ollama ps`, restart it if it is stuck, then re-run.",
+  },
+  {
+    match: isLmStudioContextTooSmall,
+    title: "LM Studio context too small",
+    body: "LM Studio sets a model's context length when the model is loaded, and this request did not fit. The error names the sizes. In LM Studio, raise Context Length in the model's load settings and reload the model, or run `lms load <model> --context-length <tokens>`, then re-run. If the model is already at its limit, narrow the question or the agent's scope, or pick a model with a larger context window in Settings → LLM Providers.",
   },
   {
     match: (e) =>
@@ -77,13 +91,14 @@ const SUGGESTIONS: Suggestion[] = [
 export function RunFailureRemediation({ run }: { run: RunRecord }) {
   const openReportIssue = useReportIssue();
   if (run.status !== "failed" || !run.error) return null;
-  // A failed lookup of the Ollama model's context limit has one cause and
-  // one recovery; its HTTP status (for example 403) is not a Graph denial.
-  const lookup = isContextLimitLookup(run.error);
-  const matched = lookup
-    ? SUGGESTIONS.filter((suggestion) => suggestion.match === isContextLimitLookup)
+  // A failed lookup of the Ollama model's context limit and an LM Studio
+  // context error each have one cause and one recovery; an HTTP status or a
+  // number in their text (for example 403) is not a Graph denial.
+  const exclusive = EXCLUSIVE.find((match) => match(run.error!));
+  const matched = exclusive
+    ? SUGGESTIONS.filter((suggestion) => suggestion.match === exclusive)
     : SUGGESTIONS.filter((suggestion) => suggestion.match(run.error!));
-  const accessDenial = lookup ? undefined : run.accessDenial ?? graphAccessDenialFromError(run.error);
+  const accessDenial = exclusive ? undefined : run.accessDenial ?? graphAccessDenialFromError(run.error);
   if (accessDenial) {
     matched.unshift({ match: () => true, title: accessDenial.title, body: `${accessDenial.message} ${accessDenial.recovery}` });
   }

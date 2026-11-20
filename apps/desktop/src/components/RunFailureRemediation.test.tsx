@@ -151,3 +151,25 @@ it("shows only the lookup playbook for an HTTP 403 from the lookup, even with a 
   expect(screen.queryByText(accessDenial.title)).not.toBeInTheDocument();
   expect(screen.queryByText("Graph access cause unverified")).not.toBeInTheDocument();
 });
+
+it.each([
+  "LM Studio context length too small: This request needs 15,857 tokens of context, but qwen3-8b is loaded in LM Studio with a context length of 4,096. Raise Context Length to at least 20,480 (qwen3-8b supports up to 32,768) in the model's load settings in LM Studio and reload it, or run `lms load qwen3-8b --context-length 20480`, then re-run. OpenAdminOS does not reload the model itself, because that would replace the model you loaded. LM Studio said: <LM Studio error> Trying to keep the first 15857 tokens when context the overflows. However, the model is loaded with context length of only 4096 tokens, which is not enough.",
+  "LM Studio context length too small: This request does not fit in the context length qwen3-8b is loaded with in LM Studio. Raise Context Length in the model's load settings in LM Studio and reload it, or run `lms load qwen3-8b --context-length <tokens>`, then re-run. OpenAdminOS does not reload the model itself, because that would replace the model you loaded. LM Studio said: The number of tokens to keep from the initial prompt is greater than the context length. Try to load the model with a larger context length, or provide a shorter input. Error Data: n/a, Additional Data: n/a",
+  "LM Studio context length too small: This request needs 40,301 tokens of context, but qwen3-8b is loaded in LM Studio with a context length of 4,030. qwen3-8b supports at most 403,000, so narrow the request or pick a model with a larger context window. LM Studio said: invalid input, request timed out, forbidden",
+])("gives an LM Studio context error only its own recovery: %s", (error) => {
+  const accessDenial = classifyGraphAccessDenied({});
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error, accessDenial };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("LM Studio context too small")).toBeInTheDocument();
+  expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
+  for (const title of [accessDenial.title, "Tenant token expired", "Manifest validation failed", "Request timed out", "Ollama context too small"]) {
+    expect(screen.queryByText(title)).not.toBeInTheDocument();
+  }
+});
+
+it("does not give an Ollama context error the LM Studio playbook", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama context size too small: This request needs 40,652 tokens of context, but qwen3:8b supports at most 40,960." };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama context too small")).toBeInTheDocument();
+  expect(screen.queryByText("LM Studio context too small")).not.toBeInTheDocument();
+});
