@@ -12,6 +12,7 @@ import {
   LOCAL_RESET_MARKER,
   LocalResetRequestError,
   localResetLeftoverPaths,
+  localResetLinkCheck,
   localResetRemovalPlan,
   MACOS_SAFE_STORAGE_ACCOUNT,
   MACOS_SAFE_STORAGE_SERVICE,
@@ -412,6 +413,34 @@ describe("local reset: wipe at launch", () => {
     }
   });
 
+  it("does not empty a data folder that is a link, and finds token caches that are links", async () => {
+    const dir = await tempDir();
+    try {
+      const shared = join(dir, "shared");
+      mkdirSync(shared);
+      seedDataFolder(shared, DEV_MARKER);
+      const linked = join(dir, "profile-link");
+      symlinkSync(shared, linked);
+      assert.equal(localResetLinkCheck(linked).dataFolderIsLink, true);
+      const report = runPendingLocalReset({ userDataDir: linked, packaged: false, platform: "linux", home: dir, env: {} });
+      assert.equal(report?.status, "incomplete");
+      assert.match(report?.failed[0]?.reason ?? "", /is a link to another folder/);
+      assert.ok(existsSync(join(shared, "state.json")));
+
+      const profile = join(dir, "profile");
+      mkdirSync(profile);
+      writeFileSync(join(dir, "other-cache.bin"), "other profile");
+      symlinkSync(join(dir, "other-cache.bin"), join(profile, "tokens-abc.bin"));
+      writeFileSync(join(profile, "tokens.bin"), "x");
+      assert.deepEqual(localResetLinkCheck(profile), { dataFolderIsLink: false, linkedTokenCaches: ["tokens-abc.bin"] });
+      writeFileSync(join(profile, LOCAL_RESET_MARKER), JSON.stringify(DEV_MARKER));
+      assert.equal(runPendingLocalReset({ userDataDir: profile, packaged: false, platform: "linux", home: dir, env: {} })?.status, "completed");
+      assert.equal(readFileSync(join(dir, "other-cache.bin"), "utf8"), "other profile");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("never writes through a link planted where a marker temp file used to go", async () => {
     const dir = await tempDir();
     try {
@@ -610,11 +639,15 @@ describe("local reset: end to end with the store", () => {
         const persisted = JSON.parse(readFileSync(statePath, "utf8")) as { runs: Array<Record<string, unknown>> };
         persisted.runs[0] = { ...persisted.runs[0], status: "cancelled" };
         writeFileSync(statePath, JSON.stringify(persisted));
-        const runService = (store as unknown as { runService: { isDriving(id: string): boolean } }).runService;
-        const original = runService.isDriving.bind(runService);
-        runService.isDriving = (id) => id === "run-1";
-        assert.match((await store.localResetBlocker()) ?? "", /is applying a confirmed change/);
-        runService.isDriving = original;
+        const runService = (store as unknown as { runService: { hasActiveApply(): boolean } }).runService;
+        const original = runService.hasActiveApply.bind(runService);
+        runService.hasActiveApply = () => true;
+        assert.match((await store.localResetBlocker()) ?? "", /A confirmed change is still finishing.*Nothing was removed/);
+        // Also when the run's record is gone, as after a disconnect.
+        persisted.runs = [];
+        writeFileSync(statePath, JSON.stringify(persisted));
+        assert.match((await store.localResetBlocker()) ?? "", /still finishing/);
+        runService.hasActiveApply = original;
         assert.equal(await store.localResetBlocker(), undefined);
       } finally {
         store.close();
@@ -712,5 +745,12 @@ function failingFileSystem(fails: (path: string) => boolean): LocalResetFileSyst
       rmSync(path, { recursive: true, force: true });
     },
     writeMarker: (path, content) => writeFileSync(path, content),
+    isLink: (path) => {
+      try {
+        return lstatSync(path).isSymbolicLink();
+      } catch {
+        return false;
+      }
+    },
   };
 }
