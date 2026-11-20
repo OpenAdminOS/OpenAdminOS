@@ -11,7 +11,7 @@ import type {
   WritePlan,
   WriteLimits,
 } from "@openadminos/agent-sdk";
-import { assertWritePlanLimits, GraphAccessDeniedError, WritePlanLimitError } from "@openadminos/agent-sdk";
+import { assertWritePlanLimits, graphAccessDenialFromError, WritePlanLimitError } from "@openadminos/agent-sdk";
 import { DRY_RUN_WRITE_ERROR } from "./dry-run.js";
 import { confirmationPhraseProblem } from "./confirmation-phrase.js";
 import { fenceTenantData, withTenantDataInstructions, withTenantDataOutputFilter } from "./tenant-data.js";
@@ -28,8 +28,12 @@ export interface SandboxBrokerAgentPolicy {
 export interface SandboxBroker {
   handle(request: SandboxBrokerRequest): Promise<SandboxBrokerResponse>;
   getWritePlan(): WritePlan | undefined;
-  /** The last Graph denial a brokered Graph request raised; the script only sees its message. */
-  getGraphAccessDenied(): GraphAccessDeniedError | undefined;
+  /**
+   * The typed Graph denial behind a script failure. The script only sees a
+   * denial's message, so the failure is matched to the brokered Graph or
+   * connector request whose denial message it carries, the latest first.
+   */
+  graphDenialFor(scriptOutput: string): Error | undefined;
 }
 
 export interface SandboxBrokerInput {
@@ -57,7 +61,7 @@ class SandboxBrokerError extends Error {
 
 export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
   let writePlan: WritePlan | undefined;
-  let graphAccessDenied: GraphAccessDeniedError | undefined;
+  const graphDenials: Error[] = [];
 
   return {
     async handle(request) {
@@ -91,12 +95,12 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
             );
         }
       } catch (error) {
-        if (error instanceof GraphAccessDeniedError) graphAccessDenied = error;
+        if (error instanceof Error && graphAccessDenialFromError(error)) graphDenials.push(error);
         return failure(id, error);
       }
     },
     getWritePlan: () => writePlan,
-    getGraphAccessDenied: () => graphAccessDenied,
+    graphDenialFor: (scriptOutput) => [...graphDenials].reverse().find((denied) => scriptOutput.includes(denied.message)),
   };
 }
 

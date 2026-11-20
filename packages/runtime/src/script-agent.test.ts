@@ -14,6 +14,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { describe, it } from "node:test";
 
 import {
+  ConnectorScopeError,
   GraphAccessDeniedError,
   graphAccessDenialFromError,
   type RunContext,
@@ -143,24 +144,37 @@ definition:
     assert.ok(capturedInput?.env?.OPENADMINOS_BROKER_DIR);
   });
 
-  it("keeps a brokered Graph denial as the cause when the script exits on it", async () => {
-    for (const exitsOnDenial of [true, false]) {
+  it("keeps the brokered Graph denial the script exited on as the cause", async () => {
+    const consent = new GraphAccessDeniedError({ method: "GET", path: "/deviceManagement/managedDevices", requiredScopes: ["DeviceManagementManagedDevices.Read.All"], grantedScopes: [] });
+    const role = new GraphAccessDeniedError({ method: "GET", path: "/deviceManagement/managedDevices", requiredScopes: ["DeviceManagementManagedDevices.Read.All"], grantedScopes: ["DeviceManagementManagedDevices.Read.All"] });
+    const teams = new ConnectorScopeError("Microsoft Graph rejected the request (HTTP 403). The signed-in admin lacks the required Teams scopes.", { connectorId: "teams", missingScopes: [] });
+    // Each case: the errors Graph raises in order, the response the script exits on, and the cause expected.
+    const cases: Array<{ denials: Error[]; exitOn: number | "other"; via?: "connector"; cause: string | undefined }> = [
+      { denials: [consent], exitOn: 0, cause: "missing-consent" },
+      { denials: [consent], exitOn: "other", cause: undefined },
+      { denials: [consent, role], exitOn: 0, cause: "missing-consent" },
+      { denials: [consent, role], exitOn: 1, cause: "missing-role" },
+      { denials: [teams], exitOn: 0, via: "connector", cause: "unknown" },
+    ];
+    for (const testCase of cases) {
       const tempRoot = await mkdtemp(path.join(tmpdir(), "openadminos-script-denial-"));
       const agentDir = path.join(tempRoot, "agent");
       await mkdir(agentDir, { recursive: true });
       await writeFile(path.join(agentDir, "agent.mjs"), "process.exit(1);\n");
-      const denied = new GraphAccessDeniedError({ method: "GET", path: "/deviceManagement/managedDevices", requiredScopes: ["DeviceManagementManagedDevices.Read.All"], grantedScopes: [] });
       const runner: SandboxRunner = {
         id: "mxc",
         probe: async () => ({ backend: "mxc", status: "available", experimentalEnabled: true, supported: true, detail: "test" }),
         run: async (input) => {
-          const response = await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, {
-            id: "graph-1",
-            method: "graph.request",
-            params: { method: "GET", path: "/deviceManagement/managedDevices", query: { $select: "id,deviceName" } },
-          } satisfies SandboxBrokerRequest);
-          assert.equal(response.ok, false);
-          const stderr = exitsOnDenial ? `Error: graph.request: ${response.error?.message}` : "Error: result file could not be written";
+          const messages: string[] = [];
+          for (const [index] of testCase.denials.entries()) {
+            const response = await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, testCase.via === "connector"
+              ? { id: `teams-${index}`, method: "connector.invoke", params: { connector: "teams", capability: "post-channel-message", args: {} } } as SandboxBrokerRequest
+              : { id: `graph-${index}`, method: "graph.request", params: { method: "GET", path: "/deviceManagement/managedDevices", query: { $select: "id,deviceName" } } } satisfies SandboxBrokerRequest);
+            assert.equal(response.ok, false, JSON.stringify(response));
+            messages.push(response.error?.message ?? "");
+          }
+          const method = testCase.via === "connector" ? "connector.invoke" : "graph.request";
+          const stderr = testCase.exitOn === "other" ? "Error: result file could not be written" : `Error: ${method}: ${messages[testCase.exitOn]}`;
           return { exitCode: 1, signal: null, stdout: "", stderr };
         },
       };
@@ -174,6 +188,13 @@ descriptor:
     name: OpenAdminOS
   category: devices
   mode: read
+  connectors:
+    - id: teams
+      minVersion: 1.0.0
+      required: false
+      capabilities:
+        - id: post-channel-message
+          version: 1
 execution:
   kind: script
   sandbox: mxc
@@ -196,10 +217,12 @@ definition:
 `);
       const module = scriptAgentTemplateToModule(manifest, agentDir, { sandboxRunner: runner, tempRoot, nodePath: process.execPath });
       const ctx = fakeRunContext();
-      ctx.graph.request = async () => { throw denied; };
+      let call = 0;
+      ctx.graph.request = async () => { throw testCase.denials[call++]!; };
+      ctx.connectors = { teams: { capabilities: { postChannelMessage: async () => { throw testCase.denials[call++]!; } } } } as unknown as RunContext["connectors"];
       const error = await module.run(ctx).then(() => undefined, (failure: unknown) => failure);
       assert.ok(error instanceof Error);
-      assert.equal(graphAccessDenialFromError(error)?.cause, exitsOnDenial ? "missing-consent" : undefined);
+      assert.equal(graphAccessDenialFromError(error)?.cause, testCase.cause, JSON.stringify({ ...testCase, denials: undefined }));
     }
   });
 
