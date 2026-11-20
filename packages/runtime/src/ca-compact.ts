@@ -121,6 +121,8 @@ function compactApplications(apps: Json | undefined): Json | undefined {
   if (exclude.length) out.exclude = exclude.join(", ");
   const actions = asStrings(apps.includeUserActions);
   if (actions.length) out.userActions = actions.map((action) => action.replace(/^urn:user:/, ""));
+  const agentActions = asStrings(apps.includeAgentActions);
+  if (agentActions.length) out.agentActions = agentActions.length;
   const contexts = asStrings(apps.includeAuthenticationContextClassReferences);
   if (contexts.length) out.authContexts = contexts.length;
   const filter = asRecord(apps.applicationFilter);

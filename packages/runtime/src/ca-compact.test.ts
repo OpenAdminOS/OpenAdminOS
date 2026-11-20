@@ -120,6 +120,11 @@ describe("compactConditionalAccessPolicy", () => {
       grantControls: { operator: "OR", builtInControls: ["block"] },
     }, NOW);
     assert.deepEqual(record.workloadIdentities, { include: "2 service principals" });
+    const agentOnly = compactConditionalAccessPolicy({
+      displayName: "Agent actions", state: "enabled",
+      conditions: { applications: { includeApplications: [], includeAgentActions: ["action-1", "action-2"] } },
+    }, NOW);
+    assert.deepEqual(agentOnly.apps, { agentActions: 2 });
     assert.deepEqual(record.insiderRisk, ["elevated", "moderate"]);
     assert.deepEqual(record.otherConditions, ["deviceStates"]);
     assert.deepEqual(record.users, { include: { users: "None" } });
