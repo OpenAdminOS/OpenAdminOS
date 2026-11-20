@@ -316,9 +316,11 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         if (opts.signal?.aborted) throw stoppedByUser();
         // The revision this request was sized for; a kept size binds to it.
         requestRevision = sized?.revision;
+        // Without a known pin status the maximum is not the limit (a pin
+        // below it may apply), so none is assumed.
         lookupLimit = sized?.pinnedNumCtx !== undefined
           ? Math.min(sized.pinnedNumCtx, sized.modelMaxContext ?? Infinity)
-          : sized?.modelMaxContext;
+          : sized?.pinKnown ? sized.modelMaxContext : undefined;
         if (sized?.tooLarge) throw new ContextTooSmallError(sized.tooLarge);
         if (sized?.dropKept) {
           if (cachedCtx !== undefined && ollamaContextOverrides.get(cacheKey) === cachedCtx) ollamaContextOverrides.delete(cacheKey);
@@ -387,10 +389,11 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           // A retry lookup without a pin for the same revision keeps the pin the
           // first lookup saw.
           const pin = retryShow?.pinnedNumCtx ?? (sameRevision ? sized?.pinnedNumCtx : undefined);
+          const pinKnown = pin !== undefined || retryShow?.pinKnown === true || (sameRevision && sized?.pinKnown === true);
           // An agent run that never learned whether the model is pinned does
           // not raise num_ctx, which would override a pin: the size Ollama
           // ran it with is the limit it gets.
-          if (opts.enforceContextWindow && pin === undefined && modelMax === undefined) {
+          if (opts.enforceContextWindow && !pinKnown) {
             const answerTokens = opts.maxTokens ?? DEFAULT_ANSWER_RESERVE_TOKENS;
             throw new ContextTooSmallError({
               code: "context-too-small",

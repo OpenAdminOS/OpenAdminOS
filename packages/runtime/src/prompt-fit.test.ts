@@ -113,8 +113,12 @@ const SHOW = {
 
 describe("Ollama context window", () => {
   it("reads the pinned num_ctx and the architecture's maximum, not the rope key", () => {
-    assert.deepEqual(parseOllamaShow(SHOW), { pinnedNumCtx: 16384, modelMaxContext: 262144 });
+    assert.deepEqual(parseOllamaShow(SHOW), { pinnedNumCtx: 16384, modelMaxContext: 262144, pinKnown: true });
+    // Only model_info: the maximum, but not whether a pin applies.
     assert.deepEqual(parseOllamaShow({ model_info: { "general.architecture": "llama", "llama.context_length": 131072 } }), { modelMaxContext: 131072 });
+    // Ollama leaves parameters out for a model without any; the Modelfile says the same.
+    assert.deepEqual(parseOllamaShow({ modelfile: "FROM llama3\nPARAMETER num_ctx 8192\n" }), { pinnedNumCtx: 8192, pinKnown: true });
+    assert.deepEqual(parseOllamaShow({ modelfile: "FROM llama3\n" }), { pinKnown: true });
     assert.deepEqual(parseOllamaShow(null), {});
   });
 
