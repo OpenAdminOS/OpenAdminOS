@@ -2669,8 +2669,10 @@ Mockup: `docs/mockups/34-local-reset.html`.
   still the one the wipe emptied and holds no `state.json`. The restart of
   this app's own Linux AppImage (`APPIMAGE`, with the running executable
   inside `APPDIR` as written or resolved) goes through a detached shell
-  that waits for the old process and for the AppImage runtime that started
-  it, then starts the AppImage file: the mount it runs from goes away with
+  that waits for the old process (in extract-and-run also for the AppImage
+  runtime, its parent, which removes the extracted copy; a mounted
+  runtime replaced itself with the app, so the parent there is the
+  launcher and is not waited for), then starts the AppImage file: the mount it runs from goes away with
   the old process, and Electron's relaunch helper runs with no_new_privs,
   under which the new AppImage could not mount itself. When `APPDIR` is not
   a mount (extract-and-run, without working FUSE; the runtime strips that
