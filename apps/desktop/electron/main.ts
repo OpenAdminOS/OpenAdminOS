@@ -5550,6 +5550,11 @@ function localResetInfo(): LocalResetInfo {
 function relaunchInteractive(): void {
   // app.exit skips will-quit, so the recovery profile goes here.
   removeLocalResetRecoveryProfile();
+  // The relaunched process inherits this environment. The sandbox flag goes
+  // back to how this launch found it, so a setting the reset removes from
+  // state.json does not come back as the next launch's default.
+  if (launchSandboxedCodeDefault) process.env[OPENADMINOS_MXC_FLAG] = "1";
+  else delete process.env[OPENADMINOS_MXC_FLAG];
   if (process.platform === "darwin" && app.isPackaged && isBackgroundSchedulerLaunch) {
     relaunchOutsideLaunchAgent();
     return;
