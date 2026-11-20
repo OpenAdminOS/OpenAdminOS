@@ -2544,8 +2544,11 @@ after a fresh check that the model runs here: the host reads Ollama's
 `/api/tags` again (model metadata only; nothing is loaded) and refuses a
 model that is no longer listed or is now remote-backed, or when the list
 cannot be read; for LM Studio and Lemonade it classifies the address they
-are reached at, and refuses one outside this device. That check runs again before every model call of the
-request, not only once. A hosted choice takes a destination fingerprint
+are reached at, and refuses one outside this device. That check runs again
+before every model call of the request, not only once. The Ollama adapter's
+own context retry inside one call goes to the same address and model name and
+is not checked again; a hook there is a follow-up for the adapter
+(packages/runtime/src/llm-ollama.ts). A hosted choice takes a destination fingerprint
 (`getProviderDestination`: its address, or the Azure OpenAI resource and
 deployment, and Lemonade's address, which can be set outside this device)
 when its accept step opens, and the host refuses the send if the destination
@@ -2593,7 +2596,8 @@ A failed answer keeps its reason in history: after a reload or a switch of
 conversation, its bubble shows the notice's title and why line, without the
 choices, which belong to the live request only.
 
-After. The stored answer carries `switchedFrom` (the provider and model it
+While the accepted request runs, its turn says "Sending to <location label>
+for this request only". After. The stored answer carries `switchedFrom` (the provider and model it
 replaced, why, and whether the provider that took it was on this device when
 it was sent, so later settings cannot relabel it) and shows "Answered by <location label> for this request
 only. Chat is back on <model>." A failed answer carries `modelFit` with the
