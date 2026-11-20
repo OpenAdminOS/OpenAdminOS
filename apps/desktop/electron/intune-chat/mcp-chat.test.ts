@@ -679,6 +679,22 @@ const fetchTool: McpChatTool = {
 const callFetch = JSON.stringify({ tool: fetchTool.name, params: { url: "https://learn.microsoft.com/x" } });
 
 describe("The MCP query writer boundary", () => {
+  it("does not run the query writer when the compact budget has no call left for it", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const prompts: Array<{ system?: string; prompt: string }> = [];
+      const writerPrompts: string[] = [];
+      const cacheRead = JSON.stringify({ tool: "list_cached_resources", params: {} });
+      const result = await runAgenticChat({
+        ...input(store, scriptedLlm([cacheRead, cacheRead, cacheRead, callDocs("intune compliance grace period")], prompts, writerPrompts, ["not json"]), mcpContext(calls)),
+        budget: "compact",
+      });
+      assert.equal(result.ok, false);
+      assert.equal(prompts.length, 4);
+      assert.equal(writerPrompts.length, 0, "the fourth reply's MCP call would have been the fifth model call");
+    });
+  });
+
   it("counts a failed query writer call against a local model's compact budget", async () => {
     await withStore(async (store) => {
       const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];

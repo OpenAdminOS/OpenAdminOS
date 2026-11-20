@@ -2405,7 +2405,7 @@ export class IntuneChatService {
         }, buildAnswerPrompt(answerPack, documentation));
         finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0 });
         // The answer was written from the computed result, so a follow-up may narrow it.
-        if (computed) computedShown = true;
+        if (computed && content.trim()) computedShown = true;
         return {
           content,
           model,
@@ -3131,8 +3131,8 @@ export class IntuneChatService {
           attemptPrompt = repaired;
         }
         assistantContent = relabelUnverifiedLearn(assistantContent.trim(), false);
-        // The answer was written from the computed result, so a follow-up may narrow it.
-        if (computed) computedShown = true;
+        // The answer was written from the computed result, so a follow-up may narrow it; a blank one shows nothing.
+        if (computed && assistantContent.trim()) computedShown = true;
         emitDelta(assistantContent, "");
         finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0, failed: isCancelled() });
       };

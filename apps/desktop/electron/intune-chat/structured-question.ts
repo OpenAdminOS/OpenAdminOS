@@ -100,7 +100,7 @@ export interface ComputedResult {
 export const COMPUTED_LIST_LIMIT = 50;
 
 const OS_FILTERS: Array<{ pattern: RegExp; label: string; predicate: GraphCacheQueryPredicate }> = [
-  { pattern: /\bwindows\b|\bwin(?:10|11)\b/, label: "Windows", predicate: { field: "operatingSystem", op: "eq", value: "Windows" } },
+  { pattern: /\bwindows\b/, label: "Windows", predicate: { field: "operatingSystem", op: "eq", value: "Windows" } },
   { pattern: /\bmac ?os\b|\bmacs?\b|\bos x\b/, label: "macOS", predicate: { field: "operatingSystem", op: "eq", value: "macOS" } },
   { pattern: /\bios\b|\bipad ?os\b|\biphones?\b|\bipads?\b/, label: "iOS", predicate: { field: "operatingSystem", op: "in", value: ["iOS", "iPadOS"] } },
   { pattern: /\bandroid\b/, label: "Android", predicate: { field: "operatingSystem", op: "startsWith", value: "Android" } },
@@ -142,7 +142,7 @@ const KNOWN_WORDS = new Set([
   "only", "just", "those", "these", "them", "they", "ones", "one", "it", "its", "also", "both", "each", "every",
   "count", "number", "total", "totals", "tally", "operating", "system", "systems", "os", "platform", "platforms",
   "split", "breakdown", "broken", "down", "grouped", "group", "across", "state", "status", "states",
-  "windows", "win10", "win11", "macos", "mac", "macs", "osx", "x", "ios", "ipados", "iphone", "iphones", "ipad", "ipads",
+  "windows", "macos", "mac", "macs", "osx", "x", "ios", "ipados", "iphone", "iphones", "ipad", "ipads",
   "android", "linux", "ubuntu", "machines", "machine", "endpoints", "endpoint", "computers", "computer", "laptops",
   "laptop", "pcs", "pc", "phones", "phone", "tablets", "tablet", "fleet", "tenant", "currently", "right", "now", "cached",
   "out", "failing", "fail", "grace", "period", "aren't", "isn't", "arent", "isnt", "ownership", "owner", "type",
@@ -154,12 +154,18 @@ const KNOWN_WORDS = new Set([
 
 const DEVICE_DETAIL_WORDS = new Set(["why", "reason", "reasons", "cause", "causes", "wrong", "marked", "showing", "shows", "show", "flagged", "as", "failing", "fails", "fail", "the", "device", "called", "named", "still", "it", "its"]);
 
+/**
+ * The words no handler reads. A number is read only as a sync window ("in
+ * the last 7 days"): "Windows 11 devices" names a version the filters do
+ * not model, so the 11 is unknown and the question goes to the planner.
+ */
 function unknownWords(lower: string): string[] {
   return lower
     .replace(/[?.!,;:()"]/g, " ")
+    .replace(/\b\d{1,4}\s+days?\b/g, " days ")
     .split(/\s+/)
     .map((word) => word.replace(/^-+|-+$/g, ""))
-    .filter((word) => word && !/^\d+$/.test(word) && !KNOWN_WORDS.has(word) && !word.split("-").every((part) => KNOWN_WORDS.has(part) || /^\d+$/.test(part)));
+    .filter((word) => word && !KNOWN_WORDS.has(word) && !word.split("-").every((part) => KNOWN_WORDS.has(part)));
 }
 
 function normalize(question: string): string {
@@ -167,7 +173,7 @@ function normalize(question: string): string {
 }
 
 /** An operating system the question excludes ("not Windows", "non-Windows", "other than macOS"): a filter the parser does not express. */
-const NEGATED_SYSTEM = /(?:\b(?:not|except|excluding|besides|other than|apart from)|n't|\bnon)[\s-]*(?:(?:on|running|a|an|any)\s+)?(?:windows|win(?:10|11)|mac ?os|macs?|os x|ios|ipad ?os|iphones?|ipads?|android|linux|ubuntu)\b/;
+const NEGATED_SYSTEM = /(?:\b(?:not|except|excluding|besides|other than|apart from)|n't|\bnon)[\s-]*(?:(?:on|running|a|an|any)\s+)?(?:windows|mac ?os|macs?|os x|ios|ipad ?os|iphones?|ipads?|android|linux|ubuntu)\b/;
 
 function osFilter(lower: string): { label: string; predicate: GraphCacheQueryPredicate } | undefined {
   if (NEGATED_SYSTEM.test(lower)) return undefined;
@@ -300,6 +306,14 @@ export function structuredQueryForQuestion(input: {
       || (anaphora && (count || list || breakdown.length > 0)));
   if (followsUp && previous) {
     const added = [os, compliance, sync].flatMap((entry) => (entry ? [entry] : []));
+    // Without the previous rows (more than CONTEXT_ID_LIMIT matched), the cache is read afresh with the
+    // previous filters and the new ones, and the answer says so instead of claiming the previous set.
+    if (!previous.ids) {
+      if (previous.resource === "entraDevices" && (compliance || sync)) return undefined;
+      const fields = new Set(added.map((entry) => entry.predicate.field));
+      const filters = dedupe([...previous.filters.filter((filter) => !fields.has(filter.field)), ...added.map((entry) => entry.predicate)]);
+      return { kind: "count", resource: previous.resource, scopeLabel: describeFilters(previous.resource, filters), filters, breakdown, list: true };
+    }
     // Entra device objects carry no compliance state and no sync time.
     if (previous.resource === "entraDevices" && (compliance || sync)) return undefined;
     // A different value on a field already in force ("what about macOS?" after Windows) switches that value:
@@ -390,8 +404,11 @@ function dedupe(filters: GraphCacheQueryPredicate[]): GraphCacheQueryPredicate[]
 export function deviceComplianceReasonQuery(question: string, store: IntelligenceSqliteStore, tenantId: string): DeviceDetailQuery | undefined {
   const lower = normalize(question);
   if (!WHY.test(lower) || !(NOT_COMPLIANT.test(lower) || /\bcompliance\b/.test(lower))) return undefined;
-  const match = store.findGraphRowsNamedIn({ tenantId, resource: "managedDevices", text: question, limit: 2 })[0];
+  const matches = store.findGraphRowsNamedIn({ tenantId, resource: "managedDevices", text: question, limit: 5 });
+  const match = matches[0];
   if (!match) return undefined;
+  // Two records with this name: their states can differ, so code does not pick one. The planner path answers.
+  if (matches.filter((entry) => entry.name.toLowerCase() === match.name.toLowerCase()).length > 1) return undefined;
   // Every other word must belong to the question form: "according to Microsoft Learn, why is X not compliant" is a docs question.
   const rest = lower.split(match.name.toLowerCase()).join(" ");
   if (unknownWords(rest).some((word) => !DEVICE_DETAIL_WORDS.has(word))) return undefined;

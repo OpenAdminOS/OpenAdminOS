@@ -3838,7 +3838,9 @@ the format. Decisions:
   is its own state. Wording the parser cannot read for certain (two operating
   systems, an excluded one such as "not Windows", "not currently compliant",
   "not in grace period", both states at once, a "not" or "failing" no filter
-  reads, a sync verb without a window) goes to the planner, and the sample rows then get no
+  reads, a sync verb without a window, a number other than a sync window such
+  as "Windows 11", which names a version the filters do not model) goes to
+  the planner, and the sample rows then get no
   OS or compliance filter from it either.
   `count_cached` on a resource that was never refreshed returns no count.
 - Intune is the device inventory. Device, OS, sync and compliance wording plans
@@ -3854,7 +3856,9 @@ the format. Decisions:
   answer. A different value on a field already filtered after a switch lead
   ("what about macOS" after Windows) asks the same question of a fresh set.
   What ran shows the filters of a follow-up, not the row ids. A device
-  lookup stores no follow-up context. Any other answer clears the context, and
+  lookup stores no follow-up context. When the previous answer matched more
+  than 500 rows, a follow-up reads the cache afresh with both filters and its
+  answer does not claim to narrow the previous set. Any other answer clears the context, and
   follow-up planning reads write intent from the current question only. Short
   follow-ups are planned with the previous question as context. The context is
   stored only when the visible answer came from the computed result (code, or
@@ -3862,8 +3866,9 @@ the format. Decisions:
   its own way.
 - Questions the data cannot answer: "why is <device> not compliant" names the
   device's cached state, says the failing rule is not in the cached data, and
-  gives the last sync as the lead, with nothing invented. The device name is
-  resolved against the cache at question time; a device first seen by this
+  gives the last sync as the lead, with nothing invented. A name two cached
+  records share goes to the planner, so code never picks one. The device name
+  is resolved against the cache at question time; a device first seen by this
   turn's refresh is answered by the planner path.
 - A local model never writes the answer to a question code has computed (a
   count, breakdown, filtered list, follow-up or device lookup): code renders
@@ -3878,7 +3883,8 @@ the format. Decisions:
   turn for a missing question kind, at most four model calls before the
   fallback; the short query-writing call of an MCP tool the model chose is not
   a failure turn and is not counted; a writer call that produced nothing
-  sendable is). A rejected `count_cached` call blocks a zero answer as a
+  sendable is, and no writer runs once the budget is spent). A second
+  progress-only reply falls back as `unfinished` instead of being kept. A rejected `count_cached` call blocks a zero answer as a
   rejected `query_cache` does. A context overflow falls back instead of failing
   the message and returns the provider's error as `failureDetail`.
   Always investigative mode and hosted providers keep the established budget,

@@ -9,7 +9,8 @@ import type { RunLlmApi } from "@openadminos/agent-sdk";
 import { AppStateStore } from "../state.js";
 import type { IntelligenceSqliteStore } from "./sqlite-store.js";
 import { LOCAL_FALLBACK_NOTICES } from "./agentic-loop.js";
-import { computeStructuredResult, deviceRowFilters, structuredQueryForQuestion } from "./structured-question.js";
+import { recordAgenticOutcome } from "./service.js";
+import { computeStructuredResult, deviceComplianceReasonQuery, deviceRowFilters, structuredQueryForQuestion } from "./structured-question.js";
 import { buildAnswerPack, GRAPH_CACHE_RESOURCES, planChatContext } from "./planner.js";
 
 /**
@@ -92,6 +93,8 @@ async function withHarness(run: (harness: Harness) => Promise<void>): Promise<vo
       yield { delta: text, accumulated: text, done: true, model: "openadminos/openadmin-8b" };
     },
   };
+  // The failure memory is per process; each test starts with the model's slate clean.
+  recordAgenticOutcome("ollama", "openadminos/openadmin-8b", true);
   const store = new AppStateStore({
     filePath: statePath, userDataPath: dir, statsApiUrl: "",
     tokenStore: { read: async () => "", write: async () => undefined },
@@ -244,6 +247,25 @@ describe("local model accuracy on the tester's tenant", () => {
     });
   });
 
+  it("leaves a device name two records share to the planner, and stores no context from a blank answer", async () => {
+    await withHarness(async ({ store, cache, reply }) => {
+      cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: new Date().toISOString(),
+        rows: [...managedDevices, { id: "md-m2-old", deviceName: "MAC-02", operatingSystem: "macOS", complianceState: "compliant", lastSyncDateTime: recent }] });
+      assert.equal(deviceComplianceReasonQuery("why is MAC-02 not compliant?", cache, tenant.id), undefined);
+      cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: new Date().toISOString(), rows: managedDevices });
+      assert.equal(deviceComplianceReasonQuery("why is MAC-02 not compliant?", cache, tenant.id)?.deviceId, "md-m2");
+
+      // Always investigative, the loop fails, and the model writes a blank deterministic answer: nothing was shown.
+      await store.setChatInvestigationMode("always-agentic");
+      reply(({ loop }) => (loop ? '```json\n{"tool": "query_ca\n```' : "   "));
+      const blank = await store.streamIntuneChatMessage({ content: Q1, refreshIfStale: false }, () => {});
+      await store.setChatInvestigationMode("auto");
+      reply(({ loop }) => (loop ? final("Windows answer.") : "Windows answer."));
+      const followUp = (await store.streamIntuneChatMessage({ content: "only Windows", conversationId: blank.conversation.id, refreshIfStale: false }, () => {})).assistantMessage;
+      assert.doesNotMatch(followUp.content, /from the previous answer/);
+    });
+  });
+
   it("keeps a follow-up to the previous answer's devices after a refresh adds one", async () => {
     await withHarness(async ({ store, cache }) => {
       await store.setChatInvestigationMode("always-deterministic");
@@ -314,7 +336,7 @@ describe("structured device questions", () => {
   });
 
   it("falls back for filters it cannot express and reads negation within its clause", () => {
-    for (const question of ["how many devices are not managed in Intune?", "how many noncompliant devices have not synced", "how many devices have synced?", "how many devices are failing?", "how many devices are not in grace period", "How many devices in Intune are not Windows?", "how many non-Windows devices are there", "How many Windows or macOS devices are there?", "how many devices are not currently compliant", "how many are compliant and how many are not compliant", "which devices are no longer compliant"]) {
+    for (const question of ["How many Windows 11 devices are there?", "How many devices are there without Windows?", "How many devices have never synced?", "how many devices are not managed in Intune?", "how many noncompliant devices have not synced", "how many devices have synced?", "how many devices are failing?", "how many devices are not in grace period", "How many devices in Intune are not Windows?", "how many non-Windows devices are there", "How many Windows or macOS devices are there?", "how many devices are not currently compliant", "how many are compliant and how many are not compliant", "which devices are no longer compliant"]) {
       assert.equal(structuredQueryForQuestion({ question, generatedAt: at }), undefined, question);
     }
     const both = structuredQueryForQuestion({ question: "How many devices are not compliant and synced today?", generatedAt: at });
@@ -343,7 +365,7 @@ describe("structured device questions", () => {
   });
 
   it("narrows a previous result only for a follow-up, and reads sync windows", () => {
-    const previous = { version: 1 as const, tenantId: "t", question: Q1, resource: "managedDevices" as const, filters: [{ field: "complianceState", op: "eq" as const, value: "noncompliant" }], label: "Intune managed devices not compliant", total: 6, computedAt: at };
+    const previous = { version: 1 as const, tenantId: "t", question: Q1, resource: "managedDevices" as const, filters: [{ field: "complianceState", op: "eq" as const, value: "noncompliant" }], label: "Intune managed devices not compliant", total: 6, ids: ["md-w1", "md-w2", "md-w3", "md-w4", "md-m2", "md-a1"], computedAt: at };
     const synced = structuredQueryForQuestion({ question: "which of those synced this month", generatedAt: at, previous });
     assert.deepEqual(synced?.focus, { label: "synced this month", filters: [{ field: "lastSyncDateTime", op: "gte", value: "2026-11-01T00:00:00.000Z" }] });
     assert.equal(synced?.followUp?.previousQuestion, Q1);
@@ -362,6 +384,13 @@ describe("structured device questions", () => {
     // Without a switch lead it is not read as one.
     assert.equal(structuredQueryForQuestion({ question: "only macOS", generatedAt: at, previous: windows }), undefined);
     assert.equal(structuredQueryForQuestion({ question: "only the compliant ones", generatedAt: at, previous }), undefined);
+    // More than the kept row ids: the cache is read afresh with both filters, and the answer does not claim the previous set.
+    const large = { ...previous, ids: undefined, total: 900 };
+    const fresh = structuredQueryForQuestion({ question: "only Windows", generatedAt: at, previous: large });
+    assert.equal(fresh?.followUp, undefined);
+    assert.equal(fresh?.ids, undefined);
+    assert.deepEqual(fresh?.filters, [{ field: "complianceState", op: "eq", value: "noncompliant" }, { field: "operatingSystem", op: "eq", value: "Windows" }]);
+    assert.equal(fresh?.scopeLabel, "Intune managed Windows devices not compliant");
     // Entra devices have no compliance state to narrow by.
     assert.equal(structuredQueryForQuestion({ question: "only the noncompliant ones", generatedAt: at, previous: { ...previous, resource: "entraDevices", filters: [], label: "Entra devices" } }), undefined);
   });

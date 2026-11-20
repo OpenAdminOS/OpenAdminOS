@@ -561,6 +561,20 @@ describe("compact budget for a local model in Chat", () => {
     } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
   });
 
+  it("falls back on a second progress message instead of keeping it as the answer", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-compact-"));
+    const store = seededStore(dir);
+    try {
+      const result = await runAgenticChat({ ...baseInput(store, scriptedLlm([
+        JSON.stringify({ tool: "query_cache", params: { resource: "managedDevices" } }),
+        JSON.stringify({ final: true, answer: "I'll check that now." }),
+        JSON.stringify({ final: true, answer: "Let me look into it." }),
+      ])), budget: "compact" });
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.equal(result.failureReason, "unfinished");
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
   it("names a reply with nothing in it thinking-only, and a context overflow context-too-small", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-compact-"));
     const store = seededStore(dir);

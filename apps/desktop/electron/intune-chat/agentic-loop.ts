@@ -602,6 +602,14 @@ export async function runAgenticChat(
     // A final answer that only promises work gets up to two repair turns, in
     // Chat and in voice. After that voice falls back to deterministic
     // retrieval, as before; Chat keeps the answer it has.
+    // On the compact budget a progress message after the last nudge falls back; it is never kept as the answer.
+    if (compact && action.kind === "final" && promiseNudges >= limits.promiseNudges && looksLikeUnkeptPromise(finalAnswer)) {
+      await settleModelStep({ kind: "repair", reason: "unfinished" });
+      return {
+        ok: false, reason: "unfinished-answer", failureReason: "unfinished", fallbackNotice: LOCAL_FALLBACK_NOTICES.unfinished,
+        toolTrace, iterations: iteration, ...(responseModel ? { model: responseModel } : {}),
+      };
+    }
     if (action.kind === "final" && promiseNudges < limits.promiseNudges + (input.voice ? 1 : 0) && looksLikeUnkeptPromise(finalAnswer)) {
       await settleModelStep({ kind: "repair", reason: "unfinished" });
       lastProblem = "unfinished";
@@ -724,6 +732,8 @@ export async function runAgenticChat(
     }
     const startedAt = new Date().toISOString();
     const mcpTool = isMcpChatToolName(action.tool) ? input.tools.mcp?.tools.find((tool) => tool.name === action.tool) : undefined;
+    // The query writer is a model call: with no budget left for it, the compact loop ends before it runs.
+    if (compact && mcpTool && attempts >= maxAttempts) break;
     input.onToolStart?.({
       tool: action.tool,
       // The model's params for an MCP tool are never sent, so they are not shown either.
