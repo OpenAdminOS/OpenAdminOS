@@ -54,15 +54,17 @@ What stays:
 
 - The IT policy file `policy.json` set by whoever manages the device, both the
   machine file and the one in the data folder. If the one in the data folder
-  is a link, or a folder, the reset stops before removing anything and says
-  so: place the file itself there, or use the machine-wide policy path.
+  is a link, a folder or anything else than a plain file, the reset stops
+  before removing anything and says so: place the file itself there, or use the machine-wide policy path.
 - Exports and other files you saved outside the data folder.
 - The enterprise application and admin consent in each tenant.
 
 A few details:
 
-- The reset waits while a confirmed change is being applied. Let the run
-  finish, then reset.
+- The reset waits while any run is still going, read-only ones included,
+  since a run can send to Teams or another connector. Let it finish, or
+  cancel it in Runs, then reset. Once the reset starts, connector sends are
+  declined.
 - If some files in the data folder cannot be removed, for example because a
   backup or antivirus scan holds them, OpenAdminOS does not open. It shows
   **Reset did not finish** with the files that are left. Close the program
@@ -86,12 +88,16 @@ and stop if any of these applies:
   On macOS check with `ls -ld <folder>` and `mount | grep -i openadmin`. On
   Linux check with `ls -ld <folder>` and the command below, which lists
   every mount at or inside the folder (`findmnt` writes a space in a path as
-  `\x20`, so the targets are decoded first). If it prints anything, or
-  `findmnt` fails, stop. Unmount first, or remove only the link itself.
+  `\x20`, so the targets are decoded first). Continue only when it prints
+  "No mount found". Unmount first, or remove only the link itself.
 
   ```bash
-  folder="$(realpath ~/.config/OpenAdminOS)"
-  findmnt -rno TARGET | while IFS= read -r target; do printf '%b\n' "$target"; done | grep -F -- "$folder"
+  if folder="$(realpath ~/.config/OpenAdminOS)" && mounts="$(findmnt -rno TARGET)"; then
+    printf '%s\n' "$mounts" | while IFS= read -r target; do printf '%b\n' "$target"; done |
+      grep -F -- "$folder" && echo "STOP: a mount is at or inside $folder" || echo "No mount found. You can continue."
+  else
+    echo "STOP: the check did not run"
+  fi
   ```
 
   Run it again with `~/.cache/@openadminosdesktop-updater` for the cache
