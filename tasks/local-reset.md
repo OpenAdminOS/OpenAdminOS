@@ -384,6 +384,14 @@ the installed app's scheduler, login item or caches.
   system API refuses every change by path inside the data folder from the
   commit (data-folder-seal.ts), with the marker allowed so its warnings can
   still be added; drafts and self-training are also gated and counted.
+- Review round 37: Claude and Muse no blocking (guard verified against the
+  compiled ESM build and Baileys' imports). Sol one blocking (AppImage
+  restart through the mount that goes away; now through `APPIMAGE`) and a
+  medium (scheduler and login item now checked against the committed
+  folder). Muse and Claude lows applied: links into the folder resolved,
+  update checks stop at the commit (electron-updater captured its fs
+  functions), streams fail as streams, the commit stops self-writing work
+  before sealing, the rejection log listener is removed on unseal.
 - Process lesson: twice I edited the tree while a reviewer was reading it;
   parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the
