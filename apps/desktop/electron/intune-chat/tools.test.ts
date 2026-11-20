@@ -192,6 +192,7 @@ it("reuses versioned cache metadata on reopen and backfills rows from older vers
 });
 
 it("backfills a stale Secure Score page through bounded worker jobs", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const dir = await mkdtemp(join(tmpdir(), "openadminos-score-backfill-"));
   const path = join(dir, "openadminos.db");
   let store = new IntelligenceSqliteStore(path);

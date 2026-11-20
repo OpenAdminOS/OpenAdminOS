@@ -747,6 +747,7 @@ test("Graph ingress sends field classification to the worker and a worker failur
 });
 
 test("Secure Score Graph ingress preserves field evidence across bounded worker batches", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const post = ClassificationWorker.prototype.post;
   const batches: number[] = [];
   t.mock.method(ClassificationWorker.prototype, "post", function (
@@ -879,6 +880,7 @@ test("worker preserves long fenced evidence and can remove its mirror", async ()
 });
 
 test("a failed worker transport reports incomplete coverage and recovers on the next request", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const post = ClassificationWorker.prototype.post;
   const transport = t.mock.method(ClassificationWorker.prototype, "post", function (
     this: ClassificationWorker, ...args: Parameters<ClassificationWorker["post"]>
