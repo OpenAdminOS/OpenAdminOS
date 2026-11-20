@@ -136,6 +136,8 @@ describe("IntuneChat model fit (mockup 36)", () => {
     await user.click(within(notice).getByRole("button", { name: "Run with Codex" }));
     const accept = await screen.findByRole("dialog", { name: "Run this request with Codex?" });
     expect(accept.querySelector("[data-model-fit-question]")).toHaveTextContent(QUESTION);
+    // A long question scrolls by keyboard: the quote is a tab stop.
+    expect(accept.querySelector("[data-model-fit-question]")).toHaveAttribute("tabindex", "0");
     // The admin removes part of the question while the accept step is open.
     const composer = screen.getByRole("combobox", { name: CHAT_COPY.composerLabel });
     await user.clear(composer);

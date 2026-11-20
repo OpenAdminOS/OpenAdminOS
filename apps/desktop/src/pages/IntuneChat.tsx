@@ -4320,7 +4320,8 @@ function HostedChatConsentPanel({
       {modelFit ? (
         <figure className="mt-3">
           <figcaption className="mb-1 text-xs text-[var(--color-text-muted)]">{MODEL_FIT_COPY.questionLabel}</figcaption>
-          <blockquote data-model-fit-question="" className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border)]">
+          {/* Focusable, so a long question scrolls by keyboard too. */}
+          <blockquote data-model-fit-question="" tabIndex={0} className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)]">
             {prompt.content}
           </blockquote>
         </figure>
