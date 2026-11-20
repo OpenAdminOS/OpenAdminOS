@@ -209,7 +209,7 @@ function compactSession(value: unknown): string[] | undefined {
 
 const RENDERED_CONDITIONS = new Set([
   "users", "applications", "clientAppTypes", "platforms", "locations", "signInRiskLevels", "userRiskLevels",
-  "servicePrincipalRiskLevels", "insiderRiskLevels", "devices", "authenticationFlows", "clientApplications",
+  "servicePrincipalRiskLevels", "insiderRiskLevels", "devices", "deviceStates", "authenticationFlows", "clientApplications",
 ]);
 
 function isSet(value: unknown): boolean {
@@ -280,11 +280,15 @@ export function compactConditionalAccessPolicy(policy: unknown, now = Date.now()
   if (servicePrincipalRisk.length) out.servicePrincipalRisk = servicePrincipalRisk;
   // Device states set without a filter (Compliant, DomainJoined): the
   // current includeDevices and excludeDevices and their deprecated names.
+  // The oldest form sits outside devices, as conditions.deviceStates.
   const devices = asRecord(conditions.devices);
+  const topLevelStates = asRecord(conditions.deviceStates);
   const deviceStates = compactIncludeExclude(
     devices && (asStrings(devices.includeDevices).length || asStrings(devices.excludeDevices).length)
       ? { includeDevices: devices.includeDevices, excludeDevices: devices.excludeDevices }
-      : { includeDevices: devices?.includeDeviceStates, excludeDevices: devices?.excludeDeviceStates },
+      : devices && (asStrings(devices.includeDeviceStates).length || asStrings(devices.excludeDeviceStates).length)
+        ? { includeDevices: devices.includeDeviceStates, excludeDevices: devices.excludeDeviceStates }
+        : { includeDevices: topLevelStates?.includeStates, excludeDevices: topLevelStates?.excludeStates },
     "includeDevices", "excludeDevices", "device state",
   );
   if (deviceStates) out.deviceStates = deviceStates;

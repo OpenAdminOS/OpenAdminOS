@@ -126,7 +126,8 @@ describe("compactConditionalAccessPolicy", () => {
     }, NOW);
     assert.deepEqual(agentOnly.apps, { agentActions: 2 });
     assert.deepEqual(record.insiderRisk, ["elevated", "moderate"]);
-    assert.deepEqual(record.otherConditions, ["deviceStates"]);
+    assert.deepEqual(record.deviceStates, { include: "All", exclude: "Compliant" });
+    assert.equal(record.otherConditions, undefined);
     assert.deepEqual(record.users, { include: { users: "None" } });
   });
 
