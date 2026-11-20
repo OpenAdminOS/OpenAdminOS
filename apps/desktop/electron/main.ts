@@ -11,6 +11,7 @@ import {
   MANAGED_POLICY_FILE,
   localResetPolicyProblem,
   parseWhoamiUser,
+  windowsTaskListHas,
   windowsTaskBelongsToThisAccount,
   windowsTaskUserId,
   readLocalResetMarker,
@@ -152,6 +153,7 @@ import type {
 import { ORGANIZATION_NAME_MAX_LENGTH, providerCatalog, servicePartById } from "@openadminos/agent-sdk";
 import { companionUpcomingSchedules, runDueCompanionSchedules } from "./companion-schedules.js";
 import {
+  blockConnectorConfirmations,
   installConnectorConfirmBridge,
   respondConnectorConfirm,
 } from "./connector-confirm-bridge.js";
@@ -5489,14 +5491,21 @@ function removeSchedulerRegistration(): void {
   }
 }
 
+/**
+ * From the full task list, not a query by name: schtasks reports "not
+ * found" and "Task Scheduler is not available" with the same exit code, in
+ * the user's language, so only a list that worked can say a task is absent.
+ */
 function windowsSchedulerTaskPresence(): "present" | "absent" | "unknown" {
-  const result = spawnSync("schtasks.exe", ["/Query", "/TN", WINDOWS_SCHEDULER_TASK], {
-    stdio: "ignore",
+  const result = spawnSync("schtasks.exe", ["/Query", "/FO", "CSV", "/NH"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
     windowsHide: true,
-    timeout: 5_000,
+    timeout: 15_000,
+    maxBuffer: 16 * 1024 * 1024,
   });
-  if (result.error || result.status === null) return "unknown";
-  return result.status === 0 ? "present" : "absent";
+  if (result.error || result.status !== 0) return "unknown";
+  return windowsTaskListHas(result.stdout, WINDOWS_SCHEDULER_TASK) ? "present" : "absent";
 }
 
 /** `launchctl print` exits 113 for a service it does not know. */
@@ -5585,6 +5594,9 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
     throw new LocalResetRequestError("A reset is already in progress. OpenAdminOS restarts in a moment.");
   }
   localResetRequested = true;
+  // No connector send is approved from here on; the request may still be
+  // refused below, which lifts this again.
+  blockConnectorConfirmations("OpenAdminOS is resetting. Nothing was sent.");
   try {
     await requestLocalReset(confirmation, {
       checkReady: async () => {
@@ -5635,6 +5647,7 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
   } catch (error) {
     localResetRequested = false;
     store.cancelLocalReset();
+    blockConnectorConfirmations(undefined);
     throw error;
   }
   console.info("[local-reset] reset requested; restarting");

@@ -786,6 +786,12 @@ export function windowsTaskBelongsToThisAccount(
   return binary.startsWith(homePrefix);
 }
 
+/** Whether `schtasks /Query /FO CSV /NH` lists a task of this name in the root folder. */
+export function windowsTaskListHas(csv: string, taskName: string): boolean {
+  const wanted = `"\\${taskName}"`.toLowerCase();
+  return csv.split(/\r?\n/).some((line) => line.trim().toLowerCase().startsWith(wanted + ","));
+}
+
 /** The account a Windows task runs as, from its XML definition (`<Principal><UserId>`). */
 export function windowsTaskUserId(xml: string | undefined): string | undefined {
   if (!xml) return undefined;

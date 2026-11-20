@@ -2358,7 +2358,7 @@ export class AppStateStore {
     this.localResetStarted = true;
     const blocker = this.confirmationsInFlight > 0
       ? "A change is being confirmed. Wait for it to finish, then reset. Nothing was removed."
-      : await this.localResetBlocker();
+      : (await this.localResetBlocker()) ?? (await this.localResetRunningBlocker());
     if (blocker) this.localResetStarted = false;
     return blocker;
   }
@@ -2383,6 +2383,19 @@ export class AppStateStore {
     }
     const name = persisted.installedAgents.find((agent) => agent.slug === applying.agentSlug)?.name ?? "A write run";
     return `${name} is applying a confirmed change. Wait for it to finish, or cancel it in Runs, then reset. Nothing was removed.`;
+  }
+
+  /**
+   * Any run still going, read-only ones included: a run can send through a
+   * connector (a Teams post, for example) after its own approval, and a
+   * restart would leave unknown whether that send arrived.
+   */
+  async localResetRunningBlocker(): Promise<string | undefined> {
+    const persisted = await this.read();
+    const running = persisted.runs.find((run) => run.status === "running" || run.status === "queued");
+    if (!running) return undefined;
+    const name = persisted.installedAgents.find((agent) => agent.slug === running.agentSlug)?.name ?? "A run";
+    return `${name} is still running. Wait for it to finish, or cancel it in Runs, then reset. Nothing was removed.`;
   }
 
   /**
