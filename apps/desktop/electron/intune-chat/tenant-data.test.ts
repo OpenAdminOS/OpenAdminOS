@@ -331,19 +331,26 @@ test("Chat observations expire with the four-turn window and stay scoped to thei
   const hint = "7qX";
   const path = "/applications";
   let offerHint = true;
+  let originalLedger: ClassificationLedger | undefined;
   const f = await fixture({
     graphResult: route => ({ value: offerHint && route === path ?
       [{ id: "fixture-app", passwordCredentials: [{ hint }] }] : [] }),
-    respond: (_request, index) => index === 0 ?
-      JSON.stringify({ kind: "tenant", tool: "graph_get", params: { path } }) :
-      '{"final":true,"answer":"Reviewed."}',
+    respond: (_request, index) => {
+      if (index === 0) return JSON.stringify({ kind: "tenant", tool: "graph_get", params: { path } });
+      if (index === 1) originalLedger = currentClassificationLedger();
+      return '{"final":true,"answer":"Reviewed."}';
+    },
   });
   try {
     await f.store.setChatInvestigationMode("always-agentic");
     const first = await f.store.streamIntuneChatMessage({ content: "Which application registrations need review?" }, () => {});
     const id = first.conversation.id;
     await f.waitForClassifications();
-    assert.ok(f.store.getRequestClassifications(id).some(event => event.classification.counts.credential > 0));
+    assert.ok(originalLedger);
+    // This tests the retained turn. The original request is allowed to
+    // report incomplete coverage while its ingress is still pending.
+    await originalLedger.waitForObservations();
+    assert.ok(originalLedger.classifyRequest(f.prompts.at(-1)!).counts.credential > 0);
     offerHint = false;
     await f.store.setChatInvestigationMode("always-deterministic");
     const question = `Explain this JSON example {"hint":"${hint}"}`;
