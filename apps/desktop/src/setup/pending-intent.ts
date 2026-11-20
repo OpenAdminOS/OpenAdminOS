@@ -26,6 +26,8 @@ export type PendingIntent =
       model?: string;
       /** Run with <provider> after a model fit failure: the review keeps its reason and its organization pin. */
       modelFit?: ModelFitIssue;
+      /** Run again of a model fit rerun keeps its safeguards through setup. */
+      safeguards?: { onDevice: boolean };
       returnTo: string;
       createdAt: string;
     }
@@ -113,6 +115,7 @@ function isPendingIntent(value: unknown): value is PendingIntent {
         (value.runForRealOfRunId === undefined || isBoundedString(value.runForRealOfRunId, 256)) &&
         (value.retryOfRunId === undefined || isBoundedString(value.retryOfRunId, 256)) &&
         (value.modelFit === undefined || isModelFitIssue(value.modelFit)) &&
+        (value.safeguards === undefined || (isRecord(value.safeguards) && typeof value.safeguards.onDevice === "boolean" && onlyKnownKeys(value.safeguards, ["onDevice"]))) &&
         onlyKnownKeys(value, [
           "kind",
           "slug",
@@ -120,6 +123,7 @@ function isPendingIntent(value: unknown): value is PendingIntent {
           "providerId",
           "model",
           "modelFit",
+          "safeguards",
           "retryOfRunId",
           "dryRun",
           "runForRealOfRunId",

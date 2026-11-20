@@ -1,4 +1,5 @@
 import { guardModelFitLlm } from "./intune-chat/model-fit.js";
+import { classifyModelFitFailure, isOnDeviceModel, SELF_HOSTED_PROVIDER_IDS } from "../src/shared/model-fit.js";
 import { TENANT_CLOSED_COPY } from "./tenant-lifecycle.js";
 import { createHash, randomUUID } from "node:crypto";
 
@@ -801,6 +802,11 @@ export class RunService {
       // A model fit rerun keeps its admission checks for every later phase (plan, replan, apply).
       if (options.requireOnDeviceModel) queuedRun.requireOnDeviceModel = true;
       if (options.bindProviderEndpoint) {
+        // A server outside this device that OpenAdminOS reaches directly (LM Studio, Lemonade, Ollama) is
+        // not a model fit choice: its location is not stated and it may redirect a request elsewhere.
+        if (activeProvider && !activeProvider.isLocal && SELF_HOSTED_PROVIDER_IDS.has(activeProvider.id)) {
+          throw new Error(`${activeProvider.name} is set to a server outside this device, so it is not offered for a run the local model could not do. Choose a hosted provider.`);
+        }
         // The destination the run review saw; a change since refuses the start before anything is sent.
         // One read for the check and the binding, so they cannot disagree.
         const target = await this.host.providerTarget?.(providerId);
@@ -1814,7 +1820,28 @@ export class RunService {
     });
   }
 
+  /**
+   * A failed run whose model on this device could not do it gets the fit
+   * issue the run page offers from. The model's locality is confirmed now,
+   * when it failed, never later against changed provider settings.
+   */
+  private async withModelFitIssue(run: RunRecord): Promise<RunRecord> {
+    if (run.status !== "failed" || run.modelFit || !run.providerId || run.origin !== undefined || run.officeContext) return run;
+    try {
+      const provider = (await this.host.listProviders()).find((entry) => entry.id === run.providerId);
+      if (!provider || !isOnDeviceModel(provider, run.model)) return run;
+      const context = { providerId: provider.id, model: run.model, isLocal: true };
+      const issue = classifyModelFitFailure((run as { failureReason?: unknown }).failureReason ?? run.error, context) ?? classifyModelFitFailure(run.error, context);
+      if (!issue || !(await this.host.verifyOnDeviceModel?.(provider.id, run.model))) return run;
+      return { ...run, modelFit: issue };
+    } catch {
+      // A check that cannot run offers nothing; the run keeps its failure as it is.
+      return run;
+    }
+  }
+
   async persistRunSnapshot(run: RunRecord): Promise<void> {
+    run = await this.withModelFitIssue(run);
     let deliveryCandidate: RunRecord | undefined;
     await this.host.serialize(async () => {
       const persisted = await this.host.read();

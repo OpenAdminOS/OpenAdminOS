@@ -6,7 +6,7 @@ import { MarkdownPreview, stripMarkdownToPlainText } from "../components/Markdow
 import { ResultPanel } from "../components/ResultPanel";
 import { RunFailureRemediation } from "../components/RunFailureRemediation";
 import { ModelFitNotice } from "../components/ModelFitNotice";
-import { classifyModelFitFailure, isOnDeviceModel, modelFitChoices, type ModelFitChoice, type ModelFitChoices } from "../shared/model-fit";
+import { isOnDeviceModel, modelFitChoices, type ModelFitChoice, type ModelFitChoices } from "../shared/model-fit";
 import { RunProgressBar, RunStepTimeline } from "../components/RunProgress";
 import { RunSection } from "../components/RunSection";
 import { useToast } from "../components/Toast";
@@ -131,14 +131,19 @@ function RunResultPage({ run }: { run: RunRecord }) {
 
   // The local model could not fit this run: offer what else is configured
   // (mockup 36, section F). Team runs keep their own review in Agent Team.
+  // The host records the fit issue when the run fails, after confirming its model ran on this
+  // device then; a provider that is not on this device now is not offered from either.
   const modelFit =
-    run.status === "failed" && !isSystemRun && !run.officeContext && run.providerId && runProvider
-      ? classifyModelFitFailure(
-          // A typed reason from the runtime's prompt fit check comes first, the error text after.
-          (run as { failureReason?: unknown }).failureReason ?? run.error,
-          { providerId: run.providerId, model: run.model, isLocal: isOnDeviceModel(runProvider, run.model) },
-        ) ?? classifyModelFitFailure(run.error, { providerId: run.providerId, model: run.model, isLocal: isOnDeviceModel(runProvider, run.model) })
+    run.status === "failed" && !isSystemRun && !run.officeContext && run.modelFit && runProvider && isOnDeviceModel(runProvider, run.model)
+      ? run.modelFit
       : undefined;
+  // Run again of a model fit rerun keeps its safeguards: the on-device check and the endpoint binding.
+  const ownRerunChoice: RerunChoice = {
+    ...(run.providerId ? { providerId: run.providerId } : {}),
+    ...(run.model ? { model: run.model } : {}),
+    ...(run.requireOnDeviceModel || run.providerEndpointBinding ? { safeguards: { onDevice: run.requireOnDeviceModel === true } } : {}),
+    ...(run.dryRun && (run.requireOnDeviceModel || run.providerEndpointBinding) ? { dryRun: true } : {}),
+  };
   const fitChoices = modelFit
     ? modelFitChoices({ issue: modelFit, providers: state.providers, activeModelByProviderId: state.activeModelByProviderId, managedPolicy: state.managedPolicy })
     : undefined;
@@ -203,10 +208,7 @@ function RunResultPage({ run }: { run: RunRecord }) {
       // Run with <provider> reruns on the chosen provider; the preflight is its accept step.
       const override = rerunOverrideRef.current;
       rerunOverrideRef.current = null;
-      openRerunPreflight(run.agentSlug, override ?? {
-        ...(run.providerId ? { providerId: run.providerId } : {}),
-        ...(run.model ? { model: run.model } : {}),
-      });
+      openRerunPreflight(run.agentSlug, override ?? ownRerunChoice);
       return;
     }
     if (
@@ -272,10 +274,7 @@ function RunResultPage({ run }: { run: RunRecord }) {
                 setCrossOrganization(false);
                 const override = rerunOverrideRef.current;
                 rerunOverrideRef.current = null;
-                openRerunPreflight(run.agentSlug, override ?? {
-                  ...(run.providerId ? { providerId: run.providerId } : {}),
-                  ...(run.model ? { model: run.model } : {}),
-                });
+                openRerunPreflight(run.agentSlug, override ?? ownRerunChoice);
               }}
             >
               {RERUN_COPY.runInActive(activeOrganization.name)}

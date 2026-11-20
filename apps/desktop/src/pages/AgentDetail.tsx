@@ -173,7 +173,7 @@ export default function AgentDetail({
   const [uninstalling, setUninstalling] = useState(false);
   const [requestedScopes, setRequestedScopes] = useState<RequestedScope[]>([]);
   const [pendingRunChoice, setPendingRunChoice] = useState<
-    { dryRun?: boolean; runForRealOfRunId?: string; retryOfRunId?: string; tenantId?: string; providerId?: ProviderId; model?: string; modelFit?: ModelFitIssue; expectedProviderDestination?: string; destinationFailed?: true } | null
+    { dryRun?: boolean; runForRealOfRunId?: string; retryOfRunId?: string; tenantId?: string; providerId?: ProviderId; model?: string; modelFit?: ModelFitIssue; safeguards?: { onDevice: boolean }; expectedProviderDestination?: string; destinationFailed?: true } | null
   >(null);
   const consumedStartRunOnOpen = useRef(false);
   const resumedIntentRef = useRef<string | null>(null);
@@ -225,12 +225,14 @@ export default function AgentDetail({
     model?: string;
     /** Run with <provider> after the local model could not fit the last run. */
     modelFit?: ModelFitIssue;
+    /** Run again of a model fit rerun keeps its safeguards. */
+    safeguards?: { onDevice: boolean };
   }) => {
     const openReview = (opened: typeof choice) => {
       const reviewed = opened ?? {};
       setPendingRunChoice(reviewed);
       // A model fit rerun remembers where its provider is reached as the review opens; Start refuses if that changes.
-      if (reviewed.modelFit && reviewed.providerId) {
+      if ((reviewed.modelFit || reviewed.safeguards) && reviewed.providerId) {
         const read = window.openAdminOS?.getProviderDestination?.(reviewed.providerId);
         // Without a destination the host refuses Start, so the review says so instead of waiting.
         void (read ?? Promise.reject(new Error("unavailable")))
@@ -259,6 +261,7 @@ export default function AgentDetail({
           ...(choice?.providerId ? { providerId: choice.providerId } : {}),
           ...(choice?.model ? { model: choice.model } : {}),
           ...(choice?.modelFit ? { modelFit: modelFitForIntent(choice.modelFit) } : {}),
+          ...(choice?.safeguards ? { safeguards: choice.safeguards } : {}),
           returnTo: `/agents/${encodeURIComponent(agent.slug)}`,
         }),
       )
@@ -295,7 +298,8 @@ export default function AgentDetail({
       ...(typeof runChoice?.model === "string" ? { model: runChoice.model } : {}),
       ...(runChoice?.modelFit ? { modelFit: runChoice.modelFit } : {}),
       // A model fit rerun of a dry run stays a dry run.
-      ...(runChoice?.modelFit && runChoice.dryRun ? { dryRun: true } : {}),
+      ...((runChoice?.modelFit || runChoice?.safeguards) && runChoice.dryRun ? { dryRun: true } : {}),
+      ...(runChoice?.safeguards ? { safeguards: runChoice.safeguards } : {}),
     });
     // Only the first open reads the route state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -331,6 +335,7 @@ export default function AgentDetail({
       ...(resumed.model ? { model: resumed.model } : {}),
       ...(resumed.retryOfRunId ? { retryOfRunId: resumed.retryOfRunId } : {}),
       ...(resumed.modelFit ? { modelFit: resumed.modelFit } : {}),
+      ...(resumed.safeguards ? { safeguards: resumed.safeguards } : {}),
     });
   }, [
     activeTenant,
@@ -384,30 +389,32 @@ export default function AgentDetail({
     providerId?: ProviderId;
     model?: string;
     modelFit?: ModelFitIssue;
+    safeguards?: { onDevice: boolean };
     expectedProviderDestination?: string;
   }) => {
     if (!agent) return;
+    const fitLike = Boolean(choice?.modelFit || choice?.safeguards);
     setRunError(null);
     try {
       await waitForDeliverySaves();
       // A Run with <provider> after a model fit failure starts only in the
       // organization this review showed, or in none if it showed none, so a
       // switch before the host admits it cannot send another organization's data.
-      const pinTenant = choice?.modelFit
-        ? pendingTenant ? { tenantId: choice.tenantId ?? pendingTenant.id } : { expectNoTenant: true as const }
+      const pinTenant = fitLike
+        ? pendingTenant ? { tenantId: choice?.tenantId ?? pendingTenant.id } : { expectNoTenant: true as const }
         : choice?.tenantId ? { tenantId: choice.tenantId } : {};
       const options =
-        choice && (choice.dryRun || choice.runForRealOfRunId || choice.retryOfRunId || choice.tenantId || choice.providerId || choice.model || choice.modelFit)
+        choice && (choice.dryRun || choice.runForRealOfRunId || choice.retryOfRunId || choice.tenantId || choice.providerId || choice.model || fitLike)
           ? {
               ...(choice.dryRun ? { dryRun: true } : {}),
               ...(choice.runForRealOfRunId ? { runForRealOfRunId: choice.runForRealOfRunId } : {}),
               ...(choice.retryOfRunId ? { retryOfRunId: choice.retryOfRunId } : {}),
               ...pinTenant,
               // A model on this device is checked again by the host before the run is admitted.
-              ...(choice.modelFit && pendingProvider?.isLocal ? { requireOnDeviceModel: true } : {}),
+              ...((choice.modelFit && pendingProvider?.isLocal) || choice.safeguards?.onDevice ? { requireOnDeviceModel: true } : {}),
               // Every later phase (replan, apply) goes only where the provider was reached when the run was admitted.
-              ...(choice.modelFit ? { bindProviderEndpoint: true } : {}),
-              ...(choice.modelFit && choice.expectedProviderDestination ? { expectedProviderDestination: choice.expectedProviderDestination } : {}),
+              ...(fitLike ? { bindProviderEndpoint: true } : {}),
+              ...(fitLike && choice.expectedProviderDestination ? { expectedProviderDestination: choice.expectedProviderDestination } : {}),
               ...(choice.providerId ? { providerId: choice.providerId } : {}),
               ...(choice.model ? { model: choice.model } : {}),
             }
@@ -1112,9 +1119,9 @@ export default function AgentDetail({
           modelFit={pendingRunChoice?.modelFit}
           deliverySaving={pendingDeliverySaveCount > 0}
           // A model fit rerun starts only once the review knows where its provider is reached.
-          {...(pendingRunChoice?.modelFit && pendingRunChoice.destinationFailed
+          {...((pendingRunChoice?.modelFit || pendingRunChoice?.safeguards) && pendingRunChoice.destinationFailed
             ? { destinationState: "failed" as const }
-            : pendingRunChoice?.modelFit && !pendingRunChoice.expectedProviderDestination
+            : (pendingRunChoice?.modelFit || pendingRunChoice?.safeguards) && !pendingRunChoice.expectedProviderDestination
               ? { destinationState: "pending" as const }
               : {})}
           // Provider readiness is checked on its own, whatever the
@@ -1143,6 +1150,7 @@ export default function AgentDetail({
                 ...(choice.providerId ? { providerId: choice.providerId } : {}),
                 ...(choice.model ? { model: choice.model } : {}),
                 ...(choice.modelFit ? { modelFit: modelFitForIntent(choice.modelFit) } : {}),
+                ...(choice.safeguards ? { safeguards: choice.safeguards } : {}),
                 returnTo: `/agents/${encodeURIComponent(agent.slug)}`,
               }),
             );
@@ -2736,6 +2744,8 @@ export interface RerunChoice {
   modelFit?: ModelFitIssue;
   /** The failed run was a dry run; a model fit rerun keeps it one. */
   dryRun?: boolean;
+  /** Run again of a model fit rerun: it keeps the endpoint binding, and the on-device check when it ran here. */
+  safeguards?: { onDevice: boolean };
 }
 
 function RunPreflightModal({

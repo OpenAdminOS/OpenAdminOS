@@ -451,3 +451,21 @@ it('refuses a model fit rerun whose destination changed after its review, and ke
   assert.equal(real.requireOnDeviceModel, true);
   assert.deepEqual(real.providerEndpointBinding, { endpoint: 'http://127.0.0.1:11434', scope: 'model-fit' });
 });
+
+it('records a fit issue on a failed run only after confirming its model ran on this device', async () => {
+  const h = harness();
+  let onDevice = true;
+  Object.assign(h.host, {
+    listProviders: async () => [{ id: 'ollama', name: 'Ollama', status: 'connected', models: ['gpt-oss:20b'], defaultModel: 'gpt-oss:20b', isLocal: true }],
+    verifyOnDeviceModel: async () => onDevice,
+  });
+  const failed = (id: string) => ({ id, agentSlug: 'docs', status: 'failed', providerId: 'ollama', model: 'gpt-oss:20b', queuedAt: new Date().toISOString(), steps: [], logs: [],
+    error: 'Ollama context size too small: This request needs 40,652 tokens of context, but Ollama could only give gpt-oss:20b 16,384, usually because free memory ran out.' }) as unknown as RunRecord;
+  await h.host.write({ ...h.state(), runs: [failed('r1'), failed('r2')] });
+  await h.service.persistRunSnapshot(failed('r1'));
+  assert.deepEqual(h.state().runs.find((run) => run.id === 'r1')?.modelFit, { reason: 'context-too-small', neededTokens: 40652, limitTokens: 16384, providerId: 'ollama', model: 'gpt-oss:20b' });
+  // The alias is remote-backed when the run fails: nothing is offered.
+  onDevice = false;
+  await h.service.persistRunSnapshot(failed('r2'));
+  assert.equal(h.state().runs.find((run) => run.id === 'r2')?.modelFit, undefined);
+});

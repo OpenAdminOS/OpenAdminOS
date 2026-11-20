@@ -1084,6 +1084,12 @@ export interface RunRecord {
   accessDenial?: GraphAccessDenial;
   /** Model fit rerun on a model on this device: every phase checks again that it runs here before building the model. */
   requireOnDeviceModel?: true;
+  /**
+   * The run failed because the model on this device could not do it, as the
+   * host classified the failure and confirmed, when it failed, that the model
+   * ran on this device. The run page offers other providers only from this.
+   */
+  modelFit?: ModelFitIssue;
   /** Model fit rerun: where the provider was reached at admission; every phase is built only for it. */
   providerEndpointBinding?: { endpoint: string | undefined; scope?: "model-fit" };
   logs: RunLogRecord[];

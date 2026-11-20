@@ -812,10 +812,12 @@ it("says Run again did not continue when the run page closes before the switch l
 
 describe("Run with another provider after a model fit failure (mockup 36, section F)", () => {
   const CONTEXT_ERROR = "Ollama context size too small: This request needs 40,652 tokens of context, but Ollama could only give llama3.1 16,384, usually because free memory ran out.";
+  // What the host records with such a failure, after confirming the model ran on this device.
+  const FIT = { modelFit: { reason: "context-too-small" as const, providerId: "ollama" as const, model: "llama3.1", neededTokens: 40652, limitTokens: 16384 } };
 
   it("offers the ready hosted provider with its location label, accepts in the run review, and reruns with it", async () => {
     const user = userEvent.setup();
-    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "ollama", model: "llama3.1", tenantId: "tenant-1", error: CONTEXT_ERROR });
+    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "ollama", model: "llama3.1", tenantId: "tenant-1", error: CONTEXT_ERROR, ...FIT });
     const bridge = makeMockBridge({}, createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "write" })], runs: [run] }));
     renderWithPreflight(run.id, bridge);
     const notice = await screen.findByRole("region", { name: "llama3.1 cannot fit this run" });
@@ -837,7 +839,7 @@ describe("Run with another provider after a model fit failure (mockup 36, sectio
 
   it("does not start a model fit rerun when the review cannot read where the provider is reached", async () => {
     const user = userEvent.setup();
-    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "ollama", model: "llama3.1", tenantId: "tenant-1", error: CONTEXT_ERROR });
+    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "ollama", model: "llama3.1", tenantId: "tenant-1", error: CONTEXT_ERROR, ...FIT });
     const bridge = makeMockBridge({ getProviderDestination: vi.fn(async () => { throw new Error("no answer"); }) }, createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "read" })], runs: [run] }));
     renderWithPreflight(run.id, bridge);
     await user.click(within(await screen.findByRole("region", { name: "llama3.1 cannot fit this run" })).getByRole("button", { name: "Run with Codex" }));
@@ -850,7 +852,7 @@ describe("Run with another provider after a model fit failure (mockup 36, sectio
   it("asks the host to check a larger local model again before the rerun", async () => {
     const user = userEvent.setup();
     const providers = mockProviders.map((provider) => (provider.id === "ollama" ? { ...provider, models: ["llama3.1", "gpt-oss:20b"] } : provider));
-    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "ollama", model: "openadmin-8b", tenantId: "tenant-1", error: CONTEXT_ERROR });
+    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "ollama", model: "openadmin-8b", tenantId: "tenant-1", error: CONTEXT_ERROR, modelFit: { ...FIT.modelFit, model: "openadmin-8b" } });
     const bridge = makeMockBridge({}, createMockAppState({ providers, installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "read" })], runs: [run] }));
     renderWithPreflight(run.id, bridge);
     await user.click(within(await screen.findByRole("region", { name: "OpenAdmin 8B cannot fit this run" })).getByRole("button", { name: "Use gpt-oss:20b" }));
@@ -861,7 +863,7 @@ describe("Run with another provider after a model fit failure (mockup 36, sectio
 
   it("keeps a failed dry run a dry run when it is run again with another provider", async () => {
     const user = userEvent.setup();
-    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, dryRun: true, providerId: "ollama", model: "llama3.1", tenantId: "tenant-1", error: CONTEXT_ERROR });
+    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, dryRun: true, providerId: "ollama", model: "llama3.1", tenantId: "tenant-1", error: CONTEXT_ERROR, ...FIT });
     const bridge = makeMockBridge({}, createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "write" })], runs: [run] }));
     renderWithPreflight(run.id, bridge);
     await user.click(within(await screen.findByRole("region", { name: "llama3.1 cannot fit this run" })).getByRole("button", { name: "Run with Codex" }));
@@ -870,9 +872,24 @@ describe("Run with another provider after a model fit failure (mockup 36, sectio
     await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({ dryRun: true, providerId: "openai" })));
   });
 
+  it("keeps a model fit rerun's safeguards when it is run again", async () => {
+    const user = userEvent.setup();
+    const run = { ...createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "ollama", model: "llama3.1", tenantId: "tenant-1", error: "OpenAdminOS could not confirm that llama3.1 still runs on this device, so nothing was sent to it. Start the run again." }),
+      requireOnDeviceModel: true as const, providerEndpointBinding: { endpoint: "http://127.0.0.1:11434", scope: "model-fit" as const } };
+    const bridge = makeMockBridge({}, createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "read" })], runs: [run] }));
+    renderWithPreflight(run.id, bridge);
+    await user.click(await screen.findByRole("button", { name: "Run again" }));
+    const dialog = await screen.findByRole("dialog", { name: /Review run/ });
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Start run" })).toBeEnabled());
+    await user.click(within(dialog).getByRole("button", { name: "Start run" }));
+    await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({
+      providerId: "ollama", model: "llama3.1", requireOnDeviceModel: true, bindProviderEndpoint: true, expectedProviderDestination: "dest-ollama", tenantId: "tenant-1",
+    })));
+  });
+
   it("keeps Run again on the run's own provider", async () => {
     const user = userEvent.setup();
-    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "ollama", model: "llama3.1", tenantId: "tenant-1", error: CONTEXT_ERROR });
+    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "ollama", model: "llama3.1", tenantId: "tenant-1", error: CONTEXT_ERROR, ...FIT });
     const bridge = makeMockBridge({}, createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "read" })], runs: [run] }));
     renderWithPreflight(run.id, bridge);
     await user.click(await screen.findByRole("button", { name: "Run again" }));
@@ -885,7 +902,7 @@ describe("Run with another provider after a model fit failure (mockup 36, sectio
   it("keeps the chosen provider through Run in the active organization, and drops it on Cancel", async () => {
     const user = userEvent.setup();
     const fabrikam = { ...createMockAppState().tenants[0]!, id: "tenant-2", displayName: "Fabrikam" };
-    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "ollama", model: "llama3.1", tenantId: "tenant-2", error: CONTEXT_ERROR });
+    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "ollama", model: "llama3.1", tenantId: "tenant-2", error: CONTEXT_ERROR, ...FIT });
     const state = createMockAppState({ tenants: [createMockAppState().tenants[0]!, fabrikam], installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "read" })], runs: [run] });
     const bridge = makeMockBridge({}, state);
     const first = renderWithPreflight(run.id, bridge);
@@ -910,7 +927,7 @@ describe("Run with another provider after a model fit failure (mockup 36, sectio
 
   it("does not offer anything for a run on a remote-backed model of a local server", async () => {
     const providers = mockProviders.map((provider) => (provider.id === "ollama" ? { ...provider, remoteModels: ["llama3.1"] } : provider));
-    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "ollama", model: "llama3.1", tenantId: "tenant-1", error: CONTEXT_ERROR });
+    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "ollama", model: "llama3.1", tenantId: "tenant-1", error: CONTEXT_ERROR, ...FIT });
     const bridge = makeMockBridge({}, createMockAppState({ providers, installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "read" })], runs: [run] }));
     renderWithPreflight(run.id, bridge);
     await screen.findByRole("button", { name: "Run again" });
