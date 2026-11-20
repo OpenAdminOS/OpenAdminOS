@@ -1823,12 +1823,16 @@ Entra or Intune role assignment or activation. Unverified failures list consent,
 role, licence, and access-policy possibilities without recommending reconnect.
 Structured access-denial fields are additive in run history, cache status, and
 multi-tenant readiness; persisted status values remain unchanged. Only an error
-from a Microsoft Graph call is classified: the Graph client's own error type, or
-the wrapper text the Graph clients write ("Graph responded", "Microsoft Graph", a
-Graph host). Graph's 403 body (`{"error":{"code":"Forbidden"|"accessDenied",...}}`)
-does not name Graph, so a bare "403" from Ollama, LM Studio, a vendor API, or an
-MCP server is never a Graph denial, and the run failure panel ignores a denial
-stored with such an error by an earlier version. Licence inventory
+from a Microsoft Graph call is classified: the Graph client's own error type
+(also as the `cause` of an agent's error), or a message that starts with the text
+the Graph clients write ("Graph responded with HTTP 403", "Microsoft Graph
+rejected", "Microsoft Graph denied access"). Graph's 403 body
+(`{"error":{"code":"Forbidden"|"accessDenied",...}}`) does not name Graph, and a
+provider error can quote "Microsoft Graph" in a body it appends, so a 403 from
+Ollama, LM Studio, a vendor API, or an MCP server is never a Graph denial. New
+denials carry `source: "microsoft-graph"`. A stored denial without it is shown
+only when its error came from Graph; on load, it is dropped from other runs, and
+a scheduled run's Graph advice saved as its summary is replaced by the error. Licence inventory
 failures remain unknown. This Phase 1 change adds no access probes, selectable
 permission packs, onboarding questions, or changes to scopes requested at sign-in.
 Setup recommends Global Reader for daily read work, treats Global Administrator as
