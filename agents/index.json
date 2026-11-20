@@ -50,7 +50,7 @@
       ],
       "minAppVersion": "0.7.3-nightly.20261120040000",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/conditional-access-explainer/manifest.yaml",
-      "manifestSha256": "7a4d70adb4ed6a755e7a66a1598bc8c6138989a90374bb57009663dc435f4188"
+      "manifestSha256": "2ca924a3d8db0da84f2da2d94c63399901078b585ff3ecea3ca218dd8ce9cdd6"
     },
     {
       "id": "dormant-app-registrations",
@@ -73,9 +73,9 @@
       "services": [
         "entra"
       ],
-      "minAppVersion": "0.7.3-nightly.20261120040000",
+      "minAppVersion": "0.6.3",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/dormant-app-registrations/manifest.yaml",
-      "manifestSha256": "695aa5c56813062139b5751cffa8f9aa3989c2e02f482c2e3f26d670059cbef0"
+      "manifestSha256": "afc91b0ee52f3f2a1ee74220c7c0a24c3c83b02cc795c4ef5f4582aa0ad88ba4"
     },
     {
       "id": "find-inactive-devices",
@@ -182,9 +182,9 @@
       "services": [
         "intune"
       ],
-      "minAppVersion": "0.7.3-nightly.20261120040000",
+      "minAppVersion": "0.1.0",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/os-update-posture/manifest.yaml",
-      "manifestSha256": "d576b26e90e5f0c52eb679854509846e51d77fad82b04456c823bf3898500d24"
+      "manifestSha256": "34b0ea962a5d21bee7f7c0086e6d5f8254c7712fce5c0356354ab4c501a24b2f"
     },
     {
       "id": "risky-sign-in-triage",
@@ -257,9 +257,9 @@
       "services": [
         "entra"
       ],
-      "minAppVersion": "0.7.3-nightly.20261120040000",
+      "minAppVersion": "0.1.0",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/sign-in-failure-explainer/manifest.yaml",
-      "manifestSha256": "d0b5dce0e0b7819034c12f30462b4d30183bdfba223cca309593060598f32bb1"
+      "manifestSha256": "dcabb0098dce16ed6850378d71bc0b649a9230f8b41fad994c42949e2350484e"
     },
     {
       "id": "stale-guest-cleanup",
@@ -352,9 +352,9 @@
       "services": [
         "entra"
       ],
-      "minAppVersion": "0.7.3-nightly.20261120040000",
+      "minAppVersion": "0.6.3",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/tenant-change-audit/manifest.yaml",
-      "manifestSha256": "85a580e51162546a06ee4769ae75d1d6bfb671579a084244fbf3773a561a188b"
+      "manifestSha256": "2585368df74d30ac799ee3f076dbd62b7e166124e49279129b67b40a90940c0e"
     },
     {
       "id": "tenant-health-report",
@@ -402,9 +402,9 @@
       "services": [
         "entra"
       ],
-      "minAppVersion": "0.7.3-nightly.20261120040000",
+      "minAppVersion": "0.1.0",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/user-license-overview/manifest.yaml",
-      "manifestSha256": "1dfcb35ff50c16c5ec5e5f55d62f8a27933dd1b27190b77b002d89183f9a214d"
+      "manifestSha256": "12380fdd71fb96634179c2f0a9d7835c12b2e6249bb99f4cca1c23f849fb41d7"
     }
   ]
 }
