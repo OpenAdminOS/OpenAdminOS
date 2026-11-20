@@ -749,7 +749,8 @@ describe("Chat steps, sources and follow-ups end to end", () => {
           : await store.streamIntuneChatMessage({ content: "How many non-compliant devices are there?" }, () => undefined);
         const message = result.assistantMessage;
         assert.doesNotMatch(message.content, /inventory is unavailable/, send);
-        assert.match(message.content, /0 devices are marked non-compliant/, send);
+        // On a local model code answers from the refreshed cache.
+        assert.match(message.content, /Intune managed devices not compliant: 0\./, send);
         assert.ok(graphPaths.length > 0, send);
         assert.ok(kinds(message.steps).includes("graph-refresh"), send);
       }, { emptyCache: true });

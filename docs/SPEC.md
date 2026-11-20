@@ -3840,7 +3840,9 @@ the format. Decisions:
   "not in grace period", both states at once, a "not" or "failing" no filter
   reads, a sync verb without a window, a number other than a sync window such
   as "Windows 11", which names a version the filters do not model, an "or",
-  since filters combine with AND only) goes to the planner, and the sample rows then get no
+  since filters combine with AND only, "last month" or "last week" alone,
+  which name a calendar period, a question naming both Intune and Entra
+  devices) goes to the planner, and the sample rows then get no
   OS or compliance filter from it either.
   `count_cached` on a resource that was never refreshed returns no count.
 - Intune is the device inventory. Device, OS, sync and compliance wording plans
@@ -3853,8 +3855,11 @@ the format. Decisions:
   to 500 matched row ids; deleted with the conversation) and a follow-up such
   as "only Windows" or "which of those synced this month" narrows those rows
   by id: a device added by a later refresh is not part of the previous answer,
-  a device whose values changed stays in it and is listed with its current
-  values, and one that left the cache is said to be gone. A different value on a field already filtered after a switch lead
+  a device whose values changed stays in it, is listed with its current
+  values and is counted as no longer matching, one that left the cache is said
+  to be gone, and every requested narrowing, also a repeated one, applies to
+  the current values. In a two-clause question each filter belongs to its
+  clause: the first clause is the counted set, the second the listed subset. A different value on a field already filtered after a switch lead
   ("what about macOS" after Windows) asks the same question of a fresh set.
   What ran shows the filters of a follow-up, not the row ids. A device
   lookup stores no follow-up context. When the previous answer matched more

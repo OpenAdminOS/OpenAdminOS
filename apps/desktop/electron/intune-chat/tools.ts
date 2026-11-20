@@ -932,7 +932,7 @@ export async function executeIntuneChatTool(
     const cacheSource = ((): IntuneChatToolTraceEntry["cacheSource"] => {
       if (result === null || typeof result !== "object") return undefined;
       const record = result as Record<string, unknown>;
-      if (tool === "query_cache" && record.snapshot && typeof record.snapshot === "object") {
+      if ((tool === "query_cache" || tool === "count_cached") && record.snapshot && typeof record.snapshot === "object") {
         const snapshot = record.snapshot as Record<string, unknown>;
         if (typeof record.resource !== "string") return undefined;
         return {

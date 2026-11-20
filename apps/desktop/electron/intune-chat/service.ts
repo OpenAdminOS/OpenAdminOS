@@ -4193,7 +4193,7 @@ function withMcpSkippedNotice(capability: AgenticCapabilityDecision, mcpInstalle
   if (!mcpInstalled || capability.enabled || capability.tooSmall) return capability.notice;
   const skipped = capability.reason === "setting"
     ? "Installed MCP tools were not used because Chat is set to deterministic retrieval."
-    : "Installed MCP tools were not used because the selected model is too small for tool use.";
+    : "Installed MCP tools were not used because Chat skips the tool loop for this model.";
   return capability.notice ? `${capability.notice} ${skipped}` : skipped;
 }
 

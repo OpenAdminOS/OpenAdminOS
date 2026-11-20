@@ -260,7 +260,9 @@ export function syncFilter(lower: string, generatedAt: string): { label: string;
     label = "this week";
   } else {
     const days = /\b(?:last|past|in the last|within(?: the last)?|over the last|for|in)\s+(\d{1,4})\s+days?\b/.exec(lower)?.[1]
-      ?? (/\b(?:last|past) week\b/.test(lower) ? "7" : /\b(?:last|past) month\b|\b30 days\b/.test(lower) ? "30" : undefined);
+      // "in the past week" is the trailing seven days; "last week" or "last month" alone is a calendar
+      // period, which one cutoff cannot express, so it stays unread and the question goes to the planner.
+      ?? (/\b(?:in|within|over|during) the (?:last|past) week\b|\bthe past week\b/.test(lower) ? "7" : /\b(?:in|within|over|during) the (?:last|past) month\b/.test(lower) ? "30" : undefined);
     if (days === undefined) return undefined;
     const count = Math.max(1, Math.min(3650, Number(days)));
     since = new Date(now.getTime() - count * MS_PER_DAY);
@@ -331,8 +333,9 @@ export function structuredQueryForQuestion(input: {
       const filters = dedupe([...previous.filters, ...added.map((entry) => entry.predicate)]);
       return { kind: "count", resource: previous.resource, scopeLabel: describeFilters(previous.resource, filters), filters, breakdown, list: true };
     }
-    // A narrowing that repeats a filter already in force adds nothing new; the previous set is listed again.
-    const fresh = added.filter((entry) => !previous.filters.some((filter) => JSON.stringify(filter) === JSON.stringify(entry.predicate)));
+    // Every requested narrowing applies to the previous rows' current values, also one that repeats a filter
+    // already in force: a device whose OS changed since is not listed as Windows.
+    const fresh = added;
     const label = fresh.map((entry) => entry.label).join(", ");
     return {
       kind: "count",
@@ -349,25 +352,41 @@ export function structuredQueryForQuestion(input: {
 
   if (!DEVICE_SUBJECT.test(lower) || OTHER_TOPIC.test(lower) || WHY.test(lower)) return undefined;
   if (!count && breakdown.length === 0 && !(list && constraints > 0)) return undefined;
-  const entra = ENTRA_SUBJECT.test(lower) && !/\bintune\b|\bmanaged devices?\b/.test(lower);
+  // A question that names both inventories asks for two counts; the computed result holds one.
+  const entraNamed = ENTRA_SUBJECT.test(lower);
+  if (entraNamed && /\bintune\b|\bmanaged devices?\b/.test(lower)) return undefined;
+  const entra = entraNamed;
   const resource: StructuredDeviceResource = entra ? "entraDevices" : "managedDevices";
   // Entra device objects carry no complianceState and no lastSyncDateTime.
   if (entra && (compliance || sync)) return undefined;
-  // A second clause ("and how many are not compliant", "and how many are Windows") is the subset, never a
-  // filter on the whole count: an OS named only there joins the subset, not the counted set.
+  // Two clauses ("how many noncompliant devices are there, and how many are Windows"): each filter belongs to
+  // the clause that names it. The first clause is the counted set, the second the listed subset.
   const second = secondClauseStart(lower);
   const twoParts = second >= 0;
-  const osInSubset = twoParts && os !== undefined && osFilter(lower.slice(0, second)) === undefined;
-  const scopeOs = osInSubset ? undefined : os;
-  const scopeFilters = [scopeOs, ...(compliance && !list && !count ? [compliance] : [])].flatMap((entry) => (entry ? [entry.predicate] : []));
-  const scopeLabel = resource === "managedDevices"
-    ? `Intune managed ${scopeOs ? `${scopeOs.label} ` : ""}devices`
-    : `Entra ${scopeOs ? `${scopeOs.label} ` : ""}devices`;
+  let scopeParts: Array<{ label: string; predicate: GraphCacheQueryPredicate }>;
+  let focusParts: Array<{ label: string; predicate: GraphCacheQueryPredicate }>;
+  if (twoParts) {
+    const clause = (text: string) => {
+      const state = complianceFocus(text);
+      return state === "ambiguous" ? undefined : [osFilter(text), state, syncFilter(text, input.generatedAt)].flatMap((entry) => (entry ? [entry] : []));
+    };
+    const head = clause(lower.slice(0, second));
+    const tail = clause(lower.slice(second));
+    if (!head || !tail) return undefined;
+    // The same field in both clauses with different values is two questions.
+    if (tail.some((entry) => head.some((other) => other.predicate.field === entry.predicate.field))) return undefined;
+    scopeParts = head;
+    focusParts = tail;
+  } else {
+    scopeParts = [os, ...(compliance && !list && !count ? [compliance] : [])].flatMap((entry) => (entry ? [entry] : []));
+    focusParts = [compliance, sync].flatMap((entry) => (entry ? [entry] : []));
+  }
+  const scopeLabel = describeFilters(resource, scopeParts.map((entry) => entry.predicate));
   // "How many devices, and which are not compliant": the count covers the set, the list the subset.
-  const focusParts = [osInSubset ? os : undefined, compliance, sync].flatMap((entry) => (entry ? [entry] : []));
   const focus = focusParts.length > 0 && (count || breakdown.length > 0) && (list || twoParts)
     ? { label: focusParts.map((entry) => entry.label).join(", "), filters: focusParts.map((entry) => entry.predicate) }
     : undefined;
+  const scopeFilters = scopeParts.map((entry) => entry.predicate);
   const filters = focus ? scopeFilters : [...scopeFilters, ...focusParts.map((entry) => entry.predicate)];
   const label = focus || focusParts.length === 0 ? scopeLabel : `${scopeLabel} ${focusParts.map((entry) => entry.label).join(", ")}`;
   return {
@@ -489,7 +508,8 @@ export function computeStructuredResult(input: {
         tenantId,
         resource: query.resource,
         filters: [...baseFilters, ...query.focus.filters],
-        groupBy: query.resource === "managedDevices" ? ["operatingSystem"] : [],
+        // A follow-up's requested breakdown ("of those, Windows by compliance state") is over the narrowed rows.
+        groupBy: [...new Set([...(query.resource === "managedDevices" ? ["operatingSystem"] : []), ...(query.followUp ? query.breakdown : [])])],
         ...ids,
         listLimit: COMPUTED_LIST_LIMIT,
       })
@@ -510,10 +530,17 @@ export function computeStructuredResult(input: {
   if (!query.followUp) facts.push(`${query.scopeLabel}: ${counted.total}${breakdownText ? ` (${breakdownText})` : ""}.`);
   else if (!query.focus) facts.push(`${capitalize(previousSet)}${breakdownText ? ` (${breakdownText})` : ""}${listSet && rows.length ? ":" : "."}`);
   if (gone > 0) facts.push(`${gone} of the devices in the previous answer ${gone === 1 ? "is" : "are"} no longer in the cache.`);
+  // A device whose values changed since the previous answer stays in its set; say how many no longer match it.
+  if (query.ids && query.filters.length > 0) {
+    const changed = counted.total - store.countGraphCache({ tenantId, resource: query.resource, filters: query.filters, ids: query.ids }).total;
+    if (changed > 0) facts.push(`${changed} of them no longer ${changed === 1 ? "matches" : "match"} "${query.scopeLabel}" with ${changed === 1 ? "its" : "their"} current values, shown below.`);
+  }
   if (query.focus && focusCount) {
     const os = groupText(focusCount.groups.operatingSystem);
     const subject = query.followUp ? `${capitalize(query.focus.label)} among ${previousSet}` : capitalize(query.focus.label);
-    facts.push(`${subject}: ${focusCount.total}${os && Object.keys(focusCount.groups.operatingSystem ?? {}).length > 1 ? ` (${os})` : ""}${focusRows.length ? ":" : "."}`);
+    const focusBreakdown = query.followUp ? query.breakdown.filter((field) => field !== "operatingSystem").map((field) => `${FIELD_WORDS[field] ?? `by ${field}`}: ${groupText(focusCount.groups[field]) || "none reported"}`) : [];
+    const parts = [...(os && Object.keys(focusCount.groups.operatingSystem ?? {}).length > 1 ? [os] : []), ...focusBreakdown];
+    facts.push(`${subject}: ${focusCount.total}${parts.length ? ` (${parts.join("; ")})` : ""}${focusRows.length ? ":" : "."}`);
     facts.push(...focusRows.map(rowLine));
     if (focusCount.total > focusRows.length) facts.push(`${focusCount.total - focusRows.length} more match and are not listed.`);
   } else if (listSet) {
@@ -522,7 +549,8 @@ export function computeStructuredResult(input: {
   }
   facts.push(`Counted from the ${query.resource === "managedDevices" ? "Intune" : "Entra"} device cache${snapshot?.refreshedAt ? ` refreshed ${snapshot.refreshedAt}` : ""}${snapshot?.partial ? "; the cache does not hold every device, so these counts cover the cached part only" : ""}.`);
 
-  const listedLabel = query.focus ? `${query.scopeLabel} ${query.focus.label}` : query.scopeLabel;
+  // Built from the filters, so a chain of follow-ups reads "Intune managed Windows devices not compliant".
+  const listedLabel = describeFilters(query.resource, dedupe(listedFilters));
   return {
     kind: "count",
     resource: query.resource,
@@ -636,6 +664,8 @@ export function computedResultForModel(result: ComputedResult): Record<string, u
  */
 export function deviceRowFilters(question: string): GraphCacheQueryPredicate[] {
   const lower = normalize(question);
+  // "Windows or noncompliant" is a union; ANDing its parts would sample the wrong rows.
+  if (/\bor\b/.test(lower)) return [];
   const compliance = complianceFocus(lower);
   return [osFilter(lower), compliance === "ambiguous" ? undefined : compliance].flatMap((entry) => (entry ? [entry.predicate] : []));
 }
