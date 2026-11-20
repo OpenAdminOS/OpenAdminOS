@@ -512,8 +512,7 @@ it("starts a model fit rerun resumed from setup on the provider and model its re
   await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith("devices", expect.objectContaining({ providerId: "openai", model: "gpt-5", expectedProviderDestination: "dest-openai" })));
 });
 
-it("passes a model fit rerun's named model as named, so the host can refuse one the provider no longer reports", async () => {
-  const user = userEvent.setup();
+it("does not start a model fit rerun whose named model the provider no longer lists, and says so", async () => {
   const agent = createMockAgent({ id: "devices", slug: "devices", name: "Inactive devices", mode: "read", scopes: ["DeviceManagementManagedDevices.Read.All"], services: ["intune"] });
   const state = createMockAppState({ installedAgents: [agent], activeProviderId: "ollama" });
   const intent = {
@@ -530,10 +529,10 @@ it("passes a model fit rerun's named model as named, so the host can refuse one 
     { path: "*", route: "/start", bridge },
   );
   const dialog = await screen.findByRole("dialog", { name: /Review run/ });
-  const start = within(dialog).getByRole("button", { name: "Start run" });
-  await waitFor(() => expect(start).toBeEnabled());
-  await user.click(start);
-  await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith("devices", expect.objectContaining({ providerId: "openai", model: "gpt-4.1" })));
+  // The review would otherwise show a fallback model while Start passes the named one.
+  expect(await within(dialog).findByText("Codex no longer lists gpt-4.1, so this run cannot start. Choose a provider again on the run page.")).toBeInTheDocument();
+  expect(within(dialog).getByRole("button", { name: "Start run" })).toBeDisabled();
+  expect(bridge.startRun).not.toHaveBeenCalled();
 });
 
 it("does not start a model fit rerun on a hosted provider that reports no model", async () => {

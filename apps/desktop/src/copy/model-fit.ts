@@ -111,6 +111,7 @@ export const MODEL_FIT_COPY = {
   answeredRest: (model: string) => `for this request only. Chat is back on ${model}.`,
   answeredLocal: (model: string, providerName: string) => `${model} on this device (${providerName})`,
 
+  modelGone: (model: string, provider: string) => `${provider} no longer lists ${model}, so this run cannot start. Choose a provider again on the run page.`,
   modelMissing: (provider: string) => `${provider} does not report a model yet, so this run cannot start. Check it in Settings, Providers.`,
   destinationPending: (provider: string) => `Checking where ${provider} is reached before the run can start.`,
   destinationFailedChat: (provider: string) =>

@@ -2627,8 +2627,8 @@ sent. The run review takes the destination fingerprint when it opens and
 Start passes it (`expectedProviderDestination`); Start stays disabled until
 it is read, a failed read says so in the review, and a change refuses the
 start. Start passes the provider and model the review showed, never one the
-host resolves again, and the host refuses a model the provider no longer
-reports. When the chosen provider is not ready and the review opens setup, a
+host resolves again. A model the choice named that the provider no longer
+lists keeps Start disabled, and the review says so; the host refuses it too. When the chosen provider is not ready and the review opens setup, a
 provider picked there stays on that run: setup does not change the active
 provider for a model fit rerun or for Run for real of a model fit dry run, and
 checks the picked provider in full the way selecting it does. A run resumed

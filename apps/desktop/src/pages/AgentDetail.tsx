@@ -1127,7 +1127,9 @@ export default function AgentDetail({
           modelFit={pendingRunChoice?.modelFit}
           deliverySaving={pendingDeliverySaveCount > 0}
           // A model fit rerun starts only once the review knows where its provider is reached.
-          {...((pendingRunChoice?.modelFit || pendingRunChoice?.safeguards) && pendingProvider && !pendingProvider.isLocal && !pendingModel
+          {...((pendingRunChoice?.modelFit || pendingRunChoice?.safeguards) && pendingRunChoice.model && pendingProvider && pendingProvider.models.length > 0 && !pendingProvider.models.includes(pendingRunChoice.model)
+            ? { destinationState: "model-gone" as const, missingModel: pendingRunChoice.model }
+            : (pendingRunChoice?.modelFit || pendingRunChoice?.safeguards) && pendingProvider && !pendingProvider.isLocal && !pendingModel
             ? { destinationState: "no-model" as const }
             : (pendingRunChoice?.modelFit || pendingRunChoice?.safeguards) && pendingRunChoice.destinationFailed
             ? { destinationState: "failed" as const }
@@ -2774,6 +2776,7 @@ function RunPreflightModal({
   modelLabel,
   deliverySaving,
   destinationState,
+  missingModel,
   onConnect,
   onOpenConnections,
   providerReady = true,
@@ -2811,7 +2814,9 @@ function RunPreflightModal({
   modelLabel?: string | undefined;
   deliverySaving: boolean;
   /** A model fit rerun is still reading, or could not read, where its provider is reached, or its hosted provider names no model. */
-  destinationState?: "pending" | "failed" | "no-model";
+  destinationState?: "pending" | "failed" | "no-model" | "model-gone";
+  /** The model a model fit rerun named that its provider no longer reports. */
+  missingModel?: string | undefined;
   onClose: () => void;
   onConfirm: () => void;
 }) {
@@ -2902,7 +2907,7 @@ function RunPreflightModal({
             ? { tone: "danger", title: "This agent cannot start as declared.", body: scopeBlockCopy, hint: "Fix the agent's declared permissions to start it." }
             : null;
   const missingServicesBlock = !blocker && activeTenant && missingServices.length > 0;
-  const hint = blocker?.hint ?? (missingServicesBlock ? `Connect ${formatServiceList(missingServices.map((service) => service.title))} to start this run.` : deliverySaving ? "Saving connector delivery changes before the run starts." : destinationState === "no-model" ? MODEL_FIT_COPY.modelMissing(providerName) : destinationState === "failed" ? MODEL_FIT_COPY.destinationFailed(providerName) : destinationState === "pending" ? MODEL_FIT_COPY.destinationPending(providerName) : undefined);
+  const hint = blocker?.hint ?? (missingServicesBlock ? `Connect ${formatServiceList(missingServices.map((service) => service.title))} to start this run.` : deliverySaving ? "Saving connector delivery changes before the run starts." : destinationState === "model-gone" ? MODEL_FIT_COPY.modelGone(missingModel ?? "", providerName) : destinationState === "no-model" ? MODEL_FIT_COPY.modelMissing(providerName) : destinationState === "failed" ? MODEL_FIT_COPY.destinationFailed(providerName) : destinationState === "pending" ? MODEL_FIT_COPY.destinationPending(providerName) : undefined);
   const locationDetail = providerDataLocationDetail({ id: providerId });
   const changes = dryRun
     ? "None. This run only prepares a plan. Graph writes, connector changes and automatic result delivery are blocked."
