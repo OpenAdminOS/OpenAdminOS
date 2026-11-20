@@ -98,6 +98,11 @@ describe("Ollama context size", () => {
       let raw = "";
       req.on("data", (part) => (raw += part));
       req.on("end", () => {
+        if (req.url === "/api/ps") {
+          // Nothing loaded: the model loads at the size the request asks for.
+          res.end(JSON.stringify({ models: [] }));
+          return;
+        }
         const body = JSON.parse(raw) as { options?: { num_ctx?: number }; messages?: Array<{ content: string }> };
         if (req.url === "/api/show") {
           shows.push(raw);
@@ -368,7 +373,10 @@ describe("Ollama context size", () => {
       const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "budget" });
       await llm.complete({ prompt: "big", maxTokens: 10000 });
       assert.deepEqual(fake.chats.at(-1), { num_ctx: 51200 });
-      assert.equal(fake.shows.length, 1);
+      // The first request already asks for room for the 10,000 token answer;
+      // the model lookup then runs once more for the overflow retry.
+      assert.deepEqual(fake.chats[0], { num_ctx: 16384 });
+      assert.equal(fake.shows.length, 2);
     } finally {
       await fake.close();
     }
@@ -495,4 +503,52 @@ describe("Ollama context size", () => {
       }
     });
   }
+});
+
+describe("Ollama context for an unpinned model", () => {
+  const show = (pinned: boolean) => JSON.stringify({
+    ...(pinned ? { parameters: "num_ctx                        16384" } : {}),
+    model_info: { "general.architecture": "llama", "llama.context_length": 131072 },
+  });
+  function mocked(pinned: boolean, loaded: number | undefined, model = "local") {
+    const chats: Array<{ num_ctx?: number }> = [];
+    const fetchImpl = (async (input: string | URL, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/api/show") return new Response(show(pinned), { status: 200 });
+      if (path === "/api/ps") return new Response(JSON.stringify({ models: loaded ? [{ name: `${model}:latest`, context_length: loaded }] : [] }), { status: 200 });
+      const body = JSON.parse(String(init?.body)) as { options?: { num_ctx?: number } };
+      chats.push(body.options?.num_ctx === undefined ? {} : { num_ctx: body.options.num_ctx });
+      return new Response(`${JSON.stringify({ model: "local", message: { content: "ok" }, done: true })}\n`, { status: 200 });
+    }) as typeof fetch;
+    return { chats, fetchImpl };
+  }
+  const longPrompt = "policy record ".repeat(8000);
+
+  it("asks for room for a long prompt on the first request when the model is loaded smaller", async () => {
+    const { chats, fetchImpl } = mocked(false, 4096);
+    const original = globalThis.fetch;
+    globalThis.fetch = fetchImpl;
+    try {
+      await createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "local" }).complete({ prompt: longPrompt, maxTokens: 1100 });
+      assert.equal(chats.length, 1, "no overflow round trip");
+      assert.ok((chats[0]!.num_ctx ?? 0) > 4096, "the first request asks for more than the loaded size");
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("sends no num_ctx for a pinned model, a short prompt, or a model loaded large enough", async () => {
+    const original = globalThis.fetch;
+    try {
+      for (const [pinned, loaded, prompt] of [[true, undefined, longPrompt], [false, undefined, "short"], [false, 262144, longPrompt]] as const) {
+        const model = `local-${String(pinned)}-${String(loaded)}`;
+        const { chats, fetchImpl } = mocked(pinned, loaded, model);
+        globalThis.fetch = fetchImpl;
+        await createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: model }).complete({ prompt, maxTokens: 1100 });
+        assert.deepEqual(chats, [{}], `pinned ${String(pinned)}, loaded ${String(loaded)}`);
+      }
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
 });

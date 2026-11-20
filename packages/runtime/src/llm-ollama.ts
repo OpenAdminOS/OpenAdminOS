@@ -6,7 +6,8 @@ import type {
   RunLlmApi,
 } from "@openadminos/agent-sdk";
 import { isRefusedRedirect, modelServerRedirect, redirectRefusedDetail } from "./llm-openai-compatible.js";
-import { readOllamaContextWindow } from "./ollama-context.js";
+import { ollamaRequestNumCtx, readOllamaContextWindow } from "./ollama-context.js";
+import { DEFAULT_ANSWER_RESERVE_TOKENS } from "./prompt-fit.js";
 
 export interface OllamaProviderOptions {
   endpoint?: string;
@@ -173,9 +174,28 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       let retry: { requested: number; numCtx: number } | undefined;
       try {
         let numCtx = ollamaContextOverrides.get(cacheKey);
+        // A model without a pinned num_ctx gets room for this request up
+        // front, so it is never served at a smaller default.
+        const upFront = await ollamaRequestNumCtx({
+          endpoint, model, ...(opts.system ? { system: opts.system } : {}), prompt: opts.prompt,
+          // The same answer reserve as the run's size check, so a short
+          // request without maxTokens needs no lookup.
+          answerTokens: opts.maxTokens ?? DEFAULT_ANSWER_RESERVE_TOKENS,
+          ...(numCtx !== undefined ? { currentNumCtx: numCtx } : {}),
+          timeoutMs: lookupTimeoutMs, signal: controller.signal,
+        });
+        if (upFront !== undefined) {
+          numCtx = upFront;
+          raisedCtx = upFront;
+        }
+        const upFrontStopped = abortError(`${endpoint.replace(/\/$/, "")}/api/show`);
+        if (upFrontStopped) throw upFrontStopped;
 
         response = await send(numCtx);
         let detail = await errorDetail(response);
+        if (!response.ok && upFront !== undefined && isOllamaMemoryError(detail)) {
+          throw new Error(contextMemoryMessage(model, upFront, upFront, detail));
+        }
         const overflow = response.status === 400 ? parseContextOverflow(detail) : undefined;
         if (overflow) {
           // Ollama sizes the context from its own default and free memory,

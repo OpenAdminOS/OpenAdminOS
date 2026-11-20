@@ -1,6 +1,7 @@
 // Context window lookup for Ollama models, kept apart from llm-ollama.ts so
 // the request path and this lookup can change independently.
 import { modelServerRedirect } from "./llm-openai-compatible.js";
+import { estimateTokens } from "./prompt-fit.js";
 
 const LOOKUP_TIMEOUT_MS = 5000;
 
@@ -68,6 +69,75 @@ export function parseOllamaLoadedContext(data: unknown, model: string): number |
 function normalizeModelName(name: string): string {
   const trimmed = name.trim().toLowerCase();
   return /:[^/]+$/.test(trimmed) ? trimmed : `${trimmed}:latest`;
+}
+
+/** Ollama's smallest default context; a request this size needs no num_ctx. */
+const SMALLEST_DEFAULT_CONTEXT = 2048;
+
+async function readJson(
+  fetchImpl: typeof fetch,
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  try {
+    const timeout = AbortSignal.timeout(timeoutMs);
+    const response = await fetchImpl(url, {
+      ...init,
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+      redirect: modelServerRedirect(url),
+    });
+    return response.ok ? await response.json() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export interface OllamaRequestContextInput {
+  endpoint: string;
+  model: string;
+  system?: string;
+  prompt: string;
+  /** Tokens kept for the answer. */
+  answerTokens: number;
+  /** num_ctx this app already sends for the model, if any. */
+  currentNumCtx?: number;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
+/**
+ * The num_ctx to send with a request to a model that has no pinned
+ * num_ctx, so its first request already has room for the prompt and the
+ * answer. Ollama loads such a model at its own default (a few thousand
+ * tokens), and an older Ollama shortens a longer prompt without an error, so
+ * waiting for an overflow would review partial data. Undefined when the
+ * request needs no larger context: a pinned model (the size check holds it
+ * to its pin), a small request, or a context already large enough. Sizes go
+ * up in powers of two, so a model is reloaded rarely.
+ */
+export async function ollamaRequestNumCtx(input: OllamaRequestContextInput): Promise<number | undefined> {
+  const needed = estimateTokens(input.system ?? "") + estimateTokens(input.prompt) + input.answerTokens;
+  if (needed <= SMALLEST_DEFAULT_CONTEXT) return undefined;
+  if (input.currentNumCtx !== undefined && input.currentNumCtx >= needed) return undefined;
+  const fetchImpl = input.fetchImpl ?? fetch;
+  const timeoutMs = input.timeoutMs ?? LOOKUP_TIMEOUT_MS;
+  const base = input.endpoint.replace(/\/$/, "");
+  const show = parseOllamaShow(await readJson(fetchImpl, `${base}/api/show`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model: input.model }),
+  }, timeoutMs, input.signal));
+  if (show.pinnedNumCtx !== undefined) return undefined;
+  if (input.currentNumCtx === undefined) {
+    const loaded = parseOllamaLoadedContext(await readJson(fetchImpl, `${base}/api/ps`, { method: "GET" }, timeoutMs, input.signal), input.model);
+    if (loaded !== undefined && loaded >= needed) return undefined;
+  }
+  let target = 4096;
+  while (target < needed) target *= 2;
+  return show.modelMaxContext !== undefined ? Math.min(target, show.modelMaxContext) : target;
 }
 
 /**
