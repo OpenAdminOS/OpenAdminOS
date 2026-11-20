@@ -516,7 +516,7 @@
   <main class="doc">
     <header>
       <h1>Data policy decides what each model may see, and when masking applies, the answer says what was hidden.</h1>
-      <p>Seven data classes, three provider tiers, three actions. Rules apply on this device before every model call: agent runs, Chat, Office, drafts, follow-ups and Nova. A masked name or identifier is replaced by a token for the call and restored on the way back, so the admin reads real names while a hosted model sees placeholders. A credential is replaced one way: it stays [CREDENTIAL] in the answer, the transcript and tool parameters. Check the frames at 1280 and 900 px, in both themes. Click any cell in A to change a rule; the sample line redraws. A stricter action applies at once, a looser one asks first.</p>
+      <p>Seven data classes, three provider tiers, three actions. Rules apply on this device before every model call: agent runs, Chat, Office, drafts, follow-ups and Nova. A masked identity, device or security name or identifier is replaced by a token for the call and restored on the way back, so the admin reads real names while a hosted model sees placeholders. Every other masked value is replaced one way: a credential stays [CREDENTIAL], and masked activity or configuration stays a placeholder, in the answer, the transcript and tool parameters. Check the frames at 1280 and 900 px, in both themes. Click any cell in A to change a rule; the sample line redraws. A stricter action applies at once, a looser one asks first.</p>
     </header>
 
     <!-- A: Settings -->
@@ -634,6 +634,10 @@
           <div class="pop" role="dialog" aria-label="Where voice goes, rule tightened after a transfer" data-voicepop="secblock" data-recorded="defaults"></div>
           <p class="xs muted" style="margin:4px 0 -4px">Security set back to Mask after the 09:43 transfer was withheld</p>
           <div class="pop" role="dialog" aria-label="Where voice goes, rule loosened after a withheld transfer" data-voicepop="defaults" data-recorded="secblock"></div>
+          <p class="xs muted" style="margin:4px 0 -4px">Security back to Mask and Configuration set to Block after the 09:43 transfer was withheld</p>
+          <div class="pop" role="dialog" aria-label="Where voice goes, another class now blocks a withheld transfer" data-voicepop="sectocfg" data-recorded="secblock"></div>
+          <p class="xs muted" style="margin:4px 0 -4px">Credential on Hosted is Block: the call opened without the profile</p>
+          <div class="pop" role="dialog" aria-label="Where voice goes, session start withheld" data-voicepop="credhosted"></div>
         </div>
       <ul class="notes" style="margin-top:0">
         <li>Clicking the strip opens the popover on the left. It is built from the effective rules by the same function as the strip, so it lists what each class does now, with a lock where IT set the rule. Try it on the strip in A after changing a cell. Public data is not amber: it came from outside the tenant.</li>
@@ -645,11 +649,13 @@
         <li>Tenant data the app sends to the hosted voice model as context goes through the same request scan and the same rules as any hosted call, so the voice strip is drawn by the same function as every other hosted strip and names the same masked classes: with the defaults, "identities, security names and devices masked". Where a value is masked the voice model says "the user" and "the device"; the transcript on screen shows real values.</li>
         <li>Ollama or LM Studio at an address on another machine is Hosted: data policy applies the Hosted column, and the strip names the host instead of a vendor, "Hosted · Ollama on gpu-01.woodgrove.example". The frame below shows the same state in Connections and in Chat.</li>
         <li>The voice popover is built by one function, here and on the live strip in A, from two inputs: the context transfers of the current call as recorded, and the rules in force now. Each transfer keeps the decision made when it was sent (sent, masked with its count, or withheld) and what the voice model said then. The rules in force now drive only the strip, the dashed preview of what the next transfer would do ("Next transfer under current rules, a preview"), the rule per class, and the recovery for withheld context.</li>
-        <li>The first transfer is the session start request: the profile block that nova.ts sends when the OpenAI session opens, with your standing instructions and confirmed notes. It goes through the same request scan and rules as every later transfer and is listed as its own line. In this call one confirmed note holds a BitLocker recovery key, so the line says it reached OpenAI as [CREDENTIAL], one way. With Credential on Hosted set to Block, that transfer would be withheld and the call would start without the profile block.</li>
+        <li>The first transfer is the session start request: the profile block that nova.ts sends when the OpenAI session opens, with your standing instructions and confirmed notes. It goes through the same request scan and rules as every later transfer and is listed as its own line. In this call one confirmed note holds a BitLocker recovery key, so the line says it reached OpenAI as [CREDENTIAL], one way.</li>
+        <li>Proposed 2026-11-19, pending the maintainer's confirmation: with Credential on Hosted set to Block, the whole session start transfer is withheld and the call opens without the profile, as in the seventh popover. The line and the notice say the call opened without the profile, never that it was sent. Its recovery is Change the rule: the profile is not a question, so there is no local model to ask. The alternative for the maintainer is per note: leave out only the instructions and notes that carry the blocked class, here the one note with the recovery key, and send the rest.</li>
         <li>Changing a rule during a call never rewrites a past transfer. The fourth popover was recorded under the defaults and opened after Security on Hosted was set to Block: the 09:43 transfer still reads "Sent, 10 values masked", the preview reads "Would be withheld", and a line says context already sent stays as recorded. Data policy cannot recall what OpenAI received.</li>
         <li>A voice strip names a blocked class as withheld context, not as blocked: with Security on Hosted set to Block it reads "security context withheld", because the session goes on and only that context stays on this device.</li>
         <li>The withheld notice comes from the recorded decision on one transfer, not from the rules in force now: at 09:43 the app was about to send 6 Conditional Access policies, Security was Block on Hosted, so that transfer was withheld and the notice names it, the class that withheld it and what the voice model said at the time. A rule that no transfer in the call has hit shows no notice. The transcript records the same line.</li>
-        <li>Recovery is worked out from the rules in force now, by the test in E: Ask in Chat with Ollama only when the rules on Local allow every class the withheld context carries, with Change the rule beside it. With Security Block on Local too, as in the third popover, only Change the rule is offered, and when IT set every rule involved, the notice names policy.json and offers nothing. When the rule that withheld the context no longer blocks it, as in the fifth popover, the notice stays and offers Ask again, which sends the context under the current rules.</li>
+        <li>Recovery is worked out from the rules in force now, by the test in E: Ask in Chat with Ollama only when the rules on Local allow every class the withheld context carries, with Change the rule beside it. With Security Block on Local too, as in the third popover, only Change the rule is offered, and when IT set every rule involved, the notice names policy.json and offers nothing. When the rules in force now would send the whole transfer, as in the fifth popover, the notice stays and offers Ask again, which sends the context under the current rules.</li>
+        <li>The offer is worked out from the decision the rules in force now make on the whole transfer, every class it carries, never from the class that withheld it. The 09:43 transfer carries Security and Configuration. In the sixth popover Security went back to Mask while Configuration was set to Block: the transfer still reads "Withheld, Security was Block" as recorded, the preview reads withheld by Configuration, and the notice says Configuration now blocks it and offers Ask in Chat with Ollama, not Ask again.</li>
         <li>Voice on this device keeps spoken words under data policy. The words are transcribed on this device, then the text goes through the same request scan as a typed question before any hosted reasoning call, so its strip is the ordinary hosted strip with the voice named first.</li>
       </ul>
       </div>
@@ -1233,7 +1239,7 @@
         const lk = c.locked ? lockIcon : "";
         let dd;
         if (a === "block") dd = voice ? '<dd class="bk">Withheld, the call goes on without it</dd>' : '<dd class="bk">Blocked, the call is not sent</dd>';
-        else if (a === "mask") dd = `<dd class="mk2"><span class="hx"></span>${c.id === "credential" ? "Masked, never restored into a prompt" : c.id === "security" ? "Names masked, settings sent as is" : "Masked"}</dd>`;
+        else if (a === "mask") dd = `<dd class="mk2"><span class="hx"></span>${c.id === "credential" ? "Masked, never restored into a prompt" : c.id === "security" ? "Names masked, settings sent as is" : c.id === "activity" || c.id === "configuration" ? "Masked, not restored in the answer" : "Masked"}</dd>`;
         else dd = `<dd class="${c.id === "public" ? "" : "lv"}">Sent as is</dd>`;
         return `<dt>${c.name}${lk}</dt>${dd}`;
       };
@@ -1259,7 +1265,7 @@
     // Context the app sends to the hosted voice model during a call. Each transfer carries values of some classes.
     // The first transfer is the session start request: the profile block nova.ts sends when the OpenAI session opens.
     const VOICE_CALL = [
-      { at: "09:40", start: true, what: "Session start: your profile, 3 standing instructions, 5 confirmed notes", carries: { identity: 2, configuration: 3, credential: 1 }, detail: "One confirmed note holds a BitLocker recovery key." },
+      { at: "09:40", start: true, what: "Session start: your profile, 3 standing instructions, 5 confirmed notes", body: "Your profile, 3 standing instructions and 5 confirmed notes", carries: { identity: 2, configuration: 3, credential: 1 }, detail: "One confirmed note holds a BitLocker recovery key." },
       { at: "09:41", what: "38 finance devices", ask: "which finance devices have not checked in", carries: { device: 38, identity: 31, activity: 38, configuration: 12 } },
       { at: "09:42", what: "214 sign-ins", ask: "who signed in from outside Germany", carries: { activity: 214, identity: 38 } },
       { at: "09:43", what: "6 Conditional Access policies", ask: "which policies exclude the break-glass admins", carries: { security: 6, identity: 4, configuration: 9 } },
@@ -1283,28 +1289,49 @@
       });
     }
     // Recovery for withheld context offers only what would work under the rules in force now, by the same test as E.
+    // It is worked out from the decision the rules in force now make on the whole transfer, every class it carries,
+    // never from the class that withheld it: a rule loosened on one class does not free a transfer another class now blocks.
+    const capAct = (a) => a[0].toUpperCase() + a.slice(1);
     function voiceRecovery(r, t, d) {
-      const still = d.withheldBy.filter((c) => r[c].hosted === "block");
-      if (!still.length) {
-        const now = joinList(d.withheldBy.map((c) => `${clsName(c)} is ${r[c].hosted[0].toUpperCase() + r[c].hosted.slice(1)}`));
-        return {
+      const nowD = transferDecision(r, t);
+      const still = nowD.withheldBy;
+      const freed = d.withheldBy.filter((c) => !still.includes(c));
+      const newly = still.filter((c) => !d.withheldBy.includes(c));
+      if (nowD.sent) {
+        const now = joinList(d.withheldBy.map((c) => `${clsName(c)} is ${capAct(r[c].hosted)}`));
+        return t.start ? {
+          acts: ['<button class="bt primary sm" type="button">Send the profile now</button>'],
+          text: `${now} on Hosted now, and no rule blocks a class the profile carries. Send it now and the app sends the profile to OpenAI under the current rules.`,
+          say: "",
+        } : {
           acts: ['<button class="bt primary sm" type="button">Ask again</button>'],
-          text: `${now} on Hosted now. Ask again and the app sends this context to OpenAI under the current rules.`,
+          text: `${now} on Hosted now, and no rule blocks a class this context carries. Ask again and the app sends this context to OpenAI under the current rules.`,
           say: "",
         };
       }
+      // A loosened rule that no longer frees the transfer is named with the class that now blocks it.
+      const moved = freed.length && newly.length
+        ? `${joinList(freed.map((c) => `${clsName(c)} is ${capAct(r[c].hosted)}`))} on Hosted now, but ${joinList(newly.map(clsName))} ${isAre(newly)} Block, so this context would still be withheld. `
+        : "";
       const localBlocks = d.ids.filter((c) => r[c].local === "block");
       const lockedAll = still.every((c) => CLASSES.find((x) => x.id === c).locked) && localBlocks.every((c) => CLASSES.find((x) => x.id === c).locked);
       const names = joinList(still.map((c) => clsName(c).toLowerCase()));
+      // The profile is not a question, so a withheld session start has no local model to ask: the recovery is the rule.
+      const lockedStart = still.every((c) => CLASSES.find((x) => x.id === c).locked);
+      if (t.start) return {
+        acts: lockedStart ? [] : ['<button class="bt primary sm" type="button">Change the rule</button>'],
+        text: `${moved}${joinList(still.map(clsName))} ${isAre(still)} Block on Hosted, so every hosted voice call opens without the profile while it carries ${names} data.${lockedStart ? " Your IT department set this rule in policy.json. Ask IT to change it." : ""}`,
+        say: "I'll answer without your standing instructions and notes.",
+      };
       if (!localBlocks.length) return {
         acts: ['<button class="bt primary sm" type="button">Ask in Chat with Ollama</button>', lockedAll ? "" : '<button class="bt ghost sm" type="button">Change the rule</button>'],
-        text: `Ollama with gpt-oss:20b is ready on this device, and your rules on Local allow every class this context carries.`,
+        text: `${moved}Ollama with gpt-oss:20b is ready on this device, and your rules on Local allow every class this context carries.`,
         say: "Ask in Chat with a local model to see it.",
       };
-      if (lockedAll) return { acts: [], text: `${joinList(localBlocks.map(clsName))} ${isAre(localBlocks)} Block on Local too, and your IT department set these rules in policy.json, so no model on this device may use this context. Ask IT to change them.`, say: "Your IT department's policy keeps it from every model on this device." };
+      if (lockedAll) return { acts: [], text: `${moved}${joinList(localBlocks.map(clsName))} ${isAre(localBlocks)} Block on Local too, and your IT department set these rules in policy.json, so no model on this device may use this context. Ask IT to change them.`, say: "Your IT department's policy keeps it from every model on this device." };
       return {
         acts: ['<button class="bt primary sm" type="button">Change the rule</button>'],
-        text: `${joinList(localBlocks.map(clsName))} ${isAre(localBlocks)} Block on Local too, so a local model would refuse this context as well.`,
+        text: `${moved}${joinList(localBlocks.map(clsName))} ${isAre(localBlocks)} Block on Local too, so a local model would refuse this context as well.`,
         say: `Your data policy keeps ${names} data from every model, so I can't answer that.`,
       };
     }
@@ -1318,7 +1345,7 @@
     // A past transfer shows the decision recorded when it was sent, never one computed from the rules in force now.
     function transferLine(t) {
       let more = t.detail || "";
-      if (t.detail && t.carries.credential) more += t.d.sent ? " It reached OpenAI as [CREDENTIAL], one way, and is never restored." : " It did not reach OpenAI.";
+      if (t.detail && t.carries.credential) more += t.d.sent ? " It reached OpenAI as [CREDENTIAL], one way, and is never restored." : " The call opened without the profile, so none of it reached OpenAI.";
       return `<dt><span class="tt">${t.at}</span>${t.what}</dt>${decisionDd(t.d)}${more ? `<dd class="txn">${more}</dd>` : ""}`;
     }
     function voicePopInner(r, call = recordCall(r)) {
@@ -1329,9 +1356,12 @@
       if (last) {
         const d = last.d, rec = voiceRecovery(r, last, d);
         const names = joinList(d.withheldBy.map((c) => clsName(c).toLowerCase()));
-        const why = last.start ? "sent when the call opened" : `for "${last.ask}"`;
-        const goesOn = last.start ? "The call started without it" : "The call went on without it";
-        note = `<div class="withheld" role="status"><b>${last.start ? "Session start context" : "Context"} withheld at ${last.at}</b>${last.what}, ${why}. ${joinList(d.withheldBy.map(clsName))} ${wasWere(d.withheldBy)} Block on Hosted at ${last.at}, so the app sent none of this context to OpenAI. ${goesOn}, and the voice model said so:<q>I can't use the ${names} data for that in this call. ${last.said}</q><span class="rec">${rec.text}</span>${rec.acts.join("") ? `<span class="acts">${rec.acts.join("")}</span>` : ""}</div>`;
+        const rule = `${joinList(d.withheldBy.map(clsName))} ${wasWere(d.withheldBy)} Block on Hosted at ${last.at}`;
+        // A withheld session start never went out: the call opened without the profile.
+        const body = last.start
+          ? `<b>Session start context withheld at ${last.at}</b>${last.body}. ${rule}, so the call opened without the profile and the app sent none of it to OpenAI. The voice model said so:<q>I don't have your profile in this call: your data policy keeps ${names} data from OpenAI. ${last.said}</q>`
+          : `<b>Context withheld at ${last.at}</b>${last.what}, for "${last.ask}". ${rule}, so the app sent none of this context to OpenAI. The call went on without it, and the voice model said so:<q>I can't use the ${names} data for that in this call. ${last.said}</q>`;
+        note = `<div class="withheld" role="status">${body}<span class="rec">${rec.text}</span>${rec.acts.join("") ? `<span class="acts">${rec.acts.join("")}</span>` : ""}</div>`;
       }
       // What the next transfer would do is a preview from the rules in force now.
       const lt = call[call.length - 1], next = transferDecision(r, lt);
@@ -1356,7 +1386,8 @@
     const CRED_BLOCK = withRule("activity", "hosted", "block"); CRED_BLOCK.credential.hosted = "block";
     const SEC_BOTH = withRule("security", "hosted", "block"); SEC_BOTH.security.local = "block";
     const LOCAL_MASK = withRule("identity", "local", "mask");
-    const STRIP_RULES = { defaults: DEFAULTS, blocked: withRule("activity", "hosted", "block"), credblock: CRED_BLOCK, clear: ALL_CLEAR, secblock: withRule("security", "hosted", "block"), secboth: SEC_BOTH, localmask: LOCAL_MASK };
+    const SEC_TO_CFG = withRule("configuration", "hosted", "block");
+    const STRIP_RULES = { defaults: DEFAULTS, credhosted: withRule("credential", "hosted", "block"), sectocfg: SEC_TO_CFG, blocked: withRule("activity", "hosted", "block"), credblock: CRED_BLOCK, clear: ALL_CLEAR, secblock: withRule("security", "hosted", "block"), secboth: SEC_BOTH, localmask: LOCAL_MASK };
     const orgchip = '<button class="orgchip" type="button"><span class="av">WB</span>Woodgrove Bank<svg class="chev"><use href="#i-chev"/></svg></button>';
     let popSeq = 0;
     const topRules = (el) => el.dataset.top === "live" ? rules : el.dataset.top === "blocked" ? STRIP_RULES.blocked : DEFAULTS;
@@ -1639,6 +1670,18 @@
       { k: "last check-in", cls: "activity", v: "2 Oct 08:14, Frankfurt", tok: "[ACTIVITY_1]" },
       { k: "policy", cls: "configuration", v: "Windows baseline 24H2", tok: "[CONFIG_1]" },
     ];
+    // Only identity, device and security names and identifiers come back. Credential, activity and configuration
+    // placeholders are one way: they stay masked in the answer, the transcript and tool parameters.
+    const RESTORED = ["identity", "device", "security"];
+    function restoreLine(tier) {
+      const m = [...new Set(SAMPLE.filter((s) => rules[s.cls][tier] === "mask").map((s) => s.cls))];
+      const back = RESTORED.filter((c) => m.includes(c)).map((c) => clsName(c).toLowerCase());
+      const kept = ["credential", "activity", "configuration"].filter((c) => m.includes(c)).map((c) => clsName(c).toLowerCase());
+      let t = "";
+      if (back.length) t += ` Restored in the answer on this device: ${joinList(back)} names and identifiers.`;
+      if (kept.length) t += ` The ${joinList(kept)} ${kept.length === 1 ? "placeholder stays" : "placeholders stay"} masked in the answer, the transcript and tool parameters: only identity, device and security names and identifiers are restored.`;
+      return t;
+    }
     function render() {
       // cells
       matrix.querySelectorAll(".mrow[data-cls]").forEach((row) => {
@@ -1685,7 +1728,7 @@
       const secMasked = rules.security[previewTier] === "mask";
       footEl.textContent = previewTier === "local" && !masked
         ? "Local: the model runs on this device, so the record is used as is unless a local rule masks it."
-        : `${masked} ${masked === 1 ? "value" : "values"} replaced before the call.${OFF_DEVICE[previewTier] ? " Underlined text leaves this device in clear text" + (secMasked ? ", including the settings of the conditional access policy" : "") + "." : ""} Placeholders are restored in the answer on this device; the credential is not.`;
+        : `${masked} ${masked === 1 ? "value" : "values"} replaced before the call.${OFF_DEVICE[previewTier] ? " Underlined text leaves this device in clear text" + (secMasked ? ", including the settings of the conditional access policy" : "") + "." : ""}${restoreLine(previewTier)}`;
     }
     render();
   </script>
