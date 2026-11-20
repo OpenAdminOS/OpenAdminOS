@@ -187,6 +187,30 @@ it("keeps the previous rows and identity index when batched preparation is cance
   }
 });
 
+it("prepares fresh cache sidecars and identity indexes in the local worker", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-classification-ingress-"));
+  const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+  try {
+    const common = { tenantId: "tenant-1", scopeSet: [], refreshedAt: "2026-11-18T00:00:00.000Z" };
+    await store.replaceGraphResourcesInBatches({ ...common, resource: "users", label: "Users",
+      rows: [{ id: "fixture-id", displayName: "Yelena Fixture" }] });
+    assert.equal(store.tenantIdentityValues(common.tenantId).matches("Yelena Fixture"), true);
+    const resource = "managedDevices";
+    const row = { id: "device-1", deviceName: "Yelena", activationLockBypassCode: "q7z" };
+    await store.replaceGraphResourcesInBatches({ ...common, resource, label: "Devices", rows: [row] });
+    const ledger = new ClassificationLedger();
+    const result = withClassificationScope(ledger, () => store.queryGraphCache({ ...common, resource }));
+    assert.deepEqual(result.rows.map(entry => entry.row), [row]);
+    const { counts, coverageIncomplete } = ledger.classifyRequest({ prompt: JSON.stringify(row) });
+    assert.equal(counts.identity, 1);
+    assert.equal(counts.credential, 1);
+    assert.equal(coverageIncomplete, false);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 describe("Intune Chat read-only tools", () => {
   it("lists cache inventory and query_cache enforces row caps", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));

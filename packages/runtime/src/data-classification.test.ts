@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
 import { DATA_CLASSES_BY_SENSITIVITY, highestDataClass, maxDataClass, type DataClass } from "@openadminos/agent-sdk";
-import { ClassificationLedger, classificationDiagnostics, classifyData, hasGraphFieldClasses, registerRenderedFragment, registerTenantData, withClassificationScope, withRequestClassification, type RequestClassificationEvent } from "./data-classification.js";
+import { ClassificationLedger, classificationDiagnostics, classifyData, hasGraphFieldClasses, registerGraphTenantData, registerRenderedFragment, registerTenantData, withClassificationScope, withRequestClassification, type RequestClassificationEvent } from "./data-classification.js";
 import { GRAPH_FIELD_CLASSES, GRAPH_FIELD_CLASSES_VERSION, GRAPH_ROUTE_ALIASES } from "./graph-field-classes.js";
 import { GRAPH_CLASSIFICATION_FIXTURES } from "./graph-classification.fixtures.js";
 import { fenceTenantData } from "./tenant-data.js";
@@ -695,6 +695,44 @@ test("worker keeps scoped matcher changes and returns offsets for the unchanged 
     current.dispose();
     previous.dispose();
   }
+});
+
+test("Graph ingress sends field classification to the worker and a worker failure leaves provider options intact", async t => {
+  const post = ClassificationWorker.prototype.post;
+  const sent: string[] = [];
+  let rejectGraph = false;
+  t.mock.method(ClassificationWorker.prototype, "post", function (
+    this: ClassificationWorker, ...args: Parameters<ClassificationWorker["post"]>
+  ) {
+    sent.push(args[0].type);
+    if (args[0].type === "graph" && rejectGraph) throw new Error("fixture Graph worker failure");
+    post.apply(this, args);
+  });
+  const payload = { value: [{ passwordCredentials: [{ hint: "q7z" }] }] };
+  const request = { prompt: JSON.stringify(payload) };
+  for (const fails of [false, true]) {
+    rejectGraph = fails;
+    const ledger = new ClassificationLedger();
+    const events: RequestClassificationEvent[] = [];
+    const llm = withRequestClassification({
+      available: true,
+      async complete(options) {
+        assert.equal(options, request);
+        return { text: "reviewed", model: "fixture" };
+      },
+      async *stream() { throw new Error("Unused"); },
+    }, "ollama", event => events.push(event));
+    try {
+      await withClassificationScope(ledger, async () => {
+        await registerGraphTenantData("/applications", payload);
+        assert.equal((await llm.complete(request)).text, "reviewed");
+      });
+      assert.equal(events[0]?.classification.counts.credential, fails ? 0 : 1);
+      assert.equal(events[0]?.classification.coverageIncomplete, fails);
+      if (fails) assert.equal(events[0]?.classification.unexamined.registrations, 1);
+    } finally { ledger.dispose(); }
+  }
+  assert.equal(sent.filter(type => type === "graph").length, 2);
 });
 
 test("worker timeout reports incomplete coverage and still calls the provider with the original options", async t => {

@@ -38,7 +38,7 @@ import {
 } from "@openadminos/agent-sdk";
 
 import { PROMPT_INSTRUCTION_ROOTS, renderDeep, renderTemplate, renderPromptTemplate, type TemplateContext } from "./template-engine.js";
-import { registerTenantData } from "./data-classification.js";
+import { registerGraphTenantData, registerTenantData } from "./data-classification.js";
 import { stripTenantDataFences, withTenantDataInstructions } from "./tenant-data.js";
 import { confirmationPhraseProblem } from "./confirmation-phrase.js";
 
@@ -1059,7 +1059,7 @@ async function requestGraphPages(input: {
     query: input.query,
     headers: input.headers,
   });
-  registerTenantData(`graph:${input.path}`, first, { graphPath: input.path });
+  await registerGraphTenantData(input.path, first);
   const firstPage = graphCollectionPage(first);
   if (!firstPage) return first;
 
@@ -1084,7 +1084,7 @@ async function requestGraphPages(input: {
       query: next.query,
       headers: input.headers,
     });
-    registerTenantData(`graph:${next.path}`, payload, { graphPath: next.path });
+    await registerGraphTenantData(next.path, payload);
     const page = graphCollectionPage(payload);
     if (!page) {
       throw new Error(`Graph paging for ${input.path} returned a non-collection response.`);

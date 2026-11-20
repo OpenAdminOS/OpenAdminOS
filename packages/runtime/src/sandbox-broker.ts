@@ -14,7 +14,7 @@ import type {
 import { assertWritePlanLimits, WritePlanLimitError } from "@openadminos/agent-sdk";
 import { DRY_RUN_WRITE_ERROR } from "./dry-run.js";
 import { confirmationPhraseProblem } from "./confirmation-phrase.js";
-import { registerTenantData } from "./data-classification.js";
+import { registerGraphTenantData, registerTenantData } from "./data-classification.js";
 import { fenceTenantData, withTenantDataInstructions, withTenantDataOutputFilter } from "./tenant-data.js";
 
 export interface SandboxBrokerAgentPolicy {
@@ -128,7 +128,7 @@ async function handleGraphRequest(
   }
   validateSelectSubset(operation, request);
   const response = await input.ctx.graph.request(request);
-  registerTenantData(`graph:${request.path}`, response, { graphPath: request.path });
+  await registerGraphTenantData(request.path, response);
   return response;
 }
 

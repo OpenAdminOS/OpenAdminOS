@@ -13,8 +13,15 @@ import {
 
 export { GRAPH_FIELD_CLASSES_VERSION } from "./graph-field-classes.js";
 export { releaseClassificationIdentityShard } from "./classification-worker-client.js";
-export { CLASSIFICATION_TTL_MS, ClassificationLedger, currentClassificationLedger, classificationDiagnostics, collectClassifiedValues, registerClassifiedValues, registerRenderedFragment, registerTenantData, registerTransientTenantData, withTransientClassificationScope, withClassificationScope, withRequestClassification } from "./request-classification.js";
+export { CLASSIFICATION_TTL_MS, ClassificationLedger, currentClassificationLedger, classificationDiagnostics, collectClassifiedValues, registerClassifiedValues, registerGraphTenantData, registerRenderedFragment, registerTenantData, registerTransientTenantData, withTransientClassificationScope, withClassificationScope, withRequestClassification } from "./request-classification.js";
 export type { ClassifiedValues, ClassificationSpan, RequestClassification, RequestClassificationEvent } from "./request-classification.js";
+
+export { ClassificationSlice, classifyCacheRows } from "./classification-worker-client.js";
+export {
+  addCacheIdentity, addUserFirstName, describeCacheRow, INCOMPLETE_CACHE_CLASSIFICATION,
+  prepareCacheClassification, readCacheClassification, type CacheClassificationResult,
+} from "./cache-classification.js";
+export { collectTenantValues } from "./tenant-values.js";
 
 export interface DataClassification {
   /** Original JSON Pointers. A truncated classification can cover the rest of a subtree. */

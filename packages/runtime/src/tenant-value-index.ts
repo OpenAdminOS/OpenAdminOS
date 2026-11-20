@@ -40,6 +40,15 @@ const COMPACT_IDENTIFIER_MIN = 8;
  */
 export type TenantMatchEntry = readonly ["sequence" | "compact", string];
 
+export interface TenantValueIndexSnapshot {
+  longestSequence: Map<string, number>;
+  buckets: Map<string, Set<string>>;
+  compact: Set<string>;
+  compactPrefixes: Set<string>;
+  compactMaxLength: number;
+  count: number;
+}
+
 export class TenantValueIndex {
   private readonly longestSequence = new Map<string, number>();
   private readonly buckets = new Map<string, Set<string>>();
@@ -49,6 +58,17 @@ export class TenantValueIndex {
   private count = 0;
 
   constructor(private readonly parts: readonly TenantValueIndex[] = []) {}
+
+  static fromWorkerSnapshot(snapshot: TenantValueIndexSnapshot): TenantValueIndex {
+    return Object.assign(new TenantValueIndex(), snapshot);
+  }
+
+  workerSnapshot(): TenantValueIndexSnapshot {
+    return {
+      longestSequence: this.longestSequence, buckets: this.buckets, compact: this.compact,
+      compactPrefixes: this.compactPrefixes, compactMaxLength: this.compactMaxLength, count: this.count,
+    };
+  }
 
   get size(): number {
     return this.parts.reduce((count, part) => count + part.size, this.count);

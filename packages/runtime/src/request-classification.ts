@@ -2,8 +2,8 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { DATA_CLASSES_BY_SENSITIVITY, maxDataClass, type DataClass, type DataClassCounts, type LlmOptions, type ProviderId, type RunLlmApi } from "@openadminos/agent-sdk";
 import { emptyDataClassCounts, graphClassificationSource, requestTextSpans, walkDataClasses, type ClassificationOptions, type TextSpan } from "./data-classification.js";
 import { GRAPH_FIELD_CLASSES_VERSION, type SecurityMaskRole } from "./graph-field-classes.js";
-import { ClassificationSlice, requestWorker, type ClassificationWorker } from "./classification-worker-client.js";
-import { TenantValueIndex, type TenantMatchEntry } from "./tenant-value-index.js";
+import { ClassificationSlice, requestWorker, syncIdentityShards, type ClassificationWorker } from "./classification-worker-client.js";
+import { TenantValueIndex } from "./tenant-value-index.js";
 
 export interface ClassificationSpan extends TextSpan {
   section: "system" | "prompt";
@@ -162,6 +162,7 @@ const MATCH_BUDGET = 200_000;
 const ANCHOR_WIDTH = 8;
 const MAIN_SCAN_LIMIT = 512;
 const SYNC_BATCH_UNITS = 16_384;
+const MAX_GRAPH_MATCH_VALUE = 32_768;
 export const CLASSIFICATION_TTL_MS = 15 * 60_000;
 
 function fenceEscapes(text: string): string {
@@ -461,6 +462,31 @@ export class ClassificationLedger {
     try {
       const identityIndex = options.identityIndex ?? this.identityIndex;
       this.registerClassified(source.startsWith("graph:") && options.graphPath ? graphClassificationSource(options.graphPath) : source, collectClassifiedValues(data, { ...options, ...(identityIndex ? { identityIndex } : {}) }));
+    } catch {
+      this.incompleteRegistrations++;
+    }
+  }
+
+  async registerGraph(graphPath: string, data: unknown, signal?: AbortSignal): Promise<void> {
+    if (this.disposed) return;
+    try {
+      const source = graphClassificationSource(graphPath);
+      let indexCurrent = () => true;
+      const classified = await requestWorker().run<"graph">(async client => {
+        const { shards, isCurrent } = await syncIdentityShards(client, this.identityIndex, new ClassificationSlice());
+        indexCurrent = isCurrent;
+        return { message: { type: "graph", data, graphPath, shards } };
+      }, signal);
+      if (classified.incomplete || !indexCurrent()) this.incompleteRegistrations++;
+      const slice = new ClassificationSlice();
+      for (const { value, kind, key, maskRole } of classified.fields) {
+        if (this.disposed) return;
+        // Large individual values can require several escaped match patterns.
+        // The final request detectors still see their text with incomplete provenance.
+        if (typeof value === "string" && value.length > MAX_GRAPH_MATCH_VALUE) this.dropped++;
+        else this.add(value, { kind, source, key: key.toLowerCase(), ...(maskRole ? { maskRole } : {}) });
+        if (slice.elapsed) await slice.yield();
+      }
     } catch {
       this.incompleteRegistrations++;
     }
@@ -877,7 +903,7 @@ export class ClassificationLedger {
   async classifyLargeRequest(request: RequestText, signal?: AbortSignal): Promise<RequestClassification> {
     const wasDisposed = this.disposed;
     let indexCurrent = () => true;
-    const result = await requestWorker().run(async client => {
+    const result = await requestWorker().run<"scan">(async client => {
       const slice = new ClassificationSlice();
       const sections = { system: await encodeSection(request.system, slice), prompt: await encodeSection(request.prompt, slice) };
       const transfers = Object.values(sections).flatMap(section => section ? [section.buffer] : []);
@@ -887,43 +913,15 @@ export class ClassificationLedger {
         const id = await ledger.syncLedger(client, slice);
         if (!ledger.disposed) ledgers.push(id);
       }
-      const indexedShards: Array<[TenantValueIndex, number]> = [];
-      const snapshot = [...identityIndex?.workerShards?.() ?? []];
-      indexCurrent = () => {
-        const current = [...identityIndex?.workerShards?.() ?? []];
-        return current.length === snapshot.length && current.every((shard, index) => shard === snapshot[index]);
-      };
-      for (const shard of snapshot) {
-        let id = client.shards.get(shard);
-        if (id === undefined) {
-          id = client.id(shard);
-          client.shards.set(shard, id);
-          let entries: TenantMatchEntry[] = [];
-          let units = 0;
-          for (const entry of shard.workerEntries()) {
-            if (client.shards.get(shard) !== id) break;
-            entries.push(entry);
-            units += entry[1].length + 24;
-            if (units >= SYNC_BATCH_UNITS || slice.elapsed) {
-              client.post({ type: "identity", id, entries });
-              entries = [];
-              units = 0;
-              if (slice.elapsed) await slice.yield();
-            }
-          }
-          if (entries.length && client.shards.get(shard) === id) client.post({ type: "identity", id, entries });
-        }
-        indexedShards.push([shard, id]);
-      }
+      const { shards, isCurrent } = await syncIdentityShards(client, identityIndex, slice);
+      indexCurrent = isCurrent;
       // Resample expiry after asynchronous synchronization. Disposed mirrors
       // have already been dropped; history will mark their replay ranges.
       const latest = this.scanState();
-      const shards = indexedShards.flatMap(([shard, id]) => client.shards.get(shard) === id ? [id] : []);
       return {
         message: { type: "scan", sections, ledgers, shards, state: {
           ...state, historyFences: latest.historyFences,
-          incomplete: state.incomplete || latest.incomplete || !indexCurrent() || shards.length !== indexedShards.length ||
-            Boolean(identityIndex && !identityIndex.workerShards),
+          incomplete: state.incomplete || latest.incomplete || !indexCurrent(),
         } },
         transfers,
       };
@@ -1067,6 +1065,12 @@ export function currentClassificationLedger(): ClassificationLedger | undefined 
 export function registerTenantData(source: string, data: unknown, options?: ClassificationOptions): void {
   const ledger = scopes.getStore();
   if (ledger) ledger.register(source, data, options);
+  else unscopedRegistrations++;
+}
+
+export async function registerGraphTenantData(graphPath: string, data: unknown, signal?: AbortSignal): Promise<void> {
+  const ledger = scopes.getStore();
+  if (ledger) await ledger.registerGraph(graphPath, data, signal);
   else unscopedRegistrations++;
 }
 

@@ -17,7 +17,7 @@ import type {
 import { GRAPH_CACHE_LOG_WINDOW_DAYS, graphAccessDenialFromError, graphAccessDenialText, isGraphCacheLogResource, missingServiceCopy, omittedSnapshotsCopy } from "@openadminos/agent-sdk";
 import { fenceTenantData } from "@openadminos/runtime";
 import {
-  registerRenderedFragment, registerTenantData, PRIVATE_PATTERN,
+  registerGraphTenantData, registerRenderedFragment, registerTenantData, PRIVATE_PATTERN,
 } from "@openadminos/runtime/data-classification";
 
 import { lookupEndpoint, searchEndpoints } from "../graph-catalog.js";
@@ -1523,7 +1523,7 @@ async function graphGet(
   const requestPage = async (input: GraphRequestInput): Promise<unknown> => {
     try {
       const data = await graph.request({ ...input, ...(ctx.signal ? { signal: ctx.signal } : {}) });
-      registerTenantData(`graph:${input.path}`, data, { graphPath: input.path });
+      await registerGraphTenantData(input.path, data, ctx.signal);
       return data;
     } catch (error) {
       const denial = graphAccessDenialFromError(error, { path, method: "GET", requiredScopes: validation.scopes });
