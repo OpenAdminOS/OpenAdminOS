@@ -375,6 +375,15 @@ the installed app's scheduler, login item or caches.
   and hold it while they run. Not applied: Muse's low on clearing the
   Connectors error banner on a successful status poll (it would also clear
   action errors).
+- Review round 36: Claude no blocking (index download could hold a reset
+  indefinitely: now not counted, aborted at the commit, 30 minute timeout;
+  a stopped WhatsApp client kept a connected status: it now leaves it).
+  Sol and Muse two blocking each, again writers outside the list (queued
+  Baileys writes, agent drafts, self-training, window state). Instead of a
+  fifth round of per writer checks: a process wide guard on Node's file
+  system API refuses every change by path inside the data folder from the
+  commit (data-folder-seal.ts), with the marker allowed so its warnings can
+  still be added; drafts and self-training are also gated and counted.
 - Process lesson: twice I edited the tree while a reviewer was reading it;
   parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the
