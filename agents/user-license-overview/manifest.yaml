@@ -4,7 +4,7 @@ descriptor:
   name: User license overview
   description: Reviews tenant user licensing hygiene by usage location, account state, and assigned-license presence.
   version: 1.2.0
-  minAppVersion: 0.7.3-nightly.20261120040000
+  minAppVersion: 0.1.0
   author:
     name: OpenAdminOS
     handle: openadminos
@@ -43,6 +43,16 @@ skills:
       field: usageLocation
       missing: "(unset)"
 
+  - id: by_location_top
+    format: transform
+    label: Count users by usage location, largest buckets
+    settings:
+      kind: count-by-field
+      source: "{{ load_users.output }}"
+      field: usageLocation
+      missingBucket: "(unset)"
+      top: 40
+
   - id: by_account_enabled
     format: transform
     label: Count users by account state
@@ -80,7 +90,7 @@ skills:
         this agent only checks user-level readiness signals.
       prompt: |-
         Total users: {{ load_users.output | size }}.
-        By usage location: {{ by_location.output | top(40) }}.
+        By usage location: {{ by_location_top.output }}.
         By account state: {{ by_account_enabled.output }}.
         By user type: {{ by_user_type.output }}.
         Users without a usage location: {{ missing_usage_location.output.(unset) | size }}.

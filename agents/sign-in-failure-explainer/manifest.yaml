@@ -10,7 +10,7 @@ descriptor:
   name: Sign-in failure explainer
   description: Clusters recent failed sign-ins by error, app, user, client app, Conditional Access status, and location signals.
   version: 1.2.0
-  minAppVersion: 0.7.3-nightly.20261120040000
+  minAppVersion: 0.1.0
   author:
     name: OpenAdminOS
     handle: openadminos
@@ -63,6 +63,15 @@ skills:
       source: "{{ load_failures.output }}"
       field: status.errorCode
 
+  - id: by_error_top
+    format: transform
+    label: Count failures by error code, largest buckets
+    settings:
+      kind: count-by-field
+      source: "{{ load_failures.output }}"
+      field: status.errorCode
+      top: 25
+
   - id: by_app
     format: transform
     label: Count failures by app
@@ -71,6 +80,15 @@ skills:
       source: "{{ load_failures.output }}"
       field: appDisplayName
 
+  - id: by_app_top
+    format: transform
+    label: Count failures by app, largest buckets
+    settings:
+      kind: count-by-field
+      source: "{{ load_failures.output }}"
+      field: appDisplayName
+      top: 25
+
   - id: by_user
     format: transform
     label: Count failures by user
@@ -78,6 +96,15 @@ skills:
       kind: count-by-field
       source: "{{ load_failures.output }}"
       field: userPrincipalName
+
+  - id: by_user_top
+    format: transform
+    label: Count failures by user, largest buckets
+    settings:
+      kind: count-by-field
+      source: "{{ load_failures.output }}"
+      field: userPrincipalName
+      top: 25
 
   - id: by_client_app
     format: transform
@@ -130,9 +157,9 @@ skills:
         {{ load_failures.output | size }} sign-in failures in the
         last 24 hours.
 
-        Top error codes: {{ by_error.output | top(25) }}
-        Top apps: {{ by_app.output | top(25) }}
-        Top users: {{ by_user.output | top(25) }}
+        Top error codes: {{ by_error_top.output }}
+        Top apps: {{ by_app_top.output }}
+        Top users: {{ by_user_top.output }}
         Top client apps: {{ by_client_app.output }}
         Conditional Access status: {{ by_ca_status.output }}
         Risk during sign-in: {{ by_risk_during_sign_in.output }}

@@ -14,7 +14,7 @@ descriptor:
   name: OS update posture
   description: Reviews Intune OS version distribution, compliance, ownership, enrollment, and stale inventory signals so admins can prioritize update work.
   version: 1.2.0
-  minAppVersion: 0.7.3-nightly.20261120040000
+  minAppVersion: 0.1.0
   author:
     name: OpenAdminOS
     handle: openadminos
@@ -72,6 +72,15 @@ skills:
       source: "{{ load_devices.output }}"
       field: osVersion
 
+  - id: by_os_version_top
+    format: transform
+    label: Tally by full OS version, largest buckets
+    settings:
+      kind: count-by-field
+      source: "{{ load_devices.output }}"
+      field: osVersion
+      top: 30
+
   - id: by_compliance
     format: transform
     label: Tally by compliance state
@@ -95,6 +104,15 @@ skills:
       field: managedDeviceOwnerType
       missing: unknown
 
+  - id: by_owner_type_count
+    format: transform
+    label: Count by ownership
+    settings:
+      kind: count-by-field
+      source: "{{ load_devices.output }}"
+      field: managedDeviceOwnerType
+      missingBucket: "unknown"
+
   - id: by_enrollment_type
     format: transform
     label: Group by enrollment type
@@ -104,6 +122,15 @@ skills:
       source: "{{ load_devices.output }}"
       field: deviceEnrollmentType
       missing: unknown
+
+  - id: by_enrollment_type_count
+    format: transform
+    label: Count by enrollment type
+    settings:
+      kind: count-by-field
+      source: "{{ load_devices.output }}"
+      field: deviceEnrollmentType
+      missingBucket: "unknown"
 
   - id: stale_inventory
     format: transform
@@ -124,6 +151,15 @@ skills:
       source: "{{ stale_inventory.output }}"
       field: operatingSystem
       missing: unknown
+
+  - id: stale_by_os_count
+    format: transform
+    label: Count stale inventory by operating system
+    settings:
+      kind: count-by-field
+      source: "{{ stale_inventory.output }}"
+      field: operatingSystem
+      missingBucket: "unknown"
 
   - id: oldest_inventory
     format: transform
@@ -150,12 +186,12 @@ skills:
       prompt: |-
         Tenant managed devices: {{ load_devices.output | size }}.
         By operating system: {{ by_os.output }}
-        By OS version: {{ by_os_version.output | top(30) }}
+        By OS version: {{ by_os_version_top.output }}
         By compliance state: {{ by_compliance.output }}
-        Devices by owner type: {{ by_owner_type.output | counts }}
-        Devices by enrollment type: {{ by_enrollment_type.output | counts }}
+        Devices by owner type: {{ by_owner_type_count.output }}
+        Devices by enrollment type: {{ by_enrollment_type_count.output }}
         Inventory stale >= {{ settings.staleSyncDays }} days: {{ stale_inventory.output | size }} devices.
-        Stale inventory by OS: {{ stale_by_os.output | counts }}
+        Stale inventory by OS: {{ stale_by_os_count.output }}
         Oldest stale inventory sample: {{ oldest_inventory.output }}
 
         Write a compact report with these sections:
