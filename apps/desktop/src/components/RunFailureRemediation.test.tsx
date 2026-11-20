@@ -181,7 +181,7 @@ it.each([
   }
 });
 
-it("shows the sizes and the reload command in the LM Studio playbook, which the header cuts off", () => {
+it("shows the sizes and the load settings steps in the LM Studio playbook, which the header cuts off", () => {
   const advice = "This request needs 15,857 tokens of context, but qwen3-8b is loaded in LM Studio with a context length of 4,096. Raise Context Length to at least 20,480 (qwen3-8b supports up to 32,768) in the model's load settings in LM Studio (My Models, or the loaded model in the Developer tab) and reload it, then re-run. If LM Studio refuses the larger size or keeps the smaller one, narrow the request or pick a model with a larger context window. OpenAdminOS does not reload the model itself, because that would replace the model you loaded.";
   const error = `LM Studio context length too small: ${advice} LM Studio said: <LM Studio error> Trying to keep the first 15857 tokens when context the overflows.`;
   const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };

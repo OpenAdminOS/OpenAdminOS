@@ -100,14 +100,22 @@ async function readLmStudioContext(endpoint: string, model: string, signal?: Abo
     let found: LmStudioContextInfo = {};
     const v1 = await getJson(`${base}/api/v1/models`);
     const models = isRecord(v1) && Array.isArray(v1.models) ? v1.models.filter(isRecord) : [];
-    for (const entry of models) {
-      const instances = Array.isArray(entry.loaded_instances) ? entry.loaded_instances.filter(isRecord) : [];
-      // The key names one instance only when exactly one is loaded.
-      const instance = instances.find((item) => item.id === model) ?? (entry.key === model && instances.length === 1 ? instances[0] : undefined);
-      if (!instance) continue;
-      const config = isRecord(instance.config) ? instance.config : {};
-      found = { ...tokenCount("loaded", config.context_length), ...tokenCount("max", entry.max_context_length) };
-      break;
+    const instancesOf = (entry: Record<string, unknown>) =>
+      Array.isArray(entry.loaded_instances) ? entry.loaded_instances.filter(isRecord) : [];
+    const loadedSize = (instance: Record<string, unknown> | undefined) =>
+      tokenCount("loaded", isRecord(instance?.config) ? instance.config.context_length : undefined);
+    // An instance named by the request, else the model named by its key. The
+    // key gives the model's limit; it names one loaded size only when exactly
+    // one instance is loaded.
+    const byInstance = models.find((entry) => instancesOf(entry).some((item) => item.id === model));
+    if (byInstance) {
+      found = { ...loadedSize(instancesOf(byInstance).find((item) => item.id === model)), ...tokenCount("max", byInstance.max_context_length) };
+    } else {
+      const byKey = models.find((entry) => entry.key === model);
+      if (byKey) {
+        const instances = instancesOf(byKey);
+        found = { ...(instances.length === 1 ? loadedSize(instances[0]) : {}), ...tokenCount("max", byKey.max_context_length) };
+      }
     }
     if (found.loaded !== undefined || controller.signal.aborted) return found;
     const v0 = await getJson(`${base}/api/v0/models/${encodeURIComponent(model)}`);
