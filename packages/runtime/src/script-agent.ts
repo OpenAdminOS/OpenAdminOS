@@ -185,7 +185,7 @@ async function runScriptAgent(
           // the refusal) fails with the typed reason, not its stack trace.
           // A script that caught the refusal and failed later keeps its error.
           const tooLarge = broker.getContextFailure();
-          if (tooLarge && /context-too-small|tokens of context/i.test(sandboxResult.stderr)) {
+          if (tooLarge && endedOnSizeRefusal(sandboxResult.stderr)) {
             throw new ContextTooSmallError(tooLarge);
           }
           const detail = sandboxResult.stderr.trim() || `exit code ${sandboxResult.exitCode}`;
@@ -336,6 +336,17 @@ function resolveEntrypoint(agentDir: string, entrypoint: string): string {
     throw new Error(`Script entrypoint must stay inside the agent directory.`);
   }
   return resolvedEntrypoint;
+}
+
+/**
+ * Whether the error the script ended on (the last error header Node prints,
+ * such as "Error: llm.complete: ...") is the size refusal. A refusal the
+ * script logged earlier and then moved past does not count.
+ */
+export function endedOnSizeRefusal(stderr: string): boolean {
+  const headers = [...stderr.matchAll(/^(?:Uncaught )?[A-Za-z]*Error\b[^\n]*$/gm)];
+  const last = headers.at(-1)?.[0] ?? "";
+  return /context-too-small|tokens of context/i.test(last);
 }
 
 async function readScriptResult(

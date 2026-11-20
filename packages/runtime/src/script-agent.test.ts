@@ -24,7 +24,7 @@ import {
   agentTemplateToModule,
   parseAgentTemplate,
 } from "./agent-template.js";
-import { scriptAgentTemplateToModule } from "./script-agent.js";
+import { endedOnSizeRefusal, scriptAgentTemplateToModule } from "./script-agent.js";
 import type { SandboxRunInput, SandboxRunner } from "./sandbox.js";
 
 describe("script-backed MXC agents", () => {
@@ -268,6 +268,13 @@ definition:
       assert.match((error as Error).message, /TypeError/);
       return true;
     });
+  });
+
+    it("reads only the error the script ended on", () => {
+    const refusal = "Error: llm.complete: This request needs about 20,100 tokens of context (20,000 for the prompt and 100 for the answer), but m accepts 16,384.";
+    assert.equal(endedOnSizeRefusal(`${refusal}\n    at main (agent.mjs:4:1)\n\nNode.js v22.23.5`), true);
+    assert.equal(endedOnSizeRefusal(`${refusal}\nfalling back to local counts\nTypeError: Cannot read properties of undefined (reading 'value')\n    at main (agent.mjs:9:1)`), false);
+    assert.equal(endedOnSizeRefusal("TypeError: x is not a function"), false);
   });
 
     it("refuses direct template-module conversion for script agents", () => {
