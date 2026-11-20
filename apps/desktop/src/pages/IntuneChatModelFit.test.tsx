@@ -315,6 +315,25 @@ describe("IntuneChat model fit (mockup 36)", () => {
     expect(line).toHaveTextContent("Attempted through Codex · location set by your account for this request only. Chat is back on llama3.1.");
   });
 
+  it("does not say Chat is back on the model it left once Chat uses another provider", async () => {
+    const answered: IntuneChatMessage = {
+      id: "assistant-old", conversationId: conversation.id, role: "assistant", status: "completed", createdAt: "2026-11-19T09:00:02.000Z",
+      content: "Contoso has 412 managed devices across 187 owners.",
+      providerId: "openai", model: "gpt-5", switchedFrom: { providerId: "ollama", model: "llama3.1", reason: "context-too-small" },
+    };
+    const bridge = makeMockBridge({
+      listIntuneChatConversations: vi.fn(async () => [conversation]),
+      getIntuneChatMessages: vi.fn(async (): Promise<IntuneChatMessage[]> => [
+        { id: "user-old", conversationId: conversation.id, role: "user", content: QUESTION, status: "completed", createdAt: conversation.createdAt },
+        answered,
+      ]),
+    }, createMockAppState({ activeProviderId: "openai" }));
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: `/chat/${conversation.id}`, bridge });
+    const line = (await screen.findByText("Answered by")).parentElement!;
+    expect(line).toHaveTextContent("Answered by Codex · location set by your account for this request only.");
+    expect(line).not.toHaveTextContent("Chat is back on");
+  });
+
   it("keeps the reason on a stored failed answer after a reload, without the choices", async () => {
     const stored: IntuneChatMessage = {
       id: "assistant-stored", conversationId: conversation.id, role: "assistant", status: "failed", createdAt: "2026-11-19T09:00:01.000Z",

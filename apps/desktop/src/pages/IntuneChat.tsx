@@ -4755,7 +4755,7 @@ function AnswerScopeDisclosure({
  * (mockup 36, section C). A hosted one is named with its location label.
  */
 function SwitchedProviderLine({ message }: { message: IntuneChatMessage }) {
-  const { state: { providers } } = useAppState();
+  const { state: { providers, activeProviderId, activeModelByProviderId } } = useAppState();
   const providerId = message.providerId!;
   const switchedFrom = message.switchedFrom!;
   const provider = providers.find((entry) => entry.id === providerId);
@@ -4764,6 +4764,10 @@ function SwitchedProviderLine({ message }: { message: IntuneChatMessage }) {
   // listed, or an older answer without the record, is named with its location label.
   const local = switchedFrom.toOnDevice ?? provider?.isLocal === true;
   const back = modelFitModelName({ providerId: switchedFrom.providerId, ...(switchedFrom.model ? { model: switchedFrom.model } : {}) });
+  // "Chat is back on" names the model it left only while Chat still uses it; a stored answer
+  // read after the admin changed the provider or model says only that it was this request.
+  const activeModel = resolveProviderDefaultModel(providers.find((entry) => entry.id === activeProviderId), activeModelByProviderId).model;
+  const stillOnModelLeft = switchedFrom.providerId === activeProviderId && (!switchedFrom.model || switchedFrom.model === activeModel);
   return (
     <div
       data-switched-provider=""
@@ -4773,7 +4777,7 @@ function SwitchedProviderLine({ message }: { message: IntuneChatMessage }) {
       <span className={local ? "text-[var(--color-success)]" : "text-[var(--color-warning)]"}>
         {local ? MODEL_FIT_COPY.answeredLocal(message.model ?? name, name) : providerDataLocation({ id: providerId, name })}
       </span>{" "}
-      <span className="text-[var(--color-text-soft)]">{message.status === "streaming" ? MODEL_FIT_COPY.sendingRest : MODEL_FIT_COPY.answeredRest(back)}</span>
+      <span className="text-[var(--color-text-soft)]">{message.status === "streaming" || !stillOnModelLeft ? MODEL_FIT_COPY.sendingRest : MODEL_FIT_COPY.answeredRest(back)}</span>
     </div>
   );
 }
