@@ -2531,6 +2531,15 @@ in the main process. Mockup: `docs/mockups/34-local-reset.html`.
   last, so an interrupted wipe resumes at the next launch without repeating
   the Keychain step. External commands are bounded at 5 seconds each, below
   Chromium's wait for a second launch.
+- **Scheduler wakes.** A background scheduler launch never runs or resumes a
+  reset: while a marker is pending it exits at once (on macOS it is the
+  LaunchAgent's own job, which the reset unloads) and the pre-lock scheduler
+  repair is skipped. A request made from a window that a scheduler-started
+  process shows does not unload its own LaunchAgent; the launch that wipes
+  removes it. Removal is checked afterwards (`launchctl print` exit 113, a
+  `schtasks /Query` that no longer finds the task), with every command bounded.
+- **Kept names** are matched without regard to letter case, because macOS and
+  Windows volumes read `Policy.json` through the path `policy.json`.
 - **Failures.** A data folder entry that cannot be removed keeps the marker and
   opens **Reset did not finish** instead of the app (the paths with reasons,
   Try again relaunches, Show data folder, Quit); a background wake just exits.
