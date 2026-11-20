@@ -1820,8 +1820,10 @@ row values at those paths. It stores no second copy of the values in SQLite.
 The local worker classifies incoming Graph responses and prepares cache row
 classifications and identity indexes for fresh snapshots. The existing SQLite
 snapshot replacement is atomic. If classification fails during a refresh, the
-new rows remain usable with incomplete coverage. Startup builds indexes in
-batches and publishes only finished shards. Older cache rows are backfilled once.
+new rows remain usable with incomplete coverage. Graph observations cross from the worker in bounded transferable batches.
+Startup reads, classifies and backfills cache rows in pages on the worker.
+The main process builds staged identity indexes in yielding slices and
+publishes only finished shards.
 The request scanner marks coverage incomplete if the worker lacks the current
 identity index. A confirmed tenant identity can raise a stale cached field
 class. Generic syntax matches such as an unconfirmed GUID honor typed field

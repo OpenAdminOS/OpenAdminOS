@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setImmediate as nextTick } from "node:timers/promises";
+import { Worker } from "node:worker_threads";
 import { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
 
@@ -158,6 +159,53 @@ it("reuses versioned cache metadata on reopen and backfills rows from older vers
     const request = ledger.classifyRequest({ prompt: JSON.stringify(row) });
     assert.equal(request.coverageIncomplete, false);
     assert.equal(request.counts.credential, 1);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("backfills a stale Secure Score page through bounded worker jobs", async t => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-score-backfill-"));
+  const path = join(dir, "openadminos.db");
+  let store = new IntelligenceSqliteStore(path);
+  try {
+    const tenantId = "fixture-tenant";
+    const resource = "secureScores";
+    const rows = Array.from({ length: 90 }, (_, i) => ({
+      id: `score-${i}`, controlScores: Array.from({ length: 242 }, (_, j) => ({
+        controlName: `Control${j}`, description: "A synthetic description for the control that applies to the organization. ".repeat(3),
+      })),
+    }));
+    const db = new DatabaseSync(path);
+    store.replaceGraphResources({ tenantId, resource, label: "Secure Score", scopeSet: [],
+      refreshedAt: "2026-11-18T00:00:00.000Z", rows });
+    store.close();
+    try { db.exec("UPDATE graph_resources SET classification_json = NULL"); }
+    finally { db.close(); }
+    const cursors: number[] = [];
+    const post = Worker.prototype.postMessage;
+    t.mock.method(Worker.prototype, "postMessage", function (
+      this: Worker, ...args: Parameters<Worker["postMessage"]>
+    ) {
+      const message = args[0] as { type?: string; graphPath?: string; rows?: unknown[]; startup?: { afterRowId: number } };
+      if (message.type === "cache" && message.graphPath === "/security/secureScores") {
+        assert.deepEqual(message.rows, []);
+        cursors.push(message.startup!.afterRowId);
+      }
+      post.apply(this, args);
+    });
+    store = new IntelligenceSqliteStore(path, { backgroundClassification: true });
+    await store.waitForCacheClassification();
+    assert.deepEqual(cursors, [0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 90]);
+    const check = new DatabaseSync(path);
+    try {
+      assert.equal(check.prepare("SELECT COUNT(*) AS missing FROM graph_resources WHERE classification_json IS NULL").get()?.missing, 0);
+      const record = check.prepare("SELECT classification_json FROM graph_resources WHERE graph_id = 'score-89'").get();
+      const [, incomplete, fields] = JSON.parse(String(record?.classification_json));
+      assert.equal(incomplete, false);
+      assert.deepEqual(fields.at(-1), [["controlScores", "241", "description"], "description", "public"]);
+    } finally { check.close(); }
   } finally {
     store.close();
     await rm(dir, { recursive: true, force: true });

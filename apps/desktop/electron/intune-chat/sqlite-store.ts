@@ -439,6 +439,8 @@ export class IntelligenceSqliteStore {
   private readonly tenantIdentityShards = new Map<string, Map<GraphCacheResourceKind, TenantValueIndex>>();
   private readonly classificationIndexes = new Map<string, Map<GraphCacheResourceKind, TenantValueIndex>>();
   private cacheClassificationReady = false;
+  private readonly stagedIdentityShards = new Map<string, Map<GraphCacheResourceKind, TenantValueIndex>>();
+  private readonly stagedFirstNames = new Map<string, Map<GraphCacheResourceKind, TenantValueIndex>>();
   private classificationInitialization?: Promise<void>;
   private closed = false;
   private readonly cacheCleared = new Map<string, number>();
@@ -2569,13 +2571,64 @@ export class IntelligenceSqliteStore {
       await yieldToMain();
       await beforeClassification?.();
       if (this.closed) return;
-      for (const _batch of this.cacheClassificationBatches()) {
-        await yieldToMain();
-        if (this.closed) return;
+      const resources = this.db.prepare("SELECT DISTINCT tenant_id, resource FROM graph_resources").all() as
+        unknown as Array<{ tenant_id: string; resource: GraphCacheResourceKind }>;
+      const generations = new Map(this.cacheCleared);
+      const current = (tenantId: string) => !this.closed && !this.disconnectedClassificationTenants.has(tenantId) &&
+        generations.get(tenantId) === this.cacheCleared.get(tenantId);
+      for (const { tenant_id: tenantId, resource } of resources) {
+        if (current(tenantId) && identityResources.has(resource)) {
+          await this.classifyStartupRows(tenantId, resource, true, () => current(tenantId));
+        }
       }
+      // A request can only see entire finished shards.
+      for (const [staged, published] of [[this.stagedIdentityShards, this.tenantIdentityShards],
+        [this.stagedFirstNames, this.classificationIndexes]] as const) {
+        for (const [tenantId, shards] of staged) {
+          if (!current(tenantId)) continue;
+          for (const [resource, index] of shards) this.setIdentityShard(published, tenantId, resource, index);
+        }
+        staged.clear();
+      }
+      for (const { tenant_id: tenantId, resource } of resources) {
+        if (current(tenantId)) await this.classifyStartupRows(tenantId, resource, false, () => current(tenantId));
+      }
+      if (!this.closed) this.cacheClassificationReady = true;
     } catch {
-      // Requests still run. The classifier reports incomplete coverage,
-      // and the existing egress guard reads its index directly from SQLite.
+      // Requests still run with incomplete coverage. The egress guard
+      // keeps using its separate index directly from SQLite.
+    } finally {
+      this.stagedIdentityShards.clear();
+      this.stagedFirstNames.clear();
+    }
+  }
+
+  private async classifyStartupRows(
+    tenantId: string, resource: GraphCacheResourceKind, indexOnly: boolean, current: () => boolean,
+  ): Promise<void> {
+    const graphPath = pathForResource(resource)?.path ?? "";
+    let cursor = 0;
+    while (current()) {
+      const identity = indexOnly || resource === "users" || resource === "groups" ? undefined : this.classificationIdentityIndex(tenantId);
+      const startup = { dbPath: this.dbPath, tenantId, resource, afterRowId: cursor, indexOnly };
+      const result = await classifyCacheRows([], graphPath, identity, indexOnly, indexOnly && resource === "users", undefined, startup);
+      if (!current() || result.nextRowId === undefined) return;
+      cursor = result.nextRowId;
+      if (indexOnly) {
+        const slice = new ClassificationSlice();
+        for (const [snapshot, staged] of [[result.egressIndex, this.stagedIdentityShards],
+          [result.firstNames, this.stagedFirstNames]] as const) {
+          if (!snapshot) continue;
+          let shard = staged.get(tenantId)?.get(resource);
+          if (!shard) this.setIdentityShard(staged, tenantId, resource, shard = new TenantValueIndex());
+          for (const entry of TenantValueIndex.fromWorkerSnapshot(snapshot).workerEntries()) {
+            if (!current()) return;
+            shard.addWorkerEntry(entry);
+            if (slice.elapsed) await slice.yield();
+          }
+        }
+      }
+      await yieldToMain();
     }
   }
 

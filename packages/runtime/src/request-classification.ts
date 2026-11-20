@@ -165,7 +165,6 @@ const MATCH_BUDGET = 200_000;
 const ANCHOR_WIDTH = 8;
 const MAIN_SCAN_LIMIT = 512;
 const SYNC_BATCH_UNITS = 16_384;
-const MAX_GRAPH_MATCH_VALUE = 32_768;
 export const CLASSIFICATION_TTL_MS = 15 * 60_000;
 
 function fenceEscapes(text: string): string {
@@ -498,16 +497,35 @@ export class ClassificationLedger {
       const classified = await requestWorker().run<"graph">(async client => {
         const { shards, isCurrent } = await syncIdentityShards(client, this.identityIndex, new ClassificationSlice());
         indexCurrent = isCurrent;
-        return { message: { type: "graph", data, graphPath, shards } };
+        const record = data !== null && typeof data === "object" && !Array.isArray(data) ? data as Record<string, unknown> : undefined;
+        const field = record && Object.keys(record).find(key => key.toLowerCase() === "value" && Array.isArray(record[key]));
+        const rows = Array.isArray(data) ? data : field ? record![field] as unknown[] : undefined;
+        if (!rows || rows.length < 2) return { message: { type: "graph", data, graphPath, shards } };
+        // Preserve the root wrapper and order for the worker's single field-map walk.
+        // Small input messages also avoid a page-sized main-thread clone.
+        const slice = new ClassificationSlice();
+        for (let offset = 0; offset < rows.length; offset += 4) {
+          signal?.throwIfAborted();
+          if (this.disposed) throw new Error("Graph classification evidence was released.");
+          client.post({ type: "graph-rows", rows: rows.slice(offset, offset + 4) });
+          if (slice.elapsed) await slice.yield();
+        }
+        const header = field ? { ...record, [field]: [] } : undefined;
+        return { message: { type: "graph", data: header, graphPath, shards, collection: field || true } };
       }, signal);
+      if (this.disposed) return;
+      this.dropped += classified.dropped;
       if (classified.incomplete || !indexCurrent()) this.incompleteRegistrations++;
       const slice = new ClassificationSlice();
-      for (const { value, kind, key, maskRole } of classified.fields) {
-        if (this.disposed) return;
-        // Large individual values can require several escaped match patterns.
-        // The final request detectors still see their text with incomplete provenance.
-        if (typeof value === "string" && value.length > MAX_GRAPH_MATCH_VALUE) this.dropped++;
-        else this.add(value, { kind, source, key: key.toLowerCase(), ...(maskRole ? { maskRole } : {}) });
+      const decoder = new TextDecoder();
+      for (const batch of classified.batches) {
+        const fields = JSON.parse(decoder.decode(batch)) as ClassifiedValues["fields"];
+        for (const { value, kind, key, maskRole } of fields) {
+          if (this.disposed) return;
+          signal?.throwIfAborted();
+          this.add(value, { kind, source, key: key.toLowerCase(), ...(maskRole ? { maskRole } : {}) });
+          if (slice.elapsed) await slice.yield();
+        }
         if (slice.elapsed) await slice.yield();
       }
     } catch {

@@ -42,8 +42,17 @@ export interface CacheClassificationRow {
   displayName: string | null;
 }
 
+export interface CacheStartupPage {
+  dbPath: string;
+  tenantId: string;
+  resource: string;
+  afterRowId: number;
+  indexOnly: boolean;
+}
+
 export interface CacheClassificationResult {
   sidecars: string[];
+  nextRowId?: number;
   egressIndex?: TenantValueIndexSnapshot;
   firstNames?: TenantValueIndexSnapshot;
 }
@@ -63,15 +72,17 @@ export function addUserFirstName(index: TenantValueIndex, name: string | null, r
 
 export function prepareCacheClassification(
   rows: readonly CacheClassificationRow[], options: ClassificationOptions, indexValues: boolean, indexNames: boolean,
+  indexOnly = false,
 ): CacheClassificationResult {
   const egressIndex = indexValues ? new TenantValueIndex() : undefined;
   const firstNames = indexNames ? new TenantValueIndex() : undefined;
-  const sidecars = rows.map(({ rawJson, graphId, displayName }) => {
+  const sidecars: string[] = [];
+  for (const { rawJson, graphId, displayName } of rows) {
     const row: unknown = JSON.parse(rawJson);
     if (egressIndex) addCacheIdentity(egressIndex, graphId, displayName, row);
     if (firstNames) addUserFirstName(firstNames, displayName, row);
-    return describeCacheRow(row, options);
-  });
+    if (!indexOnly) sidecars.push(describeCacheRow(row, options));
+  }
   return {
     sidecars,
     ...(egressIndex ? { egressIndex: egressIndex.workerSnapshot() } : {}),

@@ -746,6 +746,37 @@ test("Graph ingress sends field classification to the worker and a worker failur
   assert.equal(sent.filter(type => type === "graph").length, 2);
 });
 
+test("Secure Score Graph ingress preserves field evidence across bounded worker batches", async t => {
+  const post = ClassificationWorker.prototype.post;
+  const batches: number[] = [];
+  t.mock.method(ClassificationWorker.prototype, "post", function (
+    this: ClassificationWorker, ...args: Parameters<ClassificationWorker["post"]>
+  ) {
+    if (args[0].type === "graph-rows") batches.push(args[0].rows.length);
+    post.apply(this, args);
+  });
+  const scores = Array.from({ length: 90 }, (_, i) => ({
+    id: `score-${i}`,
+    controlScores: Array.from({ length: 242 }, (_, j) => ({
+      controlName: `Control${j}`,
+      description: "A synthetic description for the control that applies to the organization. ".repeat(3),
+    })),
+    ...(i === 89 ? { secretText: "synthetic-score-secret-value" } : {}),
+  }));
+  const ledger = new ClassificationLedger();
+  try {
+    await ledger.registerGraph("/security/secureScores", { value: scores, "@odata.nextLink": "https://graph.invalid/continuation" });
+    const result = ledger.classifyRequest({ prompt: 'synthetic-score-secret-value https://graph.invalid/continuation' });
+    assert.equal(result.counts.credential, 1);
+    assert.equal(result.counts.identity, 1);
+    assert.equal(result.coverageIncomplete, false);
+    assert.equal(batches.reduce((sum, batch) => sum + batch, 0), scores.length);
+    assert.ok(batches.every(batch => batch <= 4));
+  } finally {
+    ledger.dispose();
+  }
+});
+
 test("a stalled classifier cannot consume the provider deadline or replace its signal", async t => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   let markSent!: () => void;
