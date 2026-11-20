@@ -23,7 +23,7 @@ import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { closeSync, type Dirent, existsSync, fsyncSync, lstatSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
 import { open, rename, rm } from "node:fs/promises";
-import { basename, dirname, join, posix, resolve, sep, win32 } from "node:path";
+import { basename, dirname, join, posix, resolve, win32 } from "node:path";
 
 import type { LocalResetProblem, LocalResetReport } from "@openadminos/agent-sdk";
 
@@ -218,16 +218,13 @@ const DATA_FOLDER_LINK_REASON =
 export function localResetLinkCheck(
   userDataDir: string,
   fs: Pick<LocalResetFileSystem, "isLink" | "isShared" | "readdir"> = nodeFileSystem,
-  home?: string,
 ): {
   dataFolderIsLink: boolean;
   linkedTokenCaches: string[];
   /** The folder could not be listed, so its token caches could not be checked. */
   scanFailed: boolean;
 } {
-  if (fs.isLink(userDataDir) || (home !== undefined && pathHasLinkBelow(home, userDataDir))) {
-    return { dataFolderIsLink: true, linkedTokenCaches: [], scanFailed: false };
-  }
+  if (fs.isLink(userDataDir)) return { dataFolderIsLink: true, linkedTokenCaches: [], scanFailed: false };
   let entries: string[];
   try {
     entries = fs.readdir(userDataDir);
@@ -279,29 +276,6 @@ export function folderGoesThroughLink(
   } catch (cause) {
     return (cause as NodeJS.ErrnoException).code !== "ENOENT";
   }
-}
-
-/**
- * True when a folder between `root` and `path` (below `root`, down to the
- * parent of `path`) is a link, or cannot be read. A storage migration can
- * leave, say, ~/Library/Caches as a link to an archive; removing a plain
- * folder under it would delete files in that archive. Paths outside `root`
- * are not checked here.
- */
-export function pathHasLinkBelow(root: string, path: string): boolean {
-  const base = resolve(root);
-  const target = resolve(path);
-  if (!target.startsWith(`${base}${sep}`)) return false;
-  let current = base;
-  for (const segment of target.slice(base.length + 1).split(sep).slice(0, -1)) {
-    current = join(current, segment);
-    try {
-      if (lstatSync(current).isSymbolicLink()) return true;
-    } catch (cause) {
-      return (cause as NodeJS.ErrnoException).code !== "ENOENT";
-    }
-  }
-  return false;
 }
 
 /**
@@ -634,11 +608,21 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
   }
 
   // A data folder that is a link may point at a folder other things share;
-  // its entries are never listed or removed through it.
-  if (fs.isLink(userDataDir) || pathHasLinkBelow(options.home, userDataDir)) {
+  // its entries are never listed or removed through it. Folders above it
+  // are not checked: whatever they resolve to, the data folder at its real
+  // location is the one the app has used, and only its contents go.
+  if (fs.isLink(userDataDir)) {
     failed.push({ item: userDataDir, reason: DATA_FOLDER_LINK_REASON });
     return finish("incomplete");
   }
+  // The folder checked here is the one written to later: if it is swapped
+  // for another (a link to another profile) while the wipe runs, the
+  // progress record and the marker removal stop instead.
+  const identity = folderIdentity(userDataDir);
+  const sameFolder = () => {
+    const now = folderIdentity(userDataDir);
+    return identity !== undefined && now !== undefined && now.dev === identity.dev && now.ino === identity.ino && !fs.isLink(userDataDir);
+  };
   const policyProblem = localResetPolicyProblem(userDataDir);
   if (policyProblem) {
     failed.push({ item: MANAGED_POLICY_FILE, reason: policyProblem });
@@ -669,6 +653,10 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
   if (options.packaged && marker.build === "installed") {
     if (!marker.leftoversDone) {
       removeLeftovers(options, fs, run, warnings);
+      if (!sameFolder()) {
+        failed.push({ item: userDataDir, reason: DATA_FOLDER_CHANGED_REASON });
+        return finish("incomplete");
+      }
       // Recorded before the marker goes, so a marker that cannot be removed
       // never makes a later launch remove a Keychain item made since.
       recordLeftoversDone(fs, userDataDir, marker, warnings);
@@ -682,6 +670,10 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
 
   checkFolderEmpty(fs, userDataDir, failed);
   if (failed.length > 0) return finish("incomplete");
+  if (!sameFolder()) {
+    failed.push({ item: userDataDir, reason: DATA_FOLDER_CHANGED_REASON });
+    return finish("incomplete");
+  }
   try {
     fs.remove(join(userDataDir, LOCAL_RESET_MARKER));
   } catch (cause) {
@@ -689,6 +681,18 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
     return finish("incomplete");
   }
   return finish("completed");
+}
+
+const DATA_FOLDER_CHANGED_REASON =
+  "the data folder was replaced by another folder or a link while the reset ran, so nothing more was written or removed there. Check the folder, then open OpenAdminOS again";
+
+function folderIdentity(path: string): { dev: number; ino: number } | undefined {
+  try {
+    const stat = lstatSync(path);
+    return { dev: stat.dev, ino: stat.ino };
+  } catch {
+    return undefined;
+  }
 }
 
 function checkFolderEmpty(fs: LocalResetFileSystem, dir: string, failed: LocalResetProblem[]): void {
@@ -753,12 +757,14 @@ function removeLeftovers(
       // is a failure.
       const left = run("/usr/bin/defaults", ["read", MACOS_BUNDLE_ID]);
       if (left.status === 0) warnings.push({ item: `Preferences (${MACOS_BUNDLE_ID})`, reason: "they are still there after defaults delete" });
+      else if (left.error || left.status === null) warnings.push({ item: `Preferences (${MACOS_BUNDLE_ID})`, reason: "their removal could not be confirmed" });
     }
   }
   for (const path of localResetLeftoverPaths(options.platform, options.home, options.env)) {
-    // A cache folder that is a link, sits under a linked folder or holds a
-    // mount is left alone.
-    if (pathHasLinkBelow(options.home, path) || folderGoesThroughLink(path, { platform: options.platform, mountInfo: options.mountInfo })) {
+    // A cache folder that is a link or holds a mount is left alone. Folders
+    // above it resolve to wherever the app keeps its cache, so they are not
+    // checked: only this OpenAdminOS folder goes.
+    if (folderGoesThroughLink(path, { platform: options.platform, mountInfo: options.mountInfo })) {
       if (fs.exists(path)) warnings.push({ item: path, reason: "it is a link or holds another mount, so it was left in place" });
       continue;
     }

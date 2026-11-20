@@ -11,7 +11,6 @@ import {
   MANAGED_POLICY_FILE,
   localResetPolicyProblem,
   parseWhoamiUser,
-  pathHasLinkBelow,
   windowsTaskListHas,
   windowsTaskBelongsToThisAccount,
   windowsTaskUserId,
@@ -473,8 +472,8 @@ function removeMacosLaunchAgent(): void {
     stat = undefined;
   }
   if (!stat) return;
-  if (!stat.isFile() || pathHasLinkBelow(app.getPath("home"), plistPath)) {
-    throw new Error(`something other than the scheduler file is at ${plistPath}, or a folder on the way is a link, so it was left in place`);
+  if (!stat.isFile()) {
+    throw new Error(`something other than the scheduler file is at ${plistPath}, so it was left in place`);
   }
   rmSync(plistPath, { force: true });
 }
@@ -5596,7 +5595,7 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
   try {
     await requestLocalReset(confirmation, {
       checkReady: async () => {
-        if (localResetLinkCheck(app.getPath("userData"), undefined, app.getPath("home")).dataFolderIsLink) {
+        if (localResetLinkCheck(app.getPath("userData")).dataFolderIsLink) {
           throw new LocalResetRequestError(localResetDataFolderLinkMessage());
         }
         const policyProblem = localResetPolicyProblem(app.getPath("userData"));
@@ -5611,7 +5610,7 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
         // become a link since the checks gets no marker, so no other
         // profile can receive a reset request.
         const dataFolder = app.getPath("userData");
-        if (localResetLinkCheck(dataFolder, undefined, app.getPath("home")).dataFolderIsLink) {
+        if (localResetLinkCheck(dataFolder).dataFolderIsLink) {
           throw new Error("the data folder became a link to another place");
         }
         await writeLocalResetMarker(dataFolder, marker);
@@ -5627,7 +5626,7 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
         });
         // Sign-out rewrites the token caches; a cache that is a link would
         // be rewritten wherever it points. The wipe removes the link only.
-        const check = localResetLinkCheck(app.getPath("userData"), undefined, app.getPath("home"));
+        const check = localResetLinkCheck(app.getPath("userData"));
         if (check.dataFolderIsLink) {
           return [{
             item: "Microsoft sign-ins",
