@@ -20,7 +20,7 @@
  * macOS Keychain item can be removed without a new key being created first.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { rename } from "node:fs/promises";
 import { join, posix, win32 } from "node:path";
 
@@ -48,19 +48,41 @@ const CHROMIUM_LOCK_FILES = new Set(["SingletonLock", "SingletonCookie", "Single
  */
 const AUDIT_SIDE_FILE_SUFFIXES = ["-audit-anchor.json", "-audit-pending.json"];
 
-/** The Keychain service Electron's safeStorage uses for the app name "OpenAdminOS". */
+/**
+ * The Keychain item Electron's safeStorage uses for the app name
+ * "OpenAdminOS": service "<name> Safe Storage", account "<name>".
+ */
 export const MACOS_SAFE_STORAGE_SERVICE = "OpenAdminOS Safe Storage";
+export const MACOS_SAFE_STORAGE_ACCOUNT = "OpenAdminOS";
 const MACOS_BUNDLE_ID = "com.openadminos.desktop";
 /** electron-updater's cache folder: the package name "@openadminos/desktop", sanitized, plus "-updater". */
 export const UPDATER_CACHE_DIR = "@openadminosdesktop-updater";
 
-const COMMAND_TIMEOUT_MS = 20_000;
+/**
+ * Each command gets a short bound: the wipe blocks startup, and a second
+ * launch waits about 20 seconds for this process before it treats it as
+ * hung. An interrupted wipe resumes at the next launch.
+ */
+const COMMAND_TIMEOUT_MS = 5_000;
+
+/**
+ * Which build asked for the reset. Development and installed builds can
+ * share the default data folder, so the build that finishes a reset never
+ * does more, or less, than the one that asked: only an installed build's
+ * request removes the Keychain item, the scheduler and the caches, and only
+ * an installed build carries that out.
+ */
+export type LocalResetBuild = "installed" | "development";
 
 export interface LocalResetMarker {
   version: 1;
   requestedAt: string;
+  /** Absent in a marker that could not be read: treated as development, the narrower cleanup. */
+  build?: LocalResetBuild;
   /** Steps of the request that did not finish; shown with the report. */
   requestWarnings?: LocalResetProblem[];
+  /** The cleanup outside the data folder ran; a resumed wipe never runs it again. */
+  leftoversDone?: true;
 }
 
 // ---------------------------------------------------------------------------
@@ -83,6 +105,7 @@ export interface LocalResetRequestSteps {
   forgetSignIns(): Promise<LocalResetProblem[]>;
   disableScheduler(): Promise<void>;
   disableLoginItem(): Promise<void>;
+  build: LocalResetBuild;
   now?: () => Date;
 }
 
@@ -99,7 +122,11 @@ export async function requestLocalReset(
     throw new LocalResetRequestError(`Type ${LOCAL_RESET_PHRASE} exactly to reset. Nothing was removed.`);
   }
   await steps.checkReady();
-  const marker: LocalResetMarker = { version: 1, requestedAt: (steps.now?.() ?? new Date()).toISOString() };
+  const marker: LocalResetMarker = {
+    version: 1,
+    requestedAt: (steps.now?.() ?? new Date()).toISOString(),
+    build: steps.build,
+  };
   try {
     await steps.writeMarker(marker);
   } catch (cause) {
@@ -133,13 +160,26 @@ export async function requestLocalReset(
   return { marker };
 }
 
-/** Writes the marker atomically, so a crash never leaves half a marker. */
-export async function writeLocalResetMarker(userDataDir: string, marker: LocalResetMarker): Promise<void> {
+/**
+ * Writes the marker atomically, so a crash never leaves half a marker. The
+ * rename is the commit point: once it succeeded the next launch resets, so
+ * a failed directory flush after it is logged, never reported as a reset
+ * that did not start.
+ */
+export async function writeLocalResetMarker(
+  userDataDir: string,
+  marker: LocalResetMarker,
+  options: { syncDirectory?: (path: string) => Promise<void> } = {},
+): Promise<void> {
   const path = join(userDataDir, LOCAL_RESET_MARKER);
   const temp = `${path}.tmp`;
   await writeFileDurably(temp, `${JSON.stringify(marker, null, 2)}\n`, { durable: true });
   await rename(temp, path);
-  await syncDirectory(userDataDir);
+  try {
+    await (options.syncDirectory ?? syncDirectory)(userDataDir);
+  } catch (cause) {
+    console.warn(`[local-reset] the marker is in place but the data folder could not be flushed: ${reasonOf(cause)}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -158,6 +198,8 @@ export interface LocalResetFileSystem {
   readFile(path: string): string;
   /** Removes a file or folder tree; throws when it cannot. */
   remove(path: string): void;
+  /** Replaces the marker atomically. */
+  writeMarker(path: string, content: string): void;
 }
 
 export interface LocalResetWipeOptions {
@@ -180,6 +222,10 @@ const nodeFileSystem: LocalResetFileSystem = {
   readFile: (path) => readFileSync(path, "utf8"),
   // maxRetries covers EBUSY and EPERM on Windows while a scanner holds a file.
   remove: (path) => rmSync(path, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }),
+  writeMarker: (path, content) => {
+    writeFileSync(`${path}.tmp`, content, { mode: 0o600 });
+    renameSync(`${path}.tmp`, path);
+  },
 };
 
 function runCommand(file: string, args: string[]): CommandResult {
@@ -248,6 +294,8 @@ export function readLocalResetMarker(userDataDir: string, fs: LocalResetFileSyst
     return {
       version: 1,
       requestedAt: typeof parsed.requestedAt === "string" ? parsed.requestedAt : "",
+      ...(parsed.build === "installed" || parsed.build === "development" ? { build: parsed.build } : {}),
+      ...(parsed.leftoversDone === true ? { leftoversDone: true as const } : {}),
       ...(Array.isArray(parsed.requestWarnings)
         ? { requestWarnings: parsed.requestWarnings.filter(isProblem) }
         : {}),
@@ -287,6 +335,16 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
     warnings,
   });
 
+  // A development build cannot carry out the Keychain, scheduler and cache
+  // cleanup an installed build asked for, so it leaves the reset to it.
+  if (marker.build === "installed" && !options.packaged) {
+    failed.push({
+      item: "Reset requested in the installed app",
+      reason: "open the installed OpenAdminOS to finish it; a development build does not remove its Keychain item, scheduler or caches",
+    });
+    return finish("incomplete");
+  }
+
   let entries: string[];
   try {
     entries = fs.readdir(userDataDir);
@@ -302,7 +360,21 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
   for (const name of plan.last) removeEntry(fs, userDataDir, name, failed);
   if (failed.length > 0) return finish("incomplete");
 
-  if (options.packaged) removeLeftovers(options, fs, run, warnings);
+  if (options.packaged && marker.build === "installed") {
+    if (!marker.leftoversDone) {
+      removeLeftovers(options, fs, run, warnings);
+      // Recorded before the marker goes, so a marker that cannot be removed
+      // never makes a later launch remove a Keychain item made since.
+      recordLeftoversDone(fs, userDataDir, marker);
+    }
+  } else if (options.packaged) {
+    warnings.push({
+      item: "Keychain item, background scheduler and cached updates",
+      reason: marker.build === "development"
+        ? "not removed, because the reset was requested in a development build"
+        : "not removed, because the reset request could not be read",
+    });
+  }
 
   try {
     fs.remove(join(userDataDir, LOCAL_RESET_MARKER));
@@ -348,17 +420,32 @@ function removeLeftovers(
   }
 }
 
+function recordLeftoversDone(fs: LocalResetFileSystem, userDataDir: string, marker: LocalResetMarker): void {
+  try {
+    fs.writeMarker(join(userDataDir, LOCAL_RESET_MARKER), `${JSON.stringify({ ...marker, leftoversDone: true }, null, 2)}\n`);
+  } catch (cause) {
+    console.warn(`[local-reset] could not record that the cleanup outside the data folder ran: ${reasonOf(cause)}`);
+  }
+}
+
 /** `security` exits 44 when no item matches. */
 const SECURITY_ITEM_NOT_FOUND = 44;
 
 /**
- * Deletes every Keychain item of our safeStorage service, matched by its
- * exact service name only. Each call deletes one match.
+ * Deletes the safeStorage Keychain item, matched by its exact service and
+ * account, so an item of another app or account is never touched. Each
+ * call deletes one match.
  */
 function removeMacosKeychainItem(run: (file: string, args: string[]) => CommandResult, warnings: LocalResetProblem[]): void {
   const item = `Keychain item "${MACOS_SAFE_STORAGE_SERVICE}"`;
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    const result = run("/usr/bin/security", ["delete-generic-password", "-s", MACOS_SAFE_STORAGE_SERVICE]);
+    const result = run("/usr/bin/security", [
+      "delete-generic-password",
+      "-s",
+      MACOS_SAFE_STORAGE_SERVICE,
+      "-a",
+      MACOS_SAFE_STORAGE_ACCOUNT,
+    ]);
     if (result.error) {
       warnings.push({ item, reason: reasonOf(result.error) });
       return;

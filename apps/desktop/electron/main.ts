@@ -5356,10 +5356,7 @@ function runLocalResetAtLaunch(): LocalResetReport | undefined {
       env: process.env,
       // The LaunchAgent label and task name are per user, shared with any
       // other copy, so only an installed build removes them.
-      removeScheduler: () => {
-        if (process.platform === "darwin") removeMacosLaunchAgent();
-        else if (process.platform === "win32") removeWindowsSchedulerTask();
-      },
+      removeScheduler: removeSchedulerRegistration,
     });
     if (report) {
       console.info("[local-reset] reset ran at launch", {
@@ -5391,6 +5388,36 @@ function finishLocalResetAfterReady(report: LocalResetReport): void {
       item: "Menu bar login item",
       reason: `${error instanceof Error ? error.message : String(error)}. Turn it off in System Settings, General, Login Items.`,
     });
+  }
+}
+
+/**
+ * Removes the per-user scheduler registration and checks that it is gone:
+ * the removal helpers treat any failure as "already removed", and a reset
+ * must not report a scheduler as off while it still launches the app.
+ */
+function removeSchedulerRegistration(): void {
+  if (process.platform === "darwin") {
+    removeMacosLaunchAgent();
+    if (existsSync(macosSchedulerPlistPath()) || macosLaunchAgentLoaded()) {
+      throw new Error("the scheduler LaunchAgent is still registered. Remove it with launchctl bootout, as described in Uninstall and reset");
+    }
+  } else if (process.platform === "win32") {
+    removeWindowsSchedulerTask();
+    if (windowsSchedulerTaskXml() !== undefined) {
+      throw new Error(`the scheduled task ${WINDOWS_SCHEDULER_TASK} is still registered. Remove it in Task Scheduler`);
+    }
+  }
+}
+
+function macosLaunchAgentLoaded(): boolean {
+  const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
+  if (uid === undefined) return false;
+  try {
+    execFileSync("launchctl", ["print", `gui/${uid}/${MACOS_SCHEDULER_LABEL}`], { stdio: "ignore", timeout: 5_000 });
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -5429,14 +5456,13 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
       disableScheduler: async () => {
         // A development build never registered the per-user scheduler; the
         // installed app's registration is not its to remove.
-        if (!app.isPackaged) return;
-        if (process.platform === "darwin") removeMacosLaunchAgent();
-        else if (process.platform === "win32") removeWindowsSchedulerTask();
+        if (app.isPackaged) removeSchedulerRegistration();
       },
       disableLoginItem: async () => {
         if (process.platform !== "darwin" || !app.isPackaged) return;
         if (getCompanionLaunchSettings().enabled) setCompanionLaunchEnabled(false);
       },
+      build: app.isPackaged ? "installed" : "development",
     });
   } catch (error) {
     localResetRequested = false;
