@@ -592,6 +592,36 @@ describe("Model fit in Chat", () => {
     });
   });
 
+  it("refuses the send, with the offer still unused, when the conversation is deleted during the last read before the claim", async () => {
+    await withStore(async (store) => {
+      const built: string[] = [];
+      const host = chatHost(store, built);
+      const service = new IntuneChatService(host);
+      const failed = await service.streamIntuneChatMessage({ content: QUESTION }, () => undefined);
+      const offerId = failed.assistantMessage.modelFit!.offerId!;
+      built.length = 0;
+      // The send reads the state at its start and again right before the claim; the deletion lands in that last read.
+      const read = host.read.bind(host);
+      let reads = 0;
+      host.read = async () => {
+        const state = await read();
+        reads += 1;
+        if (reads === 2) store.deleteConversation(failed.conversation.id);
+        return state;
+      };
+      await assert.rejects(
+        service.streamIntuneChatMessage({
+          content: QUESTION,
+          conversationId: failed.conversation.id,
+          modelOverride: { offerId, providerId: "anthropic", model: "claude-sonnet-5-5", destination: "dest-anthropic" },
+          hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5", false, offerId),
+        }, () => undefined),
+        /deleted/,
+      );
+      assert.deepEqual(built, []);
+    });
+  });
+
   it("refuses an offer whose conversation was deleted", async () => {
     await withStore(async (store) => {
       const built: string[] = [];
