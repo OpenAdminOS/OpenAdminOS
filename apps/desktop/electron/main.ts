@@ -11,6 +11,7 @@ import {
   MANAGED_POLICY_FILE,
   localResetPolicyProblem,
   parseWhoamiUser,
+  pathHasLinkBelow,
   windowsTaskListHas,
   windowsTaskBelongsToThisAccount,
   windowsTaskUserId,
@@ -472,8 +473,8 @@ function removeMacosLaunchAgent(): void {
     stat = undefined;
   }
   if (!stat) return;
-  if (!stat.isFile()) {
-    throw new Error(`something other than the scheduler file is at ${plistPath}, so it was left in place`);
+  if (!stat.isFile() || pathHasLinkBelow(app.getPath("home"), plistPath)) {
+    throw new Error(`something other than the scheduler file is at ${plistPath}, or a folder on the way is a link, so it was left in place`);
   }
   rmSync(plistPath, { force: true });
 }
@@ -5595,7 +5596,7 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
   try {
     await requestLocalReset(confirmation, {
       checkReady: async () => {
-        if (localResetLinkCheck(app.getPath("userData")).dataFolderIsLink) {
+        if (localResetLinkCheck(app.getPath("userData"), undefined, app.getPath("home")).dataFolderIsLink) {
           throw new LocalResetRequestError(localResetDataFolderLinkMessage());
         }
         const policyProblem = localResetPolicyProblem(app.getPath("userData"));
@@ -5605,7 +5606,16 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
         // From here runs, Nova sends and deliveries are refused by the reset
         // flag, which a refused request lifts again.
       },
-      writeMarker: (marker) => writeLocalResetMarker(app.getPath("userData"), marker),
+      writeMarker: async (marker) => {
+        // Checked again right before each write: a data folder that has
+        // become a link since the checks gets no marker, so no other
+        // profile can receive a reset request.
+        const dataFolder = app.getPath("userData");
+        if (localResetLinkCheck(dataFolder, undefined, app.getPath("home")).dataFolderIsLink) {
+          throw new Error("the data folder became a link to another place");
+        }
+        await writeLocalResetMarker(dataFolder, marker);
+      },
       forgetSignIns: async () => {
         // The marker is written, so the reset goes ahead: no connector send
         // is approved from here on and no organization starts new work. Done
@@ -5617,7 +5627,7 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
         });
         // Sign-out rewrites the token caches; a cache that is a link would
         // be rewritten wherever it points. The wipe removes the link only.
-        const check = localResetLinkCheck(app.getPath("userData"));
+        const check = localResetLinkCheck(app.getPath("userData"), undefined, app.getPath("home"));
         if (check.dataFolderIsLink) {
           return [{
             item: "Microsoft sign-ins",

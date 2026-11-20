@@ -23,7 +23,7 @@ import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { closeSync, type Dirent, existsSync, fsyncSync, lstatSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
 import { open, rename, rm } from "node:fs/promises";
-import { basename, dirname, join, posix, resolve, win32 } from "node:path";
+import { basename, dirname, join, posix, resolve, sep, win32 } from "node:path";
 
 import type { LocalResetProblem, LocalResetReport } from "@openadminos/agent-sdk";
 
@@ -215,13 +215,19 @@ const DATA_FOLDER_LINK_REASON =
  * Links in the data folder the reset must not write or delete through: the
  * folder itself, and token cache files, which sign-out would rewrite.
  */
-export function localResetLinkCheck(userDataDir: string, fs: Pick<LocalResetFileSystem, "isLink" | "isShared" | "readdir"> = nodeFileSystem): {
+export function localResetLinkCheck(
+  userDataDir: string,
+  fs: Pick<LocalResetFileSystem, "isLink" | "isShared" | "readdir"> = nodeFileSystem,
+  home?: string,
+): {
   dataFolderIsLink: boolean;
   linkedTokenCaches: string[];
   /** The folder could not be listed, so its token caches could not be checked. */
   scanFailed: boolean;
 } {
-  if (fs.isLink(userDataDir)) return { dataFolderIsLink: true, linkedTokenCaches: [], scanFailed: false };
+  if (fs.isLink(userDataDir) || (home !== undefined && pathHasLinkBelow(home, userDataDir))) {
+    return { dataFolderIsLink: true, linkedTokenCaches: [], scanFailed: false };
+  }
   let entries: string[];
   try {
     entries = fs.readdir(userDataDir);
@@ -273,6 +279,29 @@ export function folderGoesThroughLink(
   } catch (cause) {
     return (cause as NodeJS.ErrnoException).code !== "ENOENT";
   }
+}
+
+/**
+ * True when a folder between `root` and `path` (below `root`, down to the
+ * parent of `path`) is a link, or cannot be read. A storage migration can
+ * leave, say, ~/Library/Caches as a link to an archive; removing a plain
+ * folder under it would delete files in that archive. Paths outside `root`
+ * are not checked here.
+ */
+export function pathHasLinkBelow(root: string, path: string): boolean {
+  const base = resolve(root);
+  const target = resolve(path);
+  if (!target.startsWith(`${base}${sep}`)) return false;
+  let current = base;
+  for (const segment of target.slice(base.length + 1).split(sep).slice(0, -1)) {
+    current = join(current, segment);
+    try {
+      if (lstatSync(current).isSymbolicLink()) return true;
+    } catch (cause) {
+      return (cause as NodeJS.ErrnoException).code !== "ENOENT";
+    }
+  }
+  return false;
 }
 
 /**
@@ -606,7 +635,7 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
 
   // A data folder that is a link may point at a folder other things share;
   // its entries are never listed or removed through it.
-  if (fs.isLink(userDataDir)) {
+  if (fs.isLink(userDataDir) || pathHasLinkBelow(options.home, userDataDir)) {
     failed.push({ item: userDataDir, reason: DATA_FOLDER_LINK_REASON });
     return finish("incomplete");
   }
@@ -717,11 +746,19 @@ function removeLeftovers(
     // Preferences go through cfprefsd, which caches the plist; deleting the
     // file alone could be written back. A missing domain exits 1.
     const prefs = run("/usr/bin/defaults", ["delete", MACOS_BUNDLE_ID]);
-    if (prefs.error) warnings.push({ item: `Preferences (${MACOS_BUNDLE_ID})`, reason: reasonOf(prefs.error) });
+    if (prefs.error) {
+      warnings.push({ item: `Preferences (${MACOS_BUNDLE_ID})`, reason: reasonOf(prefs.error) });
+    } else if (prefs.status !== 0) {
+      // A missing domain also exits non-zero; only a domain still readable
+      // is a failure.
+      const left = run("/usr/bin/defaults", ["read", MACOS_BUNDLE_ID]);
+      if (left.status === 0) warnings.push({ item: `Preferences (${MACOS_BUNDLE_ID})`, reason: "they are still there after defaults delete" });
+    }
   }
   for (const path of localResetLeftoverPaths(options.platform, options.home, options.env)) {
-    // A cache folder that is a link or holds a mount is left alone.
-    if (folderGoesThroughLink(path, { platform: options.platform, mountInfo: options.mountInfo })) {
+    // A cache folder that is a link, sits under a linked folder or holds a
+    // mount is left alone.
+    if (pathHasLinkBelow(options.home, path) || folderGoesThroughLink(path, { platform: options.platform, mountInfo: options.mountInfo })) {
       if (fs.exists(path)) warnings.push({ item: path, reason: "it is a link or holds another mount, so it was left in place" });
       continue;
     }

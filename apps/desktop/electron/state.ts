@@ -2445,11 +2445,6 @@ export class AppStateStore {
   }
 
   /**
-   * Stops background services and closes the databases before a restart,
-   * waiting at most `boundMs` for the gateway and MCP servers, so the next
-   * launch can delete the files.
-   */
-  /**
    * Reset OpenAdminOS, once its marker is written: every organization stops
    * taking new work, the way Disconnect closes one. Work already running
    * gets its signal; the shutdown before the restart waits for it.
@@ -2465,6 +2460,11 @@ export class AppStateStore {
   /** Organizations a reset request closed, so a refused request can reopen them. */
   private localResetClosedTenants: string[] = [];
 
+  /**
+   * Stops background services and closes the databases before a restart,
+   * waiting at most `boundMs` for leased work, the gateway and MCP servers,
+   * so the next launch can delete the files.
+   */
   async shutdown(boundMs: number): Promise<void> {
     this.whatsappWebClientInstance?.dispose();
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -2794,6 +2794,8 @@ export class AppStateStore {
    * it at the typed confirmation gate. Nothing is applied here.
    */
   async prepareSplashtopChange(input: PrepareSplashtopChangeInput): Promise<RunRecord> {
+    // Before any Splashtop read, and again before the plan is saved.
+    if (this.localResetStarted) throw new LocalResetInProgressError();
     const persisted = await this.read();
     this.requireActiveOrganization(persisted, input.organizationId);
     const request = validateSplashtopChangeRequest(input);
@@ -4840,6 +4842,8 @@ export class AppStateStore {
   async startBaselineRollback(input: StartBaselineRollbackInput): Promise<RunRecord> {
     if (this.localResetStarted) throw new LocalResetInProgressError();
     const built = await this.driftService.buildBaselineRollbackPlan(input);
+    // A reset may have started while the plan was built.
+    if (this.localResetStarted) throw new LocalResetInProgressError();
     return this.runService.startRollbackRun({
       tenantId: built.tenantId,
       baselineId: built.baselineId,
@@ -7617,8 +7621,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * sent anywhere. Also expires proposed notes past their review window.
    */
   async fireDueNovaFollowUps(): Promise<void> {
-    if (this.novaFollowUpsFiring) return;
+    if (this.novaFollowUpsFiring || this.localResetStarted) return;
     this.novaFollowUpsFiring = true;
+    this.localResetWorkInFlight += 1;
     try {
       // Follow-ups run only inside these passes, one after another, so at
       // the start of one no follow-up of this session is running: a row
@@ -7643,6 +7648,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         console.warn("[nova] follow-ups could not be checked", errorText(error));
     } finally {
       this.novaFollowUpsFiring = false;
+      this.localResetWorkInFlight -= 1;
     }
   }
 
