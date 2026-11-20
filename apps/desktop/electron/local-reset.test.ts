@@ -432,7 +432,7 @@ describe("local reset: wipe at launch", () => {
       writeFileSync(join(dir, "other-cache.bin"), "other profile");
       symlinkSync(join(dir, "other-cache.bin"), join(profile, "tokens-abc.bin"));
       writeFileSync(join(profile, "tokens.bin"), "x");
-      assert.deepEqual(localResetLinkCheck(profile), { dataFolderIsLink: false, linkedTokenCaches: ["tokens-abc.bin"] });
+      assert.deepEqual(localResetLinkCheck(profile), { dataFolderIsLink: false, linkedTokenCaches: ["tokens-abc.bin"], scanFailed: false });
       writeFileSync(join(profile, LOCAL_RESET_MARKER), JSON.stringify(DEV_MARKER));
       assert.equal(runPendingLocalReset({ userDataDir: profile, packaged: false, platform: "linux", home: dir, env: {} })?.status, "completed");
       assert.equal(readFileSync(join(dir, "other-cache.bin"), "utf8"), "other profile");
@@ -452,6 +452,60 @@ describe("local reset: wipe at launch", () => {
       writeFileSync(join(profile, LOCAL_RESET_MARKER), JSON.stringify(DEV_MARKER));
       assert.equal(runPendingLocalReset({ userDataDir: profile, packaged: false, platform: "linux", home: dir, env: {} })?.status, "completed");
       assert.equal(readFileSync(join(dir, "backup-tokens.bin"), "utf8"), "backup bytes");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("never starts a wipe from a folder where the marker belongs", async () => {
+    const dir = await tempDir();
+    try {
+      writeFileSync(join(dir, "state.json"), "{}");
+      mkdirSync(join(dir, LOCAL_RESET_MARKER));
+      const report = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", home: dir, env: {} });
+      assert.equal(report?.status, "incomplete");
+      assert.ok(existsSync(join(dir, "state.json")));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not check token caches it cannot list", () => {
+    const check = localResetLinkCheck("/data", {
+      isLink: () => false,
+      isShared: () => false,
+      readdir: () => { throw Object.assign(new Error("EACCES"), { code: "EACCES" }); },
+    });
+    assert.deepEqual(check, { dataFolderIsLink: false, linkedTokenCaches: [], scanFailed: true });
+  });
+
+  it("clears the request's scheduler warning when removal works at launch", async () => {
+    const dir = await tempDir();
+    try {
+      seedDataFolder(dir, { ...MARKER, requestWarnings: [{ item: "Background scheduler", reason: "launchctl failed" }] });
+      const { run } = recordingRun({ "/usr/bin/security": [keychainNotFound] });
+      const report = runPendingLocalReset({
+        userDataDir: dir, packaged: true, platform: "darwin", home: join(dir, "home"), env: {}, run,
+        removeScheduler: () => undefined,
+      });
+      assert.equal(report?.status, "completed");
+      assert.deepEqual(report?.warnings, []);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("never starts a wipe from a hard-linked marker", async () => {
+    const dir = await tempDir();
+    try {
+      const profile = join(dir, "profile");
+      mkdirSync(profile);
+      writeFileSync(join(profile, "state.json"), "{}");
+      writeFileSync(join(dir, "elsewhere.json"), JSON.stringify(DEV_MARKER));
+      linkSync(join(dir, "elsewhere.json"), join(profile, LOCAL_RESET_MARKER));
+      const report = runPendingLocalReset({ userDataDir: profile, packaged: false, platform: "linux", home: dir, env: {} });
+      assert.equal(report?.status, "incomplete");
+      assert.ok(existsSync(join(profile, "state.json")));
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -797,9 +851,9 @@ function failingFileSystem(fails: (path: string) => boolean): LocalResetFileSyst
     isShared: (path) => {
       try {
         const stat = lstatSync(path);
-        return stat.isSymbolicLink() || (stat.isFile() && stat.nlink > 1);
-      } catch {
-        return false;
+        return !(stat.isFile() && stat.nlink === 1);
+      } catch (cause) {
+        return (cause as NodeJS.ErrnoException).code !== "ENOENT";
       }
     },
   };
