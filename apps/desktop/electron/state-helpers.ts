@@ -55,7 +55,7 @@ import {
   staleManagedDeviceSyncThresholdDays,
   thresholdIsoDaysBefore,
 } from "./intune-chat/planner.js";
-import { deviceRowFilters, QUESTION_WORDS } from "./intune-chat/structured-question.js";
+import { DEVICE_FIELD_WORDS, deviceRowFilters, QUESTION_WORDS } from "./intune-chat/structured-question.js";
 import { withAgentCompatibility } from "./agent-draft-helpers.js";
 
 
@@ -948,15 +948,26 @@ export function readPlannedChatRows(
   },
 ): Record<GraphCacheResourceKind, unknown[]> {
   // OS and compliance state named in the question filter the device rows on their fields.
+  // Question words ("how", "many") match nothing a row is named for; ANDed as text they only emptied the match.
   const deviceFilters = deviceRowFilters(input.question);
+  const terms = input.searchTerms.filter((term) => !QUESTION_WORDS.has(term));
+  const others = input.resources.filter((resource) => resource !== "managedDevices");
   const rows = store.readGraphRows({
     tenantId: input.tenantId,
-    resources: input.resources,
-    // Question words ("how", "many", "compliant") match nothing a row is named for; ANDed as text they only emptied the match.
-    searchTerms: input.searchTerms.filter((term) => !QUESTION_WORDS.has(term)),
+    resources: others,
+    searchTerms: terms,
     limitPerResource: input.limitPerResource,
-    ...(deviceFilters.length > 0 ? { filters: { managedDevices: deviceFilters } } : {}),
   });
+  if (input.resources.includes("managedDevices")) {
+    // The device words the field filters replace leave the text match of device rows.
+    rows.managedDevices = store.readGraphRows({
+      tenantId: input.tenantId,
+      resources: ["managedDevices"],
+      searchTerms: terms.filter((term) => !DEVICE_FIELD_WORDS.has(term)),
+      limitPerResource: input.limitPerResource,
+      ...(deviceFilters.length > 0 ? { filters: { managedDevices: deviceFilters } } : {}),
+    }).managedDevices;
+  }
   const staleSyncDays = staleManagedDeviceSyncThresholdDays(input.question);
   if (staleSyncDays !== undefined && input.resources.includes("managedDevices")) {
     rows.managedDevices = store.readManagedDevicesLastSyncBefore({

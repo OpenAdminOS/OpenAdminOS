@@ -131,6 +131,7 @@ import { runAgenticChat, type AgenticFailureReason, type RunAgenticChatInput } f
 import {
   chatResultContextFor,
   COMPUTED_ANSWER_NOTICE,
+  computedAnswerText,
   computedResultForModel,
   computeStructuredResult,
   followUpPlanningText,
@@ -218,6 +219,18 @@ const NO_TENANT_SCOPE: TenantRecord = Object.freeze({
 
 const NO_TENANT_GRAPH_REFUSAL =
   "No organization is active, so Chat reads no tenant data. Connect Microsoft 365 to answer this.";
+
+/**
+ * Plans a question with the previous one as context when it reads as a
+ * follow-up, with write intent read from the current question alone: a
+ * read-only "only Windows" after "retire stale devices" is not a write.
+ */
+function planForFollowUp(content: string, previousQuestion: string | undefined): PlannedChatContext {
+  const text = followUpPlanningText(content, previousQuestion);
+  const planned = planChatContext(text);
+  if (text !== content) planned.hasWriteIntent = planChatContext(content).hasWriteIntent;
+  return planned;
+}
 
 function restrictPlannedResourcesForTenant(
   planned: PlannedChatContext,
@@ -2178,7 +2191,7 @@ export class IntuneChatService {
     const history = store.listMessages(conversation.id);
     const conversationMemory = boundedConversationMemory(history);
     const followUp = noTenant ? undefined : this.followUpContext(store, conversation.id, tenant.id, history);
-    const planned = planChatContext(followUpPlanningText(content, followUp?.previousQuestion));
+    const planned = planForFollowUp(content, followUp?.previousQuestion);
     const directResources = voiceDeviceEvidenceIntent(content)
       ? ["managedDevices" as const]
       : voiceResourcesForQuestion(content);
@@ -2208,7 +2221,9 @@ export class IntuneChatService {
     // before any model call, so those questions keep the refresh before the answer.
     // With nothing connected, an explicit docs request is not left to the model's classification.
     const docsWithoutTenant = noTenant && !planned.hasWriteIntent && isExplicitDocsRequest(content);
-    const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent && !docsWithoutTenant;
+    // A local model never writes a device lookup's answer: code renders it, so the cache refreshes first, as for direct answers.
+    const localCodeAnswer = provider?.isLocal === true && structured?.kind === "device-detail";
+    const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent && !docsWithoutTenant && !localCodeAnswer;
     const veto = docsWithoutTenant ? undefined : docsVeto(content, history);
     const answerPlan = await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, modelClassifies: lazyRefresh, ...(veto ? { veto } : {}), ...(docsWithoutTenant ? { forceDocs: true } : {}), steps });
     const accessBlock = accessBlockTiming(restriction.blocked, answerPlan, lazyRefresh, noTenant);
@@ -2259,7 +2274,8 @@ export class IntuneChatService {
     const answerGeneratedAt = new Date().toISOString();
     const readPack = () => ({
       cacheStatus: store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
-      computed: this.computeStructured(store, tenant.id, structured, answerGeneratedAt),
+      // Only for a tenant or mixed question whose resource this tenant grants: a docs answer never carries cached device facts.
+      computed: this.computeStructured(store, tenant.id, structured && planned.resources.includes(structured.resource) && answerPlan?.sources.kind !== "docs" ? structured : undefined, answerGeneratedAt),
       rows: readPlannedChatRows(store, {
         tenantId: tenant.id,
         question: content,
@@ -2315,7 +2331,8 @@ export class IntuneChatService {
       ? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant), () => {}, entry => { (toolTrace ??= []).push(entry); }) ??
         voiceAppPlatformCountAnswer(content, cacheStatus, (resource) =>
           this.graphAggregatesFor(store, tenant.id, [resource])[resource],
-        )
+        ) ??
+        (localCodeAnswer && computed ? computedAnswerText(computed) : undefined)
       : undefined;
     const namedAgent = persisted.installedAgents.find(a => [a.name, a.slug].some(n => n.toLowerCase() === content.toLowerCase()));
     if (namedAgent) {
@@ -2381,7 +2398,7 @@ export class IntuneChatService {
         }, buildAnswerPrompt(answerPack, documentation));
         finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0 });
         if (provider?.isLocal === true) {
-          const checked = reconcileWithComputed(content, computed);
+          const checked = reconcileWithComputed(content, computed, this.cachedDevicesNamedIn(store, tenant.id));
           if (checked.replaced) {
             engineNotice = [engineNotice, COMPUTED_ANSWER_NOTICE].filter(Boolean).join(" ");
             return { content: checked.answer, model };
@@ -2452,7 +2469,7 @@ export class IntuneChatService {
             if (agentic.ok) {
               assistantContent = agentic.answer;
               if (localChat) {
-                const checked = reconcileWithComputed(agentic.answer, computed);
+                const checked = reconcileWithComputed(agentic.answer, computed, this.cachedDevicesNamedIn(store, tenant.id));
                 if (checked.replaced) {
                   assistantContent = checked.answer;
                   engineNotice = COMPUTED_ANSWER_NOTICE;
@@ -2548,7 +2565,7 @@ export class IntuneChatService {
     }
     store.touchConversation(conversation.id, this.answeredChatTitle(conversation.id, newConversationTitle, modelTitle), assistantMessage.createdAt);
     // The next question can narrow this answer's computed result; any other answer clears it.
-    if (followUp) store.setChatResultContext(conversation.id, answered ? chatResultContextFor(computed, { tenantId: tenant.id, question: content, computedAt: assistantMessage.createdAt }) : undefined, assistantMessage.createdAt);
+    if (followUp) store.setChatResultContext(conversation.id, answered && (directDeviceAnswer === undefined || localCodeAnswer) ? chatResultContextFor(computed, { tenantId: tenant.id, question: content, computedAt: assistantMessage.createdAt }) : undefined, assistantMessage.createdAt);
 
     if (!noTenant) {
       await this.maybeCreateSelfTrainingSuggestionFromChat({
@@ -2679,7 +2696,7 @@ export class IntuneChatService {
     const voiceProfile = options.voice && options.voiceProfile ? novaProfilePromptBlock({ ...options.voiceProfile, byteLimit: novaReasoningProfileByteLimit(providerId) }) : "";
     const voiceByteLimit = smallVoiceModel ? 3000 : VOICE_PROMPT_BYTE_LIMIT + Buffer.byteLength(voiceProfile) + (voiceProfile ? Buffer.byteLength(NOVA_PROFILE_BLOCK_END) + 2 : 0);
     const followUp = options.voice || noTenant ? undefined : this.followUpContext(store, conversation.id, tenant.id, history);
-    const planned = planChatContext(voiceContext?.planningQuestion ?? followUpPlanningText(content, followUp?.previousQuestion));
+    const planned = voiceContext?.planningQuestion ? planChatContext(voiceContext.planningQuestion) : planForFollowUp(content, followUp?.previousQuestion);
     const directResources = voiceDeviceEvidenceIntent(content) ? ["managedDevices" as const] : voiceResourcesForQuestion(content);
     if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
     const structured = followUp && !planned.hasWriteIntent ? planStructuredQuery({ question: content, generatedAt: now, ...(followUp.result ? { previous: followUp.result } : {}), store, tenantId: tenant.id }) : undefined;
@@ -2732,7 +2749,9 @@ export class IntuneChatService {
     // before any model call, so those questions keep the refresh before the answer.
     // With nothing connected, an explicit docs request is not left to the model's classification.
     const docsWithoutTenant = noTenant && !planned.hasWriteIntent && isExplicitDocsRequest(content);
-    const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent && !docsWithoutTenant;
+    // A local model never writes a device lookup's answer: code renders it, so the cache refreshes first, as for direct answers.
+    const localCodeAnswer = !options.voice && provider?.isLocal === true && structured?.kind === "device-detail";
+    const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent && !docsWithoutTenant && !localCodeAnswer;
     const veto = docsWithoutTenant ? undefined : docsVeto(content, history);
     // Voice keeps its own bounded tool set and no source plan; MCP tools are Chat only.
     const answerPlan = options.voice
@@ -2934,7 +2953,8 @@ export class IntuneChatService {
     const answerGeneratedAt = new Date().toISOString();
     const readPack = () => ({
       cacheStatus: store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
-      computed: this.computeStructured(store, tenant.id, structured, answerGeneratedAt),
+      // Only for a tenant or mixed question whose resource this tenant grants: a docs answer never carries cached device facts.
+      computed: this.computeStructured(store, tenant.id, structured && planned.resources.includes(structured.resource) && answerPlan?.sources.kind !== "docs" ? structured : undefined, answerGeneratedAt),
       rows: readPlannedChatRows(store, {
         tenantId: tenant.id,
         question: voiceContext?.planningQuestion ?? content,
@@ -3015,7 +3035,7 @@ export class IntuneChatService {
 
     const directVoiceAnswer = noTenant || accessBlockedMessage || answerPlan?.sources.kind === "docs"
       ? undefined
-      : await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant, options.signal), message => sendProgress({ message, stage: "running-tools" }), entry => { (toolTrace ??= []).push(entry); }) ?? voiceInventoryAnswer(content, cacheStatus) ?? voiceAppPlatformCountAnswer(content, cacheStatus, (resource) => this.graphAggregatesFor(store, tenant.id, [resource])[resource]) ?? voiceDeviceSummaryAnswer(content, cacheStatus, () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices);
+      : await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant, options.signal), message => sendProgress({ message, stage: "running-tools" }), entry => { (toolTrace ??= []).push(entry); }) ?? voiceInventoryAnswer(content, cacheStatus) ?? voiceAppPlatformCountAnswer(content, cacheStatus, (resource) => this.graphAggregatesFor(store, tenant.id, [resource])[resource]) ?? voiceDeviceSummaryAnswer(content, cacheStatus, () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices) ?? (localCodeAnswer && computed ? computedAnswerText(computed) : undefined);
     const namedAgent = persisted.installedAgents.find(a => [a.name, a.slug].some(n => n.toLowerCase() === content.toLowerCase()));
     if (namedAgent) {
       assistantContent = `${namedAgent.name} is an installed ${namedAgent.mode === "read" ? "read-only" : "write"} agent. Use its Run button to review and start it. Nothing has been started.${namedAgent.mode === "write" ? " Its change plan still requires confirmation." : ""}`;
@@ -3103,7 +3123,7 @@ export class IntuneChatService {
         }
         assistantContent = relabelUnverifiedLearn(assistantContent.trim(), false);
         if (provider?.isLocal === true && !isCancelled()) {
-          const checked = reconcileWithComputed(assistantContent, computed);
+          const checked = reconcileWithComputed(assistantContent, computed, this.cachedDevicesNamedIn(store, tenant.id));
           if (checked.replaced) {
             assistantContent = checked.answer;
             engineNotice = [engineNotice, COMPUTED_ANSWER_NOTICE].filter(Boolean).join(" ");
@@ -3239,7 +3259,7 @@ export class IntuneChatService {
             if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok, agentic.ok ? undefined : agentic.failureReason);
             if (agentic.ok) {
               if (localChat) {
-                const checked = reconcileWithComputed(agentic.answer, computed);
+                const checked = reconcileWithComputed(agentic.answer, computed, this.cachedDevicesNamedIn(store, tenant.id));
                 if (checked.replaced) {
                   agentic.answer = checked.answer;
                   engineNotice = COMPUTED_ANSWER_NOTICE;
@@ -3422,7 +3442,7 @@ export class IntuneChatService {
     }
     store.touchConversation(conversation.id, this.answeredChatTitle(conversation.id, newConversationTitle, modelTitle), assistantMessage.createdAt);
     // The next question can narrow this answer's computed result; any other answer clears it.
-    if (followUp) store.setChatResultContext(conversation.id, answered ? chatResultContextFor(computed, { tenantId: tenant.id, question: content, computedAt: assistantMessage.createdAt }) : undefined, assistantMessage.createdAt);
+    if (followUp) store.setChatResultContext(conversation.id, answered && (directVoiceAnswer === undefined || localCodeAnswer) ? chatResultContextFor(computed, { tenantId: tenant.id, question: content, computedAt: assistantMessage.createdAt }) : undefined, assistantMessage.createdAt);
 
     if (!noTenant) {
       await this.maybeCreateSelfTrainingSuggestionFromChat({
@@ -3475,6 +3495,14 @@ export class IntuneChatService {
     const previousQuestion = [...history].reverse().find((message) => message.role === "user" && message.status === "completed")?.content;
     const result = readChatResultContext(store, conversationId, tenantId);
     return { ...(previousQuestion ? { previousQuestion } : {}), ...(result ? { result } : {}) };
+  }
+
+  /** The cached Intune and Entra devices a text names, for the answer check. */
+  private cachedDevicesNamedIn(store: IntelligenceSqliteStore, tenantId: string): (text: string) => Array<{ id: string; name: string }> {
+    return (text) => [
+      ...store.findGraphRowsNamedIn({ tenantId, resource: "managedDevices", text, limit: 200 }),
+      ...store.findGraphRowsNamedIn({ tenantId, resource: "entraDevices", text, limit: 200 }),
+    ];
   }
 
   /** Exact counts for a structured question, from the cache as it is now. */

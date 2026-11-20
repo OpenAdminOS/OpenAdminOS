@@ -3787,33 +3787,46 @@ the format. Decisions:
   question to the planner, so "which Macs need attention" is never answered
   with a list of all Macs. The deterministic answer pack carries the result as
   an authoritative `computedResult` (exact counts, the full filtered list,
-  plain fact lines) and no sample rows for that resource. "Not compliant" is
-  `complianceState != compliant`.
+  plain fact lines) and no sample rows for that resource, only for a tenant or
+  mixed question whose resource the tenant grants. "Not compliant" is Intune's
+  `noncompliant` state, as the direct evidence answers count it; grace period
+  is its own state. Wording the parser cannot read for certain (two operating
+  systems, "not currently compliant", both states at once) goes to the planner.
+  `count_cached` on a resource that was never refreshed returns no count.
 - Intune is the device inventory. Device, OS, sync and compliance wording plans
   `managedDevices` only; `entraDevices` joins for Entra, directory, join,
   registration, stale-device cleanup, duplicate and deleted-record wording.
 - Row samples use structured filters for the OS and compliance state a question
   names, and question words are no longer ANDed as text matches.
 - Follow-ups: the structured result of the last answer is stored per
-  conversation (`chat_result_context`: resource, filters, label, total; deleted
-  with the conversation) and a follow-up such as "only Windows" or "which of
-  those synced this month" narrows it. Any other answer clears it. Short
+  conversation (`chat_result_context`: resource, filters, label, total and up
+  to 500 matched row ids; deleted with the conversation) and a follow-up such
+  as "only Windows" or "which of those synced this month" narrows those rows,
+  so a device added by a later refresh is not counted as part of the previous
+  answer. A different value on a field already filtered ("what about macOS"
+  after Windows) is a new question. Any other answer clears the context, and
+  follow-up planning reads write intent from the current question only. Short
   follow-ups are planned with the previous question as context.
 - Questions the data cannot answer: "why is <device> not compliant" names the
   device's cached state, says the failing rule is not in the cached data, and
-  gives the last sync as the lead, with nothing invented.
+  gives the last sync as the lead, with nothing invented. For a local model
+  code writes this answer without a model call.
 - A local model's answer that leaves out or changes a computed fact is
   replaced by the computed answer: every breakdown count, every listed name
   for a list of up to 25, the total when the question asked for a number or
   the list is longer, and for a device lookup the not-in-data statement and
-  the sync date. A list question answered with all its names needs no count, with the notice "The local model's answer
+  the sync date. A complete list must name no other cached Intune or Entra
+  device, and a number given for the not compliant set must be one the result
+  gives. A list question answered with all its names needs no count, with the notice "The local model's answer
   did not match the counts computed from cached data, so the computed result is
   shown instead." This applies to the deterministic path for any local model
   and to the tool loop in auto mode.
 - Auto mode, local model, Chat: a compact loop budget (four iterations, one
   repair for malformed, empty, unfinished or evidence-free replies, no repair
   turn for a missing question kind, at most four model calls before the
-  fallback). For a structured question the host runs `count_cached` before the
+  fallback; the short query-writing call of an MCP tool the model chose is not
+  a failure turn and is not counted). For a structured question
+  the host runs `count_cached` before the
   first model call and gives the facts as an observation, so a good reply needs
   one call. A context overflow falls back instead of failing the message.
   Always investigative mode and hosted providers keep the established budget,

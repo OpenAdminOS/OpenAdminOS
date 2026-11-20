@@ -126,8 +126,7 @@ const EVIDENCE_TOOLS = new Set<string>([
  */
 function isEvidenceResult(tool: string, result: unknown): boolean {
   if (!EVIDENCE_TOOLS.has(tool as never)) return false;
-  if (tool === "count_cached") return true;
-  if (tool !== "query_cache") return true;
+  if (tool !== "query_cache" && tool !== "count_cached") return true;
   if (result === null || typeof result !== "object") return false;
   const record = result as {
     returnedRows?: unknown;
@@ -327,6 +326,8 @@ export type RunAgenticChatResult =
       reason: "malformed-output" | "iteration-cap" | "provider-unavailable" | "context-limit" | "unfinished-answer" | "empty-answer" | "no-evidence";
       /** The finer reason, for callers that act on it (a notice, an offer to switch models). */
       failureReason: AgenticFailureReason;
+      /** For context-too-small: the provider's error, which names the tokens needed and the model's limit. */
+      failureDetail?: string;
       fallbackNotice: string;
       toolTrace: IntuneChatToolTraceEntry[];
       iterations: number;
@@ -505,11 +506,12 @@ export async function runAgenticChat(
     }
     } catch (caught) {
       // A local prompt that overflowed the context window falls back; any other error is the provider's.
-      if (!compact || input.signal?.aborted || !CONTEXT_TOO_SMALL.test(caught instanceof Error ? caught.message : String(caught))) throw caught;
+      const detail = caught instanceof Error ? caught.message : String(caught);
+      if (!compact || input.signal?.aborted || !CONTEXT_TOO_SMALL.test(detail)) throw caught;
       input.modelStep?.finish({ kind: "repair", reason: "malformed" });
       withdrawAnswer();
       if (invalidQueries.size) return blockedAnswer();
-      return { ok: false, reason: "context-limit", failureReason: "context-too-small", fallbackNotice: LOCAL_FALLBACK_NOTICES["context-too-small"], toolTrace, iterations: iteration, ...(responseModel ? { model: responseModel } : {}) };
+      return { ok: false, reason: "context-limit", failureReason: "context-too-small", failureDetail: detail, fallbackNotice: LOCAL_FALLBACK_NOTICES["context-too-small"], toolTrace, iterations: iteration, ...(responseModel ? { model: responseModel } : {}) };
     }
     responseModel = completion.model;
     const assistantText = completion.text.trim();

@@ -1197,6 +1197,12 @@ describe("count_cached", () => {
 
       const invalid = await executeIntuneChatTool(ctx, "count_cached", { resource: "managedDevices", groupBy: ["noSuchField"] });
       assert.match(invalid.trace.error ?? "", /Unsupported managedDevices field: noSuchField/);
+
+      // Never refreshed: no count, not a zero that reads as an empty tenant.
+      const uncached = await executeIntuneChatTool(ctx, "count_cached", { resource: "users" });
+      assert.equal((uncached.result as { cached?: boolean }).cached, false);
+      assert.equal((uncached.result as { totalCount?: number }).totalCount, undefined);
+      assert.equal(uncached.trace.resultSummary, "nothing is cached for this resource yet");
     } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
   });
 });

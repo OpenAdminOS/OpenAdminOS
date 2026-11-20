@@ -1455,10 +1455,14 @@ function countCached(ctx: IntuneChatToolContext, params: unknown): unknown {
   let filters: GraphCacheQueryPredicate[] | undefined;
   let groupBy: string[] = [];
   let list = false;
+  let ids: string[] | undefined;
   try {
     const record = params as Record<string, unknown>;
-    const extras = Object.keys(record).filter(key => !["resource", "where", "filters", "groupBy", "list"].includes(key));
+    const extras = Object.keys(record).filter(key => !["resource", "where", "filters", "groupBy", "list", "ids"].includes(key));
     if (extras.length) throw new Error(`Unsupported count_cached parameters: ${extras.join(", ")}. Use resource, where, filters, groupBy or list; nothing was counted.`);
+    // ids narrows a count to rows an earlier answer matched; the host sends it for a follow-up.
+    if (record.ids !== undefined && (!Array.isArray(record.ids) || record.ids.length > 500 || record.ids.some(id => typeof id !== "string"))) throw new Error("ids must be an array of at most 500 row ids.");
+    ids = record.ids as string[] | undefined;
     const rawGroup = record.groupBy;
     groupBy = rawGroup === undefined ? [] : typeof rawGroup === "string" ? [rawGroup] : Array.isArray(rawGroup) && rawGroup.every(field => typeof field === "string") ? rawGroup as string[] : (() => { throw new Error("groupBy must be a field name or an array of at most three field names."); })();
     if (groupBy.length > 3) throw new Error("groupBy takes at most three fields.");
@@ -1471,10 +1475,20 @@ function countCached(ctx: IntuneChatToolContext, params: unknown): unknown {
     throw new InvalidCacheQueryError(`${error instanceof Error ? error.message : String(error)} Use where:{"fieldName":value}, groupBy:["fieldName"]. Available fields: ${availableFields.join(", ")}.`);
   }
   const snapshot = ctx.store.getGraphCacheStatus(ctx.tenantId, [definitionForResource(resource)])[0];
+  // Never refreshed: there is nothing to count, and zero would read as an empty tenant.
+  if (!snapshot?.refreshedAt) {
+    return {
+      resource,
+      snapshot,
+      cached: false,
+      note: `Nothing is cached for ${resource}, so no count is available. Refresh the resource before concluding anything about it.`,
+    };
+  }
   const counted = ctx.store.countGraphCache({
     tenantId: ctx.tenantId,
     resource,
     ...(filters ? { filters } : {}),
+    ...(ids ? { ids } : {}),
     groupBy,
     ...(list ? { listLimit: COUNT_CACHED_LIST_CAP } : {}),
   });
@@ -2020,6 +2034,7 @@ function summarizeToolResult(
     return `${Number(record.returnedRows ?? 0).toLocaleString()} of ${Number(record.totalCount ?? 0).toLocaleString()} cached rows returned`;
   }
   if (tool === "count_cached") {
+    if (record.cached === false) return "nothing is cached for this resource yet";
     const groups = record.groups && typeof record.groups === "object" ? Object.keys(record.groups as object) : [];
     return `${Number(record.totalCount ?? 0).toLocaleString()} matching cached rows counted${groups.length ? ` · by ${groups.join(", ")}` : ""}${Number(record.returnedRows ?? 0) > 0 ? ` · ${Number(record.returnedRows).toLocaleString()} listed` : ""}`;
   }

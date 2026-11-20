@@ -199,9 +199,11 @@ describe("local model accuracy on the tester's tenant", () => {
       const counted = (followUp.toolTrace ?? []).filter((entry) => entry.tool === "count_cached");
       assert.equal(counted.length, 1);
       assert.deepEqual((counted[0]!.params as { filters: unknown[] }).filters, [
-        { field: "complianceState", op: "neq", value: "compliant" },
+        { field: "complianceState", op: "eq", value: "noncompliant" },
         { field: "operatingSystem", op: "eq", value: "Windows" },
       ]);
+      // And to the rows of the previous answer: a device added by a later refresh is not part of it.
+      assert.deepEqual((counted[0]!.params as { ids: string[] }).ids, ["md-a1", "md-m2", "md-w1", "md-w2", "md-w3", "md-w4"]);
       assert.equal(calls.length, 1);
 
       // The same narrowing on the deterministic path.
@@ -216,22 +218,56 @@ describe("local model accuracy on the tester's tenant", () => {
   });
 
   it("says the failing rule is not in the cached data and gives the last sync as the only lead (Q2)", async () => {
+    await withHarness(async ({ store, calls, reply }) => {
+      // A weak model would invent a reason; for a local model the lookup is answered by code, with no model call.
+      reply(() => "MAC-02 is not compliant because FileVault is off.");
+      for (const mode of ["always-deterministic", "auto"] as const) {
+        await store.setChatInvestigationMode(mode);
+        reply(() => "MAC-02 is not compliant because FileVault is off.");
+        const message = (await store.sendIntuneChatMessage({ content: "why is MAC-02 not compliant?", refreshIfStale: false })).assistantMessage;
+        assert.match(message.content, /MAC-02 \(macOS\) is marked noncompliant/, mode);
+        assert.match(message.content, /does not include which compliance policy or setting failed/, mode);
+        assert.match(message.content, /the last sync was on 2026-05-18/, mode);
+        assert.doesNotMatch(message.content, /FileVault/, mode);
+        assert.equal(calls.length, 0, `${mode}: no model call`);
+        assert.equal(message.engineNotice, undefined, mode);
+      }
+
+      // A docs question that names the device is not a device lookup, and its prompt carries no cached device facts.
+      await store.setChatInvestigationMode("always-deterministic");
+      reply(() => "Microsoft Learn describes compliance policies.");
+      await store.sendIntuneChatMessage({ content: "According to Microsoft Learn, why is MAC-02 not compliant?", refreshIfStale: false });
+      assert.equal(calls.length, 1);
+      assert.doesNotMatch(calls[0]!.prompt, /computedResult/);
+    });
+  });
+
+  it("replaces an answer that adds a device or a wrong count to the right facts", async () => {
     await withHarness(async ({ store, reply }) => {
       await store.setChatInvestigationMode("always-deterministic");
-      // A weak model that invents a reason.
-      reply(() => "MAC-02 is not compliant because BitLocker is disabled and its OS is out of date.");
-      const message = (await store.sendIntuneChatMessage({ content: "why is MAC-02 not compliant?", refreshIfStale: false })).assistantMessage;
-      assert.match(message.content, /MAC-02 \(macOS\) is marked noncompliant/);
-      assert.match(message.content, /does not include which compliance policy or setting failed/);
-      assert.match(message.content, /the last sync was on 2026-05-18/);
-      assert.doesNotMatch(message.content, /BitLocker|out of date/);
-      assert.equal(message.engineNotice, COMPUTED_ANSWER_NOTICE);
+      const right = "There are 9 devices: Windows 5, macOS 2, Android 2. 6 are not compliant: WIN-01, WIN-02, WIN-03, WIN-04, MAC-02, AND-01.";
+      reply(() => right);
+      const kept = (await store.sendIntuneChatMessage({ content: Q1, refreshIfStale: false })).assistantMessage;
+      assert.equal(kept.content, right);
+      for (const wrong of [`${right} ENTRA-ONLY-03 is also not compliant.`, `${right} WIN-05 is not compliant either.`, right.replace("6 are not compliant", "3 are not compliant")]) {
+        reply(() => wrong);
+        const replaced = (await store.sendIntuneChatMessage({ content: Q1, refreshIfStale: false })).assistantMessage;
+        assertQ1(replaced.content);
+        assert.equal(replaced.engineNotice, COMPUTED_ANSWER_NOTICE, wrong);
+      }
+    });
+  });
 
-      // A model that says so in its own words keeps its answer.
-      reply(() => "The cached data does not include which setting failed for MAC-02. Its last sync was on 2026-05-18, about six months ago.");
-      const own = (await store.sendIntuneChatMessage({ content: "why is MAC-02 not compliant?", refreshIfStale: false })).assistantMessage;
-      assert.match(own.content, /does not include which setting failed/);
-      assert.equal(own.engineNotice, undefined);
+  it("keeps a follow-up to the previous answer's devices after a refresh adds one", async () => {
+    await withHarness(async ({ store, cache, reply }) => {
+      await store.setChatInvestigationMode("always-deterministic");
+      reply(({ prompt }) => factsIn(prompt).join("\n"));
+      const first = await store.sendIntuneChatMessage({ content: Q1, refreshIfStale: false });
+      cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: new Date().toISOString(),
+        rows: [...managedDevices, { id: "md-w6", deviceName: "WIN-06", operatingSystem: "Windows", complianceState: "noncompliant", lastSyncDateTime: recent }] });
+      const followUp = (await store.sendIntuneChatMessage({ content: "only Windows", conversationId: first.conversation.id, refreshIfStale: false })).assistantMessage;
+      for (const name of NONCOMPLIANT_WINDOWS) assert.ok(followUp.content.includes(name), name);
+      assert.ok(!followUp.content.includes("WIN-06"), "the device added after the answer is not part of it");
     });
   });
 
@@ -269,7 +305,7 @@ describe("structured device questions", () => {
       scopeLabel: "Intune managed devices",
       filters: [],
       breakdown: ["operatingSystem"],
-      focus: { label: "not compliant", filters: [{ field: "complianceState", op: "neq", value: "compliant" }] },
+      focus: { label: "not compliant", filters: [{ field: "complianceState", op: "eq", value: "noncompliant" }] },
       list: true,
       asksCount: true,
     });
@@ -287,6 +323,20 @@ describe("structured device questions", () => {
     assert.deepEqual(missingComputedFacts("WIN-01 has not synced.", result("Which devices have not synced in the last 7 days?", 2, ["WIN-01", "WIN-02"])), ["WIN-02"]);
   });
 
+  it("falls back for filters it cannot express and reads negation within its clause", () => {
+    for (const question of ["How many Windows or macOS devices are there?", "how many devices are not currently compliant", "how many are compliant and how many are not compliant", "which devices are no longer compliant"]) {
+      assert.equal(structuredQueryForQuestion({ question, generatedAt: at }), undefined, question);
+    }
+    const both = structuredQueryForQuestion({ question: "How many devices are not compliant and synced today?", generatedAt: at });
+    assert.deepEqual(both?.filters, [
+      { field: "complianceState", op: "eq", value: "noncompliant" },
+      { field: "lastSyncDateTime", op: "gte", value: "2026-11-19T00:00:00.000Z" },
+    ]);
+    assert.deepEqual(structuredQueryForQuestion({ question: "how many devices have not synced in the last 7 days", generatedAt: at })?.filters, [
+      { field: "lastSyncDateTime", op: "lt", value: "2026-11-12T12:00:00.000Z" },
+    ]);
+  });
+
   it("leaves questions it does not fully understand to the planner", () => {
     for (const question of ["Which of our macOS devices need attention?", "How many devices have BitLocker enabled?", "Which apps are installed on WIN-01?", "Why is WIN-01 not compliant?", "How many users are there?"]) {
       assert.equal(structuredQueryForQuestion({ question, generatedAt: at }), undefined, question);
@@ -294,11 +344,19 @@ describe("structured device questions", () => {
   });
 
   it("narrows a previous result only for a follow-up, and reads sync windows", () => {
-    const previous = { version: 1 as const, tenantId: "t", question: Q1, resource: "managedDevices" as const, filters: [{ field: "complianceState", op: "neq" as const, value: "compliant" }], label: "Intune managed devices not compliant", total: 6, computedAt: at };
+    const previous = { version: 1 as const, tenantId: "t", question: Q1, resource: "managedDevices" as const, filters: [{ field: "complianceState", op: "eq" as const, value: "noncompliant" }], label: "Intune managed devices not compliant", total: 6, computedAt: at };
     const synced = structuredQueryForQuestion({ question: "which of those synced this month", generatedAt: at, previous });
     assert.deepEqual(synced?.focus, { label: "synced this month", filters: [{ field: "lastSyncDateTime", op: "gte", value: "2026-11-01T00:00:00.000Z" }] });
     assert.equal(synced?.followUp?.previousQuestion, Q1);
     // A new question with its own subject starts over.
     assert.equal(structuredQueryForQuestion({ question: "how many macOS devices are there?", generatedAt: at, previous })?.followUp, undefined);
+    assert.equal(structuredQueryForQuestion({ question: "And how many devices are there in total?", generatedAt: at, previous })?.followUp, undefined);
+    assert.equal(structuredQueryForQuestion({ question: "how many macs?", generatedAt: at, previous })?.followUp, undefined);
+    // A different value on a filtered field is a new question, not a narrowing to nothing.
+    const windows = { ...previous, filters: [{ field: "operatingSystem", op: "eq" as const, value: "Windows" }], label: "Intune managed Windows devices" };
+    assert.equal(structuredQueryForQuestion({ question: "what about macOS?", generatedAt: at, previous: windows }), undefined);
+    assert.equal(structuredQueryForQuestion({ question: "only the compliant ones", generatedAt: at, previous }), undefined);
+    // Entra devices have no compliance state to narrow by.
+    assert.equal(structuredQueryForQuestion({ question: "only the noncompliant ones", generatedAt: at, previous: { ...previous, resource: "entraDevices", filters: [], label: "Entra devices" } }), undefined);
   });
 });
