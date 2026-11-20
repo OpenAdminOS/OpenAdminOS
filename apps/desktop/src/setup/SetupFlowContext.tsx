@@ -290,12 +290,15 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
           writePendingIntent(next);
           return next;
         });
+        // A run that moves off a local model that could not fit it is for that run only:
+        // the replacement stays on the run and the active provider is left as it was.
+        if (isOneRunProviderIntent(intent)) return;
         await setActiveProvider(id);
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : String(caught));
       }
     },
-    [setActiveProvider],
+    [intent, setActiveProvider],
   );
 
   const resume = useCallback(() => {
@@ -356,7 +359,7 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
         activeTenant={connectedTenant ?? activeTenant}
         agentName={pendingAgentName}
         providers={state.providers}
-        activeProviderId={state.activeProviderId}
+        activeProviderId={isOneRunProviderIntent(intent) && intent.providerId ? intent.providerId : state.activeProviderId}
         savedRegistrations={state.savedAppRegistrations ?? []}
         registrationLocked={
           isManagedSettingLocked(state.managedPolicy, "appRegistration") &&
@@ -387,6 +390,13 @@ export function useSetupFlow(): SetupFlowValue {
 
 export function currentReturnTo(pathname: string, search = ""): string {
   return `${pathname}${search}`;
+}
+
+/** A model fit rerun (or Run again of one): the provider it names is for this run only. */
+function isOneRunProviderIntent(
+  intent: PendingIntent | null | undefined,
+): intent is Extract<PendingIntent, { kind: "agent-run" }> {
+  return intent?.kind === "agent-run" && Boolean(intent.modelFit || intent.safeguards);
 }
 
 function intentNeedsProvider(intent: PendingIntent): boolean {

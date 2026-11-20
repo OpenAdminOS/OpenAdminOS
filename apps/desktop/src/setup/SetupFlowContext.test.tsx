@@ -9,7 +9,7 @@ import {
   mockProviders,
   renderWithAppState,
 } from "../test/test-utils";
-import { clearPendingIntent, createPendingIntent, writePendingIntent } from "./pending-intent";
+import { clearPendingIntent, createPendingIntent, readPendingIntent, writePendingIntent } from "./pending-intent";
 import { OPENADMINOS_APP_CLIENT_ID } from "../shared/openAdminOS";
 
 const INTUNE_PARTS = ["intune.people", "intune.devices", "intune.apps"];
@@ -171,6 +171,29 @@ describe("contextual tenant setup", () => {
       await screen.findByRole("heading", { name: "Pick an LLM provider" }),
     ).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Tenant connected" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a provider picked for a model fit rerun on that run, without changing the active provider", async () => {
+    const user = userEvent.setup();
+    writePendingIntent(
+      createPendingIntent({
+        kind: "agent-run",
+        slug: "device-offboard",
+        providerId: "anthropic",
+        model: "claude-sonnet",
+        modelFit: { reason: "context-too-small", providerId: "ollama", model: "llama3.1" },
+        returnTo: "/runs/run-1",
+      }),
+    );
+    const bridge = makeMockBridge({}, createMockAppState({ activeProviderId: "ollama" }));
+    renderWithAppState(<div>App content</div>, { route: "/chat", bridge });
+
+    await screen.findByRole("heading", { name: "Pick an LLM provider" });
+    await user.click(screen.getByRole("button", { name: /Codex/ }));
+    expect(await screen.findByRole("heading", { name: "Tenant connected" })).toBeInTheDocument();
+    expect(readPendingIntent()).toMatchObject({ kind: "agent-run", providerId: "openai" });
+    expect(readPendingIntent()).not.toHaveProperty("model");
+    expect(bridge.setActiveProvider).not.toHaveBeenCalled();
   });
 
   it("treats a configured Azure provider at available as ready, matching the host", async () => {
