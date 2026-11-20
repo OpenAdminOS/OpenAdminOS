@@ -17,8 +17,8 @@ Two phases, so nothing is deleted while Chromium, SQLite or MSAL hold files.
    modal with the impact list and the typed phrase `RESET OPENADMINOS`. The main
    process checks the phrase again, refuses while a write run is applying, then:
    writes a pending-reset marker into the data folder (if this fails, nothing
-   changed and the modal says so), removes the Microsoft sign-in of every
-   tenant from the token caches, turns off the OS scheduler and the menu bar
+   changed and the modal says so), closes every organization to new work (no
+   sign-out: round 22 removed it, see SPEC), turns off the OS scheduler and the menu bar
    login item, stops the gateway, MCP servers and stores (awaited, bounded), and
    relaunches.
 2. **Wipe (next launch, before anything else).** At the top of the main script,
@@ -51,7 +51,7 @@ the installed app's scheduler, login item or caches.
       orchestration with injected steps
 - [x] Main process wiring: IPC (reset, report, dismiss, relaunch, show folder,
       quit), top-level wipe, incomplete mode, phase 2 scheduler and login item
-- [x] Store: forget every sign-in, bounded awaited shutdown, applying-run check
+- [x] Store: close tenant work, bounded awaited shutdown, applying-run check
 - [x] Renderer: Data section row, `ResetOpenAdminOSDialog`, reset incomplete
       screen, post-reset notice, settings search item, copy
 - [x] NSIS research and `TODO(ugur)` on `deleteAppDataOnUninstall`
@@ -268,6 +268,16 @@ the installed app's scheduler, login item or caches.
   Keychain deletion and lookup are limited to the login keychain, in the app
   and the guide. An entry that cannot be removed keeps the entries named
   after it, so a locked `openadminos.db` keeps its `-wal` and `-shm`.
+- Review round 23: Claude and Muse no blocking (the SDK comment and two
+  lines of this file still described the sign-out, fixed). Sol two blocking
+  and a medium. Fixed: closing and draining organizations after the marker
+  uses the in-memory state, so the reset never creates a state file in a
+  folder swapped in; a lookup across the keychain search list warns when an
+  item of the same name is in another keychain. Declined, with the reasoning
+  in SPEC ("Accepted limit"): a folder replaced during a single recursive
+  removal or the marker's file creation; Node has no handle-relative
+  removal, the per-entry identity check limits it to one entry, and only a
+  process of the same account can cause it.
 - Process lesson: twice I edited the tree while a reviewer was reading it;
   parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the
