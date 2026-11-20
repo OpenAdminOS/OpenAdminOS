@@ -5386,11 +5386,11 @@ function finishLocalResetAfterReady(report: LocalResetReport): void {
   // Only an installed build's own request turns off the installed login item.
   if (process.platform !== "darwin" || !app.isPackaged || pendingLocalResetBuild !== "installed") return;
   try {
-    if (getCompanionLaunchSettings().enabled) setCompanionLaunchEnabled(false);
+    disableCompanionLoginItemForReset();
   } catch (error) {
     report.warnings.push({
       item: "Menu bar login item",
-      reason: `${error instanceof Error ? error.message : String(error)}. Turn it off in System Settings, General, Login Items.`,
+      reason: error instanceof Error ? error.message : String(error),
     });
   }
 }
@@ -5412,15 +5412,30 @@ function removeSchedulerRegistration(): void {
       );
     }
   } else if (process.platform === "win32") {
-    // A query that fails means no task: a per-user task its own user cannot
-    // read is not a case this app creates. Only a task that was there is
-    // deleted and checked again.
-    if (windowsSchedulerTaskXml() === undefined) return;
+    // schtasks answers "not found" with a non-zero exit in the user's
+    // language, so any answer that is not a timeout counts: a per-user task
+    // its own user cannot read is not a case this app creates.
+    if (windowsSchedulerTaskPresence() === "absent") return;
     removeWindowsSchedulerTask();
-    if (windowsSchedulerTaskXml() !== undefined) {
-      throw new Error(`the scheduled task ${WINDOWS_SCHEDULER_TASK} is still registered. Remove it in Task Scheduler`);
+    const after = windowsSchedulerTaskPresence();
+    if (after !== "absent") {
+      throw new Error(
+        after === "unknown"
+          ? `Task Scheduler did not confirm that the task ${WINDOWS_SCHEDULER_TASK} is gone. Check it in Task Scheduler`
+          : `the scheduled task ${WINDOWS_SCHEDULER_TASK} is still registered. Remove it in Task Scheduler`,
+      );
     }
   }
+}
+
+function windowsSchedulerTaskPresence(): "present" | "absent" | "unknown" {
+  const result = spawnSync("schtasks.exe", ["/Query", "/TN", WINDOWS_SCHEDULER_TASK], {
+    stdio: "ignore",
+    windowsHide: true,
+    timeout: 5_000,
+  });
+  if (result.error || result.status === null) return "unknown";
+  return result.status === 0 ? "present" : "absent";
 }
 
 /** `launchctl print` exits 113 for a service it does not know. */
@@ -5433,6 +5448,14 @@ function macosLaunchAgentLoaded(): "loaded" | "absent" | "unknown" {
   if (result.status === 0) return "loaded";
   if (result.status === LAUNCHCTL_SERVICE_NOT_FOUND) return "absent";
   return "unknown";
+}
+
+/** Turns the menu bar login item off and throws when macOS still reports it on. */
+function disableCompanionLoginItemForReset(): void {
+  if (!getCompanionLaunchSettings().enabled) return;
+  if (setCompanionLaunchEnabled(false).enabled) {
+    throw new Error("macOS still lists it as on. Turn it off in System Settings, General, Login Items");
+  }
 }
 
 function localResetInfo(): LocalResetInfo {
@@ -5479,7 +5502,7 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
       },
       disableLoginItem: async () => {
         if (process.platform !== "darwin" || !app.isPackaged) return;
-        if (getCompanionLaunchSettings().enabled) setCompanionLaunchEnabled(false);
+        disableCompanionLoginItemForReset();
       },
       build: app.isPackaged ? "installed" : "development",
     });
