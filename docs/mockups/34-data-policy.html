@@ -451,6 +451,8 @@
     .withheld .rec { display: block; margin-top: 8px; color: var(--color-text-soft); }
     .withheld .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
     .pop dl.tx dd.txn { grid-column: 1 / -1; border-top: 0; padding: 0 0 6px 46px; text-align: left; font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text-muted); }
+    /* The rebuilt start's own outcome sits under what the start opened without, in the same column. */
+    .pop dl.tx dd.rb { grid-column: 2; border-top: 0; padding-top: 0; }
     .pop dl.tx.preview { margin-top: 4px; }
     .pop dl.tx.preview dt, .pop dl.tx.preview dd { border-top-style: dashed; }
     .pop .drift { margin: -4px 0 6px; }
@@ -687,6 +689,7 @@
         <li>When a rule blocks a class anywhere in the start request, the app rebuilds it without the blocked parts: the profile block whole when it carries a blocked class (decided 2026-11-19, the maintainer chose the whole block over single notes), and the organization name, tenant id or greeting name replaced by neutral wording where the rule covers the class the check gave them, so the voice model still knows a tenant is connected and does not greet by name. The rebuilt start is checked again in full before the call opens. In the seventh popover Credential on Hosted is Block: the call opened without the profile, and the line and the notice say so, never that it was sent. Its recovery is Change the rule: the profile is not a question, so there is no local model to ask. Credential is not the class of any fixed-line value, so the organization name went as is and the tenant id and greeting name were masked, as under the defaults. In the eighth popover Identity on Hosted is Block in a call that has just opened: the profile carries identity and is left out, the tenant id and greeting name are identity and are replaced by neutral wording, the line quotes that wording, and the organization name, configuration, stays. The rebuilt start passed its check in full, so the call opened with it.</li>
         <li>Decided in round 22: every check that could open the call must cover the whole start, the first one included. When the first check does not finish, also with the defaults and no Block anywhere, the call never opens on it and the part it did not examine is never masked one way and sent. The app rebuilds the start without the parts the check did not examine, the profile whole or a fixed-line value by its neutral wording, and checks the rebuilt start in full; when the part it did not examine is one the rebuilt start keeps, such as the app's fixed rules, the call does not open and the block below shows.</li>
         <li>Decided in round 23: the ninth popover shows the first case of the plan's criterion 29. The rules are the defaults, with no Block anywhere, and the first check stopped inside your profile at the third confirmed note. The call did not open on that check, and the part it did not reach was not masked and sent, although Mask is the strictest rule on Hosted. The start without the profile passed a complete check, so the call opened with it: the line says it opened without your profile because the first check did not finish on it, the tenant id and greeting name were masked as under the defaults, and the notice offers Start the call again, which checks the whole start, the profile included, before anything is sent.</li>
+        <li>Decided in round 24: a session start line that opened with a rebuilt start records two facts from the time it was sent, what the start opened without and the rebuilt start's own outcome with its masking count, such as "Opened without your profile, Credential was Block" above "Rebuilt start sent, 2 values masked: the tenant id and your greeting name". A value replaced by neutral wording was not sent, so it is not counted; in the eighth popover the line reads "Rebuilt start sent, no values masked". A later rule change rewrites neither fact: the last popover was recorded with Credential and Security at Block and opened under the defaults, and its 09:40 line still reads both as recorded.</li>
         <li>Every voice popover states the difference in its first list. At the session start, text the check could not examine is never sent: the call opens with the rebuilt start, or does not start. In a later transfer during the call, such text takes the strictest rule on Hosted, like any hosted request: masked one way as [CREDENTIAL] under the defaults, withheld when a rule on Hosted is Block. The row is worked out from the rules in force now.</li>
         <li>When the second check still finds blocked content, or does not finish on the whole text, the call does not open, as in the last block: nothing is sent to OpenAI and no audio leaves this device. The block says why. A check that did not finish offers Start the call again; blocked content the app could not leave out offers Change the rule, or names policy.json when IT set it. Voice on this device is offered in both. With an empty profile and Identity on Hosted at Block, a check of the profile block alone would find nothing and send your greeting name; the check of the whole request finds it.</li>
         <li>Changing a rule during a call never rewrites a past transfer. The fourth popover was recorded under the defaults and opened after Security on Hosted was set to Block: the 09:43 transfer still reads "Sent, 10 values masked", the preview reads "Would be withheld", and a line says context already sent stays as recorded. Data policy cannot recall what OpenAI received.</li>
@@ -1643,13 +1646,23 @@
     }
     // What the check gave each value of the fixed lines, shown on the session start line.
     const startClasses = (t) => `Classes the check gave the fixed lines: the organization name ${clsName(t.org).toLowerCase()}, the tenant id ${clsName(t.tenantId).toLowerCase()}, your greeting name ${clsName(t.greeting).toLowerCase()}.`;
+    // A rebuilt start records its own outcome next to what it opened without: what was masked in the start that was
+    // sent, under the rules in force then. A value replaced by neutral wording is not sent, so it is not counted.
+    function rebuiltRecord(r, t, classes, profileOut) {
+      const neu = startNeutral(t, classes);
+      const masked = START_VALUES.filter((v) => !neu.includes(v) && r[t[v.key]].hosted === "mask").map((v) => v.part);
+      const prof = profileOut ? 0 : Object.entries(t.profile).filter(([c]) => r[c].hosted === "mask").reduce((n, [, k]) => n + k, 0);
+      if (prof) masked.push(`${prof} ${prof === 1 ? "value" : "values"} in your profile`);
+      return { masked, maskedValues: masked.length - (prof ? 1 : 0) + prof };
+    }
     const sameDecision = (a, b) => a.sent === b.sent && a.maskedValues === b.maskedValues && a.withheldBy.join() === b.withheldBy.join();
     // A call as the app records it: each transfer keeps the decision made under the rules in force when it was sent,
     // and what the voice model said then. Changing a rule later never rewrites these.
     function recordCall(rAtTime) {
       return VOICE_CALL.map((t) => {
         const d = transferDecision(rAtTime, t);
-        return { ...t, d, said: d.sent ? "" : voiceRecovery(rAtTime, t, d).say };
+        const rebuilt = t.start && !d.sent ? rebuiltRecord(rAtTime, t, d.withheldBy, startLeftOut(t, d.withheldBy).includes("your profile")) : null;
+        return { ...t, d, rebuilt, said: d.sent ? "" : voiceRecovery(rAtTime, t, d).say };
       });
     }
     // Recovery for withheld context offers only what would work under the rules in force now, by the same test as E.
@@ -1709,13 +1722,16 @@
       const sent = preview ? "Would be sent" : "Sent";
       return d.masked.length ? `<dd class="mk2"><span class="hx"></span>${sent}, ${d.maskedValues} ${d.maskedValues === 1 ? "value" : "values"} masked</dd>` : `<dd class="lv">${sent} as is</dd>`;
     }
+    // The rebuilt start's own outcome, from the record: sent, with the values masked in what was sent.
+    const rebuiltDd = (b) => b.maskedValues
+      ? `<dd class="mk2 rb"><span class="hx"></span>Rebuilt start sent, ${b.maskedValues} ${b.maskedValues === 1 ? "value" : "values"} masked: ${joinList(b.masked)}</dd>`
+      : `<dd class="lv rb">Rebuilt start sent, no values masked</dd>`;
     // A past transfer shows the decision recorded when it was sent, never one computed from the rules in force now.
     function transferLine(t) {
       // A first check that stopped inside the profile: the call opened only on the rebuilt start, checked in full.
       if (t.unexamined) {
-        const m = t.fixedMasked;
-        const more = `${startClasses(t)} The first check stopped inside your profile, at the third of 5 confirmed notes, when its work budget ran out. A start that was not checked in full is never sent, so the call did not open on it, and the part the check did not reach was not masked and sent. The app rebuilt the start without your profile, checked the rebuilt start again in full, and the call opened with it${m.length ? `, with ${joinList(m)} masked` : ""}. None of your profile reached OpenAI.`;
-        return `<dt><span class="tt">${t.at}</span>${t.what}</dt><dd class="bk">Opened without your profile, the first check did not finish on it</dd><dd class="txn">${more}</dd>`;
+        const more = `${startClasses(t)} The first check stopped inside your profile, at the third of 5 confirmed notes, when its work budget ran out. A start that was not checked in full is never sent, so the call did not open on it, and the part the check did not reach was not masked and sent. The app rebuilt the start without your profile, checked the rebuilt start again in full, and the call opened with it. None of your profile reached OpenAI.`;
+        return `<dt><span class="tt">${t.at}</span>${t.what}</dt><dd class="bk">Opened without your profile, the first check did not finish on it</dd>${rebuiltDd(t.rebuilt)}<dd class="txn">${more}</dd>`;
       }
       let more = t.start ? `${startClasses(t)} ${t.detail}` : t.detail || "";
       const parts = t.start && !t.d.sent ? startLeftOut(t, t.d.withheldBy) : [];
@@ -1724,7 +1740,7 @@
       const neutral = t.start && !t.d.sent ? startNeutral(t, t.d.withheldBy) : [];
       if (neutral.length) more += ` In place of ${joinList(neutral.map((v) => v.part))} the rebuilt start says ${joinList(neutral.map((v) => `"${v.neutral}"`))}.`;
       // A session start with a blocked class opens with the rescanned rest, so its line says what it opened without.
-      const dd = parts.length ? `<dd class="bk">Opened without ${joinList(parts)}, ${joinList(t.d.withheldBy.map(clsName))} ${wasWere(t.d.withheldBy)} Block</dd>` : decisionDd(t.d);
+      const dd = parts.length ? `<dd class="bk">Opened without ${joinList(parts)}, ${joinList(t.d.withheldBy.map(clsName))} ${wasWere(t.d.withheldBy)} Block</dd>${rebuiltDd(t.rebuilt)}` : decisionDd(t.d);
       return `<dt><span class="tt">${t.at}</span>${t.what}</dt>${dd}${more ? `<dd class="txn">${more}</dd>` : ""}`;
     }
     function voicePopInner(r, call = recordCall(r)) {
@@ -1812,7 +1828,7 @@
     // data-upto keeps only the first transfers, for a call that has just opened.
     // data-firstscan="profile": the first check of the start stopped inside the profile, and the start without it passed in full.
     function firstScanStopped(call, r) {
-      return call.map((t) => t.start ? { ...t, unexamined: true, fixedMasked: START_VALUES.filter((v) => r[t[v.key]].hosted === "mask").map((v) => v.part), said: "The app left your profile out of this call because it could not be checked in full. I'll answer without your standing instructions and notes." } : t);
+      return call.map((t) => t.start ? { ...t, unexamined: true, rebuilt: rebuiltRecord(r, t, [], true), said: "The app left your profile out of this call because it could not be checked in full. I'll answer without your standing instructions and notes." } : t);
     }
     document.querySelectorAll("[data-voicepop]").forEach((el) => {
       const recorded = STRIP_RULES[el.dataset.recorded || el.dataset.voicepop];
