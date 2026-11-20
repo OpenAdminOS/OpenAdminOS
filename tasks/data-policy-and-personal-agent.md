@@ -235,6 +235,20 @@ built on top of them are planned separately.
   a call whose scan ran out of budget is withheld, with a smaller question
   or a local model as the recovery.
 
+**Review findings adopted (2026-11-19, round 11 of the design review)**
+- MCP approval binds to the complete tool object the server lists, not a
+  projection: the readable view and the raw JSON of the whole object, a
+  write check over every string in it (keys and annotations included), and
+  a SHA-256 hash of its canonical form (RFC 8785). Approval needs a positive
+  `readOnlyHint: true` (B5).
+- Teams Confirm also rechecks that the organization on the card is still
+  active. Every outgoing post has its own confirmation: a message over the
+  Teams limit is not split; the card offers a shorter summary on a new card
+  or saving the full report locally (B3).
+- Adding a server by URL has a designed step 1: URL, authentication with
+  secrets in the keychain, the IT allowlist check with its refusal, and the
+  disclosure of what the server receives (B5).
+
 ## Why
 
 Today the choice is binary. With a local model the request never leaves the
