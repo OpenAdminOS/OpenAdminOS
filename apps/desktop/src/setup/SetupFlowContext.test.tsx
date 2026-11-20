@@ -268,6 +268,24 @@ describe("contextual tenant setup", () => {
     expect(screen.queryByRole("button", { name: /Codex/ })).toBeNull();
   });
 
+  it("checks Azure OpenAI at its ready state for a usable model for a model fit rerun", async () => {
+    writePendingIntent(
+      createPendingIntent({
+        kind: "agent-run",
+        slug: "device-offboard",
+        providerId: "azure-openai",
+        modelFit: { reason: "context-too-small", providerId: "ollama", model: "llama3.1" },
+        returnTo: "/runs/run-1",
+      }),
+    );
+    // Azure is at "available" (its ready state), but its one model came from a policy lock.
+    const providers = mockProviders.map((provider) => (provider.id === "azure-openai" ? { ...provider, status: "available" as const, models: ["dep"], defaultModel: "dep", modelsFromPolicy: true as const } : provider));
+    renderWithAppState(<div>App content</div>, { route: "/chat", bridge: makeMockBridge({}, createMockAppState({ activeProviderId: "ollama", providers })) });
+
+    expect(await screen.findByRole("heading", { name: "Pick an LLM provider" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Azure OpenAI/ })).toBeNull();
+  });
+
   it("treats a configured Azure provider at available as ready, matching the host", async () => {
     const providers = mockProviders.map((provider) =>
       provider.id === "azure-openai"

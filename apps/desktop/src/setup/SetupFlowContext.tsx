@@ -444,7 +444,9 @@ function modelFitEligible(provider: ProviderSummary): boolean {
  */
 function modelFitUsable(provider: ProviderSummary, activeModelByProviderId: Partial<Record<ProviderId, string>> | undefined): boolean {
   if (!modelFitEligible(provider)) return false;
-  if (provider.isLocal || provider.status !== "connected") return true;
+  // Azure OpenAI's ready state is "available"; any other state still needs setup.
+  const ready = provider.status === "connected" || (provider.id === "azure-openai" && provider.status === "available");
+  if (provider.isLocal || !ready) return true;
   return hostedModelFitModel(provider, activeModelByProviderId) !== undefined;
 }
 
