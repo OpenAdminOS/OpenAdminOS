@@ -3239,6 +3239,8 @@ function notificationBodyForRun(run: RunRecord): string {
 async function refreshRegistryInBackground(
   trigger: "startup" | "interval" | "focus",
 ): Promise<void> {
+  // No background refresh while a reset is requested: it writes the cache.
+  if (localResetRequested) return;
   lastBackgroundRefreshAt = Date.now();
   try {
     const result = await store.initRegistry();

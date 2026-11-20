@@ -1706,7 +1706,7 @@ describe("local reset: end to end with the store", () => {
     }
   });
 
-  it("refuses WhatsApp Web and Splashtop work once a reset has started, and stops WhatsApp Web at the commit", async () => {
+  it("refuses WhatsApp Web, Splashtop and download work once a reset has started, and stops WhatsApp Web at the commit", async () => {
     const dir = await tempDir();
     try {
       const statePath = join(dir, "state.json");
@@ -1723,6 +1723,12 @@ describe("local reset: end to end with the store", () => {
           () => store.listWhatsAppWebGroups(),
           () => store.testSplashtop("org-1"),
           () => store.disconnectSplashtop("org-1"),
+          // Downloads that write the registry cache, agent manifests or the index.
+          () => store.initRegistry(),
+          () => store.installAgent("any-agent"),
+          () => store.updateAgent("any-agent"),
+          () => store.uninstallAgent("any-agent"),
+          () => store.installRetrievalIndex({ baseUrl: "https://example.invalid" }),
         ]) {
           await assert.rejects(call(), /OpenAdminOS is resetting/);
         }

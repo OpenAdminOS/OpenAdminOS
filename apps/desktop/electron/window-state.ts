@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { app, BrowserWindow, screen, type Rectangle } from "electron";
 
+import { dataFolderSealed } from "./data-folder-seal.js";
+
 /**
  * Minimal window-state persistence: remembers the last position + size
  * across launches and clamps the result back inside a visible display
@@ -106,7 +108,8 @@ function rectsOverlap(a: Rectangle, b: Rectangle, slack: number): boolean {
 export function attachWindowStatePersistence(window: BrowserWindow): void {
   let timer: NodeJS.Timeout | undefined;
   const save = async () => {
-    if (window.isDestroyed()) return;
+    // A reset sealed the data folder: the window state is not saved there.
+    if (window.isDestroyed() || dataFolderSealed()) return;
     const bounds = window.getNormalBounds();
     const next: PersistedWindowState = {
       x: bounds.x,

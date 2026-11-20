@@ -277,6 +277,8 @@ import {
 import {
   WHATSAPP_WEB_CONNECTOR_ID,
   getWhatsAppWebClient,
+  resumeWhatsAppWebClients,
+  stopAllWhatsAppWebClients,
   type WhatsAppWebClient,
 } from "@openadminos/connector-whatsapp-web";
 
@@ -362,7 +364,7 @@ import {
   buildUsageTelemetryPayload,
   type UsageTelemetryPayload,
 } from "./telemetry/usage.js";
-import { sealDataFolder, unsealDataFolder } from "./data-folder-seal.js";
+import { DataFolderSealedError, dataFolderSealed, sealDataFolder, unsealDataFolder } from "./data-folder-seal.js";
 import { LocalResetInProgressError, OrganizationBoundaryError, RunService, gatewayRejectionCoolingDown, type RunGraphExecution, type SplashtopRunClient } from "./runs.js";
 import { RunDeliveryService } from "./run-delivery.js";
 import {
@@ -2373,7 +2375,7 @@ export class AppStateStore {
     const blocker = this.confirmationsInFlight > 0
       ? "A change is being confirmed. Wait for it to finish, then reset. Nothing was removed."
       : this.localResetWorkInFlight > 0
-        ? "A run is starting, or a message or report is being sent. Wait for it to finish, then reset. Nothing was removed."
+        ? "A run is starting, or a message, report, download or connection is still under way. Wait for it to finish, then reset. Nothing was removed."
         : (await this.localResetBlocker()) ?? (await this.localResetRunningBlocker());
     if (blocker) this.localResetStarted = false;
     return blocker;
@@ -2384,6 +2386,7 @@ export class AppStateStore {
     this.localResetCommitted = false;
     this.auditLog.unfreezeSideFiles();
     unsealDataFolder();
+    resumeWhatsAppWebClients();
     // A request refused after its checks (the marker could not be written)
     // gives every organization its work back, as an undone Disconnect does.
     if (this.localResetClosedTenants.length > 0) {
@@ -2444,16 +2447,20 @@ export class AppStateStore {
     this.localResetCommitted = true;
     this.auditLog.freezeSideFiles();
     sealDataFolder();
-    // The WhatsApp Web client writes and deletes its auth files by path on
-    // its own (credential updates, a logged out session, a QR refresh): it
-    // stops now, not only at the shutdown.
+    // WhatsApp Web clients write and delete their auth files by path on
+    // their own (credential and key updates, a logged out session, a QR
+    // refresh): every client of the process stops now, also one a delivery
+    // created, and none opens a socket again.
+    stopAllWhatsAppWebClients();
     this.whatsappWebClientInstance?.dispose();
   }
 
   /**
-   * Connector work that reaches a network service and then writes its
-   * credentials (WhatsApp Web, Splashtop): refused once a reset has started,
-   * and while it runs the reset waits for it, as for a connector send.
+   * Work that reaches a network service and then writes files in the data
+   * folder by path (WhatsApp Web and Splashtop credentials, the registry
+   * cache, agent manifests, the documentation index): refused once a reset
+   * has started, and while it runs the reset waits for it, as for a
+   * connector send.
    */
   private async localResetGatedWork<T>(work: () => Promise<T>): Promise<T> {
     if (this.localResetStarted) {
@@ -3130,6 +3137,13 @@ export class AppStateStore {
     sourceDir?: string;
     baseUrl?: string;
   }): Promise<RetrievalStatus> {
+    return this.localResetGatedWork(() => this.installRetrievalIndexNow(input));
+  }
+
+  private async installRetrievalIndexNow(input: {
+    sourceDir?: string;
+    baseUrl?: string;
+  }): Promise<RetrievalStatus> {
     if (!this.userDataPath) {
       throw new Error("Installing a documentation index needs a configured userData directory.");
     }
@@ -3366,6 +3380,10 @@ export class AppStateStore {
    * Safe to call multiple times (e.g., on manual refresh).
    */
   async initRegistry(): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }> {
+    return this.localResetGatedWork(() => this.initRegistryNow());
+  }
+
+  private async initRegistryNow(): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }> {
     if (!this.userDataPath) {
       // No userData path, fall back to filesystem only (tests / legacy ctor).
       return { error: null, fromCache: false, cachedAt: null };
@@ -6800,6 +6818,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   async uninstallAgent(slug: string): Promise<AppState> {
+    return this.localResetGatedWork(() => this.uninstallAgentNow(slug));
+  }
+
+  private async uninstallAgentNow(slug: string): Promise<AppState> {
     let userAuthoredDir: string | undefined;
     let downloadedManifestDir: string | undefined;
 
@@ -6835,14 +6857,14 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       });
     });
 
-    if (userAuthoredDir) {
+    if (userAuthoredDir && !dataFolderSealed()) {
       try {
         await rm(userAuthoredDir, { recursive: true, force: true });
       } catch (error) {
         console.error("[uninstall] failed to remove user-authored dir", error);
       }
     }
-    if (downloadedManifestDir) {
+    if (downloadedManifestDir && !dataFolderSealed()) {
       try {
         await rm(downloadedManifestDir, { recursive: true, force: true });
       } catch (error) {
@@ -6862,6 +6884,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   async installAgent(agentId: string): Promise<AppState> {
+    return this.localResetGatedWork(() => this.installAgentNow(agentId));
+  }
+
+  private async installAgentNow(agentId: string): Promise<AppState> {
     let installedSlug: string | undefined;
     let installIdForReport: string | undefined;
     const initialCandidate = this.listRegistryAgents().find(
@@ -7018,6 +7044,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   async updateAgent(
+    slug: string,
+    options?: { confirmTrustChanges?: boolean },
+  ): Promise<AppState> {
+    return this.localResetGatedWork(() => this.updateAgentNow(slug, options));
+  }
+
+  private async updateAgentNow(
     slug: string,
     options?: { confirmTrustChanges?: boolean },
   ): Promise<AppState> {
@@ -7237,6 +7270,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       throw new Error("Agent manifest storage is unavailable.");
     }
     const agentDir = join(updatesRoot, slug);
+    if (dataFolderSealed()) throw new DataFolderSealedError();
     await mkdir(agentDir, { recursive: true, mode: 0o700 });
     const finalPath = join(agentDir, "manifest.yaml");
     const tmpPath = `${finalPath}.${randomUUID()}.tmp`;
@@ -7250,12 +7284,19 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const normalized = manifestText.endsWith("\n")
       ? manifestText
       : `${manifestText}\n`;
+    if (dataFolderSealed()) throw new DataFolderSealedError();
     await writeFile(tmpPath, normalized, { encoding: "utf8", mode: 0o600 });
     try {
-      await atomicRename(tmpPath, finalPath);
+      await atomicRename(tmpPath, finalPath, {
+        beforeAttempt: () => {
+          if (dataFolderSealed()) throw new DataFolderSealedError();
+        },
+      });
       try {
         await commitState();
       } catch (stateError) {
+        // A reset sealed the folder meanwhile: nothing more is written there.
+        if (dataFolderSealed()) throw stateError;
         if (previousManifest === undefined) {
           await rm(finalPath, { force: true });
         } else {
