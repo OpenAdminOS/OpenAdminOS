@@ -487,6 +487,31 @@ it("names the organization of a resumed run's tenant, not the active one (Muse r
   expect(within(dialog).getByRole("button", { name: "Start run" })).toBeDisabled();
 });
 
+it("starts a model fit rerun resumed from setup on the provider and model its review showed", async () => {
+  const user = userEvent.setup();
+  const agent = createMockAgent({ id: "devices", slug: "devices", name: "Inactive devices", mode: "read", scopes: ["DeviceManagementManagedDevices.Read.All"], services: ["intune"] });
+  const state = createMockAppState({ installedAgents: [agent], activeProviderId: "ollama" });
+  // Setup cleared the model when the admin picked Codex for this run.
+  const intent = {
+    kind: "agent-run", slug: "devices", tenantId: state.activeTenantId, providerId: "openai",
+    modelFit: { reason: "context-too-small", providerId: "ollama", model: "llama3.1" },
+    returnTo: "/agents/devices", createdAt: new Date().toISOString(),
+  };
+  const bridge = makeMockBridge({}, state);
+  renderRoute(
+    <Routes>
+      <Route path="/start" element={<Navigate to="/agents/devices" state={{ resumePendingIntent: intent }} />} />
+      <Route path="/agents/:slug" element={<Agents />} />
+    </Routes>,
+    { path: "*", route: "/start", bridge },
+  );
+  const dialog = await screen.findByRole("dialog", { name: /Review run/ });
+  const start = within(dialog).getByRole("button", { name: "Start run" });
+  await waitFor(() => expect(start).toBeEnabled());
+  await user.click(start);
+  await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith("devices", expect.objectContaining({ providerId: "openai", model: "gpt-5", expectedProviderDestination: "dest-openai" })));
+});
+
 describe("start errors inside the run review (review round 3)", () => {
   const draft = () => createMockAgent({ id: "draft", slug: "draft", name: "Script draft", mode: "read", scopes: [], services: [] });
 
