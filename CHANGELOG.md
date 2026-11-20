@@ -15,6 +15,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Provider requests start while classification runs in the background. Startup cache classification also runs off the main thread. Chat and Nova report missing credential provenance during replay, and Disconnect clears staged and worker observations.
 
 - Chat, agents, Graph paging and cache reads proceed while data classification runs. Local diagnostics flag evidence that is pending or was lost and preserve exact offsets for interpolated policy values.
+- Chat preserves classification when it clips a Graph value before the background scan finishes. Cache sidecars publish without waiting for a database writer, and local diagnostics count omitted offsets.
 
 - GitHub Copilot Fusion: the Copilot provider offers Copilot Fusion Standard, High and Max from the CLI's catalog, shows tiers your plan does not include greyed out with the reason, says when several models may see a prompt, and makes Copilot Free accounts usable (they list only Fusion Standard). Copilot models now show their catalog names, such as MAI Code 2 for Microsoft's MAI models, and models your organization's Copilot policy turns off are greyed out with the reason.
 - Lemonade Server as a local provider: the model scan, Settings and the model choice find it on its loopback port (13305), offer its downloaded chat models (never embedding, speech, image or cloud-routed ones) and keep prompts on this device; LM Studio and Lemonade share one OpenAI-compatible adapter.

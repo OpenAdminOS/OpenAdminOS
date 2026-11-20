@@ -41,6 +41,10 @@ and cache reads also run independently of classification. Cache field
 classifications are loaded in background batches. The local record reports
 incomplete coverage if evidence for that request is still pending or was
 lost during synchronization, or if the scan fails or its worker times out.
+This includes pending classification of a value clipped for Chat, and
+cache classification that could not be saved while the database was busy.
+Local diagnostics keep the total counts and report how many offsets were
+omitted when a record reaches its size limit.
 The local evidence budget favors credentials and identity
 values. Live runs keep registering evidence until they finish or are
 cancelled. Temporary Chat observations are kept on this device

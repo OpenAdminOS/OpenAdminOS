@@ -1824,10 +1824,16 @@ fields that survive projection when the final row shape is available. A sidecar
 is valid only for the snapshot read. The observer records incomplete coverage
 if a needed sidecar is missing, stale or too large for a bounded decode.
 Graph observations cross from the worker in bounded transferable batches.
-Startup reads, classifies and backfills cache rows in pages on the worker.
-The main process builds staged identity indexes in yielding slices and
-publishes only finished shards. A drift transaction acquires the SQLite write
-lock before reading, so a concurrent backfill cannot invalidate its snapshot.
+Startup reads and classifies cache rows in pages on a read-only worker
+connection. The main process publishes sidecars through the existing SQLite
+connection, one row per scheduled turn. Compressed sidecars live in a separate
+table so publication does not rewrite the raw rows. The write checks the row ID and
+snapshot ID again and skips publication if SQLite reports a busy writer.
+Backfill skips rows larger than 256 KiB of raw JSON or with a sidecar above the
+decode budget. Missing sidecars leave coverage incomplete. The main process
+builds staged identity indexes in yielding slices and publishes only finished
+shards. Chat and MCP can reuse their raw identity lookup until the tenant
+cache changes, even while classification is still pending.
 The request scanner marks coverage incomplete if the worker lacks the current
 identity index. A confirmed tenant identity can raise a stale cached field
 class. Generic syntax matches such as an unconfirmed GUID honor typed field
@@ -1863,8 +1869,10 @@ whole-word match for distinctive short identifiers. Boolean and numeric
 values need provenance. Serialized arrays preserve field provenance for all
 elements, including nested arrays. Generic phrases use word boundaries.
 Transformed values carry their original class through
-clipping, scalar interpolation and standalone fences. An unfamiliar name or
-an opaque unlabeled secret can evade detection.
+clipping, scalar interpolation and standalone fences. Rendering records
+bounded provenance while ingress is pending and resolves it after the
+evidence settles. Pending or discarded mappings leave coverage incomplete.
+An unfamiliar name or an opaque unlabeled secret can evade detection.
 
 A turn keeps up to two million units for values and provenance, favoring
 Credential and Identity when it has to drop lower classes. Retained evidence
@@ -1881,10 +1889,13 @@ in batches. The desktop transfers request text and receives classification
 offsets from the worker. The main thread handles up to 512 UTF-16 code units
 of combined request text with bounded matcher state. The worker has a
 three-second deadline covering queueing, synchronization and scanning. Its
-queue admits up to 24 jobs and 128 MiB of estimated input, including the active
-job and observer work admitted before scheduling. A full queue records
-incomplete coverage using request lengths without retaining the request text.
-Cancellation releases queued input promptly. The app stops the worker on quit.
+queue admits up to 24 jobs and 128 MiB of estimated input across scopes,
+including the active job and ingress and request work admitted before
+scheduling. Graph ingress reserves up to 16 MiB before measuring its input
+and limits each worker message to an estimated 512 KiB. One scheduler shares
+the main-thread budget across scopes. If capacity is unavailable, the
+observer records incomplete coverage without queuing the input. Cancellation
+releases queued input promptly. The app stops the worker on quit.
 Multi-tenant summaries use the job ID as their scope.
 Stopping the job releases the summary ledger.
 If work or retention limits leave evidence unexamined, the
@@ -1905,7 +1916,9 @@ Each local diagnostic event includes the field map version, dispatch sequence,
 timestamp and available run or conversation ID. The sequence identifies the
 request even when observations finish out of order. Graph evidence sources use static route
 labels. The host retains the most recent 16 records per scope across 32 scopes,
-with up to 256 offsets per retained record. Records expire after 15 minutes.
+with up to 256 combined classified spans and unexamined ranges per retained
+record. When offsets exceed the cap, the record keeps the aggregate counts and
+the number of omitted spans and ranges. Records expire after 15 minutes.
 Disconnect clears records associated with that organization. Live observers
 receive the full classification result. The host exposes counters for unscoped
 registrations and requests.
