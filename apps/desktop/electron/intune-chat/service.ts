@@ -133,6 +133,7 @@ import {
   COMPUTED_ANSWER_NOTICE,
   computedAnswerText,
   computedResultForModel,
+  computedTraceEntry,
   computeStructuredResult,
   followUpPlanningText,
   hostCallsForQuery,
@@ -2222,7 +2223,8 @@ export class IntuneChatService {
     // With nothing connected, an explicit docs request is not left to the model's classification.
     const docsWithoutTenant = noTenant && !planned.hasWriteIntent && isExplicitDocsRequest(content);
     // A local model never writes a device lookup's answer: code renders it, so the cache refreshes first, as for direct answers.
-    const localCodeAnswer = provider?.isLocal === true && structured?.kind === "device-detail";
+    // Always investigative keeps the loop the admin chose.
+    const localCodeAnswer = provider?.isLocal === true && structured?.kind === "device-detail" && store.getChatInvestigationSettings().mode !== "always-agentic";
     const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent && !docsWithoutTenant && !localCodeAnswer;
     const veto = docsWithoutTenant ? undefined : docsVeto(content, history);
     const answerPlan = await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, modelClassifies: lazyRefresh, ...(veto ? { veto } : {}), ...(docsWithoutTenant ? { forceDocs: true } : {}), steps });
@@ -2332,7 +2334,7 @@ export class IntuneChatService {
         voiceAppPlatformCountAnswer(content, cacheStatus, (resource) =>
           this.graphAggregatesFor(store, tenant.id, [resource])[resource],
         ) ??
-        (localCodeAnswer && computed ? computedAnswerText(computed) : undefined)
+        (localCodeAnswer && computed ? ((toolTrace ??= []).push(computedTraceEntry(computed)), computedAnswerText(computed)) : undefined)
       : undefined;
     const namedAgent = persisted.installedAgents.find(a => [a.name, a.slug].some(n => n.toLowerCase() === content.toLowerCase()));
     if (namedAgent) {
@@ -2750,7 +2752,8 @@ export class IntuneChatService {
     // With nothing connected, an explicit docs request is not left to the model's classification.
     const docsWithoutTenant = noTenant && !planned.hasWriteIntent && isExplicitDocsRequest(content);
     // A local model never writes a device lookup's answer: code renders it, so the cache refreshes first, as for direct answers.
-    const localCodeAnswer = !options.voice && provider?.isLocal === true && structured?.kind === "device-detail";
+    // Always investigative keeps the loop the admin chose.
+    const localCodeAnswer = !options.voice && provider?.isLocal === true && structured?.kind === "device-detail" && store.getChatInvestigationSettings().mode !== "always-agentic";
     const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent && !docsWithoutTenant && !localCodeAnswer;
     const veto = docsWithoutTenant ? undefined : docsVeto(content, history);
     // Voice keeps its own bounded tool set and no source plan; MCP tools are Chat only.
@@ -3035,7 +3038,7 @@ export class IntuneChatService {
 
     const directVoiceAnswer = noTenant || accessBlockedMessage || answerPlan?.sources.kind === "docs"
       ? undefined
-      : await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant, options.signal), message => sendProgress({ message, stage: "running-tools" }), entry => { (toolTrace ??= []).push(entry); }) ?? voiceInventoryAnswer(content, cacheStatus) ?? voiceAppPlatformCountAnswer(content, cacheStatus, (resource) => this.graphAggregatesFor(store, tenant.id, [resource])[resource]) ?? voiceDeviceSummaryAnswer(content, cacheStatus, () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices) ?? (localCodeAnswer && computed ? computedAnswerText(computed) : undefined);
+      : await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant, options.signal), message => sendProgress({ message, stage: "running-tools" }), entry => { (toolTrace ??= []).push(entry); }) ?? voiceInventoryAnswer(content, cacheStatus) ?? voiceAppPlatformCountAnswer(content, cacheStatus, (resource) => this.graphAggregatesFor(store, tenant.id, [resource])[resource]) ?? voiceDeviceSummaryAnswer(content, cacheStatus, () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices) ?? (localCodeAnswer && computed ? ((toolTrace ??= []).push(computedTraceEntry(computed)), computedAnswerText(computed)) : undefined);
     const namedAgent = persisted.installedAgents.find(a => [a.name, a.slug].some(n => n.toLowerCase() === content.toLowerCase()));
     if (namedAgent) {
       assistantContent = `${namedAgent.name} is an installed ${namedAgent.mode === "read" ? "read-only" : "write"} agent. Use its Run button to review and start it. Nothing has been started.${namedAgent.mode === "write" ? " Its change plan still requires confirmation." : ""}`;

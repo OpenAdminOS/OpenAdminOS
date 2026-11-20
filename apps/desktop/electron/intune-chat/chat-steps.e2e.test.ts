@@ -725,6 +725,8 @@ describe("Chat steps, sources and follow-ups end to end", () => {
 
   it("does not let a follow-up be docs only when an earlier answer in the chat used tenant data", async () => {
     await withHarness(async ({ store, prompts, script }) => {
+      // The full investigative loop: in auto mode "And for Windows?" is a structured switch that the host counts.
+      await store.setChatInvestigationMode("always-agentic");
       script([
         { kind: "tenant", sources: [], tool: "query_cache", params: { resource: "managedDevices", where: { operatingSystem: "macOS", complianceState: "noncompliant" } } },
         { final: true, answer: "2 of your 5 Macs are noncompliant." },

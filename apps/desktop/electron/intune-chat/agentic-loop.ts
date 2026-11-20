@@ -438,8 +438,14 @@ export async function runAgenticChat(
   }
   for (const call of input.hostCalls ?? []) {
     const startedAt = new Date().toISOString();
-    input.onToolStart?.({ tool: call.tool, params: call.params, message: summarizeToolCallForProgress(call.tool, call.params), startedAt });
+    const shown = Array.isArray(call.params.ids) ? (({ ids, ...rest }) => ({ ...rest, previousAnswerRows: (ids as unknown[]).length }))(call.params) : call.params;
+    input.onToolStart?.({ tool: call.tool, params: shown, message: summarizeToolCallForProgress(call.tool, call.params), startedAt });
     const execution = await executeIntuneChatTool(input.tools, call.tool, call.params);
+    // A follow-up's row ids can run to hundreds; the trace and the prompt carry their count, not the ids.
+    if (Array.isArray(call.params.ids)) {
+      const { ids, ...rest } = execution.trace.params as Record<string, unknown>;
+      execution.trace.params = { ...rest, previousAnswerRows: (ids as unknown[]).length };
+    }
     toolTrace.push(execution.trace);
     if (!execution.trace.error && isEvidenceResult(call.tool, execution.result)) evidenceToolCalls += 1;
     input.onToolFinish?.({ traceEntry: execution.trace, message: execution.trace.error ? `${call.tool} failed.` : execution.trace.resultSummary });

@@ -3803,14 +3803,17 @@ the format. Decisions:
   to 500 matched row ids; deleted with the conversation) and a follow-up such
   as "only Windows" or "which of those synced this month" narrows those rows,
   so a device added by a later refresh is not counted as part of the previous
-  answer. A different value on a field already filtered ("what about macOS"
-  after Windows) is a new question. Any other answer clears the context, and
+  answer. A different value on a field already filtered after a switch lead
+  ("what about macOS" after Windows) asks the same question of a fresh set.
+  The trace and the prompt carry how many previous rows a follow-up counts,
+  not their ids. Any other answer clears the context, and
   follow-up planning reads write intent from the current question only. Short
   follow-ups are planned with the previous question as context.
 - Questions the data cannot answer: "why is <device> not compliant" names the
   device's cached state, says the failing rule is not in the cached data, and
   gives the last sync as the lead, with nothing invented. For a local model
-  code writes this answer without a model call.
+  code writes this answer without a model call, and What ran shows the cache
+  read; always investigative mode keeps the model's loop.
 - A local model's answer that leaves out or changes a computed fact is
   replaced by the computed answer: every breakdown count, every listed name
   for a list of up to 25, the total when the question asked for a number or

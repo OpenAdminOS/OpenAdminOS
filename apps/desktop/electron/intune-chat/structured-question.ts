@@ -1,4 +1,6 @@
-import type { GraphCacheResourceStatus } from "@openadminos/agent-sdk";
+import { randomUUID } from "node:crypto";
+
+import type { GraphCacheResourceStatus, IntuneChatToolTraceEntry } from "@openadminos/agent-sdk";
 
 import type { GraphCacheQueryPredicate, IntelligenceSqliteStore } from "./sqlite-store.js";
 
@@ -127,6 +129,7 @@ const ENTRA_SUBJECT = /\b(entra|azure ad|aad|directory devices?|registered devic
  */
 const OTHER_TOPIC = /\b(apps?|applications?|polic(?:y|ies)|profiles?|scripts?|remediations?|updates?|patch|users?|groups?|encrypt\w*|bitlocker|filevault|autopilot|enrol\w*|sign-?ins?|alerts?|incidents?|defender|configuration|certificates?|wi-?fi|vpn|licen[cs]e\w*|storage|disk|memory|serial|model|manufacturer|vendor|ram|cpu|primary user|assigned|assignment|stale|inactive|retire\w*|wipe\w*|delete\w*)\b/;
 const FOLLOW_UP_LEAD = /^(?:and |but |ok(?:ay)?,? |so |then )?(?:only|just|what about|how about|and|of (?:those|these|them)|which of (?:those|these|them)|how many of (?:those|these|them)|filter (?:to|by|for)|same for)\b/;
+const SWITCH_LEAD = /^(?:and |but |ok(?:ay)?,? |so |then )?(?:what about|how about|and for|same for|now for|and)\b|\binstead\b/;
 const ANAPHORA = /\b(those|these|them|that list|the same|of those|of these|of them|ones)\b/;
 const WHY = /\bwhy\b|\breason\b|\bwhat(?:'s| is) wrong\b|\bcause\b/;
 
@@ -190,7 +193,7 @@ function complianceFocus(lower: string): { label: string; predicate: GraphCacheQ
   const negative = NOT_COMPLIANT.test(lower);
   const rest = lower.replace(new RegExp(NOT_COMPLIANT.source, "g"), " ");
   const positive = COMPLIANT.test(rest);
-  if (negative && positive) return "ambiguous";
+  if ([negative, positive, GRACE.test(lower)].filter(Boolean).length > 1) return "ambiguous";
   if (positive && /(?:\b(?:not|no longer|never)|n't)\s+(?:\w+\s+){0,2}compliant\b/.test(rest)) return "ambiguous";
   if (negative) return { label: "not compliant", predicate: { field: "complianceState", op: "eq", value: "noncompliant" } };
   if (GRACE.test(lower)) return { label: "in grace period", predicate: { field: "complianceState", op: "eq", value: "inGracePeriod" } };
@@ -206,7 +209,7 @@ export function syncFilter(lower: string, generatedAt: string): { label: string;
   const now = new Date(generatedAt);
   if (!Number.isFinite(now.getTime())) return undefined;
   // Only a negation on the sync verb itself counts: "not compliant and synced today" is synced today.
-  const negated = /(?:\b(?:not|never|no longer|without)|n't)\s+(?:(?:been|had|yet|recently|once)\s+){0,2}(?:sync(?:ed|ing|s)?|checked in|check-?in|contacted|seen)\b|\bno (?:recent )?(?:sync|check-?in)\b/.test(lower);
+  const negated = /(?:\b(?:not|never|no longer|without)|n't)\s+(?:(?:been|had|yet|recently|once|a|any)\s+){0,2}(?:sync(?:ed|ing|s)?|checked in|check-?in|contacted|seen)\b|\bno (?:recent )?(?:sync|check-?in)\b/.test(lower);
   let since: Date | undefined;
   let label = "";
   if (/\bthis month\b/.test(lower)) {
@@ -275,8 +278,23 @@ export function structuredQueryForQuestion(input: {
     const added = [os, compliance, sync].flatMap((entry) => (entry ? [entry] : []));
     // Entra device objects carry no compliance state and no sync time.
     if (previous.resource === "entraDevices" && (compliance || sync)) return undefined;
-    // A different value on a field already in force ("what about macOS?" after Windows) is a new question, not a narrowing.
-    if (added.some((entry) => previous.filters.some((filter) => filter.field === entry.predicate.field && JSON.stringify(filter) !== JSON.stringify(entry.predicate)))) return undefined;
+    // A different value on a field already in force ("what about macOS?" after Windows) switches that value:
+    // the same question over a fresh set, not a narrowing of the previous rows to nothing.
+    const switched = added.filter((entry) => previous.filters.some((filter) => filter.field === entry.predicate.field && JSON.stringify(filter) !== JSON.stringify(entry.predicate)));
+    if (switched.length > 0) {
+      if (switched.length !== added.length || !SWITCH_LEAD.test(lower)) return undefined;
+      const fields = new Set(switched.map((entry) => entry.predicate.field));
+      const filters = [...previous.filters.filter((filter) => !fields.has(filter.field)), ...switched.map((entry) => entry.predicate)];
+      return {
+        kind: "count",
+        resource: previous.resource,
+        scopeLabel: describeFilters(previous.resource, filters),
+        filters,
+        breakdown,
+        list: true,
+        asksCount: count,
+      };
+    }
     // A narrowing that repeats a filter already in force adds nothing new; the previous set is listed again.
     const fresh = added.filter((entry) => !previous.filters.some((filter) => JSON.stringify(filter) === JSON.stringify(entry.predicate)));
     const label = fresh.map((entry) => entry.label).join(", ");
@@ -321,6 +339,19 @@ export function structuredQueryForQuestion(input: {
     list: list || Boolean(focus),
     asksCount: count,
   };
+}
+
+/** A plain label for a filtered device set, such as "Intune managed macOS devices not compliant". */
+function describeFilters(resource: StructuredDeviceResource, filters: readonly GraphCacheQueryPredicate[]): string {
+  const os = OS_FILTERS.find((entry) => filters.some((filter) => JSON.stringify(filter) === JSON.stringify(entry.predicate)))?.label;
+  const state = filters.find((filter) => filter.field === "complianceState")?.value;
+  const sync = filters.find((filter) => filter.field === "lastSyncDateTime");
+  const base = resource === "managedDevices" ? `Intune managed ${os ? `${os} ` : ""}devices` : `Entra ${os ? `${os} ` : ""}devices`;
+  const parts = [
+    state === "noncompliant" ? "not compliant" : state === "inGracePeriod" ? "in grace period" : state === "compliant" ? "compliant" : undefined,
+    sync && typeof sync.value === "string" ? `${sync.op === "lt" ? "not synced" : "synced"} since ${sync.value.slice(0, 10)}` : undefined,
+  ].filter(Boolean);
+  return parts.length ? `${base} ${parts.join(", ")}` : base;
 }
 
 function dedupe(filters: GraphCacheQueryPredicate[]): GraphCacheQueryPredicate[] {
@@ -515,6 +546,21 @@ function computeDeviceDetail(
 
 function capitalize(text: string): string {
   return text ? `${text[0]!.toUpperCase()}${text.slice(1)}` : text;
+}
+
+/** The trace entry of a code-rendered answer, so What ran shows the cache read. */
+export function computedTraceEntry(result: ComputedResult): IntuneChatToolTraceEntry {
+  const now = new Date().toISOString();
+  const listed = result.focus?.rows.length ?? result.rows?.length ?? 0;
+  return {
+    id: `tool_${randomUUID()}`,
+    tool: "count_cached",
+    params: { resource: result.resource, filters: result.context.filters },
+    resultSummary: `${result.focus?.total ?? result.total} matching cached rows counted${listed ? ` · ${listed} listed` : ""}`,
+    durationMs: 0,
+    createdAt: now,
+    completedAt: now,
+  };
 }
 
 /** The answer code writes from a computed result: its facts, one per line. */
