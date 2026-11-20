@@ -2601,7 +2601,8 @@ Mockup: `docs/mockups/34-local-reset.html`.
   (inside the scheduler step right before the LaunchAgent bootout, the plist
   removal and the task deletion; each Keychain deletion attempt; the
   preferences; each cache folder), and the reset stops there, incomplete,
-  if it was replaced or holds anything but the kept files again: a profile
+  if it was replaced or holds anything but the kept files again (its
+  identity is checked before and after it is listed): a profile
   restored meanwhile, as a new folder or file by file into the same one,
   keeps its Keychain key, and the files that came back are listed. The same
   check runs once more after the last step, before the cleanup is recorded
@@ -2611,8 +2612,9 @@ Mockup: `docs/mockups/34-local-reset.html`.
   cache folder's identity is compared last, after this check and the Linux
   mount check, right before its removal. From the commit on, the audit
   log's side files (anchor and pending file, written by path) are not
-  written again, also not when it closes; events kept only in memory go
-  with the log the reset removes.
+  written again, also not when it closes, and no expired rows are pruned
+  (a prune must move the anchor with them); events kept only in memory go
+  with the log the reset removes. A refused reset unfreezes them.
   On Linux the mount table is read again before every removal in the data
   folder and right before a cache folder's removal, so a bind mount added
   under either while the wipe runs is never removed through. On Windows the
