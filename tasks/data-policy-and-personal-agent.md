@@ -905,11 +905,14 @@ the IT policy file.
       organization name, the greeting name). When the rescan still finds
       blocked content, or does not cover the whole text (its budget ran out,
       it timed out or it failed), the call does not open: nothing is sent to
-      OpenAI, no audio is streamed, and the designed state names the rule
-      and the part it could not leave out, with voice on this device and
-      Change the rule as the recovery, or the policy file and key instead of
-      Change the rule when IT set the rule (mockup 34, B, "Hosted voice did
-      not start"). A scan of the profile block alone would send a greeting name
+      OpenAI, no audio is streamed, and the designed state says why. Its
+      recovery offers only what would work: for blocked content, it names the
+      rule and the part it could not leave out and offers voice on this
+      device and Change the rule, or the policy file and key instead of
+      Change the rule when IT set the rule; for a rescan that did not finish,
+      it offers voice on this device and Start the call again, which scans
+      the whole start request again before anything is sent (mockup 34, B,
+      "Hosted voice did not start"). A scan of the profile block alone would send a greeting name
       or a tenant name a rule blocks, and is not enough. The voice model speaks roles
       where a value is masked, and the transcript restores only reversible
       placeholders (identity, device and security names and identifiers, the
