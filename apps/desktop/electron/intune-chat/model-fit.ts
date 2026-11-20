@@ -167,6 +167,10 @@ export function resolveChatTurnProvider(input: {
   if ((chosen.id === offer.failed.providerId && model === offer.failed.model) || (chosen.id === active.id && model === activeModel)) {
     throw new ModelOverrideError("That model already could not do this request. Choose another one, or narrow the question.");
   }
+  if (!chosen.isLocal && !model) {
+    // The approval names one model; a provider that reports none could pick its own after it.
+    throw new ModelOverrideError(`${chosen.name} does not report a model yet, so nothing was sent. Check it in Settings, Providers, then choose it again.`);
+  }
   if (chosen.isLocal && isRemoteBackedModel(chosen, model)) {
     // A cloud or remote-backed model on a loopback Ollama sends the prompt to another host.
     throw new ModelOverrideError(`${model} runs on another server, not on this device, so nothing was sent. Choose another model.`);

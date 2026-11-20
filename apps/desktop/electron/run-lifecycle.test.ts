@@ -418,6 +418,25 @@ it('binds a model fit rerun to its endpoint and checks the model again when a ph
   assert.match(failed?.error ?? '', /still runs on this device/);
 });
 
+it('refuses a model fit rerun on a hosted provider that reports no model', async () => {
+  const h = harness();
+  const agent = { id: 'docs', slug: 'docs', name: 'Docs', description: 'No service calls', requiresEntraTier: 'free', version: '1.0.0', mode: 'read', category: 'devices', tier: 'agent', scopes: [], author: { name: 'Test' }, installedAt: new Date().toISOString() } as AgentSummary;
+  let built = 0;
+  Object.assign(h.host, {
+    appVersion: '0.7.2',
+    listProviders: async () => [{ id: 'openai', name: 'Codex', status: 'connected', models: [], isLocal: false }],
+    providerCanRun: () => true,
+    providerTarget: async () => ({ endpoint: undefined, destination: 'dest-openai' }),
+    buildLlm: async () => { built += 1; return new Promise(() => {}); },
+  });
+  await h.host.write({ ...h.state(), installedAgents: [agent], tenants: [] });
+  await assert.rejects(
+    h.service.startRun('docs', { bindProviderEndpoint: true, expectedProviderDestination: 'dest-openai', providerId: 'openai', expectNoTenant: true }),
+    /Codex does not report a model yet, so the run did not start/,
+  );
+  assert.equal(built, 0);
+});
+
 it('refuses a model fit rerun whose destination changed after its review, and keeps the safeguards into Run for real', async () => {
   const h = harness();
   const agent = { id: 'writer', slug: 'writer', name: 'Writer', description: 'Writes', requiresEntraTier: 'free', version: '1.0.0', mode: 'write', category: 'devices', tier: 'agent', scopes: [], author: { name: 'Test' }, installedAt: new Date().toISOString() } as AgentSummary;

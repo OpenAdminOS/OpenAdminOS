@@ -713,6 +713,12 @@ export class RunService {
         );
       }
 
+      // A model fit rerun on a hosted provider runs the model its review named, never one the
+      // provider picks after the approval.
+      if (options.bindProviderEndpoint && activeProvider && !activeProvider.isLocal && !model) {
+        throw new Error(`${activeProvider.name} does not report a model yet, so the run did not start. Check it in Settings, Providers, then review the run again.`);
+      }
+
       // A model fit rerun on a model on this device is admitted only after a fresh check that it runs here.
       if (options.requireOnDeviceModel) {
         if (activeProvider?.isLocal !== true || !(await this.host.verifyOnDeviceModel?.(providerId, model))) {

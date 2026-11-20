@@ -243,6 +243,15 @@ describe("Model fit: the per-request override", () => {
     assert.deepEqual(turn.switchedFrom, { providerId: "ollama", model: LOCAL_MODEL, reason: "context-too-small", toOnDevice: false });
   });
 
+  it("refuses a hosted provider that reports no model, since the approval names one", () => {
+    const unpinned: ProviderSummary = { ...claude, models: [], defaultModel: undefined };
+    assert.throws(
+      () => resolveChatTurnProvider({ ...base, providers: [ollama, unpinned], override: { offerId: "fit_1", providerId: "anthropic" }, consent: freshConsent("anthropic") }),
+      /does not report a model yet/,
+    );
+    assert.deepEqual(modelFitChoices({ issue: { reason: "context-too-small", providerId: "ollama", model: LOCAL_MODEL }, providers: [ollama, unpinned] }).hosted, []);
+  });
+
   it("refuses a provider that is not listed (left out by policy) or not ready, a stale offer, and Nova", () => {
     assert.throws(() => resolveChatTurnProvider({ ...base, providers: [ollama], override, consent: freshConsent("anthropic") }), /not available on this device/);
     assert.throws(() => resolveChatTurnProvider({ ...base, providers: [ollama, codexSignedOut], override: { offerId: "fit_1", providerId: "openai" }, consent: freshConsent("openai") }), /not ready/);

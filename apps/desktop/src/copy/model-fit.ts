@@ -111,6 +111,7 @@ export const MODEL_FIT_COPY = {
   answeredRest: (model: string) => `for this request only. Chat is back on ${model}.`,
   answeredLocal: (model: string, providerName: string) => `${model} on this device (${providerName})`,
 
+  modelMissing: (provider: string) => `${provider} does not report a model yet, so this run cannot start. Check it in Settings, Providers.`,
   destinationPending: (provider: string) => `Checking where ${provider} is reached before the run can start.`,
   destinationFailedChat: (provider: string) =>
     `OpenAdminOS could not read where ${provider} is reached, so nothing was sent. Choose the provider again.`,

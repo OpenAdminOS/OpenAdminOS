@@ -245,9 +245,10 @@ export function modelFitChoices(input: {
   // that OpenAdminOS reaches directly is not offered: its location is not stated and it may redirect.
   const hosted = providers
     .filter((provider) => !provider.isLocal && HOSTED_PROVIDER_IDS.has(provider.id) && provider.id !== issue.providerId && isProviderReady(provider) && managedProviderAllowed(input.managedPolicy, provider.id))
-    .map((provider) => {
+    .flatMap((provider) => {
+      // The accept step names the exact model, so a provider that reports none yet is not offered.
       const model = resolveProviderDefaultModel(provider, input.activeModelByProviderId).model;
-      return { providerId: provider.id, providerName: provider.name, isLocal: false, ...(model ? { model } : {}) };
+      return model ? [{ providerId: provider.id, providerName: provider.name, isLocal: false, model }] : [];
     });
   const currentSize = modelSizeBillions(issue.model);
   const local: ModelFitChoice[] = [];
