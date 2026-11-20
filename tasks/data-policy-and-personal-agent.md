@@ -88,7 +88,9 @@ built on top of them are planned separately.
   groups, role names); setting values stay readable.
 - Classification uses a request ledger. Values are classified by field when
   they arrive and registered for the run or Chat conversation, in memory only.
-  Just before each model call, the final request (system text plus prompt,
+  Each value keeps its provenance (the field path it came from) and the
+  effective field map revision that classed it, and that revision is checked
+  before every request (round 18). Just before each model call, the final request (system text plus prompt,
   including the admin's own words) is scanned against those values and the
   detectors, in the one Hosted gate every request that leaves the device
   passes (provider calls, hosted voice context and web search, A3). Routing
@@ -358,7 +360,8 @@ built on top of them are planned separately.
   meaningful remains, the search is not sent and the designed state says
   so. Text the app cannot recognize can still reach the search provider,
   stated as honestly as the remote MCP boundary. The Hosted gate still
-  applies to whatever remains. Whenever web search is offered, the status
+  applies to whatever remains (round 18 sets the order: placeholders are
+  removed after the gate). Whenever web search is offered, the status
   strip names its destination (OpenAI), also when the chat model is local,
   so "No data leaves this device" is never shown while search is offered
   (A3, mockup 34, B and E).
@@ -367,6 +370,36 @@ built on top of them are planned separately.
 - Mockup 35: the comparison marks changes at array element paths (for
   example `inputSchema.enum[0]`) in the raw view, and at object and array
   nodes in the readable view.
+
+**Review findings adopted (2026-11-20, round 18 of the design review)**
+- Web search enforces the public research boundary on the final outbound
+  query, after the Hosted gate, in this order: remove every recognized
+  tenant value, apply the Hosted gate, then remove every placeholder from
+  the result (a stale one with no mapping, such as `[USER_2]` from an
+  earlier masked answer, and any token the gate produced, such as
+  `[CREDENTIAL]`), then check whether meaningful text remains. When none
+  remains, nothing is sent. A gate Block on what remains (for example a
+  scan that ran out of its budget with a Block on the tier) makes no
+  request and has its own designed state (A3, mockup 34, E).
+- A redirect that changes a user-added server's endpoint (any change of
+  scheme, host, port or path) is refused during tool listing and every
+  tool call. Nothing is sent to the target, and the designed state names
+  the redirect target and asks the admin to add that address as its own
+  server, which gets a fresh review. This tightens the same-origin rule the
+  MCP transport follows today (`apps/desktop/electron/mcp/host.ts`) (B5,
+  mockup 35).
+- The effective field map revision is checked before every request, also
+  for evidence held in an open conversation's in-memory ledger. Evidence
+  classified under an older revision is reclassified from its provenance
+  (the field path) where it has one; evidence that cannot be rebuilt counts
+  as unexamined. Saved evidence stores no field path, so the round 16 rule
+  for it stands (A1, A3).
+- Mockup 34, E: a web search with public words left that the Hosted gate
+  withholds, and the OpenAI search destination in the Claude Code
+  reasoning frame.
+- Mockup 35: the readable comparison marks an empty node that becomes
+  populated (`inputSchema.properties` from `{}`), and the tool `name` goes
+  through the same path-aware marker.
 
 ## Why
 
@@ -490,7 +523,22 @@ the IT policy file.
 - [ ] Value detectors for unknown shapes and free text, built on
       `tenant-values.ts` and the existing private patterns.
 - [ ] A request ledger: values are classified by field when they arrive and
-      registered for the run or Chat conversation, in memory only.
+      registered for the run or Chat conversation, in memory only. Each
+      ledger entry keeps its provenance (the field path it came from, when
+      it came from a field) and the effective field map revision that
+      classed it.
+- [ ] The effective field map revision is checked before every request,
+      including a request that uses evidence from an open conversation's
+      in-memory ledger, not only evidence rebuilt from saved history. Evidence
+      classified under a revision older than a later class raise from any
+      source is reclassified from its provenance where it has one: the span
+      adds its field's current class history to its set (it never drops a
+      class it held, detector classes included), and its action is the
+      strictest across the set under the rules in force. Evidence that cannot
+      be rebuilt, such as a span with no field path, counts as unexamined.
+      Saved evidence stores no field path, so evidence saved under an older
+      revision counts as unexamined, as below (decided by the lead
+      2026-11-20, round 18).
 - [ ] Saved Chat history keeps its classification evidence. Each saved Chat
       message stores, next to it in the local database, the spans the ledger
       found in its text and the effective field map revision that classed
@@ -585,6 +633,13 @@ the IT policy file.
     Settings reclassification or an IT policy reclassification raises any
     class, and stays the same for a change that raises nothing (test per
     source).
+12. In-memory ledger (test): a ledger entry from a `configuration` field,
+    classed under revision 41, is used in a request after a Settings raise
+    of that field to `security` (revision 42) without the conversation
+    being closed. The check before the request reclassifies it from its
+    field path, its set holds `configuration` and `security`, and its action
+    is the strictest of the two. A ledger entry with no field path,
+    classed under revision 41, counts as unexamined in the same request.
 
 ### Phase A2: Provider tiers
 
@@ -617,19 +672,33 @@ the IT policy file.
         public research boundary (SPEC.md: outbound queries are public
         research) on top of the gate: a query never carries tenant data of
         any class, whatever the rules on Hosted allow. The query is written
-        from public inputs only. Just before the request, every value the
-        app recognizes as tenant data in the final query (any class,
-        configuration included, such as an internal app name from the
-        cache, and any value A4 restored into the tool's parameters) is
-        removed, never masked as a token, and so is a one-way placeholder
-        left in the query. When nothing meaningful remains,
-        the search is not sent, no network request is made, and Chat shows
-        the designed state (mockup 34, E, "Web search without tenant data").
-        Text the app cannot recognize, such as an internal project name it
-        has never seen, can still reach the search provider; the web search
-        copy and the docs say so, as the remote MCP boundary does. The
-        Hosted gate still applies to whatever remains, so unexamined text
-        follows its rule and a blocked remainder makes no network request.
+        from public inputs only. The boundary is enforced on the final
+        outbound query, after the Hosted gate, in this order (round 18):
+        1. Every value the ledger or the tenant value index recognizes as
+           tenant data in the query (any class, configuration included, such
+           as an internal app name from the cache, and any value A4 restored
+           into the tool's parameters) is removed, never masked as a token.
+           Values only the detectors find (credential and identifier
+           patterns) are handled by the gate in step 2 and removed in
+           step 3.
+        2. The Hosted gate scans what remains and applies the rules on
+           Hosted. Text it cannot examine follows the rule for unexamined
+           data. When the gate blocks, the search is not sent, no network
+           request is made, and Chat shows the designed state that names the
+           reason (mockup 34, E, "Withheld by the data policy check"); its
+           recovery is a shorter search or an answer without searching.
+        3. Every placeholder is removed from the gate's result: a stale one
+           with no mapping in the ledger (such as `[USER_2]` left from an
+           earlier masked answer) and any token the gate produced (such as
+           `[CREDENTIAL]` for a recovery key a detector found).
+        4. The app checks whether meaningful text remains. When none
+           remains, the search is not sent, no network request is made, and
+           Chat shows the designed state (mockup 34, E, "Web search without
+           tenant data").
+        Only the text that passed all four steps is sent. Text the app
+        cannot recognize, such as an internal project name it has never
+        seen, can still reach the search provider; the web search copy and
+        the docs say so, as the remote MCP boundary does.
         Switching to a local model is not offered, since web search always
         goes to OpenAI. Whenever web search is offered, the status strip
         names its destination ("Web search · OpenAI"), also when the chat
@@ -705,6 +774,13 @@ the IT policy file.
       earlier answers (the question alone, with no saved history in the
       request) and a local model only when no Local rule is Block (mockup 34,
       F, "A conversation reopened after a restart").
+- [ ] An open conversation follows the same revision rule (A1, round 18).
+      Before every follow-up, the evidence in the conversation's in-memory
+      ledger is checked against the effective field map revision: a value
+      classed under an older revision is reclassified from its field path,
+      keeping every class it held, and a value that cannot be rebuilt counts
+      as unexamined. A follow-up never uses a class from before a raise
+      because the conversation stayed open.
 - [ ] Agent manifests declare `descriptor.dataClasses`, derived when absent, with
       a qa-graph check and the JSON Schema updated in the same commit. Agent
       details show what an agent reads. Preflight refuses a run the policy would
@@ -826,6 +902,37 @@ the IT policy file.
 17. Gate coverage test: a test lists every module that calls a hosted model
    endpoint and fails when one of them sends without the Hosted gate,
    including a new module added later.
+18. Web search order regression test, stale placeholder: an earlier answer
+   in the conversation masked a user as `[USER_2]`, and its mapping is no
+   longer in the ledger. Nova writes the search "[USER_2] Win32 app not
+   detected after install 24H2". The fake request function receives the
+   query without `[USER_2]` and with the public words. A query that held
+   only `[USER_2]` leaves nothing meaningful: the fake receives no call.
+   A step that removed only values with a mapping, or removed placeholders
+   before the gate, would send the token, and the test fails on it.
+19. Web search order regression test, gate token: with Credential on Hosted
+   at Mask, Nova writes a search that holds a BitLocker recovery key the
+   tenant value index does not know, followed by public words. The gate
+   masks the key as `[CREDENTIAL]`, and the fake request function receives
+   the public words with neither the key nor `[CREDENTIAL]`. A search that
+   removed placeholders before the gate would send the token, and the test
+   fails on it.
+20. Web search withheld by the gate (test): Activity on Hosted is Block and
+   Nova writes a search with a pasted install log longer than the scan's
+   work budget. Public words remain after step 1, the gate reports the
+   unexamined tail, the strictest action on Hosted is Block, and the fake
+   receives no call. Chat shows the withheld state with the reason and
+   offers a shorter search and an answer without searching (renderer test).
+21. Open conversation regression test: a local Chat answer restores the
+   name of a Conditional Access policy from a field that is `configuration`
+   at the time, and the conversation stays open, with no restart. The
+   admin raises that field from `configuration` to `security` in Settings,
+   which changes the effective field map revision, and asks a hosted
+   follow-up with Security on Hosted at Block. The check before the request
+   reclassifies the ledger entry from its field path, the name reaches no
+   provider request, and the follow-up shows the designed blocked state. A
+   ledger that kept the class from the older revision would send the name
+   as configuration, and the test fails on it.
 
 ### Phase A4: Masking
 
@@ -1071,6 +1178,22 @@ the IT policy file.
       An approval belongs to the endpoint (the full address) it was given
       for and never carries over to another endpoint, even for a tool with
       the same name and an identical definition.
+- [ ] Redirects never change the endpoint (round 18). During tool listing
+      (step 2 and every later `tools/list`) and every tool call, a redirect
+      that changes the endpoint, meaning any change of scheme, host, port or
+      path, is refused: the target is never requested, nothing from the
+      call (credential, tool parameters) is sent there, and the listing or
+      call fails with a designed state that names the redirect target and
+      asks the admin to add that address as its own server, which gets its
+      own allowlist check and a fresh tool review with every tool unchecked
+      (adding it starts step 1 with that address filled in). An approval
+      never follows a redirect. While listing is refused, the app cannot hash
+      the server's tools, so none is offered and the strip rule above leaves
+      the host out. This tightens the MCP transport,
+      which today follows a redirect within the same origin
+      (`sameOriginFetch` in `apps/desktop/electron/mcp/host.ts`), so a path
+      redirect on the same host is refused as well (mockup 35, "A redirect
+      to another address").
 - [ ] The boundary, stated in the grant copy: the server receives a query
       written from the admin's question with every value the app recognizes as
       tenant data removed. Text the app cannot recognize, such as an internal
@@ -1212,6 +1335,18 @@ the IT policy file.
     the complete current object side by side with both full hashes, and
     Copy puts the exact 64-character hash on the clipboard (test, mockup
     35).
+16. Regression test, same-host path redirect: the server at
+    `https://tools.contoso.example/mcp` answers 308 with
+    `Location: /baselines/mcp`. In step 2, `tools/list` is refused, no
+    request reaches `/baselines/mcp`, the review shows the designed state
+    naming `https://tools.contoso.example/baselines/mcp`, and
+    Continue stays disabled. For an approved server that starts answering
+    the same redirect, a call to an approved tool from Chat, a skill and a
+    scheduled check fails with the same state, and the fake server records
+    no request at the target, so the tool parameters and the credential
+    never reach it. A transport that followed same-origin redirects would
+    send them, and the test fails on it. A change of scheme, host or port
+    is refused the same way (test per component).
 
 ### Phase B6: Learning
 
@@ -1303,4 +1438,6 @@ the IT policy file.
     unexamined when a later change raised any class; otherwise its stored
     classes apply (lead, 2026-11-20, from the unexamined rule). The version
     is the effective field map revision, raised by the shipped map, Settings
-    or the IT policy file (round 16).
+    or the IT policy file (round 16). Evidence in an open conversation's
+    in-memory ledger is checked against it before every request and is
+    reclassified from its field path where it has one (round 18).
