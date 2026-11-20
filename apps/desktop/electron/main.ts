@@ -7,6 +7,8 @@ import { officeFullscreen } from "./office-fullscreen.js";
 import {
   LocalResetRequestError,
   localResetDataFolderLinkMessage,
+  localResetFolderIdentity,
+  type LocalResetFolderIdentity,
   localResetLinkCheck,
   MANAGED_POLICY_FILE,
   localResetPolicyProblem,
@@ -5592,6 +5594,7 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
     throw new LocalResetRequestError("A reset is already in progress. OpenAdminOS restarts in a moment.");
   }
   localResetRequested = true;
+  let committedFolder: LocalResetFolderIdentity | undefined;
   try {
     await requestLocalReset(confirmation, {
       checkReady: async () => {
@@ -5613,7 +5616,9 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
         if (localResetLinkCheck(dataFolder).dataFolderIsLink) {
           throw new Error("the data folder became a link to another place");
         }
-        await writeLocalResetMarker(dataFolder, marker);
+        // The first write fixes which folder this reset is for; a later
+        // write (the warnings) and the sign-out go only to that folder.
+        committedFolder = await writeLocalResetMarker(dataFolder, marker, committedFolder ? { expectFolder: committedFolder } : {});
       },
       forgetSignIns: async () => {
         // The marker is written, so the reset goes ahead: no connector send
@@ -5624,6 +5629,15 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
         await store.closeAllTenantWork().catch((error: unknown) => {
           console.warn("[local-reset] could not close every organization's work; the restart stops it", error);
         });
+        // Sign-out rewrites the token caches, so only in the folder the
+        // marker was written for: not one restored or swapped in since.
+        const nowFolder = localResetFolderIdentity(app.getPath("userData"));
+        if (!committedFolder || !nowFolder || nowFolder.dev !== committedFolder.dev || nowFolder.ino !== committedFolder.ino) {
+          return [{
+            item: "Microsoft sign-ins",
+            reason: "not removed from the token caches, because the data folder is no longer the one the reset was accepted for. The reset at the next launch stops before removing anything there",
+          }];
+        }
         // Sign-out rewrites the token caches; a cache that is a link would
         // be rewritten wherever it points. The wipe removes the link only.
         const check = localResetLinkCheck(app.getPath("userData"));

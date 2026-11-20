@@ -90,7 +90,7 @@ export interface LocalResetMarker {
    * roamed to another device has another identity, so its marker is not
    * trusted there.
    */
-  folder?: { dev: number; ino: number };
+  folder?: LocalResetFolderIdentity;
   /** Set when reading, never written: the marker is not trusted, with the reason shown to the admin. */
   unusable?: string;
 }
@@ -179,12 +179,24 @@ export async function requestLocalReset(
 export async function writeLocalResetMarker(
   userDataDir: string,
   marker: LocalResetMarker,
-  options: { syncDirectory?: (path: string) => Promise<void> } = {},
-): Promise<void> {
+  options: {
+    syncDirectory?: (path: string) => Promise<void>;
+    /**
+     * The folder the first write was for. A later write (the warnings) goes
+     * only to that same folder and keeps its identity, so a folder restored
+     * or swapped in meanwhile never receives a reset request.
+     */
+    expectFolder?: LocalResetFolderIdentity;
+  } = {},
+): Promise<LocalResetFolderIdentity> {
   const path = join(userDataDir, LOCAL_RESET_MARKER);
   const temp = markerTempPath(userDataDir);
-  const folder = folderIdentity(userDataDir);
-  if (!folder) throw new Error("the data folder could not be read");
+  const current = localResetFolderIdentity(userDataDir);
+  if (!current) throw new Error("the data folder could not be read");
+  if (options.expectFolder && !sameSessionFolder(options.expectFolder, current)) {
+    throw new Error("the data folder is no longer the one the reset was accepted for");
+  }
+  const folder = options.expectFolder ?? current;
   try {
     // "wx" creates a new file and fails on anything already there, a link
     // included, so a planted link can never redirect the write.
@@ -205,6 +217,7 @@ export async function writeLocalResetMarker(
   } catch (cause) {
     console.warn(`[local-reset] the marker is in place but the data folder could not be flushed: ${reasonOf(cause)}`);
   }
+  return folder;
 }
 
 /** A fresh, unpredictable temporary name for a marker write in the data folder. */
@@ -547,7 +560,7 @@ export function readLocalResetMarker(userDataDir: string, fs: LocalResetFileSyst
   const build = parsed.build === "installed" || parsed.build === "development" ? parsed.build : undefined;
   const folder = parsed.folder;
   if (
-    !folder || typeof folder.dev !== "number" || typeof folder.ino !== "number"
+    !folder || typeof folder.dev !== "number" || typeof folder.ino !== "number" || typeof folder.birth !== "number"
     || parsed.version !== 1 || !build
     || typeof parsed.requestedAt !== "string" || Number.isNaN(Date.parse(parsed.requestedAt))
   ) {
@@ -557,7 +570,7 @@ export function readLocalResetMarker(userDataDir: string, fs: LocalResetFileSyst
     version: 1,
     requestedAt: parsed.requestedAt,
     build,
-    folder: { dev: folder.dev, ino: folder.ino },
+    folder: { dev: folder.dev, ino: folder.ino, birth: folder.birth },
     ...(parsed.leftoversDone === true ? { leftoversDone: true as const } : {}),
     ...(Array.isArray(parsed.requestWarnings)
       ? { requestWarnings: parsed.requestWarnings.filter(isProblem) }
@@ -629,17 +642,18 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
   }
   // The request was accepted for this very folder: a copy restored or
   // roamed to another device carries the marker but not the identity.
-  const identity = folderIdentity(userDataDir);
-  if (!identity || !marker.folder || identity.dev !== marker.folder.dev || identity.ino !== marker.folder.ino) {
+  const identity = localResetFolderIdentity(userDataDir);
+  if (!identity || !marker.folder || !markerFolderMatches(marker.folder, identity)) {
     failed.push({ item: LOCAL_RESET_MARKER, reason: MARKER_OTHER_FOLDER_REASON });
     return finish("incomplete");
   }
   // The folder checked here is the one removed from and written to: if it
   // is swapped for another (a link to another profile) while the wipe runs,
-  // the wipe stops before its next removal or write.
+  // the wipe stops before its next removal or write. A cheap check of the
+  // folder itself; the full walk for mounts ran once above.
   const sameFolder = () => {
-    const now = folderIdentity(userDataDir);
-    return now !== undefined && now.dev === identity.dev && now.ino === identity.ino && !fs.isLink(userDataDir);
+    const now = localResetFolderIdentity(userDataDir);
+    return now !== undefined && sameSessionFolder(identity, now) && !isSymbolicLink(userDataDir);
   };
   const removeIfSameFolder = (name: string): boolean => {
     if (!sameFolder()) {
@@ -677,7 +691,7 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
   // the folder was listed; the reset is done only when nothing but the kept
   // files is left. Checked before the cleanup outside the folder and again
   // right before the marker goes.
-  checkFolderEmpty(fs, userDataDir, failed);
+  checkFolderEmpty(fs, userDataDir, failed, removeIfSameFolder);
   if (failed.length > 0) return finish("incomplete");
 
   if (options.packaged && marker.build === "installed") {
@@ -698,7 +712,7 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
     });
   }
 
-  checkFolderEmpty(fs, userDataDir, failed);
+  checkFolderEmpty(fs, userDataDir, failed, removeIfSameFolder);
   if (failed.length > 0) return finish("incomplete");
   if (!sameFolder()) {
     failed.push({ item: userDataDir, reason: DATA_FOLDER_CHANGED_REASON });
@@ -719,21 +733,63 @@ const MARKER_OTHER_FOLDER_REASON =
 const DATA_FOLDER_CHANGED_REASON =
   "the data folder was replaced by another folder or a link while the reset ran, so nothing more was written or removed there. Check the folder, then open OpenAdminOS again";
 
-function folderIdentity(path: string): { dev: number; ino: number } | undefined {
+/** Which folder this is: device, inode and birth time from lstat. */
+export interface LocalResetFolderIdentity {
+  dev: number;
+  ino: number;
+  birth: number;
+}
+
+/**
+ * The folder's identity, or undefined when it cannot be read or the file
+ * system gives no way to tell folders apart (no inode and no birth time),
+ * which fails safe: no marker is written and none is trusted.
+ */
+export function localResetFolderIdentity(path: string): LocalResetFolderIdentity | undefined {
   try {
     const stat = lstatSync(path);
-    return { dev: stat.dev, ino: stat.ino };
+    if (stat.ino === 0 && stat.birthtimeMs === 0) return undefined;
+    return { dev: stat.dev, ino: stat.ino, birth: stat.birthtimeMs };
   } catch {
     return undefined;
   }
 }
 
-function checkFolderEmpty(fs: LocalResetFileSystem, dir: string, failed: LocalResetProblem[]): void {
+/** Within one session: the same device and inode (and birth time where known). */
+function sameSessionFolder(a: LocalResetFolderIdentity, b: LocalResetFolderIdentity): boolean {
+  return a.dev === b.dev && a.ino === b.ino && (a.birth === 0 || b.birth === 0 || a.birth === b.birth);
+}
+
+/**
+ * Across a restart: the device number can change with a reboot or a
+ * remount (network homes, btrfs, autofs), so it is not compared. A copy
+ * restored or roamed elsewhere gets a new inode and a new birth time.
+ */
+export function markerFolderMatches(stored: LocalResetFolderIdentity, now: LocalResetFolderIdentity): boolean {
+  const birthKnown = stored.birth !== 0 && now.birth !== 0;
+  if (stored.ino === 0 || now.ino === 0) return birthKnown && stored.birth === now.birth;
+  return stored.ino === now.ino && (!birthKnown || stored.birth === now.birth);
+}
+
+function isSymbolicLink(path: string): boolean {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return true;
+  }
+}
+
+function checkFolderEmpty(
+  fs: LocalResetFileSystem,
+  dir: string,
+  failed: LocalResetProblem[],
+  removeChecked: (name: string) => boolean,
+): void {
   try {
     for (const name of fs.readdir(dir)) {
       // The marker's own temporary file is part of the reset, not left data.
       if (isMarkerTempName(name)) {
-        removeEntry(fs, dir, name, failed);
+        if (!removeChecked(name)) return;
         continue;
       }
       if (!isKeptThroughReset(name)) failed.push({ item: name, reason: "it was created again during the reset" });
