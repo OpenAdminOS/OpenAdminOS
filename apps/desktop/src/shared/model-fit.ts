@@ -13,6 +13,14 @@ import { isProviderReady } from "./provider-detection.js";
 // "thinking-only" has no producer on main yet: the reasoning report work
 // (runtime/gpt-oss-reasoning-report) is to raise it as a typed reason.
 // TODO(ugur): confirm the shape that branch uses (`kind` or `code`).
+/**
+ * How every host refusal that ends a model fit offer (expired, used, made for
+ * another question, the organization or model changed) tells the admin what
+ * to do. Chat shows an offer's choices again after a refused retry only when
+ * the refusal does not say this.
+ */
+export const MODEL_FIT_RESEND = "Send the question again.";
+
 const FIT_REASONS: readonly ModelFitReason[] = ["context-too-small", "repeated-failure", "thinking-only"];
 
 function count(text: string | undefined): number | undefined {

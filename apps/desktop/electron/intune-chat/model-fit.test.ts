@@ -13,7 +13,7 @@ import type {
   RunLlmApi,
 } from "@openadminos/agent-sdk";
 
-import { classifyModelFitFailure, isOllamaCloudModel, isPlaceholderModel, modelFitChoices, modelSizeBillions } from "../../src/shared/model-fit.js";
+import { classifyModelFitFailure, isOllamaCloudModel, isPlaceholderModel, MODEL_FIT_RESEND, modelFitChoices, modelSizeBillions } from "../../src/shared/model-fit.js";
 import { GEMINI_DEFAULT_MODEL } from "@openadminos/runtime";
 import { MODEL_FIT_OFFER_TTL_MS, ModelFitOffers, ModelOverrideError, chatModelFitFailure, guardModelFitLlm, loopFailureIssue, repeatedFailureIssue, resolveChatTurnProvider, type ModelFitOffer } from "./model-fit.js";
 import { IntuneChatService, type ChatServiceHost } from "./service.js";
@@ -344,6 +344,16 @@ describe("Model fit: the per-request override", () => {
 });
 
 describe("Model fit: offers", () => {
+  it("ends every refusal of a gone or used offer with the resend line Chat reads", () => {
+    const offers = new ModelFitOffers();
+    const request = { conversationId: "chat_1", tenantId: undefined, content: "q", workspaceKey: undefined };
+    assert.throws(() => offers.check("fit_missing", request), (error: Error) => error.message.endsWith(MODEL_FIT_RESEND));
+    const id = offers.issue({ ...request, anchor: { providerId: "ollama", model: LOCAL_MODEL }, failed: { providerId: "ollama", model: LOCAL_MODEL }, reason: "context-too-small" });
+    assert.throws(() => offers.check(id, { ...request, content: "other" }), (error: Error) => error.message.endsWith(MODEL_FIT_RESEND));
+    offers.claim(id);
+    assert.throws(() => offers.claim(id), (error: Error) => error.message.endsWith(MODEL_FIT_RESEND));
+  });
+
   it("lets only one send claim an offer", () => {
     const offers = new ModelFitOffers();
     const id = offers.issue({ conversationId: "chat_1", tenantId: undefined, content: "q", workspaceKey: undefined, anchor: { providerId: "ollama", model: LOCAL_MODEL }, failed: { providerId: "ollama", model: LOCAL_MODEL }, reason: "context-too-small" });

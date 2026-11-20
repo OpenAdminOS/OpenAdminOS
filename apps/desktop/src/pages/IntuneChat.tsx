@@ -100,7 +100,7 @@ import { formatAgentDisplayName } from "../shared/agent-display";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { ModelFitNotice, modelFitModelName } from "../components/ModelFitNotice";
 import { MODEL_FIT_COPY } from "../copy/model-fit";
-import { modelFitChoices, type ModelFitChoice } from "../shared/model-fit";
+import { MODEL_FIT_RESEND, modelFitChoices, type ModelFitChoice } from "../shared/model-fit";
 import { currentReturnTo, useSetupFlow } from "../setup/SetupFlowContext";
 import { Badge, IconButton, Menu, SegmentedControl, Tooltip } from "../components/ui";
 import { AnswerBody, FollowUpChip, SourceList, StepSkeleton, StepSummary, StepTimeline } from "../components/chat/ChatSteps";
@@ -1197,7 +1197,10 @@ function IntuneChatContent() {
       // the conversation, organization or model changed.
       // Each offer comes back once: if the host had used it before refusing, choosing it again is
       // refused too, and the admin is not looped through the same refusal.
-      if (offerBeforeRetry && !reachedTerminal && !startedSeen && !restoredOfferIdsRef.current.has(offerBeforeRetry.issue.offerId)) {
+      // A refusal that ends the offer (expired, used, another question, the model changed) tells the
+      // admin to send the question again instead, so its choices do not come back.
+      const offerEnded = errorMessage.includes(MODEL_FIT_RESEND);
+      if (offerBeforeRetry && !offerEnded && !reachedTerminal && !startedSeen && !restoredOfferIdsRef.current.has(offerBeforeRetry.issue.offerId)) {
         restoredOfferIdsRef.current.add(offerBeforeRetry.issue.offerId);
         setModelFitOffer(offerBeforeRetry);
       }

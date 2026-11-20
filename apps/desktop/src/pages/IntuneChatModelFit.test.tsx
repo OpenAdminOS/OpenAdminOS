@@ -223,6 +223,20 @@ describe("IntuneChat model fit (mockup 36)", () => {
     await waitFor(() => expect(screen.queryByRole("region", { name: "llama3.1 cannot fit this request" })).toBeNull());
   });
 
+  it("does not show the choices again when the host says the offer has ended", async () => {
+    const bridge = fitBridge();
+    const stream = bridge.streamIntuneChatMessage;
+    bridge.streamIntuneChatMessage = vi.fn<OpenAdminOSApi["streamIntuneChatMessage"]>(async (input, onEvent, options) => {
+      if (input.modelOverride) throw new Error("This choice is no longer available, so nothing was sent. Send the question again.");
+      return stream(input, onEvent, options);
+    });
+    const { user, notice } = await sendTooLarge(bridge);
+    await user.click(within(notice).getByRole("button", { name: "Run with Codex" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "Run this request with Codex?" })).getByRole("button", { name: "Send through Codex" }));
+    await screen.findByText(/no longer available, so nothing was sent/);
+    expect(screen.queryByRole("region", { name: "llama3.1 cannot fit this request" })).toBeNull();
+  });
+
   it("does not show the choices again when a retry fails after the host started it", async () => {
     const bridge = fitBridge();
     const stream = bridge.streamIntuneChatMessage;
