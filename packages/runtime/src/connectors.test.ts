@@ -74,7 +74,7 @@ describe("connector invocation confirmation", () => {
   });
 });
 
-import { graphAccessDenialFromError } from "@openadminos/agent-sdk";
+import { graphAccessDenialFromError, graphAccessDenialFromStoredText } from "@openadminos/agent-sdk";
 import { preflightConnectors } from "./connectors.js";
 
 describe("required connector preflight", () => {
@@ -93,5 +93,7 @@ describe("required connector preflight", () => {
     assert.ok(failure instanceof Error);
     assert.match(failure.message, /failed its health check/);
     assert.equal(graphAccessDenialFromError(failure)?.cause, "unknown");
+    // The emitted message, as a stored run keeps it, still reads as a Graph 403.
+    assert.equal(graphAccessDenialFromStoredText(failure.message)?.cause, "unknown");
   });
 });

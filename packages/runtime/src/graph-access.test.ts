@@ -172,6 +172,7 @@ describe("Graph access denial classification", () => {
       "The plan could not be checked against the tenant before applying, so nothing was applied. ",
       "The proposal could not be checked against the tenant before applying, so nothing was applied. ",
       "Nothing was applied: ",
+      "Connector 'teams' failed its health check: ",
     ]) {
       assert.equal(graphAccessDenialFromStoredText(wrapper + graph)?.cause, "unknown", wrapper);
       assert.equal(errorComesFromGraph(`${wrapper}Graph rejected the access token (HTTP 401). Tenant needs reconnect.`), true, wrapper);

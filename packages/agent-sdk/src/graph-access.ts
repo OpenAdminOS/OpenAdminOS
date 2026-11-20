@@ -231,11 +231,13 @@ function unwrapScriptAgentGraphError(raw: string): string {
 }
 
 /**
- * Wrappers the app puts in front of a Graph error when a write run stops
- * before apply: a failed check of the reviewed plan or proposal, and a failed
- * replan. The Graph error follows them unchanged.
+ * Wrappers the app puts in front of a Graph error: a required Teams or Outlook
+ * connector's failed health check, and, when a write run stops before apply, a
+ * failed check of the reviewed plan or proposal and a failed replan. The Graph
+ * error follows them unchanged.
  */
 const APP_FAILURE_WRAPPERS = [
+  /^Connector '(?:teams|outlook)' failed its health check: /,
   /^The (?:plan|proposal) could not be checked against the tenant before applying, so nothing was applied\. /,
   /^Nothing was applied: /,
 ];

@@ -48,6 +48,14 @@ function lmStudioContextAdvice(error: string): string {
 /** Errors with one cause and one recovery: only their own playbook is shown. */
 const EXCLUSIVE = [isLmStudioContextTooSmall, isContextLimitLookup];
 
+/**
+ * A Microsoft sign-in error as MSAL reports it: the message starts with an
+ * AADSTS code, or with an OAuth error such as interaction_required followed by
+ * one, also after the app's write-plan wrappers. An AADSTS code quoted further
+ * into a provider's error is not a tenant sign-in.
+ */
+const MICROSOFT_SIGN_IN_ERROR = /^(?:The (?:plan|proposal) could not be checked[^.]*\. |Nothing was applied: )?(?:AADSTS\d+|(?:interaction_required|invalid_grant|consent_required): AADSTS\d+)/;
+
 const SUGGESTIONS: Suggestion[] = [
   {
     match: (e) => /ollama/i.test(e) && /(not reachable|connect|refused|econnrefused)/i.test(e) && !isContextLimitLookup(e),
@@ -104,7 +112,7 @@ const SUGGESTIONS: Suggestion[] = [
     // "expired token" is not.
     match: (e) =>
       ((errorComesFromGraph(e) && /\b401\b|unauthor/i.test(e)) ||
-        (/\bAADSTS\d+/.test(e) && /interaction_required|invalid_grant|expired/i.test(e))) &&
+        MICROSOFT_SIGN_IN_ERROR.test(e)) &&
       !isContextLimitLookup(e),
     title: "Tenant token expired",
     body: "Disconnect and reconnect the tenant from Connections. MSAL caches a refresh token but Graph can revoke it independently.",
