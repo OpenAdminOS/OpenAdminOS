@@ -9,7 +9,7 @@ import {
   localResetDataFolderLinkMessage,
   localResetLinkCheck,
   MANAGED_POLICY_FILE,
-  policyLinkProblem,
+  localResetPolicyProblem,
   readLocalResetMarker,
   requestLocalReset,
   runPendingLocalReset,
@@ -5577,7 +5577,7 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
         if (localResetLinkCheck(app.getPath("userData")).dataFolderIsLink) {
           throw new LocalResetRequestError(localResetDataFolderLinkMessage());
         }
-        const policyProblem = policyLinkProblem(app.getPath("userData"));
+        const policyProblem = localResetPolicyProblem(app.getPath("userData"));
         if (policyProblem) throw new LocalResetRequestError(`The reset could not start: ${policyProblem}. Nothing was removed.`);
         const blocker = await store.beginLocalReset();
         if (blocker) throw new LocalResetRequestError(blocker);
