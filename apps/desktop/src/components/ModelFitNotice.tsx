@@ -4,7 +4,7 @@ import { MODEL_FIT_COPY } from "../copy/model-fit";
 import { PROVIDER_TOOL_NAMES } from "../copy/providers";
 import { providerDataLocation } from "../copy/trust";
 import { modelDisplayName } from "../setup/model-choice";
-import type { ModelFitChoice, ModelFitChoices } from "../shared/model-fit";
+import { modelSizeBillions, type ModelFitChoice, type ModelFitChoices } from "../shared/model-fit";
 import type { ModelFitIssue } from "../shared/openAdminOS";
 
 /** What the admin knows a model as: "OpenAdmin 8B" for the OpenAdmin model, the name otherwise. */
@@ -88,7 +88,7 @@ export function ModelFitNotice({
                     {choice.isLocal ? (
                       <>
                         <div className="text-xs text-[var(--color-success)]">{MODEL_FIT_COPY.localWhere(choice.providerName)}</div>
-                        <div className="text-xs text-[var(--color-text-muted)]">{MODEL_FIT_COPY.localNote(surface)}</div>
+                        <div className="text-xs text-[var(--color-text-muted)]">{MODEL_FIT_COPY.localNote(surface, modelSizeBillions(issue.model) !== undefined)}</div>
                         {/* A model on this device needs no accept step, so its button sends straight away. */}
                         {surface === "chat" ? <span className="sr-only">{MODEL_FIT_COPY.localSendsNow}</span> : null}
                       </>

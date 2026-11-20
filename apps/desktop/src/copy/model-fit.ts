@@ -64,8 +64,9 @@ export const MODEL_FIT_COPY = {
   acceptProviderGone: (provider: string) => `${provider} is no longer available for this request, so nothing was sent. Choose another option.`,
   /** The offer was withdrawn because the organization, conversation or model changed. */
   offerWithdrawn: "The organization or model changed, so this choice was withdrawn and nothing was sent. Send the question again.",
-  localNote: (surface: Surface) =>
-    `A larger model on this device. Its context size is not checked before the ${noun(surface)}.`,
+  /** `sizeKnown`: the failed model's size could be read, so this one is larger than it. */
+  localNote: (surface: Surface, sizeKnown = true) =>
+    `${sizeKnown ? "A larger model" : "Another model"} on this device. Its context size is not checked before the ${noun(surface)}.`,
   /**
    * Where the cost lands. The app does not know the admin's plan or price.
    * TODO(ugur): is this cost note enough, or should hosted rows show an estimate?
