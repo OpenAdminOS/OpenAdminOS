@@ -2548,11 +2548,14 @@ Mockup: `docs/mockups/34-local-reset.html`.
   Chromium's wait for a second launch, except the Windows task list (15
   seconds), which reads every task; a wipe killed by a second launch resumes
   from the marker.
-- **Marker bound to its folder.** The marker records the data folder's
-  device and inode when it is written, and the launch wipe runs only for
-  that same folder: a copy restored or roamed to another device carries the
-  marker but not the identity, so it stops with nothing removed and asks for
-  a fresh reset there. The post-reset notice is kept in memory for that
+- **Marker bound to its folder.** The first marker write records the data
+  folder's identity (device, inode and birth time); the warnings rewrite and
+  the sign-out go only to that same folder. At launch the wipe runs only when
+  the folder still has that inode and birth time (the device number is not
+  compared, since a reboot or remount can change it): a copy restored or
+  roamed to another device carries the marker but not the identity, so it
+  stops with nothing removed and asks for a fresh reset there. A file system
+  with neither inode nor birth time gets no marker at all. The post-reset notice is kept in memory for that
   launch only; quitting before reading it loses its warnings (the log keeps
   them).
 - **Folders above** the data folder or a cache are not checked (decided in
@@ -2569,8 +2572,9 @@ Mockup: `docs/mockups/34-local-reset.html`.
   when its real location is not its real parent plus its own name (so
   `link/` is caught too; compared by device and inode, so letter case does
   not matter; each marker write checks again, and the launch wipe checks
-  the folder's identity before every removal and write and stops if it was
-  swapped for another), when it or any folder inside it is on another device (a
+  the folder's identity and that it is not a link before every removal and
+  write, the marker's temporary files included, and stops if it was swapped
+  for another), when it or any folder inside it is on another device (a
   mounted volume or disk image; a folder that cannot be read counts too),
   or, on Linux, when a mount sits at or inside it (a bind mount; an
   unreadable mount table counts too). Cache folders outside the data folder

@@ -244,6 +244,14 @@ the installed app's scheduler, login item or caches.
   bound to the folder's device and inode). Muse lows: gateway proposals
   counted, a test for an unconfirmed `defaults read`, the notice lifetime
   documented.
+- Review round 20: Claude one important (the device number can change across
+  a reboot or remount, which would refuse a resumed reset on the same
+  machine; the binding now uses inode and birth time); Sol one blocking (the
+  warnings rewrite captured a replaced folder's identity; the first write's
+  identity is now required for the rewrite and the sign-out) and a test race
+  (the confirmation test now waits for the delivery pass); Muse no blocking,
+  lows applied (temp marker removal checked too, a cheap per-removal check,
+  no identity without inode and birth time).
 - Process lesson: twice I edited the tree while a reviewer was reading it;
   parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the
