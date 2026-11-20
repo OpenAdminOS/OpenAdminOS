@@ -2539,10 +2539,12 @@ in the main process. Mockup: `docs/mockups/34-local-reset.html`.
   with a warning; the wipe removes links inside the folder without following
   them. The folder counts as a link when its path has `.` or `..` segments,
   when its real location is not its real parent plus its own name (so
-  `link/` is caught too), when it is on another device than its parent (a
-  mounted volume), or, on Linux, when a mount sits at or inside it (a bind
-  mount; an unreadable mount table counts too). Cache folders outside the
-  data folder are skipped with a warning on the same Linux check. A
+  `link/` is caught too; compared by device and inode, so letter case does
+  not matter), when it or any folder inside it is on another device (a
+  mounted volume or disk image; a folder that cannot be read counts too),
+  or, on Linux, when a mount sits at or inside it (a bind mount; an
+  unreadable mount table counts too). Cache folders outside the data folder
+  are skipped with a warning on the same checks, on every platform. A
   `policy.json` that is a link at all, or a folder at that name, stops the
   reset at the request and at launch: a chain of links can always be built
   that a check cannot follow the way the system does, so the reset does not
@@ -2569,7 +2571,11 @@ in the main process. Mockup: `docs/mockups/34-local-reset.html`.
   removes it. That process restarts through a detached shell outside the
   LaunchAgent's process group, which waits for it to exit and runs `open` on
   the app bundle, because launchd ends the group, Electron's relaunch helper
-  included, with the job. The LaunchAgent is unloaded by its exact service
+  included, with the job. On Windows the task name is the same for every
+  account, so the reset removes the task only when it runs this executable
+  or one under this account's profile (the installer is per user) and
+  otherwise leaves it with a warning; a per-user task name is a follow-up.
+  The LaunchAgent is unloaded by its exact service
   label, never by path (a path can name other jobs), and only a plain file
   at the plist path is deleted. Removal is checked afterwards (`launchctl print` exit 113, a
   `schtasks /Query` that no longer finds the task), with every command bounded.

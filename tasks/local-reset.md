@@ -165,6 +165,16 @@ the installed app's scheduler, login item or caches.
   another device than its parent refuses removal, the Windows manual script
   walks the tree and removes links as links, and the Keychain loop ends with
   a read-only lookup.
+- Review round 11: Claude no blocking; Muse one blocking (a volume mounted
+  inside the data folder or a cache off Linux); Sol four blocking (the same
+  nested mount, manual steps without mount and policy checks, an elevated
+  Windows reset removing another account's task). Fixed: every folder tree
+  the reset empties is walked for another device, the guide has a "Before
+  removing files by hand" section and the Windows script stops on a linked
+  policy file, the Windows task is removed only when its action is this
+  account's copy, links removed with Directory.Delete instead of cmd. Open
+  follow-up: a per-user Windows task name (the scheduler registration is
+  outside this change).
 - Found in the end to end run and fixed: the incomplete screen called the
   appearance handler before it was registered, and failure reasons repeated
   full paths.
