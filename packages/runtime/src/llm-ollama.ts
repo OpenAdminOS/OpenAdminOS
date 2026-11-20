@@ -73,6 +73,8 @@ export interface OllamaEndpointTrust {
 }
 
 export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi {
+  // The /api/show reading each model's size check got, per adapter (one run).
+  const checkedShows = new Map<string, OllamaShowContext>();
   const endpoint = resolveOllamaEndpoint(options.endpoint);
   const defaultModel = options.defaultModel;
   const lookupTimeoutMs = options.lookupTimeoutMs ?? OLLAMA_SHOW_TIMEOUT_MS;
@@ -89,7 +91,15 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
     streamsIncrementally: true,
     // The retry below raises num_ctx for a model without a pinned one, so
     // that model's maximum is its limit; a pinned num_ctx is the limit.
-    contextWindow: (model) => readOllamaContextWindow(endpoint, model ?? defaultModel, { appRaisesNumCtx: true, timeoutMs: lookupTimeoutMs }),
+    contextWindow: (model) => {
+      const name = model ?? defaultModel;
+      return readOllamaContextWindow(endpoint, name, {
+        appRaisesNumCtx: true, timeoutMs: lookupTimeoutMs,
+        // Kept for this adapter's requests: if their own lookup fails, the
+        // pin the size check saw still holds.
+        onShow: (show) => { if (name) checkedShows.set(name, show); },
+      });
+    },
     async complete(opts: LlmOptions): Promise<LlmCompletion> {
       let last: LlmStreamChunk | undefined;
       for await (const chunk of this.stream(opts)) {
@@ -264,6 +274,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
           ...(cachedCtx !== undefined ? { currentNumCtx: cachedCtx, ...(cachedRevision !== undefined ? { currentRevision: cachedRevision } : {}) } : {}),
           ...(opts.enforceContextWindow ? { enforce: true } : {}),
+          ...(checkedShows.has(model) ? { fallbackShow: checkedShows.get(model)! } : {}),
           timeoutMs: lookupTimeoutMs, signal: controller.signal,
         });
         if (opts.signal?.aborted) throw stoppedByUser();
@@ -307,7 +318,9 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           // Ollama counted more than the estimate, so refuse before any retry
           // lookup can lose that pin or fail.
           const answerBudget = opts.maxTokens ?? DEFAULT_ANSWER_RESERVE_TOKENS;
-          const seenLimit = sized?.pinnedNumCtx !== undefined ? Math.min(sized.pinnedNumCtx, sized.modelMaxContext ?? Infinity) : undefined;
+          const seenLimit = sized?.pinnedNumCtx !== undefined
+            ? Math.min(sized.pinnedNumCtx, sized.modelMaxContext ?? Infinity)
+            : sized?.modelMaxContext;
           if (opts.enforceContextWindow && seenLimit !== undefined && overflow.requested + answerBudget > seenLimit) {
             throw new ContextTooSmallError({
               code: "context-too-small",
@@ -333,7 +346,11 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           // first lookup saw.
           const pin = retryShow?.pinnedNumCtx ??
             (retryShow?.revision === undefined || retryShow.revision === sized?.revision ? sized?.pinnedNumCtx : undefined);
-          const enforcedLimit = opts.enforceContextWindow && pin !== undefined ? Math.min(pin, modelMax ?? Infinity) : undefined;
+          // An agent run is held to the pin, else to the model's maximum, with
+          // room for its answer.
+          const enforcedLimit = !opts.enforceContextWindow
+            ? undefined
+            : pin !== undefined ? Math.min(pin, modelMax ?? Infinity) : modelMax;
           if (enforcedLimit !== undefined) {
             const answerTokens = opts.maxTokens ?? DEFAULT_ANSWER_RESERVE_TOKENS;
             if (overflow.requested + answerTokens > enforcedLimit) {
