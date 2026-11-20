@@ -84,7 +84,7 @@ export const MODEL_FIT_COPY = {
   declined: (model: string) =>
     `Kept on ${model}. Nothing was sent. Narrow the question, for example to one platform or one group, or split it into smaller questions, then send again.`,
   policy: "Your organization's policy allows only providers on this device, so no hosted provider is offered.",
-  noneSetUp: "No hosted provider is set up, so none is offered.",
+  noneSetUp: "No hosted provider is ready, so none is offered.",
   openProviders: "Open Settings, Providers",
 
   acceptTitle: (tool: string) => `Run this request with ${tool}?`,

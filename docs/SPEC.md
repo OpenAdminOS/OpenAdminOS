@@ -2528,7 +2528,7 @@ size; Split the question (a hint, and the question back in an empty
 composer); and Keep on the local model, which leaves "Kept on <model>. Nothing was
 sent. Narrow the question ... then send again." Providers the managed policy
 does not allow are not in the provider list, so they are never offered; when
-the policy allows no hosted provider the notice says so, and with none set up
+the policy allows no hosted provider the notice says so, and with none ready
 it links to Settings, Providers.
 
 Accept step. A hosted choice opens the hosted send confirmation in a
