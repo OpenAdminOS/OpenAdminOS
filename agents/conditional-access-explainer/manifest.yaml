@@ -212,8 +212,9 @@ skills:
         Windows and on iOS does not overlap). Matching counts ("2 groups",
         "1 named location"), matching filter modes and shortened device
         filter rules do not show that two policies cover the same objects,
-        so treat that scope as unresolved and ask the admin to compare those
-        policies in Entra. Mention policies not
+        and neither do matching otherConditions names, which carry no
+        values, so treat that scope as unresolved and ask the admin to
+        compare those policies in Entra. Mention policies not
         modified for over a year when they matter.
 
         5. What the policies do.
