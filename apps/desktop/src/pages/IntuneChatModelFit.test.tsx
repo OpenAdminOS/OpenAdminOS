@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Route, Routes } from "react-router";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -161,6 +161,20 @@ describe("IntuneChat model fit (mockup 36)", () => {
     expect(line).toHaveTextContent("Sending to Codex · location set by your account for this request only.");
     release();
     expect(await screen.findByText("Answered by")).toBeInTheDocument();
+  });
+
+  it("sends an accepted request once when Send is clicked twice in the same tick", async () => {
+    const bridge = fitBridge();
+    const { user, notice } = await sendTooLarge(bridge);
+    await user.click(within(notice).getByRole("button", { name: "Run with Codex" }));
+    const send = within(await screen.findByRole("dialog", { name: "Run this request with Codex?" })).getByRole("button", { name: "Send through Codex" });
+    // Both clicks land before React re-renders, so the sending state has not changed yet.
+    act(() => {
+      send.click();
+      send.click();
+    });
+    await screen.findByText("Answered by");
+    expect(bridge.streamIntuneChatMessage).toHaveBeenCalledTimes(2);
   });
 
   it("keeps a narrower draft the admin typed when the original question is retried", async () => {
