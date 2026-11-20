@@ -2544,14 +2544,14 @@ after a fresh check that the model runs here: the host reads Ollama's
 `/api/tags` again (model metadata only; nothing is loaded) and refuses a
 model that is no longer listed or is now remote-backed, or when the list
 cannot be read; for LM Studio and Lemonade it classifies the address they
-are reached at, and refuses one outside this device. That check runs again
+are reached at, and refuses one outside this device (Lemonade's address can
+be set to another machine, so its local choice is bound to that address too). That check runs again
 before every model call of the request, not only once. The Ollama adapter's
 own context retry inside one call goes to the same address and model name and
 is not checked again; a hook there is a follow-up for the adapter
 (packages/runtime/src/llm-ollama.ts). A hosted choice takes a destination fingerprint
 (`getProviderDestination`: its address, or the Azure OpenAI resource and
-deployment, and Lemonade's address, which can be set outside this device)
-when its accept step opens, and the host refuses the send if the destination
+deployment) when its accept step opens, and the host refuses the send if the destination
 changed since. The check and the binding come from one read of the
 destination, and the binding is checked again on the address the adapter is
 built with. A lookup for an earlier choice is dropped when the admin picks
