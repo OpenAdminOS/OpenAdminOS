@@ -2179,9 +2179,9 @@ export class IntelligenceSqliteStore {
     const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
     let snapshotsDeleted = 0;
     let versionsDeleted = 0;
-    // Reserve the write transaction before reading a snapshot that a
-    // sidecar backfill on another WAL connection could otherwise invalidate.
-    this.db.exec("BEGIN IMMEDIATE");
+    // Read before upgrading the deferred transaction so a competing writer
+    // fails the upgrade immediately instead of entering SQLite’s busy wait.
+    this.db.exec("BEGIN");
     try {
       const rows = tenantId
         ? this.db

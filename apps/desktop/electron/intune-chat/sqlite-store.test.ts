@@ -24,11 +24,11 @@ import type {
 } from "@openadminos/agent-sdk";
 
 describe("Intune Chat SQLite store", () => {
-  it("prunes drift history while a second connection attempts a sidecar write", async t => {
-    const dir = await mkdtemp(join(tmpdir(), "openadminos-drift-backfill-"));
+  it("reads drift history before trying to upgrade a transaction while another writer holds the lock", async t => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-drift-locked-"));
     const path = join(dir, "openadminos.db");
     const store = new IntelligenceSqliteStore(path);
-    const backfill = new DatabaseSync(path);
+    const writer = new DatabaseSync(path);
     try {
       const snapshot = { tenantId: "tenant-1", resource: "configurationPolicies" as const, label: "Policies", scopeSet: [] };
       store.replaceGraphResources({ ...snapshot, rows: [{ id: "fixture-device", displayName: "Original" }],
@@ -36,29 +36,36 @@ describe("Intune Chat SQLite store", () => {
       store.replaceGraphResources({ ...snapshot, rows: [{ id: "fixture-device", displayName: "Replacement" }],
         refreshedAt: "2000-01-02T00:00:00.000Z" });
       const db = store["db"];
+      // Keep a nonzero timeout so the test exercises the deferred upgrade.
+      // A regression attempting to acquire the lock up front reaches no read.
+      db.exec("PRAGMA busy_timeout = 50");
       const prepare = db.prepare.bind(db);
-      const update = backfill.prepare("UPDATE graph_resources SET classification_json = NULL");
-      let attempted = false;
+      let readWhileLocked = false;
       t.mock.method(db, "prepare", (sql: string) => {
         const statement = prepare(sql);
         if (sql.includes("FROM drift_object_versions") && sql.includes("ORDER BY tenant_id")) {
           const all = statement.all.bind(statement);
           t.mock.method(statement, "all", (...args: Parameters<typeof statement.all>) => {
             const rows = all(...args);
-            attempted = true;
-            assert.throws(() => update.run(), { errcode: 5 });
+            assert.equal(writer.isTransaction, true);
+            readWhileLocked = true;
             return rows;
           });
         }
         return statement;
       });
-      const result = store.pruneDriftHistory(snapshot.tenantId, 1);
-      assert.equal(attempted, true);
-      assert.equal(result.versionsDeleted, 1);
-      assert.equal(update.run().changes, 1);
+
+      writer.exec("BEGIN IMMEDIATE");
+      assert.throws(() => store.pruneDriftHistory(snapshot.tenantId, 1), { errcode: 5 });
+      assert.equal(readWhileLocked, true);
+      assert.equal(db.isTransaction, false);
+
+      writer.exec("ROLLBACK");
+      t.mock.restoreAll();
+      assert.equal(store.pruneDriftHistory(snapshot.tenantId, 1).versionsDeleted, 1);
     } finally {
-      backfill.close();
-      store.close();
+      writer.close();
+      await store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
