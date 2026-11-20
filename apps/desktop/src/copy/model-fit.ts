@@ -24,7 +24,7 @@ export const MODEL_FIT_COPY = {
   /** The reason in plain numbers, where the provider gave them. */
   why(issue: ModelFitIssue, model: string, surface: Surface): string {
     if (issue.reason === "repeated-failure") {
-      return "It did not hold the investigation format twice in a row, so this answer comes from cached data only.";
+      return "It could not finish the investigation twice in a row, so this answer comes from cached data only.";
     }
     if (issue.reason === "thinking-only") return `${model} spent its whole answer budget on reasoning.`;
     const what = `This ${noun(surface)}`;
@@ -102,7 +102,8 @@ export const MODEL_FIT_COPY = {
 
   answeredBy: "Answered by",
   /** A switched request that failed or was stopped: the prompt still left this device. */
-  sentTo: "Sent to",
+  // A failed or stopped call may or may not have reached the provider, so the line says it was attempted.
+  sentTo: "Attempted through",
   /** The accepted request while it runs. */
   sendingTo: "Sending to",
   /** While it runs, the switch back has not happened yet. */

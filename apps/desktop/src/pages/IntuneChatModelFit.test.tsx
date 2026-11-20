@@ -188,7 +188,7 @@ describe("IntuneChat model fit (mockup 36)", () => {
     await user.click(within(await screen.findByRole("dialog", { name: "Run this request with Codex?" })).getByRole("button", { name: "Send through Codex" }));
     await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledTimes(2));
     await screen.findByText(/settings changed after you chose it, so nothing was sent/);
-    expect(screen.queryByText("Sent to")).toBeNull();
+    expect(screen.queryByText("Attempted through")).toBeNull();
     expect(screen.queryByText("Sending to")).toBeNull();
   });
 
@@ -297,8 +297,8 @@ describe("IntuneChat model fit (mockup 36)", () => {
       ]),
     });
     renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: `/chat/${conversation.id}`, bridge });
-    const line = (await screen.findByText("Sent to")).parentElement!;
-    expect(line).toHaveTextContent("Sent to Codex · location set by your account for this request only. Chat is back on llama3.1.");
+    const line = (await screen.findByText("Attempted through")).parentElement!;
+    expect(line).toHaveTextContent("Attempted through Codex · location set by your account for this request only. Chat is back on llama3.1.");
   });
 
   it("keeps the reason on a stored failed answer after a reload, without the choices", async () => {
