@@ -11,13 +11,13 @@ interface Suggestion {
 }
 
 /**
- * A failed lookup of the model's context limit has its own playbook only.
- * Only the app's own text counts: what Ollama said, quoted after "Ollama said:", may mention a context limit too.
+ * The app's own text of an error. What Ollama said, quoted after "Ollama said:",
+ * can contain words such as "context limit" or "invalid" that would pick an unrelated playbook.
  */
-const isContextLimitLookup = (e: string) => {
-  const own = e.split("Ollama said:")[0] ?? e;
-  return /ollama/i.test(own) && /context limit|\/api\/show/i.test(own);
-};
+const ownText = (e: string) => e.split("Ollama said:")[0] ?? e;
+
+/** A failed lookup of the model's context limit has its own playbook only. */
+const isContextLimitLookup = (e: string) => /ollama/i.test(e) && /context limit|\/api\/show/i.test(e);
 
 const SUGGESTIONS: Suggestion[] = [
   {
@@ -85,10 +85,11 @@ export function RunFailureRemediation({ run }: { run: RunRecord }) {
   if (run.status !== "failed" || !run.error) return null;
   // A failed lookup of the Ollama model's context limit has one cause and
   // one recovery; its HTTP status (for example 403) is not a Graph denial.
-  const lookup = isContextLimitLookup(run.error);
+  const own = ownText(run.error);
+  const lookup = isContextLimitLookup(own);
   const matched = lookup
     ? SUGGESTIONS.filter((suggestion) => suggestion.match === isContextLimitLookup)
-    : SUGGESTIONS.filter((suggestion) => suggestion.match(run.error!));
+    : SUGGESTIONS.filter((suggestion) => suggestion.match(own));
   const accessDenial = lookup ? undefined : run.accessDenial ?? graphAccessDenialFromError(run.error);
   if (accessDenial) {
     matched.unshift({ match: () => true, title: accessDenial.title, body: `${accessDenial.message} ${accessDenial.recovery}` });
