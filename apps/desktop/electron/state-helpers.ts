@@ -110,7 +110,8 @@ export function humanizeScheduledRunError(message: string, accessDenial?: GraphA
   const raw = message.trim();
   const lower = raw.toLowerCase();
   if (accessDenial) return graphAccessDenialText(accessDenial);
-  const unknownDenial = graphAccessDenialFromError(raw);
+  // Only the app's own words count: a "403 MiB" in what Ollama said is not a Graph denial.
+  const unknownDenial = graphAccessDenialFromError(raw.split("Ollama said:")[0] ?? raw);
   if (unknownDenial) return graphAccessDenialText(unknownDenial);
   if (lower.includes("graph request failed") && lower.includes("fetch failed")) {
     return "Microsoft Graph request failed. Check network or VPN connectivity, then rerun the schedule.";
