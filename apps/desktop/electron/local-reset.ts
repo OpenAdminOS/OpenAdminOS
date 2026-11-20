@@ -275,6 +275,17 @@ export function relaunchTarget(input: {
   return { execPath: appImage, args, extractAndRun };
 }
 
+/**
+ * The processes the AppImage restart waits for. A mounted AppImage's
+ * runtime replaced itself with the app, so this process's parent is the
+ * launcher (a terminal, a file manager) and is not waited for. In
+ * extract-and-run the runtime stays as the parent and removes the extracted
+ * folder once the app exits, so it is waited for too.
+ */
+export function appImageHandoffWaitPids(extractAndRun: boolean, pid: number, ppid: number): number[] {
+  return extractAndRun && ppid > 1 ? [pid, ppid] : [pid];
+}
+
 /** True when the Linux mount table lists a mount exactly at `path`; an unreadable table counts as one. */
 function isMountPoint(path: string, mountInfo: (() => string) | undefined): boolean {
   let table: string;

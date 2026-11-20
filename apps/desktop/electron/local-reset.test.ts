@@ -33,6 +33,7 @@ import {
   UPDATER_CACHE_DIR,
   requestLocalReset,
   relaunchTarget,
+  appImageHandoffWaitPids,
   runPendingLocalReset,
   writeLocalResetMarker,
   type CommandResult,
@@ -1538,6 +1539,11 @@ describe("local reset: restart", () => {
       { args: [] },
     );
     assert.deepEqual(relaunchTarget({ platform: "darwin", env, argv, execPath, dropArgs: [] }), { args: ["--some-flag", "--background-scheduler"] });
+    // Only an extract-and-run runtime is waited for; a mounted AppImage's
+    // parent is the launcher, and init never is.
+    assert.deepEqual(appImageHandoffWaitPids(false, 4200, 4100), [4200]);
+    assert.deepEqual(appImageHandoffWaitPids(true, 4200, 4100), [4200, 4100]);
+    assert.deepEqual(appImageHandoffWaitPids(true, 4200, 1), [4200]);
   });
 });
 
