@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setImmediate as nextTick } from "node:timers/promises";
 import { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
 
@@ -73,6 +74,35 @@ it("recognizes a cached user's first name inside a device name and resolves type
       prompt.slice(span.start, span.end) === deviceName));
     assert.ok(spans.some(span => span.kind === "device" && prompt.slice(span.start, span.end) === "Desk computer"));
     assert.deepEqual(spans.filter(span => span.section === "system").map(span => system.slice(span.start, span.end)), [knownId, unknownId]);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("publishes only complete startup identity shards to the request worker", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-classification-startup-"));
+  const path = join(dir, "openadminos.db");
+  const tenantId = "fixture-tenant";
+  let store = new IntelligenceSqliteStore(path);
+  try {
+    store.replaceGraphResources({ tenantId, resource: "users", label: "Users", scopeSet: [],
+      refreshedAt: "2026-11-18T00:00:00.000Z",
+      rows: Array.from({ length: 600 }, (_, i) => ({ id: `user-${i}`, displayName: i === 599 ? "Yelena Last" : `Fixture ${i}` })),
+    });
+    store.close();
+    store = new IntelligenceSqliteStore(path, { backgroundClassification: true });
+    const index = store.classificationIdentityIndex(tenantId);
+    const ledger = new ClassificationLedger(index);
+    await nextTick();
+    assert.equal(index.isComplete?.(), false);
+    assert.deepEqual([...index.workerShards!()], []);
+    assert.equal(ledger.classifyRequest({ prompt: "Yelena" }).coverageIncomplete, true);
+    await store.waitForCacheClassification();
+    const result = await ledger.classifyProviderRequest({ prompt: "Yelena" });
+    assert.equal(result.coverageIncomplete, false);
+    assert.equal(result.counts.identity, 1);
+    ledger.dispose();
   } finally {
     store.close();
     await rm(dir, { recursive: true, force: true });

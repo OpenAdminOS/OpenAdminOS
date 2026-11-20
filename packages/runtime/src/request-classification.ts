@@ -866,6 +866,7 @@ export class ClassificationLedger {
 
   async classifyLargeRequest(request: RequestText, signal?: AbortSignal): Promise<RequestClassification> {
     const wasDisposed = this.disposed;
+    let indexCurrent = () => true;
     const result = await requestWorker().run(async client => {
       const slice = new ClassificationSlice();
       const sections = { system: await encodeSection(request.system, slice), prompt: await encodeSection(request.prompt, slice) };
@@ -877,7 +878,12 @@ export class ClassificationLedger {
         if (!ledger.disposed) ledgers.push(id);
       }
       const indexedShards: Array<[TenantValueIndex, number]> = [];
-      for (const shard of identityIndex?.workerShards?.() ?? []) {
+      const snapshot = [...identityIndex?.workerShards?.() ?? []];
+      indexCurrent = () => {
+        const current = [...identityIndex?.workerShards?.() ?? []];
+        return current.length === snapshot.length && current.every((shard, index) => shard === snapshot[index]);
+      };
+      for (const shard of snapshot) {
         let id = client.shards.get(shard);
         if (id === undefined) {
           id = client.id(shard);
@@ -906,7 +912,7 @@ export class ClassificationLedger {
       return {
         message: { type: "scan", sections, ledgers, shards, state: {
           ...state, historyFences: latest.historyFences,
-          incomplete: latest.incomplete || shards.length !== indexedShards.length ||
+          incomplete: state.incomplete || latest.incomplete || !indexCurrent() || shards.length !== indexedShards.length ||
             Boolean(identityIndex && !identityIndex.workerShards),
         } },
         transfers,
@@ -914,7 +920,7 @@ export class ClassificationLedger {
     }, signal);
     const classification = await unpackWorkerResult(result);
     if (!wasDisposed && this.disposed) throw new Error("Request classification evidence was released.");
-    return classification;
+    return indexCurrent() ? classification : { ...classification, coverageIncomplete: true, effectiveClass: "credential" };
   }
 
   static scanInWorker(message: WorkerScan, ledgers: Map<number, ClassificationLedger>, shards: Map<number, TenantValueIndex>): WorkerResult {

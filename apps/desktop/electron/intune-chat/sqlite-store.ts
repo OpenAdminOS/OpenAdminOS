@@ -2538,6 +2538,9 @@ export class IntelligenceSqliteStore {
     const placeholders = TENANT_IDENTITY_RESOURCES.map(() => "?").join(", ");
     const select = this.db.prepare(`SELECT rowid, tenant_id, resource, graph_id, display_name, raw_json
       FROM graph_resources WHERE rowid > ? AND resource IN (${placeholders}) ORDER BY rowid LIMIT ?`);
+    const identity = new Map<string, Map<GraphCacheResourceKind, TenantValueIndex>>();
+    const firstNames = new Map<string, Map<GraphCacheResourceKind, TenantValueIndex>>();
+    const generations = new Map(this.cacheCleared);
     let cursor = 0;
     for (;;) {
       const rows = select.all(cursor, ...TENANT_IDENTITY_RESOURCES, CLASSIFICATION_BATCH_ROWS) as
@@ -2545,16 +2548,24 @@ export class IntelligenceSqliteStore {
       if (!rows.length) break;
       for (const row of rows) {
         cursor = row.rowid;
-        let index = this.tenantIdentityShards.get(row.tenant_id)?.get(row.resource);
-        if (!index) this.setIdentityShard(this.tenantIdentityShards, row.tenant_id, row.resource, index = new TenantValueIndex());
+        if (generations.get(row.tenant_id) !== this.cacheCleared.get(row.tenant_id)) continue;
         const parsed = readJson<unknown>(row.raw_json, null);
+        let index = identity.get(row.tenant_id)?.get(row.resource);
+        if (!index) this.setIdentityShard(identity, row.tenant_id, row.resource, index = new TenantValueIndex());
         addCacheIdentity(index, row.graph_id, row.display_name, parsed);
         if (row.resource !== "users") continue;
-        let firstNames = this.classificationIndexes.get(row.tenant_id)?.get(row.resource);
-        if (!firstNames) this.setIdentityShard(this.classificationIndexes, row.tenant_id, row.resource, firstNames = new TenantValueIndex());
-        addUserFirstName(firstNames, row.resource, row.display_name, parsed);
+        let names = firstNames.get(row.tenant_id)?.get(row.resource);
+        if (!names) this.setIdentityShard(firstNames, row.tenant_id, row.resource, names = new TenantValueIndex());
+        addUserFirstName(names, row.resource, row.display_name, parsed);
       }
       yield;
+    }
+    // A worker mirror may outlive this turn. Publish only finished indexes.
+    for (const [prepared, published] of [[identity, this.tenantIdentityShards], [firstNames, this.classificationIndexes]] as const) {
+      for (const [tenantId, shards] of prepared) {
+        if (generations.get(tenantId) !== this.cacheCleared.get(tenantId)) continue;
+        for (const [resource, index] of shards) this.setIdentityShard(published, tenantId, resource, index);
+      }
     }
     yield* this.backfillCacheClassifications();
     this.cacheClassificationReady = true;
