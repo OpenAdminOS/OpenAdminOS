@@ -160,7 +160,7 @@ export async function preflightConnectors(
           `Connector '${requirement.id}' failed its health check${
             health.message ? `: ${health.message}` : "."
           }`,
-          { connectorId: requirement.id },
+          { connectorId: requirement.id, ...(health.error !== undefined ? { cause: health.error } : {}) },
         );
       }
       input.log("warn", `Skipping optional connector '${requirement.id}': health check failed.`, {

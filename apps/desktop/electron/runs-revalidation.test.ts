@@ -11,6 +11,7 @@ import type {
   RunLlmApi,
   RunRecord,
 } from "@openadminos/agent-sdk";
+import { GraphAccessDeniedError } from "@openadminos/agent-sdk";
 import { createQueuedRun, executePlan } from "@openadminos/runtime";
 
 import {
@@ -254,6 +255,16 @@ describe("write plans are checked against the tenant before apply", () => {
     assert.equal(writes.length, 0, "no Graph write is sent");
     assert.equal(run.status, "failed");
     assert.match(run.error ?? "", /^The plan could not be checked against the tenant before applying, so nothing was applied\. .*Graph is unavailable\./);
+  });
+
+  it("keeps the Graph denial when consent was lost after review", async () => {
+    const denied = new GraphAccessDeniedError({ method: "GET", path: "/users", requiredScopes: ["User.Read.All"], grantedScopes: [] });
+    const { run, writes } = await confirmAfter(() => denied);
+    assert.equal(writes.length, 0, "no Graph write is sent");
+    assert.equal(run.status, "failed");
+    assert.match(run.error ?? "", /^The plan could not be checked against the tenant before applying, so nothing was applied\./);
+    assert.equal(run.accessDenial?.cause, "missing-consent");
+    assert.equal(run.accessDenial?.source, "microsoft-graph");
   });
 
   it("says nothing was applied when the model or the Graph sign-in fails before the replan", async () => {
