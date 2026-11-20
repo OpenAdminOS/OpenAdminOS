@@ -2187,9 +2187,14 @@ export class AppStateStore {
       },
       executeReadTool: (tenantId, name, input) =>
         this.chatService.executeReadTool(tenantId, name, input),
-      queueExternalProposal: (input) => {
+      queueExternalProposal: async (input) => {
         if (this.localResetStarted) throw new LocalResetInProgressError();
-        return this.runService.startExternalProposalRun(input);
+        this.localResetWorkInFlight += 1;
+        try {
+          return await this.runService.startExternalProposalRun(input);
+        } finally {
+          this.localResetWorkInFlight -= 1;
+        }
       },
       getRun: (runId) => this.runService.getRun(runId),
       recordAudit: (event) =>

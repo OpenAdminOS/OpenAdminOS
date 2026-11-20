@@ -84,6 +84,13 @@ export interface LocalResetMarker {
   requestWarnings?: LocalResetProblem[];
   /** The cleanup outside the data folder ran; a resumed wipe never runs it again. */
   leftoversDone?: true;
+  /**
+   * The data folder the request was accepted for, by device and inode.
+   * Written by writeLocalResetMarker. A copy of the folder restored or
+   * roamed to another device has another identity, so its marker is not
+   * trusted there.
+   */
+  folder?: { dev: number; ino: number };
   /** Set when reading, never written: the marker is not trusted, with the reason shown to the admin. */
   unusable?: string;
 }
@@ -176,12 +183,14 @@ export async function writeLocalResetMarker(
 ): Promise<void> {
   const path = join(userDataDir, LOCAL_RESET_MARKER);
   const temp = markerTempPath(userDataDir);
+  const folder = folderIdentity(userDataDir);
+  if (!folder) throw new Error("the data folder could not be read");
   try {
     // "wx" creates a new file and fails on anything already there, a link
     // included, so a planted link can never redirect the write.
     const handle = await open(temp, "wx", 0o600);
     try {
-      await handle.writeFile(`${JSON.stringify(marker, null, 2)}\n`, "utf8");
+      await handle.writeFile(`${JSON.stringify({ ...marker, folder }, null, 2)}\n`, "utf8");
       await handle.sync();
     } finally {
       await handle.close();
@@ -536,8 +545,10 @@ export function readLocalResetMarker(userDataDir: string, fs: LocalResetFileSyst
     return { version: 1, requestedAt: "", unusable: MARKER_INVALID_REASON };
   }
   const build = parsed.build === "installed" || parsed.build === "development" ? parsed.build : undefined;
+  const folder = parsed.folder;
   if (
-    parsed.version !== 1 || !build
+    !folder || typeof folder.dev !== "number" || typeof folder.ino !== "number"
+    || parsed.version !== 1 || !build
     || typeof parsed.requestedAt !== "string" || Number.isNaN(Date.parse(parsed.requestedAt))
   ) {
     return { version: 1, requestedAt: "", unusable: MARKER_INVALID_REASON };
@@ -546,6 +557,7 @@ export function readLocalResetMarker(userDataDir: string, fs: LocalResetFileSyst
     version: 1,
     requestedAt: parsed.requestedAt,
     build,
+    folder: { dev: folder.dev, ino: folder.ino },
     ...(parsed.leftoversDone === true ? { leftoversDone: true as const } : {}),
     ...(Array.isArray(parsed.requestWarnings)
       ? { requestWarnings: parsed.requestWarnings.filter(isProblem) }
@@ -615,13 +627,27 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
     failed.push({ item: userDataDir, reason: DATA_FOLDER_LINK_REASON });
     return finish("incomplete");
   }
-  // The folder checked here is the one written to later: if it is swapped
-  // for another (a link to another profile) while the wipe runs, the
-  // progress record and the marker removal stop instead.
+  // The request was accepted for this very folder: a copy restored or
+  // roamed to another device carries the marker but not the identity.
   const identity = folderIdentity(userDataDir);
+  if (!identity || !marker.folder || identity.dev !== marker.folder.dev || identity.ino !== marker.folder.ino) {
+    failed.push({ item: LOCAL_RESET_MARKER, reason: MARKER_OTHER_FOLDER_REASON });
+    return finish("incomplete");
+  }
+  // The folder checked here is the one removed from and written to: if it
+  // is swapped for another (a link to another profile) while the wipe runs,
+  // the wipe stops before its next removal or write.
   const sameFolder = () => {
     const now = folderIdentity(userDataDir);
-    return identity !== undefined && now !== undefined && now.dev === identity.dev && now.ino === identity.ino && !fs.isLink(userDataDir);
+    return now !== undefined && now.dev === identity.dev && now.ino === identity.ino && !fs.isLink(userDataDir);
+  };
+  const removeIfSameFolder = (name: string): boolean => {
+    if (!sameFolder()) {
+      failed.push({ item: userDataDir, reason: DATA_FOLDER_CHANGED_REASON });
+      return false;
+    }
+    removeEntry(fs, userDataDir, name, failed);
+    return true;
   };
   const policyProblem = localResetPolicyProblem(userDataDir);
   if (policyProblem) {
@@ -637,12 +663,16 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
     return finish("incomplete");
   }
   const plan = localResetRemovalPlan(entries);
-  for (const name of plan.first) removeEntry(fs, userDataDir, name, failed);
+  for (const name of plan.first) if (!removeIfSameFolder(name)) break;
   // The audit side files stay while anything else does, so a database that
   // could not be removed keeps its anchor and reads as intact next time.
   if (failed.length > 0) return finish("incomplete");
-  for (const name of plan.last) removeEntry(fs, userDataDir, name, failed);
+  for (const name of plan.last) if (!removeIfSameFolder(name)) break;
   if (failed.length > 0) return finish("incomplete");
+  if (!sameFolder()) {
+    failed.push({ item: userDataDir, reason: DATA_FOLDER_CHANGED_REASON });
+    return finish("incomplete");
+  }
   // A process left from the last session could have written something since
   // the folder was listed; the reset is done only when nothing but the kept
   // files is left. Checked before the cleanup outside the folder and again
@@ -682,6 +712,9 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
   }
   return finish("completed");
 }
+
+const MARKER_OTHER_FOLDER_REASON =
+  "it was written for this data folder on another device, or before the folder was copied or restored here, so nothing was removed. To keep this data, remove that file from the data folder and open OpenAdminOS again; to reset here, remove it and choose Reset OpenAdminOS again";
 
 const DATA_FOLDER_CHANGED_REASON =
   "the data folder was replaced by another folder or a link while the reset ran, so nothing more was written or removed there. Check the folder, then open OpenAdminOS again";
