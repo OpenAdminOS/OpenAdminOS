@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { createServer, globalAgent as httpGlobalAgent, type Server } from "node:http";
 import { describe, it } from "node:test";
 import { brotliCompressSync, deflateRawSync, deflateSync, gzipSync } from "node:zlib";
+import { directFetch } from "./direct-fetch.js";
 
 import { AppStateStore } from "../state.js";
 import { embeddingModelState, pullEmbeddingModel } from "./embedding-model.js";
@@ -314,6 +315,38 @@ describe("local documentation retrieval never follows a redirect from this devic
     ]);
   });
 
+  it("keeps the dialled address as Host over HTTPS, where Node checks the certificate against it (PR #206 review round 9)", async (t) => {
+    const sent: Array<string | null> = [];
+    t.mock.method(loopbackTransport, "fetch", async (_url: Parameters<typeof fetch>[0], options?: RequestInit) => {
+      sent.push(new Headers(options?.headers).get("host"));
+      return new Response(JSON.stringify({ embeddings: [[0.1]] }), { status: 200 });
+    });
+    await ollamaEmbedQuery("https://localhost:8443")("test");
+    await ollamaEmbedQuery("http://localhost:8443")("test");
+    assert.deepEqual(sent, [null, "localhost:8443"]);
+  });
+
+  it("stops decoding a compressed answer when its budget runs out, also after the connection has closed (PR #206 review round 9)", async (t) => {
+    // Decoded, the body is far larger than the stream buffers, so most of it is still being decoded when the budget runs out.
+    const raw = Buffer.from(JSON.stringify({ embeddings: [new Array(2_000_000).fill(0)] }));
+    const bodies: Record<string, Buffer> = { gzip: gzipSync(raw), deflate: deflateSync(raw), "deflate raw": deflateRawSync(raw) };
+    let encoding = "gzip";
+    const server = createServer((_request, response) => {
+      const packed = bodies[encoding]!;
+      response.writeHead(200, { "content-type": "application/json", "content-encoding": encoding.split(" ")[0]!, "content-length": packed.length }).end(packed);
+    });
+    await listen(server);
+    t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/embed`;
+    for (encoding of Object.keys(bodies)) {
+      const budget = new AbortController();
+      const response = await directFetch(url, { signal: budget.signal });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      budget.abort(new DOMException("The budget ran out.", "TimeoutError"));
+      await assert.rejects(response.text(), (error: Error) => error.name === "TimeoutError", encoding);
+    }
+  });
+
   it("fails a model pull that stalls before its answer or while sending it, with the reason (PR #206 review round 7)", { timeout: 10_000 }, async (t) => {
     let mode: "before" | "during" = "before";
     const server = createServer((_request, response) => {
@@ -334,7 +367,7 @@ describe("local documentation retrieval never follows a redirect from this devic
       loopbackTransport.idleTimeoutMs = previous;
     });
     const endpoint = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-    const stopped = /Ollama stopped answering while downloading nomic-embed-text\. Check that Ollama is running, then run `ollama pull nomic-embed-text` and select Refresh\.$/;
+    const stopped = /Ollama stopped answering while downloading nomic-embed-text\. Check that Ollama is running, then restart OpenAdminOS to download it again\.$/;
     await assert.rejects(pullEmbeddingModel(endpoint), stopped);
     mode = "during";
     await assert.rejects(pullEmbeddingModel(endpoint), stopped);

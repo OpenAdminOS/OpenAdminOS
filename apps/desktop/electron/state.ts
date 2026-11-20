@@ -3031,7 +3031,7 @@ export class AppStateStore {
    * Pull the embedding model in the background when Ollama is running
    * and the model is missing. Same contract as the index install: never
    * blocks, never dialogs, honours the same auto-install switch, and a
-   * failed pull is retried at most once a day. An unreachable Ollama is
+   * failed pull is retried at most once a day. An unreachable or stalled Ollama is
    * not counted as an attempt, so starting Ollama later gets the model
    * on the next launch rather than a day later.
    */
@@ -3065,8 +3065,11 @@ export class AppStateStore {
         const message = error instanceof EmbeddingPullStalledError ? error.message :
           (await describeNetworkFailure({ what: "The local index model download", url: "https://registry.ollama.ai/", error, path: "ollama" })) ??
           (error instanceof Error ? error.message : String(error));
+        // Like an unreachable Ollama, a stalled one is not the day's attempt, so the next launch tries again.
+        const stalled = error instanceof EmbeddingPullStalledError;
         await this.serialize(async () => {
-          await this.write({ ...(await this.read()), embeddingModelPullError: message });
+          const { embeddingModelPullAttemptedAt, ...current } = await this.read();
+          await this.write({ ...current, ...(stalled ? {} : { embeddingModelPullAttemptedAt }), embeddingModelPullError: message });
         });
         this.emitStateChanged("retrieval-embedding-failed");
         throw error;

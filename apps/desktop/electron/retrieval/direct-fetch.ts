@@ -1,4 +1,4 @@
-import { Agent as HttpAgent, request as httpRequest } from "node:http";
+import { Agent as HttpAgent, request as httpRequest, type IncomingMessage } from "node:http";
 import { Agent as HttpsAgent, request as httpsRequest } from "node:https";
 import { Readable, Transform, pipeline } from "node:stream";
 import { createBrotliDecompress, createGunzip, createInflate, createInflateRaw } from "node:zlib";
@@ -12,7 +12,7 @@ import { createBrotliDecompress, createGunzip, createInflate, createInflateRaw }
  * question included. This connects with a fresh agent per request, which
  * reads no proxy setting. A redirect is never followed: a 3xx is returned
  * as it came. Bodies are strings only, which is all retrieval sends. As with
- * fetch, a gzip, deflate or br body is decoded, and a connection idle for
+ * fetch, a gzip, deflate (zlib-wrapped or raw) or br body is decoded, and a connection idle for
  * `loopbackTransport.idleTimeoutMs` (5 minutes, fetch's own headers and body
  * timeouts) fails with a TimeoutError, before the headers or while the body
  * is read.
@@ -34,45 +34,31 @@ export function directFetch(input: string | URL | Request, init: RequestInit = {
     let answered: Readable | undefined;
     const request = send(url, { method, headers, agent, signal: init.signal ?? undefined }, (response) => {
       answered = response;
-      const status = response.statusCode ?? 0;
-      const responseHeaders = new Headers();
-      for (const [name, value] of Object.entries(response.headers)) {
-        if (Array.isArray(value)) for (const entry of value) responseHeaders.append(name, entry);
-        else if (value !== undefined) responseHeaders.set(name, value);
-      }
-      // A budget that runs out while the body is read ends it with the budget's reason, as fetch does.
+      // A budget that runs out while the body is read or decoded ends it with the budget's reason, as fetch does.
+      // The body is the decoder when there is one, so the listener stays until the decoded body is done.
+      let reading: Readable = response;
       const signal = init.signal;
-      if (signal) {
-        const stop = () => response.destroy(signal.reason instanceof Error ? signal.reason : new DOMException("This operation was aborted", "AbortError"));
-        if (signal.aborted) stop();
-        else {
-          signal.addEventListener("abort", stop, { once: true });
-          response.once("close", () => signal.removeEventListener("abort", stop));
-        }
-      }
-      const withoutBody = method === "HEAD" || status === 204 || status === 205 || status === 304;
-      if (withoutBody) response.resume();
-      const encoding = (response.headers["content-encoding"] ?? "").trim().toLowerCase();
-      const decoder = encoding === "gzip" || encoding === "x-gzip"
-        ? createGunzip()
-        : encoding === "deflate"
-          ? inflateEither()
-          : encoding === "br"
-            ? createBrotliDecompress()
-            : undefined;
-      let stream: Readable = response;
-      if (decoder && !withoutBody) {
-        // The decoded body has another length and no encoding, as fetch reports it.
-        responseHeaders.delete("content-encoding");
-        responseHeaders.delete("content-length");
-        stream = pipeline(response, decoder, () => undefined);
-      }
-      try {
-        resolve(new Response(withoutBody ? null : (Readable.toWeb(stream) as ReadableStream<Uint8Array>), { status, headers: responseHeaders }));
-      } catch (error) {
-        response.destroy();
-        reject(error);
-      }
+      const stop = () => {
+        const reason = signal?.reason instanceof Error ? signal.reason : new DOMException("This operation was aborted", "AbortError");
+        reading.destroy(reason);
+        response.destroy(reason);
+      };
+      if (signal?.aborted) stop();
+      else signal?.addEventListener("abort", stop, { once: true });
+      const release = () => signal?.removeEventListener("abort", stop);
+      answer(response, method).then(
+        ({ stream, status, headers: responseHeaders }) => {
+          reading = stream ?? response;
+          reading.once("close", release);
+          if (reading.destroyed) release();
+          resolve(new Response(stream ? (Readable.toWeb(stream) as ReadableStream<Uint8Array>) : null, { status, headers: responseHeaders }));
+        },
+        (error: unknown) => {
+          release();
+          response.destroy();
+          reject(error);
+        },
+      );
     });
     // Idle before the headers fails the request; idle while the body is read fails the read.
     request.setTimeout(idleMs, () => {
@@ -85,26 +71,59 @@ export function directFetch(input: string | URL | Request, init: RequestInit = {
   });
 }
 
-/**
- * A deflate body is meant to be zlib-wrapped, but some servers send it raw;
- * fetch accepts both, so the first byte picks the decoder, as fetch does.
- */
-function inflateEither(): Transform {
-  let inner: Transform | undefined;
-  return new Transform({
-    transform(chunk: Buffer, _encoding, done) {
-      if (!inner) {
-        inner = (chunk[0]! & 0x0f) === 0x08 ? createInflate() : createInflateRaw();
-        inner.on("data", (decoded: Buffer) => this.push(decoded));
-        inner.on("error", (error) => this.destroy(error));
-      }
-      inner.write(chunk, () => done());
-    },
-    flush(done) {
-      if (!inner) return done();
-      inner.once("end", () => done());
-      inner.end();
-    },
+/** The response's status, headers and body stream, decoded when it came compressed. */
+async function answer(response: IncomingMessage, method: string): Promise<{ stream: Readable | undefined; status: number; headers: Headers }> {
+  const status = response.statusCode ?? 0;
+  const headers = new Headers();
+  for (const [name, value] of Object.entries(response.headers)) {
+    if (Array.isArray(value)) for (const entry of value) headers.append(name, entry);
+    else if (value !== undefined) headers.set(name, value);
+  }
+  if (method === "HEAD" || status === 204 || status === 205 || status === 304) {
+    response.resume();
+    return { stream: undefined, status, headers };
+  }
+  const encoding = (response.headers["content-encoding"] ?? "").trim().toLowerCase();
+  let decoder: Transform | undefined;
+  if (encoding === "gzip" || encoding === "x-gzip") decoder = createGunzip();
+  else if (encoding === "br") decoder = createBrotliDecompress();
+  else if (encoding === "deflate") {
+    // Meant to be zlib-wrapped, but some servers send it raw; fetch takes both, so the first byte picks, as fetch does.
+    const first = await peekFirstByte(response);
+    if (first !== undefined) decoder = (first & 0x0f) === 0x08 ? createInflate() : createInflateRaw();
+  }
+  if (!decoder) return { stream: response, status, headers };
+  // The decoded body has another length and no encoding, as fetch reports it.
+  headers.delete("content-encoding");
+  headers.delete("content-length");
+  return { stream: pipeline(response, decoder, () => undefined), status, headers };
+}
+
+/** The body's first byte, left in the stream; undefined for an empty body. */
+function peekFirstByte(stream: Readable): Promise<number | undefined> {
+  return new Promise((resolve, reject) => {
+    const settle = (finish: () => void) => {
+      stream.off("readable", onReadable);
+      stream.off("end", onEnd);
+      stream.off("error", onError);
+      stream.off("close", onClose);
+      finish();
+    };
+    const onReadable = () => {
+      const chunk = stream.read(1) as Buffer | null;
+      if (chunk === null) return;
+      settle(() => {
+        stream.unshift(chunk);
+        resolve(chunk[0]);
+      });
+    };
+    const onEnd = () => settle(() => resolve(undefined));
+    const onError = (error: Error) => settle(() => reject(error));
+    const onClose = () => settle(() => reject(stream.errored ?? new Error("The model server closed the connection before its answer.")));
+    stream.on("readable", onReadable);
+    stream.once("end", onEnd);
+    stream.once("error", onError);
+    stream.once("close", onClose);
   });
 }
 

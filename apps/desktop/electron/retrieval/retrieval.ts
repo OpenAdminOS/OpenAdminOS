@@ -451,9 +451,10 @@ export async function fetchLoopback(
   fetchImpl: typeof fetch = loopbackTransport.fetch,
 ): Promise<{ response: Response; url: string }> {
   const candidates = loopbackEndpoints(endpoint);
-  // A localhost name is dialled by address, but the server still sees the name it was given, as with fetch.
+  // A localhost name is dialled by address, but over HTTP the server still sees the name it was given, as with fetch.
+  // Not over HTTPS: Node checks the certificate against the Host header, and it must cover the address dialled.
   const named = new URL(endpoint);
-  const host = /^localhost\.?$/i.test(named.hostname) ? named.host : undefined;
+  const host = named.protocol === "http:" && /^localhost\.?$/i.test(named.hostname) ? named.host : undefined;
   for (const [index, base] of candidates.entries()) {
     const url = `${base}${path}`;
     const headers = new Headers(init.headers);

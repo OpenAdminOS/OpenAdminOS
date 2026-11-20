@@ -141,14 +141,17 @@ describe("the local index model download", () => {
     }
   });
 
-  it("says the local Ollama stopped answering, not the registry, with a recovery that works during the daily wait (PR #206 review round 8)", { timeout: 10_000 }, async () => {
+  it("says the local Ollama stopped answering, not the registry, and tries again on the next launch (PR #206 review rounds 8 and 9)", { timeout: 10_000 }, async () => {
     const { createServer } = await import("node:http");
     const { loopbackTransport } = await import("./retrieval/direct-fetch.js");
+    let pulls = 0;
     const server = createServer((request, response) => {
       if (request.url === "/api/tags") {
         response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ models: [] }));
+        return;
       }
       // The pull gets nothing: the local Ollama stalled.
+      pulls += 1;
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const original = process.env.OPENADMINOS_EMBEDDING_ENDPOINT;
@@ -163,7 +166,10 @@ describe("the local index model download", () => {
       await store.autoInstallEmbeddingModel();
       const status = await store.getRetrievalStatusWithUpdates();
       assert.equal(status.embeddingModelInstalled, false);
-      assert.equal(status.embeddingModelError, "Ollama stopped answering while downloading nomic-embed-text. Check that Ollama is running, then run `ollama pull nomic-embed-text` and select Refresh.");
+      assert.equal(status.embeddingModelError, "Ollama stopped answering while downloading nomic-embed-text. Check that Ollama is running, then restart OpenAdminOS to download it again.");
+      // The stall is not the day's attempt: the next launch pulls again instead of waiting 24 hours.
+      await store.autoInstallEmbeddingModel();
+      assert.equal(pulls, 2);
     } finally {
       loopbackTransport.idleTimeoutMs = idle;
       if (original === undefined) delete process.env.OPENADMINOS_EMBEDDING_ENDPOINT;
