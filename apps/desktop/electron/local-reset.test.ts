@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -441,6 +441,40 @@ describe("local reset: wipe at launch", () => {
     }
   });
 
+  it("treats a hard-linked token cache as shared, and removes only the profile's entry", async () => {
+    const dir = await tempDir();
+    try {
+      const profile = join(dir, "profile");
+      mkdirSync(profile);
+      writeFileSync(join(dir, "backup-tokens.bin"), "backup bytes");
+      linkSync(join(dir, "backup-tokens.bin"), join(profile, "tokens.bin"));
+      assert.deepEqual(localResetLinkCheck(profile).linkedTokenCaches, ["tokens.bin"]);
+      writeFileSync(join(profile, LOCAL_RESET_MARKER), JSON.stringify(DEV_MARKER));
+      assert.equal(runPendingLocalReset({ userDataDir: profile, packaged: false, platform: "linux", home: dir, env: {} })?.status, "completed");
+      assert.equal(readFileSync(join(dir, "backup-tokens.bin"), "utf8"), "backup bytes");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("never starts a wipe from a marker that is a link", async () => {
+    const dir = await tempDir();
+    try {
+      const profile = join(dir, "profile");
+      mkdirSync(profile);
+      writeFileSync(join(profile, "state.json"), "{}");
+      writeFileSync(join(dir, "unrelated.txt"), "not a marker");
+      symlinkSync(join(dir, "unrelated.txt"), join(profile, LOCAL_RESET_MARKER));
+      const report = runPendingLocalReset({ userDataDir: profile, packaged: true, platform: "darwin", home: join(dir, "home"), env: {}, run: recordingRun().run });
+      assert.equal(report?.status, "incomplete");
+      assert.match(report?.failed[0]?.reason ?? "", /a link or a shared file, not one OpenAdminOS wrote, so nothing was removed/);
+      assert.ok(existsSync(join(profile, "state.json")));
+      assert.equal(readFileSync(join(dir, "unrelated.txt"), "utf8"), "not a marker");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("never writes through a link planted where a marker temp file used to go", async () => {
     const dir = await tempDir();
     try {
@@ -696,6 +730,14 @@ describe("local reset: confirmations", () => {
       releaseProviders();
       const run = await confirming;
       assert.ok(run.confirmedAt);
+      // The real apply is tracked from the moment it is confirmed until its
+      // work settles, without stubs.
+      const runService = (store as unknown as { runService: { hasActiveApply(): boolean } }).runService;
+      assert.equal(runService.hasActiveApply(), true);
+      for (let attempt = 0; attempt < 3000 && runService.hasActiveApply(); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(runService.hasActiveApply(), false);
       // Now recorded as applying, until the apply finishes.
       const blocker = await store.beginLocalReset();
       if (blocker === undefined) {
@@ -748,6 +790,14 @@ function failingFileSystem(fails: (path: string) => boolean): LocalResetFileSyst
     isLink: (path) => {
       try {
         return lstatSync(path).isSymbolicLink();
+      } catch {
+        return false;
+      }
+    },
+    isShared: (path) => {
+      try {
+        const stat = lstatSync(path);
+        return stat.isSymbolicLink() || (stat.isFile() && stat.nlink > 1);
       } catch {
         return false;
       }
