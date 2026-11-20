@@ -44,6 +44,29 @@ export interface OpenAiCompatibleServer {
    * requested id. Defaults to true.
    */
   streamNamesModel?: boolean;
+  /**
+   * The message for a request that failed because the prompt did not fit in
+   * the context the server loaded the model with, or undefined when the
+   * failure is something else. Called with the failed response's body, or
+   * the error a streamed or JSON answer carried.
+   */
+  contextOverflowMessage?: (failure: OpenAiCompatibleFailure) => Promise<string | undefined>;
+  /**
+   * Whether an `error` field that is a plain string fails the request.
+   * LM Studio 0.3.x sends its errors that way; Lemonade's string errors keep
+   * their earlier handling. Defaults to false.
+   */
+  stringErrors?: boolean;
+}
+
+export interface OpenAiCompatibleFailure {
+  endpoint: string;
+  model: string;
+  /** What the server said. */
+  detail: string;
+  /** The caller's token limit for the answer, when it set one. */
+  maxTokens?: number;
+  signal?: AbortSignal;
 }
 
 export interface OpenAiCompatibleModel {
@@ -99,9 +122,8 @@ interface ChatResponse {
     completion_tokens?: number;
     total_tokens?: number;
   };
-  error?: {
-    message?: string;
-  };
+  /** An object in the OpenAI shape; older LM Studio releases send a string. */
+  error?: { message?: string } | string;
 }
 
 const DEFAULT_TIMEOUT_MS = 180_000;
@@ -159,6 +181,21 @@ export function createOpenAiCompatibleLlm(
     throw new Error(server.unlistedModelMessage(model, data.find((entry) => entry.id === model)));
   };
 
+  /** The server's own error for a prompt larger than the loaded context, if it is one. */
+  const contextOverflow = async (detail: string, model: string, opts: LlmOptions): Promise<Error | undefined> => {
+    if (!server.contextOverflowMessage) return undefined;
+    const message = await server.contextOverflowMessage({
+      endpoint,
+      model,
+      detail,
+      ...(typeof opts.maxTokens === "number" ? { maxTokens: opts.maxTokens } : {}),
+      ...(opts.signal ? { signal: opts.signal } : {}),
+    });
+    if (message === undefined) return undefined;
+    if (opts.signal?.aborted) return new Error(`${name} request stopped by user.`);
+    return new Error(message);
+  };
+
   return {
     available: true,
     defaultModel,
@@ -200,11 +237,13 @@ export function createOpenAiCompatibleLlm(
       if (isRefusedRedirect(response, url)) throw new Error(redirectRefusedDetail(name, url));
       if (!response.ok) {
         const detail = await response.text().catch(() => "");
-        throw new Error(`${name} responded with HTTP ${response.status}: ${truncate(detail, 200)}`);
+        throw (await contextOverflow(detail, model, opts)) ??
+          new Error(`${name} responded with HTTP ${response.status}: ${truncate(detail, 200)}`);
       }
       const payload = (await response.json()) as ChatResponse;
-      if (payload.error?.message) {
-        throw new Error(`${name} error: ${payload.error.message}`);
+      const payloadError = errorMessage(payload, server.stringErrors ?? false);
+      if (payloadError) {
+        throw (await contextOverflow(payloadError, model, opts)) ?? new Error(`${name} error: ${payloadError}`);
       }
       const text = payload.choices?.[0]?.message?.content;
       if (!text) {
@@ -257,7 +296,8 @@ export function createOpenAiCompatibleLlm(
         opts.signal?.removeEventListener("abort", abortFromCaller);
         if (isRefusedRedirect(response, url)) throw new Error(redirectRefusedDetail(name, url));
         const detail = await response.text().catch(() => "");
-        throw new Error(`${name} responded with HTTP ${response.status}: ${truncate(detail, 200)}`);
+        throw (await contextOverflow(detail, model, opts)) ??
+          new Error(`${name} responded with HTTP ${response.status}: ${truncate(detail, 200)}`);
       }
 
       if (!response.body) {
@@ -302,8 +342,9 @@ export function createOpenAiCompatibleLlm(
             } catch {
               continue;
             }
-            if (payload.error?.message) {
-              throw new Error(`${name} error: ${payload.error.message}`);
+            const payloadError = errorMessage(payload, server.stringErrors ?? false);
+            if (payloadError) {
+              throw (await contextOverflow(payloadError, model, opts)) ?? new Error(`${name} error: ${payloadError}`);
             }
             if (streamNamesModel && typeof payload.model === "string" && payload.model.length > 0) {
               actualModel = payload.model;
@@ -476,6 +517,12 @@ export function classifyOpenAiCompatibleEndpoint(
     isLocal: false,
     reason: `${name} endpoint host ${host || "(empty)"} is not loopback.`,
   };
+}
+
+function errorMessage(payload: ChatResponse, stringErrors: boolean): string | undefined {
+  const { error } = payload;
+  if (typeof error === "string") return stringErrors && error.length > 0 ? error : undefined;
+  return error?.message || undefined;
 }
 
 function allModelIds(data: OpenAiCompatibleModel[]): string[] {

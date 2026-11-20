@@ -78,6 +78,9 @@ describe("Graph access denial classification", () => {
     assert.doesNotMatch(graphAccessDenialText(denial), /reconnect/i);
     assert.equal(classifyGraphAccessDenied({ ...users, grantedScopes: ["User.Read.All"], errorCode: "insufficient_claims" }).cause, "unknown");
     assert.equal(graphAccessDenialFromError("HTTP 429"), undefined);
+    // Token counts in a model context error are not a Graph status.
+    assert.equal(graphAccessDenialFromError("LM Studio context length too small: This request needs 403,121 tokens of context, but qwen3-8b is loaded in LM Studio with a context length of 1,403."), undefined);
+    assert.ok(graphAccessDenialFromError("Graph responded with HTTP 403, Forbidden"));
   });
 
   it("never recommends a read-only role for a write action", () => {
