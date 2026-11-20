@@ -1836,7 +1836,7 @@ connection, one row per scheduled turn. Compressed sidecars live in a separate
 table so publication does not rewrite the raw rows. The write checks the row ID and
 snapshot ID on every attempt. Replacing or clearing the raw snapshot invalidates
 its sidecars in the same transaction. Background batches reclaim stale
-sidecars. Disconnect waits for its sidecars to be physically removed. Busy writes retry in the background with a
+sidecars with row and byte limits and a zero busy timeout. Disconnect waits for its sidecars to be physically removed. Busy writes retry in the background with a
 bounded backoff and a zero SQLite busy timeout. Drift pruning, drift baseline
 creation and tracked cache refresh read inside deferred transactions so they
 can return promptly when another connection holds the writer lock.

@@ -153,6 +153,25 @@ interface PreparedGraphResources {
 }
 
 const CLASSIFICATION_BATCH_ROWS = 256;
+const SIDECAR_CLEANUP_ROWS = 64;
+const SIDECAR_CLEANUP_BYTES = 128 * 1024;
+
+type SidecarCleanupRow = { id: number; bytes: number; stale: number };
+
+function boundedSidecarDeletion(rows: readonly SidecarCleanupRow[]) {
+  const ids: number[] = [];
+  let bytes = 0;
+  let inspected = 0;
+  for (const row of rows) {
+    if (row.stale) {
+      if (ids.length && bytes + row.bytes > SIDECAR_CLEANUP_BYTES) break;
+      ids.push(row.id);
+      bytes += row.bytes;
+    }
+    inspected++;
+  }
+  return { ids, inspected };
+}
 
 interface DriftSnapshotRow {
   id: string;
@@ -2308,36 +2327,36 @@ export class IntelligenceSqliteStore {
       if (delay) await waitForRetry(delay);
       else await yieldToMain();
       if (this.closed) return;
-      page ??= this.db.prepare(`SELECT s.cache_rowid AS id, g.rowid IS NULL AS stale
-        FROM graph_classification_sidecars s LEFT JOIN graph_resources g
-          ON g.rowid = s.cache_rowid AND g.snapshot_id = s.snapshot_id
-          AND g.tenant_id = s.tenant_id AND g.resource = s.resource
-        WHERE s.cache_rowid > ? ORDER BY s.cache_rowid LIMIT 64`);
-      remove ??= this.db.prepare(`DELETE FROM graph_classification_sidecars
-        WHERE cache_rowid IN (SELECT value FROM json_each(?))
-          AND NOT EXISTS (
-            SELECT 1 FROM graph_resources g WHERE g.rowid = cache_rowid
-              AND g.snapshot_id = graph_classification_sidecars.snapshot_id
-              AND g.tenant_id = graph_classification_sidecars.tenant_id
-              AND g.resource = graph_classification_sidecars.resource
-          )`);
-      const rows = page.all(cursor) as unknown as Array<{ id: number; stale: number }>;
-      const ids = rows.filter(row => row.stale).map(row => row.id);
-      if (ids.length) {
-        this.db.exec("PRAGMA busy_timeout = 0");
-        try {
-          remove.run(JSON.stringify(ids));
-        } catch (error) {
-          if (!isSqliteBusy(error)) throw error;
-          delay = Math.min(400, delay ? delay * 2 : 25);
-          continue;
-        } finally {
-          this.db.exec("PRAGMA busy_timeout = 5000");
-        }
+      let exhausted: boolean;
+      this.db.exec("PRAGMA busy_timeout = 0");
+      try {
+        page ??= this.db.prepare(`SELECT s.cache_rowid AS id, length(s.compressed) AS bytes, g.rowid IS NULL AS stale
+          FROM graph_classification_sidecars s LEFT JOIN graph_resources g
+            ON g.rowid = s.cache_rowid AND g.snapshot_id = s.snapshot_id
+            AND g.tenant_id = s.tenant_id AND g.resource = s.resource
+          WHERE s.cache_rowid > ? ORDER BY s.cache_rowid LIMIT ?`);
+        remove ??= this.db.prepare(`DELETE FROM graph_classification_sidecars
+          WHERE cache_rowid IN (SELECT value FROM json_each(?))
+            AND NOT EXISTS (
+              SELECT 1 FROM graph_resources g WHERE g.rowid = cache_rowid
+                AND g.snapshot_id = graph_classification_sidecars.snapshot_id
+                AND g.tenant_id = graph_classification_sidecars.tenant_id
+                AND g.resource = graph_classification_sidecars.resource
+            )`);
+        const rows = page.all(cursor, SIDECAR_CLEANUP_ROWS) as unknown as SidecarCleanupRow[];
+        const { ids, inspected } = boundedSidecarDeletion(rows);
+        if (ids.length) remove.run(JSON.stringify(ids));
+        cursor = rows[inspected - 1]?.id ?? cursor;
+        exhausted = inspected === rows.length && rows.length < SIDECAR_CLEANUP_ROWS;
+      } catch (error) {
+        if (!isSqliteBusy(error)) throw error;
+        delay = Math.min(400, delay ? delay * 2 : 25);
+        continue;
+      } finally {
+        this.db.exec("PRAGMA busy_timeout = 5000");
       }
       delay = 0;
-      cursor = rows.at(-1)?.id ?? cursor;
-      if (rows.length === 64) continue;
+      if (!exhausted) continue;
       if (generation === this.staleSidecarGeneration) return;
       generation = this.staleSidecarGeneration;
       cursor = 0;
@@ -2450,15 +2469,21 @@ export class IntelligenceSqliteStore {
     }
     // Disconnect waits for physical deletion, while other cache changes
     // need only invalidate the snapshot before returning.
-    const remove = this.db.prepare(`DELETE FROM graph_classification_sidecars WHERE cache_rowid IN (
-      SELECT cache_rowid FROM graph_classification_sidecars WHERE tenant_id = ? LIMIT 64
-    )`);
+    let page: ReturnType<DatabaseSync["prepare"]> | undefined;
+    let remove: ReturnType<DatabaseSync["prepare"]> | undefined;
     for (let delay = 0; ;) {
       if (delay) await waitForRetry(delay);
       else await yieldToMain();
       this.db.exec("PRAGMA busy_timeout = 0");
       try {
-        if (Number(remove.run(tenantId).changes) < 64) break;
+        page ??= this.db.prepare(`SELECT cache_rowid AS id, length(compressed) AS bytes, 1 AS stale
+          FROM graph_classification_sidecars WHERE tenant_id = ? LIMIT ?`);
+        remove ??= this.db.prepare(`DELETE FROM graph_classification_sidecars
+          WHERE tenant_id = ? AND cache_rowid IN (SELECT value FROM json_each(?))`);
+        const rows = page.all(tenantId, SIDECAR_CLEANUP_ROWS) as unknown as SidecarCleanupRow[];
+        const { ids, inspected } = boundedSidecarDeletion(rows);
+        if (ids.length) remove.run(tenantId, JSON.stringify(ids));
+        if (inspected === rows.length && rows.length < SIDECAR_CLEANUP_ROWS) break;
         delay = 0;
       } catch (error) {
         if (!isSqliteBusy(error) || delay >= 400) throw error;

@@ -102,7 +102,7 @@ describe("Intune Chat SQLite store", () => {
     });
   }
 
-  it("invalidates sidecars at clear and purge commit and reclaims them in batches", async () => {
+  it("invalidates sidecars at clear and purge commit and reclaims them in batches", async t => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-sidecar-cleanup-"));
     const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
     const db = store["db"];
@@ -120,6 +120,23 @@ describe("Intune Chat SQLite store", () => {
           FROM graph_resources WHERE tenant_id = ?`).run(tenantId);
       }
       db.exec("CREATE TABLE IF NOT EXISTS audit_events (tenant_id TEXT)");
+      // Three large sidecars cannot fit in one cleanup slice.
+      db.exec(`UPDATE graph_classification_sidecars SET compressed = zeroblob(65536)
+        WHERE cache_rowid IN (SELECT cache_rowid FROM graph_classification_sidecars
+          WHERE tenant_id = 'fixture-purge' ORDER BY cache_rowid LIMIT 3)`);
+      const deletes: string[][] = [];
+      const prepare = db.prepare.bind(db);
+      t.mock.method(db, "prepare", (sql: string) => {
+        const statement = prepare(sql);
+        if (sql.startsWith("DELETE FROM graph_classification_sidecars")) {
+          const run = statement.run.bind(statement);
+          t.mock.method(statement, "run", (...args: Parameters<typeof statement.run>) => {
+            deletes.push(JSON.parse(String(args.at(-1))));
+            return run(...args);
+          });
+        }
+        return statement;
+      });
       const physical = db.prepare("SELECT COUNT(*) AS count FROM graph_classification_sidecars WHERE tenant_id = ?");
       const readable = db.prepare(`SELECT COUNT(*) AS count FROM graph_classification_sidecars s JOIN graph_resources g
         ON g.rowid = s.cache_rowid AND g.snapshot_id = s.snapshot_id WHERE s.tenant_id = ?`);
@@ -129,12 +146,15 @@ describe("Intune Chat SQLite store", () => {
       assert.equal(physical.get("fixture-clear")?.count, 129);
       await store["staleSidecarCleanup"];
       assert.equal(physical.get("fixture-clear")?.count, 0);
+      assert.deepEqual(deletes.map(ids => ids.length), [64, 64, 1]);
+      deletes.length = 0;
 
       const pending = store.purgeTenant("fixture-purge");
       assert.equal(readable.get("fixture-purge")?.count, 0);
       assert.equal(physical.get("fixture-purge")?.count, 129);
       await pending;
       assert.equal(physical.get("fixture-purge")?.count, 0);
+      assert.deepEqual(deletes.map(ids => ids.length), [2, 64, 63]);
       assert.equal(readable.get("fixture-keep")?.count, 129);
     } finally {
       await store.close();
