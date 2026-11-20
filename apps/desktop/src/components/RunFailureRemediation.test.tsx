@@ -199,3 +199,11 @@ it("does not give an Ollama context error the LM Studio playbook", () => {
   expect(screen.getByText("Ollama context too small")).toBeInTheDocument();
   expect(screen.queryByText("LM Studio context too small")).not.toBeInTheDocument();
 });
+
+it("keeps the LM Studio playbook for a model whose name mentions Ollama", () => {
+  const error = "LM Studio context length too small: This request does not fit in the 8,192 tokens of context ollama-port/qwen3 is loaded with in LM Studio. Raise Context Length in the model's load settings in LM Studio (My Models, or the loaded model in the Developer tab) and reload it, then re-run. LM Studio said: context limit reached at /api/show: n/a";
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("LM Studio context too small")).toBeInTheDocument();
+  expect(screen.queryByText("Ollama did not report the model's context limit")).not.toBeInTheDocument();
+});

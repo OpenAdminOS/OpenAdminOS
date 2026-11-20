@@ -26,7 +26,7 @@ const LM_STUDIO_CONTEXT_PREFIX = "LM Studio context length too small:";
 const isLmStudioContextTooSmall = (e: string) => e.includes(LM_STUDIO_CONTEXT_PREFIX);
 
 /**
- * The sizes and the reload command from the runtime's LM Studio context
+ * The sizes and the reload steps from the runtime's LM Studio context
  * error, without LM Studio's own text. The run header truncates the error,
  * so the playbook repeats what the admin needs to act on.
  */
@@ -40,7 +40,7 @@ function lmStudioContextAdvice(error: string): string {
 }
 
 /** Errors with one cause and one recovery: only their own playbook is shown. */
-const EXCLUSIVE = [isContextLimitLookup, isLmStudioContextTooSmall];
+const EXCLUSIVE = [isLmStudioContextTooSmall, isContextLimitLookup];
 
 const SUGGESTIONS: Suggestion[] = [
   {
