@@ -273,7 +273,7 @@
     @container (max-width: 640px) { .strips > div { grid-template-columns: 1fr; gap: 6px; } }
     .pop { width: min(400px, 100%); border-radius: var(--radius-lg); background: var(--color-bg-elevated); box-shadow: var(--shadow-pop); padding: 14px 16px; font-size: var(--text-sm); line-height: var(--lh-sm); }
     .pop h4 { margin: 0 0 2px; font-size: var(--text-sm); font-weight: 500; color: var(--color-warning); }
-    .pop dl { display: grid; grid-template-columns: minmax(0, 1fr) auto; margin: 10px 0; }
+    .pop dl { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); column-gap: 12px; margin: 10px 0; }
     .pop dt, .pop dd { margin: 0; padding: 5px 0; border-top: 1px solid var(--color-border-soft); }
     .pop dd { text-align: right; color: var(--color-text-soft); }
     .pop dd.lv { color: var(--color-warning); }
@@ -599,7 +599,7 @@
         </div>
       </div>
       <ul class="notes">
-        <li>The credential row's Allow is struck through on Hosted and cannot be pressed. It is the one rule nobody may loosen, the admin or IT: values the app recognizes as credentials never reach a hosted model in clear text. A secret written into a free-text field in a form the app does not recognize can still be sent, and the popover in B says so. The reason sits under the cell instead of in a tooltip.</li>
+        <li>The credential row's Allow is struck through on Hosted and cannot be pressed. It is the one rule nobody may loosen, the admin or IT: values the app recognizes as credentials never reach a model on the Hosted tier in clear text. On the Confidential tier they are masked by default, and Allow there is possible only after the confirmation dialog, a rule IT can lock. A secret written into a free-text field in a form the app does not recognize can still be sent, and the popover in B says so. The reason sits under the cell instead of in a tooltip.</li>
         <li>Credential on Confidential defaults to Mask. Allow is possible there only after the confirmation dialog, which names recovery keys, LAPS passwords and client secrets as what would leave, and IT can lock the cell with <code>dataPolicy.rules.credential.confidential</code>.</li>
         <li>Decided: security is the seventh class, between identity and device. It covers Conditional Access policies and named locations, authentication methods, security defaults, security baselines and endpoint security policies, admin role definitions and assignments, PIM, cross-tenant access and identity protection policies. Defaults: Local allow, Confidential allow, Hosted mask. Masking a security object replaces its names and identifiers (policy names, named locations, IP ranges, excluded users and groups, role names) while setting values stay readable, as the conditional access value in the sample line shows.</li>
         <li>IT-locked rows are disabled, not merely ignored: their buttons cannot be focused or pressed, carry <code>aria-disabled</code>, and point to the visible line that names the file and key. An attempt over IPC is refused the same way and logged. The Device row also shows the refusal state from H: an earlier setting of the admin's that IT has since made stricter is kept on record but not applied.</li>
@@ -617,7 +617,7 @@
     <!-- B: Status strip -->
     <section class="sect" id="b">
       <h2>B. The status strip</h2>
-      <p>The strip names the provider and, when a rule masks or blocks, what it does. It names classes the rules hide, not counts: counts belong to an answer. Masked credentials are not named because no rule can send a value the app recognizes as a credential to a hosted model in clear text; blocked credentials are named like any other blocked class.</p>
+      <p>The strip names the provider and, when a rule masks or blocks, what it does. It names classes the rules hide, not counts: counts belong to an answer. Masked credentials are not named on a hosted strip because no rule can send a value the app recognizes as a credential to a model on the Hosted tier in clear text; blocked credentials are named like any other blocked class. On the Confidential tier credentials are masked unless the admin allows them after a confirmation dialog, which IT can lock, so the Confidential strip names them.</p>
       <div class="strips">
         <div><span class="cap">Local model, web search off</span><span class="boundary" data-where="local"><span class="pip"></span>Local · Ollama · No data leaves this device</span></div>
         <div><span class="cap">Local model, web search offered</span><span data-localstrip="defaults" data-search data-form="full"></span></div>
@@ -653,6 +653,8 @@
           <div class="pop" role="dialog" aria-label="Where voice goes, another class now blocks a withheld transfer" data-voicepop="sectocfg" data-recorded="secblock"></div>
           <p class="xs muted" style="margin:4px 0 -4px">Credential on Hosted is Block: the call opened without the profile</p>
           <div class="pop" role="dialog" aria-label="Where voice goes, session start withheld" data-voicepop="credhosted"></div>
+          <p class="xs muted" style="margin:4px 0 -4px">Identity on Hosted is Block, a call that has just opened: the rebuilt start passed its check, with neutral wording for the tenant id and your greeting name</p>
+          <div class="pop" role="dialog" aria-label="Where voice goes, session start opened with neutral wording" data-voicepop="idblock" data-upto="1"></div>
           <p class="xs muted" style="margin:4px 0 -4px">Credential and Security were Block when both transfers were withheld, and are Mask now: each withheld transfer keeps its own recovery</p>
           <div class="pop" role="dialog" aria-label="Where voice goes, two withheld transfers after the rules were loosened" data-voicepop="defaults" data-recorded="credsec"></div>
           <p class="xs muted" style="margin:4px 0 -4px">Hosted voice did not start: the check of the rebuilt start did not finish</p>
@@ -660,7 +662,7 @@
             <span class="glyph" data-t="blocked"><svg><use href="#i-stop"/></svg></span>
             <div>
               <h3>Hosted voice did not start</h3>
-              <p>Identity on Hosted is Block, and the start request named you by your greeting name. The app rebuilt the start without your greeting name and without your profile, then checked the rest again, but that check did not finish: the tenant index was still loading after the switch to Woodgrove Bank. A start that was not checked in full is never sent, so the call did not open. Nothing was sent to OpenAI, and no audio left this device.</p>
+              <p>Identity on Hosted is Block, and the start request named you by your greeting name and held the tenant id. The app rebuilt the start without your profile and with neutral wording in place of the tenant id and your greeting name, then checked the rebuilt start again, but that check did not finish: the tenant index was still loading after the switch to Woodgrove Bank. A start that was not checked in full is never sent, so the call did not open. Nothing was sent to OpenAI, and no audio left this device.</p>
               <div class="acts"><button class="bt primary sm" type="button">Start the call again</button><button class="bt secondary sm" type="button">Use voice on this device</button></div>
               <p class="xs muted" style="margin-top:10px">Start the call again checks the whole start request again before anything is sent. Voice on this device turns your words into text here, and the text gets the same check as a typed question. When the rescan finishes and still finds blocked content, the state names the part it could not leave out and offers Change the rule instead of Start the call again, or names policy.json when IT set the rule.</p>
             </div>
@@ -670,15 +672,16 @@
         <li>Clicking the strip opens the popover on the left. It is built from the effective rules by the same function as the strip, so it lists what each class does now, with a lock where IT set the rule. Try it on the strip in A after changing a cell. Public data is not amber: it came from outside the tenant.</li>
         <li>Every hosted strip on this page, in A and in the app frames, is computed from the rules by one function, so the long form and the narrow count always name the same classes, a blocked credential included. Security shows as "security names masked" under Mask, because the settings of a security object still go to the model, and as "security blocked" under Block, because nothing of the object goes. The reopened conversation in F uses the same words in its composer.</li>
         <li>The strip picks its form by the space it has, not by the window width: the long form while it fits next to the organization, the count when it would be cut. The catalogue above shows both forms side by side.</li>
-        <li>"Only recognized credentials masked" names the effective policy: every class but credentials is allowed on hosted. It is the only hosted strip without a hatch, so a policy that hides almost nothing looks different from one that hides names and devices. The words say what is still masked, since recognized credentials never reach a hosted model in clear text.</li>
+        <li>"Only recognized credentials masked" names the effective policy: every class but credentials is allowed on hosted. It is the only hosted strip without a hatch, so a policy that hides almost nothing looks different from one that hides names and devices. The words say what is still masked, since recognized credentials never reach a model on the Hosted tier in clear text.</li>
         <li>The Confidential strip appears only once a provider has passed attestation (Track C), and until then no frame in the app shows it. It still says "leaves this device" in words: an attested enclave is not this device, and the admin should never read the lock as "local". It is outlined in amber like hosted, without the fill.</li>
         <li>Decided in round 17: whenever web search is offered, the strip names where search words go, also when the chat model is local: "Local · Ollama · web search to OpenAI, recognized tenant data removed", or "web search to OpenAI" when space is short. It never reads "No data leaves this device" while search is offered, because the search words leave this device even though the model does not. Turning web search off in Nova's abilities brings "No data leaves this device" back. E shows the strip in Chat.</li>
         <li>Decided 2026-11-19: hosted voice is honest about its boundary. Its strip says "hears what you say": the admin's spoken words go to OpenAI as audio and data policy does not check them.</li>
         <li>Tenant data the app sends to the hosted voice model as context goes through the same request scan and the same rules as any hosted call, so the voice strip is drawn by the same function as every other hosted strip and names the same masked classes: with the defaults, "identities, security names and devices masked". Where a value is masked the voice model says "the user" and "the device"; the transcript on screen restores identity, device and security names and identifiers, while activity, configuration and credential placeholders stay masked there too.</li>
         <li>Ollama or LM Studio at an address on another machine is Hosted: data policy applies the Hosted column, and the strip names the host instead of a vendor, "Hosted · Ollama on gpu-01.woodgrove.example". The frame below shows the same state in Connections and in Chat.</li>
         <li>The voice popover is built by one function, here and on the live strip in A, from two inputs: the context transfers of the current call as recorded, and the rules in force now. Each transfer keeps the decision made when it was sent (sent, masked with its count, or withheld) and what the voice model said then. The rules in force now drive only the strip, the dashed preview of what the next transfer would do ("Next transfer under current rules, a preview"), the rule per class, and the recovery for withheld context.</li>
-        <li>The first transfer is the session start request. Decided in round 21: the check reads the complete instructions nova.ts would send when the OpenAI session opens, not only the profile block: the fixed lines with the organization name, the tenant id and your greeting name, the provider and model names, and the profile block with your standing instructions and confirmed notes. It goes through the same request scan and rules as every later transfer and is listed as its own line. In this call one confirmed note holds a BitLocker recovery key, so the line says it reached OpenAI as [CREDENTIAL], one way.</li>
-        <li>When a rule blocks a class anywhere in the start request, the app rebuilds it without the blocked parts: the profile block whole when it carries a blocked class (decided 2026-11-19, the maintainer chose the whole block over single notes), and the organization name, tenant id or greeting name replaced by neutral wording where the rule covers the class the check gave them, so the voice model still knows a tenant is connected and does not greet by name. The rebuilt start is checked again in full before the call opens. In the seventh popover Credential on Hosted is Block: the call opened without the profile, and the line and the notice say so, never that it was sent. Its recovery is Change the rule: the profile is not a question, so there is no local model to ask. In this call the check gave the organization name and tenant id no class a rule covers, so they stayed as they were.</li>
+        <li>The first transfer is the session start request. Decided in round 21: the check reads the complete instructions nova.ts would send when the OpenAI session opens, not only the profile block: the fixed lines with the organization name, the tenant id and your greeting name, the provider and model names, and the profile block with your standing instructions and confirmed notes. It goes through the same request scan and rules as every later transfer and is listed as its own line. In this call one confirmed note holds a BitLocker recovery key, so the line says it reached OpenAI as [CREDENTIAL], one way. Each value of the fixed lines has its own class, and the line names them: in this fixture the organization name is configuration and the tenant id and greeting name are identity, so under the defaults the tenant id and greeting name are masked and the organization name goes as is. The plan's field map decides the real classes.</li>
+        <li>When a rule blocks a class anywhere in the start request, the app rebuilds it without the blocked parts: the profile block whole when it carries a blocked class (decided 2026-11-19, the maintainer chose the whole block over single notes), and the organization name, tenant id or greeting name replaced by neutral wording where the rule covers the class the check gave them, so the voice model still knows a tenant is connected and does not greet by name. The rebuilt start is checked again in full before the call opens. In the seventh popover Credential on Hosted is Block: the call opened without the profile, and the line and the notice say so, never that it was sent. Its recovery is Change the rule: the profile is not a question, so there is no local model to ask. Credential is not the class of any fixed-line value, so the organization name went as is and the tenant id and greeting name were masked, as under the defaults. In the eighth popover Identity on Hosted is Block in a call that has just opened: the profile carries identity and is left out, the tenant id and greeting name are identity and are replaced by neutral wording, the line quotes that wording, and the organization name, configuration, stays. The rebuilt start passed its check in full, so the call opened with it.</li>
+        <li>Decided in round 22: every check that could open the call must cover the whole start, the first one included. When the first check does not finish, also with the defaults and no Block anywhere, the call never opens on it and the part it did not examine is never masked one way and sent. The app rebuilds the start without the parts the check did not examine, the profile whole or a fixed-line value by its neutral wording, and checks the rebuilt start in full; when the part it did not examine is one the rebuilt start keeps, such as the app's fixed rules, the call does not open and the block below shows.</li>
         <li>When the second check still finds blocked content, or does not finish on the whole text, the call does not open, as in the last block: nothing is sent to OpenAI and no audio leaves this device. The block says why. A check that did not finish offers Start the call again; blocked content the app could not leave out offers Change the rule, or names policy.json when IT set it. Voice on this device is offered in both. With an empty profile and Identity on Hosted at Block, a check of the profile block alone would find nothing and send your greeting name; the check of the whole request finds it.</li>
         <li>Changing a rule during a call never rewrites a past transfer. The fourth popover was recorded under the defaults and opened after Security on Hosted was set to Block: the 09:43 transfer still reads "Sent, 10 values masked", the preview reads "Would be withheld", and a line says context already sent stays as recorded. Data policy cannot recall what OpenAI received.</li>
         <li>A voice strip names a blocked class as withheld context, not as blocked: with Security on Hosted set to Block it reads "security context withheld", because the session goes on and only that context stays on this device.</li>
@@ -1221,7 +1224,7 @@
       </ul>
 
       <h3 id="f-reopen" style="margin:32px 0 6px;font-size:var(--text-base);font-weight:500">A conversation reopened after a restart</h3>
-      <p>Each saved Chat message keeps its classification next to it on this device: where each recognized value sits in the text, every class that applied to it, from its field and from the value checks, and the field map revision in force, not a second copy of the value. Reopening a conversation rebuilds the ledger from that record before any follow-up, so a policy name that is no longer in the tenant index is still known as security. A message saved without that record could hold anything, so it counts as not examined. So does every message whose record was made before any change to the classes of a field, whether an app update to the field map, a move in Settings or a mapping in the IT policy file, a higher class or a lower one, and whether or not the message used that field: the record cannot show that none of its values came from the changed field, so the saved classification can no longer be used.</p>
+      <p>Each saved Chat message keeps its classification next to it on this device: where each recognized value sits in the text, every class that applied to it, from its field and from the value checks, and the field map revision under which that value's classes were computed, not the revision in force when the message was saved, and not a second copy of the value. Reopening a conversation rebuilds the ledger from that record before any follow-up, so a policy name that is no longer in the tenant index is still known as security. A message saved without that record could hold anything, so it counts as not examined. So does every message whose record was made before any change to the classes of a field, whether an app update to the field map, a move in Settings or a mapping in the IT policy file, a higher class or a lower one, and whether or not the message used that field: the record cannot show that none of its values came from the changed field, so the saved classification can no longer be used.</p>
       <div class="win">
         <div class="lights"><i></i><i></i><i></i></div>
         <div class="shell">
@@ -1276,7 +1279,7 @@
         </div>
       </div>
       <ul class="notes">
-        <li>Decided in round 13: each saved Chat message stores its classification evidence in the local database: the offset and length of every value the ledger found in it with every class that applied to it (refined in rounds 14 and 15 below), the offset and length of every part the check did not examine within its budget (added in round 21), and the field map revision that classed them (made the effective revision in round 16 below). It is no new copy of the values beyond the message text already saved. On reopening, the parts that were not examined take the strictest rule any class has on the tier, like any text the check did not examine, even when the rest of the message is classified from its record, and a message whose skipped parts could not be stored counts as not examined as a whole. Disconnecting the organization and deleting the conversation remove the evidence with the messages.</li>
+        <li>Decided in round 13: each saved Chat message stores its classification evidence in the local database: the offset and length of every value the ledger found in it with every class that applied to it (refined in rounds 14 and 15 below), the offset and length of every part the check did not examine within its budget (added in round 21), and the field map revision that classed them (made the effective revision in round 16 below, and kept per value since round 22 below). It is no new copy of the values beyond the message text already saved. On reopening, the parts that were not examined take the strictest rule any class has on the tier, like any text the check did not examine, even when the rest of the message is classified from its record, and a message whose skipped parts could not be stored counts as not examined as a whole. Disconnecting the organization and deleting the conversation remove the evidence with the messages.</li>
         <li>Reopening rebuilds the ledger from the stored evidence before the follow-up is built, and the scan of the final request still runs over the history, so a class can only rise. An answer that named a Conditional Access policy since renamed in the tenant keeps that name as security: with Security on Hosted at Block, the name is withheld, as the blocked prompt in E shows.</li>
         <li>A message with no stored evidence, saved by an earlier version or with evidence that cannot be read, counts as not examined, the same rule as a request the check ran out of time on. With a Block on the tier, it is withheld and the follow-up waits for the admin: sent without the history it depends on, it would get a confident wrong answer. With Mask as the strictest rule, it is masked one way and the answer says so.</li>
         <li>Ask without the earlier answers sends the new question alone, with no saved history in the request. The local model is offered only when no rule on Local is Block, as in the withheld calls above.</li>
@@ -1286,6 +1289,54 @@
         <li>Decided in round 15: the stored set also holds every class a value check assigned when the message was saved, a tenant index match or a credential or identifier pattern, next to its field's classes. A person's display name in a configuration field, recognized by the tenant index as identity, keeps identity after a restart once the name has left the index: with Identity on Hosted at Mask it is masked, at Block it is withheld, and it is never sent in clear text.</li>
         <li>Decided in round 16: the revision is that of the effective field map, the one the app applies, not the version it ships. It changes whenever any source changes a class (any change since round 20 below, not only a raise): an app update to the shipped map, a move in Settings, or a mapping in the IT policy file (<code>dataPolicy.fieldClasses</code>). A change that leaves every field's classes as they were leaves it as it is. The 15 November answer above was saved while profile descriptions were configuration; the move to security in Settings made revision 42, and after a restart, with WGB Finance MFA gone from the tenant index, the hosted follow-up is withheld under Security Block. A check of the shipped map alone would see no change and send the name as configuration.</li>
         <li>Decided in round 20: a remap to a lower class changes the revision too, because a lower class can be stricter on a tier. With Security on Hosted at Allow and Configuration on Hosted at Block, an IT policy file mapping that moves a field from security to configuration makes a new revision, and a record saved before it counts as not examined and is withheld under the Block. A revision that moved only on raises would keep the value at security, which Hosted allows, and send it.</li>
+        <li>Decided in round 22: each stored value keeps the revision under which its classes were computed, copied from the conversation's ledger, never the revision in force when the message is saved. In the plan's criterion 30, the IT policy file maps <code>deviceConfigurations: description</code> from configuration to security while a local answer is still streaming: the description in that answer was classed configuration under revision 41 and is saved with revision 41, although 42 was in force at save. On reopening, and again before every request, the app compares each value's revision with the one in force: 41 is older, so the message counts as not examined and, with Security on Hosted at Block, is withheld. A record that stored the revision at save would read 42, current, and send the description as configuration.</li>
+      </ul>
+
+      <h3 id="f-tail" style="margin:32px 0 6px;font-size:var(--text-base);font-weight:500">A reopened message with a part that was never examined</h3>
+      <p>A record at the current revision is used as stored, but only for what the check examined. A message can be saved with a part the check did not reach within its budget, such as the tail of a long log you pasted. That part is stored as not examined, and after a restart it is still not examined: it takes the strictest rule any class has on the tier the follow-up goes to, whatever the rest of the message holds.</p>
+      <div class="win">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="shell">
+          <aside class="side" data-side="chat"></aside>
+          <div class="appmain">
+            <div class="topbar"><button class="orgchip" type="button"><span class="av">WB</span>Woodgrove Bank<svg class="chev"><use href="#i-chev"/></svg></button><span class="boundary" data-where="confidential"><svg aria-hidden="true"><use href="#i-lock"/></svg>Confidential · attested enclave · leaves this device ·<span class="blk">identities blocked</span></span></div>
+            <div class="page"><div class="chat">
+              <p class="reopen"><span>Reopened today at 11:05, after a restart. Saved 18 November.</span><span class="r">Field map revision 43, the same as when both messages were classified</span></p>
+              <div class="hist" aria-label="Earlier messages">
+                <div class="q">Why does Company Portal keep asking the finance Macs to sign in again? The log from one of them is below.<span class="xs" style="display:block;margin-top:4px;color:var(--color-text-muted)">Pasted log, 2,412 lines</span></div>
+                <p class="histtag"><span class="hx"></span><span>Classified under revision 43, still current: 3 values classified from their stored record. Lines 1 to 1,180 of the pasted log were examined; lines 1,181 to 2,412 were not examined within the check's budget and are stored as not examined.</span></p>
+                <div class="ans">
+                  <div class="who"><svg width="14" height="14"><use href="#oa"/></svg>Nova with Ollama on this device, 18 November, classified under field map revision 43</div>
+                  <div class="body"><p>The first part of the log shows the Platform SSO extension failing to register after each restart, which sends Company Portal back to the sign-in screen. I read the whole log on this device; the error repeats every 40 minutes.</p></div>
+                </div>
+                <p class="histtag"><span class="hx"></span><span>Classified under revision 43, still current, from its stored record.</span></p>
+              </div>
+              <div class="q">Does the same happen on the other finance Macs?</div>
+              <div class="ans">
+                <div class="block" data-t="blocked">
+                  <span class="glyph" data-t="blocked"><svg><use href="#i-q"/></svg></span>
+                  <div>
+                    <h3>Your follow-up was not sent: part of an earlier message was never examined</h3>
+                    <p>Your question from 18 November holds a log you pasted. When it was saved, the check examined lines 1 to 1,180 within its budget and stored lines 1,181 to 2,412 as not examined. Nothing changed the field map since, so revision 43 is still current and the examined part is classified from its stored record. The part that was not examined could hold anything, so it takes the strictest rule any class has on Confidential. Credential on Confidential is Allow, which you confirmed on 12 November, but Identity on Confidential is Block, so the strictest rule is Block. The message was not sent to the attested enclave, and your follow-up was not sent without it: it depends on it.</p>
+                    <ul class="calls" aria-label="Model calls for this follow-up">
+                      <li><span class="tm">11:05:12</span><span class="loc">Local</span><span>Rebuilt 2 earlier messages under revision 43: both from their stored record, lines 1,181 to 2,412 of the pasted log not examined.</span></li>
+                      <li><span class="tm">11:05:13</span><span class="sent">Sent</span><span>Planning the question. Your question, checked by data policy. No sensitive values found.</span></li>
+                      <li><span class="tm">11:05:14</span><span class="not">Not sent</span><span>Follow-up with 2 earlier messages. 1,232 lines not examined, treated as credential; the strictest rule on Confidential is Identity's Block.</span></li>
+                    </ul>
+                    <div class="acts"><button class="bt primary" type="button">Ask without the earlier answers</button><button class="bt secondary" type="button">Switch to a local model</button></div>
+                    <p class="xs muted" style="margin-top:10px">Without the earlier answers, only your new question goes to the attested enclave, with none of this conversation's history, so name the error you mean, or paste the lines you need, which get the same check as a new question. Ollama with gpt-oss:20b is ready on this device, and no rule on Local is Block, so the follow-up can be answered there with the whole conversation, the log included.</p>
+                  </div>
+                </div>
+              </div>
+              <div class="composer">Ask a follow-up<span class="r">Confidential, identities blocked</span></div>
+            </div></div>
+          </div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>Decided in round 21: the stored record of a message holds the parts the check did not examine, as offsets and lengths, next to the values it found. A current revision makes the found values usable as stored; it never makes the skipped parts examined. When the skipped parts could not be stored, the whole message counts as not examined.</li>
+        <li>Data that was not examined is reported as credential, but its action is the strictest action of any class on the tier, not the credential rule. On Confidential, Credential at Allow (possible only after the confirmation dialog, and lockable by IT) would send it; Identity at Block withholds it. A rebuild from the stored values alone, or one that gave the skipped lines the credential rule, would send lines 1,181 to 2,412, and the plan's criterion 26 fails on either.</li>
+        <li>The Confidential strip appears in the app only once a provider has passed attestation (Track C). This frame shows that later state, as the plan's test does with a test provider of the Confidential tier.</li>
       </ul>
 
       <h3 id="f-open" style="margin:32px 0 6px;font-size:var(--text-base);font-weight:500">A follow-up in a conversation that stayed open</h3>
@@ -1491,7 +1542,7 @@
 
     // One function draws every hosted strip from a set of rules, long and short form alike.
     const joinList = (xs) => xs.length < 3 ? xs.join(" and ") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
-    // Masked credentials are never named: no rule sends them in clear text. Blocked ones are.
+    // Masked credentials are never named: no rule sends them to the Hosted tier in clear text. Blocked ones are.
     // Voice context withholds a transfer instead of refusing a call, so a voice strip names blocked classes as withheld context.
     // Masking a security object hides its names only; a block keeps the whole object back, so the label drops "names".
     const stripName = (c, act) => act === "block" && c.stripBlock ? c.stripBlock : c.strip;
@@ -1539,7 +1590,7 @@
       const p = PROVIDERS[prov];
       return `<h4>${p.label}</h4><p class="soft">${p.where} Before each call, this device applies your data policy:</p><dl>${policyRows(r)}</dl>
         <p class="xs muted" style="margin-bottom:6px">Data the check could not examine in time is reported as credential and gets the strictest rule any class has on Hosted.</p>
-        <p class="xs muted" style="margin-bottom:6px">Values the app recognizes as credentials never reach a hosted model in clear text. A secret written into a free-text field in a form the app does not recognize can still be sent.</p>
+        <p class="xs muted" style="margin-bottom:6px">Values the app recognizes as credentials never reach a model on the Hosted tier in clear text. On the Confidential tier they are masked unless you allow them after a confirmation, and your IT department can lock that rule. A secret written into a free-text field in a form the app does not recognize can still be sent.</p>
         <p class="xs muted" style="margin-bottom:10px">Names the app has never seen, such as a person you type for the first time, cannot be detected and are sent as typed.</p>
         <button class="bt secondary sm" type="button">Data policy settings</button>`;
     }
@@ -1547,7 +1598,7 @@
     // The first transfer is the session start request: the complete instructions nova.ts would send when the OpenAI
     // session opens, the fixed lines with the organization name, tenant id and greeting name, and the profile block.
     const VOICE_CALL = [
-      { at: "09:40", start: true, what: "Session start: app instructions, your greeting name, your profile", body: "The app's instructions with the organization name, tenant id and your greeting name, and your profile with 3 standing instructions and 5 confirmed notes", carries: { identity: 3, configuration: 3, credential: 1 }, greeting: "identity", profile: { identity: 2, configuration: 3, credential: 1 }, detail: "One confirmed note holds a BitLocker recovery key." },
+      { at: "09:40", start: true, what: "Session start: app instructions, your greeting name, your profile", body: "The app's instructions with the organization name, tenant id and your greeting name, and your profile with 3 standing instructions and 5 confirmed notes", carries: { identity: 4, configuration: 4, credential: 1 }, org: "configuration", tenantId: "identity", greeting: "identity", profile: { identity: 2, configuration: 3, credential: 1 }, detail: "One confirmed note holds a BitLocker recovery key." },
       { at: "09:41", what: "38 finance devices", ask: "which finance devices have not checked in", carries: { device: 38, identity: 31, activity: 38, configuration: 12 } },
       { at: "09:42", what: "214 sign-ins", ask: "who signed in from outside Germany", carries: { activity: 214, identity: 38 } },
       { at: "09:43", what: "6 Conditional Access policies", ask: "which policies exclude the break-glass admins", carries: { security: 6, identity: 4, configuration: 9 } },
@@ -1561,14 +1612,30 @@
       const masked = ids.filter((c) => r[c].hosted === "mask");
       return { ids, withheldBy, masked, sent: !withheldBy.length, maskedValues: masked.reduce((n, c) => n + t.carries[c], 0) };
     }
-    // A blocked class in the session start leaves out the parts that carry it: the profile block whole, and the greeting
-    // name replaced by neutral wording. The rest is scanned again in full before the call opens.
+    // A blocked class in the session start leaves out the parts that carry it: the profile block whole, and the
+    // organization name, tenant id and greeting name each replaced by neutral wording where the rule covers the class
+    // the check gave it. The rest is scanned again in full before the call opens. The classes here are this fixture's:
+    // the organization name is configuration and the tenant id identity; the plan's field map decides the real ones.
+    const START_VALUES = [
+      { key: "org", part: "the organization name", neutral: "an organization is selected; its name is withheld by data policy" },
+      { key: "tenantId", part: "the tenant id", neutral: "the organization's tenant id is withheld by data policy" },
+      { key: "greeting", part: "your greeting name", neutral: "no greeting name in this call" },
+    ];
     function startLeftOut(t, classes) {
       const parts = [];
       if (Object.keys(t.profile).some((c) => classes.includes(c))) parts.push("your profile");
-      if (classes.includes(t.greeting)) parts.push("your greeting name");
+      START_VALUES.forEach((v) => { if (classes.includes(t[v.key])) parts.push(v.part); });
       return parts;
     }
+    // The neutral wording the rebuilt start carries in place of each replaced value.
+    const startNeutral = (t, classes) => START_VALUES.filter((v) => classes.includes(t[v.key]));
+    // How the start was rebuilt: the profile left out, the fixed-line values replaced by neutral wording.
+    function startRebuilt(t, classes) {
+      const neu = startNeutral(t, classes), dropped = startLeftOut(t, classes).filter((p) => !neu.some((v) => v.part === p));
+      return [dropped.length ? `without ${joinList(dropped)}` : "", neu.length ? `with neutral wording in place of ${joinList(neu.map((v) => v.part))}` : ""].filter(Boolean).join(" and ");
+    }
+    // What the check gave each value of the fixed lines, shown on the session start line.
+    const startClasses = (t) => `Classes the check gave the fixed lines: the organization name ${clsName(t.org).toLowerCase()}, the tenant id ${clsName(t.tenantId).toLowerCase()}, your greeting name ${clsName(t.greeting).toLowerCase()}.`;
     const sameDecision = (a, b) => a.sent === b.sent && a.maskedValues === b.maskedValues && a.withheldBy.join() === b.withheldBy.join();
     // A call as the app records it: each transfer keeps the decision made under the rules in force when it was sent,
     // and what the voice model said then. Changing a rule later never rewrites these.
@@ -1637,9 +1704,12 @@
     }
     // A past transfer shows the decision recorded when it was sent, never one computed from the rules in force now.
     function transferLine(t) {
-      let more = t.detail || "";
+      let more = t.start ? `${startClasses(t)} ${t.detail}` : t.detail || "";
       const parts = t.start && !t.d.sent ? startLeftOut(t, t.d.withheldBy) : [];
-      if (t.detail && t.carries.credential) more += t.d.sent ? " It reached OpenAI as [CREDENTIAL], one way, and is never restored." : ` The app rebuilt the start without ${joinList(parts)}, checked the rest again in full, and the call opened with it, so none of ${joinList(parts)} reached OpenAI.`;
+      if (t.detail && t.carries.credential) more += t.d.sent ? " It reached OpenAI as [CREDENTIAL], one way, and is never restored." : ` The app rebuilt the start ${startRebuilt(t, t.d.withheldBy)}, checked the rebuilt start again in full, and the call opened with it, so none of ${joinList(parts)} reached OpenAI.`;
+      // A value replaced by neutral wording: the line quotes what the voice model received in its place.
+      const neutral = t.start && !t.d.sent ? startNeutral(t, t.d.withheldBy) : [];
+      if (neutral.length) more += ` In place of ${joinList(neutral.map((v) => v.part))} the rebuilt start says ${joinList(neutral.map((v) => `"${v.neutral}"`))}.`;
       // A session start with a blocked class opens with the rescanned rest, so its line says what it opened without.
       const dd = parts.length ? `<dd class="bk">Opened without ${joinList(parts)}, ${joinList(t.d.withheldBy.map(clsName))} ${wasWere(t.d.withheldBy)} Block</dd>` : decisionDd(t.d);
       return `<dt><span class="tt">${t.at}</span>${t.what}</dt>${dd}${more ? `<dd class="txn">${more}</dd>` : ""}`;
@@ -1656,7 +1726,7 @@
         // A withheld session start never went out: the call opened without the profile.
         const parts = last.start ? startLeftOut(last, d.withheldBy) : [];
         const body = last.start
-          ? `<b>Session start at ${last.at} opened without ${joinList(parts)}</b>${last.body}. ${rule}, so the app rebuilt the start without ${joinList(parts)}, checked the rest again in full, and the call opened without ${parts.length === 1 ? "it" : "them"}. The app sent none of ${joinList(parts)} to OpenAI. The voice model said so:<q>The app withheld ${joinList(parts)} from this call. ${last.said}</q>`
+          ? `<b>Session start at ${last.at} opened without ${joinList(parts)}</b>${last.body}. ${rule}, so the app rebuilt the start ${startRebuilt(last, d.withheldBy)}, checked the rebuilt start again in full, and the call opened with it. The app sent none of ${joinList(parts)} to OpenAI. The voice model said so:<q>The app withheld ${joinList(parts)} from this call. ${last.said}</q>`
           : `<b>Context withheld at ${last.at}</b>${last.what}, for "${last.ask}". ${rule}, so the app sent none of this context to OpenAI. The call went on without it, and the voice model said so:<q>I can't use the ${names} data for that in this call. ${last.said}</q>`;
         note = `<div class="withheld" role="status">${body}<span class="rec">${rec.text}</span>${rec.acts.join("") ? `<span class="acts">${rec.acts.join("")}</span>` : ""}</div>`;
         return note;
@@ -1673,7 +1743,7 @@
         <dl class="tx">${call.map(transferLine).join("")}</dl>
         ${note}
         <p class="sub">Next transfer under current rules, a preview</p>
-        <dl class="tx preview"><dt>${lt.what}, sent again now</dt>${decisionDd(next, true)}</dl>
+        <dl class="tx preview"><dt>${lt.what}, ${lt.start ? "if the call started again now" : "sent again now"}</dt>${lt.start && !next.sent ? `<dd class="bk">Would open without ${joinList(startLeftOut(lt, next.withheldBy))}, ${joinList(next.withheldBy.map(clsName))} ${isAre(next.withheldBy)} Block</dd>` : decisionDd(next, true)}</dl>
         ${drift}
         <p class="sub">Rules in force now for tenant data sent as context, checked like any hosted call:</p>
         <dl>${policyRows(r, true)}</dl>
@@ -1686,7 +1756,7 @@
     const SEC_BOTH = withRule("security", "hosted", "block"); SEC_BOTH.security.local = "block";
     const LOCAL_MASK = withRule("identity", "local", "mask");
     const SEC_TO_CFG = withRule("configuration", "hosted", "block");
-    const STRIP_RULES = { defaults: DEFAULTS, credhosted: withRule("credential", "hosted", "block"), sectocfg: SEC_TO_CFG, blocked: withRule("activity", "hosted", "block"), credblock: CRED_BLOCK, clear: ALL_CLEAR, secblock: withRule("security", "hosted", "block"), secboth: SEC_BOTH, localmask: LOCAL_MASK, credsec: (() => { const r = withRule("credential", "hosted", "block"); r.security.hosted = "block"; return r; })() };
+    const STRIP_RULES = { defaults: DEFAULTS, credhosted: withRule("credential", "hosted", "block"), idblock: withRule("identity", "hosted", "block"), sectocfg: SEC_TO_CFG, blocked: withRule("activity", "hosted", "block"), credblock: CRED_BLOCK, clear: ALL_CLEAR, secblock: withRule("security", "hosted", "block"), secboth: SEC_BOTH, localmask: LOCAL_MASK, credsec: (() => { const r = withRule("credential", "hosted", "block"); r.security.hosted = "block"; return r; })() };
     const orgchip = '<button class="orgchip" type="button"><span class="av">WB</span>Woodgrove Bank<svg class="chev"><use href="#i-chev"/></svg></button>';
     let popSeq = 0;
     const topRules = (el) => el.dataset.top === "live" ? rules : STRIP_RULES[el.dataset.top] || DEFAULTS;
@@ -1722,7 +1792,8 @@
     document.querySelectorAll("[data-strip]").forEach((el) => { el.outerHTML = stripHtml(STRIP_RULES[el.dataset.strip], el.dataset.form, el.dataset.label, "", "voice" in el.dataset); });
     document.querySelectorAll("[data-pop]:not([data-top])").forEach((el) => { el.innerHTML = popInner(STRIP_RULES[el.dataset.pop], el.dataset.prov); });
     // data-recorded names the rules in force when the call's transfers were sent; data-voicepop the rules in force now.
-    document.querySelectorAll("[data-voicepop]").forEach((el) => { el.innerHTML = voicePopInner(STRIP_RULES[el.dataset.voicepop], recordCall(STRIP_RULES[el.dataset.recorded || el.dataset.voicepop])); });
+    // data-upto keeps only the first transfers, for a call that has just opened.
+    document.querySelectorAll("[data-voicepop]").forEach((el) => { el.innerHTML = voicePopInner(STRIP_RULES[el.dataset.voicepop], recordCall(STRIP_RULES[el.dataset.recorded || el.dataset.voicepop]).slice(0, Number(el.dataset.upto) || undefined)); });
     // The call on the live strip in A was recorded under the defaults, before any change in the matrix.
     const LIVE_CALL = recordCall(DEFAULTS);
     document.addEventListener("click", (e) => {
@@ -1762,7 +1833,7 @@
           return `<button type="button" data-a="${a}">${a[0].toUpperCase() + a.slice(1)}</button>`;
         }).join("")}</div></div></div>`;
       });
-      if (c.id === "credential") html += `<div class="why r" id="why-credential">Allow is not available on Hosted: values the app recognizes as credentials never reach a hosted model in clear text. On Confidential, Allow asks first, and IT can lock it.</div>`;
+      if (c.id === "credential") html += `<div class="why r" id="why-credential">Allow is not available on Hosted: values the app recognizes as credentials never reach a model on the Hosted tier in clear text. On the Confidential tier, Allow is possible only after a confirmation, and IT can lock it.</div>`;
       if (c.id === "security") html += `<div class="why">Masking replaces names and identifiers: policy names, named locations, IP ranges, excluded users and groups, role names. Setting values stay readable.</div>`;
       if (c.locked) html += `<span class="lockline" id="${lockId}"><svg><use href="#i-lock"/></svg><span>Locked. Set by your IT department in policy.json, <code>${c.locked}</code>.${c.overridden ? " " + c.overridden : ""}</span></span>`;
       row.innerHTML = html;
