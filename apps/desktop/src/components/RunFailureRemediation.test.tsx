@@ -275,6 +275,8 @@ it.each([
   ["Graph responded with HTTP 401 for https://graph.microsoft.com/v1.0/users: {\"error\":{\"code\":\"InvalidAuthenticationToken\"}}", true],
   ["AADSTS65001 interaction_required: consent is needed", true],
   ["interaction_required: AADSTS50076: Due to a configuration change made by your administrator, you must use multi-factor authentication.", true],
+  ["Microsoft Graph rejected the Teams access token (HTTP 401). Reconnect the tenant.", true],
+  ['Graph responded with HTTP 403 for https://graph.microsoft.com/v1.0/users/1/authentication/methods: {"error":{"code":"accessDenied","message":"The caller is unauthorized to perform this action."}}', false],
   ["Ollama responded with HTTP 403 at http://gateway.example/api/chat: upstream said AADSTS65001 interaction_required", false],
 ])("gives tenant sign-in advice only for a tenant sign-in failure: %s", (error, tenant) => {
   const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
@@ -333,6 +335,12 @@ it("keeps the LM Studio playbook for a model whose name mentions Ollama", () => 
 
 it("shows Graph advice for a stored required Teams connector failure on a Graph 403", () => {
   const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Connector 'teams' failed its health check: Microsoft Graph rejected the request (HTTP 403). The signed-in admin lacks the required Teams scopes." };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Graph access cause unverified")).toBeInTheDocument();
+});
+
+it("shows Graph advice for a stored replan failure on a required Teams connector's Graph 403", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Nothing was applied: Connector 'teams' failed its health check: Microsoft Graph rejected the request (HTTP 403). The signed-in admin lacks the required Teams scopes." };
   render(<RunFailureRemediation run={run} />);
   expect(screen.getByText("Graph access cause unverified")).toBeInTheDocument();
 });

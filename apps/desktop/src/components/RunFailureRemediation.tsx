@@ -2,7 +2,7 @@ import { IconWarning } from "./icons";
 import { Button } from "./Button";
 import { useReportIssue } from "./ReportIssueModal";
 import type { RunRecord } from "../shared/openAdminOS";
-import { errorComesFromGraph, graphAccessDenialFromStoredText, storedGraphAccessDenial } from "@openadminos/agent-sdk";
+import { errorIsGraphSignInRejection, graphAccessDenialFromStoredText, storedGraphAccessDenial } from "@openadminos/agent-sdk";
 
 interface Suggestion {
   match: (error: string) => boolean;
@@ -111,8 +111,7 @@ const SUGGESTIONS: Suggestion[] = [
     // model server or vendor API that answers 401, 403 Unauthorized or
     // "expired token" is not.
     match: (e) =>
-      ((errorComesFromGraph(e) && /\b401\b|unauthor/i.test(e)) ||
-        MICROSOFT_SIGN_IN_ERROR.test(e)) &&
+      (errorIsGraphSignInRejection(e) || MICROSOFT_SIGN_IN_ERROR.test(e)) &&
       !isContextLimitLookup(e),
     title: "Tenant token expired",
     body: "Disconnect and reconnect the tenant from Connections. MSAL caches a refresh token but Graph can revoke it independently.",

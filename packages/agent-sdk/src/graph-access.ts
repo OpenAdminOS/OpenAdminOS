@@ -244,8 +244,34 @@ const APP_FAILURE_WRAPPERS = [
 
 function storedText(error: unknown): string {
   let raw = (error instanceof Error ? error.message : String(error ?? "")).trimStart();
-  for (const wrapper of APP_FAILURE_WRAPPERS) raw = raw.replace(wrapper, "");
+  // Wrappers nest, for example "Nothing was applied: Connector 'teams' failed its health check: ...".
+  for (let unwrapped = true; unwrapped;) {
+    unwrapped = false;
+    for (const wrapper of APP_FAILURE_WRAPPERS) {
+      const next = raw.replace(wrapper, "");
+      if (next !== raw) {
+        raw = next;
+        unwrapped = true;
+      }
+    }
+  }
   return unwrapScriptAgentGraphError(raw);
+}
+
+/**
+ * The start of a Graph 401 as Graph code writes it: the runtime adapter
+ * ("Graph rejected the access token (HTTP 401)."), its older wording ("Graph
+ * responded with HTTP 401 for ..."), and the connectors ("Microsoft Graph
+ * rejected the Teams access token (HTTP 401).").
+ */
+const GRAPH_401_START = /^(?:Graph rejected the access token \(HTTP 401\)|Graph responded with HTTP 401 for |Microsoft Graph rejected the (?:\w+ )?access token \(HTTP 401\))/;
+
+/**
+ * True when Graph rejected the tenant's access token. A 401 or "unauthorized"
+ * elsewhere, such as in a Graph 403 body or a provider's response, is not.
+ */
+export function errorIsGraphSignInRejection(error: unknown): boolean {
+  return GRAPH_401_START.test(storedText(error));
 }
 
 /** True when a stored error message was written by OpenAdminOS's Graph code. */
