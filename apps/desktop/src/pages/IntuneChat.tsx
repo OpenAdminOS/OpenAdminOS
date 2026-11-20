@@ -4765,7 +4765,7 @@ function SwitchedProviderLine({ message }: { message: IntuneChatMessage }) {
       <span className={local ? "text-[var(--color-success)]" : "text-[var(--color-warning)]"}>
         {local ? MODEL_FIT_COPY.answeredLocal(message.model ?? name, name) : providerDataLocation({ id: providerId, name })}
       </span>{" "}
-      <span className="text-[var(--color-text-soft)]">{MODEL_FIT_COPY.answeredRest(back)}</span>
+      <span className="text-[var(--color-text-soft)]">{message.status === "streaming" ? MODEL_FIT_COPY.sendingRest : MODEL_FIT_COPY.answeredRest(back)}</span>
     </div>
   );
 }

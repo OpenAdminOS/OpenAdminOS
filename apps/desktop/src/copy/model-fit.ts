@@ -104,6 +104,8 @@ export const MODEL_FIT_COPY = {
   sentTo: "Sent to",
   /** The accepted request while it runs. */
   sendingTo: "Sending to",
+  /** While it runs, the switch back has not happened yet. */
+  sendingRest: "for this request only.",
   answeredRest: (model: string) => `for this request only. Chat is back on ${model}.`,
   answeredLocal: (model: string, providerName: string) => `${model} on this device (${providerName})`,
 
