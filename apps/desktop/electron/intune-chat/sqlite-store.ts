@@ -2576,7 +2576,7 @@ export class IntelligenceSqliteStore {
          WHERE tenant_id = ?
            AND resource = 'managedDevices'
            AND last_seen_at IS NOT NULL
-           AND last_seen_at < ?
+           AND julianday(last_seen_at) < julianday(?)
            ${extra.map((built) => `AND ${built.sql}`).join(" ")}
          ORDER BY last_seen_at ASC
          LIMIT ?`,

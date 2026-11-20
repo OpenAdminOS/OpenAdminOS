@@ -3846,12 +3846,16 @@ the format. Decisions:
   questions go to the planner, because whether an iPad reports
   operatingSystem "iOS" or "iPadOS" is not documented and could not be checked
   on a tenant (2026-11-20, the Lokka tenant has no iPad); a sync window must
-  be one day to ten years, and times compare as times; a later sentence with
+  be one day to ten years, times compare as times, and "today", "this week"
+  and "this month" start in this device's time zone; a later sentence with
   its own subject is its own question and goes to the planner; "list their
   names" together with a subset asks for two lists and goes to the planner;
   "what about macOS" asks the stored question again with macOS swapped in or
-  added in the same shape (its split, subset, count or list), and a split
-  that was over a follow-up's subset is not rebuilt; a device lookup is
+  added in the same shape (its split, subset, count or list), replacing the OS
+  in the set and the subset alike, and a split that was over a follow-up's
+  subset is not rebuilt; a split asked after the subset clause could mean
+  either and goes to the planner; a turn with attached workspace context goes
+  to the planner, since code reads none of its instructions; a device lookup is
   resolved again by name in the snapshot that answers; Entra device questions
   always go to the planner. The deterministic
   answer pack carries the result as an authoritative `computedResult` (exact
@@ -3878,7 +3882,7 @@ the format. Decisions:
   clause: the first clause is the counted set, the second the listed subset. A different value on a field already filtered after a switch lead
   ("what about macOS" after Windows) asks the same question of a fresh set.
   What ran shows the filters of a follow-up, not the row ids. A device
-  lookup stores no follow-up context. When the previous answer matched more
+  lookup stores no follow-up context, and a stopped turn clears the context. When the previous answer matched more
   than 500 rows, no rows were kept and "of those" goes to the planner. Any other answer clears the context, and
   follow-up planning reads write intent from the current question only. Short
   follow-ups are planned with the previous question as context. The context is

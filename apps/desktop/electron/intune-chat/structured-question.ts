@@ -167,14 +167,15 @@ function syncFilter(lower: string, generatedAt: string): { label: string; predic
   let since: Date | undefined;
   let label = "";
   if (/\bthis month\b/.test(lower)) {
-    since = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    // Calendar windows start in this device's time zone: "today" is the admin's day, not the UTC one.
+    since = new Date(now.getFullYear(), now.getMonth(), 1);
     label = "this month";
   } else if (/\btoday\b/.test(lower)) {
-    since = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    since = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     label = "today";
   } else if (/\bthis week\b/.test(lower)) {
-    const day = (now.getUTCDay() + 6) % 7;
-    since = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - day));
+    const day = (now.getDay() + 6) % 7;
+    since = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day);
     label = "this week";
   } else {
     const days = /\b(?:last|past|in the last|within(?: the last)?|over the last|for|in)\s+(\d{1,4})\s+days?\b/.exec(lower)?.[1]
@@ -309,8 +310,12 @@ function countQuery(text: string, generatedAt: string): StructuredDeviceQuery | 
   let focus: Part | undefined;
   let listed = false;
   for (const clause of (groups.rest ?? "").split(/\s*(?:[?,;.]|\band\b)\s*/).map((part) => part.trim()).filter(Boolean)) {
-    if (CLAUSE_BREAK_OS.test(clause) && !breakdown.includes("operatingSystem")) breakdown.push("operatingSystem");
-    else if (CLAUSE_BREAK_STATE.test(clause) && !breakdown.includes("complianceState")) breakdown.push("complianceState");
+    const split = CLAUSE_BREAK_OS.test(clause) ? "operatingSystem" : CLAUSE_BREAK_STATE.test(clause) ? "complianceState" : undefined;
+    // A split after the subset ("show which are Windows, and show them by compliance state") could mean the
+    // subset or the set; the question goes to the planner.
+    if (split && focus) return undefined;
+    if (split === "operatingSystem" && !breakdown.includes("operatingSystem")) breakdown.push("operatingSystem");
+    else if (split === "complianceState" && !breakdown.includes("complianceState")) breakdown.push("complianceState");
     else if (CLAUSE_LIST.test(clause)) listed = true;
     else {
       const state = CLAUSE_FOCUS_STATE.exec(clause)?.groups;
@@ -380,14 +385,17 @@ function followUpQuery(text: string, previous: ChatResultContext, generatedAt: s
     const field = part.predicate.field;
     const inFocus = shape.focus?.filters.some((filter) => filter.field === field) ?? false;
     const swap = (filters: readonly GraphCacheQueryPredicate[]) => filters.map((filter) => (filter.field === field ? part.predicate : filter));
-    const filters = inFocus ? [...shape.filters] : shape.filters.some((filter) => filter.field === field) ? swap(shape.filters) : [...shape.filters, part.predicate];
+    // The OS is replaced wherever the stored question holds one, in the set and in the subset; added to the set
+    // only when it holds none, so no Windows filter survives next to the new macOS one.
+    const inScope = shape.filters.some((filter) => filter.field === field);
+    const filters = inScope ? swap(shape.filters) : inFocus ? [...shape.filters] : [...shape.filters, part.predicate];
     return {
       kind: "count",
       resource: previous.resource,
       scopeLabel: describeFilters(filters),
       filters,
       // A per OS split of one OS says nothing; it is dropped once the set is one OS.
-      breakdown: inFocus ? shape.breakdown : shape.breakdown.filter((entry) => entry !== field),
+      breakdown: inFocus && !inScope ? shape.breakdown : shape.breakdown.filter((entry) => entry !== field),
       ...(shape.focus ? { focus: inFocus ? { label: part.label, filters: swap(shape.focus.filters) } : shape.focus } : {}),
       list: shape.list,
     };
@@ -539,7 +547,6 @@ export function computeStructuredResult(input: {
   const previousSet = `the ${query.ids?.length ?? counted.total} ${query.scopeLabel} from the previous answer`;
   const gone = query.ids ? query.ids.length - counted.total : 0;
   if (!query.followUp) facts.push(`${query.scopeLabel}: ${counted.total}${breakdownText ? ` (${breakdownText})` : ""}.`);
-  else if (!query.focus) facts.push(`${capitalize(previousSet)}${breakdownText ? ` (${breakdownText})` : ""}${listSet && rows.length ? ":" : "."}`);
   if (gone > 0) facts.push(`${gone} of the devices in the previous answer ${gone === 1 ? "is" : "are"} no longer in the cache.`);
   // A device whose values changed since the previous answer stays in its set; say how many no longer match it.
   if (query.ids && query.filters.length > 0) {
@@ -550,7 +557,9 @@ export function computeStructuredResult(input: {
     const os = groupText(focusCount.groups.operatingSystem);
     const subject = query.followUp ? `${capitalize(query.focus.label)} among ${previousSet}` : capitalize(query.focus.label);
     const focusBreakdown = query.followUp ? query.breakdown.filter((field) => field !== "operatingSystem").map((field) => `${FIELD_WORDS[field] ?? `by ${field}`}: ${groupText(focusCount.groups[field]) || "none reported"}`) : [];
-    const parts = [...(os && Object.keys(focusCount.groups.operatingSystem ?? {}).length > 1 ? [os] : []), ...focusBreakdown];
+    // An OS split asked for in a follow-up is shown even with one OS; otherwise only when the subset spans several.
+    const showOs = os && (Object.keys(focusCount.groups.operatingSystem ?? {}).length > 1 || (query.followUp !== undefined && query.breakdown.includes("operatingSystem")));
+    const parts = [...(showOs ? [os] : []), ...focusBreakdown];
     facts.push(`${subject}: ${focusCount.total}${parts.length ? ` (${parts.join("; ")})` : ""}${focusRows.length ? ":" : "."}`);
     facts.push(...focusRows.map(rowLine));
     if (focusCount.total > focusRows.length) facts.push(`${focusCount.total - focusRows.length} more match and are not listed.`);
@@ -597,8 +606,11 @@ function computeDeviceDetail(
   snapshot: ComputedResult["snapshot"],
   generatedAt: string,
 ): ComputedResult | undefined {
-  // The name is resolved again in the snapshot that answers: a refresh in this turn can have renamed the device.
-  const counted = store.countGraphCache({ tenantId, resource: "managedDevices", filters: [{ field: "displayName", op: "eq", value: query.deviceName }], listLimit: 2 });
+  // The name is resolved again in the snapshot that answers, as the first lookup did it (whole name, any case):
+  // a refresh in this turn can have renamed the device or added another of that name.
+  const named = store.findGraphRowsNamedIn({ tenantId, resource: "managedDevices", text: query.deviceName, limit: 5 }).filter((entry) => entry.name.toLowerCase() === query.deviceName.toLowerCase());
+  if (named.length !== 1) return undefined;
+  const counted = store.countGraphCache({ tenantId, resource: "managedDevices", filters: [{ field: "id", op: "eq", value: named[0]!.id }], listLimit: 1 });
   if (counted.total !== 1) return undefined;
   const raw = counted.rows?.[0] as Record<string, unknown> | undefined;
   const row = listedRow(raw);

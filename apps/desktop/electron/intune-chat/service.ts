@@ -2193,7 +2193,8 @@ export class IntuneChatService {
       ? ["managedDevices" as const]
       : voiceResourcesForQuestion(content);
     if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
-    const structured = followUp && !planned.hasWriteIntent ? planStructuredQuery({ question: content, generatedAt: now, ...(followUp.result ? { previous: followUp.result } : {}), store, tenantId: tenant.id }) : undefined;
+    // Attached workspace instructions ("exclude LAB- devices") are read by the model; code answers none of them.
+    const structured = followUp && !planned.hasWriteIntent && !input.workspaceContext ? planStructuredQuery({ question: content, generatedAt: now, ...(followUp.result ? { previous: followUp.result } : {}), store, tenantId: tenant.id }) : undefined;
     if (structured) planned.resources = [structured.resource];
     const restriction = restrictPlannedResourcesForTenant(planned, tenant, noTenant);
     const userMessage: IntuneChatMessage = {
@@ -2689,7 +2690,8 @@ export class IntuneChatService {
     const planned = voiceContext?.planningQuestion ? planChatContext(voiceContext.planningQuestion) : planForFollowUp(content, followUp?.previousQuestion);
     const directResources = voiceDeviceEvidenceIntent(content) ? ["managedDevices" as const] : voiceResourcesForQuestion(content);
     if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
-    const structured = followUp && !planned.hasWriteIntent ? planStructuredQuery({ question: content, generatedAt: now, ...(followUp.result ? { previous: followUp.result } : {}), store, tenantId: tenant.id }) : undefined;
+    // Attached workspace instructions ("exclude LAB- devices") are read by the model; code answers none of them.
+    const structured = followUp && !planned.hasWriteIntent && !input.workspaceContext ? planStructuredQuery({ question: content, generatedAt: now, ...(followUp.result ? { previous: followUp.result } : {}), store, tenantId: tenant.id }) : undefined;
     // Code answers this question exactly from one resource; nothing else is planned or refreshed for it.
     if (structured) planned.resources = [structured.resource];
     const restriction = restrictPlannedResourcesForTenant(planned, tenant, noTenant);
@@ -2755,6 +2757,8 @@ export class IntuneChatService {
     const isCancelled = () => options.signal?.aborted === true;
     const finishCancelled = (): SendIntuneChatMessageResult => {
       const cancelledAt = new Date().toISOString();
+      // A stopped turn is the latest one: the next follow-up must not narrow an older answer.
+      if (followUp) store.setChatResultContext(conversation.id, undefined, cancelledAt);
       const currentCacheStatus = store.getGraphCacheStatus(tenant.id, [
         ...GRAPH_CACHE_RESOURCES,
       ]);
