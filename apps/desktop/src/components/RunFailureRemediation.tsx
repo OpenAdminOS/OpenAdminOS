@@ -12,9 +12,10 @@ interface Suggestion {
 
 /**
  * A failed lookup of the model's context limit has its own playbook only.
- * `/api/show` must end the path, so an endpoint prefix such as `/api/showroom` is not read as the lookup.
+ * The runtime names the lookup URL followed by a final ".", ": " or a space, so an endpoint
+ * prefix such as `/api/showroom` or `/api/show.v1` in front of `/api/chat` is not read as the lookup.
  */
-const isContextLimitLookup = (e: string) => /ollama/i.test(e) && /context limit|\/api\/show(?![\w/-])/i.test(e);
+const isContextLimitLookup = (e: string) => /ollama/i.test(e) && /context limit|\/api\/show(?=\.$|:\s|\s)/i.test(e);
 
 const SUGGESTIONS: Suggestion[] = [
   {
