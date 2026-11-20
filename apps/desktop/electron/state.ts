@@ -362,7 +362,7 @@ import {
   buildUsageTelemetryPayload,
   type UsageTelemetryPayload,
 } from "./telemetry/usage.js";
-import { OrganizationBoundaryError, RunService, gatewayRejectionCoolingDown, type RunGraphExecution, type SplashtopRunClient } from "./runs.js";
+import { LocalResetInProgressError, OrganizationBoundaryError, RunService, gatewayRejectionCoolingDown, type RunGraphExecution, type SplashtopRunClient } from "./runs.js";
 import { RunDeliveryService } from "./run-delivery.js";
 import {
   OUTLOOK_CONNECTOR_ID,
@@ -2187,8 +2187,10 @@ export class AppStateStore {
       },
       executeReadTool: (tenantId, name, input) =>
         this.chatService.executeReadTool(tenantId, name, input),
-      queueExternalProposal: (input) =>
-        this.runService.startExternalProposalRun(input),
+      queueExternalProposal: (input) => {
+        if (this.localResetStarted) throw new LocalResetInProgressError();
+        return this.runService.startExternalProposalRun(input);
+      },
       getRun: (runId) => this.runService.getRun(runId),
       recordAudit: (event) =>
         this.appendAuditEvents([{
@@ -2448,10 +2450,9 @@ export class AppStateStore {
    * launch can delete the files.
    */
   /**
-   * Reset OpenAdminOS, once accepted: every organization stops taking new
-   * work, the way Disconnect closes one, so no Nova send, report delivery or
-   * run starts before the restart. Work already running gets its signal and
-   * `shutdown` waits for it within its bound.
+   * Reset OpenAdminOS, once its marker is written: every organization stops
+   * taking new work, the way Disconnect closes one. Work already running
+   * gets its signal; the shutdown before the restart waits for it.
    */
   async closeAllTenantWork(): Promise<void> {
     for (const tenant of (await this.read()).tenants) {
@@ -2803,6 +2804,7 @@ export class AppStateStore {
       { api: binding.api, teamId: binding.record.teamId, teamLabel: SplashtopService.teamLabel(binding) },
       request,
     );
+    if (this.localResetStarted) throw new LocalResetInProgressError();
     return this.runService.startSplashtopChangeRun({
       tenantId,
       organizationId: binding.organization.id,
@@ -4836,6 +4838,7 @@ export class AppStateStore {
   }
 
   async startBaselineRollback(input: StartBaselineRollbackInput): Promise<RunRecord> {
+    if (this.localResetStarted) throw new LocalResetInProgressError();
     const built = await this.driftService.buildBaselineRollbackPlan(input);
     return this.runService.startRollbackRun({
       tenantId: built.tenantId,
@@ -5849,6 +5852,18 @@ export class AppStateStore {
   }
 
   async sendWhatsAppWebTestMessage(to: string): Promise<WhatsAppWebSendResult> {
+    // Like every connector send: refused once a reset has started, and a
+    // send under way holds the reset until it has its answer.
+    if (this.localResetStarted) throw new Error("OpenAdminOS is resetting. Nothing was sent.");
+    this.localResetWorkInFlight += 1;
+    try {
+      return await this.sendWhatsAppWebTestMessageNow(to);
+    } finally {
+      this.localResetWorkInFlight -= 1;
+    }
+  }
+
+  private async sendWhatsAppWebTestMessageNow(to: string): Promise<WhatsAppWebSendResult> {
     const result = await this.whatsAppWebClient().sendMessage({
       to,
       text: `OpenAdminOS test notification\n\nSent ${new Date().toISOString()}.`,
@@ -8965,9 +8980,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     options: StartRunOptions = {},
     boundary: { activeOrganizationOnly?: boolean } = {},
   ): Promise<RunRecord> {
-    if (this.localResetStarted) {
-      throw new Error("OpenAdminOS is resetting and restarts in a moment. The run did not start.");
-    }
+    if (this.localResetStarted) throw new LocalResetInProgressError();
     this.localResetWorkInFlight += 1;
     try {
       return await this.runService.startRun(agentSlug, options, boundary);

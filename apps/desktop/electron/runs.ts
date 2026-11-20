@@ -104,6 +104,17 @@ export class OrganizationBoundaryError extends Error {
   override readonly name = "OrganizationBoundaryError";
 }
 
+/**
+ * Reset OpenAdminOS has started, so no run starts. Schedules treat it like
+ * an organization boundary: the run waits, no failure is recorded and the
+ * due slot is kept, so a reset that is then refused leaves no false failure.
+ */
+export class LocalResetInProgressError extends OrganizationBoundaryError {
+  constructor() {
+    super("OpenAdminOS is resetting and restarts in a moment. The run did not start.");
+  }
+}
+
 /** Why nothing new starts or applies for an organization that is being disconnected. */
 export const TENANT_DISCONNECTING_COPY = TENANT_CLOSED_COPY;
 

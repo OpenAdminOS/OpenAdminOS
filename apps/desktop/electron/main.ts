@@ -5602,17 +5602,28 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
         if (policyProblem) throw new LocalResetRequestError(`The reset could not start: ${policyProblem}. Nothing was removed.`);
         const blocker = await store.beginLocalReset();
         if (blocker) throw new LocalResetRequestError(blocker);
-        // Every check passed: no connector send is approved from here on,
-        // and no organization starts new work (a Nova send, a report
-        // delivery, a run). A refused request never gets this far.
-        blockConnectorConfirmations("OpenAdminOS is resetting. Nothing was sent.");
-        await store.closeAllTenantWork();
+        // From here runs, Nova sends and deliveries are refused by the reset
+        // flag, which a refused request lifts again.
       },
       writeMarker: (marker) => writeLocalResetMarker(app.getPath("userData"), marker),
       forgetSignIns: async () => {
+        // The marker is written, so the reset goes ahead: no connector send
+        // is approved from here on and no organization starts new work. Done
+        // here, after the commit, so a refused request never declines an
+        // approval or stops work. Neither step can refuse the reset now.
+        blockConnectorConfirmations("OpenAdminOS is resetting. Nothing was sent.");
+        await store.closeAllTenantWork().catch((error: unknown) => {
+          console.warn("[local-reset] could not close every organization's work; the restart stops it", error);
+        });
         // Sign-out rewrites the token caches; a cache that is a link would
         // be rewritten wherever it points. The wipe removes the link only.
         const check = localResetLinkCheck(app.getPath("userData"));
+        if (check.dataFolderIsLink) {
+          return [{
+            item: "Microsoft sign-ins",
+            reason: "not removed from the token caches, because the data folder now reaches another place through a link. The reset at the next launch stops before removing anything there",
+          }];
+        }
         if (check.scanFailed) {
           return [{
             item: "Microsoft sign-ins",
