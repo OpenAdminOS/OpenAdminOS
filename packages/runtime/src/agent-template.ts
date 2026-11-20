@@ -39,6 +39,7 @@ import {
 
 import { PROMPT_INSTRUCTION_ROOTS, renderDeep, renderTemplate, renderPromptTemplate, type TemplateContext } from "./template-engine.js";
 import { registerGraphTenantData, registerTenantData } from "./data-classification.js";
+import { withTemplateInterpolations, type TemplateInterpolation } from "./request-classification.js";
 import { stripTenantDataFences, withTenantDataInstructions } from "./tenant-data.js";
 import { confirmationPhraseProblem } from "./confirmation-phrase.js";
 
@@ -1631,13 +1632,17 @@ async function runLlmSkill(
 
   const context = templateCtx();
   const settings = renderDeep(skill.settings, context);
-  const completion = await ctx.llm.complete({
-    prompt: renderPromptTemplate(skill.settings.prompt, context),
-    system: withTenantDataInstructions(skill.settings.system
-      ? renderPromptTemplate(skill.settings.system, context) : undefined),
-    ...(typeof settings.temperature === "number" ? { temperature: settings.temperature } : {}),
-    ...(typeof settings.maxTokens === "number" ? { maxTokens: settings.maxTokens } : {}),
-  });
+  const promptInterpolations: TemplateInterpolation[] = [];
+  const systemInterpolations: TemplateInterpolation[] = [];
+  const prompt = renderPromptTemplate(skill.settings.prompt, context, span => promptInterpolations.push(span));
+  const system = withTenantDataInstructions(skill.settings.system
+    ? renderPromptTemplate(skill.settings.system, context, span => systemInterpolations.push(span)) : undefined);
+  const completion = await withTemplateInterpolations({ prompt: promptInterpolations, system: systemInterpolations }, () =>
+    ctx.llm.complete({
+      prompt, system,
+      ...(typeof settings.temperature === "number" ? { temperature: settings.temperature } : {}),
+      ...(typeof settings.maxTokens === "number" ? { maxTokens: settings.maxTokens } : {}),
+    }));
 
   const cleaned = cleanLlmText(stripTenantDataFences(completion.text));
   ctx.log(

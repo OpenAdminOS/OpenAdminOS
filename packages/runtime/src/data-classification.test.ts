@@ -1,3 +1,4 @@
+import { withTemplateInterpolations, type TemplateInterpolation } from "./request-classification.js";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
@@ -391,6 +392,30 @@ test("short values use key or rendering provenance and scalars do not match on t
   ledger.register("fixture-user", { contactLabel: shortName }, { graphPath: "/users" });
   assert.equal(ledger.classifyRequest({ prompt: shortName }).counts.identity, 0);
   assert.equal(ledger.classifyRequest({ prompt: JSON.stringify({ contactLabel: shortName }) }).counts.identity, 1);
+});
+
+test("rendering binds standalone booleans and adjacent scalars to their exact request offsets", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const ledger = new ClassificationLedger();
+  const policy = { passwordRequired: true, minimumPasswordLength: 8 };
+  ledger.register("graph:/deviceManagement/deviceCompliancePolicies", policy,
+    { graphPath: "/deviceManagement/deviceCompliancePolicies" });
+  const promptEntries: TemplateInterpolation[] = [];
+  const systemEntries: TemplateInterpolation[] = [];
+  const ctx = { policy };
+  const prompt = renderPromptTemplate("{{ policy.passwordRequired }}", ctx, span => promptEntries.push(span));
+  const system = renderPromptTemplate("true 😀 {{ policy.passwordRequired }}{{ policy.minimumPasswordLength }} 8", ctx,
+    span => systemEntries.push(span));
+  assert.equal(prompt, "true");
+  assert.equal(system, "true 😀 true8 8");
+  const request = { prompt, system };
+  try {
+    const result = await withTemplateInterpolations({ prompt: promptEntries, system: systemEntries }, () =>
+      ledger.classifyLargeRequest(request));
+    assert.equal(result.coverageIncomplete, false);
+    assert.deepEqual(result.spans.map(({ section, start, end, kind }) => [section, start, end, kind]),
+      [["system", 8, 12, "security"], ["system", 12, 13, "security"], ["prompt", 0, 4, "security"]]);
+  } finally { ledger.dispose(); }
 });
 
 test("case normalization keeps matching unaffected offsets and applies word boundaries", () => {

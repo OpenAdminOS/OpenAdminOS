@@ -56,6 +56,18 @@ export interface RequestClassificationEvent {
 }
 
 type Scalar = string | number | boolean;
+export interface TemplateInterpolation extends TextSpan {
+  key: string;
+  value?: Scalar;
+}
+const MAX_TEMPLATE_INTERPOLATIONS = 1024;
+const templateInterpolations = new AsyncLocalStorage<Partial<Record<ClassificationSpan["section"], readonly TemplateInterpolation[]>>>();
+
+export function withTemplateInterpolations<T>(
+  sections: Partial<Record<ClassificationSpan["section"], readonly TemplateInterpolation[]>>, work: () => T,
+): T {
+  return templateInterpolations.run(sections, work);
+}
 interface FieldObservation {
   value: Scalar;
   kind: DataClass;
@@ -130,12 +142,14 @@ type ScanState = {
   registrations: number;
   incomplete: boolean;
   identityIndex: ClassificationOptions["identityIndex"];
+  renderedSpans?: ClassificationSpan[];
 };
 
 type EvidenceSnapshot = {
   state: ScanState;
   revisions: readonly number[];
   shards: readonly TenantValueIndex[];
+  interpolations: ReturnType<typeof templateInterpolations.getStore>;
 };
 
 export type WorkerValue = [Scalar, ValueEntry | undefined, Array<[string, Fence]>];
@@ -156,7 +170,7 @@ export interface WorkerScan {
   sections: Record<ClassificationSpan["section"], EncodedText | undefined>;
   ledgers: number[];
   shards: number[];
-  state: Pick<ScanState, "historyFences" | "promptReplay" | "dropped" | "registrations" | "incomplete">;
+  state: Pick<ScanState, "historyFences" | "promptReplay" | "dropped" | "registrations" | "incomplete" | "renderedSpans">;
 }
 
 export interface WorkerResult {
@@ -960,13 +974,37 @@ export class ClassificationLedger {
   }
 
   classifyRequest(request: RequestText): RequestClassification {
-    return this.scanRequest(request, this.scanState());
+    const evidence = this.captureEvidence();
+    return this.scanRequest(request, this.renderedState(evidence));
   }
 
   captureEvidence(): EvidenceSnapshot {
     const state = this.scanState();
     return { state, revisions: state.retained.map(ledger => ledger.revision),
-      shards: [...state.identityIndex?.workerShards?.() ?? []] };
+      shards: [...state.identityIndex?.workerShards?.() ?? []], interpolations: templateInterpolations.getStore() };
+  }
+
+  private renderedState({ state, interpolations }: EvidenceSnapshot): ScanState {
+    if (!interpolations) return state;
+    const renderedSpans: ClassificationSpan[] = [];
+    let incomplete = state.incomplete;
+    for (const section of ["system", "prompt"] as const) {
+      const entries = interpolations[section];
+      if (!entries) continue;
+      incomplete ||= entries.length > MAX_TEMPLATE_INTERPOLATIONS;
+      for (const { start, end, key, value } of entries.slice(0, MAX_TEMPLATE_INTERPOLATIONS)) {
+        if (value === undefined || start >= end) continue;
+        let best: Evidence | undefined;
+        for (const ledger of state.retained) {
+          const entry = ledger.values.get(value);
+          const candidate = entry?.fields.get(key) ?? entry?.fields.get("");
+          if (candidate && preferEvidence(best, candidate)) best = candidate;
+        }
+        if (best) renderedSpans.push({ section, start, end, kind: best.kind, source: best.source,
+          ...(best.maskRole ? { maskRole: best.maskRole } : {}) });
+      }
+    }
+    return { ...state, renderedSpans, incomplete };
   }
 
   private evidenceCurrent({ state, revisions, shards }: EvidenceSnapshot, latest: ScanState): boolean {
@@ -995,7 +1033,7 @@ export class ClassificationLedger {
     // No arbitrary-sized lookup or folding work enters the main-thread path.
     if (length <= MAIN_SCAN_LIMIT && retainedUnits <= 4_096 && !this.identityIndex?.workerShards) {
       const slice = new ClassificationSlice();
-      const result = this.classifyRequest(request);
+      const result = this.scanRequest(request, this.renderedState(evidence));
       if (slice.elapsed) await slice.yield();
       return this.withCurrentCoverage(result, evidence);
     }
@@ -1054,7 +1092,7 @@ export class ClassificationLedger {
       const slice = new ClassificationSlice();
       const sections = { system: await encodeSection(request.system, slice), prompt: await encodeSection(request.prompt, slice) };
       const transfers = Object.values(sections).flatMap(section => section ? [section.buffer] : []);
-      const { retained, identityIndex, ...state } = evidence.state;
+      const { retained, identityIndex, ...state } = this.renderedState(evidence);
       const ledgers: number[] = [];
       for (const ledger of retained) {
         const id = await ledger.syncLedger(client, slice);
@@ -1129,6 +1167,9 @@ export class ClassificationLedger {
           found.set(key, { section, start, end, kind, source, ...(maskRole ? { maskRole } : {}), ...(authoritative ? { authoritative } : {}) });
         }
       };
+      for (const span of state.renderedSpans ?? []) {
+        if (span.section === section && span.end <= text.length) collect(span, { ...span, key: "" }, true);
+      }
       if (section === "prompt" && state.promptReplay) {
         const { start, end } = state.promptReplay;
         if (start < text.length && start < end) {

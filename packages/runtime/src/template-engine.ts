@@ -14,6 +14,7 @@
 // string.
 
 import { registerRenderedFragment } from "./data-classification.js";
+import type { TemplateInterpolation } from "./request-classification.js";
 import { fenceTenantData } from "./tenant-data.js";
 
 const EXPRESSION_REGEX = /\{\{\s*([^}]+?)\s*\}\}/g;
@@ -212,25 +213,36 @@ export function renderTemplate(input: string, ctx: TemplateContext): unknown {
 }
 
 /** Only model prompts fence interpolations; transforms and displayed results stay typed. */
-export function renderPromptTemplate(input: string, ctx: TemplateContext): string {
+export function renderPromptTemplate(
+  input: string, ctx: TemplateContext, capture?: (interpolation: TemplateInterpolation) => void,
+): string {
+  let shift = 0;
   return input.replace(EXPRESSION_REGEX, (match, expr: string, offset: number) => {
     const value = evaluateExpression(expr, ctx);
     const path = parseExpression(expr).path;
+    const key = path.split(".").at(-1)!;
     const text = typeof value === "string" ? value : JSON.stringify(value) ?? "";
-    if (value === undefined || value === null) return text;
-    // Saved settings and admin-approved standing instructions stay trusted.
     const root = path.split(".")[0]!;
-    if (ctx[PROMPT_INSTRUCTION_ROOTS]?.[root] === ctx[root] &&
-      /^(?:settings\.|descriptor\.|ctx\.|task\.instructions$)/.test(path)) return text;
-    if (typeof value === "number" || typeof value === "boolean") {
+    const trusted = ctx[PROMPT_INSTRUCTION_ROOTS]?.[root] === ctx[root] &&
+      /^(?:settings\.|descriptor\.|ctx\.|task\.instructions$)/.test(path);
+    const scalar = typeof value === "number" || typeof value === "boolean";
+    const fenced = value !== undefined && value !== null && !trusted && !scalar;
+    const rendered = fenced ? fenceTenantData(text, `template:${path}`) : text;
+    if (capture) {
+      const at = offset + shift;
+      const start = at + (fenced ? rendered.indexOf("\n") + 1 : 0);
+      const end = at + (fenced ? rendered.lastIndexOf("\n") : rendered.length);
+      capture({ start, end, key: key.toLowerCase(),
+        ...(!trusted && (scalar || typeof value === "string") ? { value } : {}) });
+      shift += rendered.length - match.length;
+    } else if (scalar && !trusted) {
       const before = input.slice(Math.max(0, offset - 48), offset).split("}}").at(-1);
       const after = input.slice(offset + match.length, offset + match.length + 48).split("{{")[0];
       if (before?.trim() || after?.trim()) registerRenderedFragment(value, value, {
-        key: path.split(".").at(-1)!, ...(before ? { before } : {}), ...(after ? { after } : {}),
+        key, ...(before ? { before } : {}), ...(after ? { after } : {}),
       });
-      return text;
     }
-    return fenceTenantData(typeof value === "string" ? value : text, `template:${path}`);
+    return rendered;
   });
 }
 
