@@ -53,7 +53,9 @@ not remove. Nothing outside these paths is touched.
 What stays:
 
 - The IT policy file `policy.json` set by whoever manages the device, both the
-  machine file and the one in the data folder.
+  machine file and the one in the data folder. If the one in the data folder
+  is a link, or a folder, the reset stops before removing anything and says
+  so: place the file itself there, or use the machine-wide policy path.
 - Exports and other files you saved outside the data folder.
 - The enterprise application and admin consent in each tenant.
 
@@ -118,23 +120,38 @@ this in PowerShell:
 
 ```powershell
 schtasks /Delete /TN "OpenAdminOS Scheduler" /F
-Remove-Item -Recurse -Force "$env:LOCALAPPDATA\@openadminosdesktop-updater"
-$data = Get-Item "$env:APPDATA\OpenAdminOS"
-if ($data.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-  "The data folder is a link to $($data.Target). Check that folder before removing anything in it."
-} else {
-  Get-ChildItem $data.FullName -Exclude policy.json |
-    Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } |
-    Remove-Item -Recurse -Force
+
+# Removes a folder's contents without following links: a junction or
+# symbolic link is removed as a link (cmd rmdir), never entered.
+function Remove-OpenAdminOSContents([string]$Path, [string[]]$Keep = @()) {
+  Get-ChildItem -LiteralPath $Path -Force | Where-Object { $Keep -notcontains $_.Name } | ForEach-Object {
+    if ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+      if ($_.PSIsContainer) { cmd /c rmdir "$($_.FullName)" } else { Remove-Item -LiteralPath $_.FullName -Force }
+    } elseif ($_.PSIsContainer) {
+      Remove-OpenAdminOSContents $_.FullName
+      Remove-Item -LiteralPath $_.FullName -Force
+    } else {
+      Remove-Item -LiteralPath $_.FullName -Force
+    }
+  }
+}
+
+foreach ($folder in @("$env:APPDATA\OpenAdminOS", "$env:LOCALAPPDATA\@openadminosdesktop-updater")) {
+  $item = Get-Item -LiteralPath $folder -Force -ErrorAction SilentlyContinue
+  if (-not $item) { continue }
+  if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+    "$folder is a link to $($item.Target). Check that folder before removing anything in it."
+  } else {
+    Remove-OpenAdminOSContents $folder -Keep @("policy.json")
+  }
 }
 ```
 
-The script keeps `policy.json`, the IT policy file. It stops when the data
-folder is a junction or link, because removing through it would delete files
-wherever it points, and it skips links inside the folder for the same reason;
-remove those links with `cmd /c rmdir "<path>"`, which removes the link only.
-If no one manages the device and the folder is not a link, you can remove
-the whole `%APPDATA%\OpenAdminOS` folder. The
+The script keeps `policy.json`, the IT policy file. It stops at a data or
+cache folder that is a junction or link, because removing through it would
+delete files wherever it points, and it removes links inside the folders as
+links, without entering them. If no one manages the device and the folder is
+not a link, you can remove the whole `%APPDATA%\OpenAdminOS` folder. The
 encryption key that protects the sign-ins is in that folder (`Local State`),
 so removing the folder also makes any copied token files unreadable.
 
