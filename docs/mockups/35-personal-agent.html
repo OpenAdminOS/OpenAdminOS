@@ -858,6 +858,7 @@
         <li>Decided in round 12: <code>tenant_setting</code> is labelled read-only (<code>readOnlyHint: true</code>), but its description says "Edits the selected tenant setting", so it is flagged and cannot be approved in the first review. The label never outweighs a write the definition documents.</li>
         <li>The approval is bound to the JCS SHA-256 hash of the whole object: the object in the RFC 8785 JSON Canonicalization Scheme (JCS), then SHA-256 over its UTF-8 bytes. JCS sorts object keys by UTF-16 code units at every level and writes numbers and strings in its own fixed form. The raw view prints that order. <code>search_settings</code> carries <code>_meta</code> keys "10" and "2", and "10" comes first, as JCS requires. Before a tool is offered and again at every call, the app hashes the object the server lists now; any difference anywhere, a nested schema property, <code>annotations.title</code>, <code>_meta</code> or a field the app does not know, invalidates the approval. Each row shows the short form of the hash; the definition shows the full hash with Copy.</li>
         <li>Decided in round 14: the readable view shows the same complete object as the raw JSON, nothing only in one of them. Every other field is written out with its nested values (both <code>_meta</code> keys of <code>search_settings</code> and the two page sizes under <code>contoso.example/pageSizes</code>, in JCS order), and each input and output schema shows its own type and every keyword, on the schema, on each property and on array items, with its value.</li>
+        <li>Decided in round 15: one recursive layout reads every schema node at any depth, the root, each property, array items and items of items. A keyword it lays out (a string description, an enum list, properties, required names, a single items schema) gets its own line; every other keyword, and any keyword in another shape, is written out with its value. <code>list_platforms</code> shows both: its input schema has a root <code>enum</code> whose only value is an empty object, and its output schema has a description at <code>outputSchema.properties.families.items.items.description</code>, "A platform id, such as windows10", in the readable view as in the raw JSON.</li>
         <li>The write check and the hash on this page are scripts that illustrate the plan, which governs (B5, Your own MCP servers). The write check here matches a short word list: save, change, send, delete, edit, update, modify, set, write, create, assign, remove, revoke and similar words. The implementation treats any write the definition documents as disqualifying, whatever words it uses and whatever its read-only label says. The hash here is a small JCS serializer and SHA-256, the same rule the plan names.</li>
         <li>A tool that is not approved is never offered to the model. The approval is checked again at every call, whether it comes from Chat, a skill or a scheduled check, so a skill that names <code>mcp__policy-settings__export_report</code> cannot use it.</li>
         <li>When the server later adds a tool, the new tool stays off until the admin reviews it here. The review can be reopened from the server's row in Access; approving a tool later is the same step.</li>
@@ -1010,7 +1011,7 @@ WB-DT-1170   12 Nov 14:22    Baseline 24H2</div><p class="xs muted" style="margi
       </ul>
 
       <h3 id="b-deliver" style="margin:32px 0 6px;font-size:var(--text-base);font-weight:500">A run <span data-name>Nova</span> started, with a saved Teams route</h3>
-      <p>Find inactive devices has a saved delivery route: after each run it posts its report to the IT Operations team, Device health channel. When <span data-name>Nova</span> starts the run, that delivery does not post on its own. It waits on the same confirmation card, with the final text and the route's destination, and Confirm runs the same checks. The same agent on its own schedule delivers as it always has.</p>
+      <p>Find inactive devices has a saved delivery route: after each run it posts its report to the IT Operations team, Device health channel. When <span data-name>Nova</span> starts the run, that delivery does not post on its own. It waits on the same confirmation card, with the final text and the route's destination, and Confirm runs the same checks. The gate is who started the run, checked before anything enters the automatic delivery queue, so it covers every connector the queue handles, including ones added later; Teams is the example here. The same agent on its own schedule delivers as it always has.</p>
       <p class="trvcap" style="margin:0 0 8px">Confirm reads the same controls as the card above: the Send to Teams switch in Access, the active organization and the Teams connection.</p>
       <div class="win">
         <div class="lights"><i></i><i></i><i></i></div>
@@ -1054,7 +1055,7 @@ WB-DT-1170   12 Nov 14:22    Baseline 24H2</div><p class="xs muted" style="margi
         </div>
       </div>
       <ul class="notes">
-        <li>Decided in round 13: when <span data-name>Nova</span> starts an installed agent that has a saved delivery route, to Teams, Outlook, Slack, Discord or WhatsApp, no delivery from that run posts when the run finishes. Each is proposed on this card with the final text, the route's destination, the run and the organization, and nothing posts without Confirm.</li>
+        <li>Decided in round 13: when <span data-name>Nova</span> starts an installed agent that has a saved delivery route, to Teams, Outlook, Slack, Discord, WhatsApp, Signal or any connector added to the delivery queue later, no delivery from that run posts when the run finishes. Each is proposed on this card with the final text, the route's destination, the run and the organization, and nothing posts without Confirm.</li>
         <li>Confirm is a call, as for any send: the organization on the card must still be active, Send to Teams must be on and Teams connected in that organization, and the message must fit in one Teams message. Each failure reads "Not sent" with its fix, and a report too long for one message gets the card above with a shorter summary or saving it on this device. Try it with the controls above the previous card.</li>
         <li>The card is visibly a delivery, not a message <span data-name>Nova</span> wrote: its label says it comes from a run <span data-name>Nova</span> started, and Route names the saved route it would use. Runs lists the run as waiting for a confirmation until the admin confirms or cancels.</li>
         <li>The 07:00 run is the same agent on its schedule, started without <span data-name>Nova</span>. It keeps the agent's own delivery behaviour, unchanged by this plan, and posts by its route with no card. The run card <span data-name>Nova</span> shows before it starts a run says that each delivery will wait for a confirmation.</li>
@@ -1579,7 +1580,11 @@ identities with graph_get. Nothing else.
         inputSchema: obj({ version: S("string", "Version from list_baselines") }, ["version"]),
         annotations: { title: "Get baseline", readOnlyHint: true, openWorldHint: false } },
       { name: "list_platforms", title: "List platforms", description: "Lists the platforms the catalog covers",
-        inputSchema: obj({}), annotations: { title: "List platforms", readOnlyHint: true, openWorldHint: false } },
+        // A root enum (the only input accepted is an empty object) and a description under items.items, so the readable
+        // view shows schema keywords at every depth.
+        inputSchema: { ...obj({}), description: "Takes no arguments", enum: [{}] },
+        outputSchema: obj({ families: S("array", "Platform families, each a list of platforms", { items: S("array", "One family", { items: S("string", "A platform id, such as windows10") }) }) }),
+        annotations: { title: "List platforms", readOnlyHint: true, openWorldHint: false } },
       { name: "list_baselines", title: "List baselines", description: "Lists security baseline versions",
         inputSchema: obj({ platform: S("string", "Platform to list versions for", { enum: ["windows10", "macOS"] }) }),
         outputSchema: obj({ versions: S("array", "Baseline versions, newest first", { items: S("string") }) }),
@@ -1750,40 +1755,46 @@ identities with graph_get. Nothing else.
         const keys = Object.keys(v).sort(byUnits);
         return keys.length ? `<ul class="prm">${keys.map((k) => `<li><code>${hl(k)}</code>: ${val(v[k], `${path}.${k}`)}</li>`).join("")}</ul>` : "<code>{}</code>";
       };
-      // Schema keywords the readable view lays out itself; every other keyword of a schema node is listed with its value.
-      const LAID = ["type", "description", "enum", "properties", "required", "items"];
-      const extras = (node, base) => Object.keys(node || {}).filter((k) => !LAID.includes(k)).sort(byUnits)
-        .map((k) => `<span class="ds"><code>${hl(k)}</code>: ${val(node[k], `${base}.${k}`)}</span>`).join("");
-      // Required names with no property of that name are listed too, so nothing in the object is left out.
-      const strayReq = (node, base) => {
-        const missing = ((node && node.required) || []).filter((n) => !((node.properties || {})[n]));
+      // A schema node at any depth (the root, a property, array items, items of items) is laid out by one recursive
+      // function. A keyword is laid out only when it has the shape the layout expects (a string description, an enum
+      // list, a properties object, a required list, a single items schema); every other keyword, and any keyword in
+      // another shape, is written out with the recursive value renderer, so nothing in the object is left out.
+      const isObj = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
+      const laid = (s, k) => k === "type" || (k === "description" && typeof s[k] === "string") || (k === "enum" && Array.isArray(s[k]))
+        || (k === "properties" && isObj(s[k])) || (k === "required" && Array.isArray(s[k]) && s[k].every((n) => typeof n === "string")) || (k === "items" && isObj(s[k]));
+      const tyOf = (s) => (!isObj(s) ? "any type" : s.type === "array" && isObj(s.items) ? `array of ${tyOf(s.items)}` : s.type !== undefined ? esc(Array.isArray(s.type) ? s.type.join(" or ") : String(s.type)) : "any type");
+      const extras = (s, base) => Object.keys(s).filter((k) => !laid(s, k)).sort(byUnits)
+        .map((k) => `<span class="ds"><code>${hl(k)}</code>: ${val(s[k], `${base}.${k}`)}</span>`).join("");
+      // Required names with no property of that name are listed too.
+      const strayReq = (s) => {
+        if (!laid(s, "required")) return "";
+        const missing = s.required.filter((n) => !(isObj(s.properties) && s.properties[n]));
         return missing.length ? `<span class="ds">Required with no property: ${missing.map((n) => `<code>${hl(n)}</code>`).join(" ")}</span>` : "";
       };
-      const props = (schema, base) => {
-        const entries = Object.entries((schema && schema.properties) || {});
+      const enumView = (s, base, lead) => `<span class="ds ev">${lead}: ${s.enum.map((v, i) => mk(`${base}.enum[${i}]`, typeof v === "string" ? `<code>${hl(v)}</code>` : `<code>${esc(jcs(v))}</code>`)).join("")}</span>`;
+      // Everything inside one schema node except its type, which the line that introduces the node already shows.
+      const nodeBody = (s, base, lead = "Values") => {
+        if (!isObj(s)) return `<span class="ds">${val(s, base)}</span>`;
+        return (laid(s, "description") ? `<span class="ds">${mk(`${base}.description`, hl(s.description))}</span>` : "")
+          + (laid(s, "enum") ? enumView(s, base, lead) : "")
+          + extras(s, base) + strayReq(s) + props(s, base)
+          + (laid(s, "items") ? `<ul class="prm"><li><span class="ty">Each item, ${tyOf(s.items)}</span>${nodeBody(s.items, `${base}.items`, "Item values")}</li></ul>` : "");
+      };
+      function props(schema, base) {
+        const entries = laid(schema, "properties") ? Object.entries(schema.properties) : [];
         const gap = gapParent === `${base}.properties` && !entries.some(([n]) => n === gapLeaf)
           ? `<li><span class="absent"><code>${esc(gapLeaf)}</code> is not in this object</span></li>` : "";
         if (!entries.length && !gap) return "";
-        const req = (schema && schema.required) || [];
+        const req = laid(schema, "required") ? schema.required : [];
         return `<ul class="prm">${entries.map(([n, p]) => {
           const path = `${base}.properties.${n}`;
-          const it = p.items, ip = `${path}.items`;
-          const nested = (p.properties ? props(p, path) : "") + strayReq(p, path)
-            + (it ? (it.description ? `<span class="ds">Each item: ${mk(`${ip}.description`, hl(it.description))}</span>` : "")
-              + (it.enum ? `<span class="ds ev">Item values: ${it.enum.map((v) => `<code>${hl(v)}</code>`).join("")}</span>` : "")
-              + extras(it, ip) + (it.properties ? props(it, ip) : "") + strayReq(it, ip) : "");
-          const ty = p.type === "array" && it ? `array of ${it.type || "any type"}` : p.type || "any type";
           const nm = mark.path === path ? `<mark class="${cls}"><code>${hl(n)}</code></mark>` : `<code>${hl(n)}</code>`;
-          return (`<li>${nm}<span class="ty">${ty}${req.includes(n) ? ", required" : ""}</span>${p.description ? `<span class="ds">${mk(`${path}.description`, hl(p.description))}</span>` : ""}${p.enum ? `<span class="ds ev">Values: ${p.enum.map((v) => `<code>${hl(v)}</code>`).join("")}</span>` : ""}${extras(p, path)}${nested}</li>`);
+          return `<li>${nm}<span class="ty">${tyOf(p)}${req.includes(n) ? ", required" : ""}</span>${nodeBody(p, path)}</li>`;
         }).join("")}${gap}</ul>`;
-      };
-      // A whole input or output schema: its own type and keywords, then every property.
-      const schemaView = (schema, base) => {
-        const list = props(schema, base);
-        return `<span class="ds">Type <code>${esc(schema.type || "any type")}</code>${list ? "" : ", no properties"}</span>`
-          + (schema.description ? `<span class="ds">${mk(`${base}.description`, hl(schema.description))}</span>` : "")
-          + extras(schema, base) + strayReq(schema, base) + list;
-      };
+      }
+      // A whole input or output schema: its own type, then the same recursive layout as every nested node.
+      const schemaView = (schema, base) => `<span class="ds">Type <code>${isObj(schema) ? tyOf(schema) : "any type"}</code>${isObj(schema) && props(schema, base) ? "" : ", no properties"}</span>`
+        + nodeBody(schema, base);
       const ann = def.annotations
         ? Object.entries(def.annotations).map(([k, v]) => mk(`annotations.${k}`, `<code>${k}: ${typeof v === "string" ? `"${hl(v)}"` : esc(JSON.stringify(v))}</code>`)).join(" ")
           + (label(def) === "none" ? '<span class="ds warn">No <code>readOnlyHint</code>. The protocol reads a missing <code>readOnlyHint</code> as false.</span>' : "")
