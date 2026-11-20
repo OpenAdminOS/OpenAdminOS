@@ -313,6 +313,14 @@ the installed app's scheduler, login item or caches.
   to quit OpenAdminOS first). Muse lows: the SPEC marker bullet names the
   Linux device rule; the retry check has a unit test (the state write's own
   pre-rename check is covered through it, not by a timed integration test).
+- Review round 28: Claude and Muse no blocking. Sol two blocking: the data
+  folder is now checked before every step outside it, each Keychain
+  deletion attempt included, so a profile restored during the cleanup keeps
+  its key; a cache folder's identity is taken before all its checks and
+  compared after the last one. Muse lows applied: entry identity includes
+  the birth time and an entry with neither inode nor birth time counts as
+  replaced, a cache recheck test, a failing commit callback is only logged,
+  the SPEC cross reference.
 - Process lesson: twice I edited the tree while a reviewer was reading it;
   parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the
