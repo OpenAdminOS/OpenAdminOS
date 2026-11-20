@@ -28,6 +28,7 @@ import {
   MACOS_SAFE_STORAGE_ACCOUNT,
   MACOS_SAFE_STORAGE_SERVICE,
   readLocalResetMarker,
+  sharedReadOnlyFile,
   requestLocalReset,
   runPendingLocalReset,
   writeLocalResetMarker,
@@ -479,6 +480,35 @@ describe("local reset: wipe at launch", () => {
       assert.equal(runPendingLocalReset({ userDataDir: profile, packaged: false, platform: "linux", home: dir, env: {} })?.status, "completed");
       assert.equal(readFileSync(join(dir, "other-cache.bin"), "utf8"), "other profile");
     } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("on Windows leaves a read-only file that a backup also links, so the backup's copy keeps its attributes", { skip: process.platform === "win32" ? "runs with POSIX file modes; on Windows chmod maps only to the read-only attribute" : false }, async () => {
+    const dir = await tempDir();
+    try {
+      const profile = join(dir, "profile");
+      mkdirSync(join(profile, "Local Storage"), { recursive: true });
+      writeFileSync(join(dir, "backup.ldb"), "backup bytes");
+      linkSync(join(dir, "backup.ldb"), join(profile, "Local Storage", "000003.ldb"));
+      chmodSync(join(dir, "backup.ldb"), 0o444);
+      writeFileSync(join(profile, "state.json"), "{}");
+      writeFileSync(join(profile, LOCAL_RESET_MARKER), JSON.stringify(markerFor(profile, DEV_MARKER)));
+      assert.equal(sharedReadOnlyFile(join(profile, "Local Storage"), "Local Storage"), "Local Storage/000003.ldb");
+      const report = runPendingLocalReset({ userDataDir: profile, packaged: false, platform: "win32", home: dir, env: {} });
+      assert.equal(report?.status, "incomplete");
+      assert.deepEqual(report?.failed, [{
+        item: "Local Storage",
+        reason: "Local Storage/000003.ldb is read-only and also linked from another place, such as a backup; removing it would make that copy writable too. Remove the other link first, or remove it by hand",
+      }]);
+      // Nothing about the backup's copy changed; the rest of the folder went.
+      assert.equal(lstatSync(join(dir, "backup.ldb")).mode & 0o777, 0o444);
+      assert.equal(lstatSync(join(dir, "backup.ldb")).nlink, 2);
+      assert.ok(!existsSync(join(profile, "state.json")));
+      // A plain read-only file of the profile alone is removed as before.
+      assert.equal(sharedReadOnlyFile(join(dir, "missing"), "missing"), undefined);
+    } finally {
+      chmodSync(join(dir, "backup.ldb"), 0o644);
       await rm(dir, { recursive: true, force: true });
     }
   });

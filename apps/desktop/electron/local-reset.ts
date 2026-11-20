@@ -635,12 +635,25 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
     const now = localResetFolderIdentity(userDataDir);
     return now !== undefined && sameSessionFolder(identity, now) && !isSymbolicLink(userDataDir);
   };
+  // On Windows a hard link shares its attributes with every other link to
+  // the file, and removing a read-only file clears the attribute first, so
+  // a backup's copy would become writable too: such an entry stays.
+  const removeHere = (name: string): boolean => {
+    if (options.platform === "win32") {
+      const shared = sharedReadOnlyFile(join(userDataDir, name), name);
+      if (shared !== undefined) {
+        failed.push({ item: name, reason: sharedReadOnlyReason(shared, name) });
+        return false;
+      }
+    }
+    return removeEntry(fs, userDataDir, name, failed);
+  };
   const removeIfSameFolder = (name: string): boolean => {
     if (!sameFolder()) {
       failed.push({ item: userDataDir, reason: DATA_FOLDER_CHANGED_REASON });
       return false;
     }
-    return removeEntry(fs, userDataDir, name, failed);
+    return removeHere(name);
   };
   const policyProblem = localResetPolicyProblem(userDataDir);
   if (policyProblem) {
@@ -671,7 +684,7 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
       failed.push({ item: userDataDir, reason: DATA_FOLDER_CHANGED_REASON });
       break;
     }
-    keptWith = removeEntry(fs, userDataDir, name, failed) ? undefined : name;
+    keptWith = removeHere(name) ? undefined : name;
   }
   if (failed.length > 0) return finish("incomplete");
   for (const name of plan.last) if (!removeIfSameFolder(name)) break;
@@ -817,6 +830,39 @@ function latestPerItem(problems: readonly LocalResetProblem[]): LocalResetProble
   return [...byItem.values()];
 }
 
+/**
+ * The first read-only file with more than one hard link at or inside a
+ * path (named from `label`), without following links; undefined when there
+ * is none or the path is gone. A folder that cannot be listed is left to
+ * the removal, which reports it.
+ */
+export function sharedReadOnlyFile(path: string, label: string): string | undefined {
+  let stat;
+  try {
+    stat = lstatSync(path);
+  } catch {
+    return undefined;
+  }
+  if (stat.isFile()) return stat.nlink > 1 && (stat.mode & 0o200) === 0 ? label : undefined;
+  if (!stat.isDirectory()) return undefined;
+  let children: string[];
+  try {
+    children = readdirSync(path);
+  } catch {
+    return undefined;
+  }
+  for (const child of children) {
+    const found = sharedReadOnlyFile(join(path, child), `${label}/${child}`);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+function sharedReadOnlyReason(shared: string, name: string): string {
+  const what = shared === name ? "it is" : `${shared} is`;
+  return `${what} read-only and also linked from another place, such as a backup; removing it would make that copy writable too. Remove the other link first, or remove it by hand`;
+}
+
 function removeEntry(fs: LocalResetFileSystem, dir: string, name: string, failed: LocalResetProblem[]): boolean {
   try {
     fs.remove(join(dir, name));
@@ -866,6 +912,13 @@ function removeLeftovers(
     if (folderGoesThroughLink(path, { platform: options.platform, mountInfo: options.mountInfo })) {
       if (fs.exists(path)) warnings.push({ item: path, reason: "it is a link or holds another mount, so it was left in place" });
       continue;
+    }
+    if (options.platform === "win32") {
+      const shared = sharedReadOnlyFile(path, basename(path));
+      if (shared !== undefined) {
+        warnings.push({ item: path, reason: sharedReadOnlyReason(shared, basename(path)) });
+        continue;
+      }
     }
     try {
       fs.remove(path);
