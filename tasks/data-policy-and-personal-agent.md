@@ -307,7 +307,8 @@ built on top of them are planned separately.
 - Mockup 34, F: a message with readable evidence saved before a change
   that raised a class counts as unexamined, and the reopened conversation
   says why. Round 16 makes this any raise of the effective field map, from
-  the shipped map, Settings or the IT policy file.
+  the shipped map, Settings or the IT policy file; round 20 makes it any
+  change of a class, not only a raise.
 
 **Review findings adopted (2026-11-19, round 15 of the design review)**
 - Saved Chat evidence keeps the full set of classes that applied to each
@@ -322,7 +323,7 @@ built on top of them are planned separately.
   `enum` and a description under nested `items.items` appear in both panes.
 - Mockup 34, F: evidence from before any class raise counts as unexamined,
   not only evidence for the fields that changed (from any source of the
-  raise since round 16).
+  raise since round 16, and any class change since round 20).
 - Mockup 35: the saved-delivery note says the run-origin gate covers every
   connector, including ones added later, with Teams as the example.
 
@@ -338,11 +339,11 @@ built on top of them are planned separately.
   endpoint outside it (A3).
 - Evidence is versioned by the effective field map revision, which changes
   whenever the shipped map, a Settings reclassification or an IT policy
-  reclassification raises any class. Saved evidence stores that revision,
-  and evidence from before any class raise, from any source, counts as
-  unexamined. A restart regression test covers a field raised from
-  `configuration` to `security` in Settings after the answer was saved
-  (A1, A3).
+  reclassification raises any class (round 20: changes any class). Saved
+  evidence stores that revision, and evidence from before any class raise,
+  from any source, counts as unexamined. A restart regression test covers a
+  field raised from `configuration` to `security` in Settings after the
+  answer was saved (A1, A3).
 - Mockup 34: the strip reads "security names masked" for Mask and "security
   blocked" for Block, in the generated strip and the reopened Chat
   composer.
@@ -383,7 +384,8 @@ built on top of them are planned separately.
   scan that ran out of its budget with a Block on the tier) makes no
   request and has its own designed state (A3, mockup 34, E). Round 19
   widens the first step to detector matches and adds a final check after
-  the gate.
+  the gate; round 20 adds a scan of the exact final string as the last
+  step.
 - A redirect that changes a user-added server's endpoint (any change of
   scheme, host, port or path; round 19 adds the query string) is refused during tool listing and every
   tool call. Nothing is sent to the target, and the designed state names
@@ -410,7 +412,8 @@ built on top of them are planned separately.
   addresses, GUIDs, IP addresses, serial numbers and credential patterns),
   whatever the rules on Hosted allow. After the gate, a final check removes
   any recognized span still present, also under Allow, before the
-  placeholders are removed and the meaningful text check runs. A
+  placeholders are removed and the meaningful text check runs (round 20
+  adds a last scan of the exact string to be sent). A
   regression test covers a detector-only email address with Identity on
   Hosted at Allow: the address never reaches the request (A3).
 - A3 criteria 18 and 19: criterion 18 covers stale tokens only; the order
@@ -428,6 +431,32 @@ built on top of them are planned separately.
 - Mockup 34, F: a live follow-up in a conversation that stayed open, where
   the effective field map revision changed and an entry without a field
   path became unexamined, with the reason and the recovery.
+
+**Review findings adopted (2026-11-20, round 20 of the design review)**
+- The effective field map revision advances on any change of any field's
+  classes, from any source (an app update to the shipped map, Settings or
+  the IT policy file), not only on a raise. A remap to a lower class can
+  still be stricter on a tier: with Security on Hosted at Allow and
+  Configuration on Hosted at Block, an IT policy file remap of a field from
+  `security` to `configuration` blocks a value that was sent before. Live
+  and saved evidence classified under an older revision is reclassified
+  from its field path or counts as unexamined, as before. Live and
+  reopened Chat regression criteria cover that remap (A1, A3).
+- Web search: after placeholder removal and the meaningful text check, the
+  exact string that would be sent is scanned once more by every recognizer
+  (ledger, tenant value index, detectors). When any recognized span is
+  found, the search is not sent and Chat shows the designed state; the
+  string is never edited again. Removing a stale placeholder can join a
+  value, as `WGB Expen[USER_2]ses` becomes `WGB Expenses`. A regression
+  criterion covers it (A3, mockup 34, E).
+- A3 criterion 22 asserts on its own that the input to the Hosted gate
+  already excludes the detector-only address (step 1), next to the
+  separate unit test of the final check (step 3).
+- Mockup 34, F: in the live follow-up trace, the revision check comes
+  before the hosted planning call.
+- Mockup 34, E: the search withheld by the gate holds a long public log
+  excerpt the admin pasted into the question, not tenant evidence, since
+  the query writer gets public inputs only.
 
 ## Why
 
@@ -558,15 +587,16 @@ the IT policy file.
 - [ ] The effective field map revision is checked before every request,
       including a request that uses evidence from an open conversation's
       in-memory ledger, not only evidence rebuilt from saved history. Evidence
-      classified under a revision older than a later class raise from any
-      source is reclassified from its provenance where it has one: the span
+      classified under a revision older than a later class change from any
+      source, a raise or a remap to a lower class, is reclassified from its
+      provenance where it has one: the span
       adds its field's current class history to its set (it never drops a
       class it held, detector classes included), and its action is the
       strictest across the set under the rules in force. Evidence that cannot
       be rebuilt, such as a span with no field path, counts as unexamined.
       Saved evidence stores no field path, so evidence saved under an older
       revision counts as unexamined, as below (decided by the lead
-      2026-11-20, round 18).
+      2026-11-20, round 18; any class change, not only a raise, round 20).
 - [ ] Saved Chat history keeps its classification evidence. Each saved Chat
       message stores, next to it in the local database, the spans the ledger
       found in its text and the effective field map revision that classed
@@ -592,22 +622,28 @@ the IT policy file.
       classes without the classes the detectors assigned. A saved message without stored evidence (saved
       before the evidence existed, or evidence that cannot be read) counts as
       unexamined, as in the budget rule below. Evidence stored under an
-      effective field map revision older than any later class raise also
-      counts as unexamined, whatever the source of the raise; otherwise its
-      stored classes apply (decided by the lead 2026-11-20, from the
-      unexamined rule).
+      effective field map revision older than any later class change also
+      counts as unexamined, whatever the source of the change and whether
+      it raised or lowered the class; otherwise its stored classes apply
+      (decided by the lead 2026-11-20, from the unexamined rule; any change
+      since round 20).
 - [ ] The effective field map revision versions the field map the app
       actually applies, not only the map it ships. It is one number kept in
-      the local database that changes whenever any source raises the class
-      of any field: an update to the shipped field map, a reclassification in
-      Settings, or a reclassification in the IT policy file
-      (`dataPolicy.fieldClasses`). A change that raises nothing leaves it as
-      it is. Saved evidence stores the revision in force when the message was
-      saved, and a reopened conversation compares it with the revision of
-      each later raise: evidence saved before any class raise, from any of
-      the three sources, counts as unexamined, even when the message used no
-      field that was raised. The shipped map version alone never decides
-      it.
+      the local database that changes whenever any source changes the
+      classes of any field, a raise or a remap to a lower class: an update to
+      the shipped field map, a reclassification in Settings, or a
+      reclassification in the IT policy file (`dataPolicy.fieldClasses`). A
+      lower class can still be stricter on a tier: with Security on Hosted at
+      Allow and Configuration on Hosted at Block, a remap from `security` to
+      `configuration` in the IT policy file blocks a value that was sent
+      before. A change that leaves every field's classes as they were, such
+      as an IT policy file reloaded with the same mappings, leaves it as it
+      is. Saved evidence stores the revision in force when the message was
+      saved, and a reopened conversation compares it with the revision in
+      force: evidence saved before any class change, from any of the three
+      sources, counts as unexamined, even when the message used no field
+      that changed. The shipped map version alone never decides it (any
+      change, not only a raise, decided by the lead 2026-11-20, round 20).
 - [ ] Just before each model call, the final request (system text plus
       prompt, including the admin's own words) is scanned against the ledger
       and the detectors, in the gate every model request passes: the
@@ -658,9 +694,10 @@ the IT policy file.
     copy of its values; Disconnect and deleting the conversation remove the
     evidence with the messages (test).
 11. The effective field map revision changes when the shipped map, a
-    Settings reclassification or an IT policy reclassification raises any
-    class, and stays the same for a change that raises nothing (test per
-    source).
+    Settings reclassification or an IT policy reclassification changes any
+    class of any field, a remap to a lower class included (the shipped map
+    and the IT policy file), and stays the same for a change that leaves
+    every field's classes as they were (test per source).
 12. In-memory ledger (test): a ledger entry from a `configuration` field,
     classed under revision 41, is used in a request after a Settings raise
     of that field to `security` (revision 42) without the conversation
@@ -668,6 +705,15 @@ the IT policy file.
     field path, its set holds `configuration` and `security`, and its action
     is the strictest of the two. A ledger entry with no field path,
     classed under revision 41, counts as unexamined in the same request.
+13. In-memory ledger, remap to a lower class (test): a ledger entry from a
+    field mapped as `security`, classed under revision 41, is used in a
+    request after the IT policy file remaps that field to `configuration`
+    (revision 42), with Security on Hosted at Allow and Configuration on
+    Hosted at Block. The check before the request reclassifies it from its
+    field path, its set holds `security` and `configuration`, and its action
+    on Hosted is Block. A revision that advanced only on raises would stay
+    at 41 and keep the entry at `security`, which Hosted allows, and the
+    test fails on it.
 
 ### Phase A2: Provider tiers
 
@@ -702,7 +748,7 @@ the IT policy file.
         any class, whatever the rules on Hosted allow. The query is written
         from public inputs only. The boundary is enforced on the final
         outbound query, around the Hosted gate, in this order (round 18,
-        step 1 and the final check from round 19):
+        step 1 and the final check from round 19, step 6 from round 20):
         1. Everything the app recognizes as tenant data in the query is
            removed, never masked as a token, whatever the rules on Hosted
            allow: ledger matches, tenant value index matches and detector
@@ -730,7 +776,18 @@ the IT policy file.
            remains, the search is not sent, no network request is made, and
            Chat shows the designed state (mockup 34, E, "Web search without
            tenant data").
-        Only the text that passed all five steps is sent. Text the app
+        6. The last step before sending: the exact string that would be
+           sent is scanned once more by every recognizer, the ledger, the
+           tenant value index and the detectors. Removing a placeholder can
+           join a value the earlier steps could not see, as
+           `WGB Expen[USER_2]ses` becomes `WGB Expenses`. When any
+           recognized span is found, the search is not sent, no network
+           request is made, and Chat shows the designed state (mockup 34,
+           E, "Tenant data found in the final search words"). The string is
+           never edited again after this scan, so what is sent is exactly
+           what was scanned; its recovery is writing the search words again
+           or an answer without searching.
+        Only the text that passed all six steps is sent. Text the app
         cannot recognize, such as an internal project name it has never
         seen, can still reach the search provider; the web search copy and
         the docs say so, as the remote MCP boundary does.
@@ -792,8 +849,9 @@ the IT policy file.
 - [ ] Saved history in a follow-up. History whose evidence was rebuilt (A1) is
       routed and masked like any other part of the request, by its stored
       classes and by the scan of the final request, unless its effective
-      field map revision is older than a later class raise from any source
-      (A1), in which case it counts as unexamined. Each span's action is the
+      field map revision is older than a later class change from any source,
+      a raise or a remap to a lower class (A1), in which case it counts as
+      unexamined. Each span's action is the
       strictest across every class in its stored set (its field's class
       history and every class a value detector assigned to it when saved),
       recomputed under the rules in force at the follow-up, so a span whose
@@ -814,8 +872,9 @@ the IT policy file.
       ledger is checked against the effective field map revision: a value
       classed under an older revision is reclassified from its field path,
       keeping every class it held, and a value that cannot be rebuilt counts
-      as unexamined. A follow-up never uses a class from before a raise
-      because the conversation stayed open. When such a value withholds the
+      as unexamined. A follow-up never uses a class from before a class
+      change, a raise or a remap to a lower class, because the conversation
+      stayed open. When such a value withholds the
       follow-up, it shows the same designed state and recovery as a
       reopened conversation (mockup 34, F, "A follow-up in a conversation
       that stayed open").
@@ -888,7 +947,7 @@ the IT policy file.
 13. Same-revision restart regression test: a field mapped as
    `configuration` is moved to `security`, then to `identity`, and only then
    is a value from it restored in a local Chat answer that is saved, so no
-   class is raised after the save and its effective field map revision
+   class changes after the save and its effective field map revision
    stays current. The value is later gone from the current tenant value index,
    the app restarts, the conversation is reopened, and a hosted follow-up is
    asked with Security on Hosted at Block. The saved span's stored class
@@ -903,7 +962,7 @@ the IT policy file.
    `identity`, and the value is restored in a local Chat answer that is
    saved. The saved span's stored set holds `configuration` and `identity`.
    The name is later gone from the index, the app restarts with no class
-   raised since the save (the same effective field map revision), the
+   changed since the save (the same effective field map revision), the
    conversation is reopened, and a hosted follow-up
    is asked with Identity on Hosted at Mask, then at Block: the name is
    masked, then withheld, and never reaches a provider request in clear
@@ -951,16 +1010,16 @@ the IT policy file.
    placeholder removal and the gate is covered by criterion 19.
 19. Web search order regression test, gate token: with the default rules on
    Hosted (Credential at Mask, no Block on the tier), Nova writes a search
-   with public words followed by a pasted install log longer than the
-   scan's work budget. The gate masks the unexamined tail one way as
+   with public words followed by a public install log excerpt the admin
+   pasted into the question, longer than the scan's work budget. The gate masks the unexamined tail one way as
    `[CREDENTIAL]`, and the fake request function receives the public words
    with neither the tail nor `[CREDENTIAL]`. A search that removed
    placeholders before the gate would send the token, and the test fails
    on it. This is the test for the order of placeholder removal after the
    gate.
 20. Web search withheld by the gate (test): Activity on Hosted is Block and
-   Nova writes a search with a pasted install log longer than the scan's
-   work budget. Public words remain after step 1, the gate reports the
+   Nova writes a search with a public install log excerpt the admin pasted
+   into the question, longer than the scan's work budget. Public words remain after step 1, the gate reports the
    unexamined tail, the strictest action on Hosted is Block, and the fake
    receives no call. Chat shows the withheld state with the reason and
    offers a shorter search and an answer without searching (renderer test).
@@ -979,11 +1038,40 @@ the IT policy file.
    asking for password". The address is in neither the ledger nor the
    tenant value index; only the email detector finds it. Step 1 removes it,
    and the fake request function receives the public words without the
-   address, which never reaches the search request. A step 1 that removed
-   only ledger and index matches would leave
+   address, which never reaches the search request. A spy on the Hosted
+   gate asserts on its own that the gate's input already holds the public
+   words without the address, so the test fails on a step 1 that left the
+   address for step 3 to remove, even though the request would be clean.
+   A step 1 that removed only ledger and index matches would leave
    the address to the gate, which sends an allowed class as is, and the
-   test fails on it. A unit test of the final check alone (step 3) is given
-   gate output that still holds the address under Allow and removes it.
+   test fails on it. A separate unit test of the final check alone (step 3)
+   is given gate output that still holds the address under Allow and
+   removes it.
+23. Web search final string regression test: an earlier answer masked a
+   user as `[USER_2]`, and its mapping is no longer in the ledger. Nova
+   writes the search "WGB Expen[USER_2]ses not detected after install
+   24H2", and WGB Expenses is in the tenant value index. Step 1 and the
+   final check recognize nothing in the split name, step 4 removes the
+   stale placeholder and joins it, and step 5 finds meaningful text. The
+   last scan finds WGB Expenses in the exact string to be sent: the fake
+   request function receives no call, nothing is sent to `api.openai.com`,
+   and Chat shows the designed state (renderer test). A search that sent
+   the string after step 5, or that removed the joined name and sent the
+   rest, would fail the test.
+24. Remap to a lower class, live and reopened (regression tests): Security
+   on Hosted is Allow and Configuration on Hosted is Block. A local Chat
+   answer restores a value from a field mapped as `security`, and the IT
+   policy file then remaps that field to `configuration`, which changes
+   the effective field map revision. The value is no longer in the tenant
+   value index. In the conversation that stayed open, a hosted follow-up
+   reclassifies the ledger entry from its field path, its set holds
+   `security` and `configuration`, the value reaches no provider request,
+   and the follow-up shows the designed blocked state. After a restart,
+   the reopened conversation counts the saved messages as unexamined, they
+   are withheld under the Block on Hosted, and the value reaches no
+   provider request. A revision that advanced only on raises would keep
+   the value at `security`, which Hosted allows, and send it in both
+   cases, and the tests fail on it.
 
 ### Phase A4: Masking
 
@@ -1505,9 +1593,10 @@ the IT policy file.
    a list of hosts, separate from `allowedPublicReferences`, which covers
    catalog references) (mockup 35, step 1).
 10. ~~Saved Chat evidence under an older field map version~~ counts as
-    unexamined when a later change raised any class; otherwise its stored
-    classes apply (lead, 2026-11-20, from the unexamined rule). The version
-    is the effective field map revision, raised by the shipped map, Settings
+    unexamined when any class changed later, a raise or a remap
+    to a lower class; otherwise its stored classes apply (lead, 2026-11-20,
+    from the unexamined rule; any change since round 20). The version is
+    the effective field map revision, advanced by the shipped map, Settings
     or the IT policy file (round 16). Evidence in an open conversation's
     in-memory ledger is checked against it before every request and is
     reclassified from its field path where it has one (round 18).
