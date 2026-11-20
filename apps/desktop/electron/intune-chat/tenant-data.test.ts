@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { Worker } from "node:worker_threads";
 import type { LlmOptions, RunGraphApi, RunLlmApi } from "@openadminos/agent-sdk";
 import { TENANT_DATA_INSTRUCTIONS } from "@openadminos/runtime";
-import { ClassificationLedger, currentClassificationLedger, type RequestClassificationEvent } from "@openadminos/runtime/data-classification";
+import { ClassificationLedger, currentClassificationLedger, withClassificationScope, type RequestClassificationEvent } from "@openadminos/runtime/data-classification";
 import { GRAPH_CACHE_RESOURCES, planChatContext } from "./planner.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 import { AppStateStore } from "../state.js";
@@ -389,6 +389,37 @@ test("a replayed Chat turn whose credential evidence expired has incomplete cove
       "User: Explain device compliance.\nAssistant: The hint was q7z.",
     ]);
   } finally { await f.close(); }
+});
+
+test("diagnostic retention caps spans and unexamined ranges together without changing live totals", async () => {
+  const f = await fixture();
+  const ledger = new ClassificationLedger(undefined, "fixture-offset-budget", ["tenant-a"]);
+  try {
+    let live: RequestClassificationEvent | undefined;
+    f.store.observeRequestClassifications(event => { live = event; });
+    const llm = await f.store["buildLlm"]("ollama", "test");
+    const body = "xx ".repeat(300);
+    const fence = "a123456789012345";
+    ledger.registerHistoryReplay(body, Array.from({ length: 300 }, (_, i) => ({ start: i * 3, end: i * 3 + 2, ledger: undefined })));
+    ledger.rendered(body, body, { fence });
+    const prompt = `<tenant_data source="fixture" nonce="${fence}">\n${body}\n</tenant_data nonce="${fence}">\nfixture@example.invalid`;
+    await withClassificationScope(ledger, () => llm.complete({ prompt }));
+    await ledger.waitForObservations();
+    const historical = f.store.getRequestClassifications("fixture-offset-budget").at(-1);
+    assert.ok(historical && live);
+    assert.equal(live.classification.spans.length, 1);
+    assert.equal(live.classification.unexamined.ranges.length, 300);
+    assert.equal(live.rangesOmitted, undefined);
+    assert.equal(historical.classification.spans.length, 1);
+    assert.equal(historical.classification.unexamined.ranges.length, 255);
+    assert.equal(historical.rangesOmitted, 45);
+    assert.equal(historical.classification.unexamined.textCodeUnits, 600);
+    assert.deepEqual(historical.classification.counts, live.classification.counts);
+    assert.equal(historical.classification.coverageIncomplete, true);
+  } finally {
+    ledger.dispose();
+    await f.close();
+  }
 });
 
 for (const voice of [false, true]) {

@@ -8902,10 +8902,21 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     return withRequestClassification(llm, providerId, (event, tenantIds) => {
       if (this.classificationDiagnosticsClosed || tenantIds.some(id => !this.tenantLifecycle.isWritable(id))) return;
       const events = this.requestClassifications.get(event.scopeId) ?? [];
-      const spans = event.classification.spans;
+      const { spans, unexamined } = event.classification;
       const cap = 256;
-      const retained = spans.length > cap ? {
-        ...event, spansOmitted: spans.length - cap, classification: { ...event.classification, spans: spans.slice(0, cap) },
+      const keptSpans = Math.min(spans.length, cap);
+      const keptRanges = Math.min(unexamined.ranges.length, cap - keptSpans);
+      const spansOmitted = spans.length - keptSpans;
+      const rangesOmitted = unexamined.ranges.length - keptRanges;
+      const retained = spansOmitted || rangesOmitted ? {
+        ...event,
+        ...(spansOmitted ? { spansOmitted } : {}),
+        ...(rangesOmitted ? { rangesOmitted } : {}),
+        classification: {
+          ...event.classification,
+          spans: spansOmitted ? spans.slice(0, keptSpans) : spans,
+          unexamined: rangesOmitted ? { ...unexamined, ranges: unexamined.ranges.slice(0, keptRanges) } : unexamined,
+        },
       } : event;
       events.push({ event: retained, tenantIds, expiresAt: Date.now() + CLASSIFICATION_TTL_MS });
       if (events.length > 16) events.shift();

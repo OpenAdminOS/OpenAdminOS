@@ -51,8 +51,9 @@ export interface RequestClassificationEvent {
   scopePresent: boolean;
   failed: boolean;
   classification: RequestClassification;
-  /** Historical records may summarize excess offsets. Live observers receive all spans. */
+  /** Historical records may summarize excess offsets. Live observers receive all offsets. */
   spansOmitted?: number;
+  rangesOmitted?: number;
 }
 
 type Scalar = string | number | boolean;
