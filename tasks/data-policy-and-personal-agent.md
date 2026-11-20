@@ -285,6 +285,24 @@ built on top of them are planned separately.
   the same host, and the re-review marks the changed path in both raw JSON
   panes, including a property present on only one side (mockup 35).
 
+**Review findings adopted (2026-11-19, round 14 of the design review)**
+- Saved Chat evidence keeps every class a span's field has held: each span
+  stores the list of its field's classes at the time of saving, and
+  reopening recomputes the strictest action across all of them under the
+  current rules. A same-version restart regression test covers a field
+  moved from `configuration` to `security` to `identity` (A1, A3).
+- Delivery confirmation is gated by run origin before anything enters the
+  automatic delivery queue, for every connector the queue handles (Teams,
+  Outlook, Slack, Discord, WhatsApp and Signal, and any added later). A run
+  the personal agent started never reaches the queue; its deliveries wait
+  on cards. Scheduled runs keep their behaviour (B3).
+- Mockup 35: the read tools on the alternate endpoint no longer use
+  "stored" as an adjective, and the readable definition pane shows the
+  complete object, nested `_meta` values included.
+- Mockup 34, F: a message with readable evidence saved before a field map
+  change that raised a class counts as unexamined, and the reopened
+  conversation says why.
+
 ## Why
 
 Today the choice is binary. With a local model the request never leaves the
