@@ -2427,11 +2427,22 @@ export class AppStateStore {
    * gets its signal; the shutdown before the restart waits for it.
    */
   async closeAllTenantWork(): Promise<void> {
-    for (const tenant of (await this.read()).tenants) {
-      if (this.tenantLifecycle.phase(tenant.id) !== "open") continue;
-      this.tenantLifecycle.close(tenant.id);
-      this.localResetClosedTenants.push(tenant.id);
+    for (const tenantId of this.localResetTenantIds()) {
+      if (this.tenantLifecycle.phase(tenantId) !== "open") continue;
+      this.tenantLifecycle.close(tenantId);
+      this.localResetClosedTenants.push(tenantId);
     }
+  }
+
+  /**
+   * The organizations a reset closes and drains, from the state this process
+   * last read or wrote, never from the file: once the marker is written the
+   * reset reads and writes nothing in the data folder (a read of a missing
+   * state file would create one, in whatever folder is there now). The
+   * checks before the marker read the state, so the snapshot holds them all.
+   */
+  private localResetTenantIds(): string[] {
+    return (this.lastReadSnapshot?.tenants ?? []).map((tenant) => tenant.id);
   }
 
   /** Organizations a reset request closed, so a refused request can reopen them. */
@@ -2446,7 +2457,7 @@ export class AppStateStore {
     this.whatsappWebClientInstance?.dispose();
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      const tenantIds = (await this.read()).tenants.map((tenant) => tenant.id);
+      const tenantIds = this.localResetTenantIds();
       await Promise.race([
         Promise.allSettled([
           this.gatewayService.stop(),

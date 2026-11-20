@@ -1133,6 +1133,24 @@ describe("local reset: end to end with the store", () => {
     }
   });
 
+  it("closes and drains organizations without reading or creating the state file", async () => {
+    const dir = await tempDir();
+    try {
+      const statePath = join(dir, "state.json");
+      await writeFile(statePath, JSON.stringify({ activeProviderId: "ollama", installedAgents: [], runs: [], tenants: [tenant] }), "utf8");
+      const store = new AppStateStore({ filePath: statePath, tokenStore: memoryTokenStore(new Map()), userDataPath: dir, statsApiUrl: "" });
+      assert.equal(await store.beginLocalReset(), undefined);
+      // A folder swapped in after the marker has no state file yet: the
+      // reset must not create one there.
+      rmSync(statePath);
+      await store.closeAllTenantWork();
+      await store.shutdown(200);
+      assert.ok(!existsSync(statePath));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("waits while a confirmed change is being applied", async () => {
     const dir = await tempDir();
     try {
