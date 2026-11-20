@@ -354,6 +354,12 @@ describe("structured device questions", () => {
     const twoParts = structuredQueryForQuestion({ question: "how many Windows devices are there and how many are not compliant", generatedAt: at });
     assert.deepEqual(twoParts?.filters, [{ field: "operatingSystem", op: "eq", value: "Windows" }]);
     assert.deepEqual(twoParts?.focus?.filters, [{ field: "complianceState", op: "eq", value: "noncompliant" }]);
+    // An OS named only in the second clause is the subset too: the fleet total is still counted.
+    for (const question of ["how many devices do we have, and how many are Windows", "how many devices are there and which are Windows"]) {
+      const subset = structuredQueryForQuestion({ question, generatedAt: at });
+      assert.deepEqual(subset?.filters, [], question);
+      assert.deepEqual(subset?.focus?.filters, [{ field: "operatingSystem", op: "eq", value: "Windows" }], question);
+    }
     // The sample rows never get the inverse filter either.
     assert.deepEqual(deviceRowFilters("How many devices in Intune are not Windows?"), []);
   });

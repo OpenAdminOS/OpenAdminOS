@@ -228,9 +228,15 @@ function hasUnreadClause(lower: string, syncRead: boolean): boolean {
   return /(?:\b(?:not|no|never|without|longer)\b|n't)/.test(rest) || /\b(?:fail|fails|failing|failed)\b/.test(rest);
 }
 
-/** More than one clause asks for numbers or a list: "how many Windows devices, and how many are not compliant". */
-function asksTwoParts(lower: string): boolean {
-  return (lower.match(/\bhow many\b/g)?.length ?? 0) > 1 || /\band (?:which|what|list|show)\b/.test(lower);
+/**
+ * Where a second clause asking for numbers or a list starts ("how many
+ * Windows devices, and how many are not compliant"), or -1 for one clause.
+ */
+function secondClauseStart(lower: string): number {
+  const counts = [...lower.matchAll(/\bhow many\b/g)];
+  const lead = /\band (?:which|what|list|show)\b/.exec(lower);
+  const starts = [...(counts.length > 1 ? [counts[1]!.index] : []), ...(lead ? [lead.index] : [])];
+  return starts.length > 0 ? Math.min(...starts) : -1;
 }
 
 /** A sync window named in the question, as a predicate on lastSyncDateTime. */
@@ -354,14 +360,19 @@ export function structuredQueryForQuestion(input: {
   const resource: StructuredDeviceResource = entra ? "entraDevices" : "managedDevices";
   // Entra device objects carry no complianceState and no lastSyncDateTime.
   if (entra && (compliance || sync)) return undefined;
-  const scopeFilters = [os, ...(compliance && !list && !count ? [compliance] : [])].flatMap((entry) => (entry ? [entry.predicate] : []));
+  // A second clause ("and how many are not compliant", "and how many are Windows") is the subset, never a
+  // filter on the whole count: an OS named only there joins the subset, not the counted set.
+  const second = secondClauseStart(lower);
+  const twoParts = second >= 0;
+  const osInSubset = twoParts && os !== undefined && osFilter(lower.slice(0, second)) === undefined;
+  const scopeOs = osInSubset ? undefined : os;
+  const scopeFilters = [scopeOs, ...(compliance && !list && !count ? [compliance] : [])].flatMap((entry) => (entry ? [entry.predicate] : []));
   const scopeLabel = resource === "managedDevices"
-    ? `Intune managed ${os ? `${os.label} ` : ""}devices`
-    : `Entra ${os ? `${os.label} ` : ""}devices`;
+    ? `Intune managed ${scopeOs ? `${scopeOs.label} ` : ""}devices`
+    : `Entra ${scopeOs ? `${scopeOs.label} ` : ""}devices`;
   // "How many devices, and which are not compliant": the count covers the set, the list the subset.
-  const focusParts = [compliance, sync].flatMap((entry) => (entry ? [entry] : []));
-  // A second clause ("and how many are not compliant") is the subset, never a filter on the whole count.
-  const focus = focusParts.length > 0 && (count || breakdown.length > 0) && (list || asksTwoParts(lower))
+  const focusParts = [osInSubset ? os : undefined, compliance, sync].flatMap((entry) => (entry ? [entry] : []));
+  const focus = focusParts.length > 0 && (count || breakdown.length > 0) && (list || twoParts)
     ? { label: focusParts.map((entry) => entry.label).join(", "), filters: focusParts.map((entry) => entry.predicate) }
     : undefined;
   const filters = focus ? scopeFilters : [...scopeFilters, ...focusParts.map((entry) => entry.predicate)];
