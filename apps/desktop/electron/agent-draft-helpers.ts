@@ -995,7 +995,7 @@ Hard rules:
 - Skill ids are lower-case snake_case, e.g. "load_devices".
 - Graph steps: pick the closest match from the candidate endpoints listed below. Do not invent endpoints. If none of the candidates fit, fall back to GET /deviceManagement/managedDevices. Always declare the scope shown alongside the endpoint.
 - Query values must be YAML strings, including numeric-looking OData values. Example: $top: "25".
-- Transform kinds available: group-by-age, filter-by-age, count-by-field, group-by-field, sort-by, correlate-stale-devices.
+- Transform kinds available: group-by-age, filter-by-age, count-by-field, group-by-field, sort-by, correlate-stale-devices, compact-conditional-access.
 - Use definition.settings for user-adjustable values. Reference them as {{ settings.settingId }}. Supported setting types: string, integer, boolean.
 - Use a scheduled trigger only when the user asks for recurring checks. Always include a manual trigger too.
 - Use a map step when the user asks for per-item triage/rationale/classification. Put the per-item LLM step inside settings.do and add a small limit, e.g. limit: 25.
@@ -1005,7 +1005,8 @@ Hard rules:
 - definition.result.summary MUST reference the LLM step's output, e.g.: {{ summarize.output.text | default("Summary unavailable.") }}. Do not put raw counts in the summary line. Those belong in result.data.
 - Write-action kinds available: \`graph-write\` (the generic kind for any POST/PATCH/PUT/DELETE Graph endpoint, with typed-confirmation diff) and \`retire-managed-device\` (legacy alias for POST /deviceManagement/managedDevices/{id}/retire). Always prefer \`graph-write\` for new agents. For write agents, the LLM step should explain the planned actions in plain language and the write step's actionTemplate.label / actionTemplate.description should make every individual action self-explanatory. \`severity: destructive\` is the safe default unless the action is plainly reversible.
 - The confirmationPhrase must spell out the operation count and noun in CAPS, e.g. "DISABLE {{ actions | size }} GUEST ACCOUNTS" or "REVOKE {{ actions | size }} SESSIONS". This is what the admin types to approve the plan.
-- Templating uses Liquid-subset {{ path.expr | filter }}. Filters available: size, total, sample(n), default("…"), join(", ").
+- Templating uses Liquid-subset {{ path.expr | filter }}. Filters available: size, total, sample(n), default("…"), join(", "), counts, top(n), boundedJson(maxChars).
+- Keep LLM prompts small enough for local models: send counts or a bounded sample, never a whole Graph collection. Use count-by-field or `| counts` for breakdowns, `| top(25)` for fields with many values, and sort-by with take plus `| boundedJson(6000)` for samples.
 - Always include a top-level "# yaml-language-server: $schema=../../schemas/agent-template.schema.json" comment.
 
 Reserved slugs you must not use:
