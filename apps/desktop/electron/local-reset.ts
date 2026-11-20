@@ -21,7 +21,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { closeSync, existsSync, fsyncSync, lstatSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, lstatSync, openSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, writeSync } from "node:fs";
 import { open, rename, rm } from "node:fs/promises";
 import { basename, dirname, join, posix, resolve, sep, win32 } from "node:path";
 
@@ -236,21 +236,48 @@ export function localResetLinkCheck(userDataDir: string, fs: Pick<LocalResetFile
 }
 
 /**
- * True when a folder path does not lead straight to a folder of that name:
- * its real location must be its real parent plus its own name. A link at
- * the end, or a form such as "link/", "link/." or "link/.." that the system
- * resolves through a link, fails that. A path whose details cannot be read
- * counts as a link; a missing one does not.
+ * True when a folder path does not lead straight to a plain folder of that
+ * name, so emptying it could reach files that live somewhere else:
+ * - a path with "." or ".." segments, which the system may resolve through
+ *   a link differently than the path reads ("link/../name");
+ * - a folder that is a link, or whose real location is not its real parent
+ *   plus its own name ("link/");
+ * - on Linux, a folder that is itself a mount point (a bind mount of a
+ *   shared folder looks like a plain folder otherwise).
+ * A path whose details cannot be read counts as a link; a missing one does not.
  */
-export function folderGoesThroughLink(path: string): boolean {
+export function folderGoesThroughLink(
+  path: string,
+  options: { platform?: NodeJS.Platform; mountInfo?: () => string } = {},
+): boolean {
+  if (path.split(/[\\/]+/).some((segment) => segment === "." || segment === "..")) return true;
   try {
     const absolute = resolve(path);
     if (lstatSync(absolute).isSymbolicLink()) return true;
-    const expected = join(realpathSync(dirname(absolute)), basename(absolute));
-    return realpathSync(path) !== expected;
+    const real = realpathSync(path);
+    if (real !== join(realpathSync(dirname(absolute)), basename(absolute))) return true;
+    if ((options.platform ?? process.platform) === "linux" && isMountPoint(real, options.mountInfo)) return true;
+    return false;
   } catch (cause) {
     return (cause as NodeJS.ErrnoException).code !== "ENOENT";
   }
+}
+
+/** Linux: the folder is a mount point in this process's mount table. */
+function isMountPoint(folder: string, mountInfo: (() => string) | undefined): boolean {
+  let table: string;
+  try {
+    table = (mountInfo ?? (() => readFileSync("/proc/self/mountinfo", "utf8")))();
+  } catch {
+    return false;
+  }
+  for (const line of table.split("\n")) {
+    const point = line.split(" ")[4];
+    if (!point) continue;
+    const decoded = point.replace(/\\([0-7]{3})/g, (_match, octal: string) => String.fromCharCode(parseInt(octal, 8)));
+    if (decoded === folder) return true;
+  }
+  return false;
 }
 
 /**
@@ -258,29 +285,82 @@ export function folderGoesThroughLink(path: string): boolean {
  * data folder, the wipe would delete what it points to and the policy would
  * stop applying. Returns a reason to stop when that is the case.
  */
-export function policyLinkProblem(userDataDir: string): string | undefined {
+export function policyLinkProblem(userDataDir: string, platform: NodeJS.Platform = process.platform): string | undefined {
   let entries: string[];
-  let realFolder: string;
+  let folders: string[];
   try {
     entries = readdirSync(userDataDir);
-    realFolder = realpathSync(userDataDir);
+    folders = [resolve(userDataDir), realpathSync(userDataDir)];
+  } catch {
+    return undefined;
+  }
+  // macOS and Windows volumes usually match names without regard to case.
+  const fold = (value: string) => (platform === "darwin" || platform === "win32" ? value.toLowerCase() : value);
+  const inside = (candidate: string) => folders.some((folder) => fold(candidate).startsWith(`${fold(folder)}${sep}`));
+  for (const name of entries) {
+    if (name.toLowerCase() !== MANAGED_POLICY_FILE) continue;
+    // Every hop of the link chain counts: "policy.json -> managed/current.json"
+    // with "managed" a link elsewhere still depends on "managed", which the
+    // reset removes.
+    let current = join(userDataDir, name);
+    for (let hop = 0; hop < 40; hop += 1) {
+      let isLink: boolean;
+      try {
+        isLink = lstatSync(current).isSymbolicLink();
+      } catch {
+        break;
+      }
+      if (!isLink) {
+        if (hop > 0 && inside(current)) return policyLinkReason(name);
+        break;
+      }
+      let next: string;
+      try {
+        next = resolve(dirname(current), readlinkSync(current));
+      } catch {
+        break;
+      }
+      if (inside(next)) return policyLinkReason(name);
+      try {
+        // A hop through a folder link inside the data folder counts as well.
+        if (inside(realpathSync(dirname(next)))) return policyLinkReason(name);
+      } catch {
+        // The folder is missing; the loader reports a dangling policy link.
+      }
+      current = next;
+    }
+  }
+  return undefined;
+}
+
+/** A folder where the policy file belongs would be kept with whatever is in it. */
+function policyFolderProblem(fs: LocalResetFileSystem, userDataDir: string): string | undefined {
+  let entries: string[];
+  try {
+    entries = fs.readdir(userDataDir);
   } catch {
     return undefined;
   }
   for (const name of entries) {
     if (name.toLowerCase() !== MANAGED_POLICY_FILE) continue;
     const path = join(userDataDir, name);
-    try {
-      if (!lstatSync(path).isSymbolicLink()) continue;
-      const target = realpathSync(path);
-      if (target.startsWith(`${realFolder}${sep}`)) {
-        return `the IT policy file ${name} is a link to a file in the data folder, which the reset would remove and the policy would stop applying. Ask whoever manages this device to place the policy file itself in the data folder, then reset`;
-      }
-    } catch {
-      // A link to nothing keeps nothing; the policy loader reports it.
+    if (isDirectory(path)) {
+      return `${name} is a folder, not the IT policy file, and the reset would keep everything in it. Move it out of the data folder, then reset`;
     }
   }
   return undefined;
+}
+
+function isDirectory(path: string): boolean {
+  try {
+    return lstatSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function policyLinkReason(name: string): string {
+  return `the IT policy file ${name} is a link that goes through the data folder, which the reset would remove and the policy would stop applying. Ask whoever manages this device to place the policy file itself in the data folder, then reset`;
 }
 
 /** The request refuses a data folder that is a link; nothing is removed. */
@@ -526,7 +606,7 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
     failed.push({ item: userDataDir, reason: DATA_FOLDER_LINK_REASON });
     return finish("incomplete");
   }
-  const policyProblem = policyLinkProblem(userDataDir);
+  const policyProblem = policyLinkProblem(userDataDir) ?? policyFolderProblem(fs, userDataDir);
   if (policyProblem) {
     failed.push({ item: MANAGED_POLICY_FILE, reason: policyProblem });
     return finish("incomplete");
@@ -654,7 +734,9 @@ function recordLeftoversDone(
   marker: LocalResetMarker,
   warnings: LocalResetProblem[],
 ): void {
-  const next: LocalResetMarker = { ...marker, leftoversDone: true, ...(warnings.length > 0 ? { requestWarnings: [...warnings] } : {}) };
+  // The list is written even when empty, so a warning that cleared at launch
+  // does not come back with a resumed wipe.
+  const next: LocalResetMarker = { ...marker, leftoversDone: true, requestWarnings: [...warnings] };
   try {
     fs.writeMarker(join(userDataDir, LOCAL_RESET_MARKER), `${JSON.stringify(next, null, 2)}\n`);
   } catch (cause) {
@@ -676,7 +758,8 @@ const SECURITY_ITEM_NOT_FOUND = 44;
  */
 function removeMacosKeychainItem(run: (file: string, args: string[]) => CommandResult, warnings: LocalResetProblem[]): void {
   const item = `Keychain item "${MACOS_SAFE_STORAGE_SERVICE}"`;
-  for (let attempt = 0; attempt < 5; attempt += 1) {
+  // Up to five deletions, then one more call that must find nothing.
+  for (let attempt = 0; attempt < 6; attempt += 1) {
     const result = run("/usr/bin/security", [
       "delete-generic-password",
       "-s",
@@ -693,8 +776,10 @@ function removeMacosKeychainItem(run: (file: string, args: string[]) => CommandR
       warnings.push({ item, reason: `security exited with code ${result.status ?? "unknown"}` });
       return;
     }
+    if (attempt === 5) {
+      warnings.push({ item, reason: "more items with this name are still in the Keychain" });
+    }
   }
-  warnings.push({ item, reason: "more items with this name are still in the Keychain" });
 }
 
 /** File system codes in plain words. The item already names the path, so reasons never repeat it. */
