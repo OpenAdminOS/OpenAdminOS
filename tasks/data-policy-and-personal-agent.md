@@ -114,7 +114,9 @@ built on top of them are planned separately.
   reasoning call.
 - When a rule blocks a class carried by the voice session start request, the
   session opens without the whole profile block (not per note), consistent
-  with how other transfers are withheld.
+  with how other transfers are withheld. Round 21 widens the scan to the
+  complete instructions, tenant and greeting values included, with a
+  rescanned fallback or no call.
 
 **Decisions (Ugur, 2026-11-19, round 4 of the design review)**
 - Confirmations that loosen `security` name what masking replaces (policy
@@ -192,8 +194,9 @@ built on top of them are planned separately.
 - The session start request of hosted voice (the profile block with standing
   instructions and confirmed notes that `nova.ts` sends when the OpenAI session
   opens) goes through the same request scan and rules as later context
-  transfers and is listed as its own transfer. The spoken-audio boundary is
-  unchanged.
+  transfers and is listed as its own transfer (round 21: the scan covers the
+  complete instructions, not only the profile block). The spoken-audio
+  boundary is unchanged.
 - Rehydration restores only reversible placeholders (identity, device and
   security names and identifiers). Credential placeholders are one way and
   stay masked in the answer, the transcript and tool parameters.
@@ -219,6 +222,8 @@ built on top of them are planned separately.
 - Decided by Ugur on 2026-11-19: when a rule blocks a class the session start
   carries, the whole profile block is withheld, not only the notes that carry
   it. The withheld session start says the call opened without the profile.
+  Round 21 adds the tenant and greeting values the rule covers, replaced by
+  neutral wording, and a rescan before the call opens.
 
 **Review findings adopted (2026-11-19, round 10 of the design review)**
 - MCP tool review: the admin approves the full definition, which every row
@@ -275,7 +280,8 @@ built on top of them are planned separately.
 - Saved Chat history after a restart: each saved Chat message stores its
   classification evidence next to it in the local database (spans as
   offsets, lengths and classes, and the effective field map revision, as
-  round 16 names it; no new copy of the values). Reopening a conversation rebuilds the ledger from it before
+  round 16 names it, and the unexamined ranges, as round 21 adds; no new
+  copy of the values). Reopening a conversation rebuilds the ledger from it before
   any follow-up. A saved message without readable evidence counts as
   unexamined, takes the strictest action on the tier, and the follow-up says
   so. Disconnect and deleting the conversation remove the evidence (A1, A3).
@@ -458,6 +464,42 @@ built on top of them are planned separately.
   excerpt the admin pasted into the question, not tenant evidence, since
   the query writer gets public inputs only.
 
+**Review findings adopted (2026-11-20, round 21 of the design review)**
+- Hosted voice session start: the Hosted gate scans the complete serialized
+  instructions the app would send when the OpenAI session opens, not only
+  the profile block: the fixed rules, the tenant name, the tenant id, the
+  greeting name, the profile block and every other line `nova.ts` builds.
+  When a rule blocks a class anywhere in them, the app rebuilds the
+  instructions without the blocked parts: the profile block, withheld whole
+  when it carries a blocked class, and the tenant name, tenant id or
+  greeting name where the rule covers their class, each replaced by neutral
+  wording. The rebuilt instructions are scanned again before the call
+  opens. When that scan still finds blocked content, or does not cover the
+  whole text, the call does not open, nothing is sent to OpenAI, and the
+  designed state says why. A regression criterion covers an empty profile
+  with a greeting name the tenant value index recognizes as `identity`,
+  with Identity on Hosted at Block (A3, mockup 34, B).
+- Saved Chat evidence also stores the unexamined ranges of each message
+  (offsets and lengths of the text the scan did not examine within its
+  budget) next to the found spans. When the unexamined ranges cannot be
+  stored for a message, the whole message counts as unexamined. On
+  reopening, stored unexamined ranges take the strictest action on the
+  tier, like any unexamined content. A same-revision restart criterion
+  covers a partially examined message on Confidential with Credential at
+  Allow and Identity at Block (A1, A3).
+- Web search step 6 requires complete coverage from every recognizer on the
+  exact outbound string. When any recognizer did not finish (its budget ran
+  out, it timed out or it failed), the search is withheld, with a shorter
+  search and an answer without searching as the recovery (A3, mockup 34,
+  E).
+- The 1,000 character cap of `web-search.ts` applies to the sanitized
+  outbound query, after every step, as step 7: the exact string that passed
+  step 6 is measured, never cut, and a longer string is not sent. Mockup 34,
+  E illustrates the search withheld by the gate with a public excerpt
+  within the cap and a bounded scan budget, as the tests set it (A3).
+- Mockup 35, E: the learning example no longer sets an answer language,
+  which IT locks in A; it proposes a preference unrelated to language.
+
 ## Why
 
 Today the choice is binary. With a local model the request never leaves the
@@ -478,7 +520,10 @@ moment it arrives.
   where the provider id is known. Prompts are flat strings. Two paths send
   text to a hosted model outside it: hosted voice in `nova.ts`, and the Nova
   web search (`intune-chat/web-search.ts`), which posts the query to the
-  OpenAI Responses API with the Nova key.
+  OpenAI Responses API with the Nova key. The hosted voice instructions
+  carry the tenant name, the tenant id and the greeting name in fixed lines
+  outside the profile block (checked 2026-11-20), and `searchPublicWeb`
+  refuses a query over 1,000 characters as the model wrote it.
 - `fenceTenantData` (`packages/runtime/src/tenant-data.ts`) wraps almost all tenant
   content with a source label before it is stringified. It is the place to attach
   classes. `withTenantDataOutputFilter` is the model for streaming rehydration.
@@ -606,7 +651,13 @@ the IT policy file.
       field's class history at that time (the mapped class and every later
       pick) and every class a value detector assigned to it (a tenant value
       index match, such as a person's display name recognized as identity,
-      and the credential and identifier patterns). The evidence holds no copy of the values
+      and the credential and identifier patterns). Next to the spans, the
+      evidence stores the message's unexamined ranges: the offset and length
+      of every part of its text the scan did not examine within its work
+      budget (round 21). When the unexamined ranges cannot be stored for a
+      message (the write fails, or the scan cannot say which parts it
+      skipped), the whole message counts as unexamined, and its evidence
+      records it so. The evidence holds no copy of the values
       beyond the message text that is already stored. Disconnecting the
       organization and deleting the conversation remove the evidence with the
       messages.
@@ -619,7 +670,11 @@ the IT policy file.
       classes alike, computed under the rules in force at the follow-up, the
       same rule as a reclassified field below; a span is never rebuilt from
       only the first or the last class in its set, nor from its field's
-      classes without the classes the detectors assigned. A saved message without stored evidence (saved
+      classes without the classes the detectors assigned. Stored unexamined
+      ranges are rebuilt as unexamined content: they take the strictest
+      action of any class on the tier, like any text the scan did not
+      examine, and a range is never treated as examined because no span was
+      stored for it (round 21). A saved message without stored evidence (saved
       before the evidence existed, or evidence that cannot be read) counts as
       unexamined, as in the budget rule below. Evidence stored under an
       effective field map revision older than any later class change also
@@ -689,10 +744,12 @@ the IT policy file.
 10. Stored evidence: a saved Chat message keeps its spans (offset, length,
     and the full set of classes that applied to the span when the message
     was saved: every class its field had held and every class a value
-    detector assigned) and the effective field map revision in the local
-    database and no other
+    detector assigned), its unexamined ranges (offset and length) and the
+    effective field map revision in the local database and no other
     copy of its values; Disconnect and deleting the conversation remove the
-    evidence with the messages (test).
+    evidence with the messages (test). When the unexamined ranges cannot be
+    stored for a message, the evidence marks the whole message as
+    unexamined (test).
 11. The effective field map revision changes when the shipped map, a
     Settings reclassification or an IT policy reclassification changes any
     class of any field, a remap to a lower class included (the shipped map
@@ -748,7 +805,8 @@ the IT policy file.
         any class, whatever the rules on Hosted allow. The query is written
         from public inputs only. The boundary is enforced on the final
         outbound query, around the Hosted gate, in this order (round 18,
-        step 1 and the final check from round 19, step 6 from round 20):
+        step 1 and the final check from round 19, step 6 from round 20,
+        its coverage rule and step 7 from round 21):
         1. Everything the app recognizes as tenant data in the query is
            removed, never masked as a token, whatever the rules on Hosted
            allow: ledger matches, tenant value index matches and detector
@@ -776,7 +834,7 @@ the IT policy file.
            remains, the search is not sent, no network request is made, and
            Chat shows the designed state (mockup 34, E, "Web search without
            tenant data").
-        6. The last step before sending: the exact string that would be
+        6. The last scan before sending: the exact string that would be
            sent is scanned once more by every recognizer, the ledger, the
            tenant value index and the detectors. Removing a placeholder can
            join a value the earlier steps could not see, as
@@ -786,8 +844,27 @@ the IT policy file.
            E, "Tenant data found in the final search words"). The string is
            never edited again after this scan, so what is sent is exactly
            what was scanned; its recovery is writing the search words again
-           or an answer without searching.
-        Only the text that passed all six steps is sent. Text the app
+           or an answer without searching. This scan needs complete coverage
+           (round 21): every recognizer must finish on the whole string.
+           When any recognizer did not finish, because its work budget ran
+           out, it timed out or it failed, the string counts as not
+           checked, whatever the rules on Hosted are: the search is not
+           sent, no network request is made, and Chat shows the designed
+           state (mockup 34, E, "The final check of the search words did not
+           finish"), with a shorter search and an answer without searching
+           as the recovery. A recognizer that did not finish is never read
+           as one that found nothing.
+        7. The length check, after every other step (round 21): the 1,000
+           character cap that `searchPublicWeb` applies today moves from the
+           query as written to the exact string that passed step 6. That
+           string is measured as is and never cut, since cutting it would
+           edit it after the last scan. A string longer than 1,000
+           characters is not sent, no network request is made, and Chat
+           shows the designed state with a shorter search and an answer
+           without searching as the recovery. A query the model wrote
+           longer than the cap is not refused on that ground alone; the
+           cap is decided on what would be sent.
+        Only the text that passed all seven steps is sent. Text the app
         cannot recognize, such as an internal project name it has never
         seen, can still reach the search provider; the web search copy and
         the docs say so, as the remote MCP boundary does.
@@ -804,13 +881,36 @@ the IT policy file.
       the app sends to the voice model as context: it goes through the
       same request scan and follows the same rules as any hosted call, class
       by class (masked, blocked or sent as is). The first transfer is the
-      session start request: the profile block with standing instructions and
-      confirmed notes that `nova.ts` sends when the OpenAI session opens goes
-      through the same scan and rules as every later context transfer, and the
-      voice popover lists it as its own transfer. When a rule blocks a class
-      it carries, the session opens without the whole profile block (decided
-      2026-11-19), and the voice model, the transcript and the popover say the
-      call opened without the profile. The voice model speaks roles
+      session start request, and the gate scans the complete serialized
+      instructions `nova.ts` would send when the OpenAI session opens, not
+      only the profile block (round 21): the fixed rules, the tenant name and
+      tenant id in the verified app connection line, the greeting name, the
+      provider and model names, the profile block with standing instructions
+      and confirmed notes, and every other line. It goes through the same
+      scan and rules as every later context transfer, and the voice popover
+      lists it as its own transfer. When a rule blocks a class anywhere in
+      the instructions, the app builds a fallback without the blocked parts:
+      - the profile block is left out whole when it carries a blocked class
+        (decided 2026-11-19, not per note);
+      - the tenant name, the tenant id and the greeting name are each
+        replaced by neutral wording where the rule covers the class the scan
+        gave them ("an organization is selected; its name is withheld by
+        data policy", "no greeting name in this call"), so the voice model
+        still knows that a tenant is connected and does not greet by name;
+      - nothing else is changed.
+      The fallback is scanned again, in full, before the call opens. When the
+      rescan finds no blocked content and covers the whole text, the call
+      opens with the fallback, and the voice model, the transcript and the
+      popover say what the call opened without (the profile, the
+      organization name, the greeting name). When the rescan still finds
+      blocked content, or does not cover the whole text (its budget ran out,
+      it timed out or it failed), the call does not open: nothing is sent to
+      OpenAI, no audio is streamed, and the designed state names the rule
+      and the part it could not leave out, with voice on this device and
+      Change the rule as the recovery, or the policy file and key instead of
+      Change the rule when IT set the rule (mockup 34, B, "Hosted voice did
+      not start"). A scan of the profile block alone would send a greeting name
+      or a tenant name a rule blocks, and is not enough. The voice model speaks roles
       where a value is masked, and the transcript restores only reversible
       placeholders (identity, device and security names and identifiers, the
       A4 rule); activity, configuration and credential placeholders stay
@@ -858,7 +958,12 @@ the IT policy file.
       field once held `security` is blocked when Security is Block on the
       tier, whatever class it held last, and a name the tenant index
       recognized as `identity` when saved keeps `identity` after it leaves
-      the index. History without stored
+      the index. The stored unexamined ranges of a message (A1, round 21)
+      count as unexamined and take the strictest action of any class on the
+      tier, so a partially examined message is withheld when any rule on the
+      tier is Block, even when its examined spans would be sent; a message
+      whose unexamined ranges could not be stored counts as unexamined as a
+      whole. History without stored
       evidence counts as unexamined and takes the strictest action of any
       class on the tier: with a Block on the tier it is withheld, and the
       follow-up is not sent with it; with Mask as the strictest action it is
@@ -914,7 +1019,10 @@ the IT policy file.
    With Credential on Hosted at Block the whole profile block is withheld, the
    session opens without it, and the popover says the call opened without the
    profile. The voice popover lists the
-   session start as its own transfer (renderer test).
+   session start as its own transfer (renderer test). The scan input is the
+   complete serialized instructions, fixed rules, tenant name, tenant id and
+   greeting name included, and the request that opens the session is the
+   rescanned fallback (test).
 4. A hosted voice transcript test with Identity and Activity on Hosted at
    Mask shows the user's real name restored on screen while the
    `[ACTIVITY_1]` placeholder and any `[CREDENTIAL]` placeholder stay masked.
@@ -1011,7 +1119,9 @@ the IT policy file.
 19. Web search order regression test, gate token: with the default rules on
    Hosted (Credential at Mask, no Block on the tier), Nova writes a search
    with public words followed by a public install log excerpt the admin
-   pasted into the question, longer than the scan's work budget. The gate masks the unexamined tail one way as
+   pasted into the question. The excerpt and the whole query stay within
+   the 1,000 character cap, and the test sets the scan's work budget below
+   the excerpt's length, so the budget runs out on it. The gate masks the unexamined tail one way as
    `[CREDENTIAL]`, and the fake request function receives the public words
    with neither the tail nor `[CREDENTIAL]`. A search that removed
    placeholders before the gate would send the token, and the test fails
@@ -1019,7 +1129,8 @@ the IT policy file.
    gate.
 20. Web search withheld by the gate (test): Activity on Hosted is Block and
    Nova writes a search with a public install log excerpt the admin pasted
-   into the question, longer than the scan's work budget. Public words remain after step 1, the gate reports the
+   into the question, within the 1,000 character cap, and the test sets the
+   scan's work budget below the excerpt's length. Public words remain after step 1, the gate reports the
    unexamined tail, the strictest action on Hosted is Block, and the fake
    receives no call. Chat shows the withheld state with the reason and
    offers a shorter search and an answer without searching (renderer test).
@@ -1072,6 +1183,54 @@ the IT policy file.
    provider request. A revision that advanced only on raises would keep
    the value at `security`, which Hosted allows, and send it in both
    cases, and the tests fail on it.
+25. Voice session start regression test, empty profile: the profile block is
+   empty (no standing instructions, no confirmed notes), the greeting name is
+   the admin's display name, which the tenant value index recognizes as
+   `identity`, and Identity on Hosted is Block. The gate scans the complete
+   instructions, finds the greeting name, replaces it with the neutral
+   wording and rescans the fallback, which is clean: the fake session
+   receives instructions without the greeting name, and the popover says the
+   call opened without the greeting name. A scan of the profile block alone
+   finds nothing in an empty profile and sends the name, and the test fails
+   on it. In a second case the test sets the rescan's work budget below the
+   fallback's length: the rescan does not cover the whole text, the strictest
+   action on Hosted is Block, the fake session receives no request, no audio
+   is streamed, and the designed state "Hosted voice did not start" names
+   the reason (renderer test).
+26. Same-revision restart regression test, partially examined message: a
+   Chat question holds a public log excerpt the admin pasted, and with the
+   test's work budget set below its length the scan examines the first part
+   and not the tail. The local answer is saved, and the evidence stores the
+   found spans and the unexamined range of the tail. No class changes before
+   the restart, so the effective field map revision is still current. The
+   app restarts, the conversation is reopened, and a follow-up goes to a
+   test provider of the Confidential tier with Credential on Confidential at
+   Allow (after the confirmation dialog) and Identity on Confidential at
+   Block. The stored unexamined range takes the strictest action on
+   Confidential, Block: the message is withheld, the tail reaches no
+   provider request, and the follow-up shows the designed state. A rebuild
+   from the stored spans alone, or one that gave the range only the
+   credential rule (Allow there), would send the tail, and the test fails on
+   either. With the storage of the unexamined ranges made to fail at save,
+   the whole message counts as unexamined and is withheld in the same way.
+27. Web search final scan coverage (test): with no Block on Hosted, Nova
+   writes a public search that steps 1 to 5 leave unchanged. In three cases
+   one recognizer does not finish on the exact string at step 6: the tenant
+   value index fails with an error, the detectors run out of their work
+   budget, and the ledger times out. In each case the fake request function
+   receives no call, nothing is sent to `api.openai.com`, and Chat shows the
+   designed state with Shorten the search and Answer without searching
+   (renderer test). A step 6 that read a recognizer that did not finish as
+   one that found nothing would send the string, and the test fails on it.
+28. Web search length cap (test): Nova writes a search of 1,400 characters
+   of which step 1 removes 520 characters of recognized tenant values; the
+   880 characters left pass every step, and the fake request function
+   receives exactly that string. Another search leaves 1,020 characters
+   after step 6: the fake receives no call, and Chat shows the designed
+   state with a shorter search and an answer without searching. A cap
+   checked on the query as written would refuse the first search, a cap
+   that cut the string would send the second, and the test fails on
+   either.
 
 ### Phase A4: Masking
 
@@ -1581,7 +1740,9 @@ the IT policy file.
    (2026-11-18); voice context follows the data policy rules (round 4,
    2026-11-19). Spoken words are not gated in hosted voice, local voice keeps
    them under data policy (decided 2026-11-19); a blocked session start
-   withholds the whole profile block (decided 2026-11-19).
+   withholds the whole profile block (decided 2026-11-19), and the scan
+   covers the complete instructions with a rescanned fallback or no call
+   (round 21).
 3. ~~Skill format~~ SKILL.md (2026-11-18).
 4. One personal agent now, several profiles later (proposal).
 5. Local stdio MCP servers (proposal: not in the first version).
