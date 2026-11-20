@@ -8,6 +8,7 @@ import {
   LocalResetRequestError,
   localResetDataFolderLinkMessage,
   localResetFolderIdentity,
+  sameSessionFolder,
   type LocalResetFolderIdentity,
   folderGoesThroughLink,
   MANAGED_POLICY_FILE,
@@ -5624,6 +5625,15 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
   // The folder this reset is for is fixed now, before any check awaits:
   // a folder restored or swapped in while the checks run gets no marker.
   let committedFolder: LocalResetFolderIdentity | undefined = localResetFolderIdentity(app.getPath("userData"));
+  // The scheduler and the login item are per user, not per folder: they are
+  // turned off only while the data folder is still the one being reset, so
+  // a profile restored meanwhile keeps its background start.
+  const committedFolderGuard = () => {
+    const now = localResetFolderIdentity(app.getPath("userData"));
+    if (!committedFolder || !now || !sameSessionFolder(committedFolder, now)) {
+      throw new Error("left on, because the data folder is no longer the one the reset was accepted for");
+    }
+  };
   try {
     await requestLocalReset(confirmation, {
       checkReady: async () => {
@@ -5675,10 +5685,11 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
         // job: the launch that finishes the reset removes it instead.
         if (!app.isPackaged) return;
         if (process.platform === "darwin" && isBackgroundSchedulerLaunch) return;
-        removeSchedulerRegistration();
+        removeSchedulerRegistration(committedFolderGuard);
       },
       disableLoginItem: async () => {
         if (process.platform !== "darwin" || !app.isPackaged) return;
+        committedFolderGuard();
         disableCompanionLoginItemForReset();
       },
       build: app.isPackaged ? "installed" : "development",
