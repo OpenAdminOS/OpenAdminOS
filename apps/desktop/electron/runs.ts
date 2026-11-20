@@ -847,6 +847,10 @@ export class RunService {
         if (options.expectedProviderDestination !== target.destination) {
           throw new Error("The provider's settings changed after this run was reviewed, so it did not start. Review it again.");
         }
+        // Run for real goes only where its dry run planned: a new review cannot move it elsewhere.
+        if (inheritedEndpointBinding && (inheritedEndpointBinding.endpoint ?? undefined) !== (target.endpoint ?? undefined)) {
+          throw new Error("The provider is reached somewhere else than when the dry run planned, so Run for real did not start. Start a new run from the agent page.");
+        }
         queuedRun.providerEndpointBinding = { endpoint: target.endpoint, scope: "model-fit" };
       } else if (inheritedEndpointBinding) {
         queuedRun.providerEndpointBinding = inheritedEndpointBinding;

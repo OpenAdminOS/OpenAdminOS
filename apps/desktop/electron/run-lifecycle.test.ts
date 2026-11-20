@@ -447,6 +447,26 @@ it('refuses a model fit rerun on a hosted provider that reports no model', async
   assert.equal(built, 0);
 });
 
+it('keeps Run for real of a model fit dry run on the endpoint its dry run planned with', async () => {
+  const h = harness();
+  const agent = { id: 'writer', slug: 'writer', name: 'Writer', description: 'Writes', requiresEntraTier: 'free', version: '1.0.0', mode: 'write', category: 'devices', tier: 'agent', scopes: [], author: { name: 'Test' }, installedAt: new Date().toISOString() } as AgentSummary;
+  Object.assign(h.host, {
+    appVersion: '0.7.2',
+    listProviders: async () => [{ id: 'azure-openai', name: 'Azure OpenAI', status: 'available', models: ['dep'], defaultModel: 'dep', isLocal: false }],
+    providerCanRun: () => true,
+    // The admin configured another resource with the same deployment name in setup.
+    providerTarget: async () => ({ endpoint: 'https://b.openai.azure.com#dep', destination: 'dest-b' }),
+    buildLlm: async () => new Promise(() => {}),
+  });
+  const planned = { id: 'dry-az', agentSlug: 'writer', dryRun: true, status: 'planned', tenantId: 'tenant-a', providerId: 'azure-openai', model: 'dep', inputSettings: {},
+    providerEndpointBinding: { endpoint: 'https://a.openai.azure.com#dep', scope: 'model-fit' }, queuedAt: new Date().toISOString(), steps: [], logs: [] } as unknown as RunRecord;
+  await h.host.write({ ...h.state(), installedAgents: [agent], tenants: [{ id: 'tenant-a' }] as any, activeTenantId: 'tenant-a', runs: [planned] });
+  await assert.rejects(
+    h.service.startRun('writer', { runForRealOfRunId: 'dry-az', bindProviderEndpoint: true, expectedProviderDestination: 'dest-b', providerId: 'azure-openai', model: 'dep', tenantId: 'tenant-a' }),
+    /reached somewhere else than when the dry run planned/,
+  );
+});
+
 it('refuses a model fit rerun whose destination changed after its review, and keeps the safeguards into Run for real', async () => {
   const h = harness();
   const agent = { id: 'writer', slug: 'writer', name: 'Writer', description: 'Writes', requiresEntraTier: 'free', version: '1.0.0', mode: 'write', category: 'devices', tier: 'agent', scopes: [], author: { name: 'Test' }, installedAt: new Date().toISOString() } as AgentSummary;
