@@ -1549,4 +1549,44 @@ describe("Ollama context for an unpinned model", () => {
       globalThis.fetch = original;
     }
   });
+
+  it("keeps the pin the size check saw when the adapter's own lookup fails", async () => {
+    const original = globalThis.fetch;
+    let shows = 0;
+    const ollama = scripted({ showBody: undefined, loaded: () => 65536, model: "check-then-503" });
+    globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+      if (new URL(String(input)).pathname === "/api/show") {
+        shows += 1;
+        // The run's size check sees the pin; the adapter's own lookup gets a 503.
+        return shows === 1
+          ? new Response(JSON.stringify({ parameters: "num_ctx                        16384", model_info: unpinned.model_info }), { status: 200 })
+          : new Response("busy", { status: 503 });
+      }
+      return ollama.fetchImpl(input, init);
+    }) as typeof fetch;
+    try {
+      const llm = createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "check-then-503" });
+      assert.equal(await llm.contextWindow?.(), 16384);
+      await llm.complete({ prompt: words(12000), maxTokens: 1000, enforceContextWindow: true });
+      assert.deepEqual(ollama.chats, [undefined], "the pin applies, not the 65,536 another client loaded");
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("refuses an agent run's retry at an unpinned model's maximum when the answer would not fit", async () => {
+    const original = globalThis.fetch;
+    const ollama = scripted({ showBody: { model_info: { "general.architecture": "llama", "llama.context_length": 16384 } } });
+    ollama.handlers.push(() => new Response(JSON.stringify({ error: "request (15800 tokens) exceeds the available context size (8192 tokens), try increasing it" }), { status: 400 }));
+    globalThis.fetch = ollama.fetchImpl;
+    try {
+      await assert.rejects(
+        createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "small-max" }).complete({ prompt: words(14000), maxTokens: 1100, enforceContextWindow: true }),
+        (error: unknown) => error instanceof ContextTooSmallError && error.failure.limitTokens === 16384 && error.failure.neededTokens === 16900 && error.failure.sentToProvider === true,
+      );
+      assert.equal(ollama.chats.length, 1, "no retry that leaves no room for the answer");
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
 });

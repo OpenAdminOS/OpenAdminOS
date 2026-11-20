@@ -25,6 +25,13 @@ export interface OllamaContextWindowOptions {
   appRaisesNumCtx?: boolean;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  /** Receives a successful /api/show reading, so the adapter can reuse it. */
+  onShow?: (show: OllamaShowContext) => void;
+}
+
+/** Whether an /api/show reading carries anything (a failed lookup carries nothing). */
+export function ollamaShowKnown(show: OllamaShowContext | undefined): show is OllamaShowContext {
+  return show !== undefined && (show.pinnedNumCtx !== undefined || show.modelMaxContext !== undefined || show.revision !== undefined);
 }
 
 /**
@@ -188,6 +195,12 @@ export interface OllamaRequestContextInput {
    * mistaken for this one.
    */
   currentRevision?: string;
+  /**
+   * The reading the run's size check got. It stands in when this lookup
+   * fails (Ollama briefly unavailable), so a pin the check saw still holds;
+   * a successful lookup replaces it.
+   */
+  fallbackShow?: OllamaShowContext;
   /** Refuse a request larger than a pin this lookup finds (agent runs). */
   enforce?: boolean;
   fetchImpl?: typeof fetch;
@@ -226,7 +239,8 @@ export async function ollamaRequestNumCtx(
   const fetchImpl = input.fetchImpl ?? fetch;
   const timeoutMs = input.timeoutMs ?? LOOKUP_TIMEOUT_MS;
   const base = input.endpoint.replace(/\/$/, "");
-  const show = await readShow(fetchImpl, base, input.model, timeoutMs, input.signal);
+  const fresh = await readShow(fetchImpl, base, input.model, timeoutMs, input.signal);
+  const show = ollamaShowKnown(fresh) || !input.fallbackShow ? fresh : input.fallbackShow;
   const seen = {
     ...(show.revision !== undefined ? { revision: show.revision } : {}),
     ...(show.pinnedNumCtx !== undefined ? { pinnedNumCtx: show.pinnedNumCtx } : {}),
@@ -317,6 +331,7 @@ export async function readOllamaContextWindow(
   // A pinned num_ctx is the model author's choice (OpenAdmin 8B pins the
   // 16,384 its rope scaling was trained at) and is what the first request
   // gets, so it is the limit even where the app could raise num_ctx.
+  if (ollamaShowKnown(show)) options.onShow?.(show);
   if (show.pinnedNumCtx !== undefined) return Math.min(show.pinnedNumCtx, show.modelMaxContext ?? Infinity);
   if (options.appRaisesNumCtx) return show.modelMaxContext;
   const loaded = parseOllamaLoadedContext(await call("/api/ps", { method: "GET" }), model);
