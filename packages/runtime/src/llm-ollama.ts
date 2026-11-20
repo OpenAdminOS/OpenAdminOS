@@ -45,8 +45,14 @@ const OLLAMA_SHOW_TIMEOUT_MS = 5000;
 /**
  * The context size this app raised for a model, keyed by endpoint and model.
  * Later requests keep sending it so Ollama does not reload the model with
- * its smaller default between turns.
+ * its smaller default between turns. It is dropped when a request that sends
+ * it fails with a context overflow or an out-of-memory error.
  */
+// TODO(ugur): Should small requests keep sending the raised size (no model
+// reload between turns, but the larger context keeps its memory until the
+// app restarts), or go back to Ollama's default (saves memory, but the next
+// large request reloads the model and retries)? SPEC.md is silent, so the
+// raised size is kept for every later request.
 const ollamaContextOverrides = new Map<string, number>();
 
 export interface OllamaEndpointTrust {
@@ -90,14 +96,23 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         throw new Error("No Ollama model available. Pull a model with `ollama pull <model>`.");
       }
 
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      // Each request to /api/chat gets its own controller and timeout, so a
+      // retry is not charged for the time the first request and the model
+      // lookup took. A stop from the caller aborts whichever one is running.
+      let controller = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      // How a timeout message names the request that timed out.
+      let attemptLabel = "";
+      const startAttempt = (label: string) => {
+        clearTimeout(timer);
+        const current = new AbortController();
+        controller = current;
+        attemptLabel = label;
+        if (opts.signal?.aborted) current.abort();
+        else timer = setTimeout(() => current.abort(), timeoutMs);
+      };
       const abortFromCaller = () => controller.abort();
-      if (opts.signal?.aborted) {
-        controller.abort();
-      } else {
-        opts.signal?.addEventListener("abort", abortFromCaller, { once: true });
-      }
+      opts.signal?.addEventListener("abort", abortFromCaller, { once: true });
       const url = `${endpoint.replace(/\/$/, "")}/api/chat`;
 
       const messages: { role: string; content: string }[] = [];
@@ -156,37 +171,48 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           throw abortError() ?? new Error(`Ollama not reachable at ${url}: ${describe(error)}`);
         }
       };
-      const abortError = (activeUrl = url): Error | undefined => {
+      const stoppedByUser = () => new Error("Ollama request stopped by user.");
+      const abortError = (): Error | undefined => {
         if (!controller.signal.aborted) return undefined;
         return opts.signal?.aborted
-          ? new Error("Ollama request stopped by user.")
-          : new Error(`Ollama timed out after ${timeoutMs}ms at ${activeUrl}.`);
+          ? stoppedByUser()
+          : new Error(`Ollama timed out after ${timeoutMs}ms at ${url}${attemptLabel}.`);
       };
 
       let response: Response;
       let raisedCtx: number | undefined;
       // Set while the retry runs, so a memory failure can name both sizes.
       let retry: { requested: number; numCtx: number } | undefined;
+      const cachedCtx = ollamaContextOverrides.get(cacheKey);
+      /** Forgets the raised size once a request that sent it shows Ollama cannot give it. */
+      const forgetCachedCtx = () => {
+        if (cachedCtx !== undefined && ollamaContextOverrides.get(cacheKey) === cachedCtx) {
+          ollamaContextOverrides.delete(cacheKey);
+        }
+      };
       try {
-        let numCtx = ollamaContextOverrides.get(cacheKey);
+        let numCtx = cachedCtx;
 
+        startAttempt(cachedCtx === undefined ? "" : ` with the ${formatTokens(cachedCtx)} token context kept from an earlier request`);
         response = await send(numCtx);
         let detail = await errorDetail(response);
         const overflow = response.status === 400 ? parseContextOverflow(detail) : undefined;
         if (overflow) {
+          forgetCachedCtx();
+          // The first request's budget ends here; the lookup has its own.
+          clearTimeout(timer);
           // Ollama sizes the context from its own default and free memory,
           // not from the model's limit. Ask for enough room for this prompt
           // plus the answer, up to what the model supports, and retry once.
-          const modelMax = await readOllamaContextLength(endpoint, model, controller.signal, lookupTimeoutMs);
-          // A stop or the overall deadline during the lookup names the lookup.
-          const stopped = abortError(`${endpoint.replace(/\/$/, "")}/api/show`);
-          if (stopped) throw stopped;
+          const modelMax = await readOllamaContextLength(endpoint, model, opts.signal ?? new AbortController().signal, lookupTimeoutMs);
+          if (opts.signal?.aborted) throw stoppedByUser();
           const wanted = roundUp(overflow.requested + (opts.maxTokens ?? OLLAMA_ANSWER_RESERVE_TOKENS), 1024);
           if (modelMax !== undefined && overflow.requested > modelMax) {
             throw new Error(contextTooSmallMessage(model, overflow.requested, modelMax, true));
           }
           numCtx = modelMax === undefined ? wanted : Math.min(wanted, modelMax);
           retry = { requested: overflow.requested, numCtx };
+          startAttempt(` on the retry with a ${formatTokens(numCtx)} token context`);
           response = await send(numCtx);
           detail = await errorDetail(response);
           const retryOverflow = response.status === 400 ? parseContextOverflow(detail) : undefined;
@@ -198,6 +224,9 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
             throw new Error(contextMemoryMessage(model, overflow.requested, numCtx, detail));
           }
           if (response.ok) raisedCtx = numCtx;
+        } else if (cachedCtx !== undefined && !response.ok && isOllamaMemoryError(detail)) {
+          forgetCachedCtx();
+          throw new Error(cachedContextMemoryMessage(model, cachedCtx, detail));
         }
         if (!response.ok) {
           if (response.status === 404 && detail.toLowerCase().includes("model")) {
@@ -247,8 +276,13 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
             if (chunk.error) {
               // Ollama can accept the retry and then fail to load the model
               // with the larger context.
-              if (retry && accumulated.length === 0 && isOllamaMemoryError(errorText(chunk.error))) {
-                throw new Error(contextMemoryMessage(model, retry.requested, retry.numCtx, errorText(chunk.error)));
+              const text = errorText(chunk.error);
+              if (accumulated.length === 0 && isOllamaMemoryError(text)) {
+                if (retry) throw new Error(contextMemoryMessage(model, retry.requested, retry.numCtx, text));
+                if (cachedCtx !== undefined) {
+                  forgetCachedCtx();
+                  throw new Error(cachedContextMemoryMessage(model, cachedCtx, text));
+                }
               }
               throw new Error(`Ollama error: ${chunk.error}`);
             }
@@ -591,6 +625,14 @@ function isOllamaMemoryError(detail: string): boolean {
 
 function contextMemoryMessage(model: string, requested: number, numCtx: number, detail: string): string {
   return `Ollama context size too small: This request needs ${requested.toLocaleString("en-US")} tokens of context, but Ollama could not load ${model} with ${numCtx.toLocaleString("en-US")}, usually because free memory ran out. Ollama said: ${truncate(detail, 200)}`;
+}
+
+function cachedContextMemoryMessage(model: string, numCtx: number, detail: string): string {
+  return `Ollama could not load ${model} with the ${formatTokens(numCtx)} token context size kept from an earlier request, usually because free memory ran out. The next request starts from Ollama's default context size. Ollama said: ${truncate(detail, 200)}`;
+}
+
+function formatTokens(value: number): string {
+  return value.toLocaleString("en-US");
 }
 
 function contextTooSmallMessage(model: string, requested: number, limit: number, modelLimit: boolean): string {
