@@ -2539,11 +2539,14 @@ in the main process. Mockup: `docs/mockups/34-local-reset.html`.
   with a warning; the wipe removes links inside the folder without following
   them. The folder counts as a link when its path has `.` or `..` segments,
   when its real location is not its real parent plus its own name (so
-  `link/` is caught too), or, on Linux, when it is a mount point such as a
-  bind mount. A `policy.json` whose link chain goes through the data folder
-  at any hop, or a folder where `policy.json` belongs, stops the reset at the
-  request and at launch, because the wipe would remove what the policy needs
-  or keep a folder whole. Only a plain marker file with a single
+  `link/` is caught too), when it is on another device than its parent (a
+  mounted volume), or, on Linux, when a mount sits at or inside it (a bind
+  mount; an unreadable mount table counts too). Cache folders outside the
+  data folder are skipped with a warning on the same Linux check. A
+  `policy.json` that is a link at all, or a folder at that name, stops the
+  reset at the request and at launch: a chain of links can always be built
+  that a check cannot follow the way the system does, so the reset does not
+  try to vouch for one. Only a plain marker file with a single
   link starts a wipe: anything else at that path (a link, a shared file, a
   folder) leaves the reset incomplete and nothing is removed. Sign-out is also skipped when the folder
   cannot be listed. The reset-incomplete window runs from a fresh temporary

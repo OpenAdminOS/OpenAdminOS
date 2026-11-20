@@ -156,6 +156,15 @@ the installed app's scheduler, login item or caches.
   check for links first; an empty warning list is written with the progress
   record. The local full suites failed only on load timeouts at a load
   average of 137; every failed file passed alone.
+- Review round 10: Claude no blocking; Sol four blocking (nested Linux
+  mount, policy link chains through aliases and `..`, Windows manual steps
+  past nested links, policy folder only checked at launch) and Muse two
+  blocking (policy link with `..`, policy folder at request time). Closed by
+  class: any linked policy.json stops the reset, one policy check runs at
+  request and launch, a mount at or under a folder (Linux) or a folder on
+  another device than its parent refuses removal, the Windows manual script
+  walks the tree and removes links as links, and the Keychain loop ends with
+  a read-only lookup.
 - Found in the end to end run and fixed: the incomplete screen called the
   appearance handler before it was registered, and failure reasons repeated
   full paths.
