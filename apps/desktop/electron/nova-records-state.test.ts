@@ -440,17 +440,18 @@ describe("a Nova follow-up run", () => {
     }
   });
 
-  it("stops a follow-up whose Chat call ignores its signal, so later follow-ups still run", async () => {
+  it("stops a follow-up whose Chat call ignores its signal, so later follow-ups still run", async t => {
     let now = new Date();
     let calls = 0;
     let firstId: string | undefined;
+    let startFirst!: () => void;
+    const firstStarted = new Promise<void>(resolve => { startFirst = resolve; });
     const { store, dir } = await makeStore({
       clock: () => now,
       extra: {
         providerListFactory: providers,
         graphFactory: graph([]),
-        // Only the hung call gets a short bound. The healthy one gets a bound
-        // no loaded runner reaches, so its result never depends on timing.
+        // Only the hung call expires when the test advances the clock.
         novaFollowUpRunMs: (followUp: { id: string }) => (followUp.id === firstId ? 50 : 120_000),
         llmFactory: () => ({
           available: true,
@@ -458,7 +459,10 @@ describe("a Nova follow-up run", () => {
           async *stream() {
             calls += 1;
             // The first call never settles and ignores its abort signal.
-            if (calls === 1) await new Promise(() => undefined);
+            if (calls === 1) {
+              startFirst();
+              await new Promise(() => undefined);
+            }
             yield { delta: "Device A is noncompliant.", accumulated: "Device A is noncompliant.", done: true, model: "test" };
           },
         }) as never,
@@ -469,7 +473,11 @@ describe("a Nova follow-up run", () => {
       firstId = first.id;
       const second = await store.novaFollowUpsHost().create({ tenantId: contoso.id, question: "Check app installs", providerId: "ollama", model: "test", delayMinutes: 2 });
       now = new Date(now.getTime() + 121_000);
-      await store.fireDueNovaFollowUps();
+      t.mock.timers.enable({ apis: ["setTimeout"] });
+      const firing = store.fireDueNovaFollowUps();
+      await Promise.race([firstStarted, firing.then(() => assert.fail("The first follow-up never reached Chat."))]);
+      t.mock.timers.tick(50);
+      await firing;
       const list = (await store.handleNovaRecords({ action: "list" })).followUps;
       const one = list.find((entry) => entry.id === first.id);
       assert.equal(one?.status, "failed");
