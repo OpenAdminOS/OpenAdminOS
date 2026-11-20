@@ -1001,6 +1001,8 @@ function IntuneChatContent() {
     let failed = false;
     let cancelled = false;
     let reachedTerminal = false;
+    // The host claims a model fit offer before it reports the stream started.
+    let startedSeen = false;
     const streamId = window.crypto.randomUUID();
     activeStreamIdRef.current = streamId;
     const sendTenantId = state.activeTenantId;
@@ -1038,6 +1040,7 @@ function IntuneChatContent() {
             return;
           }
           if (event.type === "started") {
+            startedSeen = true;
             dispatchSend({ type: "stream" });
             setOptimisticDraft(null);
             setPendingConversation(event.conversation);
@@ -1187,10 +1190,10 @@ function IntuneChatContent() {
       const errorMessage = caught instanceof Error ? caught.message : String(caught);
       if (!reachedTerminal) dispatchSend({ type: "fail" });
       setError(errorMessage);
-      // The host refused the retry before any model call, so the choices it tells the admin to make
-      // again are shown again. The withdrawal checks still drop them if the conversation, organization
-      // or model changed, and an offer the host already used is refused when chosen.
-      if (offerBeforeRetry && !reachedTerminal) setModelFitOffer(offerBeforeRetry);
+      // The host refused the retry before it started (and before it used the offer), so the choices
+      // it tells the admin to make again are shown again. The withdrawal checks still drop them if
+      // the conversation, organization or model changed.
+      if (offerBeforeRetry && !reachedTerminal && !startedSeen) setModelFitOffer(offerBeforeRetry);
       setFailedRequest({ content, conversationId: targetConversationId });
       if (!keepDraft) setInput(content);
       setChatProgress({

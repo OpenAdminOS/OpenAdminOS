@@ -213,6 +213,30 @@ describe("IntuneChat model fit (mockup 36)", () => {
     expect(await screen.findByRole("region", { name: "llama3.1 cannot fit this request" })).toBeInTheDocument();
   });
 
+  it("does not show the choices again when a retry fails after the host started it", async () => {
+    const bridge = fitBridge();
+    const stream = bridge.streamIntuneChatMessage;
+    bridge.streamIntuneChatMessage = vi.fn<OpenAdminOSApi["streamIntuneChatMessage"]>(async (input, onEvent, options) => {
+      if (input.modelOverride) {
+        // The host used the offer, reported the start, and then the stream broke.
+        onEvent({
+          type: "started",
+          conversation,
+          userMessage: { id: "user-x", conversationId: conversation.id, role: "user", content: input.content, status: "completed", createdAt: conversation.createdAt },
+          assistantMessage: { id: "assistant-x", conversationId: conversation.id, role: "assistant", content: "", status: "streaming", createdAt: conversation.createdAt, providerId: "openai", model: "gpt-5" },
+          cacheStatus: { tenantId, resources: [] },
+        });
+        throw new Error("The connection to Chat was lost while answering.");
+      }
+      return stream(input, onEvent, options);
+    });
+    const { user, notice } = await sendTooLarge(bridge);
+    await user.click(within(notice).getByRole("button", { name: "Run with Codex" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "Run this request with Codex?" })).getByRole("button", { name: "Send through Codex" }));
+    await screen.findByText(/connection to Chat was lost/);
+    expect(screen.queryByRole("region", { name: "llama3.1 cannot fit this request" })).toBeNull();
+  });
+
   it("keeps the admin's narrower draft stored when a larger local model fails too", async () => {
     const providers = mockProviders.map((provider) => (provider.id === "ollama" ? { ...provider, models: ["llama3.1:8b", "gpt-oss:20b"], defaultModel: "llama3.1:8b" } : provider));
     // The failed model is 8B by name, so gpt-oss:20b is offered as a larger local model.
