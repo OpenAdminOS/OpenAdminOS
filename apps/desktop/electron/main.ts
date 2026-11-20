@@ -5502,7 +5502,10 @@ function relaunchOutsideLaunchAgent(): void {
   const bundle = resolve(process.execPath, "..", "..", "..");
   const script = 'i=0; while kill -0 "$0" 2>/dev/null && [ "$i" -lt 300 ]; do sleep 0.2; i=$((i+1)); done; exec /usr/bin/open "$1"';
   try {
-    spawn("/bin/sh", ["-c", script, String(process.pid), bundle], { detached: true, stdio: "ignore" }).unref();
+    const child = spawn("/bin/sh", ["-c", script, String(process.pid), bundle], { detached: true, stdio: "ignore" });
+    // A spawn failure arrives as an event; the marker stays, so the next launch resets.
+    child.on("error", (error) => console.warn("[local-reset] could not start the app again after the reset request; it resets at the next launch", error));
+    child.unref();
   } catch (error) {
     console.warn("[local-reset] could not start the app again after the reset request; it resets at the next launch", error);
   }
