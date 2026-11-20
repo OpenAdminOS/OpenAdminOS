@@ -336,6 +336,14 @@ the installed app's scheduler, login item or caches.
   files are listed) and a medium (the Windows folder guard now runs after
   the second task read). Muse lows: the Linux mount table is read again
   right before a cache folder's removal; "another item on this disk".
+- Review round 31: Claude and Muse no blocking. Sol two blocking and a
+  medium: the audit log's side files are frozen at the commit, including the
+  pending retry on close; a cache folder's identity is compared after the
+  guard and the mount check; the guard runs once more before the cleanup is
+  recorded as done. Muse: the same cache order, and SPEC records the window
+  between the last check and the `security` command as accepted. Full suite:
+  one Nova follow-up test timed out under load (120 s) and passed three
+  times alone.
 - Process lesson: twice I edited the tree while a reviewer was reading it;
   parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the
