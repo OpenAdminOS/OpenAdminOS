@@ -243,11 +243,11 @@ export async function ollamaRequestNumCtx(
   const fresh = await readShow(fetchImpl, base, input.model, timeoutMs, input.signal);
   const fallback = input.fallbackShow;
   let show = ollamaShowKnown(fresh) || !fallback ? fresh : fallback;
-  // A partial answer for the same model (no parameters) keeps the pin the
-  // size check saw; a different revision is a new model and does not.
-  if (fallback?.pinnedNumCtx !== undefined && show.pinnedNumCtx === undefined &&
-    (show.revision === undefined || show.revision === fallback.revision)) {
-    show = { ...show, pinnedNumCtx: fallback.pinnedNumCtx };
+  // A partial answer for the same model keeps the pin and maximum the size
+  // check saw; a different revision is a new model and does not.
+  if (fallback && (show.revision === undefined || show.revision === fallback.revision)) {
+    if (fallback.pinnedNumCtx !== undefined && show.pinnedNumCtx === undefined) show = { ...show, pinnedNumCtx: fallback.pinnedNumCtx };
+    if (fallback.modelMaxContext !== undefined && show.modelMaxContext === undefined) show = { ...show, modelMaxContext: fallback.modelMaxContext };
   }
   const seen = {
     ...(show.revision !== undefined ? { revision: show.revision } : {}),
@@ -264,6 +264,12 @@ export async function ollamaRequestNumCtx(
   if (input.enforce && limit !== undefined) {
     const fit = checkPromptFit({ ...fitInput, contextWindow: limit });
     if (fit.failure) return { tooLarge: fit.failure, neededTokens, ...seen };
+  }
+  // An agent run whose lookups saw neither a pin nor a maximum cannot tell
+  // whether the model is pinned, and any num_ctx it sent would override a
+  // pin. It sends none (nor a kept size), so Ollama applies the Modelfile.
+  if (input.enforce && show.pinnedNumCtx === undefined && show.modelMaxContext === undefined) {
+    return { neededTokens, ...seen, ...(input.currentNumCtx !== undefined ? { skipKept: true } : {}) };
   }
   // A kept size belongs to the model revision it was kept for. A model
   // created again under the same name starts from its own settings.
