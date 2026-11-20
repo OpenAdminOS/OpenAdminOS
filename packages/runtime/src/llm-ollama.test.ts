@@ -1331,4 +1331,47 @@ describe("Ollama context for an unpinned model", () => {
       globalThis.fetch = original;
     }
   });
+
+  it("drops a size kept by the first request when the model is created again right after it", async () => {
+    const original = globalThis.fetch;
+    let show: unknown = { ...unpinned, modified_at: "2026-11-01T00:00:00Z" };
+    const ollama = scripted({ showBody: undefined });
+    globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+      if (new URL(String(input)).pathname === "/api/show") return new Response(JSON.stringify(show), { status: 200 });
+      return ollama.fetchImpl(input, init);
+    }) as typeof fetch;
+    try {
+      const llm = createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "recreated-at-once" });
+      await llm.complete({ prompt: words(40000), maxTokens: 1000 });
+      assert.equal(ollama.chats.at(-1), 65536);
+      show = { parameters: "num_ctx                        16384", model_info: unpinned.model_info, modified_at: "2026-11-20T00:00:00Z" };
+      await llm.complete({ prompt: "short", maxTokens: 100 });
+      assert.equal(ollama.chats.at(-1), undefined, "the new model's pin applies");
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("refuses an agent run's request when the model was created again with a smaller pin, before any kept size is used", async () => {
+    const original = globalThis.fetch;
+    let show: unknown = { ...unpinned, modified_at: "2026-11-01T00:00:00Z" };
+    const ollama = scripted({ showBody: undefined });
+    globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+      if (new URL(String(input)).pathname === "/api/show") return new Response(JSON.stringify(show), { status: 200 });
+      return ollama.fetchImpl(input, init);
+    }) as typeof fetch;
+    try {
+      const llm = createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "recreated-smaller" });
+      await llm.complete({ prompt: words(18000), maxTokens: 1000, enforceContextWindow: true });
+      assert.equal(ollama.chats.length, 1);
+      show = { parameters: "num_ctx                        16384", model_info: unpinned.model_info, modified_at: "2026-11-20T00:00:00Z" };
+      await assert.rejects(
+        llm.complete({ prompt: words(18000), maxTokens: 1000, enforceContextWindow: true }),
+        (error: unknown) => error instanceof ContextTooSmallError && error.failure.limitTokens === 16384,
+      );
+      assert.equal(ollama.chats.length, 1, "nothing more reaches /api/chat");
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
 });

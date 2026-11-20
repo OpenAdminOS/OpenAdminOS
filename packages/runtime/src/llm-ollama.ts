@@ -7,7 +7,7 @@ import type {
 } from "@openadminos/agent-sdk";
 import { ContextTooSmallError } from "@openadminos/agent-sdk";
 import { isRefusedRedirect, modelServerRedirect, redirectRefusedDetail } from "./llm-openai-compatible.js";
-import { ollamaRequestNumCtx, parseOllamaShow, readOllamaContextWindow } from "./ollama-context.js";
+import { bindKeptOllamaSize, ollamaRequestNumCtx, parseOllamaShow, readOllamaContextWindow, recordOllamaRevision } from "./ollama-context.js";
 
 export interface OllamaProviderOptions {
   endpoint?: string;
@@ -263,19 +263,20 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           timeoutMs: lookupTimeoutMs, signal: controller.signal,
         });
         if (opts.signal?.aborted) throw stoppedByUser();
-        if (sized !== undefined && "tooLarge" in sized) throw new ContextTooSmallError(sized.tooLarge);
-        if (sized !== undefined && "dropKept" in sized) {
+        if (sized?.tooLarge) throw new ContextTooSmallError(sized.tooLarge);
+        if (sized?.dropKept) {
           if (cachedCtx !== undefined && ollamaContextOverrides.get(cacheKey) === cachedCtx) ollamaContextOverrides.delete(cacheKey);
           cachedCtx = undefined;
           numCtx = undefined;
-        } else if (sized !== undefined) {
+        }
+        if (sized?.numCtx !== undefined) {
           numCtx = sized.numCtx;
           raisedCtx = sized.numCtx;
           retry = { requested: sized.neededTokens, numCtx: sized.numCtx, sizedUpFront: true };
           retryFailuresAtStart = ollamaContextFailures.get(contextFailureKey(cacheKey, sized.numCtx)) ?? 0;
         }
 
-        startAttempt(sized !== undefined && "numCtx" in sized
+        startAttempt(sized?.numCtx !== undefined
           ? ` with a ${formatTokens(sized.numCtx)} token context sized for this request`
           : cachedCtx === undefined ? "" : ` with the ${formatTokens(cachedCtx)} token context kept from an earlier request`);
         // The size this first send asked for: kept, sized up front, or none.
@@ -380,6 +381,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
               // caller sees the last chunk and may stop reading. Concurrent
               // requests can raise it at once; keep the largest that worked.
               ollamaContextOverrides.set(cacheKey, Math.max(ollamaContextOverrides.get(cacheKey) ?? 0, raisedCtx));
+              bindKeptOllamaSize(endpoint, model);
             }
             if (typeof chunk.model === "string" && chunk.model.length > 0) {
               actualModel = chunk.model;
@@ -672,6 +674,7 @@ async function readOllamaContextLength(
   if (typeof answer.model_info !== "object" || answer.model_info === null) return undefined;
   // The same reading as the size check: the architecture's own key, not a
   // rope or other key that also ends in context_length.
+  recordOllamaRevision(endpoint, model, answer);
   return parseOllamaShow(answer).modelMaxContext;
 }
 
