@@ -149,10 +149,14 @@ type HostedChatConsentPrompt = {
 
 /** A request the local model could not do, offered again with the configured alternatives (mockup 36). */
 type ModelFitOffer = {
-  issue: ModelFitIssue;
+  /** Carries the host's single-use `offerId`. */
+  issue: ModelFitIssue & { offerId: string };
   content: string;
-  conversationId: string | null;
+  conversationId: string;
   tenantId?: string;
+  /** The provider and model active when the offer was made; a change withdraws it. */
+  activeProviderId: ProviderId;
+  activeModel?: string;
 };
 
 /** The hosted choice waiting for its per-request accept. */
@@ -923,11 +927,7 @@ function IntuneChatContent() {
       status: "streaming",
       createdAt: pendingCreatedAt,
       ...(modelOverride
-        ? {
-            providerId: modelOverride.providerId,
-            ...(modelOverride.model ? { model: modelOverride.model } : {}),
-            switchedFrom: { providerId: modelOverride.fromProviderId, ...(modelOverride.fromModel ? { model: modelOverride.fromModel } : {}), reason: modelOverride.reason },
-          }
+        ? { providerId: modelOverride.providerId, ...(modelOverride.model ? { model: modelOverride.model } : {}) }
         : { providerId: provider?.id ?? state.activeProviderId, ...(activeModel ? { model: activeModel } : {}) }),
     };
 
@@ -1081,19 +1081,22 @@ function IntuneChatContent() {
             // The local model could not do this request: the notice replaces the
             // generic error and offers what else is configured (mockup 36).
             const modelFit = event.type === "cancelled" ? undefined : event.result.assistantMessage.modelFit;
-            if (modelFit) {
+            const offerId = modelFit?.offerId;
+            if (modelFit && offerId) {
               setModelFitOffer({
-                issue: modelFit,
+                issue: { ...modelFit, offerId },
                 content,
                 conversationId: event.result.conversation.id,
                 ...(sendTenantId ? { tenantId: sendTenantId } : {}),
+                activeProviderId: provider?.id ?? state.activeProviderId,
+                ...(activeModel ? { activeModel } : {}),
               });
             }
             if (event.type === "failed") {
               reachedTerminal = true;
               failed = true;
               dispatchSend({ type: "fail" });
-              if (!modelFit) setError(event.error);
+              if (!offerId) setError(event.error);
               setFailedRequest({ content, conversationId: targetConversationId });
               setInput(content);
             }
@@ -1209,11 +1212,9 @@ function IntuneChatContent() {
   // opens the accept step first and sends only from its Send button.
   const chooseModelFit = (offer: ModelFitOffer, choice: ModelFitChoice) => {
     const override: ChatModelOverride = {
+      offerId: offer.issue.offerId,
       providerId: choice.providerId,
       ...(choice.model ? { model: choice.model } : {}),
-      fromProviderId: offer.issue.providerId,
-      ...(offer.issue.model ? { fromModel: offer.issue.model } : {}),
-      reason: offer.issue.reason,
     };
     const workspaceContext = buildWorkspaceContextInput();
     if (choice.isLocal) {
@@ -1264,16 +1265,21 @@ function IntuneChatContent() {
     window.requestAnimationFrame(() => composerRef.current?.focus());
   };
 
-  // An offer belongs to its conversation and organization.
+  // An offer belongs to its conversation, organization and active model. A
+  // new chat opens on no conversation until the host names it, so the offer
+  // waits for its id there; any other conversation, or a change of model or
+  // organization, withdraws it.
+  const modelFitOfferShown = modelFitOffer !== null && activeConversationId === modelFitOffer.conversationId;
   useEffect(() => {
     if (!modelFitOffer) return;
     const otherConversation = activeConversationId !== null && activeConversationId !== modelFitOffer.conversationId;
     const otherTenant = (state.activeTenantId ?? undefined) !== modelFitOffer.tenantId;
-    if (otherConversation || otherTenant) {
+    const otherModel = (provider?.id ?? state.activeProviderId) !== modelFitOffer.activeProviderId || activeModel !== modelFitOffer.activeModel;
+    if (otherConversation || otherTenant || otherModel) {
       setModelFitOffer(null);
       setModelFitAccept(null);
     }
-  }, [activeConversationId, modelFitOffer, state.activeTenantId]);
+  }, [activeConversationId, activeModel, modelFitOffer, provider?.id, state.activeProviderId, state.activeTenantId]);
 
   const confirmHostedBatchConsentAndRun = async () => {
     const prompt = hostedBatchConsentPrompt;
@@ -1798,7 +1804,7 @@ function IntuneChatContent() {
 
   const renderComposer = (placement: "home" | "docked") => (
     <>
-    {modelFitAccept ? (
+    {modelFitAccept && modelFitOfferShown ? (
       <HostedChatConsentPanel
         prompt={modelFitAccept.prompt}
         tenantName={tenants.find((tenant) => tenant.id === modelFitAccept.prompt.tenantId)?.displayName}
@@ -1809,7 +1815,7 @@ function IntuneChatContent() {
         onConfirm={() => void confirmModelFitAndSend()}
         onUseLocal={() => setModelFitAccept(null)}
       />
-    ) : modelFitOffer && !runInProgress ? (
+    ) : modelFitOffer && modelFitOfferShown && !runInProgress ? (
       <ModelFitNotice
         issue={modelFitOffer.issue}
         choices={modelFitChoices({

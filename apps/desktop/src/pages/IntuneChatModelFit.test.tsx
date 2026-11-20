@@ -1,9 +1,11 @@
 import { screen, waitFor, within } from "@testing-library/react";
+import { Route, Routes } from "react-router";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import IntuneChat from "./IntuneChat";
-import { createMockAppState, makeMockBridge, mockProviders, renderRoute } from "../test/test-utils";
+import { createMockAppState, makeMockBridge, mockProviders, renderRoute, renderWithAppState } from "../test/test-utils";
+import { useAppState } from "../state";
 import type {
   GraphCacheStatus,
   IntuneChatConversation,
@@ -42,14 +44,14 @@ function fitBridge(state = createMockAppState()) {
               id: `assistant-${count}`, conversationId: conversation.id, role: "assistant", status: "completed", createdAt: "2026-11-19T09:00:02.000Z",
               content: "Contoso has 412 managed devices across 187 owners.",
               providerId: override.providerId, model: override.model,
-              switchedFrom: { providerId: override.fromProviderId, model: override.fromModel, reason: override.reason },
+              switchedFrom: { providerId: "ollama", model: "llama3.1", reason: "context-too-small" },
             }
           : {
               id: `assistant-${count}`, conversationId: conversation.id, role: "assistant", status: "failed", createdAt: "2026-11-19T09:00:01.000Z",
               content: "The selected LLM provider failed while answering this chat message.",
               providerId: "ollama", model: "llama3.1",
               error: "Ollama context size too small",
-              modelFit: { reason: "context-too-small", providerId: "ollama", model: "llama3.1", neededTokens: 40652, limitTokens: 16384 },
+              modelFit: { reason: "context-too-small", providerId: "ollama", model: "llama3.1", neededTokens: 40652, limitTokens: 16384, offerId: `fit_${count}` },
             };
         saved = [...saved, userMessage, assistantMessage];
         const cacheStatus: GraphCacheStatus = { tenantId, resources: [] };
@@ -66,7 +68,8 @@ function fitBridge(state = createMockAppState()) {
 async function sendTooLarge(bridge: ReturnType<typeof fitBridge>) {
   const user = userEvent.setup();
   renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
-  await user.type(await screen.findByRole("combobox", { name: CHAT_COPY.composerLabel }), QUESTION);
+  await user.click(await screen.findByRole("combobox", { name: CHAT_COPY.composerLabel }));
+  await user.paste(QUESTION);
   await user.click(screen.getByRole("button", { name: "Send" }));
   const notice = await screen.findByRole("region", { name: "llama3.1 cannot fit this request" });
   return { user, notice };
@@ -113,7 +116,7 @@ describe("IntuneChat model fit (mockup 36)", () => {
     await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledTimes(2));
     const input = vi.mocked(bridge.streamIntuneChatMessage).mock.calls[1]![0];
     expect(input.content).toBe(QUESTION);
-    expect(input.modelOverride).toEqual({ providerId: "openai", model: "gpt-5", fromProviderId: "ollama", fromModel: "llama3.1", reason: "context-too-small" });
+    expect(input.modelOverride).toEqual({ offerId: "fit_1", providerId: "openai", model: "gpt-5" });
     expect(input.hostedProviderConsent).toMatchObject({ tenantId, providerId: "openai", model: "gpt-5" });
     expect(input.hostedProviderConsent).not.toHaveProperty("remember");
 
@@ -149,5 +152,28 @@ describe("IntuneChat model fit (mockup 36)", () => {
     const { notice } = await sendTooLarge(fitBridge(state));
     expect(within(notice).queryByRole("button", { name: /^Run with/ })).toBeNull();
     expect(within(notice).getByText("Your organization's policy allows only providers on this device, so no hosted provider is offered.")).toBeInTheDocument();
+  });
+  it("withdraws the offer when the active model changes", async () => {
+    const user = userEvent.setup();
+    const providers = mockProviders.map((provider) => (provider.id === "ollama" ? { ...provider, models: ["llama3.1", "qwen3:8b"] } : provider));
+    const bridge = fitBridge(createMockAppState({ providers }));
+    function SwitchModel() {
+      const { setActiveModel } = useAppState();
+      return <button type="button" onClick={() => void setActiveModel("ollama", "qwen3:8b")}>Switch model</button>;
+    }
+    renderWithAppState(
+      <Routes><Route path="/chat/:conversationId?" element={<><IntuneChat /><SwitchModel /></>} /></Routes>,
+      { route: "/chat", bridge },
+    );
+    await user.click(await screen.findByRole("combobox", { name: CHAT_COPY.composerLabel }));
+  await user.paste(QUESTION);
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    const notice = await screen.findByRole("region", { name: "llama3.1 cannot fit this request" });
+    await user.click(within(notice).getByRole("button", { name: "Run with Codex" }));
+    expect(await screen.findByRole("dialog", { name: "Run this request with Codex?" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Switch model" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Run this request with Codex?" })).toBeNull());
+    expect(screen.queryByRole("region", { name: "llama3.1 cannot fit this request" })).toBeNull();
+    expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce();
   });
 });
