@@ -1468,12 +1468,42 @@ identities with graph_get. Nothing else.
           </div>
         </div>
       </div>
+      <p class="xs muted" style="margin:20px 0 8px">A hosted model with Security at Block on Hosted, where the cut fell inside a Conditional Access policy name</p>
+      <div class="win">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="shell">
+          <aside class="side" data-side="chat"></aside>
+          <div class="appmain">
+            <div class="topbar" data-top="hosted" data-hosted="Claude Code"></div>
+            <div class="page"><div class="chat">
+              <div class="clipnote" role="status"><svg aria-hidden="true"><use href="#i-skill"/></svg><div>
+                This model gets a shortened version of <span data-name>Nova</span>'s instructions and notes: the oldest notes are left out first, then the organization instructions and the standing instructions are cut at the end. For this conversation, 9 of 14 notes for Woodgrove Bank were left out. The organization instructions were cut before a security value, which was left out whole. <button class="bt ghost sm" type="button" style="height:22px;padding:0 6px"><span>Settings, <span data-name>Nova</span></span></button>
+                <details open><summary>What this model received</summary>
+                  <ul>
+                    <li>Standing instructions, version 6, in full</li>
+                    <li>Organization instructions for Woodgrove Bank, up to the cut. The security value at the cut was left out whole, with no part of it sent.</li>
+                    <li>The 5 most recently used notes. The 9 older notes were left out.</li>
+                    <li>Data policy applied to all of it before the call: identities and devices masked, and the whole request checked again before it was sent</li>
+                  </ul>
+                </details>
+              </div></div>
+              <div class="q">Which finance users could not sign in this morning?</div>
+              <div class="ans">
+                <div class="who"><span class="mini" data-initial>N</span><span><span data-name>Nova</span> with Claude Code, Woodgrove Bank</span></div>
+                <div class="body">At Woodgrove Bank, 4 users in the Finance group had sign-ins fail since 07:00, all with error 50074, strong authentication required. The data is from the 08:10 cache, older than an hour, so sign-ins after that are not counted.</div>
+              </div>
+              <div class="composer"><span>Ask <span data-name>Nova</span></span></div>
+            </div></div>
+          </div>
+        </div>
+      </div>
       <ul class="notes">
         <li>The answer follows the standing instructions from A: it names the organization and says the data is older than an hour. The kiosk note was one of the 5 kept, so the kiosks are left out.</li>
         <li>The notice appears once, as the first line of a conversation whose model gets a shortened profile, and never between answers. Its first sentence is the wording voice uses today, so the two read the same; the second sentence counts what was left out for this conversation.</li>
         <li>What this model received lists the parts by name and size, never the text of a note, and a model that gets the whole profile shows no notice.</li>
         <li>Data policy applies to the profile block like any other part of the prompt: a note that names a user is masked on a hosted model.</li>
-        <li>Decided in round 23: a cut never splits a value data policy classified. When the end of the organization instructions or the standing instructions falls inside a policy name, a person's name, a device name or an identifier, the whole value is left out instead of a prefix of it, and the notice adds a sentence such as "The organization instructions were cut before a security value, which was left out whole." It names the part and the class, never the value. The text that stays keeps the classes the whole profile gave it, and the request is still checked in full before it is sent, in typed Chat and in hosted voice alike (plan, B2).</li>
+        <li>Decided in round 23: a cut never splits a value data policy classified. When the end of the organization instructions or the standing instructions falls inside a policy name, a person's name, a device name or an identifier, the whole value is left out instead of a prefix of it, and the notice adds a sentence such as "The organization instructions were cut before a security value, which was left out whole." It names the part and the class, never the value. The second frame shows it on Claude Code with Security at Block on Hosted: the organization instructions end with "check WGB Finance MFA first", the cut fell inside the policy name, and the notice and What this model received say the security value at the cut was left out whole. The text that stays keeps the classes the whole profile gave it, and the request is still checked in full before it is sent, in typed Chat and in hosted voice alike (plan, B2).</li>
+        <li>Decided in round 24: a cut is made only inside text the check examined completely. When the check of a part did not finish, such as the organization instructions when its work budget ran out inside them, the whole part is left out, never cut, and the notice says so: "The organization instructions were left out because their check did not finish." When the part cannot be left out, such as the app's fixed rules, the question is not sent and Chat shows the designed state "Withheld by the data policy check" (mockup 34, E); hosted voice opens without that part or does not start. The final check of the whole request still runs (plan, A3 and B2).</li>
       </ul>
     </section>
 
@@ -1552,6 +1582,8 @@ identities with graph_get. Nothing else.
     document.querySelectorAll("[data-top]").forEach((el) => {
       const [ini, org] = el.dataset.org === "fabrikam" ? ["FA", "Fabrikam"] : el.dataset.org === "contoso" ? ["CR", "Contoso Retail"] : ["WB", "Woodgrove Bank"];
       el.innerHTML = `<button class="orgchip" type="button"><span class="av">${ini}</span>${org}<svg class="chev"><use href="#i-chev"/></svg></button>`;
+      // A hosted model in G: the strip names the classes masked and blocked on Hosted, the long form while it fits.
+      if (el.dataset.hosted) el.insertAdjacentHTML("beforeend", `<span class="boundary" data-where="hosted" data-fit="full" aria-label="Hosted · ${el.dataset.hosted} · identities and devices masked, security blocked"><span class="pip"></span>Hosted · ${el.dataset.hosted} ·<span class="mask"><span class="hx"></span><span class="bw">identities and devices masked,</span><span class="bs">2 masked,</span></span><span class="blk"><span class="bw">security blocked</span><span class="bs">1 blocked</span></span></span>`);
     });
     document.addEventListener("click", (e) => {
       const b = e.target.closest("button.boundary");
