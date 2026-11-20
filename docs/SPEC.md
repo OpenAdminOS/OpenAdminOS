@@ -539,7 +539,13 @@ covering the estimated request (a power of two, never below the size it is
 loaded with), because Ollama loads it at its own default, reloads it there
 after an eviction, and an older Ollama shortens a longer prompt without an
 error. A caller that does not raise `num_ctx` gets the size Ollama loaded the
-model with (`/api/ps`) instead. LM Studio reports none for now because its
+model with (`/api/ps`) instead. Agent runs also set
+`LlmOptions.enforceContextWindow`: if the run's own lookup missed a pin (Ollama
+briefly unavailable) and the adapter's lookup finds it, the adapter refuses
+with the same `ContextTooSmallError` instead of sending. Chat leaves it unset,
+so #211's raise still serves a larger request there. A kept `num_ctx` belongs
+to the model revision it was kept for (`/api/show` `modified_at`); a model
+created again under the same name starts from its own settings. LM Studio reports none for now because its
 context fields could not be verified.
 
 The runtime's `estimateTokens` counts letters, digits, mixed ids,
