@@ -406,6 +406,11 @@ the installed app's scheduler, login item or caches.
   not a mount now restarts with APPIMAGE_EXTRACT_AND_RUN=1, and the shell
   waits for the AppImage runtime too. Muse lows: the AppImage is checked
   for being executable first (logged otherwise), APPDIR compared resolved.
+- Review round 40: Claude and Sol no blocking. Muse one blocking, also
+  Sol's medium (a mounted AppImage waited a minute for its launcher): the
+  parent is now waited for only in extract-and-run (appImageHandoffWaitPids,
+  tested). Sol medium: the end to end test closes the store before the
+  simulated next launch, as process exit does, so it also holds on Windows.
 - Process lesson: twice I edited the tree while a reviewer was reading it;
   parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the
