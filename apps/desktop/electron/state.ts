@@ -2427,11 +2427,18 @@ export class AppStateStore {
    * taking new work, the way Disconnect closes one. Work already running
    * gets its signal; the shutdown before the restart waits for it.
    */
-  async closeAllTenantWork(): Promise<void> {
-    // From here no state write reaches the file: the folder at the data path
-    // may no longer be the one the marker was written to, and an atomic
-    // write would put this process's state over whatever is there now.
+  /**
+   * The reset's marker is in place (called right after its rename): from
+   * here no state write reaches the file, since the folder at the data path
+   * may no longer be the one the marker was written to, and an atomic write
+   * would put this process's state over whatever is there now.
+   */
+  markLocalResetCommitted(): void {
     this.localResetCommitted = true;
+  }
+
+  async closeAllTenantWork(): Promise<void> {
+    this.markLocalResetCommitted();
     for (const tenantId of this.localResetTenantIds()) {
       if (this.tenantLifecycle.phase(tenantId) !== "open") continue;
       this.tenantLifecycle.close(tenantId);
@@ -10154,12 +10161,16 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       }
       // Flushed through the handle that wrote it: Windows needs write access to flush.
       await writeFileDurably(tmpPath, serialized, { durable, mode: 0o600 });
-      // Checked again before the rename: a write that was already under way
-      // when the reset was committed does not replace the file either.
-      if (this.localResetCommitted) {
-        throw new LocalResetInProgressError("OpenAdminOS is resetting and restarts in a moment. Nothing was saved.");
-      }
-      await atomicRename(tmpPath, this.filePath);
+      // Checked again before the rename and before every Windows retry of
+      // it: a write already under way when the reset was committed does not
+      // replace the file either.
+      await atomicRename(tmpPath, this.filePath, {
+        beforeAttempt: () => {
+          if (this.localResetCommitted) {
+            throw new LocalResetInProgressError("OpenAdminOS is resetting and restarts in a moment. Nothing was saved.");
+          }
+        },
+      });
       this.writeGeneration += 1;
       this.lastReadSnapshot = state;
       this.recordAuditLogSafely(state);

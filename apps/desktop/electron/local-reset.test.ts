@@ -914,6 +914,30 @@ describe("local reset: wipe at launch", () => {
     assert.equal(markerFolderMatches({ ...stored, ino: 0, birth: 0 }, { ...stored, ino: 0, birth: 0 }), false);
   });
 
+  it("marks the reset committed at the rename, before the folder flush returns", async () => {
+    const dir = await tempDir();
+    try {
+      let committed = false;
+      let committedWhenFlushStarted: boolean | undefined;
+      let release!: () => void;
+      const written = writeLocalResetMarker(dir, MARKER, {
+        onCommitted: () => { committed = true; },
+        syncDirectory: () => new Promise<void>((resolve) => {
+          committedWhenFlushStarted = committed;
+          release = resolve;
+        }),
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      while (committedWhenFlushStarted === undefined) await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(committedWhenFlushStarted, true);
+      assert.ok(existsSync(join(dir, LOCAL_RESET_MARKER)));
+      release();
+      await written;
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("writes the warnings only to the folder the reset was accepted for", async () => {
     const dir = await tempDir();
     try {

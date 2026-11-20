@@ -193,6 +193,12 @@ export async function writeLocalResetMarker(
      * folder restored or swapped in meanwhile never receives a reset request.
      */
     expectFolder?: LocalResetFolderIdentity;
+    /**
+     * Called right after the rename, before the folder flush is awaited:
+     * the reset is committed from that moment, so the caller stops state
+     * writes there and not only once the flush returns.
+     */
+    onCommitted?: () => void;
   } = {},
 ): Promise<LocalResetFolderIdentity> {
   const path = join(userDataDir, LOCAL_RESET_MARKER);
@@ -218,6 +224,7 @@ export async function writeLocalResetMarker(
     await rm(temp, { force: true }).catch(() => undefined);
     throw cause;
   }
+  options.onCommitted?.();
   try {
     await (options.syncDirectory ?? syncDirectory)(userDataDir);
   } catch (cause) {

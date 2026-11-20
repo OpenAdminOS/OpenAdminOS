@@ -5628,7 +5628,10 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
         }
         // Both writes (the request and its warnings) go only to the folder
         // taken before the checks.
-        committedFolder = await writeLocalResetMarker(dataFolder, marker, { expectFolder: committedFolder });
+        committedFolder = await writeLocalResetMarker(dataFolder, marker, {
+          expectFolder: committedFolder,
+          onCommitted: () => store.markLocalResetCommitted(),
+        });
       },
       // No sign-out here: it would rewrite the token caches in place, which
       // cannot be bound to the folder the reset was accepted for. The token
