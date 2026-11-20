@@ -2668,10 +2668,15 @@ Mockup: `docs/mockups/34-local-reset.html`.
   login item after ready at the next launch runs only while the folder is
   still the one the wipe emptied and holds no `state.json`. The restart of
   this app's own Linux AppImage (`APPIMAGE`, with the running executable
-  inside `APPDIR`) goes through a detached shell that waits for the old
-  process to exit and starts the AppImage file: the mount it runs from goes
-  away with the old process, and Electron's relaunch helper runs with
-  no_new_privs, under which the new AppImage could not mount itself. WhatsApp Web clients leave the connected
+  inside `APPDIR` as written or resolved) goes through a detached shell
+  that waits for the old process and for the AppImage runtime that started
+  it, then starts the AppImage file: the mount it runs from goes away with
+  the old process, and Electron's relaunch helper runs with no_new_privs,
+  under which the new AppImage could not mount itself. When `APPDIR` is not
+  a mount (extract-and-run, without working FUSE; the runtime strips that
+  flag), the new process gets `APPIMAGE_EXTRACT_AND_RUN=1`. An AppImage
+  that can no longer be started is logged, and the reset runs at the next
+  launch. WhatsApp Web clients leave the connected
   and QR states when they stop, so a client resumed after a refused reset
   reconnects. The shutdown before the restart leaves the SQLite databases open:
   closing checkpoints the write-ahead log and deletes it by path; the
