@@ -1647,6 +1647,52 @@ describe("local reset: end to end with the store", () => {
     }
   });
 
+  it("neither writes, clears nor reads a token cache from disk once the reset is committed", async () => {
+    const dir = await tempDir();
+    try {
+      const calls: string[] = [];
+      const recording = (name: string): TokenCacheStorage => ({
+        read: async () => { calls.push(`${name}:read`); return "cached"; },
+        write: async () => { calls.push(`${name}:write`); },
+        clear: async () => { calls.push(`${name}:clear`); },
+      });
+      const statePath = join(dir, "state.json");
+      await writeFile(statePath, JSON.stringify({ activeProviderId: "ollama", installedAgents: [], runs: [], tenants: [] }), "utf8");
+      const store = new AppStateStore({
+        filePath: statePath,
+        tokenStore: recording("default"),
+        tokenStoreFor: (partition) => recording(partition),
+        legacyTokenStoresFor: (partition) => [recording(`legacy-${partition}`)],
+        userDataPath: dir,
+        statsApiUrl: "",
+      });
+      try {
+        const internals = store as unknown as {
+          tokenStore: TokenCacheStorage;
+          tokenStoreFor: (partition: string) => TokenCacheStorage;
+          legacyTokenStoresFor: (partition: string) => TokenCacheStorage[];
+        };
+        // Before the commit every call goes through.
+        assert.equal(await internals.tokenStore.read(), "cached");
+        await internals.tokenStore.write("x");
+        assert.deepEqual(calls.splice(0), ["default:read", "default:write"]);
+        // A sign-in refresh that comes back after the commit touches no file.
+        store.markLocalResetCommitted();
+        const stores = [internals.tokenStore, internals.tokenStoreFor("custom"), ...internals.legacyTokenStoresFor("custom")];
+        for (const tokenStore of stores) {
+          assert.equal(await tokenStore.read(), "");
+          await assert.rejects(tokenStore.write("refreshed"), /Nothing was saved/);
+          await tokenStore.clear?.();
+        }
+        assert.deepEqual(calls, []);
+      } finally {
+        store.close();
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("never creates a missing state file while the reset is being checked", async () => {
     const dir = await tempDir();
     try {

@@ -1944,8 +1944,9 @@ export class AppStateStore {
   constructor(options: AppStateStoreOptions | string, legacyTokenStore?: TokenCacheStorage) {
     if (typeof options === "string") {
       this.filePath = options;
-      this.tokenStore =
-        legacyTokenStore ?? new SafeStorageTokenCacheStore(`${options}.tokens.bin`);
+      this.tokenStore = this.heldAfterLocalReset(
+        legacyTokenStore ?? new SafeStorageTokenCacheStore(`${options}.tokens.bin`),
+      );
       this.openBrowser = async () => undefined;
       this.userAgentsDir = undefined;
       this.onRunFinished = undefined;
@@ -1975,7 +1976,7 @@ export class AppStateStore {
       this.auditLog = new AuditLogStore(":memory:");
     } else {
       this.filePath = options.filePath;
-      this.tokenStore = options.tokenStore;
+      this.tokenStore = this.heldAfterLocalReset(options.tokenStore);
       this.openBrowser = options.openBrowser ?? (async () => undefined);
       this.userAgentsDir = options.userAgentsDir;
       this.onRunFinished = options.onRunFinished;
@@ -1984,8 +1985,11 @@ export class AppStateStore {
         typeof options.statsApiUrl === "string"
           ? options.statsApiUrl
           : DEFAULT_STATS_API_URL;
-      this.tokenStoreFor = options.tokenStoreFor;
-      this.legacyTokenStoresFor = options.legacyTokenStoresFor;
+      const tokenStoreFor = options.tokenStoreFor;
+      const legacyTokenStoresFor = options.legacyTokenStoresFor;
+      this.tokenStoreFor = tokenStoreFor && ((partition) => this.heldAfterLocalReset(tokenStoreFor(partition)));
+      this.legacyTokenStoresFor =
+        legacyTokenStoresFor && ((partition) => legacyTokenStoresFor(partition).map((store) => this.heldAfterLocalReset(store)));
       // No default: usage telemetry stays inert until a collector URL is
       // configured for the build AND the user opts in. // TODO(ugur):
       // decide where the usage collector is hosted and set it here.
@@ -2456,6 +2460,33 @@ export class AppStateStore {
    */
   private localResetTenantIds(): string[] {
     return (this.lastReadSnapshot?.tenants ?? []).map((tenant) => tenant.id);
+  }
+
+  /**
+   * A token cache that, once the reset is committed, is neither written nor
+   * cleared nor read from disk: the files are written and deleted by path,
+   * and the folder at that path may no longer be the one being reset. A
+   * Microsoft sign-in refresh that was waiting on the network when the
+   * reset started therefore never writes or deletes a cache afterwards (a
+   * read that cannot decrypt would otherwise delete the file).
+   */
+  private heldAfterLocalReset(store: TokenCacheStorage): TokenCacheStorage {
+    return {
+      read: async () => (this.localResetCommitted ? "" : store.read()),
+      write: async (serialized) => {
+        if (this.localResetCommitted) {
+          throw new LocalResetInProgressError("OpenAdminOS is resetting and restarts in a moment. Nothing was saved.");
+        }
+        return store.write(serialized);
+      },
+      ...(store.clear
+        ? {
+            clear: async () => {
+              if (!this.localResetCommitted) await store.clear!();
+            },
+          }
+        : {}),
+    };
   }
 
   /** Set once the reset's marker is written; every state write is refused from then on. */
