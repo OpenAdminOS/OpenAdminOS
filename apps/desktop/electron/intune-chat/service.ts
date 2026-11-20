@@ -2596,7 +2596,8 @@ export class IntuneChatService {
       }
       if (!options.providerBinding) options = { ...options, providerBinding: { endpoint: target.endpoint, scope: "model-fit" } };
     }
-    // Whether a model request of this turn went out, so the answer says "Sent to" only when one did.
+    // Whether a model request of this turn went out, so the answer names where it went ("Answered by",
+    // or "Attempted through" for a failed or stopped call) only when one did.
     let modelFitDispatched = false;
     options.signal?.throwIfAborted();
     // Nova keeps requiring a tenant.
