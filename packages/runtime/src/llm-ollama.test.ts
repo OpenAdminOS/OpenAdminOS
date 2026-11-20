@@ -785,6 +785,8 @@ describe("Ollama context size", () => {
       fake.options.failCtx = held.failCtx;
       const olderRun = llm.complete({ prompt: "big" });
       const older = assert.rejects(olderRun, /could not load restored with 45,056/);
+      // Observed at once, so an early end reports only the assertion below.
+      older.catch(() => {});
       // Fails, instead of hanging, if the older request ends before the server holds it.
       const first = await Promise.race([held.wasCaptured.then(() => "held"), olderRun.then(() => "settled", () => "settled")]);
       assert.equal(first, "held");
@@ -816,6 +818,8 @@ describe("Ollama context size", () => {
       fake.options.failCtx = held.failCtx;
       const olderRun = llm.complete({ prompt: "big" });
       const older = assert.rejects(olderRun, /could not load same-size with 45,056/);
+      // Observed at once, so an early end reports only the assertion below.
+      older.catch(() => {});
       // Fails, instead of hanging, if the older request ends before the server holds it.
       const first = await Promise.race([held.wasCaptured.then(() => "held"), olderRun.then(() => "settled", () => "settled")]);
       assert.equal(first, "held");
@@ -874,7 +878,7 @@ describe("Ollama context size", () => {
       const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "kept-outgrown" });
       await llm.complete({ prompt: "big" });
       fake.options.retryPartialError = "request (50000 tokens) exceeds the available context size (45056 tokens), try increasing it";
-      await assert.rejects(llm.complete({ prompt: "big" }), /^Error: Ollama context size too small: This request needs 50,000 tokens of context, more than the 45,056 Ollama loaded for kept-outgrown\.$/);
+      await assert.rejects(llm.complete({ prompt: "big" }), /^Error: Ollama context size too small: This request needs 50,000 tokens of context and did not fit in the 45,056 Ollama loaded for kept-outgrown\.$/);
       fake.options.retryPartialError = undefined;
       await llm.complete({ prompt: "big" });
       assert.deepEqual(fake.chats.at(-1), { num_ctx: 45056 });
