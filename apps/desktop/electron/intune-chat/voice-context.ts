@@ -41,12 +41,12 @@ export function voiceConversationContext(
     if (!conversational) reference.push(turn);
   }
   const selected = reference.slice(smallContext ? -2 : -6);
-  if (followsUp) registerTransientTenantData("nova:history", selected.map(({ role, text }) => ({ role, text })));
   const history = selected.map(turn => ({
     role: turn.role, text: clipVoiceText(turn.text, smallContext ? 128 : 400),
   }));
   let historyJson: string | undefined;
   if (followsUp && history.length) {
+    registerTransientTenantData("nova:history", history);
     const encoded = history.map(turn => JSON.stringify(turn));
     historyJson = `[${encoded.join(",")}]`;
     let start = 1;

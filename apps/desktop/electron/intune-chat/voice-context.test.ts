@@ -151,12 +151,15 @@ it("caps large Unicode evidence without losing totals or claiming omitted bucket
   );
 });
 
-it("observes clipped voice history only for the active turn", () => {
+it("observes clipped voice history only for the active turn", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const text = `LAPS password: ${"opaque".repeat(100)}`;
   const ledger = new ClassificationLedger();
   const { history } = withClassificationScope(ledger, () =>
     voiceConversationContext("What about that device?", [], true, [{ role: "assistant", text }]));
   const probe = { prompt: history };
+  assert.equal(ledger.classifyRequest(probe).coverageIncomplete, true);
+  await ledger.waitForObservations();
   assert.ok(ledger.classifyRequest(probe).spans.some(span => span.kind === "credential" && span.source === "nova:history"));
   ledger.discardTransient();
   assert.equal(ledger.classifyRequest(probe).spans.some(span => span.source === "nova:history"), false);
