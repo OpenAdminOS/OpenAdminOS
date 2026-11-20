@@ -406,8 +406,11 @@ the IT policy file.
       registered for the run or Chat conversation, in memory only.
 - [ ] Saved Chat history keeps its classification evidence. Each saved Chat
       message stores, next to it in the local database, the spans the ledger
-      found in its text (offset, length and class of each) and the field map
-      version that classed them. The evidence holds no copy of the values
+      found in its text and the field map version that classed them. Each
+      span keeps its offset, its length and the list of every class its
+      field had held when the message was saved (the field's class history
+      at that time: the mapped class and every later pick), never one class
+      alone. The evidence holds no copy of the values
       beyond the message text that is already stored. Disconnecting the
       organization and deleting the conversation remove the evidence with the
       messages.
@@ -415,7 +418,11 @@ the IT policy file.
       the ledger is rebuilt from that stored evidence before any follow-up is
       built, so a value that is no longer in the current tenant value index
       (a Conditional Access policy that was renamed or deleted since) is still
-      known by its class. A saved message without stored evidence (saved
+      known by its classes. Each rebuilt span takes the strictest action
+      across every class in its stored list, computed under the rules in
+      force at the follow-up, the same rule as a reclassified field below; a
+      span is never rebuilt from only the first or the last class in its
+      list. A saved message without stored evidence (saved
       before the evidence existed, or evidence that cannot be read) counts as
       unexamined, as in the budget rule below. Evidence stored under a field
       map version older than a map change that raised any class also counts
@@ -462,8 +469,9 @@ the IT policy file.
 9. Every field mapping was checked against a live Graph response in the lab
    tenant, and the record lists the calls.
 10. Stored evidence: a saved Chat message keeps its spans (offset, length,
-    class) and the field map version in the local database and no other copy
-    of its values; Disconnect and deleting the conversation remove the
+    and the list of every class the span's field had held when the message
+    was saved) and the field map version in the local database and no other
+    copy of its values; Disconnect and deleting the conversation remove the
     evidence with the messages (test).
 
 ### Phase A2: Provider tiers
@@ -536,7 +544,11 @@ the IT policy file.
       local model only when no Local rule is Block.
 - [ ] Saved history in a follow-up. History whose evidence was rebuilt (A1) is
       routed and masked like any other part of the request, by its stored
-      classes and by the scan of the final request. History without stored
+      classes and by the scan of the final request. Each span's action is the
+      strictest across every class in its stored list, recomputed under the
+      rules in force at the follow-up, so a span whose field once held
+      `security` is blocked when Security is Block on the tier, whatever
+      class it held last. History without stored
       evidence counts as unexamined and takes the strictest action of any
       class on the tier: with a Block on the tier it is withheld, and the
       follow-up is not sent with it; with Mask as the strictest action it is
@@ -610,6 +622,17 @@ the IT policy file.
    answers, and a local model only when no Local rule is Block. With no
    Block on Hosted, the earlier messages are masked one way and the answer
    says so.
+13. Same-version restart regression test: under one field map version, a
+   field mapped as `configuration` is moved to `security`, then to
+   `identity`, and a value from it is restored in a local Chat answer that
+   is saved. The value is later gone from the current tenant value index,
+   the app restarts, the conversation is reopened, and a hosted follow-up is
+   asked with Security on Hosted at Block. The saved span's stored class
+   list holds all three classes, the span is withheld, and the value reaches
+   no provider request. A rebuild from one stored class would send it: the
+   mapped `configuration` (Allow on Hosted by default) in clear text, the
+   latest `identity` (Mask on Hosted by default) masked, and the test fails
+   on either.
 
 ### Phase A4: Masking
 
@@ -727,10 +750,19 @@ the IT policy file.
       says it is too long and offers Send a shorter summary (the agent
       proposes a shorter message on a new card with its own Confirm) or Save
       the full report (kept on this device, nothing sent) (mockup 35).
-- [ ] Deliveries from runs the personal agent starts. When the agent starts
-      an installed agent that has a saved delivery route (Teams, Outlook,
-      Slack, Discord or WhatsApp, the routes in
-      `apps/desktop/electron/run-delivery.ts`),
+- [ ] Deliveries from runs the personal agent starts. The gate is the run's
+      origin, checked before anything enters the automatic delivery queue
+      (`enqueueRunDeliveries` and `runDeliveryQueue` in
+      `apps/desktop/electron/run-delivery.ts`). The run record says who
+      started it (today `trigger` is `manual` or `schedule`; a run the
+      personal agent started gets its own origin), and a run with the
+      personal agent's origin is never added to that queue, for any
+      connector the queue handles: Teams, Outlook, Slack, Discord, WhatsApp
+      and Signal, and any connector added to it later. The gate does not
+      list connectors; it sits in front of the queue as a whole, so a new
+      connector is covered without a change to it. A run with no recorded
+      origin is not treated as one the personal agent started. When the
+      agent starts an installed agent that has a saved delivery route,
       no delivery from that run is posted when the run finishes. Each one is
       proposed on the same per-message confirmation card, with the final text
       that would be posted, the destination of the saved route, the
@@ -791,6 +823,20 @@ the IT policy file.
    organization active, Confirm reads "Not sent" with the fix. The same agent
    started on its schedule delivers by its route as before, with no card
    (test, mockup 35).
+10. Signal route started by the personal agent (regression test): the
+   personal agent starts an installed agent whose saved delivery route sends
+   to Signal. When the run finishes, `runDeliveryQueue` holds no item for the
+   run and nothing is sent to Signal; a card shows the final text, the
+   Signal destination of the route, the organization and the run, and
+   nothing is sent without a click on Confirm, which runs the call-time
+   checks. The test repeats for every connector the queue handles (Teams,
+   Outlook, Slack, Discord, WhatsApp, Signal) and for a test connector
+   registered with the queue only for the test, so a connector added later
+   is covered by the same gate.
+11. Scheduled Signal route (regression test): the same agent started on its
+   schedule sends its result to Signal through the automatic delivery queue
+   as before, with no card, and a run started with Run in Agents keeps its
+   behaviour too.
 
 ### Phase B4: Skills
 
