@@ -621,12 +621,15 @@ describe("scheduled run failure text", () => {
   it("keeps the Graph denial for a Graph 403", () => {
     assert.equal(humanizeScheduledRunError(graphAccessDenialText(stored), stored), graphAccessDenialText(stored));
     assert.match(humanizeScheduledRunError("Graph responded with HTTP 403 for https://graph.microsoft.com/v1.0/users: {\"error\":{\"code\":\"Forbidden\"}}"), /Graph access|Microsoft Graph denied access/);
+    assert.match(humanizeScheduledRunError("Graph request failed (https://graph.microsoft.com/v1.0/users): fetch failed"), /Check network or VPN connectivity/);
   });
 
   it("ignores a stored Graph denial for a 403 that did not come from Microsoft Graph", () => {
     for (const error of [
       "Ollama responded with HTTP 403 at http://127.0.0.1:11434/api/chat: Forbidden",
       "MCP server \"tickets\" responded with HTTP 403: forbidden",
+      "Ollama responded with HTTP 403: Graph request failed: unauthorized",
+      "Ollama responded with HTTP 403: Graph request failed: fetch failed",
     ]) {
       const text = humanizeScheduledRunError(error, stored);
       assert.equal(text, error);

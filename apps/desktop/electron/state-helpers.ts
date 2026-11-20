@@ -10,7 +10,8 @@ import {
   AVAILABLE_SERVICES,
   GRAPH_CACHE_LOG_ROW_LIMIT,
   GRAPH_CACHE_LOG_WINDOW_DAYS,
-  graphAccessDenialFromError,
+  errorComesFromGraph,
+  graphAccessDenialFromStoredText,
   graphAccessDenialText,
   SAVED_APP_REGISTRATION_LIMIT,
   servicesForScopes,
@@ -128,12 +129,15 @@ export function humanizeScheduledRunError(message: string, accessDenial?: GraphA
   // Microsoft Graph (a model server, a vendor API, an MCP server) is ignored.
   const storedDenial = storedGraphAccessDenial(accessDenial, raw);
   if (storedDenial) return graphAccessDenialText(storedDenial);
-  const unknownDenial = graphAccessDenialFromError(raw);
+  const unknownDenial = graphAccessDenialFromStoredText(raw);
   if (unknownDenial) return graphAccessDenialText(unknownDenial);
-  if (lower.includes("graph request failed") && lower.includes("fetch failed")) {
+  // Only a message that Graph code wrote gets Graph advice; a provider error
+  // can quote "Graph request failed" in a body it appends.
+  const fromGraph = errorComesFromGraph(raw);
+  if (fromGraph && lower.includes("graph request failed") && lower.includes("fetch failed")) {
     return "Microsoft Graph request failed. Check network or VPN connectivity, then rerun the schedule.";
   }
-  if (lower.includes("graph request failed") && (lower.includes("401") || lower.includes("unauthorized"))) {
+  if (fromGraph && lower.includes("graph request failed") && (lower.includes("401") || lower.includes("unauthorized"))) {
     return "Microsoft Graph rejected the request because the tenant sign-in expired. Reconnect the tenant, then rerun the schedule.";
   }
   if (lower.includes("no active tenant") || lower.includes("tenant required")) {

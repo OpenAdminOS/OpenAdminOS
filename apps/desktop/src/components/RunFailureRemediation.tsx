@@ -2,7 +2,7 @@ import { IconWarning } from "./icons";
 import { Button } from "./Button";
 import { useReportIssue } from "./ReportIssueModal";
 import type { RunRecord } from "../shared/openAdminOS";
-import { graphAccessDenialFromError, storedGraphAccessDenial } from "@openadminos/agent-sdk";
+import { graphAccessDenialFromStoredText, storedGraphAccessDenial } from "@openadminos/agent-sdk";
 
 interface Suggestion {
   match: (error: string) => boolean;
@@ -86,7 +86,9 @@ export function RunFailureRemediation({ run }: { run: RunRecord }) {
   // Only a Graph error gets Graph recovery advice. Runs stored by earlier
   // versions can carry an accessDenial for a 403 from a model server, a
   // vendor API, or an MCP server; that stored value is ignored.
-  const accessDenial = storedGraphAccessDenial(run.accessDenial, run.error) ?? graphAccessDenialFromError(run.error);
+  // A run stored without a denial is read from its message, as Graph code
+  // wrote it before denials were stored.
+  const accessDenial = storedGraphAccessDenial(run.accessDenial, run.error) ?? graphAccessDenialFromStoredText(run.error);
   if (accessDenial) {
     matched.unshift({ match: () => true, title: accessDenial.title, body: `${accessDenial.message} ${accessDenial.recovery}` });
   }
