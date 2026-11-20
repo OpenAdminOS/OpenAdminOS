@@ -354,6 +354,31 @@ describe("local reset: wipe at launch", () => {
     }
   });
 
+  it("reports a progress record it could not write, and each failed step once", async () => {
+    const dir = await tempDir();
+    try {
+      seedDataFolder(dir, { ...MARKER, requestWarnings: [{ item: "Background scheduler", reason: "launchctl failed" }] });
+      writeFileSync(join(dir, `${LOCAL_RESET_MARKER}.tmp`), "{}");
+      const fs: LocalResetFileSystem = {
+        ...failingFileSystem(() => false),
+        writeMarker: () => { throw Object.assign(new Error("EROFS"), { code: "EROFS" }); },
+      };
+      const { run } = recordingRun({ "/usr/bin/security": [keychainNotFound] });
+      const report = runPendingLocalReset({
+        userDataDir: dir, packaged: true, platform: "darwin", home: join(dir, "home"), env: {}, run, fs,
+        removeScheduler: () => { throw new Error("launchd refused it again"); },
+      });
+      assert.equal(report?.status, "completed");
+      assert.deepEqual(report?.warnings, [
+        { item: "Background scheduler", reason: "launchd refused it again" },
+        { item: "Reset progress", reason: "could not be recorded (the disk is read-only). If the reset has to resume, it removes the Keychain item and caches again" },
+      ]);
+      assert.deepEqual(readdirSync(dir).sort(), ["SingletonLock", "policy.json"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("keeps the policy file in any letter case", async () => {
     const dir = await tempDir();
     try {

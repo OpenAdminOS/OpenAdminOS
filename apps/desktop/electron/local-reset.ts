@@ -336,7 +336,7 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
     finishedAt: (options.now?.() ?? new Date()).toISOString(),
     dataFolder: userDataDir,
     failed,
-    warnings,
+    warnings: latestPerItem(warnings),
   });
 
   // A development build cannot carry out the Keychain, scheduler and cache
@@ -365,14 +365,9 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
   if (failed.length > 0) return finish("incomplete");
   // A process left from the last session could have written something since
   // the folder was listed; the reset is done only when nothing but the kept
-  // files is left.
-  try {
-    for (const name of fs.readdir(userDataDir)) {
-      if (!isKeptThroughReset(name)) failed.push({ item: name, reason: "it was created again during the reset" });
-    }
-  } catch (cause) {
-    failed.push({ item: userDataDir, reason: reasonOf(cause) });
-  }
+  // files is left. Checked before the cleanup outside the folder and again
+  // right before the marker goes.
+  checkFolderEmpty(fs, userDataDir, failed);
   if (failed.length > 0) return finish("incomplete");
 
   if (options.packaged && marker.build === "installed") {
@@ -391,6 +386,8 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
     });
   }
 
+  checkFolderEmpty(fs, userDataDir, failed);
+  if (failed.length > 0) return finish("incomplete");
   try {
     fs.remove(join(userDataDir, LOCAL_RESET_MARKER));
   } catch (cause) {
@@ -398,6 +395,31 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
     return finish("incomplete");
   }
   return finish("completed");
+}
+
+function checkFolderEmpty(fs: LocalResetFileSystem, dir: string, failed: LocalResetProblem[]): void {
+  try {
+    for (const name of fs.readdir(dir)) {
+      // The marker's own temporary file is part of the reset, not left data.
+      if (name.toLowerCase() === `${LOCAL_RESET_MARKER}.tmp`) {
+        removeEntry(fs, dir, name, failed);
+        continue;
+      }
+      if (!isKeptThroughReset(name)) failed.push({ item: name, reason: "it was created again during the reset" });
+    }
+  } catch (cause) {
+    failed.push({ item: dir, reason: reasonOf(cause) });
+  }
+}
+
+/** A step tried in the request and again at launch is reported once, with its latest reason. */
+function latestPerItem(problems: readonly LocalResetProblem[]): LocalResetProblem[] {
+  const byItem = new Map<string, LocalResetProblem>();
+  for (const problem of problems) {
+    byItem.delete(problem.item);
+    byItem.set(problem.item, problem);
+  }
+  return [...byItem.values()];
 }
 
 function removeEntry(fs: LocalResetFileSystem, dir: string, name: string, failed: LocalResetProblem[]): void {
