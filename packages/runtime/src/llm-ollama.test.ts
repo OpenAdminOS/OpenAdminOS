@@ -95,6 +95,12 @@ describe("Ollama context size", () => {
     delayOverflowMs?: number;
     /** Called when a request with num_ctx arrives. */
     onRetry?: () => void;
+    /** A request with num_ctx streams one token, then this error. */
+    retryPartialError?: string;
+    /** A request with num_ctx streams one token, then this takes over the response. */
+    retryStallAfterToken?: (res: ServerResponse) => void;
+    /** A request with num_ctx sends a token and the final record in one write. */
+    retryOneWrite?: boolean;
   }) {
     const chats: Array<{ num_ctx?: number }> = [];
     const shows: string[] = [];
@@ -166,6 +172,20 @@ describe("Ollama context size", () => {
         if (numCtx !== undefined && options.retryRedirect) {
           res.writeHead(307, { location: "http://example.com/api/chat" });
           res.end();
+          return;
+        }
+        if (numCtx !== undefined && options.retryPartialError) {
+          res.end(`${JSON.stringify({ model: "m", message: { content: "partial" }, done: false })}\n${JSON.stringify({ error: options.retryPartialError })}\n`);
+          return;
+        }
+        if (numCtx !== undefined && options.retryStallAfterToken) {
+          res.writeHead(200, { "content-type": "application/x-ndjson" });
+          res.write(`${JSON.stringify({ model: "m", message: { content: "partial" }, done: false })}\n`);
+          options.retryStallAfterToken(res);
+          return;
+        }
+        if (numCtx !== undefined && options.retryOneWrite) {
+          res.end(`${JSON.stringify({ model: "m", message: { content: "a" }, done: false })}\n${JSON.stringify({ model: "m", message: { content: "b" }, done: true })}\n`);
           return;
         }
         if (numCtx !== undefined && options.retryStreamError) {
@@ -574,6 +594,65 @@ describe("Ollama context size", () => {
       }
     });
   }
+
+  it("drops the kept context when Ollama runs out of memory after the answer started", async () => {
+    const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384 });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "kept-partial" });
+      await llm.complete({ prompt: "big" });
+      fake.options.retryPartialError = "ggml_vulkan: Device memory allocation failed: VK_ERROR_OUT_OF_DEVICE_MEMORY";
+      await assert.rejects(
+        llm.complete({ prompt: "big" }),
+        /^Error: Ollama failed partway through an answer from kept-partial with the 45,056 token context size kept from an earlier request, usually because free memory ran out\./,
+      );
+      fake.options.retryPartialError = undefined;
+      fake.options.limit = () => 65536;
+      await llm.complete({ prompt: "big" });
+      assert.deepEqual(fake.chats.at(-1), {});
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("names the retry when the retry stalls after its first token", async () => {
+    const open: ServerResponse[] = [];
+    const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384, retryStallAfterToken: (res) => open.push(res) });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "stall-retry", timeoutMs: 150 });
+      await assert.rejects(
+        llm.complete({ prompt: "big" }),
+        /^Error: Ollama timed out after 150ms at http:\/\/127\.0\.0\.1:\d+\/api\/chat on the retry with a 45,056 token context\.$/,
+      );
+    } finally {
+      for (const res of open) res.destroy();
+      await fake.close();
+    }
+  });
+
+  it("stops before a buffered final record and does not keep the raised context", async () => {
+    const stop = new AbortController();
+    const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384, retryOneWrite: true });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "stop-buffered" });
+      const seen: string[] = [];
+      await assert.rejects(
+        (async () => {
+          for await (const chunk of llm.stream({ prompt: "big", signal: stop.signal })) {
+            seen.push(chunk.delta);
+            stop.abort();
+          }
+        })(),
+        /^Error: Ollama request stopped by user\.$/,
+      );
+      assert.deepEqual(seen, ["a"]);
+      fake.options.retryOneWrite = false;
+      fake.options.limit = () => 65536;
+      await llm.complete({ prompt: "big" });
+      assert.deepEqual(fake.chats.at(-1), {});
+    } finally {
+      await fake.close();
+    }
+  });
 
   it("drops the kept context when a request that sends it overflows and the retry fails", async () => {
     const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384 });

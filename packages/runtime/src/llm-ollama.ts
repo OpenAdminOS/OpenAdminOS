@@ -257,7 +257,14 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
 
       try {
         while (true) {
-          const { value, done } = await reader.read();
+          let read: Awaited<ReturnType<typeof reader.read>>;
+          try {
+            read = await reader.read();
+          } catch (error) {
+            // A stop or the deadline mid-stream keeps its own message.
+            throw abortError() ?? error;
+          }
+          const { value, done } = read;
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
 
@@ -265,6 +272,10 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           buffer = lines.pop() ?? "";
 
           for (const line of lines) {
+            // A stop while the caller handled the last chunk ends the stream
+            // before records that were already buffered.
+            const stopped = abortError();
+            if (stopped) throw stopped;
             const trimmed = line.trim();
             if (trimmed.length === 0) continue;
             let chunk: OllamaChatChunk;
@@ -277,11 +288,13 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
               // Ollama can accept the retry and then fail to load the model
               // with the larger context.
               const text = errorText(chunk.error);
-              if (accumulated.length === 0 && isOllamaMemoryError(text)) {
-                if (retry) throw new Error(contextMemoryMessage(model, retry.requested, retry.numCtx, text));
+              if (isOllamaMemoryError(text)) {
+                if (retry && accumulated.length === 0) {
+                  throw new Error(contextMemoryMessage(model, retry.requested, retry.numCtx, text));
+                }
                 if (cachedCtx !== undefined) {
                   forgetCachedCtx();
-                  throw new Error(cachedContextMemoryMessage(model, cachedCtx, text));
+                  throw new Error(cachedContextMemoryMessage(model, cachedCtx, text, accumulated.length > 0));
                 }
               }
               throw new Error(`Ollama error: ${chunk.error}`);
@@ -627,8 +640,9 @@ function contextMemoryMessage(model: string, requested: number, numCtx: number, 
   return `Ollama context size too small: This request needs ${requested.toLocaleString("en-US")} tokens of context, but Ollama could not load ${model} with ${numCtx.toLocaleString("en-US")}, usually because free memory ran out. Ollama said: ${truncate(detail, 200)}`;
 }
 
-function cachedContextMemoryMessage(model: string, numCtx: number, detail: string): string {
-  return `Ollama could not load ${model} with the ${formatTokens(numCtx)} token context size kept from an earlier request, usually because free memory ran out. The next request starts from Ollama's default context size. Ollama said: ${truncate(detail, 200)}`;
+function cachedContextMemoryMessage(model: string, numCtx: number, detail: string, answering = false): string {
+  const failed = answering ? "failed partway through an answer from" : "could not load";
+  return `Ollama ${failed} ${model} with the ${formatTokens(numCtx)} token context size kept from an earlier request, usually because free memory ran out. The next request starts from Ollama's default context size. Ollama said: ${truncate(detail, 200)}`;
 }
 
 function formatTokens(value: number): string {
