@@ -9,6 +9,7 @@ import {
   localResetDataFolderLinkMessage,
   localResetLinkCheck,
   MANAGED_POLICY_FILE,
+  policyLinkProblem,
   readLocalResetMarker,
   requestLocalReset,
   runPendingLocalReset,
@@ -5062,7 +5063,7 @@ function armMainWindowRevealFallback(window: BrowserWindow, show: boolean): void
 
 let officeWindowMode: ReturnType<typeof officeFullscreen> | undefined;
 
-async function createWindow({ show = true, route }: { show?: boolean; route?: string } = {}) {
+async function createWindow({ show = true, route, persistState = true }: { show?: boolean; route?: string; persistState?: boolean } = {}) {
   const persisted = await loadWindowState();
   const initialThemeColors =
     NATIVE_THEME_COLORS[nativeTheme.shouldUseDarkColors ? "dark" : "light"];
@@ -5135,7 +5136,7 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
 
   officeWindowMode = officeFullscreen(mainWindow);
 
-  if (!isScreenshotCaptureLaunch) {
+  if (!isScreenshotCaptureLaunch && persistState) {
     attachWindowStatePersistence(mainWindow);
   }
 
@@ -5385,7 +5386,10 @@ function showNoticeBeforeReady(title: string, text: string): void {
   ];
   for (const [tool, args] of tools) {
     const result = spawnSync(tool, args, { stdio: "ignore", timeout: 600_000 });
-    if (!result.error) return;
+    // Shown and closed. A dialog left open past the bound was shown too, so
+    // no second one follows; a missing tool or no display tries the next.
+    if (result.status === 0) return;
+    if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT") return;
   }
 }
 
@@ -5573,6 +5577,8 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
         if (localResetLinkCheck(app.getPath("userData")).dataFolderIsLink) {
           throw new LocalResetRequestError(localResetDataFolderLinkMessage());
         }
+        const policyProblem = policyLinkProblem(app.getPath("userData"));
+        if (policyProblem) throw new LocalResetRequestError(`The reset could not start: ${policyProblem}. Nothing was removed.`);
         const blocker = await store.beginLocalReset();
         if (blocker) throw new LocalResetRequestError(blocker);
       },
@@ -7279,6 +7285,8 @@ if (!gotLock) {
       localResetRecoveryProfile = mkdtempSync(join(tmpdir(), "openadminos-reset-recovery-"));
       app.setPath("userData", localResetRecoveryProfile);
       app.on("will-quit", removeLocalResetRecoveryProfile);
+      // app.exit skips will-quit; the process exit event covers every way out.
+      process.once("exit", removeLocalResetRecoveryProfile);
     } catch (error) {
       removeLocalResetRecoveryProfile();
       // Without its own profile the window would write into the folder the
@@ -7365,7 +7373,8 @@ if (!gotLock) {
       installSecurityGuards();
       // Nothing else runs in this mode, so closing the window quits, on macOS too.
       app.on("window-all-closed", () => app.quit());
-      void createWindow({ show: true, route: LOCAL_RESET_INCOMPLETE_ROUTE });
+      // No window state is saved: the temporary profile is removed on the way out.
+      void createWindow({ show: true, route: LOCAL_RESET_INCOMPLETE_ROUTE, persistState: false });
       return;
     }
     if (localResetReport?.status === "completed") finishLocalResetAfterReady(localResetReport);
