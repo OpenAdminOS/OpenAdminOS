@@ -19,9 +19,9 @@ Reviews app registrations for stale experiments, risky exposure, credentials, an
 | Category | `apps` |
 | Required Entra tier | `free` |
 | Preferred model | `llama3.1:8b` |
-| Minimum app version | `0.7.3` |
+| Minimum app version | `0.7.3-nightly.20261120040000` |
 | Author | OpenAdminOS · verified |
-| Last changed | 2026-11-19 · `aaff3750` |
+| Last changed | 2026-11-19 · `43c4add2` |
 
 ## Execution
 
