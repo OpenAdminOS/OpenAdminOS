@@ -587,11 +587,11 @@ test("Conditional Access references and delegated permissions distinguish identi
       locations: { includeLocations: [...ids, "All"], excludeLocations: ["AllTrusted", ...ids] },
       users: { includeRoles: ids, excludeRoles: ids },
     },
-    grantControls: { builtInControls: ["mfa"] },
+    grantControls: { builtInControls: ["mfa"], termsOfUse: [ids[0]], customAuthenticationFactors: [ids[1]] },
   };
   const classified = classifyData(data, { graphPath });
   assert.deepEqual(Object.values(classified.securityMaskRoles).sort(), [
-    ...Array(8).fill("nameOrIdentifier"), ...Array(3).fill("setting"),
+    ...Array(10).fill("nameOrIdentifier"), ...Array(3).fill("setting"),
   ]);
   const ledger = new ClassificationLedger();
   ledger.register("graph:policies", data, { graphPath });
@@ -599,7 +599,7 @@ test("Conditional Access references and delegated permissions distinguish identi
     const { spans } = ledger.classifyRequest({ prompt });
     for (const value of [...ids, "All", "AllTrusted", "mfa"]) {
       const matches = spans.filter(span => prompt.slice(span.start, span.end) === value);
-      assert.equal(matches.length, ids.includes(value) ? 4 : 1);
+      assert.equal(matches.length, ids.includes(value) ? 5 : 1);
       assert.ok(matches.every(span => span.kind === "security" && span.maskRole === (ids.includes(value) ? "nameOrIdentifier" : "setting")));
     }
   }

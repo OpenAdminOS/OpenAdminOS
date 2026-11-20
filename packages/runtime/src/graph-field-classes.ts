@@ -3,7 +3,7 @@ import type { DataClass } from "@openadminos/agent-sdk";
 // Source: docs/research/graph-field-classes.md and the decisions in docs/SPEC.md.
 // [] matches an array element. * matches one property in a keyed object.
 // Mapped containers set an inherited class. Unknown branches start at the resource default.
-export const GRAPH_FIELD_CLASSES_VERSION = 4;
+export const GRAPH_FIELD_CLASSES_VERSION = 5;
 
 /** Equivalent paths in the bundled Graph index, with route parameters normalized by the classifier. */
 export const GRAPH_ROUTE_ALIASES = {
@@ -36,7 +36,7 @@ export const GRAPH_ROUTE_ALIASES = {
 const SECURITY_MASK_NAMES = /^(?:name|id|.*(?:Name|Id|Ids)|.*ConsentDescription|description|cidrAddress|rolePermissions|permissionGrantPolicyIdsAssignedToDefaultUserRole)$/i;
 const SECURITY_PERMISSION_NAMES = /\/(?:(?:approles|oauth2permissionscopes)\/\[\]\/value|oauth2permissiongrants\/\[\]\/scope)$/;
 const SECURITY_LOCATION_RANGES = /\/ipranges\//;
-const CONDITIONAL_ACCESS_IDENTIFIERS = /^\/conditions\/(?:locations\/(?:include|exclude)locations|users\/(?:include|exclude)roles)\/\[\]$/;
+const CONDITIONAL_ACCESS_IDENTIFIERS = /^\/(?:conditions\/(?:locations\/(?:include|exclude)locations|users\/(?:include|exclude)roles)|grantcontrols\/(?:termsofuse|customauthenticationfactors))\/\[\]$/;
 const GRAPH_GUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
 export function graphSecurityMaskRole(field: string, path: string, route: string, value: unknown): SecurityMaskRole {
