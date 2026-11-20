@@ -12,6 +12,12 @@ interface Suggestion {
 }
 
 /**
+ * The app's own text of an error. What Ollama said, quoted after "Ollama said:",
+ * can contain words such as "context limit" or "invalid" that would pick an unrelated playbook.
+ */
+const ownText = (e: string) => e.split("Ollama said:")[0] ?? e;
+
+/**
  * A failed lookup of the model's context limit has its own playbook only.
  * The runtime names the lookup URL followed by a final ".", by ": " or by " answered ", so an
  * endpoint prefix such as `/api/showroom` or `/api/show.v1` in front of `/api/chat` is not read as the lookup.
@@ -114,11 +120,15 @@ export function RunFailureRemediation({ run }: { run: RunRecord }) {
   // A failed lookup of the Ollama model's context limit and an LM Studio
   // context error each have one cause and one recovery; an HTTP status or a
   // number in their text (for example 403) is not a Graph denial.
-  const exclusive = EXCLUSIVE.find((match) => match(run.error!));
+  const own = ownText(run.error);
+  const exclusive = EXCLUSIVE.find((match) => match(own));
   const matched = exclusive
     ? SUGGESTIONS.filter((suggestion) => suggestion.match === exclusive)
-    : SUGGESTIONS.filter((suggestion) => suggestion.match(run.error!));
-  const accessDenial = exclusive ? undefined : run.accessDenial ?? graphAccessDenialFromError(run.error);
+    : SUGGESTIONS.filter((suggestion) => suggestion.match(own));
+  // A failure that quotes Ollama is never a Graph denial; a run saved by an
+  // older build can carry one read from that quote (for example "403 MiB").
+  const quotesOllama = own !== run.error && /^Ollama /.test(run.error);
+  const accessDenial = exclusive || quotesOllama ? undefined : run.accessDenial ?? graphAccessDenialFromError(own);
   if (accessDenial) {
     matched.unshift({ match: () => true, title: accessDenial.title, body: `${accessDenial.message} ${accessDenial.recovery}` });
   }

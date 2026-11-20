@@ -45,9 +45,23 @@ const OLLAMA_SHOW_TIMEOUT_MS = 5000;
 /**
  * The context size this app raised for a model, keyed by endpoint and model.
  * Later requests keep sending it so Ollama does not reload the model with
- * its smaller default between turns.
+ * its smaller default between turns. It is dropped when a request that sends
+ * it fails with a context overflow or an out-of-memory error.
  */
+// TODO(ugur): Should small requests keep sending the raised size (no model
+// reload between turns, but the larger context keeps its memory until the
+// app restarts), or go back to Ollama's default (saves memory, but the next
+// large request reloads the model and retries)? SPEC.md is silent, so the
+// raised size is kept for every later request.
 const ollamaContextOverrides = new Map<string, number>();
+
+/**
+ * How often a context size failed, keyed by endpoint, model and size. A retry
+ * keeps its size only if that size has not failed since the retry started, so
+ * a retry that finishes late cannot bring back a size a newer request saw fail.
+ */
+const ollamaContextFailures = new Map<string, number>();
+const contextFailureKey = (cacheKey: string, size: number) => `${cacheKey}\0${size}`;
 
 export interface OllamaEndpointTrust {
   endpoint: string;
@@ -90,14 +104,23 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         throw new Error("No Ollama model available. Pull a model with `ollama pull <model>`.");
       }
 
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      // Each request to /api/chat gets its own controller and timeout, so a
+      // retry is not charged for the time the first request and the model
+      // lookup took. A stop from the caller aborts whichever one is running.
+      let controller = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      // How a timeout message names the request that timed out.
+      let attemptLabel = "";
+      const startAttempt = (label: string) => {
+        clearTimeout(timer);
+        const current = new AbortController();
+        controller = current;
+        attemptLabel = label;
+        if (opts.signal?.aborted) current.abort();
+        else timer = setTimeout(() => current.abort(), timeoutMs);
+      };
       const abortFromCaller = () => controller.abort();
-      if (opts.signal?.aborted) {
-        controller.abort();
-      } else {
-        opts.signal?.addEventListener("abort", abortFromCaller, { once: true });
-      }
+      opts.signal?.addEventListener("abort", abortFromCaller, { once: true });
       const url = `${endpoint.replace(/\/$/, "")}/api/chat`;
 
       const messages: { role: string; content: string }[] = [];
@@ -156,50 +179,103 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           throw abortError() ?? new Error(`Ollama not reachable at ${url}: ${describe(error)}`);
         }
       };
-      const abortError = (activeUrl = url): Error | undefined => {
+      const stoppedByUser = () => new Error("Ollama request stopped by user.");
+      const abortError = (): Error | undefined => {
         if (!controller.signal.aborted) return undefined;
         return opts.signal?.aborted
-          ? new Error("Ollama request stopped by user.")
-          : new Error(`Ollama timed out after ${timeoutMs}ms at ${activeUrl}.`);
+          ? stoppedByUser()
+          : new Error(`Ollama timed out after ${timeoutMs}ms at ${url}${attemptLabel}.`);
       };
 
       let response: Response;
       let raisedCtx: number | undefined;
       // Set while the retry runs, so a memory failure can name both sizes.
       let retry: { requested: number; numCtx: number } | undefined;
+      let modelMax: number | undefined;
+      const cachedCtx = ollamaContextOverrides.get(cacheKey);
+      /**
+       * Forgets a size the attempt that just failed sent. A failure is
+       * evidence only about the size that attempt asked for, at the moment it
+       * failed, so it never touches another size, and it forgets this size
+       * even when a concurrent request has kept it since.
+       */
+      const forgetSize = (size: number | undefined) => {
+        if (size === undefined) return;
+        const failureKey = contextFailureKey(cacheKey, size);
+        ollamaContextFailures.set(failureKey, (ollamaContextFailures.get(failureKey) ?? 0) + 1);
+        if (ollamaContextOverrides.get(cacheKey) === size) ollamaContextOverrides.delete(cacheKey);
+      };
+      // The failure count of the retry's size when the retry started.
+      let retryFailuresAtStart = 0;
+      /**
+       * A failure, from an HTTP answer or the stream, that shows the context
+       * the running attempt sent did not fit or could not be loaded. Forgets
+       * that size and returns the message; undefined for other failures.
+       */
+      const contextFailure = (text: string, answering: boolean): Error | undefined => {
+        const counted = parseContextOverflow(text);
+        const memory = isOllamaMemoryError(text);
+        if (!counted && !memory && !isOllamaPromptTooLong(text)) return undefined;
+        // Ollama still giving all of the size this attempt sent means the
+        // prompt outgrew it (Ollama can reject a prompt that exactly fills
+        // the context), not that memory ran out; that size stays.
+        const sent = retry ? retry.numCtx : cachedCtx;
+        const sentSizeGiven = counted !== undefined && sent !== undefined && counted.available >= sent;
+        if (!sentSizeGiven) forgetSize(sent);
+        if (memory) {
+          if (retry) {
+            return new Error(
+              answering
+                ? `Ollama failed partway through an answer from ${model} on the retry with a ${formatTokens(retry.numCtx)} token context size, usually because free memory ran out. Ollama said: ${truncate(text, 200)}`
+                : contextMemoryMessage(model, retry.requested, retry.numCtx, text),
+            );
+          }
+          if (cachedCtx !== undefined) return new Error(cachedContextMemoryMessage(model, cachedCtx, text, answering));
+          return undefined;
+        }
+        if (counted) {
+          const atModelLimit = modelMax !== undefined && counted.available >= modelMax;
+          if (!atModelLimit && sent !== undefined && counted.available >= sent) {
+            // Ollama gave all the context asked for; the request outgrew it.
+            return new Error(`Ollama context size too small: This request needs ${formatTokens(counted.requested)} tokens of context and did not fit in the ${formatTokens(counted.available)} Ollama loaded for ${model}.`);
+          }
+          return new Error(contextTooSmallMessage(model, counted.requested, counted.available, atModelLimit));
+        }
+        return new Error(notFitMessage(model, retry ? { size: retry.numCtx, kept: false } : cachedCtx !== undefined ? { size: cachedCtx, kept: true } : undefined, text));
+      };
       try {
-        let numCtx = ollamaContextOverrides.get(cacheKey);
+        let numCtx = cachedCtx;
 
+        startAttempt(cachedCtx === undefined ? "" : ` with the ${formatTokens(cachedCtx)} token context kept from an earlier request`);
         response = await send(numCtx);
         let detail = await errorDetail(response);
         const overflow = response.status === 400 ? parseContextOverflow(detail) : undefined;
         if (overflow) {
+          // Less room than the kept size asked for means Ollama can no longer
+          // give it. Otherwise the prompt grew and the kept size stays.
+          if (cachedCtx !== undefined && overflow.available < cachedCtx) forgetSize(cachedCtx);
+          // The first request's budget ends here; the lookup has its own.
+          clearTimeout(timer);
           // Ollama sizes the context from its own default and free memory,
           // not from the model's limit. Ask for enough room for this prompt
           // plus the answer, up to what the model supports, and retry once.
-          const modelMax = await readOllamaContextLength(endpoint, model, controller.signal, lookupTimeoutMs);
-          // A stop or the overall deadline during the lookup names the lookup.
-          const stopped = abortError(`${endpoint.replace(/\/$/, "")}/api/show`);
-          if (stopped) throw stopped;
+          modelMax = await readOllamaContextLength(endpoint, model, opts.signal ?? new AbortController().signal, lookupTimeoutMs);
+          if (opts.signal?.aborted) throw stoppedByUser();
           const wanted = roundUp(overflow.requested + (opts.maxTokens ?? OLLAMA_ANSWER_RESERVE_TOKENS), 1024);
           if (modelMax !== undefined && overflow.requested > modelMax) {
             throw new Error(contextTooSmallMessage(model, overflow.requested, modelMax, true));
           }
           numCtx = modelMax === undefined ? wanted : Math.min(wanted, modelMax);
           retry = { requested: overflow.requested, numCtx };
+          retryFailuresAtStart = ollamaContextFailures.get(contextFailureKey(cacheKey, numCtx)) ?? 0;
+          startAttempt(` on the retry with a ${formatTokens(numCtx)} token context`);
           response = await send(numCtx);
           detail = await errorDetail(response);
-          const retryOverflow = response.status === 400 ? parseContextOverflow(detail) : undefined;
-          if (retryOverflow) {
-            const atModelLimit = modelMax !== undefined && retryOverflow.available >= modelMax;
-            throw new Error(contextTooSmallMessage(model, retryOverflow.requested, retryOverflow.available, atModelLimit));
-          }
-          if (!response.ok && isOllamaMemoryError(detail)) {
-            throw new Error(contextMemoryMessage(model, overflow.requested, numCtx, detail));
-          }
           if (response.ok) raisedCtx = numCtx;
         }
         if (!response.ok) {
+          const failed = contextFailure(detail, false);
+          if (failed) throw failed;
           if (response.status === 404 && detail.toLowerCase().includes("model")) {
             throw new Error(
               `Ollama model "${model}" is not pulled. Run \`ollama pull ${model}\`.`,
@@ -232,7 +308,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           try {
             read = await reader.read();
           } catch (error) {
-            // A stop or the overall deadline mid-stream keeps its own message.
+            // A stop or the deadline mid-stream keeps its own message.
             throw abortError() ?? error;
           }
           const { value, done } = read;
@@ -243,6 +319,10 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           buffer = lines.pop() ?? "";
 
           for (const line of lines) {
+            // A stop while the caller handled the last chunk ends the stream
+            // before records that were already buffered.
+            const stopped = abortError();
+            if (stopped) throw stopped;
             const trimmed = line.trim();
             if (trimmed.length === 0) continue;
             let chunk: OllamaChatChunk;
@@ -252,14 +332,15 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
               continue;
             }
             if (chunk.error) {
-              // Ollama can accept the retry and then fail to load the model
-              // with the larger context.
-              if (retry && accumulated.length === 0 && isOllamaMemoryError(errorText(chunk.error))) {
-                throw new Error(contextMemoryMessage(model, retry.requested, retry.numCtx, errorText(chunk.error)));
-              }
-              throw new Error(`Ollama error: ${chunk.error}`);
+              // Ollama can accept a request and then fail to load the model
+              // with its context, or run out of room or memory mid-answer.
+              throw contextFailure(errorText(chunk.error), accumulated.length > 0) ?? new Error(`Ollama error: ${chunk.error}`);
             }
-            if (chunk.done && raisedCtx !== undefined) {
+            if (
+              chunk.done &&
+              raisedCtx !== undefined &&
+              (ollamaContextFailures.get(contextFailureKey(cacheKey, raisedCtx)) ?? 0) === retryFailuresAtStart
+            ) {
               // Kept only once the stream finished cleanly, and before the
               // caller sees the last chunk and may stop reading. Concurrent
               // requests can raise it at once; keep the largest that worked.
@@ -591,6 +672,11 @@ const OLLAMA_MEMORY_ERRORS = [
   "unable to load full model",
 ];
 
+/** Ollama's overflow message without token counts (llm/llama_server.go promptTooLongMessage). */
+function isOllamaPromptTooLong(detail: string): boolean {
+  return detail.toLowerCase().includes("the prompt is longer than the context length currently available");
+}
+
 function isOllamaMemoryError(detail: string): boolean {
   const lower = detail.toLowerCase();
   return OLLAMA_MEMORY_ERRORS.some((text) => lower.includes(text));
@@ -598,6 +684,24 @@ function isOllamaMemoryError(detail: string): boolean {
 
 function contextMemoryMessage(model: string, requested: number, numCtx: number, detail: string): string {
   return `Ollama context size too small: This request needs ${requested.toLocaleString("en-US")} tokens of context, but Ollama could not load ${model} with ${numCtx.toLocaleString("en-US")}, usually because free memory ran out. Ollama said: ${truncate(detail, 200)}`;
+}
+
+function cachedContextMemoryMessage(model: string, numCtx: number, detail: string, answering = false): string {
+  const failed = answering ? "failed partway through an answer from" : "could not load";
+  return `Ollama ${failed} ${model} with the ${formatTokens(numCtx)} token context size kept from an earlier request, usually because free memory ran out. Ollama said: ${truncate(detail, 200)}`;
+}
+
+function notFitMessage(model: string, sent: { size: number; kept: boolean } | undefined, detail: string): string {
+  const where = sent === undefined
+    ? `the context Ollama loaded for ${model}`
+    : sent.kept
+      ? `the ${formatTokens(sent.size)} token context kept from an earlier request`
+      : `the ${formatTokens(sent.size)} token context of the retry`;
+  return `Ollama context size too small: This request did not fit in ${where}. Ollama said: ${truncate(detail, 200)}`;
+}
+
+function formatTokens(value: number): string {
+  return value.toLocaleString("en-US");
 }
 
 function contextTooSmallMessage(model: string, requested: number, limit: number, modelLimit: boolean): string {

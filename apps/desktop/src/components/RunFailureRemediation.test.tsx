@@ -109,6 +109,67 @@ it("treats the overall deadline during the context limit lookup as a lookup fail
   expect(screen.queryByText("Request timed out")).not.toBeInTheDocument();
 });
 
+it.each([
+  "Ollama timed out after 180000ms at http://127.0.0.1:11434/api/chat on the retry with a 45,056 token context.",
+  "Ollama timed out after 180000ms at http://127.0.0.1:11434/api/chat with the 45,056 token context kept from an earlier request.",
+])("gives a timed out request with a raised context the generation timeout playbook: %s", (error) => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama generation timed out")).toBeInTheDocument();
+  expect(screen.queryByText("Ollama context too small")).not.toBeInTheDocument();
+  expect(screen.queryByText("Ollama did not report the model's context limit")).not.toBeInTheDocument();
+});
+
+it("does not read a context limit in what Ollama said as a failed lookup", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. The next request starts from Ollama's default context size. Ollama said: out of memory at the requested context limit" };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama context too small")).toBeInTheDocument();
+  expect(screen.queryByText("Ollama did not report the model's context limit")).not.toBeInTheDocument();
+});
+
+it("does not read a 403 in what Ollama said as a Graph denial", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. The next request starts from Ollama's default context size. Ollama said: cudaMalloc failed: out of memory (403 MiB)" };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama context too small")).toBeInTheDocument();
+  expect(screen.queryByText(/Graph/)).not.toBeInTheDocument();
+});
+
+it("ignores a Graph denial an older build saved from what Ollama said", () => {
+  const run: RunRecord = {
+    id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [],
+    error: "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. The next request starts from Ollama's default context size. Ollama said: cudaMalloc failed: out of memory (403 MiB)",
+    accessDenial: classifyGraphAccessDenied({}),
+  };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama context too small")).toBeInTheDocument();
+  expect(screen.queryByText(classifyGraphAccessDenied({}).title)).not.toBeInTheDocument();
+});
+
+it("keeps a stored Graph denial whose error only mentions the Ollama marker", () => {
+  const denial = classifyGraphAccessDenied({});
+  const run: RunRecord = {
+    id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [],
+    error: "Graph responded with HTTP 403 for GET /users: Ollama said: denied",
+    accessDenial: denial,
+  };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText(denial.title)).toBeInTheDocument();
+});
+
+it("does not pick a playbook from words in what Ollama said", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. The next request starts from Ollama's default context size. Ollama said: CUDA allocation failed: invalid argument" };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama context too small")).toBeInTheDocument();
+  expect(screen.queryByText("Manifest validation failed")).not.toBeInTheDocument();
+});
+
+it("gives a memory failure with the kept context the context playbook", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. The next request starts from Ollama's default context size. Ollama said: model requires more system memory (24.1 GiB) than is available (12.0 GiB)" };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama context too small")).toBeInTheDocument();
+  expect(screen.queryByText("Ollama generation timed out")).not.toBeInTheDocument();
+});
+
 it("gives the overall deadline during a streaming answer the Ollama generation playbook", () => {
   const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama timed out after 180000ms at http://127.0.0.1:11434/api/chat." };
   render(<RunFailureRemediation run={run} />);
