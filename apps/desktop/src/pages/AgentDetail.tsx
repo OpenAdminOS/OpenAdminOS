@@ -10,7 +10,7 @@ import { InvalidAgentNotice } from "../components/InvalidAgentNotice";
 import { AGENT_COPY, PROVIDER_TOOL_NAMES, modelTrustNote, promptsGoTo, providerDataLocationDetail } from "../copy";
 import { MODEL_FIT_COPY } from "../copy/model-fit";
 import { modelFitModelName } from "../components/ModelFitNotice";
-import { isListedHostedModel, isPlaceholderModel } from "../shared/model-fit";
+import { hostedModelFitModel, isListedHostedModel, isPlaceholderModel } from "../shared/model-fit";
 import {
   DeclaredGraphOperations,
   ManifestPreview,
@@ -195,12 +195,18 @@ export default function AgentDetail({
   const pendingProvider = state.providers.find(
     (provider) => provider.id === pendingProviderId,
   );
-  const pendingModel = resolveRunModel({
-    provider: pendingProvider,
-    activeModelByProviderId: state.activeModelByProviderId,
-    preferredModel: agent?.preferredModel,
-    explicitModel: pendingRunChoice?.model,
-  }).model;
+  // A model fit rerun on a hosted provider with no model named (a provider picked in setup) uses the
+  // model Chat and the run page would offer for it, so the review, the choices and the host agree.
+  const pendingFitLike = Boolean(pendingRunChoice?.modelFit || pendingRunChoice?.safeguards);
+  const pendingModel =
+    pendingFitLike && !pendingRunChoice?.model && pendingProvider && !pendingProvider.isLocal
+      ? hostedModelFitModel(pendingProvider, state.activeModelByProviderId)
+      : resolveRunModel({
+          provider: pendingProvider,
+          activeModelByProviderId: state.activeModelByProviderId,
+          preferredModel: agent?.preferredModel,
+          explicitModel: pendingRunChoice?.model,
+        }).model;
 
   const handleUninstallAgent = async () => {
     if (!agent || uninstalling) return;

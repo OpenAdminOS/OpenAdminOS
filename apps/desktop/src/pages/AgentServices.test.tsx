@@ -535,6 +535,32 @@ it("does not start a model fit rerun whose named model the provider no longer li
   expect(bridge.startRun).not.toHaveBeenCalled();
 });
 
+it("starts a resumed model fit rerun on a listed model when the provider's default is not listed", async () => {
+  const user = userEvent.setup();
+  const agent = createMockAgent({ id: "devices", slug: "devices", name: "Inactive devices", mode: "read", scopes: ["DeviceManagementManagedDevices.Read.All"], services: ["intune"] });
+  // Codex's configured default is a model it does not list, and no model is pinned for it.
+  const providers = mockProviders.map((provider) => (provider.id === "openai" ? { ...provider, models: ["gpt-5"], defaultModel: "gpt-from-config" } : provider));
+  const state = createMockAppState({ installedAgents: [agent], activeProviderId: "ollama", providers, activeModelByProviderId: {} });
+  const intent = {
+    kind: "agent-run", slug: "devices", tenantId: state.activeTenantId, providerId: "openai",
+    modelFit: { reason: "context-too-small", providerId: "ollama", model: "llama3.1" },
+    returnTo: "/agents/devices", createdAt: new Date().toISOString(),
+  };
+  const bridge = makeMockBridge({}, state);
+  renderRoute(
+    <Routes>
+      <Route path="/start" element={<Navigate to="/agents/devices" state={{ resumePendingIntent: intent }} />} />
+      <Route path="/agents/:slug" element={<Agents />} />
+    </Routes>,
+    { path: "*", route: "/start", bridge },
+  );
+  const dialog = await screen.findByRole("dialog", { name: /Review run/ });
+  const start = within(dialog).getByRole("button", { name: "Start run" });
+  await waitFor(() => expect(start).toBeEnabled());
+  await user.click(start);
+  await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith("devices", expect.objectContaining({ providerId: "openai", model: "gpt-5" })));
+});
+
 it("does not start a model fit rerun on a hosted provider that reports no model", async () => {
   const agent = createMockAgent({ id: "devices", slug: "devices", name: "Inactive devices", mode: "read", scopes: ["DeviceManagementManagedDevices.Read.All"], services: ["intune"] });
   // Codex without its model cache: no listed models, though its config may still name a default.
