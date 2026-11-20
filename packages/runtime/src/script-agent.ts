@@ -21,6 +21,7 @@ import type {
   SandboxBrokerRequest,
   SandboxBrokerResponse,
 } from "@openadminos/agent-sdk";
+import { ContextTooSmallError } from "@openadminos/agent-sdk";
 
 import { agentTemplateToRegistrySummary } from "./agent-template.js";
 import {
@@ -180,6 +181,10 @@ async function runScriptAgent(
         }
 
         if (sandboxResult.exitCode !== 0) {
+          // A script that stopped because its model request did not fit
+          // fails with the typed reason, not with its own stack trace.
+          const tooLarge = broker.getContextFailure();
+          if (tooLarge) throw new ContextTooSmallError(tooLarge);
           const detail = sandboxResult.stderr.trim() || `exit code ${sandboxResult.exitCode}`;
           throw new Error(
             `MXC script agent "${manifest.descriptor.id}" failed: ${truncate(detail, 600)}`,

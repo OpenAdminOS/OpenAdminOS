@@ -83,7 +83,25 @@ describe("compactConditionalAccessPolicy", () => {
     });
   });
 
-  it("survives malformed input", () => {
+  it("keeps the grant operator whenever a policy has more than one requirement", () => {
+    const policy = (operator: string) => compactConditionalAccessPolicy({
+      displayName: "MFA or terms", state: "enabled",
+      grantControls: { operator, builtInControls: ["mfa"], termsOfUse: ["t1"], customAuthenticationFactors: [] },
+    }, NOW);
+    assert.deepEqual(policy("OR").grant, { operator: "OR", controls: ["mfa"], termsOfUse: 1 });
+    assert.deepEqual(policy("AND").grant, { operator: "AND", controls: ["mfa"], termsOfUse: 1 });
+    const strength = compactConditionalAccessPolicy({
+      displayName: "Strength or compliant", state: "enabled",
+      grantControls: { operator: "OR", builtInControls: ["compliantDevice"], authenticationStrength: { displayName: "Multifactor authentication" } },
+    }, NOW);
+    assert.equal(strength.grant && (strength.grant as { operator?: string }).operator, "OR");
+    const single = compactConditionalAccessPolicy({
+      displayName: "Block", state: "enabled", grantControls: { operator: "OR", builtInControls: ["block"] },
+    }, NOW);
+    assert.deepEqual(single.grant, { controls: ["block"] });
+  });
+
+    it("survives malformed input", () => {
     assert.deepEqual(compactConditionalAccessPolicy(null, NOW), { name: "(unnamed policy)", state: "unknown", users: { include: {} } });
   });
 });
@@ -99,9 +117,14 @@ describe("counts and top template filters", () => {
   });
 
   it("keeps the largest buckets and sums the rest", () => {
-    assert.deepEqual(renderTemplate("{{ tally | top(2) }}", ctx), { b: 9, a: 5, "(other 2 values)": 4 });
+    assert.deepEqual(renderTemplate("{{ tally | top(2) }}", ctx), { top: { b: 9, a: 5 }, otherValues: 2, otherCount: 4 });
     assert.deepEqual(renderTemplate("{{ tally | top(10) }}", ctx), { b: 9, a: 5, d: 3, c: 1 });
-    assert.deepEqual(renderTemplate("{{ grouped | top(1) }}", ctx), { Windows: 3, "(other 2 values)": 1 });
+    assert.deepEqual(renderTemplate("{{ grouped | top(1) }}", ctx), { top: { Windows: 3 }, otherValues: 2, otherCount: 1 });
+  });
+
+  it("keeps a tenant bucket that looks like the summary", () => {
+    const tally = { "(other 2 values)": 10, x: 2, y: 1 };
+    assert.deepEqual(renderTemplate("{{ tally | top(1) }}", { tally }), { top: { "(other 2 values)": 10 }, otherValues: 2, otherCount: 3 });
   });
 
   it("keeps a __proto__ bucket as an ordinary key", () => {

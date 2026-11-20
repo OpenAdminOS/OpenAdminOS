@@ -51,10 +51,13 @@ export function contextTooSmallMessage(failure: ContextTooSmallFailure): string 
 
 /** The typed reason carried by an error, if it is a context fit failure. */
 export function contextTooSmallFromError(error: unknown): ContextTooSmallFailure | undefined {
-  if (error instanceof ContextTooSmallError) return error.failure;
-  if (error && typeof error === "object" && (error as { code?: unknown }).code === "context-too-small") {
-    const failure = (error as { failure?: unknown }).failure;
-    if (isContextTooSmallFailure(failure)) return failure;
+  // Follow `cause`, so a wrapper that adds context to the message keeps the reason.
+  for (let current = error, depth = 0; current && depth < 5; depth += 1) {
+    if (current instanceof ContextTooSmallError) return current.failure;
+    if (typeof current !== "object") return undefined;
+    const record = current as { code?: unknown; failure?: unknown; cause?: unknown };
+    if (record.code === "context-too-small" && isContextTooSmallFailure(record.failure)) return record.failure;
+    current = record.cause;
   }
   return undefined;
 }

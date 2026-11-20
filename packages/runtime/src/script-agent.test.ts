@@ -13,10 +13,11 @@ import * as path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { describe, it } from "node:test";
 
-import type {
-  RunContext,
-  SandboxBrokerRequest,
-  SandboxBrokerResponse,
+import {
+  ContextTooSmallError,
+  type RunContext,
+  type SandboxBrokerRequest,
+  type SandboxBrokerResponse,
 } from "@openadminos/agent-sdk";
 
 import {
@@ -141,7 +142,62 @@ definition:
     assert.ok(capturedInput?.env?.OPENADMINOS_BROKER_DIR);
   });
 
-  it("refuses direct template-module conversion for script agents", () => {
+  it("fails a script whose model request did not fit with the typed reason", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "openadminos-script-fit-"));
+    const agentDir = path.join(tempRoot, "agent");
+    await mkdir(agentDir, { recursive: true });
+    await writeFile(path.join(agentDir, "agent.mjs"), "process.exit(0);\n");
+    const failure = { code: "context-too-small" as const, promptTokens: 20_000, answerTokens: 100, neededTokens: 20_100, limitTokens: 16_384, model: "test-model" };
+    let brokerAnswer: SandboxBrokerResponse | undefined;
+    const runner: SandboxRunner = {
+      id: "mxc",
+      probe: async () => ({ backend: "mxc", status: "available", experimentalEnabled: true, supported: true, detail: "test" }),
+      run: async (input) => {
+        brokerAnswer = await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, {
+          id: "llm-1", method: "llm.complete", params: { prompt: "Summarize.", maxTokens: 100 },
+        } satisfies SandboxBrokerRequest);
+        // The script does not handle the refusal and exits with a stack trace.
+        return { exitCode: 1, signal: null, stdout: "", stderr: "Error: model request refused\n    at main (agent.mjs:1:1)" };
+      },
+    };
+    const manifest = parseAgentTemplate(`
+descriptor:
+  id: script-auditor
+  name: Script Auditor
+  description: Test script auditor.
+  version: 0.1.0
+  author:
+    name: OpenAdminOS
+  category: devices
+  mode: read
+execution:
+  kind: script
+  sandbox: mxc
+  entrypoint: agent.mjs
+skills:
+  - id: summarize
+    format: llm
+    label: Summarize
+    settings:
+      prompt: Summarize.
+definition:
+  result:
+    summary: Script result.
+`);
+    const ctx = fakeRunContext();
+    ctx.llm = { ...ctx.llm, complete: async () => { throw new ContextTooSmallError(failure); } };
+    const module = scriptAgentTemplateToModule(manifest, agentDir, { sandboxRunner: runner, tempRoot, nodePath: process.execPath });
+    await assert.rejects(() => module.run(ctx), (error: unknown) => {
+      assert.ok(error instanceof ContextTooSmallError);
+      assert.deepEqual(error.failure, failure);
+      return true;
+    });
+    assert.equal(brokerAnswer?.ok, false);
+    assert.equal(brokerAnswer && !brokerAnswer.ok ? brokerAnswer.error.code : undefined, "context-too-small");
+    assert.deepEqual(brokerAnswer && !brokerAnswer.ok ? brokerAnswer.error.detail : undefined, failure);
+  });
+
+    it("refuses direct template-module conversion for script agents", () => {
     const manifest = parseAgentTemplate(`
 descriptor:
   id: script-auditor

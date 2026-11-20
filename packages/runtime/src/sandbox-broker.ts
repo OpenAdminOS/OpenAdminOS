@@ -11,7 +11,7 @@ import type {
   WritePlan,
   WriteLimits,
 } from "@openadminos/agent-sdk";
-import { assertWritePlanLimits, WritePlanLimitError } from "@openadminos/agent-sdk";
+import { assertWritePlanLimits, contextTooSmallFromError, WritePlanLimitError, type ContextTooSmallFailure } from "@openadminos/agent-sdk";
 import { DRY_RUN_WRITE_ERROR } from "./dry-run.js";
 import { confirmationPhraseProblem } from "./confirmation-phrase.js";
 import { fenceTenantData, withTenantDataInstructions, withTenantDataOutputFilter } from "./tenant-data.js";
@@ -28,6 +28,8 @@ export interface SandboxBrokerAgentPolicy {
 export interface SandboxBroker {
   handle(request: SandboxBrokerRequest): Promise<SandboxBrokerResponse>;
   getWritePlan(): WritePlan | undefined;
+  /** The last model request refused because it did not fit the context window. */
+  getContextFailure(): ContextTooSmallFailure | undefined;
 }
 
 export interface SandboxBrokerInput {
@@ -39,6 +41,7 @@ type BrokerErrorCode =
   | "invalid_request"
   | "policy_denied"
   | "not_available"
+  | "context-too-small"
   | "host_error";
 
 class SandboxBrokerError extends Error {
@@ -55,6 +58,7 @@ class SandboxBrokerError extends Error {
 
 export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
   let writePlan: WritePlan | undefined;
+  let contextFailure: ContextTooSmallFailure | undefined;
 
   return {
     async handle(request) {
@@ -88,10 +92,12 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
             );
         }
       } catch (error) {
+        contextFailure = contextTooSmallFromError(error) ?? contextFailure;
         return failure(id, error);
       }
     },
     getWritePlan: () => writePlan,
+    getContextFailure: () => contextFailure,
   };
 }
 
@@ -531,6 +537,10 @@ function ok(id: string, result?: unknown): SandboxBrokerResponse {
 }
 
 function failure(id: string, error: unknown): SandboxBrokerResponse {
+  const tooLarge = contextTooSmallFromError(error);
+  if (tooLarge) {
+    return { id, ok: false, error: { message: error instanceof Error ? error.message : String(error), code: "context-too-small", detail: tooLarge } };
+  }
   if (error instanceof WritePlanLimitError) {
     return { id, ok: false, error: { message: error.message, code: "policy_denied" } };
   }

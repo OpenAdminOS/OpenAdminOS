@@ -25,8 +25,12 @@ describe("estimateTokens", () => {
     assert.ok(estimateTokens(guid) > estimateTokens(prose.slice(0, guid.length)));
   });
 
-  it("counts each non-ASCII character", () => {
-    assert.equal(estimateTokens("東京"), 2);
+  it("counts non-ASCII characters by their UTF-8 size", () => {
+    assert.equal(estimateTokens("é"), 1);
+    assert.equal(estimateTokens("東京"), 4);
+    assert.equal(estimateTokens("🔒"), 3);
+    // A policy named in Japanese costs more than its romanized form.
+    assert.ok(estimateTokens("条件付きアクセス") > estimateTokens("jouken tsuki akusesu"));
   });
 });
 
@@ -73,6 +77,17 @@ describe("checkPromptFit", () => {
         return true;
       },
     );
+  });
+});
+
+describe("contextTooSmallFromError", () => {
+  it("finds the reason through a wrapper's cause, as write revalidation wraps it", () => {
+    const failure = { code: "context-too-small" as const, promptTokens: 1, answerTokens: 1, neededTokens: 2, limitTokens: 1 };
+    const wrapped = new Error("Nothing was applied: the plan could not be checked.", { cause: { code: failure.code, failure } });
+    assert.deepEqual(contextTooSmallFromError(wrapped), failure);
+    assert.deepEqual(contextTooSmallFromError(new Error("outer", { cause: new ContextTooSmallError(failure) })), failure);
+    assert.equal(contextTooSmallFromError(new Error("HTTP 400")), undefined);
+    assert.equal(contextTooSmallFromError({ code: "context-too-small", failure: { code: "context-too-small" } }), undefined);
   });
 });
 

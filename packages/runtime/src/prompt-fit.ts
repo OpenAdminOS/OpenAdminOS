@@ -21,8 +21,9 @@ const PIECE = /[A-Za-z0-9]+|\s+|[\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e]+|[^\x00-\
  * Tenant JSON is dense in punctuation, GUIDs and short keys, where the usual
  * "four characters per token" rule undercounts. This counts pieces instead:
  * letters cost a token per 5.5, digits a token per 2, mixed letters and
- * digits (GUIDs, hashes) a token per 1.3, punctuation a token per 2, every
- * non-ASCII character a token, and whitespace a token per line break.
+ * digits (GUIDs, hashes) a token per 1.3, punctuation a token per 2, a
+ * non-ASCII character one token per UTF-8 byte after its first (at least
+ * one), and whitespace a token per line break.
  *
  * Calibrated on 2026-11-19 against Ollama's prompt_eval_count for
  * OpenAdmin 8B (Mistral tokenizer) and gpt-oss 20B on CA policy JSON,
@@ -37,7 +38,9 @@ export function estimateTokens(text: string): number {
     const piece = match[0];
     const first = piece.charCodeAt(0);
     if (first > 127) {
-      tokens += 1;
+      // A tokenizer that has not seen the character splits it into its
+      // UTF-8 bytes; count all but one of them, at least one token.
+      tokens += Math.max(1, Buffer.byteLength(piece, "utf8") - 1);
     } else if (/^[A-Za-z0-9]/.test(piece)) {
       const digits = /[0-9]/.test(piece);
       const letters = /[A-Za-z]/.test(piece);

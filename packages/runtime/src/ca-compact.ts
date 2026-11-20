@@ -148,7 +148,6 @@ function compactGrant(value: unknown): Json | undefined {
   if (!grant) return undefined;
   const out: Json = {};
   const controls = asStrings(grant.builtInControls);
-  if (typeof grant.operator === "string" && controls.length > 1) out.operator = grant.operator;
   if (controls.length) out.controls = controls;
   const strength = asRecord(grant.authenticationStrength);
   if (strength && typeof strength.displayName === "string") out.authStrength = strength.displayName;
@@ -156,6 +155,10 @@ function compactGrant(value: unknown): Json | undefined {
   if (terms) out.termsOfUse = terms;
   const custom = asStrings(grant.customAuthenticationFactors);
   if (custom.length) out.customFactors = custom.length;
+  // With more than one requirement, OR means any one of them satisfies the
+  // policy: MFA plus terms of use under OR does not make MFA mandatory.
+  const requirements = controls.length + (out.authStrength ? 1 : 0) + terms + custom.length;
+  if (typeof grant.operator === "string" && requirements > 1) out.operator = grant.operator;
   return Object.keys(out).length ? out : undefined;
 }
 
