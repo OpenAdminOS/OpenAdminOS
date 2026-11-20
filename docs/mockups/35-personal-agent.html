@@ -896,6 +896,25 @@
           <li>As in the first review, the hashes and the write check here are computed by an illustrative script; the plan's rules govern, and the illustration follows them.</li>
         </ul>
       </div>
+      <div style="margin-top:16px">
+        <div style="display:grid;gap:8px;align-content:start">
+          <p class="trvcap">The same comparison for an empty node that gains content, and for a new name, on the handbook server</p>
+          <div class="win" style="min-height:0">
+            <div class="dialog" role="dialog" aria-labelledby="tr-t-re2" style="width:100%;box-shadow:none;border-radius:12px">
+              <header><span class="xs muted">Contoso handbook, docs.contoso.example</span><h2 id="tr-t-re2">Review 2 changed tools</h2></header>
+              <div class="body">
+                <p>On 19 November the server changed 2 tools you approved on 12 November, so their hashes differ and <span data-name>Nova</span> does not offer them until you approve them again. <code>list_sections</code> had an input schema with an empty <code>properties</code> object and now lists a parameter; <code>get_article</code> is listed under a new name. Both still only read, so each can be approved again after you compare the definitions.</p>
+                <ul class="trv" data-trv="rereview-docs"></ul>
+              </div>
+              <footer><span class="xs muted trv-count" aria-live="polite" style="margin-right:auto"></span><button class="bt ghost" type="button">Later</button><button class="bt primary trv-ok" type="button"></button></footer>
+            </div>
+          </div>
+        </div>
+        <ul class="notes">
+          <li>Decided in round 18: an empty node is written out in the readable view, as it is in the raw JSON. <code>inputSchema.properties</code> of <code>list_sections</code> reads <code>properties: {}</code> on the approved side, and the comparison marks that node with a bar there and the new property list with a bar on the side listed now. An empty <code>required</code> or <code>enum</code> list and empty annotations are written out the same way.</li>
+          <li>The tool name goes through the same path-aware marker as every other field, so a change at <code>name</code> marks the Name line in both readable views and the <code>"name"</code> member in both raw panes.</li>
+        </ul>
+      </div>
       <ul class="notes">
         <li>The strip is derived from the tools actually offered, not from the server switches: it names the host of every server whose approved tools are offered, and drops a host the moment its switch goes off or its last approved tool goes back to review. Try it on the MCP switches. When the full list does not fit the space next to the organization, the strip keeps the first host visible with a count of the rest, such as "learn.microsoft.com +1"; pressing it lists every host with the disclosure of what they receive.</li>
         <li>KQL reference shows the case where every approved tool on an enabled server is back in review. Its grant stays on, so approving the changed tools brings it back without turning anything on again, but none of its tools is offered, so the strip leaves out kql.contoso.example. The strip popover names the server under "Granted, no tools offered" with the reason, so the admin is not left wondering why a switched-on server is missing.</li>
@@ -905,6 +924,48 @@
         <li>Every grant type has a managed state: MCP server (<code>allowedPublicReferences</code>), connector read (<code>novaCapabilities.connectorReads</code>), connector send (<code>novaCapabilities.connectorSends</code>), agent (<code>novaCapabilities.startAgents</code>, here as a list of agents), skill (<code>novaCapabilities.skills</code>) and web search (<code>novaCapabilities.webSearch</code>). Locked switches are disabled, keep their state visible and point to the line that names the key. <code>connectorReads</code> and <code>skills</code> are new keys, and <code>startAgents</code> gains a list form like <code>connectorSends</code>.</li>
         <li>Choose opens the skill chooser in place. Each skill has its own switch; one that IT turned off keeps its switch, disabled, with the lock line under it naming the key, and stays in the library.</li>
         <li>Below 600 px of content width the column heads go and each switch carries its own label.</li>
+      </ul>
+
+      <h3 id="b-redirect" style="margin:32px 0 6px;font-size:var(--text-base);font-weight:500">A redirect to another address</h3>
+      <p>Tools are reviewed and approved for one address. When the server answers with a redirect that changes the address, a different scheme, host, port or path, the app does not follow it, while listing tools or while calling one. Here <code>https://tools.contoso.example/mcp</code> redirects to <code>/baselines/mcp</code> on the same host.</p>
+      <div class="two">
+        <div style="display:grid;gap:8px;align-content:start">
+          <p class="trvcap">Step 2, when listing the tools returns a redirect</p>
+          <div class="win" style="min-height:0">
+            <div class="dialog" role="dialog" aria-labelledby="rd-t" style="width:100%;box-shadow:none;border-radius:12px">
+              <header><span class="xs muted">Step 2 of 2, tools.contoso.example</span><h2 id="rd-t">Which tools may <span data-name>Nova</span> use?</h2><p class="xs muted trvep">Tools listed by <code>https://tools.contoso.example/mcp</code></p></header>
+              <div class="body">
+                <div class="block" data-t="blocked">
+                  <span class="glyph" data-t="blocked"><svg><use href="#i-plug"/></svg></span>
+                  <div>
+                    <h3>The server sent its tool list to another address, so no tools were listed</h3>
+                    <p>Listing the tools of <code>https://tools.contoso.example/mcp</code> returned a redirect to <code>https://tools.contoso.example/baselines/mcp</code>. That is a different address, so the app did not follow it: no request went there, and the header secret was not sent there. Tools are approved for one address only. To use the other address, add it as its own server, and its tools get their own review.</p>
+                    <div class="acts"><button class="bt primary sm" type="button">Add https://tools.contoso.example/baselines/mcp</button><button class="bt secondary sm" type="button">Use another address</button></div>
+                  </div>
+                </div>
+              </div>
+              <footer><button class="bt ghost" type="button">Back</button><button class="bt primary" type="button" disabled>Add server</button></footer>
+            </div>
+          </div>
+        </div>
+        <div style="display:grid;gap:8px;align-content:start">
+          <p class="trvcap">A week later, a call to an approved tool returns the same redirect</p>
+          <div class="block" data-t="blocked">
+            <span class="glyph" data-t="blocked"><svg><use href="#i-plug"/></svg></span>
+            <div>
+              <h3><span data-name>Nova</span> did not call get_setting: the server redirected the call to another address</h3>
+              <p>The call to <code>https://tools.contoso.example/mcp</code> returned a redirect to <code>https://tools.contoso.example/baselines/mcp</code>. The app does not follow a redirect to another address, so the tool parameters and the header secret were not sent there, and <span data-name>Nova</span> answered without the tool. The approvals for <code>/mcp</code> do not apply at the other address. To use it, add it as its own server and review its tools.</p>
+              <div class="acts"><button class="bt primary sm" type="button">Add https://tools.contoso.example/baselines/mcp</button><button class="bt secondary sm" type="button">Retry</button></div>
+              <p class="xs muted" style="margin-top:10px">Retry calls <code>/mcp</code> again and refuses the redirect the same way if the server still sends it. Calls from skills and scheduled checks stop with this state too, and a scheduled check records it in its run.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>Decided in round 18: a redirect that changes the endpoint, any change of scheme, host, port or path, is refused during tool listing and every tool call. The target is never requested, so nothing reaches it: not the credential, not the tool parameters. A path on the same host counts, as here, because an approval belongs to the full address.</li>
+        <li>The state names the redirect target in full and offers to add it as its own server. Adding it starts at step 1 with that address filled in, so it gets the allowlist check and a fresh review with every tool unchecked. An approval never follows a redirect.</li>
+        <li>While the server redirects, its tools cannot be listed and hashed, so none is offered, and the strip leaves out the host as it does for a server whose tools are all in review.</li>
+        <li>This is stricter than the transport today, which follows a redirect within the same origin (<code>sameOriginFetch</code> in <code>apps/desktop/electron/mcp/host.ts</code>). The plan governs (B5, Your own MCP servers).</li>
       </ul>
 
       <h3 id="b-send" style="margin:32px 0 6px;font-size:var(--text-base);font-weight:500">Sending to Teams: the confirmation card</h3>
@@ -1677,6 +1738,19 @@ identities with graph_get. Nothing else.
         def: withPath(byName("compare_baselines"), "description", "Compares two baseline versions and saves the comparison on the server"), mark: { path: "description", frag: "and saves the comparison on the server" } },
     ];
     const UNCHANGED = APPROVED_AFTER.filter((n) => !CHANGED.some((c) => c.t === n));
+    // Two more changes on the handbook server: an empty node that becomes populated, and a new name.
+    const docsDef = (n) => DOCS_TOOLS.find((x) => x.name === n);
+    const DOCS_CHANGED = [
+      { t: "list_sections", what: "Input changed, was empty", was: "<code>inputSchema.properties</code>: <code>{}</code>", now: "<code>inputSchema.properties</code>: <mark><code>audience</code>, only sections for this audience</mark>",
+        def: withPath(docsDef("list_sections"), "inputSchema.properties", { audience: S("string", "Only sections for this audience", { enum: ["admins", "helpdesk"] }) }), mark: { path: "inputSchema.properties" } },
+      { t: "get_article", what: "Name changed", was: "<code>name</code>: <code>get_article</code>", now: "<code>name</code>: <mark><code>get_handbook_article</code></mark>",
+        def: withPath(docsDef("get_article"), "name", "get_handbook_article"), mark: { path: "name" } },
+    ];
+    // Each re-review frame: its changed tools, the server's slug and the approved tools that did not change.
+    const REVIEWS = {
+      rereview: { list: CHANGED, old: byName, slug: "policy-settings", unchanged: UNCHANGED },
+      "rereview-docs": { list: DOCS_CHANGED, old: docsDef, slug: "contoso-docs", unchanged: ["search_articles"] },
+    };
     // The write check: every string in the definition, keys included, at every depth, word by word
     // (names split on underscores and camel case). Illustrative: this word list stands in for the rule in the plan (B5),
     // which treats any write the definition documents as disqualifying, whatever its words and whatever the read-only label.
@@ -1791,6 +1865,8 @@ identities with graph_get. Nothing else.
       // Required names with no property of that name are listed too.
       const strayReq = (s, base) => {
         if (!laid(s, "required")) return "";
+        // An empty list is written out, so a list that gains a name later is marked on both sides.
+        if (!s.required.length) return '<span class="ds"><code>required</code>: <code>[]</code></span>';
         // Own properties only: a name such as "constructor" must not be found on the object prototype.
         const missing = s.required.map((n, i) => [n, i]).filter(([n]) => !(isObj(s.properties) && Object.hasOwn(s.properties, n)));
         return missing.length ? `<span class="ds">Required with no property: ${missing.map(([n, i]) => mk(`${base}.required[${i}]`, `<code>${hl(n)}</code>`)).join(" ")}</span>` : "";
@@ -1806,7 +1882,7 @@ identities with graph_get. Nothing else.
       // so a nested key such as enum[1].mode is marked in the readable view as it is in the raw JSON.
       const enumView = (s, base, lead) => {
         const gap = missingAt(`${base}.enum`, s.enum.length);
-        return blk(`${base}.enum`, `<span class="ds ev">${lead}: ${s.enum.map((v, i) => typeof v === "string" ? mk(`${base}.enum[${i}]`, `<code>${hl(v)}</code>`) : val(v, `${base}.enum[${i}]`)).join("")}${gap ? `<ul class="prm">${gap}</ul>` : ""}</span>`);
+        return blk(`${base}.enum`, `<span class="ds ev">${lead}: ${s.enum.length ? "" : "<code>[]</code>"}${s.enum.map((v, i) => typeof v === "string" ? mk(`${base}.enum[${i}]`, `<code>${hl(v)}</code>`) : val(v, `${base}.enum[${i}]`)).join("")}${gap ? `<ul class="prm">${gap}</ul>` : ""}</span>`);
       };
       // Everything inside one schema node except its type, which the line that introduces the node already shows.
       const nodeBody = (s, base, lead = "Values") => {
@@ -1820,7 +1896,9 @@ identities with graph_get. Nothing else.
         const entries = laid(schema, "properties") ? Object.entries(schema.properties) : [];
         const gap = gapParent === `${base}.properties` && !entries.some(([n]) => n === gapLeaf)
           ? `<li><span class="absent"><code>${esc(gapLeaf)}</code> is not in this object</span></li>` : "";
-        if (!entries.length && !gap) return "";
+        // An empty properties object is written out as a node of its own, so when it gains a property the
+        // comparison marks the node on both sides: {} on one, the new property list on the other.
+        if (!entries.length && !gap) return laid(schema, "properties") ? blk(`${base}.properties`, '<span class="ds"><code>properties</code>: <code>{}</code></span>') : "";
         const req = laid(schema, "required") ? schema.required : [];
         // A changed property is marked as a whole node: its name, type line and everything inside it.
         return blk(`${base}.properties`, `<ul class="prm">${entries.map(([n, p]) => {
@@ -1829,17 +1907,18 @@ identities with graph_get. Nothing else.
         }).join("")}${gap}</ul>`);
       }
       // A whole input or output schema: its own type, then the same recursive layout as every nested node.
-      const schemaView = (schema, base) => blk(base, `<span class="ds">Type ${tyMark(base, `<code>${isObj(schema) ? tyOf(schema) : "any type"}</code>`)}${isObj(schema) && props(schema, base) ? "" : ", no properties"}</span>`
+      const hasProps = (schema, base) => isObj(schema) && ((laid(schema, "properties") && Object.keys(schema.properties).length > 0) || gapParent === `${base}.properties`);
+      const schemaView = (schema, base) => blk(base, `<span class="ds">Type ${tyMark(base, `<code>${isObj(schema) ? tyOf(schema) : "any type"}</code>`)}${hasProps(schema, base) ? "" : ", no properties"}</span>`
         + nodeBody(schema, base));
       // An annotation that holds an object or array goes through the same path-aware renderer as any nested value.
       const ann = def.annotations
-        ? blk("annotations", Object.entries(def.annotations).map(([k, v]) => v !== null && typeof v === "object" ? `<span class="ds"><code>${hl(k)}</code>: ${val(v, `annotations.${k}`)}</span>` : mk(`annotations.${k}`, `<code>${k}: ${typeof v === "string" ? `"${hl(v)}"` : esc(JSON.stringify(v))}</code>`)).join(" ")
+        ? blk("annotations", (Object.keys(def.annotations).length ? "" : "<code>{}</code>") + Object.entries(def.annotations).map(([k, v]) => v !== null && typeof v === "object" ? `<span class="ds"><code>${hl(k)}</code>: ${val(v, `annotations.${k}`)}</span>` : mk(`annotations.${k}`, `<code>${k}: ${typeof v === "string" ? `"${hl(v)}"` : esc(JSON.stringify(v))}</code>`)).join(" ")
           + (label(def) === "none" ? '<span class="ds warn">No <code>readOnlyHint</code>. The protocol reads a missing <code>readOnlyHint</code> as false.</span>' : ""))
         : '<span class="warn">None sent. The protocol reads a missing <code>readOnlyHint</code> as false.</span>';
       const known = ["name", "title", "description", "inputSchema", "outputSchema", "annotations"];
       const other = Object.keys(def).filter((k) => !known.includes(k)).sort(byUnits);
       return `<dl>
-        <dt>Name</dt><dd><code>${hl(def.name)}</code></dd>
+        <dt>Name</dt><dd>${mk("name", `<code>${hl(def.name)}</code>`)}</dd>
         <dt>Title</dt><dd>${def.title ? mk("title", hl(def.title)) : "None"}</dd>
         <dt>Description</dt><dd>${def.description ? mk("description", hl(def.description)) : "None"}</dd>
         <dt>Input</dt><dd>${def.inputSchema ? schemaView(def.inputSchema, "inputSchema") : "No input schema"}</dd>
@@ -1905,14 +1984,15 @@ identities with graph_get. Nothing else.
     function fillTrv(trv, { tools = TOOLS, slug = "policy-settings", checked = [] } = {}) {
       const key = trv.dataset.trv, seq = ++renderSeq;
       trv.dataset.seq = seq;
-      if (key === "rereview") {
-        trv.innerHTML = CHANGED.map((c) => toolRow(key, c.def, false, { what: c.what, mark: c.mark, old: byName(c.t), summary: `<span class="chg"><span class="was"><span class="k">Approved</span>${c.was}</span><span class="now"><span class="k">Now</span>${c.now}</span></span>` })).join("")
-          + `<li><span class="same">Unchanged and still approved: ${UNCHANGED.map((n) => `<code>mcp__policy-settings__${n}</code>`).join(", ")}. Its definition hash matches the approved one.</span></li>`;
+      const rv = REVIEWS[key];
+      if (rv) {
+        trv.innerHTML = rv.list.map((c) => toolRow(key, c.def, false, { slug: rv.slug, what: c.what, mark: c.mark, old: rv.old(c.t), summary: `<span class="chg"><span class="was"><span class="k">Approved</span>${c.was}</span><span class="now"><span class="k">Now</span>${c.now}</span></span>` })).join("")
+          + `<li><span class="same">Unchanged and still approved: ${rv.unchanged.map((n) => `<code>mcp__${rv.slug}__${n}</code>`).join(", ")}. Its definition hash matches the approved one.</span></li>`;
       } else {
         trv.innerHTML = tools.map((d) => toolRow(key, d, checked.includes(d.name), { slug })).join("");
       }
       // Hashes: the short form in the row, the full hash with Copy in the definition. A re-review shows both.
-      const pairs = key === "rereview" ? CHANGED.map((c) => [c.def, byName(c.t)]) : tools.map((d) => [d, null]);
+      const pairs = rv ? rv.list.map((c) => [c.def, rv.old(c.t)]) : tools.map((d) => [d, null]);
       pairs.forEach(async ([def, old]) => {
         const [now, was] = await Promise.all([digest(def), old ? digest(old) : ""]);
         if (trv.dataset.seq !== String(seq)) return;
@@ -1972,7 +2052,7 @@ identities with graph_get. Nothing else.
         const b = e.target.closest(".deft"); if (!b) return;
         const open = b.getAttribute("aria-expanded") !== "true";
         b.setAttribute("aria-expanded", String(open));
-        b.querySelector("span").textContent = open ? "Hide definition" : key === "rereview" ? "Compare definitions" : "Full definition";
+        b.querySelector("span").textContent = open ? "Hide definition" : REVIEWS[key] ? "Compare definitions" : "Full definition";
         document.getElementById(b.getAttribute("aria-controls")).hidden = !open;
       });
       const dialog = trv.closest(".dialog");
@@ -1981,7 +2061,7 @@ identities with graph_get. Nothing else.
         const boxes = [...trv.querySelectorAll("input")];
         const ok = boxes.filter((b) => b.checked).length;
         const btn = dialog.querySelector(".trv-ok");
-        if (key === "rereview") {
+        if (REVIEWS[key]) {
           dialog.querySelector(".trv-count").textContent = `${ok} approved again, ${boxes.length - ok} stay off`;
           btn.textContent = ok ? `Save, ${ok} approved again` : "Save, all stay off";
         } else if (!boxes.length) {
@@ -1999,7 +2079,7 @@ identities with graph_get. Nothing else.
       };
       trv.addEventListener("change", sync);
       if (key === "after") fillTrv(trv, { checked: APPROVED_AFTER });
-      else if (key === "rereview") fillTrv(trv);
+      else if (REVIEWS[key]) fillTrv(trv);
     });
 
     // Add a server by URL, step 1: the address, the authentication, the IT allowlist check before any request,
