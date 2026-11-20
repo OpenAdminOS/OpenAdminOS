@@ -239,6 +239,22 @@ export async function writeLocalResetMarker(
   return folder;
 }
 
+/**
+ * What the restart after a reset launches. A Linux AppImage runs from a
+ * mount (or an extracted copy) that goes away when this process exits, so
+ * it is relaunched through the AppImage file itself, which `APPIMAGE` names.
+ */
+export function relaunchTarget(input: {
+  platform: NodeJS.Platform;
+  env: NodeJS.ProcessEnv;
+  argv: readonly string[];
+  dropArgs: readonly string[];
+}): { execPath?: string; args: string[] } {
+  const args = input.argv.slice(1).filter((arg) => !input.dropArgs.includes(arg));
+  const appImage = input.platform === "linux" ? input.env.APPIMAGE : undefined;
+  return appImage ? { execPath: appImage, args } : { args };
+}
+
 /** A fresh, unpredictable temporary name for a marker write in the data folder. */
 function markerTempPath(userDataDir: string): string {
   return join(userDataDir, `${LOCAL_RESET_MARKER}.${randomBytes(8).toString("hex")}.tmp`);

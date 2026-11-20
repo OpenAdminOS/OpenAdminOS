@@ -32,6 +32,7 @@ import {
   isKeptThroughReset,
   UPDATER_CACHE_DIR,
   requestLocalReset,
+  relaunchTarget,
   runPendingLocalReset,
   writeLocalResetMarker,
   type CommandResult,
@@ -1502,6 +1503,18 @@ describe("local reset: wipe at launch", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("local reset: restart", () => {
+  it("relaunches a Linux AppImage through the AppImage file, other builds through their own executable", () => {
+    const argv = ["/tmp/.mount_OpenAdXyz/openadminos", "--some-flag", "--background-scheduler"];
+    assert.deepEqual(
+      relaunchTarget({ platform: "linux", env: { APPIMAGE: "/home/admin/Apps/OpenAdminOS.AppImage" }, argv, dropArgs: ["--background-scheduler"] }),
+      { execPath: "/home/admin/Apps/OpenAdminOS.AppImage", args: ["--some-flag"] },
+    );
+    assert.deepEqual(relaunchTarget({ platform: "linux", env: {}, argv, dropArgs: ["--background-scheduler"] }), { args: ["--some-flag"] });
+    assert.deepEqual(relaunchTarget({ platform: "darwin", env: { APPIMAGE: "/x" }, argv, dropArgs: [] }), { args: ["--some-flag", "--background-scheduler"] });
   });
 });
 

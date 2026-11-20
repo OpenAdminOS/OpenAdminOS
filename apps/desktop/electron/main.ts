@@ -18,6 +18,7 @@ import {
   windowsTaskUserId,
   readLocalResetMarker,
   requestLocalReset,
+  relaunchTarget,
   runPendingLocalReset,
   writeLocalResetMarker,
 } from "./local-reset.js";
@@ -5575,9 +5576,14 @@ function relaunchInteractive(): void {
     relaunchOutsideLaunchAgent();
     return;
   }
-  app.relaunch({
-    args: process.argv.slice(1).filter((arg) => arg !== BACKGROUND_SCHEDULER_ARG && arg !== MENU_BAR_ARG),
-  });
+  app.relaunch(
+    relaunchTarget({
+      platform: process.platform,
+      env: process.env,
+      argv: process.argv,
+      dropArgs: [BACKGROUND_SCHEDULER_ARG, MENU_BAR_ARG],
+    }),
+  );
   app.exit(0);
 }
 
