@@ -140,8 +140,10 @@ it("Disconnect clears staged shards while startup is waiting on a different tena
 
     const stagedIdentity = store["stagedIdentityShards"].get(tenantId)?.get("users");
     const stagedFirstName = store["stagedFirstNames"].get(tenantId)?.get("users");
-    assert.ok(stagedIdentity?.matches("Yelena Fixture"));
-    assert.ok(stagedFirstName?.matches("Yelena"));
+    assert.ok(stagedIdentity);
+    assert.ok(stagedFirstName);
+    assert.equal(stagedIdentity.matches("Yelena Fixture"), true);
+    assert.equal(stagedFirstName.matches("Yelena"), true);
     assert.deepEqual([...store.classificationIdentityIndex(tenantId).workerShards!()], []);
     await store.disconnectClassification(tenantId);
 
