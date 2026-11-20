@@ -2598,9 +2598,18 @@ Mockup: `docs/mockups/34-local-reset.html`.
   a warning: each one's identity is taken before its link, mount and
   hard-link checks and compared after the last, right before the removal.
   The data folder itself is checked again before every step outside it
-  (the scheduler, each Keychain deletion attempt, the preferences, each
-  cache folder), and the reset stops there, incomplete, if it was replaced:
-  a profile restored meanwhile keeps its Keychain key. The guide's
+  (inside the scheduler step right before the LaunchAgent bootout, the plist
+  removal and the task deletion; each Keychain deletion attempt; the
+  preferences; each cache folder), and the reset stops there, incomplete,
+  if it was replaced: a profile restored meanwhile keeps its Keychain key.
+  On Linux the mount table is read again before every removal in the data
+  folder, so a bind mount added under it while the wipe runs stops the wipe
+  before anything is removed through it. On Windows the task's owner is
+  looked up first and its definition read right before the delete, which
+  runs only when that definition is unchanged; schtasks cannot delete on a
+  condition, so another account replacing the shared task in the moment
+  between that read and the delete remains (accepted; the per-user task
+  name follow-up closes it). The guide's
   PowerShell script leaves files whose `LinkType` is `HardLink` for the same
   reason. Then,
   installed builds only: the Keychain item by exact service
