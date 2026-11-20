@@ -1020,6 +1020,40 @@ describe("local reset: wipe at launch", () => {
     }
   });
 
+  it("keeps the Keychain key when files are restored into the same data folder during the cleanup", async () => {
+    for (const when of ["scheduler", "keychain"] as const) {
+      const dir = await tempDir();
+      try {
+        const profile = join(dir, "profile");
+        mkdirSync(profile);
+        seedDataFolder(profile, MARKER);
+        // A backup tool puts the token file back without replacing the folder.
+        const restore = () => writeFileSync(join(profile, "tokens.bin"), "restored tokens");
+        const calls: string[][] = [];
+        const run = (file: string, args: string[]): CommandResult => {
+          calls.push([file, ...args]);
+          if (when === "keychain" && args[0] === "delete-generic-password" && calls.length === 1) {
+            restore();
+            return { status: 0 };
+          }
+          return { status: 44 };
+        };
+        const report = runPendingLocalReset({
+          userDataDir: profile, packaged: true, platform: "darwin", home: join(dir, "home"), env: {}, run,
+          removeScheduler: (guard) => { if (when === "scheduler") { restore(); guard(); } },
+        });
+        assert.equal(report?.status, "incomplete", when);
+        assert.deepEqual(report?.failed, [{ item: "tokens.bin", reason: "it was created again during the reset" }], when);
+        assert.equal(calls.filter((call) => call[1] === "delete-generic-password").length, when === "keychain" ? 1 : 0, when);
+        assert.equal(readFileSync(join(profile, "tokens.bin"), "utf8"), "restored tokens", when);
+        // The marker stays, without the cleanup recorded as done.
+        assert.equal(readLocalResetMarker(profile)?.leftoversDone, undefined, when);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
   it("on Linux stops before the next removal when a mount appears inside the data folder", async () => {
     const dir = await tempDir();
     try {
@@ -1043,6 +1077,36 @@ describe("local reset: wipe at launch", () => {
       // One entry went; the wipe stopped before the next one.
       assert.equal(reads, 2);
       assert.ok(existsSync(join(profile, "registry-cache", "file")));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("on Linux leaves a cache folder that gains a mount after its walk", async () => {
+    const dir = await tempDir();
+    try {
+      const profile = join(dir, "profile");
+      mkdirSync(profile);
+      seedDataFolder(profile, MARKER);
+      const cache = join(dir, "cache", UPDATER_CACHE_DIR);
+      mkdirSync(join(cache, "pending"), { recursive: true });
+      writeFileSync(join(cache, "pending", "update.AppImage"), "update");
+      let cacheReads = 0;
+      const report = runPendingLocalReset({
+        userDataDir: profile,
+        packaged: true,
+        platform: "linux",
+        home: join(dir, "home"),
+        env: { XDG_CACHE_HOME: join(dir, "cache") },
+        // The walk sees no mount; right after it, one is added inside.
+        mountInfo: () => {
+          if (!readdirSync(profile).every((name) => isKeptThroughReset(name))) return "";
+          return cacheReads++ === 0 ? "" : `36 35 0:42 / ${realpathSync(cache)}/pending rw - ext4 /dev/sdb1 rw\n`;
+        },
+      });
+      assert.equal(report?.status, "completed");
+      assert.deepEqual(report?.warnings, [{ item: cache, reason: "it is a link or holds another mount, so it was left in place" }]);
+      assert.ok(existsSync(join(cache, "pending", "update.AppImage")));
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

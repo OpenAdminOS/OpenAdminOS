@@ -751,15 +751,20 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
   if (options.packaged && marker.build === "installed") {
     if (!marker.leftoversDone) {
       // Checked before every step outside the folder, each Keychain
-      // deletion included: a profile restored while one runs keeps its
-      // Keychain key and its caches.
+      // deletion included: a profile restored while one runs, whether it
+      // replaces the folder or puts files back into it, keeps its Keychain
+      // key and its caches. Files that came back are listed; the next try
+      // removes them first, then the key.
       try {
         removeLeftovers(options, fs, run, warnings, () => {
-          if (!sameFolder()) throw new FolderChangedDuringReset();
+          if (!sameFolder()) throw new FolderChangedDuringReset([{ item: userDataDir, reason: DATA_FOLDER_CHANGED_REASON }]);
+          const appeared: LocalResetProblem[] = [];
+          checkFolderEmpty(fs, userDataDir, appeared, () => true);
+          if (appeared.length > 0) throw new FolderChangedDuringReset(appeared);
         });
       } catch (cause) {
         if (!(cause instanceof FolderChangedDuringReset)) throw cause;
-        failed.push({ item: userDataDir, reason: DATA_FOLDER_CHANGED_REASON });
+        failed.push(...cause.problems);
         return finish("incomplete");
       }
       if (!sameFolder()) {
@@ -968,8 +973,20 @@ function removeEntry(fs: LocalResetFileSystem, dir: string, name: string, failed
   }
 }
 
-/** The data folder was replaced while the cleanup outside it ran. */
-class FolderChangedDuringReset extends Error {}
+function realpathOr(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
+/** The data folder was replaced, or files came back into it, while the cleanup outside it ran. */
+class FolderChangedDuringReset extends Error {
+  constructor(readonly problems: LocalResetProblem[]) {
+    super("the data folder changed during the reset");
+  }
+}
 
 function removeLeftovers(
   options: LocalResetWipeOptions,
@@ -1037,12 +1054,18 @@ function removeLeftovers(
       warnings.push({
         item: path,
         reason: before === "unknown" || after === "unknown"
-          ? "it cannot be told apart from another folder on this disk, so it was left in place"
+          ? "it cannot be told apart from another item on this disk, so it was left in place"
           : "it was replaced while it was being checked, so it was left in place",
       });
       continue;
     }
     guard();
+    // On Linux a bind mount added inside the cache since its walk is never
+    // removed through, as in the data folder.
+    if (options.platform === "linux" && hasMountAtOrUnder(realpathOr(path), options.mountInfo)) {
+      warnings.push({ item: path, reason: linkReason });
+      continue;
+    }
     try {
       fs.remove(path);
     } catch (cause) {
