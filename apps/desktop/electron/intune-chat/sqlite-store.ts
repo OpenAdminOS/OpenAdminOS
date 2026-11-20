@@ -800,6 +800,9 @@ export class IntelligenceSqliteStore {
 
   async replaceGraphResourcesInBatches(input: GraphResourceSnapshot, signal?: AbortSignal): Promise<void> {
     const cacheGeneration = this.cacheCleared.get(input.tenantId);
+    // Let a queued cancellation run before preparing and committing even a small snapshot.
+    await yieldToMain();
+    signal?.throwIfAborted();
     this.assertTenantWritable(input.tenantId, "graph cache");
     const rows: NormalizedGraphResourceRow[] = [];
     const slice = new ClassificationSlice();

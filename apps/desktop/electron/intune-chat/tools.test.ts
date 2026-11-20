@@ -356,7 +356,7 @@ it("commits a refresh while startup classification is still pending", async () =
     const row = { id: "new-user", displayName: "Synthetic Person" };
     await Promise.race([
       store.replaceGraphResourcesInBatches({ ...snapshot, rows: [row] }),
-      nextTick().then(() => assert.fail("Refresh waited for startup classification")),
+      nextTick().then(() => nextTick()).then(() => assert.fail("Refresh waited for startup classification")),
     ]);
     assert.deepEqual(store.queryGraphCache(snapshot).rows.map(entry => entry.row), [row]);
     assert.equal(store.classificationIdentityIndex(snapshot.tenantId).isComplete?.(), false);
