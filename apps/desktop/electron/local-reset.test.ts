@@ -16,6 +16,7 @@ import {
   localResetLinkCheck,
   folderGoesThroughLink,
   localResetPolicyProblem,
+  markerFolderMatches,
   parseWhoamiUser,
   windowsTaskBelongsToThisAccount,
   windowsTaskListHas,
@@ -61,7 +62,7 @@ function seedDataFolder(dir: string, marker: LocalResetMarker = MARKER): void {
 /** A marker as writeLocalResetMarker writes it: bound to this folder's device and inode. */
 function markerFor(dir: string, marker: LocalResetMarker): LocalResetMarker {
   const stat = lstatSync(dir);
-  return { ...marker, folder: { dev: stat.dev, ino: stat.ino } };
+  return { ...marker, folder: { dev: stat.dev, ino: stat.ino, birth: stat.birthtimeMs } };
 }
 
 function recordingRun(results: Record<string, CommandResult[]> = {}): { run: (file: string, args: string[]) => CommandResult; calls: string[][] } {
@@ -785,6 +786,38 @@ describe("local reset: wipe at launch", () => {
     }
   });
 
+  it("matches its folder across a restart even when the device number changed", () => {
+    const stored = { dev: 16777220, ino: 4242, birth: 1763550000000 };
+    assert.equal(markerFolderMatches(stored, { ...stored, dev: 16777231 }), true);
+    assert.equal(markerFolderMatches(stored, { ...stored, ino: 4243 }), false);
+    assert.equal(markerFolderMatches(stored, { ...stored, birth: 1763559999000 }), false);
+    // No birth time on this file system: the inode decides.
+    assert.equal(markerFolderMatches({ ...stored, birth: 0 }, { ...stored, birth: 0 }), true);
+    // No inode: only a known, equal birth time matches.
+    assert.equal(markerFolderMatches({ ...stored, ino: 0 }, { ...stored, ino: 0 }), true);
+    assert.equal(markerFolderMatches({ ...stored, ino: 0, birth: 0 }, { ...stored, ino: 0, birth: 0 }), false);
+  });
+
+  it("writes the warnings only to the folder the reset was accepted for", async () => {
+    const dir = await tempDir();
+    try {
+      const data = join(dir, "data");
+      mkdirSync(data);
+      const committed = await writeLocalResetMarker(data, DEV_MARKER);
+      // A restore replaces the folder with a plain folder of the same name.
+      renameSync(data, `${data}-old`);
+      mkdirSync(data);
+      writeFileSync(join(data, "state.json"), "restored");
+      await assert.rejects(
+        writeLocalResetMarker(data, { ...DEV_MARKER, requestWarnings: [{ item: "Background scheduler", reason: "x" }] }, { expectFolder: committed }),
+        /no longer the one the reset was accepted for/,
+      );
+      assert.deepEqual(readdirSync(data), ["state.json"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("never wipes a copy of the folder restored or roamed elsewhere", async () => {
     const dir = await tempDir();
     try {
@@ -1036,7 +1069,7 @@ describe("local reset: end to end with the store", () => {
       // Phase 1, as the main process runs it.
       await requestLocalReset(LOCAL_RESET_PHRASE, {
         checkReady: async () => assert.equal(await store.beginLocalReset(), undefined),
-        writeMarker: (marker) => writeLocalResetMarker(dir, marker),
+        writeMarker: async (marker) => { await writeLocalResetMarker(dir, marker); },
         forgetSignIns: async () => {
           const problems = await store.forgetAllSignIns();
           removedAccounts.push(...problems.map((problem) => problem.item));
@@ -1248,8 +1281,13 @@ describe("local reset: confirmations", () => {
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
       assert.equal(runService.hasActiveApply(), false);
-      // Now recorded as applying, until the apply finishes.
-      const blocker = await store.beginLocalReset();
+      // Now recorded as applying, until the apply finishes. The finished
+      // run's report delivery pass may still be under way: wait it out.
+      let blocker = await store.beginLocalReset();
+      for (let attempt = 0; attempt < 3000 && blocker !== undefined && /being sent|still finishing|still running/.test(blocker); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        blocker = await store.beginLocalReset();
+      }
       if (blocker === undefined) {
         // The apply already failed (no sign-in): the reset may start, and new confirmations are refused.
         await assert.rejects(store.confirmRun("run-1", "RETIRE 1 DEVICE"), /OpenAdminOS is resetting/);
