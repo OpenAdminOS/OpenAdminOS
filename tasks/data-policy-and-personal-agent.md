@@ -522,8 +522,9 @@ built on top of them are planned separately.
   computed, never the revision in force at save time. On reopening and
   before every request, a span whose revision is older than the revision in
   force counts as unexamined with its message, since saved evidence keeps no
-  field path. Criterion 30 covers an IT remap from `configuration` to
-  `security` while the answer streams (A1, A3, mockup 34, F).
+  field path. Criterion 30 covers a remap from `configuration` to
+  `security` while the answer streams (a move in Settings since round 23,
+  as the IT policy file is read once per launch) (A1, A3, mockup 34, F).
 - Mockup 34, B: the voice fixture gives the organization name and the
   tenant id their own classes, and a popover shows a fallback that opened
   with neutral wording in place of the tenant id and the greeting name.
@@ -534,6 +535,35 @@ built on top of them are planned separately.
   credentials never reach a model on the Hosted tier in clear text, and the
   Confidential exception (Allow only after the confirmation dialog, which IT
   can lock) is stated next to it, in the plan and mockup 34.
+
+**Review findings adopted (2026-11-20, round 23 of the design review)**
+- Clipping never splits a classified value. When the profile budget, a
+  history budget or evidence compaction before a hosted request would cut
+  through a span the ledger, the tenant value index or the detectors
+  classified, the whole span is left out and the clipping notice says what
+  was left out, by part and class. The retained ranges keep their
+  classification, and the complete scan of the serialized request stays.
+  B2 criteria 3 and 4 cover typed Chat and the hosted voice start with a
+  Conditional Access policy name in the organization instructions, cut by
+  the budget, under Security Block on Hosted (A3, B2, mockup 35, G).
+- The IT policy file is read once per launch (`main.ts`, not watched), so a
+  change to it advances the effective field map revision when the app
+  reads the new file, at the next launch. Criterion 30 now has the remap
+  while the answer streams come from a move in Settings, which applies at
+  once, and a third case for a file change read at the next launch.
+  Criteria 13 and 24 say the same, and the Settings notice in mockup 34, A
+  says which changes apply during a session (A1, A3).
+- Mockup 34, B: a popover for a first voice check that stops inside the
+  profile under the defaults, where the start without the profile passed a
+  complete check and the call opened with it. Every voice popover says that
+  unexamined start text is never sent (the call opens without it or does
+  not start), while unexamined text in a later transfer takes the strictest
+  action on Hosted (criterion 29).
+- Mockup 34, F: the Confidential strip in the reopened unexamined-tail
+  frame has a compact form that keeps "leaves this device" and the block;
+  B shows it next to the long form.
+- Mockup 34, B: the "only recognized credentials masked" note names the
+  Confidential exception next to the Hosted promise.
 
 ## Why
 
@@ -686,8 +716,8 @@ the IT policy file.
       the effective field map revision (defined below) under which that
       span's classes were computed, copied from its ledger entry, never the
       revision in force when the message is saved. A class change between
-      classification and save, such as an IT policy file remap while the
-      answer streams, leaves the span at the older revision (round 22). Each
+      classification and save, such as a move in Settings while the answer
+      streams, leaves the span at the older revision (round 22). Each
       span keeps its offset, its length and the full set of classes that
       applied to it when the message was saved, never one class alone: its
       field's class history at that time (the mapped class and every later
@@ -738,7 +768,15 @@ the IT policy file.
       `configuration` in the IT policy file blocks a value that was sent
       before. A change that leaves every field's classes as they were, such
       as an IT policy file reloaded with the same mappings, leaves it as it
-      is. Saved evidence stores each span's classification revision, the
+      is. A move in Settings and an app update advance it when they apply.
+      The IT policy file is read once per launch (`main.ts` loads it before
+      anything reads the provider; the file is not watched), so a change to
+      the file advances the revision when the app reads the new file, at the
+      next launch, never when the file is written; until then the strip,
+      Settings and every check use the revision in force (round 23). The
+      in-memory checks below test the check against a revision change from
+      any source; they do not assume the file is read during a session.
+      Saved evidence stores each span's classification revision, the
       revision under which its classes were computed, never the revision in
       force at save, and a reopened conversation compares it with the
       revision in force on reopening and before every request: a span
@@ -813,8 +851,8 @@ the IT policy file.
     classed under revision 41, counts as unexamined in the same request.
 13. In-memory ledger, remap to a lower class (test): a ledger entry from a
     field mapped as `security`, classed under revision 41, is used in a
-    request after the IT policy file remaps that field to `configuration`
-    (revision 42), with Security on Hosted at Allow and Configuration on
+    request after a remap of that field to `configuration` from the IT
+    policy file is read (revision 42), with Security on Hosted at Allow and Configuration on
     Hosted at Block. The check before the request reclassifies it from its
     field path, its set holds `security` and `configuration`, and its action
     on Hosted is Block. A revision that advanced only on raises would stay
@@ -926,6 +964,22 @@ the IT policy file.
       same gate. A test enforces it: it fails when a module outside the gate
       calls a hosted model endpoint (a hosted provider SDK, a vendor CLI, or
       a request to a hosted model host such as `api.openai.com`).
+- [ ] Clipping never splits a classified value (round 23). Every cut the app
+      makes to fit a request bound for a hosted model, the profile budget
+      (B2), the history budgets of Chat, the evidence excerpts and their
+      compaction (such as the excerpt cut in `agentic-loop.ts`) and the
+      voice answer pack, keeps whole every span the ledger, the tenant value
+      index or the detectors classified. When a cut would fall inside such a
+      span, the whole span is left out, and the notice for that clip (the
+      clipping notice for the profile, the note on shortened history or
+      evidence) says what was left out by part and class, never the value. The
+      retained ranges keep the classification the full text gave them; a
+      cut never makes the app classify a shorter text from scratch. The
+      complete scan of the serialized request (this phase) still runs on
+      what would be sent, after every cut. A prefix of a classified value,
+      such as "WGB Fin" of a policy name, is what a cut through it would
+      send, and the index and the detectors may not recognize it (B2,
+      criteria 3 and 4).
 - [ ] `nova.ts` and the renderer call the same Hosted gate for tenant data
       the app sends to the voice model as context: it goes through the
       same request scan and follows the same rules as any hosted call, class
@@ -1239,9 +1293,11 @@ the IT policy file.
    rest, would fail the test.
 24. Remap to a lower class, live and reopened (regression tests): Security
    on Hosted is Allow and Configuration on Hosted is Block. A local Chat
-   answer restores a value from a field mapped as `security`, and the IT
-   policy file then remaps that field to `configuration`, which changes
-   the effective field map revision. The value is no longer in the tenant
+   answer restores a value from a field mapped as `security`, and an IT
+   policy file that remaps that field to `configuration` is then read,
+   which changes the effective field map revision (at the next launch in
+   the app, since the file is read once per launch; the live case drives
+   the same revision change into the open conversation directly). The value is no longer in the tenant
    value index. In the conversation that stayed open, a hosted follow-up
    reclassifies the ledger entry from its field path, its set holds
    `security` and `configuration`, the value reaches no provider request,
@@ -1323,9 +1379,9 @@ the IT policy file.
    and save: a local Chat answer restores the description of a
    configuration profile from a field mapped `configuration`, and its ledger
    entry is classed under effective field map revision 41. While the answer
-   streams, the IT policy file maps that field to `security`, which makes
-   revision 42, and the answer is saved after that, so 42 is in force at
-   save. The stored span keeps revision 41, the revision its classes were
+   streams, the admin moves that field to `security` in Settings, which
+   applies at once and makes revision 42, and the answer is saved after
+   that, so 42 is in force at save. The stored span keeps revision 41, the revision its classes were
    computed under, and its stored set holds `configuration` only. The
    description is later gone from the tenant value index, the app restarts,
    the conversation is reopened, and a hosted follow-up is asked with
@@ -1337,7 +1393,16 @@ the IT policy file.
    and the test fails on it. In a second case the answer is saved with its
    span classed under revision 42, the conversation is reopened, and only
    then does a Settings move change a class (revision 43): the check before
-   the next follow-up counts the message as unexamined in the same way.
+   the next follow-up counts the message as unexamined in the same way. In
+   a third case the change comes from the IT policy file, which the app
+   reads once per launch (`main.ts` loads it before anything reads the
+   provider; it is not watched): the answer is saved under revision 41, the
+   file on disk is changed to map the field to `security` while the app
+   runs, and revision 41 stays in force, with the strip and Settings
+   unchanged, until the app reads the new file at the next launch, which
+   makes revision 42. After that launch the conversation is reopened and
+   the message counts as unexamined in the same way. The revision advances
+   when the new file is read, never when it is written (round 23).
 
 ### Phase A4: Masking
 
@@ -1415,12 +1480,47 @@ the IT policy file.
 - [ ] Standing instructions, organization instructions and confirmed notes reach
       typed Chat, within a budget that leaves room for history and evidence.
       Data policy applies to the profile block.
+- [ ] The profile budget never splits a classified value (round 23). The
+      ledger, the tenant value index and the detectors classify the profile
+      block before it is clipped. When the cut of `clipToBytes` in
+      `nova-profile.ts` would fall inside a span they classified (a policy
+      name, a person's name, a device name, a GUID, a credential pattern),
+      the cut moves to the start of that span and the whole span is left
+      out, never a prefix of it. The clipping notice says what was left out,
+      by part and class ("the organization instructions were cut before a
+      security value, which was left out whole"), never the value itself.
+      The retained text keeps the classes the full text gave it, so a value
+      that is recognized only in its full context keeps its class after the
+      cut. The complete scan of the serialized request still runs on what
+      would be sent, as in A3. This holds for typed Chat and for hosted voice
+      alike, and for every other clipping before a hosted request (A3).
 
 **Acceptance criteria:**
 1. A typed Chat answer follows a standing instruction (test with a fake model
    that asserts the block is in the prompt).
 2. Clipping is announced at the start of the conversation, as it is for voice
    today (mockup 35, section G).
+3. Clipping regression test, typed Chat: the organization instructions say
+   "When a finance user cannot sign in, check WGB Finance MFA first", and
+   the tenant value index knows WGB Finance MFA as a Conditional Access
+   policy, `security`. Security on Hosted is Block, and the test sets the
+   profile budget so that the cut falls inside the policy name. A typed
+   Chat question goes to a hosted provider. The fake model's request holds
+   the organization instructions up to "check" and no part of the policy
+   name ("WGB", "WGB Fin" or any other prefix), the scan of the serialized
+   request finds no blocked content, the request is sent, and the clipping
+   notice at the start of the conversation says a security value at the cut
+   was left out whole. A clip that cut through the name would send "WGB
+   Fin", which the index does not match and the scan cannot read as
+   security, and the test fails on it.
+4. Clipping regression test, hosted voice start: the same organization
+   instructions, rules and budget. Hosted voice starts. The fake session's
+   start request holds the clipped profile with no part of the policy name,
+   the scan of the complete serialized instructions covers the whole text
+   and finds no blocked content, the call opens, and the clipping notice
+   shown once in the call says a security value at the cut was left out
+   whole. A start that cut through the name would send its
+   prefix, and the test fails on it.
 
 ### Phase B3: Access grants
 
