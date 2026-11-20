@@ -814,7 +814,7 @@ describe("Model fit in Chat", () => {
           modelOverride: { offerId: failed.assistantMessage.modelFit!.offerId!, providerId: "anthropic", model: "claude-sonnet-5-5", destination: "dest-anthropic" },
           hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5", false, failed.assistantMessage.modelFit!.offerId!),
         }, () => undefined),
-        /deleted/,
+        (error: Error) => /deleted/.test(error.message) && error.message.endsWith(MODEL_FIT_RESEND),
       );
       assert.deepEqual(built, []);
     });

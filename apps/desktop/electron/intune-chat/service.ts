@@ -2567,7 +2567,7 @@ export class IntuneChatService {
       ? this.modelFitOffers.check(input.modelOverride.offerId, { conversationId: input.conversationId, tenantId: persisted.activeTenantId ?? undefined, content, workspaceKey: workspaceKeyOf(input.workspaceContext) })
       : undefined;
     if (fitOffer && !store.getConversation(fitOffer.conversationId)) {
-      throw new ModelOverrideError("That conversation was deleted, so nothing was sent.");
+      throw new ModelOverrideError("That conversation was deleted, so nothing was sent. Send the question again.");
     }
     const turn = resolveChatTurnProvider({
       override: input.modelOverride,
@@ -2645,7 +2645,7 @@ export class IntuneChatService {
     // The offer is used up once this request is cleared to send: consent and conversation checks passed.
     // The conversation is read again here, after the awaits above.
     if (fitOffer) {
-      if (!conversation || conversation.id !== fitOffer.conversationId) throw new ModelOverrideError("That conversation was deleted, so nothing was sent.");
+      if (!conversation || conversation.id !== fitOffer.conversationId) throw new ModelOverrideError("That conversation was deleted, so nothing was sent. Send the question again.");
       // The organization and model the offer was made for are read again here, after the awaits above,
       // and the claim follows with no await in between.
       const latest = await this.host.read();
@@ -2657,7 +2657,7 @@ export class IntuneChatService {
         throw new ModelOverrideError("The organization or model in Chat changed, so nothing was sent. Send the question again.");
       }
       // The conversation is read again after that await too; a deletion in between refuses the send.
-      if (!store.getConversation(fitOffer.conversationId)) throw new ModelOverrideError("That conversation was deleted, so nothing was sent.");
+      if (!store.getConversation(fitOffer.conversationId)) throw new ModelOverrideError("That conversation was deleted, so nothing was sent. Send the question again.");
       this.modelFitOffers.claim(fitOffer.id);
     }
     // Audited once the send is cleared: a refused send records no consent.
