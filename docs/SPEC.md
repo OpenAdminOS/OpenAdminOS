@@ -3841,12 +3841,19 @@ the format. Decisions:
   computing answers to other questions (a dropped "not", "or" read as "and",
   "Windows 11" read as Windows, independent clauses read as a subset), so the
   list is closed and grows only by adding a tested shape. Only "devices" (or
-  "Macs") names the inventory, since "computers" would also count phones; iOS
-  and iPadOS are separate platforms; a sync window must be one day to ten
-  years; "list their names" together with a subset asks for two lists and goes
-  to the planner; "what about macOS" asks the stored question again with
-  macOS in the same shape (its split, subset, count or list); Entra device
-  questions always go to the planner. The deterministic
+  "Macs") names the inventory, since "computers" would also count phones;
+  "iOS" is Intune's iOS/iPadOS platform, and "iPadOS", "iPad" and "iPhone"
+  questions go to the planner, because whether an iPad reports
+  operatingSystem "iOS" or "iPadOS" is not documented and could not be checked
+  on a tenant (2026-11-20, the Lokka tenant has no iPad); a sync window must
+  be one day to ten years, and times compare as times; a later sentence with
+  its own subject is its own question and goes to the planner; "list their
+  names" together with a subset asks for two lists and goes to the planner;
+  "what about macOS" asks the stored question again with macOS swapped in or
+  added in the same shape (its split, subset, count or list), and a split
+  that was over a follow-up's subset is not rebuilt; a device lookup is
+  resolved again by name in the snapshot that answers; Entra device questions
+  always go to the planner. The deterministic
   answer pack carries the result as an authoritative `computedResult` (exact
   counts, the full filtered list, plain fact lines) and no sample rows for
   that resource, only for a tenant or mixed question whose resource the tenant
@@ -3872,8 +3879,7 @@ the format. Decisions:
   ("what about macOS" after Windows) asks the same question of a fresh set.
   What ran shows the filters of a follow-up, not the row ids. A device
   lookup stores no follow-up context. When the previous answer matched more
-  than 500 rows, a follow-up reads the cache afresh with both filters and its
-  answer does not claim to narrow the previous set. Any other answer clears the context, and
+  than 500 rows, no rows were kept and "of those" goes to the planner. Any other answer clears the context, and
   follow-up planning reads write intent from the current question only. Short
   follow-ups are planned with the previous question as context. The context is
   stored only when the visible answer came from the computed result (code, or
