@@ -73,3 +73,25 @@ describe("connector invocation confirmation", () => {
     assert.equal(invoked, false);
   });
 });
+
+import { graphAccessDenialFromError } from "@openadminos/agent-sdk";
+import { preflightConnectors } from "./connectors.js";
+
+describe("required connector preflight", () => {
+  it("keeps the Teams health check's Graph 403 as the cause of the preflight failure", async () => {
+    const failure = await preflightConnectors({
+      runId: "run",
+      requirements: [{ id: "teams", minVersion: "1.0.0", required: true, capabilities: [{ id: "list-teams", version: 1 }] }],
+      tenant: { tenantId: "tenant", username: "admin@contoso.example", acquireTokenForScopes: async () => "token" },
+      configFor: () => ({}),
+      secretsFor: () => undefined as never,
+      transport: {
+        fetch: (async () => new Response('{"error":{"code":"Forbidden","message":"Insufficient privileges to complete the operation."}}', { status: 403, headers: { "content-type": "application/json" } })) as typeof fetch,
+      },
+      log: () => undefined,
+    }).then(() => undefined, (error: unknown) => error);
+    assert.ok(failure instanceof Error);
+    assert.match(failure.message, /failed its health check/);
+    assert.equal(graphAccessDenialFromError(failure)?.cause, "unknown");
+  });
+});
