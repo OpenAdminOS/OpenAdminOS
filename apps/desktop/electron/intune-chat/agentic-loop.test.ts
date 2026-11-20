@@ -179,9 +179,8 @@ it("classifies the identity cut inside a Graph preview array in the next Chat re
   const shape = (length: number) => ({ value: [{ ...padding, lastPadding: "y".repeat(length),
     conditions: { users: { includeUsers: [userId] } }, description: "p".repeat(550) }] });
   let response = shape(300);
-  const tools = toolContext(store);
+  const tools = toolContext(store, async () => response);
   tools.grantedScopes = new Set([...tools.grantedScopes, "Policy.Read.All"]);
-  tools.graphForScopes = async () => ({ request: async () => response } as RunGraphApi);
   const probe = await executeIntuneChatTool(tools, "graph_get", { path });
   const preview = (probe.result as { valuePreview: string }).valuePreview;
   const marker = '"includeUsers":["';
@@ -224,9 +223,8 @@ it("keeps the containing field when the observation budget shortens an array val
   const path = "/groups";
   const label = "opaque-group-alias-".repeat(45).slice(0, 800);
   const response = { value: [{ proxyAddresses: [[label]] }] };
-  const tools = toolContext(store);
+  const tools = toolContext(store, async () => response);
   tools.grantedScopes = new Set([...tools.grantedScopes, "Group.Read.All"]);
-  tools.graphForScopes = async () => ({ request: async () => response } as RunGraphApi);
   const requests: LlmOptions[] = [];
   const llm: RunLlmApi = { available: true, async complete(options) {
     requests.push(options);
@@ -792,7 +790,7 @@ function seededStore(dir: string): IntelligenceSqliteStore {
   return store;
 }
 
-function toolContext(store: IntelligenceSqliteStore): IntuneChatToolContext {
+function toolContext(store: IntelligenceSqliteStore, request: RunGraphApi["request"] = async () => ({ value: [] })): IntuneChatToolContext {
   return {
     tenantId: "tenant-1",
     store,
@@ -804,9 +802,7 @@ function toolContext(store: IntelligenceSqliteStore): IntuneChatToolContext {
       async retireManagedDevice() {
         throw new Error("write should not run");
       },
-      async request() {
-        return { value: [] };
-      },
+      request,
     }),
     refreshResource: async (resource) => ({
       resource,
