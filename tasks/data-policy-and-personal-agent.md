@@ -287,7 +287,8 @@ built on top of them are planned separately.
 
 **Review findings adopted (2026-11-19, round 14 of the design review)**
 - Saved Chat evidence keeps every class a span's field has held: each span
-  stores the list of its field's classes at the time of saving, and
+  stores the list of its field's classes at the time of saving (widened in
+  round 15 to every class a value detector assigned as well), and
   reopening recomputes the strictest action across all of them under the
   current rules. A same-version restart regression test covers a field
   moved from `configuration` to `security` to `identity` (A1, A3).
@@ -302,6 +303,22 @@ built on top of them are planned separately.
 - Mockup 34, F: a message with readable evidence saved before a field map
   change that raised a class counts as unexamined, and the reopened
   conversation says why.
+
+**Review findings adopted (2026-11-19, round 15 of the design review)**
+- Saved Chat evidence keeps the full set of classes that applied to each
+  span when saved: its field's class history and every class a value
+  detector assigned (a tenant value index match, the credential and
+  identifier patterns). Reopening takes the strictest action across that
+  set. A same-version restart regression test covers a display name in a
+  configuration field that the index recognized as identity and that has
+  since left the index (A1, A3).
+- Mockup 35: the readable definition pane renders every schema keyword the
+  layout does not handle with the recursive value renderer, so a root
+  `enum` and a description under nested `items.items` appear in both panes.
+- Mockup 34, F: evidence from before any class-raising field map change
+  counts as unexamined, not only evidence for the fields that changed.
+- Mockup 35: the saved-delivery note says the run-origin gate covers every
+  connector, including ones added later, with Teams as the example.
 
 ## Why
 
@@ -425,10 +442,12 @@ the IT policy file.
 - [ ] Saved Chat history keeps its classification evidence. Each saved Chat
       message stores, next to it in the local database, the spans the ledger
       found in its text and the field map version that classed them. Each
-      span keeps its offset, its length and the list of every class its
-      field had held when the message was saved (the field's class history
-      at that time: the mapped class and every later pick), never one class
-      alone. The evidence holds no copy of the values
+      span keeps its offset, its length and the full set of classes that
+      applied to it when the message was saved, never one class alone: its
+      field's class history at that time (the mapped class and every later
+      pick) and every class a value detector assigned to it (a tenant value
+      index match, such as a person's display name recognized as identity,
+      and the credential and identifier patterns). The evidence holds no copy of the values
       beyond the message text that is already stored. Disconnecting the
       organization and deleting the conversation remove the evidence with the
       messages.
@@ -437,10 +456,11 @@ the IT policy file.
       built, so a value that is no longer in the current tenant value index
       (a Conditional Access policy that was renamed or deleted since) is still
       known by its classes. Each rebuilt span takes the strictest action
-      across every class in its stored list, computed under the rules in
-      force at the follow-up, the same rule as a reclassified field below; a
-      span is never rebuilt from only the first or the last class in its
-      list. A saved message without stored evidence (saved
+      across every class in its stored set, field classes and detector
+      classes alike, computed under the rules in force at the follow-up, the
+      same rule as a reclassified field below; a span is never rebuilt from
+      only the first or the last class in its set, nor from its field's
+      classes without the classes the detectors assigned. A saved message without stored evidence (saved
       before the evidence existed, or evidence that cannot be read) counts as
       unexamined, as in the budget rule below. Evidence stored under a field
       map version older than a map change that raised any class also counts
@@ -487,8 +507,9 @@ the IT policy file.
 9. Every field mapping was checked against a live Graph response in the lab
    tenant, and the record lists the calls.
 10. Stored evidence: a saved Chat message keeps its spans (offset, length,
-    and the list of every class the span's field had held when the message
-    was saved) and the field map version in the local database and no other
+    and the full set of classes that applied to the span when the message
+    was saved: every class its field had held and every class a value
+    detector assigned) and the field map version in the local database and no other
     copy of its values; Disconnect and deleting the conversation remove the
     evidence with the messages (test).
 
@@ -563,10 +584,13 @@ the IT policy file.
 - [ ] Saved history in a follow-up. History whose evidence was rebuilt (A1) is
       routed and masked like any other part of the request, by its stored
       classes and by the scan of the final request. Each span's action is the
-      strictest across every class in its stored list, recomputed under the
-      rules in force at the follow-up, so a span whose field once held
-      `security` is blocked when Security is Block on the tier, whatever
-      class it held last. History without stored
+      strictest across every class in its stored set (its field's class
+      history and every class a value detector assigned to it when saved),
+      recomputed under the rules in force at the follow-up, so a span whose
+      field once held `security` is blocked when Security is Block on the
+      tier, whatever class it held last, and a name the tenant index
+      recognized as `identity` when saved keeps `identity` after it leaves
+      the index. History without stored
       evidence counts as unexamined and takes the strictest action of any
       class on the tier: with a Block on the tier it is withheld, and the
       follow-up is not sent with it; with Mask as the strictest action it is
@@ -651,6 +675,17 @@ the IT policy file.
    mapped `configuration` (Allow on Hosted by default) in clear text, the
    latest `identity` (Mask on Hosted by default) masked, and the test fails
    on either.
+14. Same-version restart regression test for detector classes: a
+   configuration field (mapped `configuration`, never reclassified) holds a
+   person's display name that the tenant value index recognizes as
+   `identity`, and the value is restored in a local Chat answer that is
+   saved. The saved span's stored set holds `configuration` and `identity`.
+   The name is later gone from the index, the app restarts under the same
+   field map version, the conversation is reopened, and a hosted follow-up
+   is asked with Identity on Hosted at Mask, then at Block: the name is
+   masked, then withheld, and never reaches a provider request in clear
+   text. A rebuild from the field's classes alone would send it as
+   configuration, and the test fails on it.
 
 ### Phase A4: Masking
 
