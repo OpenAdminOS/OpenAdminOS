@@ -30,8 +30,10 @@ export function LocalResetIncomplete() {
   };
 
   return (
-    <main className="flex h-full min-h-screen w-full items-center justify-center bg-[var(--color-bg)] px-6 py-10 text-[var(--color-text)]">
-      <section aria-labelledby="local-reset-incomplete-title" className="w-full max-w-xl space-y-4">
+    // The page root hides overflow, so this screen scrolls itself and keeps
+    // the actions in view however long the list is.
+    <main className="h-screen w-full overflow-y-auto bg-[var(--color-bg)] px-6 py-10 text-[var(--color-text)]">
+      <section aria-labelledby="local-reset-incomplete-title" className="mx-auto w-full max-w-xl space-y-4">
         <h1 id="local-reset-incomplete-title" className="text-lg font-semibold">
           {LOCAL_RESET_COPY.incompleteTitle}
         </h1>
@@ -40,7 +42,7 @@ export function LocalResetIncomplete() {
           <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 ring-1 ring-[var(--color-border-soft)]">
             <h2 className="text-sm font-medium">{LOCAL_RESET_COPY.incompleteFailedTitle}</h2>
             <p className="mt-0.5 break-all font-mono text-xs text-[var(--color-text-muted)]">{report.dataFolder}</p>
-            <ul className="mt-2 space-y-1 text-sm">
+            <ul className="mt-2 max-h-64 space-y-1 overflow-y-auto text-sm">
               {report.failed.map((entry) => (
                 <li key={entry.item}>
                   <span className="font-mono">{entry.item}</span>
