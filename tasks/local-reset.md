@@ -100,6 +100,14 @@ the installed app's scheduler, login item or caches.
   (approval race, dev and installed builds sharing a profile, marker commit
   point, Keychain match and retry), all fixed with tests; Muse failed on a
   transport error and runs again in round 2.
+- Review round 2: Claude no blocking; Sol three blocking (case-insensitive
+  policy file, login item and scheduler repair on a development reset, a
+  scheduler-owned process unloading its own LaunchAgent), all fixed; Muse no
+  blocking, its medium and low items fixed (folder listed again before the
+  marker goes, Windows query timeout counts as unknown, Reset off until the
+  impact list loads, login item checked, failed progress record reported).
+  Sol confirmed from Electron 42.8.1 sources that the main script runs before
+  Local State is read.
 - Found in the end to end run and fixed: the incomplete screen called the
   appearance handler before it was registered, and failure reasons repeated
   full paths.
