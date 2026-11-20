@@ -8,9 +8,8 @@ import {
   LocalResetRequestError,
   localResetDataFolderLinkMessage,
   localResetFolderIdentity,
-  sameSessionFolder,
   type LocalResetFolderIdentity,
-  localResetLinkCheck,
+  folderGoesThroughLink,
   MANAGED_POLICY_FILE,
   localResetPolicyProblem,
   parseWhoamiUser,
@@ -5604,7 +5603,7 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
         if (!committedFolder) {
           throw new LocalResetRequestError("The reset could not start: the data folder could not be read, or it cannot be told apart from another folder on this disk. Nothing was removed.");
         }
-        if (localResetLinkCheck(app.getPath("userData")).dataFolderIsLink) {
+        if (folderGoesThroughLink(app.getPath("userData"))) {
           throw new LocalResetRequestError(localResetDataFolderLinkMessage());
         }
         const policyProblem = localResetPolicyProblem(app.getPath("userData"));
@@ -5619,54 +5618,24 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
         // become a link since the checks gets no marker, so no other
         // profile can receive a reset request.
         const dataFolder = app.getPath("userData");
-        if (localResetLinkCheck(dataFolder).dataFolderIsLink) {
+        if (folderGoesThroughLink(dataFolder)) {
           throw new Error("the data folder became a link to another place");
         }
-        // The first write fixes which folder this reset is for; a later
-        // write (the warnings) and the sign-out go only to that folder.
+        // Both writes (the request and its warnings) go only to the folder
+        // taken before the checks.
         committedFolder = await writeLocalResetMarker(dataFolder, marker, { expectFolder: committedFolder });
       },
-      forgetSignIns: async () => {
+      // No sign-out here: it would rewrite the token caches in place, which
+      // cannot be bound to the folder the reset was accepted for. The token
+      // files are removed with the data folder at the next launch, before
+      // anything can read them.
+      stopTenantWork: async () => {
         // The marker is written, so the reset goes ahead: no connector send
         // is approved from here on and no organization starts new work. Done
         // here, after the commit, so a refused request never declines an
-        // approval or stops work. Neither step can refuse the reset now.
+        // approval or stops work.
         blockConnectorConfirmations("OpenAdminOS is resetting. Nothing was sent.");
-        await store.closeAllTenantWork().catch((error: unknown) => {
-          console.warn("[local-reset] could not close every organization's work; the restart stops it", error);
-        });
-        // Sign-out rewrites the token caches, so only in the folder the
-        // marker was written for: not one restored or swapped in since.
-        const nowFolder = localResetFolderIdentity(app.getPath("userData"));
-        if (!committedFolder || !nowFolder || !sameSessionFolder(committedFolder, nowFolder)) {
-          return [{
-            item: "Microsoft sign-ins",
-            reason: "not removed from the token caches, because the data folder is no longer the one the reset was accepted for. The reset at the next launch stops before removing anything there",
-          }];
-        }
-        // Sign-out rewrites the token caches; a cache that is a link would
-        // be rewritten wherever it points. The wipe removes the link only.
-        const check = localResetLinkCheck(app.getPath("userData"));
-        if (check.dataFolderIsLink) {
-          return [{
-            item: "Microsoft sign-ins",
-            reason: "not removed from the token caches, because the data folder now reaches another place through a link. The reset at the next launch stops before removing anything there",
-          }];
-        }
-        if (check.scanFailed) {
-          return [{
-            item: "Microsoft sign-ins",
-            reason: "not removed from the token caches, because the data folder could not be listed to check them. The token files are removed with the data folder",
-          }];
-        }
-        const linked = check.linkedTokenCaches;
-        if (linked.length > 0) {
-          return [{
-            item: "Microsoft sign-ins",
-            reason: `not removed from the token caches, because ${linked.join(", ")} ${linked.length === 1 ? "is a link or a file shared with" : "are links or files shared with"} another place. They are removed from the data folder only; the other copies are not touched`,
-          }];
-        }
-        return store.forgetAllSignIns();
+        await store.closeAllTenantWork();
       },
       disableScheduler: async () => {
         // A development build never registered the per-user scheduler; the

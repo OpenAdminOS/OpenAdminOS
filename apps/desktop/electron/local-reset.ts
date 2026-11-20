@@ -5,9 +5,11 @@
  * hold files in the data folder:
  *
  * 1. `requestLocalReset` (running app): checks the typed phrase, writes a
- *    pending-reset marker into the data folder, signs out of every tenant,
- *    turns off the OS scheduler and the login item. The caller then stops
- *    the stores and relaunches.
+ *    pending-reset marker into the data folder, closes every organization
+ *    to new work, turns off the OS scheduler and the login item. The caller
+ *    then stops the stores and relaunches. It does not sign out first: that
+ *    rewrites the token caches in place, which cannot be bound to the folder
+ *    the reset was accepted for. The token files go with the data folder.
  * 2. `runPendingLocalReset` (next launch, at the top of the main script,
  *    after the single-instance lock and before `app.whenReady`): empties the
  *    data folder except the IT policy file, the marker and Chromium's lock
@@ -111,8 +113,11 @@ export interface LocalResetRequestSteps {
   /** Throws when the reset must wait, for example while a change is being applied. */
   checkReady(): Promise<void>;
   writeMarker(marker: LocalResetMarker): Promise<void>;
-  /** Removes the Microsoft sign-in of every tenant; returns what could not be removed. */
-  forgetSignIns(): Promise<LocalResetProblem[]>;
+  /**
+   * After the marker: no connector send is approved and no organization
+   * starts new work. Writes nothing to the data folder.
+   */
+  stopTenantWork(): Promise<void>;
   disableScheduler(): Promise<void>;
   disableLoginItem(): Promise<void>;
   build: LocalResetBuild;
@@ -144,12 +149,13 @@ export async function requestLocalReset(
       `The reset could not start: the data folder could not be written (${reasonOf(cause)}). Nothing was removed.`,
     );
   }
-  const warnings: LocalResetProblem[] = [];
   try {
-    warnings.push(...(await steps.forgetSignIns()));
+    await steps.stopTenantWork();
   } catch (cause) {
-    warnings.push({ item: "Microsoft sign-ins", reason: `${reasonOf(cause)}. The token files are deleted with the data folder.` });
+    // The shutdown before the restart stops the same work.
+    console.warn(`[local-reset] could not close every organization's work: ${reasonOf(cause)}`);
   }
+  const warnings: LocalResetProblem[] = [];
   for (const [item, step] of [
     ["Background scheduler", steps.disableScheduler],
     ["Menu bar login item", steps.disableLoginItem],
@@ -232,33 +238,6 @@ function isMarkerTempName(name: string): boolean {
 
 const DATA_FOLDER_LINK_REASON =
   "the data folder is a link, holds another mount, or could not be read in full, so emptying it could reach files elsewhere and OpenAdminOS does not empty it. Remove its files by hand, as described in Uninstall and reset";
-
-/**
- * Links in the data folder the reset must not write or delete through: the
- * folder itself, and token cache files, which sign-out would rewrite.
- */
-export function localResetLinkCheck(
-  userDataDir: string,
-  fs: Pick<LocalResetFileSystem, "isLink" | "isShared" | "readdir"> = nodeFileSystem,
-): {
-  dataFolderIsLink: boolean;
-  linkedTokenCaches: string[];
-  /** The folder could not be listed, so its token caches could not be checked. */
-  scanFailed: boolean;
-} {
-  if (fs.isLink(userDataDir)) return { dataFolderIsLink: true, linkedTokenCaches: [], scanFailed: false };
-  let entries: string[];
-  try {
-    entries = fs.readdir(userDataDir);
-  } catch {
-    return { dataFolderIsLink: false, linkedTokenCaches: [], scanFailed: true };
-  }
-  return {
-    dataFolderIsLink: false,
-    linkedTokenCaches: entries.filter((name) => /^tokens.*\.bin$/i.test(name) && fs.isShared(join(userDataDir, name))),
-    scanFailed: false,
-  };
-}
 
 /**
  * True when a folder path does not lead straight to a plain folder of that

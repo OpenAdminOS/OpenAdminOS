@@ -45,7 +45,7 @@ export const LOCAL_RESET_COPY = {
   phrasePlaceholder: "Type the phrase to enable Reset",
   action: "Reset and restart",
   busyAction: "Resetting",
-  progress: "Signing out of every organization and stopping background work. OpenAdminOS closes in a moment.",
+  progress: "Closing every organization and stopping background work. OpenAdminOS closes in a moment.",
   restarting: "Reset started. OpenAdminOS is closing and opens again at first run.",
   failedFallback:
     "The reset could not start. Nothing was removed. Try again, or quit OpenAdminOS and remove the data folder by hand, as described in Uninstall and reset in the docs.",

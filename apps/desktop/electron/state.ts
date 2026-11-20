@@ -2422,34 +2422,6 @@ export class AppStateStore {
   }
 
   /**
-   * Reset OpenAdminOS, phase 1: removes the Microsoft sign-in of every
-   * tenant, and of every disconnect whose cleanup is still pending, from the
-   * token caches. The token files are deleted with the data folder at the
-   * next launch; this makes the sign-ins unusable now. Returns the sign-ins
-   * that could not be removed.
-   */
-  async forgetAllSignIns(): Promise<{ item: string; reason: string }[]> {
-    const persisted = await this.read();
-    const signIns = [
-      ...persisted.tenants
-        .filter((tenant) => !isLegacySampleTenant(tenant) && tenant.homeAccountId)
-        .map((tenant) => ({ name: tenant.displayName, appRegistration: tenant.appRegistration, homeAccountId: tenant.homeAccountId })),
-      ...(persisted.tenantRemovals ?? [])
-        .filter((removal) => removal.kind !== "sample" && removal.homeAccountId)
-        .map((removal) => ({ name: removal.displayName, appRegistration: removal.appRegistration, homeAccountId: removal.homeAccountId! })),
-    ];
-    const problems: { item: string; reason: string }[] = [];
-    for (const signIn of signIns) {
-      try {
-        await this.removeCachedAccount(signIn.appRegistration, signIn.homeAccountId);
-      } catch (cause) {
-        problems.push({ item: `Microsoft sign-in for ${signIn.name}`, reason: errorText(cause) });
-      }
-    }
-    return problems;
-  }
-
-  /**
    * Reset OpenAdminOS, once its marker is written: every organization stops
    * taking new work, the way Disconnect closes one. Work already running
    * gets its signal; the shutdown before the restart waits for it.

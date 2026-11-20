@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, linkSync, renameSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, renameSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,7 +13,6 @@ import {
   LOCAL_RESET_MARKER,
   LocalResetRequestError,
   localResetLeftoverPaths,
-  localResetLinkCheck,
   folderGoesThroughLink,
   localResetPolicyProblem,
   markerFolderMatches,
@@ -436,7 +435,7 @@ describe("local reset: wipe at launch", () => {
     }
   });
 
-  it("does not empty a data folder that is a link, and finds token caches that are links", async () => {
+  it("does not empty a data folder that is a link, and removes token caches that are links as links", async () => {
     const dir = await tempDir();
     try {
       const shared = join(dir, "shared");
@@ -444,7 +443,7 @@ describe("local reset: wipe at launch", () => {
       seedDataFolder(shared, DEV_MARKER);
       const linked = join(dir, "profile-link");
       symlinkSync(shared, linked);
-      assert.equal(localResetLinkCheck(linked).dataFolderIsLink, true);
+      assert.equal(folderGoesThroughLink(linked), true);
       const report = runPendingLocalReset({ userDataDir: linked, packaged: false, platform: "linux", home: dir, env: {} });
       assert.equal(report?.status, "incomplete");
       assert.match(report?.failed[0]?.reason ?? "", /is a link, holds another mount, or could not be read in full/);
@@ -455,7 +454,6 @@ describe("local reset: wipe at launch", () => {
       writeFileSync(join(dir, "other-cache.bin"), "other profile");
       symlinkSync(join(dir, "other-cache.bin"), join(profile, "tokens-abc.bin"));
       writeFileSync(join(profile, "tokens.bin"), "x");
-      assert.deepEqual(localResetLinkCheck(profile), { dataFolderIsLink: false, linkedTokenCaches: ["tokens-abc.bin"], scanFailed: false });
       writeFileSync(join(profile, LOCAL_RESET_MARKER), JSON.stringify(markerFor(profile, DEV_MARKER)));
       assert.equal(runPendingLocalReset({ userDataDir: profile, packaged: false, platform: "linux", home: dir, env: {} })?.status, "completed");
       assert.equal(readFileSync(join(dir, "other-cache.bin"), "utf8"), "other profile");
@@ -471,7 +469,6 @@ describe("local reset: wipe at launch", () => {
       mkdirSync(profile);
       writeFileSync(join(dir, "backup-tokens.bin"), "backup bytes");
       linkSync(join(dir, "backup-tokens.bin"), join(profile, "tokens.bin"));
-      assert.deepEqual(localResetLinkCheck(profile).linkedTokenCaches, ["tokens.bin"]);
       writeFileSync(join(profile, LOCAL_RESET_MARKER), JSON.stringify(markerFor(profile, DEV_MARKER)));
       assert.equal(runPendingLocalReset({ userDataDir: profile, packaged: false, platform: "linux", home: dir, env: {} })?.status, "completed");
       assert.equal(readFileSync(join(dir, "backup-tokens.bin"), "utf8"), "backup bytes");
@@ -491,15 +488,6 @@ describe("local reset: wipe at launch", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
-  });
-
-  it("does not check token caches it cannot list", () => {
-    const check = localResetLinkCheck("/data", {
-      isLink: () => false,
-      isShared: () => false,
-      readdir: () => { throw Object.assign(new Error("EACCES"), { code: "EACCES" }); },
-    });
-    assert.deepEqual(check, { dataFolderIsLink: false, linkedTokenCaches: [], scanFailed: true });
   });
 
   it("clears the request's scheduler warning when removal works at launch", async () => {
@@ -693,7 +681,6 @@ describe("local reset: wipe at launch", () => {
       // path reads as a folder next to the link.
       for (const path of [linked, `${linked}/`, `${linked}/.`, `${linked}/inner/..`, `${linked}/../shared`]) {
         assert.equal(folderGoesThroughLink(path), true, path);
-        assert.equal(localResetLinkCheck(path).dataFolderIsLink, true, path);
         const report = runPendingLocalReset({ userDataDir: path, packaged: false, platform: "linux", home: dir, env: {} });
         assert.equal(report?.status, "incomplete", path);
         assert.ok(existsSync(join(shared, "state.json")), path);
@@ -999,7 +986,7 @@ describe("local reset: request", () => {
     return {
       checkReady: async () => { log.push("check"); },
       writeMarker: async (marker) => { log.push(`marker:${marker.requestWarnings?.length ?? 0}`); },
-      forgetSignIns: async () => { log.push("sign-ins"); return []; },
+      stopTenantWork: async () => { log.push("stop-work"); },
       disableScheduler: async () => { log.push("scheduler"); },
       disableLoginItem: async () => { log.push("login-item"); },
       build: "installed",
@@ -1016,10 +1003,10 @@ describe("local reset: request", () => {
     }
   });
 
-  it("writes the marker first, then signs out and turns off background work", async () => {
+  it("writes the marker first, then stops tenant work and turns off background work", async () => {
     const log: string[] = [];
     const { marker } = await requestLocalReset(LOCAL_RESET_PHRASE, steps(log));
-    assert.deepEqual(log, ["check", "marker:0", "sign-ins", "scheduler", "login-item"]);
+    assert.deepEqual(log, ["check", "marker:0", "stop-work", "scheduler", "login-item"]);
     assert.deepEqual(marker, MARKER);
   });
 
@@ -1037,27 +1024,46 @@ describe("local reset: request", () => {
     assert.deepEqual(log, ["check"]);
   });
 
-  it("goes on past failed sign-out and scheduler steps and records them in the marker", async () => {
+  it("goes on past failed steps after the marker and records the scheduler failure in it", async () => {
     const log: string[] = [];
     const { marker } = await requestLocalReset(
       LOCAL_RESET_PHRASE,
       steps(log, {
-        forgetSignIns: async () => [{ item: "Microsoft sign-in for Contoso", reason: "cache locked" }],
+        stopTenantWork: async () => { throw new Error("store closed"); },
         disableScheduler: async () => { throw new Error("launchctl failed"); },
       }),
     );
-    assert.deepEqual(log, ["check", "marker:0", "login-item", "marker:2"]);
-    assert.deepEqual(marker.requestWarnings, [
-      { item: "Microsoft sign-in for Contoso", reason: "cache locked" },
-      { item: "Background scheduler", reason: "launchctl failed" },
-    ]);
+    assert.deepEqual(log, ["check", "marker:0", "login-item", "marker:1"]);
+    assert.deepEqual(marker.requestWarnings, [{ item: "Background scheduler", reason: "launchctl failed" }]);
+  });
+
+  it("never signs out or rewrites anything in the data folder after the marker", async () => {
+    const dir = await tempDir();
+    try {
+      writeFileSync(join(dir, "tokens.bin"), "encrypted cache");
+      const before = statSync(join(dir, "tokens.bin"));
+      await requestLocalReset(LOCAL_RESET_PHRASE, {
+        checkReady: async () => undefined,
+        writeMarker: async (marker) => { await writeLocalResetMarker(dir, marker); },
+        stopTenantWork: async () => undefined,
+        disableScheduler: async () => undefined,
+        disableLoginItem: async () => undefined,
+        build: "development",
+      });
+      // The token cache is removed by the launch wipe, never rewritten in
+      // place by a sign-out that could reach a folder swapped in since.
+      assert.equal(readFileSync(join(dir, "tokens.bin"), "utf8"), "encrypted cache");
+      assert.equal(statSync(join(dir, "tokens.bin")).mtimeMs, before.mtimeMs);
+      assert.deepEqual(readdirSync(dir).sort(), [LOCAL_RESET_MARKER, "tokens.bin"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 
 describe("local reset: end to end with the store", () => {
   it("relaunches into first run with no tenants, tokens or secrets, a fresh database and an intact audit log", async () => {
     const dir = await tempDir();
-    const removedAccounts: string[] = [];
     const tokenCache = new Map<string, string>();
     try {
       const statePath = join(dir, "state.json");
@@ -1076,11 +1082,7 @@ describe("local reset: end to end with the store", () => {
       await requestLocalReset(LOCAL_RESET_PHRASE, {
         checkReady: async () => assert.equal(await store.beginLocalReset(), undefined),
         writeMarker: async (marker) => { await writeLocalResetMarker(dir, marker); },
-        forgetSignIns: async () => {
-          const problems = await store.forgetAllSignIns();
-          removedAccounts.push(...problems.map((problem) => problem.item));
-          return problems;
-        },
+        stopTenantWork: async () => store.closeAllTenantWork(),
         disableScheduler: async () => undefined,
         disableLoginItem: async () => undefined,
         build: "development",
@@ -1108,7 +1110,6 @@ describe("local reset: end to end with the store", () => {
       } finally {
         fresh.close();
       }
-      assert.deepEqual(removedAccounts, []);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
