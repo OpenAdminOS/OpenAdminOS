@@ -2597,7 +2597,9 @@ conversation, its bubble shows the notice's title and why line, without the
 choices, which belong to the live request only.
 
 While the accepted request runs, its turn says "Sending to <location label>
-for this request only". After. The stored answer carries `switchedFrom` (the provider and model it
+for this request only."
+
+After. The stored answer carries `switchedFrom` (the provider and model it
 replaced, why, and whether the provider that took it was on this device when
 it was sent, so later settings cannot relabel it) and shows "Answered by <location label> for this request
 only. Chat is back on <model>." A failed answer carries `modelFit` with the
