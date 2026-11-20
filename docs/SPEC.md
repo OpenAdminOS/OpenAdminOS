@@ -2471,6 +2471,10 @@ taken by the personal agent mockup in PR #207).
 
 Signals. Only a model on this device gets the offer: a local provider, and not
 a remote-backed or Ollama Cloud model, whose prompt already left the device.
+Its locality is confirmed when the request fails (the same fresh check), not
+from a provider list read earlier. For runs the host records the fit issue on
+the run (`RunRecord.modelFit`) when it fails, after that check, and the run page
+offers only from it.
 - The prompt does not fit the context window. Today this is the provider's own
   error: the Ollama adapter's "context size too small" message with the tokens
   needed and the limit (PR #211 and later), including the form where Ollama could
@@ -2497,7 +2501,10 @@ plain numbers where known ("This request needs about 40,652 tokens. OpenAdmin
 separate buttons with none focused or highlighted: each configured and ready
 hosted provider with its production location label (`providerDataLocation`)
 and a cost note that says where the cost lands (the app knows no plan or
-price); up to two installed local models with a larger parameter count in
+price). Hosted means a hosted service (a vendor CLI or Azure OpenAI): an
+Ollama, LM Studio or Lemonade server outside this device is not offered and
+the host refuses it, because its location is not stated and its adapter
+follows redirects; up to two installed local models with a larger parameter count in
 their name, marked as on this device and not checked against the request
 size; Split the question (the question goes back to the composer with a
 hint); and Keep on the local model, which leaves "Kept on <model>. Nothing was
@@ -2594,7 +2601,7 @@ Start passes it (`expectedProviderDestination`); Start stays disabled until
 it is read, a failed read says so in the review, and a change refuses the
 start.
 Run for real of a model fit dry run keeps the on-device requirement and the
-endpoint binding. A model fit request in Chat is bound the same way for its
+endpoint binding, and so does Run again of a model fit rerun. A model fit request in Chat is bound the same way for its
 own duration, and its answer names where it went only once a model request
 was sent. A write agent still stops at the diff and its typed confirmation. Team
 runs keep their own review in Agent Team.

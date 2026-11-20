@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Route, Routes } from "react-router";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -157,6 +157,16 @@ describe("IntuneChat model fit (mockup 36)", () => {
     expect(await screen.findByText(/^Kept on llama3\.1\. Nothing was sent\. Narrow the question/)).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel })).toHaveValue(QUESTION);
     expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a draft the admin cleared when declining", async () => {
+    const bridge = fitBridge();
+    const { user } = await sendTooLarge(bridge);
+    // The question is back in the composer once the conversation opens; the admin clears it.
+    await screen.findByDisplayValue(QUESTION);
+    fireEvent.change(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel }), { target: { value: "" } });
+    await user.click(within(await screen.findByRole("region", { name: "llama3.1 cannot fit this request" })).getByRole("button", { name: "Keep on llama3.1" }));
+    expect(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel })).toHaveValue("");
   });
 
   it("offers no hosted provider when the managed policy allows only local ones", async () => {

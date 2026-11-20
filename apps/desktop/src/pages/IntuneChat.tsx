@@ -1103,6 +1103,9 @@ function IntuneChatContent() {
             const modelFit = event.type === "cancelled" ? undefined : event.result.assistantMessage.modelFit;
             const offerId = modelFit?.offerId;
             if (modelFit && offerId) {
+              // The question stays the draft of the conversation it failed in, so it is in the
+              // composer once that conversation opens, and decline does not need to put it back.
+              if (event.type === "failed") writeChatDraft(event.result.conversation.id, content);
               setModelFitOffer({
                 issue: { ...modelFit, offerId },
                 assistantMessageId: event.result.assistantMessage.id,
@@ -1298,8 +1301,8 @@ function IntuneChatContent() {
     setModelFitAccept(null);
     if (!offer) return;
     if (!offer.answered) {
-      // An edit the admin made in the composer while the notice was open is kept.
-      setInput((current) => (current.trim() === "" || current === offer.content ? offer.content : current));
+      // The failed question is the conversation's draft already; whatever the admin made of it,
+      // an edit or a cleared draft, stays as it is.
       setNotice(next === "split" ? MODEL_FIT_COPY.splitNotice : MODEL_FIT_COPY.declined(modelFitReturnModel(offer)));
     }
     window.requestAnimationFrame(() => composerRef.current?.focus());
