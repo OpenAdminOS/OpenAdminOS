@@ -246,6 +246,7 @@ export default function AgentDetail({
           ...(choice?.tenantId ? { tenantId: choice.tenantId } : {}),
           ...(choice?.providerId ? { providerId: choice.providerId } : {}),
           ...(choice?.model ? { model: choice.model } : {}),
+          ...(choice?.modelFit ? { modelFit: modelFitForIntent(choice.modelFit) } : {}),
           returnTo: `/agents/${encodeURIComponent(agent.slug)}`,
         }),
       )
@@ -317,6 +318,7 @@ export default function AgentDetail({
       ...(resumed.providerId ? { providerId: resumed.providerId } : {}),
       ...(resumed.model ? { model: resumed.model } : {}),
       ...(resumed.retryOfRunId ? { retryOfRunId: resumed.retryOfRunId } : {}),
+      ...(resumed.modelFit ? { modelFit: resumed.modelFit } : {}),
     });
   }, [
     activeTenant,
@@ -1118,6 +1120,7 @@ export default function AgentDetail({
                 ...(choice.dryRun ? { dryRun: true } : {}),
                 ...(choice.providerId ? { providerId: choice.providerId } : {}),
                 ...(choice.model ? { model: choice.model } : {}),
+                ...(choice.modelFit ? { modelFit: modelFitForIntent(choice.modelFit) } : {}),
                 returnTo: `/agents/${encodeURIComponent(agent.slug)}`,
               }),
             );
@@ -2695,6 +2698,12 @@ function noOrganizationReportLine(destinations: { mayGo: string[]; skipped: stri
     ? ` ${list(destinations.noTarget)} ${destinations.noTarget.length === 1 ? "has" : "have"} no destination set, so nothing is sent there.`
     : "";
   return `${sent}${skipped}${notSetUp}`;
+}
+
+/** The fit reason a setup detour keeps; the single-use offer id belongs to Chat and is never stored. */
+function modelFitForIntent(issue: ModelFitIssue): ModelFitIssue {
+  const { offerId: _offerId, ...rest } = issue;
+  return rest;
 }
 
 /** What Run again keeps from the original run when it opens the preflight. */
