@@ -282,6 +282,8 @@ describe("Model fit in Chat", () => {
       assert.ok(built.length > 0 && built.every((id) => id === "ollama"), `built ${built.join(", ")}`);
       // Stored with the answer, so a reload keeps the offer's reason.
       assert.equal(store.listMessages(result.conversation.id).at(-1)?.modelFit?.neededTokens, 40652);
+      // The offer is in memory only and single use, so it is not stored.
+      assert.equal(store.listMessages(result.conversation.id).at(-1)?.modelFit?.offerId, undefined);
     });
   });
 
