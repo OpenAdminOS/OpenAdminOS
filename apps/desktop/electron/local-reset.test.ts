@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +15,7 @@ import {
   localResetLinkCheck,
   folderGoesThroughLink,
   localResetPolicyProblem,
+  windowsTaskBelongsToThisAccount,
   localResetRemovalPlan,
   MACOS_SAFE_STORAGE_ACCOUNT,
   MACOS_SAFE_STORAGE_SERVICE,
@@ -426,7 +427,7 @@ describe("local reset: wipe at launch", () => {
       assert.equal(localResetLinkCheck(linked).dataFolderIsLink, true);
       const report = runPendingLocalReset({ userDataDir: linked, packaged: false, platform: "linux", home: dir, env: {} });
       assert.equal(report?.status, "incomplete");
-      assert.match(report?.failed[0]?.reason ?? "", /is a link to another folder/);
+      assert.match(report?.failed[0]?.reason ?? "", /is a link, holds another mount, or could not be read in full/);
       assert.ok(existsSync(join(shared, "state.json")));
 
       const profile = join(dir, "profile");
@@ -716,6 +717,39 @@ describe("local reset: wipe at launch", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
       await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("removes the Windows scheduled task only when it runs this account's copy", () => {
+    const execPath = "C:\\Users\\ada\\AppData\\Local\\Programs\\OpenAdminOS\\OpenAdminOS.exe";
+    const home = "C:\\Users\\ada";
+    assert.equal(windowsTaskBelongsToThisAccount(execPath, execPath, home), true);
+    assert.equal(windowsTaskBelongsToThisAccount("c:\\users\\ADA\\AppData\\Local\\Programs\\OpenAdminOS\\openadminos.exe", execPath, home), true);
+    assert.equal(windowsTaskBelongsToThisAccount("C:\\Users\\ada\\old\\OpenAdminOS.exe", execPath, home), true);
+    assert.equal(windowsTaskBelongsToThisAccount("C:\\Users\\bob\\AppData\\Local\\Programs\\OpenAdminOS\\OpenAdminOS.exe", execPath, home), false);
+    assert.equal(windowsTaskBelongsToThisAccount("C:\\Users\\adam\\OpenAdminOS.exe", execPath, home), false);
+    assert.equal(windowsTaskBelongsToThisAccount(undefined, execPath, home), false);
+  });
+
+  it("treats a sub-folder it cannot read as something it cannot rule out, and ignores letter case", async () => {
+    const dir = await tempDir();
+    try {
+      const data = join(dir, "Profile");
+      mkdirSync(join(data, "locked", "inner"), { recursive: true });
+      assert.equal(folderGoesThroughLink(data), false);
+      // On a case-insensitive volume the other spelling is the same folder.
+      if (existsSync(join(dir, "profile"))) assert.equal(folderGoesThroughLink(join(dir, "profile")), false);
+      if (process.getuid?.() !== 0) {
+        chmodSync(join(data, "locked"), 0o000);
+        try {
+          assert.equal(folderGoesThroughLink(data), true);
+          assert.match(localResetPolicyProblem(join(data, "locked")) ?? "", /could not be read/);
+        } finally {
+          chmodSync(join(data, "locked"), 0o755);
+        }
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
     }
   });
 
