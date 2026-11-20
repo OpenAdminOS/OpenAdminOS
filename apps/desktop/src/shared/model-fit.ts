@@ -66,6 +66,13 @@ function typedIssue(error: unknown, depth = 0): Omit<ModelFitIssue, "providerId"
  * "context" in an unrelated error does not match.
  */
 function contextIssueFromText(text: string): Omit<ModelFitIssue, "providerId" | "model"> | undefined {
+  // The agent runtime's own prompt fit check, when only its message survives (a stored run error).
+  const promptFit = /This request needs about ([\d,]+) tokens of context \([\d,]+ for the prompt and [\d,]+ for the answer\), but .+? accepts ([\d,]+)/i.exec(text);
+  if (promptFit) {
+    const neededTokens = count(promptFit[1]);
+    const limitTokens = count(promptFit[2]);
+    return { reason: "context-too-small", ...(neededTokens ? { neededTokens } : {}), ...(limitTokens ? { limitTokens } : {}) };
+  }
   // OpenAdminOS's Ollama adapter after its own retry (PR #211).
   const adapter = /context size too small: This request needs ([\d,]+) tokens of context, but (?:.+? supports at most ([\d,]+)\.|Ollama could only give .+? ([\d,]+), usually)/i.exec(text);
   if (adapter) {

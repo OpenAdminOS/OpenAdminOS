@@ -63,6 +63,8 @@ export class ModelFitOffers {
 
   issue(input: Omit<ModelFitOffer, "id" | "createdAt">): string {
     this.prune();
+    // The newest offer replaces earlier ones for the same conversation; the renderer holds only it.
+    for (const [id, offer] of this.offers) if (offer.conversationId === input.conversationId) this.offers.delete(id);
     while (this.offers.size >= MAX_OFFERS) this.offers.delete(this.offers.keys().next().value!);
     const id = `fit_${randomUUID()}`;
     this.offers.set(id, { ...input, id, createdAt: this.now() });
@@ -266,7 +268,22 @@ export function loopFailureIssue(
   if (!isOnDeviceModel(provider, model)) return undefined;
   const failureReason = (result as { failureReason?: unknown }).failureReason;
   const reason = failureReason === "context-too-small" || failureReason === "thinking-only" ? failureReason : undefined;
-  return reason ? { reason, providerId: provider.id, ...(model ? { model } : {}) } : undefined;
+  if (!reason) return undefined;
+  // The loop keeps the provider's error as `failureDetail`; its numbers go into the notice.
+  const detail = (result as { failureDetail?: unknown }).failureDetail;
+  const fromDetail = reason === "context-too-small" && detail !== undefined
+    ? classifyModelFitFailure(detail, { providerId: provider.id, model, isLocal: true })
+    : undefined;
+  const counts = fromDetail?.reason === "context-too-small" ? fromDetail : undefined;
+  return {
+    reason,
+    providerId: provider.id,
+    ...(model ? { model } : {}),
+    ...(counts?.neededTokens ? { neededTokens: counts.neededTokens } : {}),
+    ...(counts?.limitTokens ? { limitTokens: counts.limitTokens } : {}),
+    ...(counts?.limitIsModelMax ? { limitIsModelMax: true as const } : {}),
+    ...(counts?.limitIsMemory ? { limitIsMemory: true as const } : {}),
+  };
 }
 
 /**

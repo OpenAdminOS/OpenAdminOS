@@ -117,6 +117,15 @@ describe("Model fit: classifying a failure", () => {
     // A sentence that only mentions a context size is not a llama.cpp context error.
     assert.equal(classifyModelFitFailure("The Graph response exceeds the available context size of the report", { providerId: "lm-studio", isLocal: true }), undefined);
     assert.equal(loopFailureIssue({ failureReason: "thinking-only" }, ollama, LOCAL_MODEL)?.reason, "thinking-only");
+    // The loop's kept provider error gives the notice its numbers.
+    assert.deepEqual(loopFailureIssue({ failureReason: "context-too-small", failureDetail: ADAPTER_ERROR }, ollama, LOCAL_MODEL), {
+      reason: "context-too-small", providerId: "ollama", model: LOCAL_MODEL, neededTokens: 40652, limitTokens: 16384,
+    });
+    // The agent runtime's prompt fit message, as a bare stored run error.
+    assert.deepEqual(
+      classifyModelFitFailure("Error: llm.complete: This request needs about 20,100 tokens of context (20,000 for the prompt and 100 for the answer), but m accepts 16,384.", { providerId: "ollama", model: LOCAL_MODEL, isLocal: true }),
+      { reason: "context-too-small", neededTokens: 20100, limitTokens: 16384, providerId: "ollama", model: LOCAL_MODEL },
+    );
     assert.equal(loopFailureIssue({ failureReason: "malformed" }, ollama, LOCAL_MODEL), undefined);
     assert.equal(loopFailureIssue({ failureReason: "context-too-small" }, claude, "claude-sonnet-5-5"), undefined);
   });
