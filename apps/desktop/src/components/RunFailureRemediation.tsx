@@ -96,7 +96,7 @@ export function RunFailureRemediation({ run }: { run: RunRecord }) {
     : SUGGESTIONS.filter((suggestion) => suggestion.match(own));
   // A failure that quotes Ollama is never a Graph denial; a run saved by an
   // older build can carry one read from that quote (for example "403 MiB").
-  const quotesOllama = own !== run.error;
+  const quotesOllama = own !== run.error && /^Ollama /.test(run.error);
   const accessDenial = lookup || quotesOllama ? undefined : run.accessDenial ?? graphAccessDenialFromError(own);
   if (accessDenial) {
     matched.unshift({ match: () => true, title: accessDenial.title, body: `${accessDenial.message} ${accessDenial.recovery}` });

@@ -145,6 +145,17 @@ it("ignores a Graph denial an older build saved from what Ollama said", () => {
   expect(screen.queryByText(classifyGraphAccessDenied({}).title)).not.toBeInTheDocument();
 });
 
+it("keeps a stored Graph denial whose error only mentions the Ollama marker", () => {
+  const denial = classifyGraphAccessDenied({});
+  const run: RunRecord = {
+    id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [],
+    error: "Graph responded with HTTP 403 for GET /users: Ollama said: denied",
+    accessDenial: denial,
+  };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText(denial.title)).toBeInTheDocument();
+});
+
 it("does not pick a playbook from words in what Ollama said", () => {
   const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. The next request starts from Ollama's default context size. Ollama said: CUDA allocation failed: invalid argument" };
   render(<RunFailureRemediation run={run} />);
