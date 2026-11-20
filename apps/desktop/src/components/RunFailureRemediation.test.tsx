@@ -1,12 +1,18 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { classifyGraphAccessDenied, type RunRecord } from "@openadminos/agent-sdk";
+import { classifyGraphAccessDenied, type GraphAccessContext, type GraphAccessDenial, type RunRecord } from "@openadminos/agent-sdk";
 import { RunFailureRemediation } from "./RunFailureRemediation";
 
 vi.mock("./ReportIssueModal", () => ({ useReportIssue: () => vi.fn() }));
 
+/** A denial as earlier versions stored it, before denials carried their source. */
+function legacyDenial(context: GraphAccessContext = {}): GraphAccessDenial {
+  const { source: _source, ...denial } = classifyGraphAccessDenied(context);
+  return denial;
+}
+
 describe("Graph run failure recovery", () => {
-  const base: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", error: "HTTP 403", steps: [], logs: [] };
+  const base: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", error: 'Graph responded with HTTP 403 for https://graph.microsoft.com/v1.0/users: {"error":{"code":"Forbidden","message":"You cannot perform the requested operation, required scopes are missing in the token."}}', steps: [], logs: [] };
 
   it.each([
     ["missing-consent", { requiredScopes: ["User.Read.All"], grantedScopes: [] }, "Graph consent required"],
@@ -25,6 +31,33 @@ describe("Graph run failure recovery", () => {
     render(<RunFailureRemediation run={base} />);
     expect(screen.getByText("Graph access cause unverified")).toBeInTheDocument();
     expect(screen.queryByText("Scope or consent issue")).not.toBeInTheDocument();
+  });
+
+  it("shows the stored denial for a run whose error is the denial text", () => {
+    const accessDenial = classifyGraphAccessDenied({ requiredScopes: ["User.Read.All"], grantedScopes: [] });
+    render(<RunFailureRemediation run={{ ...base, error: `${accessDenial.message} ${accessDenial.recovery}`, accessDenial }} />);
+    expect(screen.getByText("Graph consent required")).toBeInTheDocument();
+  });
+
+  it("shows a denial classified from a Graph error that an agent wrapped", () => {
+    const accessDenial = classifyGraphAccessDenied({ requiredScopes: ["User.Read.All"], grantedScopes: [] });
+    render(<RunFailureRemediation run={{ ...base, error: "Listing users failed.", accessDenial }} />);
+    expect(screen.getByText("Graph consent required")).toBeInTheDocument();
+  });
+
+  it.each([
+    "Ollama responded with HTTP 403 at http://127.0.0.1:11434/api/chat: Forbidden",
+    "LM Studio responded with HTTP 403 at http://127.0.0.1:1234/v1/chat/completions: forbidden",
+    "Anthropic API returned 403 Forbidden: permission_error",
+    "MCP server \"tickets\" responded with HTTP 403: forbidden",
+    "Ollama could not report the model's context limit: HTTP 403 at http://127.0.0.1:11434/api/show: Forbidden by the Microsoft Graph lab proxy",
+    "HTTP 403",
+  ])("ignores a stored Graph denial when the error did not come from Microsoft Graph: %s", (error) => {
+    const accessDenial = legacyDenial({ requiredScopes: ["User.Read.All"], grantedScopes: [] });
+    render(<RunFailureRemediation run={{ ...base, error, accessDenial }} />);
+    for (const title of ["Graph consent required", "Graph access cause unverified", "Role access required", "Tenant licence required"]) {
+      expect(screen.queryByText(title)).not.toBeInTheDocument();
+    }
   });
 });
 
@@ -138,7 +171,7 @@ it("ignores a Graph denial an older build saved from what Ollama said", () => {
   const run: RunRecord = {
     id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [],
     error: "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. The next request starts from Ollama's default context size. Ollama said: cudaMalloc failed: out of memory (403 MiB)",
-    accessDenial: classifyGraphAccessDenied({}),
+    accessDenial: legacyDenial(),
   };
   render(<RunFailureRemediation run={run} />);
   expect(screen.getByText("Ollama context too small")).toBeInTheDocument();
@@ -219,12 +252,44 @@ it("does not show the missing-model playbook for a lookup error that quotes it",
 
 it("shows only the lookup playbook for an HTTP 403 from the lookup, even with a stored Graph denial", () => {
   const error = "Ollama could not report the model's context limit: HTTP 403 at http://127.0.0.1:11434/api/show: Forbidden";
-  const accessDenial = classifyGraphAccessDenied({});
+  const accessDenial = legacyDenial();
   const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error, accessDenial };
   render(<RunFailureRemediation run={run} />);
   expect(screen.getByText("Ollama did not report the model's context limit")).toBeInTheDocument();
   expect(screen.queryByText(accessDenial.title)).not.toBeInTheDocument();
   expect(screen.queryByText("Graph access cause unverified")).not.toBeInTheDocument();
+});
+
+it("does not read Graph advice from the text of a failure classified from its typed error", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], graphDenialChecked: true, error: "Graph responded with HTTP 403 for https://graph.microsoft.com/v1.0/users: forbidden" };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.queryByText("Graph access cause unverified")).not.toBeInTheDocument();
+});
+
+it.each([
+  ["Ollama responded with HTTP 403 at http://127.0.0.1:11434/api/chat: Unauthorized", false],
+  ["Anthropic API returned 401 Unauthorized: invalid x-api-key", false],
+  ["Ollama responded with HTTP 403: expired token", false],
+  ["Graph rejected the access token (HTTP 401). Tenant needs reconnect.", true],
+  ["The plan could not be checked against the tenant before applying, so nothing was applied. Graph rejected the access token (HTTP 401). Tenant needs reconnect.", true],
+  ["Graph responded with HTTP 401 for https://graph.microsoft.com/v1.0/users: {\"error\":{\"code\":\"InvalidAuthenticationToken\"}}", true],
+  ["AADSTS65001 interaction_required: consent is needed", true],
+  ["interaction_required: AADSTS50076: Due to a configuration change made by your administrator, you must use multi-factor authentication.", true],
+  ["Microsoft Graph rejected the Teams access token (HTTP 401). Reconnect the tenant.", true],
+  ["Graph responded with HTTP 401 for https://gateway.example/v1/messages: unauthorized", false],
+  ['Graph responded with HTTP 403 for https://graph.microsoft.com/v1.0/users/1/authentication/methods: {"error":{"code":"accessDenied","message":"The caller is unauthorized to perform this action."}}', false],
+  ["Ollama responded with HTTP 403 at http://gateway.example/api/chat: upstream said AADSTS65001 interaction_required", false],
+])("gives tenant sign-in advice only for a tenant sign-in failure: %s", (error, tenant) => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
+  render(<RunFailureRemediation run={run} />);
+  if (tenant) expect(screen.getByText("Tenant token expired")).toBeInTheDocument();
+  else expect(screen.queryByText("Tenant token expired")).not.toBeInTheDocument();
+});
+
+it("shows Graph advice for a stored write-plan failure that wraps a Graph 403", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: 'The plan could not be checked against the tenant before applying, so nothing was applied. Graph responded with HTTP 403 for https://graph.microsoft.com/beta/users: {"error":{"code":"Forbidden"}}' };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Graph access cause unverified")).toBeInTheDocument();
 });
 
 it.each([
@@ -267,4 +332,16 @@ it("keeps the LM Studio playbook for a model whose name mentions Ollama", () => 
   render(<RunFailureRemediation run={run} />);
   expect(screen.getByText("LM Studio context too small")).toBeInTheDocument();
   expect(screen.queryByText("Ollama did not report the model's context limit")).not.toBeInTheDocument();
+});
+
+it("shows Graph advice for a stored required Teams connector failure on a Graph 403", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Connector 'teams' failed its health check: Microsoft Graph rejected the request (HTTP 403). The signed-in admin lacks the required Teams scopes." };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Graph access cause unverified")).toBeInTheDocument();
+});
+
+it("shows Graph advice for a stored replan failure on a required Teams connector's Graph 403", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Nothing was applied: Connector 'teams' failed its health check: Microsoft Graph rejected the request (HTTP 403). The signed-in admin lacks the required Teams scopes." };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Graph access cause unverified")).toBeInTheDocument();
 });

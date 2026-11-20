@@ -1092,6 +1092,12 @@ export interface RunRecord {
   modelFit?: ModelFitIssue;
   /** Model fit rerun: where the provider was reached at admission; every phase is built only for it. */
   providerEndpointBinding?: { endpoint: string | undefined; scope?: "model-fit" };
+  /**
+   * True on a failure classified from its typed error, with or without a
+   * Graph denial. Its message is then never read for Graph advice; only
+   * records without it, stored by earlier versions, are read from their text.
+   */
+  graphDenialChecked?: boolean;
   logs: RunLogRecord[];
   plan?: WritePlan;
   /** Host-produced assessment, retained with the reviewed plan in run history. */
@@ -5128,9 +5134,11 @@ export interface ConnectorInstance<TCapabilities> {
   /**
    * Cheap, side-effect-free reachability probe. Called at preflight; a
    * `healthy: false` result fails the run with the supplied message
-   * surfaced as a designed remediation tile.
+   * surfaced as a designed remediation tile. `error` is the probe's own
+   * error, kept as the cause of a preflight failure so a typed Graph denial
+   * reaches the run record.
    */
-  healthCheck(): Promise<{ healthy: boolean; message?: string }>;
+  healthCheck(): Promise<{ healthy: boolean; message?: string; error?: unknown }>;
   /** Called once at run finish, success or failure. */
   dispose(): Promise<void>;
 }

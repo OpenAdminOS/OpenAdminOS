@@ -20,6 +20,8 @@ import {
   serviceStatus,
   resolveProviderDefaultModel,
   graphAccessDenialFromError,
+  graphAccessDenialFromStoredText,
+  storedGraphAccessDenial,
   graphAccessDenialText,
   type AgentSummary,
   type ChatInvestigationMode,
@@ -1611,7 +1613,7 @@ export class IntuneChatService {
         const cacheFreshness = newestRefreshedAt(relevantStatus);
         const issues = relevantStatus.flatMap(row => {
           if (!row.lastError) return [];
-          const denial = row.accessDenial ?? graphAccessDenialFromError(row.lastError, {
+          const denial = storedGraphAccessDenial(row.accessDenial, row.lastError) ?? graphAccessDenialFromStoredText(row.lastError, {
             label: row.label,
             path: pathForResource(row.resource).path,
             requiredScopes: row.scopeSet,

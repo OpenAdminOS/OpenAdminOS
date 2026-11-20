@@ -11,7 +11,7 @@ import type {
   WritePlan,
   WriteLimits,
 } from "@openadminos/agent-sdk";
-import { assertWritePlanLimits, WritePlanLimitError } from "@openadminos/agent-sdk";
+import { assertWritePlanLimits, graphAccessDenialFromError, WritePlanLimitError } from "@openadminos/agent-sdk";
 import { DRY_RUN_WRITE_ERROR } from "./dry-run.js";
 import { confirmationPhraseProblem } from "./confirmation-phrase.js";
 import { fenceTenantData, withTenantDataInstructions, withTenantDataOutputFilter } from "./tenant-data.js";
@@ -28,6 +28,14 @@ export interface SandboxBrokerAgentPolicy {
 export interface SandboxBroker {
   handle(request: SandboxBrokerRequest): Promise<SandboxBrokerResponse>;
   getWritePlan(): WritePlan | undefined;
+  /**
+   * The typed Graph denial behind a script failure. The script only sees a
+   * denial's message, so a denial counts only when it answered the script's
+   * last brokered request (log calls aside) and the script's output carries
+   * its message. A denial the script recovered from is followed by other
+   * requests and never counts.
+   */
+  graphDenialFor(scriptOutput: string): Error | undefined;
 }
 
 export interface SandboxBrokerInput {
@@ -55,12 +63,15 @@ class SandboxBrokerError extends Error {
 
 export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
   let writePlan: WritePlan | undefined;
+  // The error that answered the last brokered request, log calls aside.
+  let lastFailure: unknown;
 
   return {
     async handle(request) {
       const id = typeof request?.id === "string" && request.id.length > 0
         ? request.id
         : "unknown";
+      if (request?.method !== "log") lastFailure = undefined;
       try {
         assertBaseRequest(request);
         switch (request.method) {
@@ -88,10 +99,15 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
             );
         }
       } catch (error) {
+        if (request?.method !== "log") lastFailure = error;
         return failure(id, error);
       }
     },
     getWritePlan: () => writePlan,
+    graphDenialFor: (scriptOutput) =>
+      lastFailure instanceof Error && graphAccessDenialFromError(lastFailure) && scriptOutput.includes(lastFailure.message)
+        ? lastFailure
+        : undefined,
   };
 }
 

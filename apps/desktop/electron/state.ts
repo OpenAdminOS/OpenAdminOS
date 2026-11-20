@@ -416,6 +416,7 @@ import {
   forgetAppRegistration,
   humanizeMsalError,
   humanizeScheduledRunError,
+  withoutMisclassifiedGraphDenial,
   isNodeError,
   signInTargetFor,
   normalizeWorkspaceInstructions,
@@ -6123,7 +6124,7 @@ export class AppStateStore {
       : undefined;
     const message = error instanceof Error ? error.message : String(error);
     const accessDenial = graphAccessDenialFromError(error);
-    const summary = humanizeScheduledRunError(message, accessDenial);
+    const summary = humanizeScheduledRunError(message, accessDenial, true);
     const runId = `run_${nowMs.toString(36)}_${randomUUID().slice(0, 8)}`;
     const failedRun: RunRecord = {
       id: runId,
@@ -6139,6 +6140,7 @@ export class AppStateStore {
       summary,
       error: message,
       ...(accessDenial ? { accessDenial } : {}),
+      graphDenialChecked: true,
       steps: [],
       logs: [
         {
@@ -7889,7 +7891,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const latestWake = scheduledRuns[0];
     const latestSuccess = scheduledRuns.find((run) => run.status === "completed");
     const latestFailureMessage = latestWake?.status === "failed"
-      ? humanizeScheduledRunError(latestWake.error ?? latestWake.summary ?? "Scheduled run failed.", latestWake.accessDenial)
+      ? humanizeScheduledRunError(latestWake.error ?? latestWake.summary ?? "Scheduled run failed.", latestWake.accessDenial, latestWake.graphDenialChecked === true)
       : undefined;
     return {
       supported: process.platform !== "linux",
@@ -9339,7 +9341,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
               // pins a tenant, so a tenant-less scheduled run can only be
               // one of these records.
               .filter((run) => !(run.trigger === "schedule" && !run.tenantId))
-              .map((run) => ({ ...run, usage: run.usage ?? null }))
+              .map((run) => withoutMisclassifiedGraphDenial({ ...run, usage: run.usage ?? null }))
           : defaultState.runs,
         tenants,
       };
