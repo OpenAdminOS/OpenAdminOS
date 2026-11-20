@@ -1019,6 +1019,17 @@
               <p class="xs muted" style="margin-top:10px">Write the search words opens an empty search for you to describe the setting in public terms; tenant data is removed again before it is sent. Answer without searching lets Ollama answer from the tenant data on this device. Switching models and changing a rule are not offered: every web search goes to OpenAI, and no rule lets tenant data into a search.</p>
             </div>
           </div>
+          <p class="xs muted" style="margin-top:8px">Withheld by the data policy check, with public words left</p>
+          <div class="block" data-t="blocked">
+            <span class="glyph" data-t="blocked"><svg><use href="#i-stop"/></svg></span>
+            <div>
+              <h3>This web search was not sent: part of it could not be examined</h3>
+              <p>Nova wrote a search with the install log from the failed devices pasted after the search words. After tenant data was removed, public words were left, but the log was longer than this device examines before a call, and 3,800 characters were not examined. Text that was not examined is reported as credential and gets the strictest rule any class has on Hosted. Activity on Hosted is Block, so the search was withheld. No request was made to OpenAI.</p>
+              <div class="swords"><span class="h">Search words, kept on this device</span>Win32 app not detected after install Windows 11 24H2 <span class="wh">3,800 characters of install log, not examined</span></div>
+              <div class="acts"><button class="bt primary sm" type="button">Shorten the search</button><button class="bt secondary sm" type="button">Answer without searching</button></div>
+              <p class="xs muted" style="margin-top:10px">Shorten the search opens the search words without the log, checked again before they are sent. Answer without searching lets Ollama answer from the tenant data on this device. A local model is not offered: every web search goes to OpenAI.</p>
+            </div>
+          </div>
           <p class="xs muted" style="margin-top:8px">Hosted voice, the same boundary</p>
           <div class="block">
             <span class="glyph"><svg><use href="#i-globe"/></svg></span>
@@ -1027,22 +1038,24 @@
               <p>You said WGB Expenses aloud. Hosted voice hears what you say, and those spoken words are not checked. The search request is text this app sends to OpenAI, so the app removed the app name before sending it. Nova said: "I searched for the install error without the app name."</p>
             </div>
           </div>
-          <p class="xs muted" style="margin-top:8px">Claude Code reasoning, Security on Hosted at Mask</p>
+          <p class="xs muted" style="margin-top:8px">Claude Code reasoning, web search with OpenAI, Security on Hosted at Mask</p>
           <div class="block">
             <span class="glyph"><svg><use href="#i-globe"/></svg></span>
             <div>
-              <h3>Searched without tenant data: 1 security name removed</h3>
-              <p>Claude Code saw the policy as <code>[CA_POLICY_1]</code> and wrote the search with that token. The name was restored into the tool's parameters on this device, as in every tool call, then removed with the other tenant data before the request, so OpenAI received neither the name nor the token. The results describe the setting, not your policy.</p>
+              <h3>Searched with OpenAI without tenant data: 1 security name removed</h3>
+              <p>Claude Code reasons, and the search goes to OpenAI with the Nova key. Claude Code saw the policy as <code>[CA_POLICY_1]</code> and wrote the search with that token. The name was restored into the tool's parameters on this device, as in every tool call, then removed with the other tenant data before the request, so OpenAI received neither the name nor the token. The results describe the setting, not your policy.</p>
+              <div class="swords"><span class="h">Search words sent to OpenAI</span><span class="rm">WGB Finance MFA</span> Conditional Access policy require MFA exclude emergency access accounts</div>
             </div>
           </div>
         </div>
       </div>
       <ul class="notes" aria-label="Notes on web search">
-        <li>Decided in round 17: web search keeps the public research boundary on top of the Hosted gate. Search words are written from public inputs only, and every value the app recognizes as tenant data, of any class and configuration included, is removed before sending, whatever the rules on Hosted allow. A one-way placeholder left in the search words is removed too. Text the app cannot recognize can still reach OpenAI, and the answer line says so, as the remote MCP boundary does.</li>
-        <li>The Hosted gate from round 16 still checks what remains, just before the request: text it cannot examine follows the rule for unexamined data, and a remainder it blocks makes no network request.</li>
+        <li>Decided in round 17: web search keeps the public research boundary on top of the Hosted gate. Search words are written from public inputs only, and every value the app recognizes as tenant data, of any class and configuration included, is removed before sending, whatever the rules on Hosted allow. Text the app cannot recognize can still reach OpenAI, and the answer line says so, as the remote MCP boundary does.</li>
+        <li>Decided in round 18: the boundary holds on the final outbound query, after the Hosted gate, in this order. The app removes every value it recognizes as tenant data, the Hosted gate checks what remains, then every placeholder is removed from the result: a stale one with no mapping, such as <code>[USER_2]</code> from an earlier masked answer, and any token the gate produced, such as <code>[CREDENTIAL]</code> for a recovery key a detector found. Only then does the app check whether meaningful words are left.</li>
+        <li>When the gate blocks what remains, the search is withheld with its reason, as in the third block: here the scan ran out of its budget, unexamined text gets the strictest rule on Hosted, and Activity on Hosted is Block. Recovery offers a shorter search, checked again, or an answer without searching.</li>
         <li>The answer line shows the search words as sent, with each removed value struck through, and lists the local work, the removal and the request. The removal is listed as local work because it runs on this device before anything is sent.</li>
         <li>When nothing meaningful remains, the search is not sent and the block says so. Recovery offers only what works: writing the search words in public terms, checked again before they are sent, or an answer without searching. A local model is not offered, because no model on this device searches the web.</li>
-        <li>The strip in this frame names OpenAI for web search, though the chat model is Ollama: "No data leaves this device" is never shown while search is offered (B).</li>
+        <li>The strip in this frame names OpenAI for web search, though the chat model is Ollama: "No data leaves this device" is never shown while search is offered (B). With Claude Code reasoning, the search still goes to OpenAI, and the block names both.</li>
       </ul>
     </section>
 
