@@ -3396,6 +3396,9 @@ export class IntuneChatService {
       ? this.answerFollowUps({ content, sources: answerPlan.sources, tieInResources: answerPlan.tieInResources, tenantId: tenant.id, cacheStatus, modelFollowUps, readTenantData: tenantDataRead, privatePrompt: provenance.isPrivate })
       : { followUps: [], tenantFollowUps: [] };
     // Planned resources reach the answer as tenant rows or tool evidence; docs questions have none.
+    // The model's locality is confirmed when the request failed: a provider list read before an
+    // alias turned remote-backed must not let the notice say nothing left this device.
+    if (modelFit && !(await this.host.verifyOnDeviceModel?.(providerId, selectedModel).catch(() => false))) modelFit = undefined;
     const tenantContext = answered && planned.resources.length > 0;
     const assistantMessage: IntuneChatMessage = {
       id: assistantId,

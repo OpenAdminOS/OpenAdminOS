@@ -227,8 +227,10 @@ export function modelFitChoices(input: {
   managedPolicy?: ManagedPolicyStatus | undefined;
 }): ModelFitChoices {
   const { issue, providers } = input;
+  // Hosted means a hosted service (a vendor CLI or Azure OpenAI). A model server outside this device
+  // that OpenAdminOS reaches directly is not offered: its location is not stated and it may redirect.
   const hosted = providers
-    .filter((provider) => !provider.isLocal && provider.id !== issue.providerId && isProviderReady(provider) && managedProviderAllowed(input.managedPolicy, provider.id))
+    .filter((provider) => !provider.isLocal && HOSTED_PROVIDER_IDS.has(provider.id) && provider.id !== issue.providerId && isProviderReady(provider) && managedProviderAllowed(input.managedPolicy, provider.id))
     .map((provider) => {
       const model = resolveProviderDefaultModel(provider, input.activeModelByProviderId).model;
       return { providerId: provider.id, providerName: provider.name, isLocal: false, ...(model ? { model } : {}) };
@@ -260,6 +262,9 @@ export function modelFitChoices(input: {
     hosted.length === 0 && [...HOSTED_PROVIDER_IDS].every((id) => !managedProviderAllowed(input.managedPolicy, id));
   return { hosted, local: local.slice(0, 2), hostedBlockedByPolicy };
 }
+
+/** Model servers OpenAdminOS reaches directly; outside this device they are never a model fit hosted choice. */
+export const SELF_HOSTED_PROVIDER_IDS: ReadonlySet<ProviderId> = new Set<ProviderId>(["ollama", "lm-studio", "lemonade"]);
 
 // The catalog names which providers are hosted; a new one is covered without a change here.
 const HOSTED_PROVIDER_IDS: ReadonlySet<ProviderId> = new Set(providerCatalog.filter((provider) => !provider.isLocal).map((provider) => provider.id));

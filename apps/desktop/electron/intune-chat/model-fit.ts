@@ -10,7 +10,7 @@ import type {
   ProviderSummary,
   RunLlmApi,
 } from "@openadminos/agent-sdk";
-import { classifyModelFitFailure, isOnDeviceModel, isRemoteBackedModel } from "../../src/shared/model-fit.js";
+import { classifyModelFitFailure, isOnDeviceModel, isRemoteBackedModel, SELF_HOSTED_PROVIDER_IDS } from "../../src/shared/model-fit.js";
 import { isProviderReady } from "../../src/shared/provider-detection.js";
 
 /**
@@ -151,6 +151,9 @@ export function resolveChatTurnProvider(input: {
   const chosen = input.providers.find((provider) => provider.id === override.providerId);
   if (!chosen) {
     throw new ModelOverrideError("That provider is not available on this device, so nothing was sent. It may not be set up, or your organization's policy may not allow it.");
+  }
+  if (!chosen.isLocal && SELF_HOSTED_PROVIDER_IDS.has(chosen.id)) {
+    throw new ModelOverrideError(`${chosen.name} is set to a server outside this device, so it is not offered for one request. Choose a hosted provider.`);
   }
   if (!isProviderReady(chosen)) {
     throw new ModelOverrideError(`${chosen.name} is not ready, so nothing was sent. Check it in Settings, Providers, then choose it again.`);

@@ -228,6 +228,12 @@ describe("Model fit: the per-request override", () => {
     assert.throws(() => resolveChatTurnProvider({ ...base, nova: true, override, consent: freshConsent("anthropic") }), /Nova/);
   });
 
+  it("refuses a model server outside this device as a choice for one request", () => {
+    const remoteLmStudio: ProviderSummary = { id: "lm-studio", name: "LM Studio", description: "", isLocal: false, status: "connected", models: ["qwen3-30b"] };
+    assert.throws(() => resolveChatTurnProvider({ ...base, providers: [ollama, remoteLmStudio], override: { offerId: "fit_1", providerId: "lm-studio", model: "qwen3-30b" }, consent: freshConsent("lm-studio", "qwen3-30b") }), /server outside this device/);
+    assert.deepEqual(modelFitChoices({ issue: { reason: "context-too-small", providerId: "ollama", model: LOCAL_MODEL }, providers: [ollama, remoteLmStudio, claude] }).hosted.map((choice) => choice.providerId), ["anthropic"]);
+  });
+
   it("runs on a larger local model without a hosted acceptance, but never on an Ollama Cloud model", () => {
     const turn = resolveChatTurnProvider({ ...base, override: { offerId: "fit_1", providerId: "ollama", model: "gpt-oss:20b" }, consent: undefined });
     assert.equal(turn.model, "gpt-oss:20b");
@@ -481,8 +487,9 @@ describe("Model fit in Chat", () => {
     await withStore(async (store) => {
       const built: string[] = [];
       let checks = 0;
-      // On this device when the request is accepted, a remote-backed alias by the time the model is called.
-      const service = new IntuneChatService(chatHost(store, built, () => (checks += 1) === 1));
+      // On this device when the first request fails and when the retry is accepted, a remote-backed
+      // alias by the time the model is called.
+      const service = new IntuneChatService(chatHost(store, built, () => (checks += 1) <= 2));
       const failed = await service.streamIntuneChatMessage({ content: QUESTION }, () => undefined);
       const result = await service.streamIntuneChatMessage({
         content: QUESTION,
@@ -492,7 +499,7 @@ describe("Model fit in Chat", () => {
       assert.equal(result.assistantMessage.status, "failed");
       assert.match(result.assistantMessage.error ?? "", /still runs on this device/);
       assert.equal(result.assistantMessage.switchedFrom, undefined);
-      assert.ok(checks >= 2);
+      assert.ok(checks >= 3);
     });
   });
 
@@ -553,6 +560,15 @@ describe("Model fit in Chat", () => {
         /could not confirm that gpt-oss:20b runs on this device/,
       );
       assert.deepEqual(built, []);
+    });
+  });
+
+  it("makes no offer when the model no longer runs on this device when it fails", async () => {
+    await withStore(async (store) => {
+      const service = new IntuneChatService(chatHost(store, [], () => false));
+      const failed = await service.streamIntuneChatMessage({ content: QUESTION }, () => undefined);
+      assert.equal(failed.assistantMessage.status, "failed");
+      assert.equal(failed.assistantMessage.modelFit, undefined);
     });
   });
 
