@@ -545,7 +545,13 @@ briefly unavailable) and the adapter's lookup finds it, the adapter refuses
 with the same `ContextTooSmallError` instead of sending, and an overflow retry
 on an agent run never asks for more than the pin (when Ollama counts more than
 the estimate, the run fails with the typed reason, `sentToProvider: true`,
-whose message says the model refused the request). Chat leaves it unset,
+whose message says the model refused the request or stopped partway). An
+agent run sends a `num_ctx` only when a lookup established whether the model
+is pinned: the answer carried the parameters or the Modelfile (whose
+`PARAMETER num_ctx` lines Ollama always includes). After a failed or partial
+lookup it sends none, so a pin applies, and an overflow fails with the typed
+reason at the size Ollama ran it with. Chat keeps a size that worked when a
+lookup fails. Chat leaves it unset,
 so #211's raise still serves a larger request there. A kept `num_ctx` belongs
 to the model revision the lookup that chose it saw (`/api/show`
 `modified_at`), even when the request finishes after the model was created

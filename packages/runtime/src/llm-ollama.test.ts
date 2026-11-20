@@ -1191,7 +1191,7 @@ describe("Ollama context for an unpinned model", () => {
     return { chats, handlers, fetchImpl, ok };
   }
   const words = (count: number) => "word ".repeat(count);
-  const unpinned = { model_info: { "general.architecture": "llama", "llama.context_length": 131072 } };
+  const unpinned = { modelfile: "FROM llama\n", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } };
 
   it("forgets the size a refused first send asked for, so a concurrent request that sent it is not kept", async () => {
     const original = globalThis.fetch;
@@ -1724,7 +1724,7 @@ describe("Ollama context for an unpinned model", () => {
       if (path === "/api/show") {
         shows += 1;
         const body = shows === 1
-          ? { modified_at: "2026-11-01T00:00:00Z", model_info: { "general.architecture": "llama", "llama.context_length": 16384 } }
+          ? { modified_at: "2026-11-01T00:00:00Z", modelfile: "FROM llama\n", model_info: { "general.architecture": "llama", "llama.context_length": 16384 } }
           : { modified_at: "2026-11-01T00:00:00Z" };
         return new Response(JSON.stringify(body), { status: 200 });
       }
@@ -1738,6 +1738,83 @@ describe("Ollama context for an unpinned model", () => {
       // The retry asks for room up to the 16,384 maximum the first lookup saw, never past it.
       assert.equal(chats.length, 2);
       assert.equal(chats[1], 16384);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("holds an agent run to a pin no lookup confirmed when Ollama reports only the maximum", async () => {
+    const original = globalThis.fetch;
+    const chats: Array<number | undefined> = [];
+    let shows = 0;
+    // A model pinned to 16,384: the first lookup fails, the retry lookup
+    // answers with model_info alone, and Ollama runs the request at its pin.
+    globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/api/ps") return new Response("unavailable", { status: 503 });
+      if (path === "/api/show") {
+        shows += 1;
+        if (shows === 1) return new Response("unavailable", { status: 503 });
+        return new Response(JSON.stringify({ model_info: { "general.architecture": "llama", "llama.context_length": 131072 } }), { status: 200 });
+      }
+      chats.push((JSON.parse(String(init?.body)) as { options?: { num_ctx?: number } }).options?.num_ctx);
+      return new Response(JSON.stringify({ error: "request (18000 tokens) exceeds the available context size (16384 tokens), try increasing it" }), { status: 400 });
+    }) as typeof fetch;
+    try {
+      await assert.rejects(
+        createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "maximum-only" }).complete({ prompt: words(14000), maxTokens: 1000, enforceContextWindow: true }),
+        (error: unknown) => {
+          assert.ok(error instanceof ContextTooSmallError);
+          assert.equal(error.failure.limitTokens, 16384);
+          return true;
+        },
+      );
+      assert.deepEqual(chats, [undefined]);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("sends no num_ctx on an agent run's first try when the lookup reports only the maximum", async () => {
+    const original = globalThis.fetch;
+    const ollama = scripted({ showBody: { model_info: { "general.architecture": "llama", "llama.context_length": 131072 } } });
+    globalThis.fetch = ollama.fetchImpl;
+    try {
+      await createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "maximum-only-first" }).complete({ prompt: words(14000), maxTokens: 1000, enforceContextWindow: true });
+      assert.deepEqual(ollama.chats, [undefined]);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("keeps Chat's working size when Ollama briefly does not answer its lookups", async () => {
+    const original = globalThis.fetch;
+    const chats: Array<number | undefined> = [];
+    let down = false;
+    let overflowed = false;
+    globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/api/show") {
+        if (down) return new Response("unavailable", { status: 503 });
+        return new Response(JSON.stringify({ modified_at: "2026-11-01T00:00:00Z", modelfile: "FROM llama\nPARAMETER num_ctx 16384\n", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } }), { status: 200 });
+      }
+      if (path === "/api/ps") return down ? new Response("unavailable", { status: 503 }) : new Response(JSON.stringify({ models: [] }), { status: 200 });
+      const numCtx = (JSON.parse(String(init?.body)) as { options?: { num_ctx?: number } }).options?.num_ctx;
+      chats.push(numCtx);
+      if (!overflowed) {
+        overflowed = true;
+        return new Response(JSON.stringify({ error: "request (18000 tokens) exceeds the available context size (16384 tokens), try increasing it" }), { status: 400 });
+      }
+      return new Response(`${JSON.stringify({ model: "m", message: { content: "ok" }, done: true })}\n`, { status: 200 });
+    }) as typeof fetch;
+    try {
+      const llm = createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "chat-outage" });
+      await llm.complete({ prompt: words(14000), maxTokens: 1000 });
+      const kept = chats.at(-1);
+      assert.ok(kept !== undefined && kept > 16384, String(chats));
+      down = true;
+      await llm.complete({ prompt: words(14000), maxTokens: 1000 });
+      assert.equal(chats.at(-1), kept);
     } finally {
       globalThis.fetch = original;
     }

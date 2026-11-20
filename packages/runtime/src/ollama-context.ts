@@ -13,6 +13,12 @@ export interface OllamaShowContext {
   revision?: string;
   /** The architecture's trained maximum, `<architecture>.context_length`. */
   modelMaxContext?: number;
+  /**
+   * The answer says whether the model is pinned: it carried the parameters or
+   * the Modelfile, so no num_ctx there means none is pinned. A partial answer
+   * (only model_info, say) leaves it open.
+   */
+  pinKnown?: boolean;
 }
 
 export interface OllamaContextWindowOptions {
@@ -31,7 +37,7 @@ export interface OllamaContextWindowOptions {
 
 /** Whether an /api/show reading carries anything (a failed lookup carries nothing). */
 export function ollamaShowKnown(show: OllamaShowContext | undefined): show is OllamaShowContext {
-  return show !== undefined && (show.pinnedNumCtx !== undefined || show.modelMaxContext !== undefined || show.revision !== undefined);
+  return show !== undefined && (show.pinnedNumCtx !== undefined || show.modelMaxContext !== undefined || show.revision !== undefined || show.pinKnown === true);
 }
 
 /**
@@ -41,14 +47,20 @@ export function ollamaShowKnown(show: OllamaShowContext | undefined): show is Ol
  */
 export function parseOllamaShow(data: unknown): OllamaShowContext {
   if (!data || typeof data !== "object") return {};
-  const record = data as { parameters?: unknown; model_info?: unknown; modified_at?: unknown };
+  const record = data as { parameters?: unknown; modelfile?: unknown; model_info?: unknown; modified_at?: unknown };
   const out: OllamaShowContext = {};
   if (typeof record.modified_at === "string" && record.modified_at.length > 0) out.revision = record.modified_at;
-  if (typeof record.parameters === "string") {
-    const match = /^\s*num_ctx\s+(\d+)\s*$/m.exec(record.parameters);
+  // Ollama leaves parameters out for a model without any, but always sends
+  // the Modelfile, whose PARAMETER lines carry the same pin.
+  const pinned = (text: unknown, pattern: RegExp): number | undefined => {
+    if (typeof text !== "string") return undefined;
+    const match = pattern.exec(text);
     const value = match ? Number(match[1]) : NaN;
-    if (Number.isInteger(value) && value > 0) out.pinnedNumCtx = value;
-  }
+    return Number.isInteger(value) && value > 0 ? value : undefined;
+  };
+  const pin = pinned(record.parameters, /^\s*num_ctx\s+(\d+)\s*$/m) ?? pinned(record.modelfile, /^\s*PARAMETER\s+num_ctx\s+(\d+)\s*$/im);
+  if (pin !== undefined) out.pinnedNumCtx = pin;
+  if (typeof record.parameters === "string" || typeof record.modelfile === "string") out.pinKnown = true;
   if (record.model_info && typeof record.model_info === "object") {
     const info = record.model_info as Record<string, unknown>;
     const architecture = typeof info["general.architecture"] === "string" ? info["general.architecture"] : undefined;
@@ -132,6 +144,8 @@ export interface OllamaRequestContext {
   /** The pin and maximum this lookup saw, for the overflow retry. */
   pinnedNumCtx?: number;
   modelMaxContext?: number;
+  /** Whether this lookup established if the model is pinned. */
+  pinKnown?: boolean;
   dropKept?: boolean;
   /** Send no num_ctx this time, but leave the kept size for other callers. */
   skipKept?: boolean;
@@ -248,11 +262,14 @@ export async function ollamaRequestNumCtx(
   if (fallback && (show.revision === undefined || show.revision === fallback.revision)) {
     if (fallback.pinnedNumCtx !== undefined && show.pinnedNumCtx === undefined) show = { ...show, pinnedNumCtx: fallback.pinnedNumCtx };
     if (fallback.modelMaxContext !== undefined && show.modelMaxContext === undefined) show = { ...show, modelMaxContext: fallback.modelMaxContext };
+    if (fallback.pinKnown && !show.pinKnown) show = { ...show, pinKnown: true };
   }
+  if (show.pinnedNumCtx !== undefined && !show.pinKnown) show = { ...show, pinKnown: true };
   const seen = {
     ...(show.revision !== undefined ? { revision: show.revision } : {}),
     ...(show.pinnedNumCtx !== undefined ? { pinnedNumCtx: show.pinnedNumCtx } : {}),
     ...(show.modelMaxContext !== undefined ? { modelMaxContext: show.modelMaxContext } : {}),
+    ...(show.pinKnown ? { pinKnown: true } : {}),
   };
   // The fresh limit comes before anything kept: the pin, else the
   // architecture maximum. If the run's own lookup could not see it (Ollama
@@ -265,10 +282,10 @@ export async function ollamaRequestNumCtx(
     const fit = checkPromptFit({ ...fitInput, contextWindow: limit });
     if (fit.failure) return { tooLarge: fit.failure, neededTokens, ...seen };
   }
-  // An agent run whose lookups saw neither a pin nor a maximum cannot tell
-  // whether the model is pinned, and any num_ctx it sent would override a
-  // pin. It sends none (nor a kept size), so Ollama applies the Modelfile.
-  if (input.enforce && show.pinnedNumCtx === undefined && show.modelMaxContext === undefined) {
+  // An agent run whose lookups could not tell whether the model is pinned
+  // (failed, or answered only in part) sends no num_ctx, nor a kept size:
+  // any it sent would override a pin. Ollama then applies the Modelfile.
+  if (input.enforce && !show.pinKnown) {
     return { neededTokens, ...seen, ...(input.currentNumCtx !== undefined ? { skipKept: true } : {}) };
   }
   // A kept size belongs to the model revision it was kept for. A model
@@ -277,7 +294,9 @@ export async function ollamaRequestNumCtx(
   // another revision, or larger than this model's maximum, is not reused.
   let current = input.currentNumCtx;
   let dropKept = false;
-  if (current !== undefined && (input.currentRevision !== show.revision ||
+  // A lookup that saw no revision (Ollama briefly unavailable) is no reason
+  // to drop a size that worked.
+  if (current !== undefined && ((show.revision !== undefined && input.currentRevision !== show.revision) ||
     (show.modelMaxContext !== undefined && current > show.modelMaxContext))) {
     dropKept = true;
     current = undefined;
