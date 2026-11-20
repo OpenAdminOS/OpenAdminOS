@@ -396,6 +396,8 @@ export default function AgentDetail({
     }
   };
 
+  const startingRunRef = useRef(false);
+  const [startingRun, setStartingRun] = useState(false);
   const handleStartRun = async (choice?: {
     dryRun?: boolean;
     runForRealOfRunId?: string;
@@ -408,6 +410,11 @@ export default function AgentDetail({
     expectedProviderDestination?: string;
   }) => {
     if (!agent) return;
+    // One start per click: a second activation while admission is pending (a double click, a slow
+    // provider check) does nothing, so one review never queues two runs.
+    if (startingRunRef.current) return;
+    startingRunRef.current = true;
+    setStartingRun(true);
     const fitLike = Boolean(choice?.modelFit || choice?.safeguards);
     setRunError(null);
     try {
@@ -446,6 +453,9 @@ export default function AgentDetail({
       // A refused model fit start is not retried from this review: where the provider is reached may
       // have changed to a place this review does not show. A fresh review reads it again.
       if (fitLike) setPendingRunChoice((current) => (current === choice ? { ...current, startRefused: true } : current));
+    } finally {
+      startingRunRef.current = false;
+      setStartingRun(false);
     }
   };
 
@@ -1140,6 +1150,7 @@ export default function AgentDetail({
           modelLabel={pendingModel ? providerModelLabel(pendingProvider, pendingModel) : undefined}
           modelFit={pendingRunChoice?.modelFit}
           deliverySaving={pendingDeliverySaveCount > 0}
+          starting={startingRun}
           // A model fit rerun starts only once the review knows where its provider is reached.
           {...((pendingRunChoice?.modelFit || pendingRunChoice?.safeguards) && pendingRunChoice.model && !isPlaceholderModel(pendingRunChoice.model) && pendingProvider && pendingProvider.models.length > 0 && !pendingProvider.models.includes(pendingRunChoice.model)
             ? { destinationState: "model-gone" as const, missingModel: pendingRunChoice.model }
@@ -2791,6 +2802,7 @@ function RunPreflightModal({
   model,
   modelLabel,
   deliverySaving,
+  starting = false,
   destinationState,
   missingModel,
   onConnect,
@@ -2829,6 +2841,8 @@ function RunPreflightModal({
   /** What the model is called on screen, such as "Copilot Fusion High". */
   modelLabel?: string | undefined;
   deliverySaving: boolean;
+  /** A start from this review is being admitted; Start stays disabled until it returns. */
+  starting?: boolean;
   /** A model fit rerun is still reading, or could not read, where its provider is reached, or its hosted provider names no model. */
   destinationState?: "pending" | "failed" | "no-model" | "model-gone" | "refused";
   /** The model a model fit rerun named that its provider no longer reports. */
@@ -2875,6 +2889,7 @@ function RunPreflightModal({
     providerReady &&
     !organizationInactive &&
     !deliverySaving &&
+    !starting &&
     destinationState === undefined &&
     missingServices.length === 0 &&
     !scopeBlockCopy;

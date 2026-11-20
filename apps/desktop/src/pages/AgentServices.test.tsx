@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Navigate, Route, Routes } from "react-router";
 import { describe, expect, it, vi } from "vitest";
@@ -562,6 +562,38 @@ it("starts a resumed model fit rerun on a listed model when the provider's defau
   await waitFor(() => expect(start).toBeEnabled());
   await user.click(start);
   await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith("devices", expect.objectContaining({ providerId: "openai", model: "gpt-5" })));
+});
+
+it("queues one run when Start is activated twice while admission is pending", async () => {
+  const agent = createMockAgent({ id: "devices", slug: "devices", name: "Inactive devices", mode: "read", scopes: ["DeviceManagementManagedDevices.Read.All"], services: ["intune"] });
+  const state = createMockAppState({ installedAgents: [agent], activeProviderId: "ollama" });
+  const intent = {
+    kind: "agent-run", slug: "devices", tenantId: state.activeTenantId, providerId: "openai", model: "gpt-5",
+    modelFit: { reason: "context-too-small", providerId: "ollama", model: "llama3.1" },
+    returnTo: "/agents/devices", createdAt: new Date().toISOString(),
+  };
+  let admit: (value: unknown) => void = () => undefined;
+  const startRun = vi.fn(() => new Promise((resolve) => { admit = resolve; }));
+  const bridge = makeMockBridge({ startRun: startRun as never }, state);
+  renderRoute(
+    <Routes>
+      <Route path="/start" element={<Navigate to="/agents/devices" state={{ resumePendingIntent: intent }} />} />
+      <Route path="/agents/:slug" element={<Agents />} />
+    </Routes>,
+    { path: "*", route: "/start", bridge },
+  );
+  const dialog = await screen.findByRole("dialog", { name: /Review run/ });
+  const start = within(dialog).getByRole("button", { name: "Start run" });
+  await waitFor(() => expect(start).toBeEnabled());
+  // Both activations land before React re-renders.
+  act(() => {
+    start.click();
+    start.click();
+  });
+  await waitFor(() => expect(startRun).toHaveBeenCalledTimes(1));
+  expect(within(dialog).getByRole("button", { name: "Start run" })).toBeDisabled();
+  admit({ id: "run-1" });
+  await waitFor(() => expect(startRun).toHaveBeenCalledTimes(1));
 });
 
 it("does not retry a refused model fit start from the same review", async () => {
