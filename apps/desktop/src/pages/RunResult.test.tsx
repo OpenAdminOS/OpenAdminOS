@@ -845,6 +845,32 @@ describe("Run with another provider after a model fit failure (mockup 36, sectio
     await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({ providerId: "ollama", model: "llama3.1" })));
   });
 
+  it("keeps the chosen provider through Run in the active organization, and drops it on Cancel", async () => {
+    const user = userEvent.setup();
+    const fabrikam = { ...createMockAppState().tenants[0]!, id: "tenant-2", displayName: "Fabrikam" };
+    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "ollama", model: "llama3.1", tenantId: "tenant-2", error: CONTEXT_ERROR });
+    const state = createMockAppState({ tenants: [createMockAppState().tenants[0]!, fabrikam], installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "read" })], runs: [run] });
+    const bridge = makeMockBridge({}, state);
+    const first = renderWithPreflight(run.id, bridge);
+    const notice = await screen.findByRole("region", { name: "llama3.1 cannot fit this run" });
+    // Cancel drops the choice: a later Run again keeps the run's own provider.
+    await user.click(within(notice).getByRole("button", { name: "Run with Codex" }));
+    await user.click(within(await screen.findByRole("dialog", { name: /This run was in Fabrikam/ })).getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "Run again" }));
+    await user.click(within(await screen.findByRole("dialog", { name: /This run was in Fabrikam/ })).getByRole("button", { name: "Run in Contoso IT" }));
+    let review = await screen.findByRole("dialog", { name: /Review run/ });
+    expect(within(review).queryByText(/could not fit the last run/)).toBeNull();
+    first.unmount();
+
+    renderWithPreflight(run.id, bridge);
+    await user.click(within(await screen.findByRole("region", { name: "llama3.1 cannot fit this run" })).getByRole("button", { name: "Run with Codex" }));
+    await user.click(within(await screen.findByRole("dialog", { name: /This run was in Fabrikam/ })).getByRole("button", { name: "Run in Contoso IT" }));
+    review = await screen.findByRole("dialog", { name: /Review run/ });
+    expect(within(review).getByText(/could not fit the last run, so this run uses Codex/)).toBeInTheDocument();
+    await user.click(within(review).getByRole("button", { name: "Start run" }));
+    await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({ providerId: "openai", model: "gpt-5" })));
+  });
+
   it("does not offer a hosted provider for a failure that is not about the context, or a run on a hosted provider", async () => {
     const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "ollama", model: "llama3.1", tenantId: "tenant-1", error: "Ollama not reachable at http://127.0.0.1:11434: connect ECONNREFUSED" });
     const hosted = createAwaitingConfirmationRun({ id: "run-hosted", status: "failed", plan: undefined, providerId: "openai", model: "gpt-5", tenantId: "tenant-1", error: CONTEXT_ERROR });

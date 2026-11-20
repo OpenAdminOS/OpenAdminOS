@@ -243,25 +243,32 @@ function RunResultPage({ run }: { run: RunRecord }) {
   // Only an ordinary rerun can move to the active organization; Run for
   // real and Team retries stay with the run's own tenant.
   const ordinaryRerun = run.status !== "planned" && !run.officeContext;
+  // Closing the dialog drops a Run with <provider> choice, so a later Run again uses the run's own provider.
+  const closeCrossOrganization = () => {
+    rerunOverrideRef.current = null;
+    setCrossOrganization(false);
+  };
   const crossOrganizationDialog = (
-    <Modal open={crossOrganization} onClose={() => setCrossOrganization(false)} size="md">
+    <Modal open={crossOrganization} onClose={closeCrossOrganization} size="md">
       <ModalHeader
         title={RERUN_COPY.title(runOrganization?.name)}
         subtitle={displayName}
-        onClose={() => setCrossOrganization(false)}
+        onClose={closeCrossOrganization}
       />
       <div className="space-y-4 p-6">
         <p className="text-sm leading-relaxed text-[var(--color-text-soft)]">
           {RERUN_COPY.body(runOrganization?.name, activeOrganization?.name, ordinaryRerun)}
         </p>
         <div className="flex flex-wrap justify-end gap-2">
-          <Button variant="ghost" onClick={() => setCrossOrganization(false)}>Cancel</Button>
+          <Button variant="ghost" onClick={closeCrossOrganization}>Cancel</Button>
           {ordinaryRerun && activeOrganization ? (
             <Button
               variant="secondary"
               onClick={() => {
                 setCrossOrganization(false);
-                openRerunPreflight(run.agentSlug, {
+                const override = rerunOverrideRef.current;
+                rerunOverrideRef.current = null;
+                openRerunPreflight(run.agentSlug, override ?? {
                   ...(run.providerId ? { providerId: run.providerId } : {}),
                   ...(run.model ? { model: run.model } : {}),
                 });
@@ -281,6 +288,7 @@ function RunResultPage({ run }: { run: RunRecord }) {
                 setRerunAfterSwitch(target);
                 void setActiveOrganization(target).catch((caught) => {
                   pendingRerunRef.current = null;
+                  rerunOverrideRef.current = null;
                   setRerunAfterSwitch(null);
                   toast.error(
                     ORGANIZATION_COPY.switchFailed(
