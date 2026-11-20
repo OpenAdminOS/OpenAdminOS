@@ -5464,9 +5464,7 @@ function removeSchedulerRegistration(): void {
       );
     }
   } else if (process.platform === "win32") {
-    // schtasks answers "not found" with a non-zero exit in the user's
-    // language, so any answer that is not a timeout counts: a per-user task
-    // its own user cannot read is not a case this app creates.
+    // Presence comes from the full task list (see windowsSchedulerTaskPresence).
     if (windowsSchedulerTaskPresence() === "absent") return;
     const xml = windowsSchedulerTaskXml();
     const whoami = spawnSync("whoami", ["/user", "/fo", "csv", "/nh"], { encoding: "utf8", windowsHide: true, timeout: 5_000 });
@@ -5594,9 +5592,6 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
     throw new LocalResetRequestError("A reset is already in progress. OpenAdminOS restarts in a moment.");
   }
   localResetRequested = true;
-  // No connector send is approved from here on; the request may still be
-  // refused below, which lifts this again.
-  blockConnectorConfirmations("OpenAdminOS is resetting. Nothing was sent.");
   try {
     await requestLocalReset(confirmation, {
       checkReady: async () => {
@@ -5607,6 +5602,11 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
         if (policyProblem) throw new LocalResetRequestError(`The reset could not start: ${policyProblem}. Nothing was removed.`);
         const blocker = await store.beginLocalReset();
         if (blocker) throw new LocalResetRequestError(blocker);
+        // Every check passed: no connector send is approved from here on,
+        // and no organization starts new work (a Nova send, a report
+        // delivery, a run). A refused request never gets this far.
+        blockConnectorConfirmations("OpenAdminOS is resetting. Nothing was sent.");
+        await store.closeAllTenantWork();
       },
       writeMarker: (marker) => writeLocalResetMarker(app.getPath("userData"), marker),
       forgetSignIns: async () => {

@@ -400,6 +400,11 @@ export class RunService {
    */
   private readonly activeApplies = new Set<string>();
 
+  /** Some run's work has not settled, even when its record already reads cancelled or is gone. */
+  hasActiveDrive(): boolean {
+    return this.drives.size > 0;
+  }
+
   /** A confirmed apply is still running or settling. */
   hasActiveApply(): boolean {
     return this.activeApplies.size > 0;

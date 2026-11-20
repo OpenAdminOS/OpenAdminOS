@@ -2346,6 +2346,8 @@ export class AppStateStore {
   private localResetStarted = false;
   /** Confirmations accepted but not yet recorded as an applying run. */
   private confirmationsInFlight = 0;
+  /** Run starts, Nova sends and report delivery passes under way. */
+  private localResetWorkInFlight = 0;
 
   /**
    * Checks that no confirmed change is applying and, when none is, stops new
@@ -2358,13 +2360,21 @@ export class AppStateStore {
     this.localResetStarted = true;
     const blocker = this.confirmationsInFlight > 0
       ? "A change is being confirmed. Wait for it to finish, then reset. Nothing was removed."
-      : (await this.localResetBlocker()) ?? (await this.localResetRunningBlocker());
+      : this.localResetWorkInFlight > 0
+        ? "A run is starting, or a message or report is being sent. Wait for it to finish, then reset. Nothing was removed."
+        : (await this.localResetBlocker()) ?? (await this.localResetRunningBlocker());
     if (blocker) this.localResetStarted = false;
     return blocker;
   }
 
   cancelLocalReset(): void {
     this.localResetStarted = false;
+    // A request refused after its checks (the marker could not be written)
+    // gives every organization its work back, as an undone Disconnect does.
+    if (this.localResetClosedTenants.length > 0) {
+      for (const id of this.localResetClosedTenants) this.tenantLifecycle.abortClose(id);
+      this.localResetClosedTenants = [];
+    }
   }
 
   /**
@@ -2393,7 +2403,13 @@ export class AppStateStore {
   async localResetRunningBlocker(): Promise<string | undefined> {
     const persisted = await this.read();
     const running = persisted.runs.find((run) => run.status === "running" || run.status === "queued");
-    if (!running) return undefined;
+    if (!running) {
+      // A cancelled run, or one whose organization was disconnected, can
+      // still be finishing a send it already made.
+      return this.runService.hasActiveDrive()
+        ? "A run is still finishing. Wait a moment, then reset. Nothing was removed."
+        : undefined;
+    }
     const name = persisted.installedAgents.find((agent) => agent.slug === running.agentSlug)?.name ?? "A run";
     return `${name} is still running. Wait for it to finish, or cancel it in Runs, then reset. Nothing was removed.`;
   }
@@ -2431,12 +2447,35 @@ export class AppStateStore {
    * waiting at most `boundMs` for the gateway and MCP servers, so the next
    * launch can delete the files.
    */
+  /**
+   * Reset OpenAdminOS, once accepted: every organization stops taking new
+   * work, the way Disconnect closes one, so no Nova send, report delivery or
+   * run starts before the restart. Work already running gets its signal and
+   * `shutdown` waits for it within its bound.
+   */
+  async closeAllTenantWork(): Promise<void> {
+    for (const tenant of (await this.read()).tenants) {
+      if (this.tenantLifecycle.phase(tenant.id) !== "open") continue;
+      this.tenantLifecycle.close(tenant.id);
+      this.localResetClosedTenants.push(tenant.id);
+    }
+  }
+
+  /** Organizations a reset request closed, so a refused request can reopen them. */
+  private localResetClosedTenants: string[] = [];
+
   async shutdown(boundMs: number): Promise<void> {
     this.whatsappWebClientInstance?.dispose();
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
+      const tenantIds = (await this.read()).tenants.map((tenant) => tenant.id);
       await Promise.race([
-        Promise.allSettled([this.gatewayService.stop(), this.mcpHost.closeAll()]),
+        Promise.allSettled([
+          this.gatewayService.stop(),
+          this.mcpHost.closeAll(),
+          // Leased work of every organization (sends, deliveries, runs) settles first.
+          ...tenantIds.map((id) => this.tenantLifecycle.drain(id, boundMs)),
+        ]),
         new Promise<void>((resolve) => { timer = setTimeout(resolve, boundMs); }),
       ]);
     } finally {
@@ -5699,6 +5738,18 @@ export class AppStateStore {
 
   /** Called only after Nova consumes a one-use, session-scoped visual approval. */
   async sendNovaConnector(input: Parameters<import("./nova-actions.js").NovaActionHost["send"]>[0]): Promise<unknown> {
+    // Once Reset OpenAdminOS has started nothing more is sent; a send under
+    // way holds the reset until it has its answer.
+    if (this.localResetStarted) throw new Error("OpenAdminOS is resetting. Nothing more was sent.");
+    this.localResetWorkInFlight += 1;
+    try {
+      return await this.sendNovaConnectorNow(input);
+    } finally {
+      this.localResetWorkInFlight -= 1;
+    }
+  }
+
+  private async sendNovaConnectorNow(input: Parameters<import("./nova-actions.js").NovaActionHost["send"]>[0]): Promise<unknown> {
     const persisted = await this.read();
     input.signal.throwIfAborted();
     if (persisted.activeTenantId !== input.tenantId) throw new Error("Tenant changed. Prepare the message again.");
@@ -8914,7 +8965,15 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     options: StartRunOptions = {},
     boundary: { activeOrganizationOnly?: boolean } = {},
   ): Promise<RunRecord> {
-    return this.runService.startRun(agentSlug, options, boundary);
+    if (this.localResetStarted) {
+      throw new Error("OpenAdminOS is resetting and restarts in a moment. The run did not start.");
+    }
+    this.localResetWorkInFlight += 1;
+    try {
+      return await this.runService.startRun(agentSlug, options, boundary);
+    } finally {
+      this.localResetWorkInFlight -= 1;
+    }
   }
 
   async confirmRun(
@@ -9219,7 +9278,15 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   async processPendingRunDeliveries(): Promise<void> {
-    return this.runDeliveryService.processPendingRunDeliveries();
+    // No report goes out once Reset OpenAdminOS has started; a delivery pass
+    // under way holds the reset until it ends.
+    if (this.localResetStarted) return;
+    this.localResetWorkInFlight += 1;
+    try {
+      return await this.runDeliveryService.processPendingRunDeliveries();
+    } finally {
+      this.localResetWorkInFlight -= 1;
+    }
   }
 
   private async enqueueRunDeliveries(run: RunRecord): Promise<void> {
