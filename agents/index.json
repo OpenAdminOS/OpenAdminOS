@@ -216,7 +216,7 @@
       "slug": "secure-score-prioritizer",
       "name": "Secure Score prioritizer",
       "description": "Prioritizes Microsoft Secure Score control profiles by category, action type, effort signals, user impact, and max-score upside.",
-      "version": "1.2.0",
+      "version": "1.1.0",
       "mode": "read",
       "category": "policies",
       "tier": "agent",
@@ -232,9 +232,9 @@
       "services": [
         "defender"
       ],
-      "minAppVersion": "0.6.3",
+      "minAppVersion": "0.1.0",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/secure-score-prioritizer/manifest.yaml",
-      "manifestSha256": "2a74f3554d3a282103a53e0ebc0ad66e80032ae314ebcb3b2a193eeddace5092"
+      "manifestSha256": "69fe084072266f71d4dddfe82fa2c98c222fc661a51fb1cdd3af607c0bee9c7a"
     },
     {
       "id": "sign-in-failure-explainer",
