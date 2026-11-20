@@ -174,7 +174,7 @@ export default function AgentDetail({
   const [uninstalling, setUninstalling] = useState(false);
   const [requestedScopes, setRequestedScopes] = useState<RequestedScope[]>([]);
   const [pendingRunChoice, setPendingRunChoice] = useState<
-    { dryRun?: boolean; runForRealOfRunId?: string; retryOfRunId?: string; tenantId?: string; providerId?: ProviderId; model?: string; modelFit?: ModelFitIssue; safeguards?: { onDevice: boolean }; expectedProviderDestination?: string; destinationFailed?: true } | null
+    { dryRun?: boolean; runForRealOfRunId?: string; retryOfRunId?: string; tenantId?: string; providerId?: ProviderId; model?: string; modelFit?: ModelFitIssue; safeguards?: { onDevice: boolean }; expectedProviderDestination?: string; destinationFailed?: true; startRefused?: true } | null
   >(null);
   const consumedStartRunOnOpen = useRef(false);
   const resumedIntentRef = useRef<string | null>(null);
@@ -439,15 +439,9 @@ export default function AgentDetail({
       navigate(`/runs/${run.id}`);
     } catch (error) {
       setRunError(error instanceof Error ? error.message : String(error));
-      // A refused model fit start reads where its provider is reached again, so Try again waits for the
-      // current destination instead of resending one that may have changed on purpose.
-      if (fitLike && choice?.providerId) {
-        const retried = { ...choice, expectedProviderDestination: undefined };
-        setPendingRunChoice((current) => (current === choice ? retried : current));
-        void (window.openAdminOS?.getProviderDestination?.(choice.providerId) ?? Promise.reject(new Error("unavailable")))
-          .then((destination) => setPendingRunChoice((current) => (current === retried ? { ...retried, expectedProviderDestination: destination } : current)))
-          .catch(() => setPendingRunChoice((current) => (current === retried ? { ...retried, destinationFailed: true } : current)));
-      }
+      // A refused model fit start is not retried from this review: where the provider is reached may
+      // have changed to a place this review does not show. A fresh review reads it again.
+      if (fitLike) setPendingRunChoice((current) => (current === choice ? { ...current, startRefused: true } : current));
     }
   };
 
@@ -1147,6 +1141,8 @@ export default function AgentDetail({
             ? { destinationState: "model-gone" as const, missingModel: pendingRunChoice.model }
             : (pendingRunChoice?.modelFit || pendingRunChoice?.safeguards) && pendingProvider && !pendingProvider.isLocal && !isListedHostedModel(pendingProvider, pendingRunChoice.model ?? pendingModel)
             ? { destinationState: "no-model" as const }
+            : (pendingRunChoice?.modelFit || pendingRunChoice?.safeguards) && pendingRunChoice.startRefused
+            ? { destinationState: "refused" as const }
             : (pendingRunChoice?.modelFit || pendingRunChoice?.safeguards) && pendingRunChoice.destinationFailed
             ? { destinationState: "failed" as const }
             : (pendingRunChoice?.modelFit || pendingRunChoice?.safeguards) && !pendingRunChoice.expectedProviderDestination
@@ -2830,7 +2826,7 @@ function RunPreflightModal({
   modelLabel?: string | undefined;
   deliverySaving: boolean;
   /** A model fit rerun is still reading, or could not read, where its provider is reached, or its hosted provider names no model. */
-  destinationState?: "pending" | "failed" | "no-model" | "model-gone";
+  destinationState?: "pending" | "failed" | "no-model" | "model-gone" | "refused";
   /** The model a model fit rerun named that its provider no longer reports. */
   missingModel?: string | undefined;
   onClose: () => void;
@@ -2884,6 +2880,7 @@ function RunPreflightModal({
   const fitHint =
     destinationState === "model-gone" ? MODEL_FIT_COPY.modelGone(missingModel ?? "", providerName)
     : destinationState === "no-model" ? MODEL_FIT_COPY.modelMissing(providerName)
+    : destinationState === "refused" ? MODEL_FIT_COPY.reviewAgain
     : destinationState === "failed" ? MODEL_FIT_COPY.destinationFailed(providerName)
     : destinationState === "pending" ? MODEL_FIT_COPY.destinationPending(providerName)
     : undefined;

@@ -561,7 +561,7 @@ it("starts a resumed model fit rerun on a listed model when the provider's defau
   await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith("devices", expect.objectContaining({ providerId: "openai", model: "gpt-5" })));
 });
 
-it("reads the destination again after a refused model fit start, so Try again sends the current one", async () => {
+it("does not retry a refused model fit start from the same review", async () => {
   const user = userEvent.setup();
   const agent = createMockAgent({ id: "devices", slug: "devices", name: "Inactive devices", mode: "read", scopes: ["DeviceManagementManagedDevices.Read.All"], services: ["intune"] });
   const state = createMockAppState({ installedAgents: [agent], activeProviderId: "ollama" });
@@ -587,8 +587,12 @@ it("reads the destination again after a refused model fit start, so Try again se
   await waitFor(() => expect(start).toBeEnabled());
   await user.click(start);
   await waitFor(() => expect(startRun).toHaveBeenCalledWith("devices", expect.objectContaining({ expectedProviderDestination: "dest-1" })));
-  await user.click(await within(dialog).findByRole("button", { name: "Try again" }));
-  await waitFor(() => expect(startRun).toHaveBeenLastCalledWith("devices", expect.objectContaining({ expectedProviderDestination: "dest-2" })));
+  // Where the provider is reached may have changed to a place this review does not show: no Try again.
+  expect(await within(dialog).findByText("Close this review and open the run again to review where it goes now.")).toBeInTheDocument();
+  expect(within(dialog).queryByRole("button", { name: "Try again" })).toBeNull();
+  expect(within(dialog).getByRole("button", { name: "Start run" })).toBeDisabled();
+  expect(startRun).toHaveBeenCalledTimes(1);
+  expect(reads).toBe(1);
 });
 
 it("does not start a model fit rerun on a hosted provider that reports no model", async () => {
