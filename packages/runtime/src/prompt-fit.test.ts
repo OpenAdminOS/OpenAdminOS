@@ -11,6 +11,7 @@ import {
   resolveContextWindow,
 } from "./prompt-fit.js";
 import { parseOllamaLoadedContext, parseOllamaShow, readOllamaContextWindow } from "./ollama-context.js";
+import { createOllamaLlm } from "./llm-ollama.js";
 
 describe("estimateTokens", () => {
   it("is zero for empty text and grows with content", () => {
@@ -128,6 +129,17 @@ describe("Ollama context window", () => {
     const ps = { models: [{ name: "gpt-oss:20b", context_length: 32768 }] };
     assert.equal(await readOllamaContextWindow("http://127.0.0.1:11434", "gpt-oss:20b", { fetchImpl: fakeFetch({ "/api/show": show, "/api/ps": ps }) }), 32768);
     assert.equal(await readOllamaContextWindow("http://127.0.0.1:11434", "gpt-oss:20b", { fetchImpl: fakeFetch({ "/api/show": show }) }), 131072);
+  });
+
+  it("the Ollama adapter reports the model maximum, because it raises num_ctx on an overflow", async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = fakeFetch({ "/api/show": SHOW });
+    try {
+      const llm = createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "openadminos/openadmin-8b" });
+      assert.equal(await llm.contextWindow?.(), 262144);
+    } finally {
+      globalThis.fetch = original;
+    }
   });
 
   it("is unknown when Ollama does not answer or no model is set", async () => {
