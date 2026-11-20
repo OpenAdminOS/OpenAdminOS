@@ -2593,8 +2593,14 @@ Mockup: `docs/mockups/34-local-reset.html`.
   cannot be listed stays too, since its contents cannot be checked). The
   check can take seconds on redirected storage, so the data folder and the
   entry are checked again right after it, and the wipe stops if either was
-  replaced meanwhile. Cache folders outside the data folder get the same
-  checks, as a warning. The guide's
+  replaced meanwhile (an entry without inode or birth time counts as
+  replaced). Cache folders outside the data folder get the same checks, as
+  a warning: each one's identity is taken before its link, mount and
+  hard-link checks and compared after the last, right before the removal.
+  The data folder itself is checked again before every step outside it
+  (the scheduler, each Keychain deletion attempt, the preferences, each
+  cache folder), and the reset stops there, incomplete, if it was replaced:
+  a profile restored meanwhile keeps its Keychain key. The guide's
   PowerShell script leaves files whose `LinkType` is `HardLink` for the same
   reason. Then,
   installed builds only: the Keychain item by exact service
@@ -2621,7 +2627,7 @@ Mockup: `docs/mockups/34-local-reset.html`.
   the wipe runs only when the folder still has that inode and birth time
   (on macOS and Windows the device number is not compared, since a reboot
   or remount can change it, except where no birth time is known; on Linux
-  it must always match too, see below): a copy restored or roamed to
+  it must always match too, see "Linux binds the marker to the device too" above): a copy restored or roamed to
   another device carries the marker but not the identity, so it stops with
   nothing removed and asks for a fresh reset there. A birth time equal to
   the change time counts as unknown (Node reports the change time where
