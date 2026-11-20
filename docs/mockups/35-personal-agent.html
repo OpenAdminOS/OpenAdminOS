@@ -405,8 +405,8 @@
     .trv .d { display: block; font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text-muted); }
     .trv .ann { font-size: 11px; line-height: 18px; padding: 0 6px; border-radius: 5px; color: var(--color-text-soft); box-shadow: inset 0 0 0 1px var(--color-border); white-space: nowrap; }
     .trv .ann.warn { color: var(--color-danger); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-danger) 35%, transparent); }
-    .trv li[data-state="off"] code { color: var(--color-text-muted); }
-    .trv li[data-off] code { text-decoration: line-through; text-decoration-color: var(--color-text-faint); }
+    .trv li[data-state="off"] > label code { color: var(--color-text-muted); }
+    .trv li[data-off] > label code { text-decoration: line-through; text-decoration-color: var(--color-text-faint); }
     .trv li[data-off] label { cursor: not-allowed; }
     @container (max-width: 520px) { .trv label { grid-template-columns: 16px minmax(0, 1fr); } .trv .ann { grid-column: 2; justify-self: start; } }
     .clipnote { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 10px; margin: 0 0 18px; padding: 10px 12px; border-radius: var(--radius-md); background: var(--color-code-bg); font-size: var(--text-sm); line-height: var(--lh-sm); color: var(--color-text-soft); }
@@ -444,6 +444,32 @@
     .trv .chg mark { background: var(--color-warning-soft); color: inherit; border-radius: 3px; padding: 0 2px; }
     .trv .ann.chgd { color: var(--color-warning); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-warning) 40%, transparent); }
     .trv .same { display: block; padding: 8px 12px; font-size: var(--text-xs); color: var(--color-text-muted); }
+    /* Round 10: every row opens the full definition the admin approves */
+    .trv .defrow { padding: 0 12px 8px 38px; margin-top: -4px; }
+    .trv .deft { display: inline-flex; align-items: center; gap: 4px; border: 0; background: none; padding: 2px 0; font: inherit; font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text-soft); cursor: pointer; border-radius: 4px; }
+    .trv .deft:hover { color: var(--color-text); }
+    .trv .deft:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+    .trv .deft svg { width: 12px; height: 12px; transition: transform .15s; }
+    .trv .deft[aria-expanded="true"] svg { transform: rotate(180deg); }
+    .trv .def { margin: 0 12px 10px 38px; padding: 8px 10px; border-radius: 6px; background: var(--color-code-bg); font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text-soft); }
+    .trv .def[hidden] { display: none; }
+    .trv .def dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 0; }
+    .trv .def dt { color: var(--color-text-muted); }
+    .trv .def dd { margin: 0; color: var(--color-text); overflow-wrap: anywhere; }
+    .trv .def .prm { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+    .trv .def .prm li { border: 0; }
+    .trv .def .prm .ty { color: var(--color-text-muted); margin-left: 4px; }
+    .trv .def .prm .ds { display: block; color: var(--color-text-soft); }
+    .trv .def .ev code { margin-right: 4px; }
+    .trv .def mark.hit { background: color-mix(in srgb, var(--color-danger) 16%, transparent); color: var(--color-danger); border-radius: 3px; padding: 0 2px; }
+    .trv .def mark.new { background: var(--color-warning-soft); color: inherit; border-radius: 3px; padding: 0 2px; }
+    .trv .def .wc { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--color-border-soft); }
+    .trv .def .wc.bad { color: var(--color-danger); }
+    .trv .def .hash code { color: var(--color-text-soft); }
+    @container (max-width: 520px) { .trv .defrow { padding-left: 12px; } .trv .def { margin-left: 12px; } .trv .def dl { grid-template-columns: minmax(0, 1fr); gap: 0; } .trv .def dd { margin-bottom: 4px; } }
+    .tsend { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 14px 0 8px; }
+    .pcard .sendres[data-res="refused"] .sendmsg { color: var(--color-danger); }
+    .pcard .sendres .sendmsg b { font-weight: 500; }
     .needs .st { text-align: right; white-space: normal; }
     .missing .why { list-style: none; margin: 8px 0 0; padding: 0; font-size: var(--text-sm); line-height: var(--lh-sm); color: var(--color-text-soft); }
     .missing .why li { display: grid; grid-template-columns: minmax(0, 1fr); padding: 6px 0; border-top: 1px solid var(--color-border-soft); }
@@ -578,7 +604,7 @@
                 <div class="grant one"><span class="ic"><svg><use href="#i-book"/></svg></span><div><div class="nm">Microsoft Learn</div><div class="ds">Reference server at <span class="host">learn.microsoft.com</span>. Receives queries with recognized tenant data removed.</div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="true" aria-label="Use Microsoft Learn" data-host="learn.microsoft.com"></button></span></div>
                 <div class="grant one"><span class="ic"><svg><use href="#i-book"/></svg></span><div><div class="nm">Splashtop Docs</div><div class="ds">Reference server at <span class="host">support-splashtopbusiness.splashtop.com</span>. Not on your IT department's list, so it is off.</div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="false" disabled aria-disabled="true" aria-describedby="lock-mcp" aria-label="Use Splashtop Docs, set by IT" data-host="support-splashtopbusiness.splashtop.com"></button></span>
                   <span class="lockline" id="lock-mcp"><svg><use href="#i-lock"/></svg><span>Locked. Set by your IT department in policy.json, <code>allowedPublicReferences</code></span></span></div>
-                <div class="grant one"><span class="ic"><svg><use href="#i-plug"/></svg></span><div><div class="nm">Policy settings reference</div><div class="ds">Added by you on 12 November. Remote server at <span class="host">tools.contoso.example</span>. 4 of its 6 tools approved as read-only; the other 2 cannot be approved and are never offered. Receives queries with recognized tenant data removed.</div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="true" aria-label="Use Policy settings reference" data-host="tools.contoso.example"></button></span></div>
+                <div class="grant one"><span class="ic"><svg><use href="#i-plug"/></svg></span><div><div class="nm">Policy settings reference</div><div class="ds">Added by you on 12 November. Remote server at <span class="host">tools.contoso.example</span>. 4 of its 7 tools approved as read-only; the other 3 cannot be approved and are never offered. Receives queries with recognized tenant data removed.</div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="true" aria-label="Use Policy settings reference" data-host="tools.contoso.example"></button></span></div>
                 <div class="grant one"><span class="ic"><svg><use href="#i-plug"/></svg></span><div><div class="nm">KQL reference</div><div class="ds">Added by you on 5 November. Remote server at <span class="host">kql.contoso.example</span>. Both approved tools changed on the server and wait for your review, so none is offered and the status strip leaves out this host. The grant stays on. <button class="bt ghost sm" type="button" style="height:22px;padding:0 6px">Review 2 changed tools</button></div></div><span class="tg"><span class="lab">Use</span><button class="sw" role="switch" aria-checked="true" aria-label="Use KQL reference" data-host="kql.contoso.example" data-offered="0" data-held="Both approved tools changed on the server and wait for your review in Access."></button></span></div>
                 <p class="limit"><svg><use href="#i-globe"/></svg><span>What a server receives: a query written from your question, with every value the app recognizes as tenant data removed. Text the app cannot recognize, such as an internal project name, can still reach the server. While any of a server's tools is offered, the status strip names its host; turn the server off here to stop that.</span></p>
                 <div style="padding:10px 0 0;border-top:1px solid var(--color-border-soft)"><button class="bt secondary sm" type="button">Add a server by URL</button> <span class="xs muted" style="margin-left:8px">Only servers your IT department lists can be added.</span></div>
@@ -588,7 +614,7 @@
                 <h3>Connectors <span>Woodgrove Bank</span></h3>
                 <div class="colh"><span></span><span></span><span>Read</span><span>Send</span></div>
                 <div class="grant"><span class="ic" data-s="intune">M</span><div><div class="nm">Microsoft 365</div><div class="ds">Intune, Entra and Defender with your sign-in</div></div><span class="tg"><span class="lab">Read</span><button class="sw" role="switch" aria-checked="true" aria-label="Read Microsoft 365"></button></span><span class="na">Changes go through agents</span></div>
-                <div class="grant"><span class="ic"><svg><use href="#i-teams"/></svg></span><div><div class="nm">Teams</div><div class="ds">Reads channels you added. A send is only ever proposed by <span data-name>Nova</span> on a card, and you confirm each message before it posts. Skills never send.</div></div><span class="tg"><span class="lab">Read</span><button class="sw" role="switch" aria-checked="true" aria-label="Read Teams"></button></span><span class="tg"><span class="lab">Send</span><button class="sw" role="switch" aria-checked="true" aria-label="Send to Teams"></button></span></div>
+                <div class="grant"><span class="ic"><svg><use href="#i-teams"/></svg></span><div><div class="nm">Teams</div><div class="ds">Reads channels you added. A send is only ever proposed by <span data-name>Nova</span> on a card, and you confirm each message before it posts. Skills never send.</div></div><span class="tg"><span class="lab">Read</span><button class="sw" role="switch" aria-checked="true" aria-label="Read Teams"></button></span><span class="tg"><span class="lab">Send</span><button class="sw" role="switch" aria-checked="true" aria-label="Send to Teams" id="sw-teams-send"></button></span></div>
                 <div class="grant"><span class="ic"><svg><use href="#i-ticket"/></svg></span><div><div class="nm">ServiceNow</div><div class="ds">Reads incidents assigned to the endpoint team</div></div><span class="tg"><span class="lab">Read</span><button class="sw" role="switch" aria-checked="true" aria-label="Read ServiceNow"></button></span><span class="tg"><span class="lab">Send</span><button class="sw" role="switch" aria-checked="false" disabled aria-disabled="true" aria-describedby="lock-send" aria-label="Send to ServiceNow, set by IT"></button></span>
                   <span class="lockline" id="lock-send"><svg><use href="#i-lock"/></svg><span>Send locked. Set by your IT department in policy.json, <code>novaCapabilities.connectorSends</code></span></span></div>
                 <div class="grant"><span class="ic">ST</span><div><div class="nm">Splashtop</div><div class="ds">Not granted. <span data-name>Nova</span> does not see Splashtop tools.</div></div><span class="tg"><span class="lab">Read</span><button class="sw" role="switch" aria-checked="false" disabled aria-disabled="true" aria-describedby="lock-read" aria-label="Read Splashtop, set by IT"></button></span><span class="tg"><span class="lab">Send</span><button class="sw" role="switch" aria-checked="false" disabled aria-disabled="true" aria-describedby="lock-read" aria-label="Send to Splashtop, set by IT"></button></span>
@@ -671,7 +697,7 @@
             <div class="dialog" role="dialog" aria-labelledby="tr-t-open" style="width:100%;box-shadow:none;border-radius:12px">
               <header><span class="xs muted">Step 2 of 2, tools.contoso.example</span><h2 id="tr-t-open">Which tools may <span data-name>Nova</span> use?</h2></header>
               <div class="body">
-                <p>The server offers 6 tools, and none is approved yet. Approve only tools that read. The server's own read-only label is shown, but it does not approve a tool, and a tool whose description says it saves, changes, sends or deletes cannot be approved at all. A tool you leave unapproved is never offered, and every call is checked against this list, including calls from skills and scheduled checks.</p>
+                <p>The server offers 7 tools, and none is approved yet. Approve only tools that read, and open a tool to read its full definition: that definition is what you approve. The server's own read-only label is shown, but it does not approve a tool. The app reads every text field of the definition, title, description, parameter names and descriptions, enum values and output description, and a tool that describes saving, changing, sending or deleting in any of them cannot be approved. A tool you leave unapproved is never offered, and every call is checked against this list, including calls from skills and scheduled checks.</p>
                 <ul class="trv" data-trv="open"></ul>
               </div>
               <footer><span class="xs muted trv-count" aria-live="polite" style="margin-right:auto"></span><button class="bt ghost" type="button">Back</button><button class="bt primary trv-ok" type="button"></button></footer>
@@ -684,7 +710,7 @@
             <div class="dialog" role="dialog" aria-labelledby="tr-t-after" style="width:100%;box-shadow:none;border-radius:12px">
               <header><span class="xs muted">Step 2 of 2, tools.contoso.example</span><h2 id="tr-t-after">Which tools may <span data-name>Nova</span> use?</h2></header>
               <div class="body">
-                <p>The server offers 6 tools, and none is approved yet. Approve only tools that read. The server's own read-only label is shown, but it does not approve a tool: a tool you leave unapproved is never offered, and every call is checked against this list, including calls from skills and scheduled checks.</p>
+                <p>The server offers 7 tools, and none is approved yet. Approve only tools that read. The server's own read-only label is shown, but it does not approve a tool: a tool you leave unapproved is never offered, and every call is checked against this list, including calls from skills and scheduled checks.</p>
                 <ul class="trv" data-trv="after"></ul>
               </div>
               <footer><span class="xs muted trv-count" aria-live="polite" style="margin-right:auto"></span><button class="bt ghost" type="button">Back</button><button class="bt primary trv-ok" type="button"></button></footer>
@@ -695,7 +721,9 @@
       <ul class="notes">
         <li>Decided: in the first version a user-added server offers only the tools the admin approves as read-only at add time. The review opens with every tool unchecked, so nothing is approved by default, and Add server stays disabled until at least one tool is approved. The tool's read-only label from the server is shown in each row but never approves a tool on its own.</li>
         <li>A tool the server labels as a change is disabled from the start and cannot be approved at all; its row says why. Both frames are live: check and uncheck tools to see the count and the button follow.</li>
-        <li>Decided in round 4: approval needs a read-only label and no documented write behavior. The app flags a tool whose name, description or input parameters describe saving, changing, sending or deleting, such as <code>export_report</code>, which saves a report on the server; a flagged tool is disabled in every review state with the reason under its name, whatever its read-only label. The flag is a check the app makes, not a promise about the server: a write the description does not mention cannot be detected, which is why approval stays a human decision.</li>
+        <li>Decided in round 4: approval needs a read-only label and no documented write behavior. The app flags a tool whose definition describes saving, changing, sending or deleting, such as <code>export_report</code>, which saves a report on the server; a flagged tool is disabled in every review state with the reason under its name, whatever its read-only label. The flag is a check the app makes, not a promise about the server: a write the definition does not mention cannot be detected, which is why approval stays a human decision.</li>
+        <li>Decided in round 10: the admin approves the full definition, and the app checks all of it. Every row opens with Full definition: the name, title, description, every input parameter with its type, description and allowed values, the output description and the annotations, with the words the write check matched marked. The check reads every text field, so <code>baseline_versions</code>, whose name and description only read, is flagged by its title, "List and apply baselines", and by the value <code>apply</code> of its <code>mode</code> parameter, and cannot be approved.</li>
+        <li>The approval is bound to a SHA-256 hash of the whole definition, shown in the expanded row. Before a tool is offered and again at every call, the app hashes the definition the server lists now; any difference, in any field, including the title, an enum value, the output description or an annotation, invalidates the approval.</li>
         <li>A tool that is not approved is never offered to the model. The approval is checked again at every call, whether it comes from Chat, a skill or a scheduled check, so a skill that names <code>mcp__policy-settings__export_report</code> cannot use it.</li>
         <li>When the server later adds a tool, the new tool stays off until the admin reviews it here. The review can be reopened from the server's row in Access; approving a tool later is the same step.</li>
       </ul>
@@ -706,7 +734,7 @@
             <div class="dialog" role="dialog" aria-labelledby="tr-t-re" style="width:100%;box-shadow:none;border-radius:12px">
               <header><span class="xs muted">Policy settings reference, tools.contoso.example</span><h2 id="tr-t-re">Review 3 changed tools</h2></header>
               <div class="body">
-                <p>On 19 November the server changed the definition of 3 tools you approved on 12 November. Their approval no longer applies: <span data-name>Nova</span> does not offer them, and every call to them is refused, from Chat, skills and scheduled checks, until you approve them again here. A tool whose new definition, input parameters included, says it saves, changes, sends or deletes cannot be approved.</p>
+                <p>On 19 November the server changed the definition of 3 tools you approved on 12 November. Each approval was bound to a hash of the whole definition, and the definitions listed now hash differently, so their approval no longer applies: <span data-name>Nova</span> does not offer them, and every call to them is refused, from Chat, skills and scheduled checks, until you approve them again here. A tool whose new definition, input parameters included, says it saves, changes, sends or deletes cannot be approved.</p>
                 <ul class="trv" data-trv="rereview"></ul>
               </div>
               <footer><span class="xs muted trv-count" aria-live="polite" style="margin-right:auto"></span><button class="bt ghost" type="button">Later</button><button class="bt primary trv-ok" type="button"></button></footer>
@@ -714,7 +742,7 @@
           </div>
         </div>
         <ul class="notes" style="margin-top:20px">
-          <li>An approval belongs to the exact definition the admin saw: the tool's name, description, input schema and annotations, under the same id. The app compares the definition the server lists with the approved one before it offers a tool and again at every call; any difference sets the tool back to review, unchecked, and it is neither offered nor callable until the admin approves it again.</li>
+          <li>An approval belongs to the exact definition the admin saw, bound to a SHA-256 hash of all of it: name, title, description, every input parameter with its type, description and allowed values, the output description and the annotations, under the same id. The app hashes the definition the server lists before it offers a tool and again at every call; any difference, in any field, sets the tool back to review, unchecked, and it is neither offered nor callable until the admin approves it again. Each changed row opens the full new definition with the changed part marked and both hashes.</li>
           <li><code>get_setting</code> is the case to read first: an approved read tool whose description changed and still only reads. It returns to review with the old and new description side by side, unchecked, and can be approved again.</li>
           <li>A change in the input schema counts the same way, and the write check reads the parameters too: <code>list_baselines</code> gained <code>apply_to_tenant</code>, described as assigning a baseline, so it cannot be approved although its name and description still read as read-only. A parameter that only reads, such as a filter, returns the tool to review and it can be approved again, like <code>get_setting</code>.</li>
           <li>When the new definition describes saving, changing, sending or deleting, as <code>compare_baselines</code> now does, the tool is flagged and cannot be approved, the same check as at add time.</li>
@@ -733,7 +761,14 @@
       </ul>
 
       <h3 id="b-send" style="margin:32px 0 6px;font-size:var(--text-base);font-weight:500">Sending to Teams: the confirmation card</h3>
-      <p>With Send to Teams granted, <span data-name>Nova</span> can propose a message but never posts one on its own. The card shows the exact text that will be posted, where it goes and for which organization. Nothing is sent until Confirm, and each message gets its own card.</p>
+      <p>With Send to Teams granted, <span data-name>Nova</span> can propose a message but never posts one on its own. The card shows the exact text that will be posted, where it goes and for which organization. Nothing is sent until Confirm, each message gets its own card, and Confirm checks the grant and the connection again before anything posts.</p>
+      <div class="tsend">
+        <p class="trvcap" style="margin:0">Confirm reads the live Send to Teams switch in Access above. Use it, or the connection here, then press Confirm.</p>
+        <span class="seg" role="group" aria-label="Teams in Woodgrove Bank" id="teamsseg">
+          <button type="button" data-teams="on" aria-pressed="true">Teams connected</button>
+          <button type="button" data-teams="off" aria-pressed="false">Teams not connected</button>
+        </span>
+      </div>
       <div class="win">
         <div class="lights"><i></i><i></i><i></i></div>
         <div class="shell">
@@ -768,6 +803,7 @@
       <ul class="notes">
         <li>The card names the exact message text, the destination as the team and the channel, the organization the send goes to and the account it posts as. The text is what Teams will show; editing it means asking <span data-name>Nova</span> for a new card.</li>
         <li>Confirm posts this one message and the card records it. Cancel posts nothing and says so. Try both; "Show the card again" resets the frame.</li>
+        <li>Decided in round 10: Confirm is a call, so the call-time check runs again for the organization named on the card. If Send to Teams was turned off in Access after the card was proposed, or Teams is not connected in Woodgrove Bank, nothing is posted: the card reads "Not sent", names the reason and offers the fix, Turn on Send to Teams or Reconnect Teams in Woodgrove Bank. It never reads "posted" unless Teams accepted the message. After the fix the same card can be confirmed again; it still covers only this message.</li>
         <li>There is no "allow further sends" option. A second message, even to the same channel a minute later, gets its own card and its own Confirm.</li>
         <li>The card only appears while Send to Teams is granted and Teams is connected in the active organization. Without the grant, <span data-name>Nova</span> gives the text in the answer for the admin to post.</li>
       </ul>
@@ -1270,38 +1306,116 @@ identities with graph_get. Nothing else.
     });
 
     // Tool review: it opens with nothing approved; a tool labelled as a change, or one that documents a write, cannot be approved.
+    // Each tool is its full definition as the server lists it. The admin approves that definition, the write check
+    // reads every text field of it, and the approval is bound to a hash of the whole definition.
+    const P = (n, type, d, extra = {}) => ({ n, type, d, ...extra });
     const TOOLS = [
-      ["search_settings", "Searches setting names and descriptions", "ro"],
-      ["get_setting", "Returns one setting with its allowed values", "ro"],
-      ["list_baselines", "Lists security baseline versions", "ro"],
-      ["compare_baselines", "Compares two baseline versions", "ro"],
-      ["export_report", "Saves a report on the server and returns a link.", "writes"],
-      ["apply_setting", "Changes a setting. The server says so, and a tool that changes data cannot be approved; changes go through agents and diff confirmation.", "change"],
+      { name: "search_settings", title: "Search settings", description: "Searches setting names and descriptions in the settings catalog.", input: [P("query", "string", "Words to look for in setting names and descriptions", { req: true }), P("platform", "string", "Limits results to one platform", { en: ["windows10", "macOS", "iOS", "android"] })], output: "Matching settings with their ids", ann: { readOnlyHint: true, openWorldHint: false } },
+      { name: "get_setting", title: "Get setting", description: "Returns one setting with its allowed values", input: [P("id", "string", "Setting id from search_settings", { req: true })], output: "The setting, its allowed values and its default", ann: { readOnlyHint: true, openWorldHint: false } },
+      { name: "list_baselines", title: "List baselines", description: "Lists security baseline versions", input: [P("platform", "string", "Platform to list versions for", { en: ["windows10", "macOS"] })], output: "Baseline versions, newest first", ann: { readOnlyHint: true, openWorldHint: false } },
+      { name: "compare_baselines", title: "Compare baselines", description: "Compares two baseline versions", input: [P("from", "string", "Older version", { req: true }), P("to", "string", "Newer version", { req: true })], output: "Settings that differ between the two versions", ann: { readOnlyHint: true, openWorldHint: false } },
+      { name: "baseline_versions", title: "List and apply baselines", description: "Returns baseline versions for a platform", input: [P("platform", "string", "Platform to list versions for"), P("mode", "string", "What to do with the versions", { en: ["list", "apply"] })], output: "Baseline versions", ann: { readOnlyHint: true, openWorldHint: false } },
+      { name: "export_report", title: "Export report", description: "Saves a report on the server and returns a link.", input: [P("format", "string", "File format", { en: ["pdf", "csv"] })], output: "A link to the report", ann: { readOnlyHint: true, openWorldHint: true } },
+      { name: "apply_setting", title: "Apply setting", description: "Changes a setting on the tenant.", input: [P("id", "string", "Setting id", { req: true }), P("value", "string", "New value", { req: true })], output: "", ann: { readOnlyHint: false, destructiveHint: true } },
     ];
     const APPROVED_AFTER = ["search_settings", "get_setting", "list_baselines", "compare_baselines"];
-    // Definitions the server changed after approval, under the same ids. Any change sends the tool back to review.
+    const byName = (n) => TOOLS.find((x) => x.name === n);
+    // Definitions the server changed after approval, under the same ids. Any change, in any field, sends the tool back to review.
     const CHANGED = [
-      { t: "get_setting", what: "Description changed", was: "Returns one setting with its allowed values", now: "Returns one setting with its allowed values <mark>and the Microsoft Learn link that documents it</mark>", kind: "ro" },
-      { t: "list_baselines", what: "Input changed", was: "Input: <code>platform</code>", now: "Input: <code>platform</code>, <mark><code>apply_to_tenant</code>: assigns the newest baseline to the tenant</mark>", kind: "writes" },
-      { t: "compare_baselines", what: "Description changed", was: "Compares two baseline versions", now: "Compares two baseline versions <mark>and saves the comparison on the server</mark>", kind: "writes" },
+      { t: "get_setting", what: "Description changed", was: "Returns one setting with its allowed values", now: "Returns one setting with its allowed values <mark>and the Microsoft Learn link that documents it</mark>",
+        def: { ...byName("get_setting"), description: "Returns one setting with its allowed values and the Microsoft Learn link that documents it" }, mark: { description: "and the Microsoft Learn link that documents it" } },
+      { t: "list_baselines", what: "Input changed", was: "Input: <code>platform</code>", now: "Input: <code>platform</code>, <mark><code>apply_to_tenant</code>: assigns the newest baseline to the tenant</mark>",
+        def: { ...byName("list_baselines"), input: [...byName("list_baselines").input, P("apply_to_tenant", "boolean", "Assigns the newest baseline to the tenant")] }, mark: { param: "apply_to_tenant" } },
+      { t: "compare_baselines", what: "Description changed", was: "Compares two baseline versions", now: "Compares two baseline versions <mark>and saves the comparison on the server</mark>",
+        def: { ...byName("compare_baselines"), description: "Compares two baseline versions and saves the comparison on the server" }, mark: { description: "and saves the comparison on the server" } },
     ];
-    const toolRow = (key, t, d, kind, on, extra = "") => {
-      const change = kind === "change", writes = kind === "writes", off = change || writes;
-      const why = `trv-why-${key}-${t}`;
-      const flag = writes ? `<span class="flag">Its definition ${key === "rereview" ? "now " : ""}describes saving or changing data, so it cannot be approved, whatever its read-only label.</span>` : "";
-      const chg = extra ? `<span class="ann chgd">${extra}</span>` : "";
-      const anns = writes || extra ? `<span class="anns">${chg}<span class="ann">Labelled read-only</span>${writes ? '<span class="ann warn">Describes a write</span>' : ""}</span>` : `<span class="ann${change ? " warn" : ""}">${change ? "Labelled as a change" : "Labelled read-only"}</span>`;
-      return `<li ${off ? "data-off" : ""}><label><input type="checkbox" ${on ? "checked" : ""} ${off ? `disabled aria-disabled="true" aria-describedby="${why}"` : ""}><span><code>mcp__policy-settings__${t}</code><span class="d" ${off ? `id="${why}"` : ""}>${d}${flag}</span></span>${anns}</label></li>`;
+    // The write check: every text field of the definition, word by word (names split on underscores).
+    const WRITE_WORDS = new Set("save saves saved saving apply applies applied applying assign assigns assigned assigning change changes changing send sends sending delete deletes deleting remove removes removing update updates updating write writes writing create creates creating modify modifies set sets".split(" "));
+    const words = (s) => String(s || "").toLowerCase().split(/[^a-z]+/).filter(Boolean);
+    const hitsIn = (s) => words(s).filter((w) => WRITE_WORDS.has(w));
+    function writeCheck(def) {
+      const found = [];
+      const add = (where, s) => { const h = hitsIn(s); if (h.length) found.push({ where, w: [...new Set(h)] }); };
+      add("name", def.name); add("title", def.title); add("description", def.description);
+      def.input.forEach((p) => { add(`the name of parameter ${p.n}`, p.n); add(`the description of ${p.n}`, p.d); if (p.en) add(`the values of ${p.n}`, p.en.join(" ")); });
+      add("the output description", def.output);
+      return found;
+    }
+    const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    const hl = (s) => esc(s).replace(/[A-Za-z]+/g, (w) => (WRITE_WORDS.has(w.toLowerCase()) ? `<mark class="hit">${w}</mark>` : w));
+    const hlName = (s) => s.split("_").map((w) => (WRITE_WORDS.has(w) ? `<mark class="hit">${w}</mark>` : w)).join("_");
+    const markNew = (html, frag) => (frag ? html.replace(hl(frag), `<mark class="new">${hl(frag)}</mark>`) : html);
+    const canon = (def) => JSON.stringify(def, ["name", "title", "description", "input", "n", "type", "d", "req", "en", "output", "ann", "readOnlyHint", "destructiveHint", "openWorldHint"]);
+    async function digest(def) {
+      if (!(window.crypto && crypto.subtle)) return "";
+      const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canon(def)));
+      return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
+    }
+    const listFound = (f) => f.map((x) => `"${x.w.join('", "')}" in ${x.where === "name" || x.where === "title" || x.where === "description" ? "its " + x.where : x.where}`).join(", and ");
+    function defHtml(id, def, labelledChange, found, mark = {}, hashLine = "") {
+      const prm = def.input.map((p) => {
+        const nm = mark.param === p.n ? `<mark class="new"><code>${hlName(p.n)}</code></mark>` : `<code>${hlName(p.n)}</code>`;
+        return `<li>${nm}<span class="ty">${p.type}${p.req ? ", required" : ""}</span><span class="ds">${hl(p.d)}</span>${p.en ? `<span class="ds ev">Values: ${p.en.map((v) => `<code>${hl(v)}</code>`).join("")}</span>` : ""}</li>`;
+      }).join("");
+      const ann = Object.entries(def.ann).map(([k, v]) => `<code>${k}: ${v}</code>`).join(" ");
+      const check = labelledChange
+        ? `<p class="wc bad">The server labels this tool as a change (<code>readOnlyHint: false</code>), so it cannot be approved. Changes go through agents and diff confirmation.</p>`
+        : found.length
+          ? `<p class="wc bad">Write check: found ${listFound(found)}. A tool that describes saving, changing, sending or deleting in any field cannot be approved.</p>`
+          : `<p class="wc">Write check: no field describes saving, changing, sending or deleting. The check reads what the server wrote; a write it does not mention cannot be detected, so read the definition before you approve.</p>`;
+      return `<div class="def" id="${id}" hidden><dl>
+        <dt>Name</dt><dd><code>${hlName(def.name)}</code></dd>
+        <dt>Title</dt><dd>${hl(def.title)}</dd>
+        <dt>Description</dt><dd>${markNew(hl(def.description), mark.description)}</dd>
+        <dt>Input</dt><dd><ul class="prm">${prm || "<li>None</li>"}</ul></dd>
+        <dt>Output</dt><dd>${def.output ? hl(def.output) : "No output description"}</dd>
+        <dt>Annotations</dt><dd>${ann}</dd>
+        <dt>Definition hash</dt><dd class="hash">${hashLine}</dd>
+      </dl>${check}</div>`;
+    }
+    const short = (h) => (h ? `<code>sha256 ${h.slice(0, 8)}…${h.slice(-4)}</code>` : "Shown when the review opens");
+    const toolRow = (key, def, on, opts = {}) => {
+      const t = def.name;
+      const change = def.ann.readOnlyHint === false;
+      const found = writeCheck(def);
+      const writes = !change && found.length > 0, off = change || writes;
+      const why = `trv-why-${key}-${t}`, did = `trv-def-${key}-${t}`;
+      const flag = writes ? `<span class="flag">The write check found ${listFound(found)}, so it cannot be approved, whatever its read-only label.</span>` : change ? `<span class="flag">Labelled as a change by the server. A tool that changes data cannot be approved; changes go through agents and diff confirmation.</span>` : "";
+      const chg = opts.what ? `<span class="ann chgd">${opts.what}</span>` : "";
+      const anns = writes || opts.what ? `<span class="anns">${chg}<span class="ann">Labelled read-only</span>${writes ? '<span class="ann warn">Describes a write</span>' : ""}</span>` : `<span class="ann${change ? " warn" : ""}">${change ? "Labelled as a change" : "Labelled read-only"}</span>`;
+      const summary = opts.summary || esc(def.description);
+      return `<li ${off ? "data-off" : ""}><label><input type="checkbox" ${on ? "checked" : ""} ${off ? `disabled aria-disabled="true" aria-describedby="${why}"` : ""}><span><code>mcp__policy-settings__${t}</code><span class="d" ${off ? `id="${why}"` : ""}>${summary}${flag}</span></span>${anns}</label>`
+        + `<div class="defrow"><button class="deft" type="button" aria-expanded="false" aria-controls="${did}"><svg><use href="#i-chev"/></svg><span>Full definition</span></button></div>`
+        + defHtml(did, def, change, found, opts.mark, "") + "</li>";
     };
-    const NUM = ["No", "One", "Two", "Three", "Four", "Five", "Six"];
+    const NUM = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven"];
+    const UNAPPROVABLE = TOOLS.filter((d) => d.ann.readOnlyHint === false || writeCheck(d).length).map((d) => d.name);
     document.querySelectorAll("[data-trv]").forEach((trv) => {
       const key = trv.dataset.trv;
       if (key === "rereview") {
-        trv.innerHTML = CHANGED.map((c) => toolRow(key, c.t, `<span class="chg"><span class="was"><span class="k">Approved</span>${c.was}</span><span class="now"><span class="k">Now</span>${c.now}</span></span>`, c.kind, false, c.what)).join("")
-          + '<li><span class="same">Unchanged and still approved: <code>mcp__policy-settings__search_settings</code></span></li>';
+        trv.innerHTML = CHANGED.map((c) => toolRow(key, c.def, false, { what: c.what, mark: c.mark, summary: `<span class="chg"><span class="was"><span class="k">Approved</span>${c.was}</span><span class="now"><span class="k">Now</span>${c.now}</span></span>` })).join("")
+          + '<li><span class="same">Unchanged and still approved: <code>mcp__policy-settings__search_settings</code>. Its definition hash matches the approved one.</span></li>';
       } else {
-        trv.innerHTML = TOOLS.map(([t, d, kind]) => toolRow(key, t, d, kind, key === "after" && APPROVED_AFTER.includes(t))).join("");
+        trv.innerHTML = TOOLS.map((d) => toolRow(key, d, key === "after" && APPROVED_AFTER.includes(d.name))).join("");
       }
+      // Hash lines: the approved hash for a first review, approved and listed hashes side by side in the re-review.
+      (key === "rereview" ? CHANGED.map((c) => [c.def, byName(c.t)]) : TOOLS.map((d) => [d, null])).forEach(async ([def, old]) => {
+        const dd = trv.querySelector(`#trv-def-${key}-${def.name} .hash`);
+        const blocked = def.ann.readOnlyHint === false || writeCheck(def).length > 0;
+        const [now, was] = await Promise.all([digest(def), old ? digest(old) : ""]);
+        dd.innerHTML = old
+          ? `Approved ${short(was)}, listed now ${short(now)}. They differ, so the approval no longer applies.`
+          : blocked
+            ? `${short(now)}. This definition cannot be approved; if the server changes it, the new definition is checked again from the start.`
+            : `${short(now)}. Approving binds to this hash; a change in any field gives a new hash and returns the tool to review.`;
+      });
+      trv.addEventListener("click", (e) => {
+        const b = e.target.closest(".deft"); if (!b) return;
+        const open = b.getAttribute("aria-expanded") !== "true";
+        b.setAttribute("aria-expanded", String(open));
+        b.querySelector("span").textContent = open ? "Hide definition" : "Full definition";
+        document.getElementById(b.getAttribute("aria-controls")).hidden = !open;
+      });
       const dialog = trv.closest(".dialog");
       const intro = dialog.querySelector(".body > p");
       const sync = () => {
@@ -1317,7 +1431,7 @@ identities with graph_get. Nothing else.
           btn.disabled = !ok;
         }
         // The second frame describes the state after selection, so its intro follows the live count.
-        if (key === "after") intro.textContent = `${ok ? `You approved ${NUM[ok].toLowerCase()} ${ok === 1 ? "tool" : "tools"} that only ${ok === 1 ? "reads" : "read"}.` : "No tool is approved, so the server cannot be added yet."} export_report and apply_setting cannot be approved: one says in its description that it saves on the server, the other is labelled as a change. Only approved tools are offered, and every call is checked against this list, including calls from skills and scheduled checks.`;
+        if (key === "after") intro.textContent = `${ok ? `You approved ${NUM[ok].toLowerCase()} ${ok === 1 ? "tool" : "tools"} that only ${ok === 1 ? "reads" : "read"}.` : "No tool is approved, so the server cannot be added yet."} baseline_versions, export_report and apply_setting cannot be approved: the title of the first says it applies baselines and its mode accepts apply, the second says in its description that it saves on the server, and the third is labelled as a change. Each approval is bound to a hash of the full definition you approved, so a change in any field returns the tool to review. Only approved tools are offered, and every call is checked against this list, including calls from skills and scheduled checks.`;
         trv.querySelectorAll("li").forEach((li) => { const i = li.querySelector("input"); if (i) li.dataset.state = i.checked ? "on" : "off"; });
       };
       trv.addEventListener("change", sync);
@@ -1389,19 +1503,53 @@ identities with graph_get. Nothing else.
     applyName();
     renderStrips();
     // Teams send card: Confirm posts this one message, Cancel posts nothing. Each message has its own card.
+    // Confirm is a call: it rechecks the live Send to Teams grant and the Teams connection for the organization on the card.
     (() => {
       const card = document.getElementById("sendcard");
       if (!card) return;
+      const TEAMS = { connected: true };
+      const sendSw = document.getElementById("sw-teams-send");
+      const org = card.querySelector(".kv dt:nth-of-type(3) + dd").textContent;
       const ask = card.querySelector('[data-send="ask"]'), done = card.querySelector('[data-send="done"]'), msg = done.querySelector(".sendmsg"), state = card.querySelector(".top span:last-child"), h = card.querySelector("h3");
+      const fixBox = document.createElement("span"); fixBox.className = "sendfix"; fixBox.style.display = "contents";
+      done.insertBefore(fixBox, done.querySelector('[data-send-act="reset"]'));
+      const nm = () => document.querySelector("[data-name]").textContent;
+      const show = (res, title, top, html, fix = "") => {
+        done.dataset.res = res; h.textContent = title; state.textContent = top; msg.innerHTML = html; fixBox.innerHTML = fix;
+        ask.hidden = true; done.hidden = false; (done.querySelector("[data-send-fix]") || done.querySelector('[data-send-act="reset"]')).focus();
+      };
+      const reset = () => {
+        h.textContent = "Post this message?"; ask.hidden = false; done.hidden = true; delete done.dataset.res; fixBox.innerHTML = "";
+        state.innerHTML = `Proposed by <span data-name>${nm()}</span>, not sent`; ask.querySelector("button").focus();
+      };
+      document.getElementById("teamsseg").addEventListener("click", (e) => {
+        const b = e.target.closest("button"); if (!b) return;
+        TEAMS.connected = b.dataset.teams === "on";
+        document.querySelectorAll("#teamsseg button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      });
       card.addEventListener("click", (e) => {
-        const b = e.target.closest("[data-send-act]");
+        const b = e.target.closest("[data-send-act], [data-send-fix]");
         if (!b) return;
+        if (b.dataset.sendFix === "grant") { if (!sendSw.disabled) sendSw.setAttribute("aria-checked", "true"); reset(); return; }
+        if (b.dataset.sendFix === "connect") { TEAMS.connected = true; document.querySelectorAll("#teamsseg button").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.teams === "on"))); reset(); return; }
         const a = b.dataset.sendAct;
-        if (a === "reset") { h.textContent = "Post this message?"; ask.hidden = false; done.hidden = true; state.innerHTML = 'Proposed by <span data-name>' + document.querySelector("[data-name]").textContent + '</span>, not sent'; ask.querySelector("button").focus(); return; }
-        msg.textContent = a === "confirm" ? "Posted to Endpoint Engineering, Rollouts, at 08:42. The next message needs its own confirmation." : "Not sent. Nothing was posted to Teams.";
-        state.textContent = a === "confirm" ? "Sent at 08:42" : "Cancelled, not sent";
-        h.textContent = a === "confirm" ? "Message posted" : "Message not posted";
-        ask.hidden = true; done.hidden = false; done.querySelector("button").focus();
+        if (a === "reset") { reset(); return; }
+        if (a === "cancel") { show("cancelled", "Message not posted", "Cancelled, not sent", "Not sent. Nothing was posted to Teams."); return; }
+        // Confirm: the call-time check, in the organization named on the card.
+        const granted = sendSw.getAttribute("aria-checked") === "true";
+        if (!granted) {
+          show("refused", "Not sent", "Not sent, Send to Teams is off",
+            `<b>Not sent.</b> Send to Teams was turned off in Access for ${nm()} after this card was proposed, so nothing was posted to Teams in ${org}.`,
+            '<button class="bt primary sm" type="button" data-send-fix="grant">Turn on Send to Teams</button>');
+          return;
+        }
+        if (!TEAMS.connected) {
+          show("refused", "Not sent", "Not sent, Teams is not connected",
+            `<b>Not sent.</b> Teams is not connected in ${org}, so nothing was posted. Reconnect Teams, then confirm this card again.`,
+            `<button class="bt primary sm" type="button" data-send-fix="connect">Reconnect Teams in ${org}</button>`);
+          return;
+        }
+        show("posted", "Message posted", "Sent at 08:42", `Posted to Endpoint Engineering, Rollouts, in ${org} at 08:42. The next message needs its own confirmation.`);
       });
     })();
   </script>
