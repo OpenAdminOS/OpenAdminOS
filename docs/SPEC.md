@@ -1885,10 +1885,14 @@ offsets in the original provider text. Exact ranges keep the highest class
 from competing observations. If a lower-class field match and a more sensitive
 origin cannot be resolved from the rendering provenance, the local record marks
 that range incomplete.
-When a sandboxed script uses a Graph value that needs field provenance as
-an unbound word or token in its system text or prompt, the matching range is
-incomplete. This check covers script text within each section.
-Distinctive values still match across the full request.
+In Phase A1, a model request from a sandboxed script that has read tenant
+data records the script-supplied system text and prompt ranges as incomplete.
+Scripts can transform values arbitrarily. The effective class incorporates the
+most sensitive class read by the run, with Credential used when the read's
+class is still unknown. The observer still records any spans it finds. A script
+that has read no tenant data uses normal scanning.
+TODO(ugur): In Phase A3, how should hosted providers handle requests from scripts
+that have read tenant data when the script-supplied ranges are incomplete?
 Transformed values carry their original class through clipping, scalar
 interpolation and standalone fences. JSON previews retain the containing field
 when a cut falls inside an array element, including in nested arrays. A clipped

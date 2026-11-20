@@ -18,7 +18,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Chat, agents, Graph paging and cache reads proceed while data classification runs. Local diagnostics flag evidence that is pending or was lost and preserve exact offsets for interpolated policy values.
 - Chat preserves classification when it clips a Graph value before the background scan finishes. Cache sidecars publish without waiting for a database writer, and local diagnostics count omitted offsets.
 - Data policy keeps source field evidence for derived agent template keys and values. Drift baseline creation and tracked cache refresh return promptly when a competing SQLite writer holds the lock.
-- Data policy reports incomplete coverage when a sandboxed script renders Graph values as prose in its system text or prompt and loses the field context needed to classify them.
+- Data policy records script-supplied prompt and system coverage as incomplete after a sandboxed agent reads tenant data, even when the script transforms the values.
 - Data policy preserves field classification for clipped array values in previews and marks unresolved fragments in Chat and Nova as incomplete.
 - Data policy keeps the last visible value's classification when a formatted preview ends before its delimiter.
 - Data policy classifies disk encryption and endpoint protection posture as Security, including policy names and IDs in encryption reports.

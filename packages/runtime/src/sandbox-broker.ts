@@ -242,7 +242,7 @@ async function handleConnectorRequest(
     );
   }
   const result = await method(args);
-  registerTenantData(`connector:${connectorId}.${capabilityId}`, result);
+  registerTenantData(`connector:${connectorId}.${capabilityId}`, result, undefined, "script");
   return result;
 }
 

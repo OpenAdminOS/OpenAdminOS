@@ -119,7 +119,7 @@ interface ValueEntry {
   fenceIds?: Set<string>;
   cost: number;
 }
-type MatchMode = "text" | "word" | "field" | "context" | "folded" | "replay" | "script" | "clipped";
+type MatchMode = "text" | "word" | "field" | "context" | "folded" | "replay" | "clipped";
 interface MatchPattern {
   text: string;
   offset: number;
@@ -151,6 +151,7 @@ type ScanState = {
   identityIndex: ClassificationOptions["identityIndex"];
   renderedSpans?: ClassificationSpan[];
   scriptText?: Partial<Record<ClassificationSpan["section"], TextSpan>>;
+  scriptReadClass?: DataClass;
 };
 
 type EvidenceSnapshot = {
@@ -178,7 +179,7 @@ export interface WorkerScan {
   sections: Record<ClassificationSpan["section"], EncodedText | undefined>;
   ledgers: number[];
   shards: number[];
-  state: Pick<ScanState, "historyFences" | "promptReplay" | "dropped" | "registrations" | "incomplete" | "renderedSpans" | "scriptText">;
+  state: Pick<ScanState, "historyFences" | "promptReplay" | "dropped" | "registrations" | "incomplete" | "renderedSpans" | "scriptText" | "scriptReadClass">;
 }
 
 export interface WorkerResult {
@@ -318,12 +319,16 @@ function lessSensitiveKind(first: DataClass | undefined, second: DataClass): Dat
 
 function classification(
   spans: ClassificationSpan[], ranges: UnexaminedRange[], retainedValues: number, droppedValues: number,
-  registrations: number, incomplete = false,
+  registrations: number, incomplete = false, scriptReadClass?: DataClass,
 ): RequestClassification {
   const counts = emptyDataClassCounts();
   for (const span of spans) counts[span.kind]++;
   const coverageIncomplete = incomplete || ranges.length > 0 || droppedValues > 0 || registrations > 0;
-  const effectiveClass = coverageIncomplete ? "credential" : DATA_CLASSES_BY_SENSITIVITY.find(kind => counts[kind] > 0);
+  const observedClass = DATA_CLASSES_BY_SENSITIVITY.find(kind => counts[kind] > 0);
+  const unknownCoverage = incomplete || droppedValues > 0 || registrations > 0 ||
+    ranges.some(range => range.reason !== "script-provenance-unavailable");
+  const effectiveClass = unknownCoverage ? "credential" : scriptReadClass && observedClass
+    ? maxDataClass(scriptReadClass, observedClass) : scriptReadClass ?? observedClass;
   return { counts, spans, coverageIncomplete, ...(effectiveClass ? { effectiveClass } : {}),
     retainedValues, droppedValues, unexamined: {
       registrations, values: droppedValues, ranges, textCodeUnits: ranges.reduce((total, range) => total + range.end - range.start, 0),
@@ -450,6 +455,8 @@ export class ClassificationLedger {
   private incompleteRegistrations = 0;
   private pendingRegistrations = 0;
   private registrationGeneration = 0;
+  private unresolvedScriptReads = 0;
+  private scriptReadClass?: DataClass;
   private pendingRenderUnits = 0;
   private readonly pendingRenderings: Array<[Scalar, Scalar, RenderProvenance]> = [];
   private resolvingRenderings = false;
@@ -625,13 +632,15 @@ export class ClassificationLedger {
     }
   }
 
-  registerIngress(source: string, data: unknown, options: ClassificationOptions): void {
+  registerIngress(source: string, data: unknown, options: ClassificationOptions, context?: "script"): void {
+    if (context === "script") this.unresolvedScriptReads++;
     void this.scheduleRegistration(MAX_GRAPH_INPUT_BYTES, (signal, reservation) => this.observeIngress(
-      source.startsWith("graph:") && options.graphPath ? graphClassificationSource(options.graphPath) : source, data, options, signal, reservation,
+      source.startsWith("graph:") && options.graphPath ? graphClassificationSource(options.graphPath) : source, data, options, signal, reservation, context,
     ));
   }
 
   registerGraph(graphPath: string, data: unknown, signal?: AbortSignal, context?: "script"): Promise<void> {
+    if (context === "script") this.unresolvedScriptReads++;
     return this.scheduleRegistration(MAX_GRAPH_INPUT_BYTES, (lifetime, reservation) => this.observeIngress(
       graphClassificationSource(graphPath), data, { graphPath }, signal ? AbortSignal.any([signal, lifetime]) : lifetime, reservation, context,
     ));
@@ -669,12 +678,13 @@ export class ClassificationLedger {
       for (const { value, kind, key, maskRole } of fields) {
         if (this.disposed) return;
         signal?.throwIfAborted();
-        const entry = this.add(value, { kind, source, key: key.toLowerCase(), ...(maskRole ? { maskRole } : {}) });
-        if (context === "script" && entry?.mode === "field") this.indexScriptValue(entry, value);
+        this.add(value, { kind, source, key: key.toLowerCase(), ...(maskRole ? { maskRole } : {}) });
+        if (context === "script") this.scriptReadClass = maxDataClass(this.scriptReadClass ?? kind, kind);
         if (slice.elapsed) await slice.yield();
       }
       if (slice.elapsed) await slice.yield();
     }
+    if (context === "script" && !classified.dropped && !classified.incomplete && indexCurrent()) this.unresolvedScriptReads--;
   }
 
   registerClassified(source: string, observations: ClassifiedValues): void {
@@ -984,18 +994,6 @@ export class ClassificationLedger {
     }
   }
 
-  private indexScriptValue(entry: ValueEntry, value: Scalar): void {
-    if (entry.patterns.some(pattern => pattern.mode === "script")) return;
-    const raw = String(value);
-    const serialized = typeof value === "string" ? JSON.stringify(value).slice(1, -1) : JSON.stringify(value);
-    for (const text of new Set([raw, serialized, fenceEscapes(raw), fenceEscapes(serialized)])) {
-      const cost = text.length + 24;
-      if (!this.reserve(cost, entry.kind)) return;
-      entry.cost += cost;
-      this.index(entry, text, "script");
-    }
-  }
-
   private index(entry: ValueEntry, text: string, mode: MatchMode, provenance?: RenderProvenance): void {
     if (!text || entry.patterns.some(pattern => pattern.text === text && pattern.mode === mode &&
       pattern.before === provenance?.before && pattern.after === provenance?.after && pattern.key === provenance?.key)) return;
@@ -1079,7 +1077,6 @@ export class ClassificationLedger {
     boundary: ReturnType<typeof wordBoundaries>,
     fieldAt?: (start: number, end: number) => string | undefined,
     replayAt?: (span: TextSpan, evidence: Evidence) => void,
-    scriptAt?: (span: TextSpan, evidence: Evidence) => void,
     clippedAt?: (start: number, end: number) => void,
     fieldEvidence?: (span: TextSpan, best: Evidence, bound?: Evidence) => void,
   ): boolean {
@@ -1105,7 +1102,6 @@ export class ClassificationLedger {
         for (const bucket of matched) {
           for (const { text: value, offset, mode, entry, before, after, key } of bucket) {
             if (mode === "replay" && !replayAt) continue;
-            if (mode === "script" && (!scriptAt || entry.mode !== "field")) continue;
             if (--work.remaining < 0) return false;
             const start = at - offset;
             const end = start + value.length;
@@ -1116,7 +1112,7 @@ export class ClassificationLedger {
               if (work.remaining < 0) return false;
             }
             if (!text.startsWith(value, start)) continue;
-            if ((mode === "word" || mode === "folded" || mode === "replay" || mode === "script") && (!boundary(start, -1) || !boundary(end, 1))) continue;
+            if ((mode === "word" || mode === "folded" || mode === "replay") && (!boundary(start, -1) || !boundary(end, 1))) continue;
             if ((mode === "context" || mode === "clipped") && (before && (start < before.length || !text.startsWith(before, start - before.length)) ||
                 after && !text.startsWith(after, end))) continue;
             if (mode === "clipped") {
@@ -1127,10 +1123,6 @@ export class ClassificationLedger {
             }
             if (mode === "replay") {
               if (entry.best) replayAt?.({ start, end }, entry.best);
-              continue;
-            }
-            if (mode === "script") {
-              if (entry.best) scriptAt?.({ start, end }, entry.best);
               continue;
             }
             const field = mode === "field" ? fieldAt?.(start, end) : undefined;
@@ -1174,6 +1166,7 @@ export class ClassificationLedger {
   captureEvidence(): EvidenceSnapshot {
     const state = this.scanState();
     state.scriptText = scriptText.getStore();
+    if (state.scriptText) state.scriptReadClass = this.unresolvedScriptReads ? "credential" : this.scriptReadClass;
     return { state, revisions: state.retained.map(ledger => ledger.revision),
       shards: [...state.identityIndex?.workerShards?.() ?? []], interpolations: templateInterpolations.getStore() };
   }
@@ -1470,15 +1463,11 @@ export class ClassificationLedger {
         }
       }
       const ambiguous = new Map<string, TextSpan>();
-      const ambiguousScript = new Map<string, TextSpan>();
       const clipped = new Map<string, TextSpan>();
       const scriptRange = state.scriptText?.[section];
-      const scriptAt = scriptRange && ((span: TextSpan, evidence: Evidence) => {
-        if (scriptRange.start <= span.start && span.end <= scriptRange.end) {
-          ambiguousScript.set(`${span.start}:${span.end}`, span);
-          collectCandidate(span, evidence);
-        }
-      });
+      if (state.scriptReadClass && scriptRange && scriptRange.start < scriptRange.end) {
+        ranges.push({ section, ...scriptRange, reason: "script-provenance-unavailable" });
+      }
       const replayAt = preservedReplays.length ? (span: TextSpan, evidence: Evidence) => {
         if (preservedReplays.some(replay => replay.start <= span.start && span.end <= replay.end)) {
           ambiguous.set(`${span.start}:${span.end}`, span);
@@ -1489,7 +1478,7 @@ export class ClassificationLedger {
       const boundary = wordBoundaries(text);
       for (let from = 0; from < text.length; from += TEXT_CHUNK) {
         const to = Math.min(text.length, from + TEXT_CHUNK);
-        if (!this.scan(rawIndex, text, from, to, work, collect, boundary, fieldAt, replayAt, scriptAt,
+        if (!this.scan(rawIndex, text, from, to, work, collect, boundary, fieldAt, replayAt,
             (start, end) => clipped.set(`${start}:${end}`, { start, end }), collectCandidate) ||
             foldedIndex && folded !== undefined && !this.scan(foldedIndex, folded, from, to, work, collect, boundary)) {
           // The section-wide detector pass has not examined any of this text.
@@ -1504,7 +1493,10 @@ export class ClassificationLedger {
         const span = { start, end };
         const match = found.get(key);
         const highest = match ? maxDataClass(match.kind, best.kind) : best.kind;
-        if (bound && !proven && highest !== leastSensitive) competing.set(key, span);
+        if (bound && !proven && highest !== leastSensitive &&
+            !(state.scriptReadClass && scriptRange && scriptRange.start <= start && end <= scriptRange.end)) {
+          competing.set(key, span);
+        }
         if (bound) collect(span, bound, true, true);
         if (!bound || best.kind !== bound.kind) collect(span, best);
       }
@@ -1520,13 +1512,11 @@ export class ClassificationLedger {
       for (const [key, span] of ambiguous) {
         if (found.get(key)?.kind !== "credential") ranges.push({ section, ...span, reason: "history-provenance-unavailable" });
       }
-      for (const [matches, reason] of [[ambiguousScript, "script-provenance-unavailable"],
-        [competing, "competing-provenance"],
+      for (const [matches, reason] of [[competing, "competing-provenance"],
         [clipped, "clipped-provenance-unavailable"]] as const) {
         let reported = 0;
         let overflow: UnexaminedRange | undefined;
-        for (const [key, span] of matches) {
-          if (reason === "script-provenance-unavailable" && (provenRanges.has(key) || matchedFields.get(key)?.bound)) continue;
+        for (const span of matches.values()) {
           if (++reported <= 256) ranges.push({ section, ...span, reason });
           else if (!overflow) overflow = { section, ...span, reason };
           else {
@@ -1540,7 +1530,7 @@ export class ClassificationLedger {
       for (const { authoritative: _, ...span } of ordered) spans.push(span);
     }
     return classification(spans, ranges, retained.reduce((sum, ledger) => sum + ledger.values.size, 0),
-      state.dropped, state.registrations, state.incomplete);
+      state.dropped, state.registrations, state.incomplete, state.scriptReadClass);
   }
 }
 
@@ -1593,9 +1583,9 @@ export function currentClassificationLedger(): ClassificationLedger | undefined 
   return scopes.getStore();
 }
 
-export function registerTenantData(source: string, data: unknown, options?: ClassificationOptions): void {
+export function registerTenantData(source: string, data: unknown, options?: ClassificationOptions, context?: "script"): void {
   const ledger = scopes.getStore();
-  if (ledger) ledger.registerIngress(source, data, options ?? {});
+  if (ledger) ledger.registerIngress(source, data, options ?? {}, context);
   else unscopedRegistrations++;
 }
 

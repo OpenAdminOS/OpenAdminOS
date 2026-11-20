@@ -48,7 +48,7 @@ it("fences the script prompt, keeps the author system prompt, and strips echoed 
 });
 
 describe("sandbox broker", () => {
-  it("reports credentials copied into configuration fields, including coerced scalars", async t => {
+  it("retains found spans and covers script coercion without claiming its origin", async t => {
     const path = "/applications";
     const agent = fakeAgent({ scopes: ["Application.Read.All"], graphOperations: [{ method: "GET", path }] });
     const ledger = new ClassificationLedger();
@@ -81,9 +81,12 @@ describe("sandbox broker", () => {
         const second = request![section]!.indexOf(version!.hint, first + name!.hint.length);
         const values = [[first, first + name!.hint.length], [second, second + version!.hint.length]];
         assert.deepEqual(classification.spans.filter(span => span.section === section).map(({ start, end, kind }) => [start, end, kind]),
-          values.map(([start, end]) => [start, end, "credential"]));
+          values.map(([start, end], index) => [start, end, index === 0 ? "credential" : "configuration"]));
         assert.deepEqual(classification.unexamined.ranges.filter(range => range.section === section),
-          values.map(([start, end]) => ({ section, start, end, reason: "competing-provenance" })));
+          [
+            { section, start: request![section]!.indexOf(script), end: request![section]!.indexOf(script) + script.length,
+              reason: "script-provenance-unavailable" },
+          ]);
       }
     });
   });
@@ -122,7 +125,8 @@ describe("sandbox broker", () => {
         const request = requests.at(-1)!;
         const expected = (value: string) => (["system", "prompt"] as const).flatMap(section =>
           [...request[section]!.matchAll(new RegExp(`${value}(?![0-9])`, "g"))].map(match => [section, match.index, match.index + value.length]));
-        assert.deepEqual(classification.unexamined.ranges.map(({ section, start, end }) => [section, start, end]), expected(short));
+        assert.deepEqual(classification.unexamined.ranges.map(({ section, start, end }) => request[section]!.slice(start, end)),
+          [escapeTenantDataBody(script), escapeTenantDataBody(script)]);
         assert.deepEqual(classification.spans.map(({ section, start, end, kind }) => [section, start, end, kind]),
           expected(distinctive).map(span => [...span, "credential"]));
         assert.equal(classification.coverageIncomplete, true);
@@ -130,11 +134,11 @@ describe("sandbox broker", () => {
       const unrelated = String.raw`Both xqxz and qxzx stay whole beside \n and \u003c.`;
       assert.equal((await broker.handle({ id: "model", method: "llm.complete", params: { prompt: unrelated, system: unrelated } })).ok, true);
       await ledger.waitForObservations();
-      assert.equal(events.at(-1)?.classification.coverageIncomplete, false);
+      assert.equal(events.at(-1)?.classification.coverageIncomplete, true);
     });
   });
 
-  it("reports prose containing low-specificity Graph values as incomplete after dispatch", async t => {
+  it("records all script-supplied text as incomplete after a tenant read", async t => {
     const path = "/identity/conditionalAccess/policies";
     const policy = { id: "synthetic-policy-17", grantControls: { operator: "OR", builtInControls: ["mfa"] } };
     const agent = fakeAgent({ slug: "mfa", scopes: ["Policy.Read.All"], graphOperations: [{ method: "GET", path }] });
@@ -180,35 +184,54 @@ describe("sandbox broker", () => {
       }
     });
 
-    const [prose, unrelated, structured, distinctive, largeProse, systemProse, structuredSystem, both] = events.map(event => event.classification);
-    assert.equal(prose?.retainedValues, 3);
-    assert.equal(prose?.coverageIncomplete, true);
-    assert.equal(prose?.counts.security, 0);
-    assert.deepEqual(prose?.unexamined.ranges.map(({ start, end, reason }) => [requests[0]!.prompt.slice(start, end), reason]), [
-      ["OR", "script-provenance-unavailable"], ["mfa", "script-provenance-unavailable"],
-    ]);
-    assert.equal(unrelated?.coverageIncomplete, false);
-    assert.equal(unrelated?.counts.security, 0);
-    assert.equal(structured?.coverageIncomplete, false);
-    assert.equal(structured?.counts.security, 2);
-    assert.equal(distinctive?.coverageIncomplete, false);
-    assert.equal(distinctive?.counts.security, 1);
-    assert.equal(largeProse?.coverageIncomplete, true);
-    assert.deepEqual(largeProse?.unexamined.ranges.map(({ start, end }) => requests[4]!.prompt.slice(start, end)), ["OR", "mfa"]);
-    assert.equal(systemProse?.coverageIncomplete, true);
-    assert.equal(systemProse?.effectiveClass, "credential");
-    assert.equal(systemProse?.counts.security, 0);
-    assert.deepEqual(systemProse?.unexamined.ranges.map(({ section, start, end, reason }) =>
-      [section, requests[5]![section]!.slice(start, end), reason]), [
-      ["system", "OR", "script-provenance-unavailable"], ["system", "mfa", "script-provenance-unavailable"],
-    ]);
-    assert.equal(structuredSystem?.coverageIncomplete, false);
-    assert.equal(structuredSystem?.counts.security, 2);
-    assert.ok(structuredSystem?.spans.every(span => span.section === "system"));
-    assert.equal(both?.coverageIncomplete, true);
-    assert.deepEqual(both?.unexamined.ranges.map(({ section, start, end }) =>
-      [section, requests[7]![section]!.slice(start, end)]),
-    [["system", "OR"], ["system", "mfa"], ["prompt", "OR"], ["prompt", "mfa"]]);
+    for (const [i, { classification }] of events.entries()) {
+      assert.equal(classification.coverageIncomplete, true);
+      assert.equal(classification.effectiveClass, "security");
+      const { prompt, system } = requests[i]!;
+      const ranges = classification.unexamined.ranges.map(({ section, start, end, reason }) => {
+        assert.equal(reason, "script-provenance-unavailable");
+        return [section, requests[i]![section]!.slice(start, end)];
+      });
+      const promptBody = prompt.slice(prompt.indexOf("\n") + 1, prompt.lastIndexOf("\n"));
+      assert.deepEqual(ranges, [
+        ...(i >= 5 ? [["system", system!.slice(0, system!.indexOf("\n"))]] : []),
+        ["prompt", promptBody],
+      ]);
+    }
+    assert.equal(events[2]?.classification.counts.security, 2);
+    assert.equal(events[3]?.classification.counts.security, 1);
+    assert.equal(events[6]?.classification.counts.security, 2);
+  });
+
+  it("keeps normal coverage before reading, and covers transformed text while ingress is pending", async t => {
+    const path = "/deviceManagement/managedDevices";
+    const agent = fakeAgent({ graphOperations: [{ method: "GET", path }] });
+    const ledger = new ClassificationLedger();
+    t.after(() => ledger.dispose());
+    const events: RequestClassificationEvent[] = [];
+    const ctx = fakeContext(agent, {
+      graphRequest: async () => ({ value: [{ isEncrypted: true }] }),
+    });
+    ctx.llm = withRequestClassification(ctx.llm, "ollama", event => { events.push(event); });
+    const broker = createSandboxBroker({ agent, ctx });
+
+    await withClassificationScope(ledger, async () => {
+      const prompt = Buffer.from("true").toString("base64");
+      const send = async () => {
+        assert.equal((await broker.handle({ id: "send", method: "llm.complete", params: { prompt } })).ok, true);
+        await ledger.waitForObservations();
+        return events.at(-1)!.classification;
+      };
+      assert.equal((await send()).coverageIncomplete, false);
+      assert.equal((await broker.handle({ id: "read", method: "graph.request", params: { method: "GET", path } })).ok, true);
+      for (const kind of ["credential", "security"]) {
+        const classification = await send();
+        assert.equal(classification.coverageIncomplete, true);
+        assert.equal(classification.effectiveClass, kind);
+        assert.deepEqual(classification.unexamined.ranges.map(({ section, reason, start, end }) =>
+          [section, reason, end - start]), [["prompt", "script-provenance-unavailable", prompt.length]]);
+      }
+    });
   });
 
   it("allows only manifest-declared Graph GET requests", async () => {
