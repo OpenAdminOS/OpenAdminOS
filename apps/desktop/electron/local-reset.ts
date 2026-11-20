@@ -21,7 +21,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { closeSync, existsSync, fsyncSync, lstatSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
+import { closeSync, type Dirent, existsSync, fsyncSync, lstatSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
 import { open, rename, rm } from "node:fs/promises";
 import { basename, dirname, join, posix, resolve, win32 } from "node:path";
 
@@ -209,7 +209,7 @@ function isMarkerTempName(name: string): boolean {
 }
 
 const DATA_FOLDER_LINK_REASON =
-  "the data folder is a link to another folder, so OpenAdminOS does not empty it. Remove its files by hand, as described in Uninstall and reset";
+  "the data folder is a link, holds another mount, or could not be read in full, so emptying it could reach files elsewhere and OpenAdminOS does not empty it. Remove its files by hand, as described in Uninstall and reset";
 
 /**
  * Links in the data folder the reset must not write or delete through: the
@@ -242,9 +242,10 @@ export function localResetLinkCheck(userDataDir: string, fs: Pick<LocalResetFile
  *   a link differently than the path reads ("link/../name");
  * - a folder that is a link, or whose real location is not its real parent
  *   plus its own name ("link/");
- * - a folder on another device than its parent (a mounted volume), and on
- *   Linux a folder that is a mount point or has one inside it (a bind mount
- *   of a shared folder looks like a plain folder otherwise).
+ * - a folder on another device than its parent, or with a folder on
+ *   another device anywhere inside (a mounted volume or disk image), and on
+ *   Linux a mount point at or inside it (a bind mount of a shared folder
+ *   looks like a plain folder otherwise).
  * A path whose details cannot be read counts as a link; a missing one does not.
  */
 export function folderGoesThroughLink(
@@ -255,16 +256,53 @@ export function folderGoesThroughLink(
   try {
     const absolute = resolve(path);
     if (lstatSync(absolute).isSymbolicLink()) return true;
-    const real = realpathSync(path);
-    if (real !== join(realpathSync(dirname(absolute)), basename(absolute))) return true;
+    // The same folder as its real parent plus its own name, compared by
+    // device and inode, so a letter case difference on a case-insensitive
+    // volume is not mistaken for a link.
+    const here = statSync(path);
+    const expected = statSync(join(realpathSync(dirname(absolute)), basename(absolute)));
+    if (here.dev !== expected.dev || here.ino !== expected.ino) return true;
     // A folder on another device than its parent is a mount point, such as
     // a volume or disk image mounted at the data folder path.
-    if (statSync(real).dev !== statSync(dirname(real)).dev) return true;
-    if ((options.platform ?? process.platform) === "linux" && hasMountAtOrUnder(real, options.mountInfo)) return true;
+    if (here.dev !== statSync(dirname(realpathSync(path))).dev) return true;
+    // A volume mounted anywhere inside: rmSync would empty it.
+    if (treeCrossesDevice(path, here.dev)) return true;
+    if ((options.platform ?? process.platform) === "linux" && hasMountAtOrUnder(realpathSync(path), options.mountInfo)) return true;
     return false;
   } catch (cause) {
     return (cause as NodeJS.ErrnoException).code !== "ENOENT";
   }
+}
+
+/**
+ * Walks the folder tree without following links and reports a folder on
+ * another device: a volume or disk image mounted inside it. A folder that
+ * cannot be read counts too, since what is in it cannot be ruled out. Bind
+ * mounts of the same file system keep the device, which is why Linux also
+ * reads the mount table.
+ */
+function treeCrossesDevice(root: string, device: number): boolean {
+  const pending = [root];
+  while (pending.length > 0) {
+    const folder = pending.pop()!;
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(folder, { withFileTypes: true });
+    } catch {
+      return true;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const child = join(folder, entry.name);
+      try {
+        if (lstatSync(child).dev !== device) return true;
+      } catch {
+        return true;
+      }
+      pending.push(child);
+    }
+  }
+  return false;
 }
 
 /**
@@ -300,8 +338,9 @@ export function localResetPolicyProblem(userDataDir: string): string | undefined
   let entries: string[];
   try {
     entries = readdirSync(userDataDir);
-  } catch {
-    return undefined;
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    return `the data folder could not be read to check the IT policy file (${reasonOf(cause)})`;
   }
   for (const name of entries) {
     if (name.toLowerCase() !== MANAGED_POLICY_FILE) continue;
@@ -677,7 +716,7 @@ function removeLeftovers(
   }
   for (const path of localResetLeftoverPaths(options.platform, options.home, options.env)) {
     // A cache folder that is a link or holds a mount is left alone.
-    if (options.platform === "linux" && folderGoesThroughLink(path, { platform: "linux", mountInfo: options.mountInfo })) {
+    if (folderGoesThroughLink(path, { platform: options.platform, mountInfo: options.mountInfo })) {
       if (fs.exists(path)) warnings.push({ item: path, reason: "it is a link or holds another mount, so it was left in place" });
       continue;
     }
@@ -711,6 +750,19 @@ function recordLeftoversDone(
       reason: `could not be recorded (${reasonOf(cause)}). If the reset has to resume, it removes the Keychain item and caches again`,
     });
   }
+}
+
+/**
+ * The Windows task name is the same for every account on the machine, so an
+ * elevated reset must not remove another account's task. The installer is
+ * per user, so a task that runs this executable, or one under this
+ * account's profile, is this account's; anything else is left in place.
+ */
+export function windowsTaskBelongsToThisAccount(taskBinary: string | undefined, execPath: string, home: string): boolean {
+  if (!taskBinary) return false;
+  const binary = win32.normalize(taskBinary).toLowerCase();
+  const homePrefix = `${win32.normalize(home).toLowerCase().replace(/\\+$/, "")}\\`;
+  return binary === win32.normalize(execPath).toLowerCase() || binary.startsWith(homePrefix);
 }
 
 /** `security` exits 44 when no item matches. */
