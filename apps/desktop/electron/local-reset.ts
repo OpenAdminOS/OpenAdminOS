@@ -959,11 +959,11 @@ export function macosLoginKeychain(home: string): string {
  * Deletes the safeStorage Keychain item, matched by its exact service and
  * account and only in the login keychain, so an item of another app or
  * account, or one in a keychain imported from another Mac, is never
- * touched. Then a lookup across the keychain search list (attributes only,
- * never the secret) warns when an item of that name is in another keychain:
- * safeStorage creates its key in the default keychain, which an admin may
- * have set to another one, and only the admin can tell whether it is this
- * install's key.
+ * touched. Then every other keychain in the user's search list is looked up
+ * on its own (attributes only, never the secret), and each one that holds
+ * an item of that name gets its own warning: safeStorage creates its key in
+ * the default keychain, which an admin may have set to another one, and
+ * only the admin can tell whether it is this install's key.
  */
 function removeMacosKeychainItem(
   run: (file: string, args: string[]) => CommandResult,
@@ -972,15 +972,27 @@ function removeMacosKeychainItem(
 ): void {
   const item = `Keychain item "${MACOS_SAFE_STORAGE_SERVICE}"`;
   removeFromLoginKeychain(run, keychain, item, warnings);
-  const elsewhere = run("/usr/bin/security", ["find-generic-password", "-s", MACOS_SAFE_STORAGE_SERVICE, "-a", MACOS_SAFE_STORAGE_ACCOUNT]);
-  if (elsewhere.error || elsewhere.status !== 0) return;
-  const found = /^keychain: "(.+)"$/m.exec(elsewhere.stdout ?? "")?.[1];
-  // The login keychain's own leftovers are already reported above.
-  if (found === keychain) return;
-  warnings.push({
-    item,
-    reason: `an item with this name is also in ${found ?? "another keychain"}, which the reset does not change. If OpenAdminOS used that keychain, remove the item there with Keychain Access`,
-  });
+  const list = run("/usr/bin/security", ["list-keychains", "-d", "user"]);
+  if (list.error || list.status !== 0) {
+    warnings.push({ item: `${item} in other keychains`, reason: "not checked, because the keychain search list could not be read" });
+    return;
+  }
+  for (const other of parseKeychainList(list.stdout ?? "")) {
+    if (other === keychain) continue;
+    const lookup = run("/usr/bin/security", ["find-generic-password", "-s", MACOS_SAFE_STORAGE_SERVICE, "-a", MACOS_SAFE_STORAGE_ACCOUNT, other]);
+    if (lookup.status === SECURITY_ITEM_NOT_FOUND) continue;
+    warnings.push({
+      item: `${item} in ${other}`,
+      reason: lookup.status === 0
+        ? "not removed: the reset removes it from the login keychain only. If OpenAdminOS used this keychain, remove the item there with Keychain Access"
+        : "this keychain could not be checked for it",
+    });
+  }
+}
+
+/** Parses `security list-keychains`: one quoted path per line. */
+export function parseKeychainList(output: string): string[] {
+  return [...output.matchAll(/^\s*"(.+)"\s*$/gm)].map((match) => match[1]!);
 }
 
 function removeFromLoginKeychain(
