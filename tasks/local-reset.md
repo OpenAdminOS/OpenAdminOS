@@ -344,6 +344,10 @@ the installed app's scheduler, login item or caches.
   between the last check and the `security` command as accepted. Full suite:
   one Nova follow-up test timed out under load (120 s) and passed three
   times alone.
+- Review round 32: Claude and Muse no blocking. Sol one blocking (the
+  guard listed the folder after checking it; it now checks the identity
+  again after the listing). Muse: no prune while the audit log is frozen
+  (medium), and a refused reset unfreezes it (low).
 - Process lesson: twice I edited the tree while a reviewer was reading it;
   parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the
