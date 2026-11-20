@@ -228,7 +228,14 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
 
       try {
         while (true) {
-          const { value, done } = await reader.read();
+          let read: Awaited<ReturnType<typeof reader.read>>;
+          try {
+            read = await reader.read();
+          } catch (error) {
+            // A stop or the overall deadline mid-stream keeps its own message.
+            throw abortError() ?? error;
+          }
+          const { value, done } = read;
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
 
