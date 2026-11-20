@@ -51,8 +51,8 @@ export const LOCAL_RESET_COPY = {
   docsUrl: "https://docs.openadminos.com/basics/uninstall-and-reset",
   incompleteTitle: "Reset did not finish",
   incompleteBody:
-    "Some files in the data folder could not be removed. OpenAdminOS does not open until the reset finishes, so old data is never mixed with new.",
-  incompleteFailedTitle: "Still in the data folder",
+    "The reset of this device has not finished. OpenAdminOS does not open until it does, so old data is never mixed with new.",
+  incompleteFailedTitle: "Not finished",
   incompleteHint:
     "Close programs that may use these files, such as a backup or antivirus scan, then choose Try again. You can also remove them from the data folder yourself and then choose Try again.",
   incompleteRetry: "Try again",
