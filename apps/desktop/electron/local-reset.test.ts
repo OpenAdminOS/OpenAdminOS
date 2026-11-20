@@ -1659,8 +1659,11 @@ describe("local reset: end to end with the store", () => {
       // The committed process refuses every change in the folder, the wipe's too.
       assert.throws(() => writeFileSync(join(dir, "late.txt"), "late"), { code: "EROFS" });
 
-      // Phase 2, at the next launch: a new process, with no seal.
+      // Phase 2, at the next launch: a new process, with no seal, and the old
+      // process's database handles released by its exit (closing stands in
+      // for it here; Windows would not let the wipe remove an open database).
       unsealDataFolder();
+      store.close();
       const report = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: process.platform, home: join(dir, "home"), env: {} });
       assert.equal(report?.status, "completed");
       assert.deepEqual(readdirSync(dir), ["policy.json"]);
