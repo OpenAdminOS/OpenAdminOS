@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
+import { pathToFileURL } from "node:url";
 import { parentPort } from "node:worker_threads";
 import type { WorkerMessage } from "./classification-worker-client.js";
 import { ClassificationLedger, decodeWorkerLargeValue } from "./request-classification.js";
@@ -16,9 +17,11 @@ let graphRows: unknown[] = [];
 function classifyStartupPage(
   page: CacheStartupPage, options: Parameters<typeof prepareCacheClassification>[1], indexNames: boolean,
 ): ReturnType<typeof prepareCacheClassification> {
-  const db = new DatabaseSync(page.dbPath);
+  // Background work must never create a database if its store was removed.
+  const db = new DatabaseSync(`${pathToFileURL(page.dbPath).href}?mode=${page.indexOnly ? "ro" : "rw"}`);
   try {
-    db.exec("PRAGMA busy_timeout = 5000; PRAGMA secure_delete = ON;");
+    db.exec("PRAGMA busy_timeout = 5000;");
+    if (!page.indexOnly) db.exec("PRAGMA secure_delete = ON;");
     const prefix = `[${GRAPH_FIELD_CLASSES_VERSION},%`;
     const select = db.prepare(`SELECT rowid, snapshot_id AS snapshotId, graph_id AS graphId, display_name AS displayName, raw_json AS rawJson
       FROM graph_resources WHERE tenant_id = ? AND resource = ? AND rowid > ?

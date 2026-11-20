@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setImmediate as nextTick } from "node:timers/promises";
@@ -13,7 +13,7 @@ import {
   type RunGraphApi,
 } from "@openadminos/agent-sdk";
 
-import { ClassificationLedger, hasGraphFieldClass, hasGraphFieldClasses, withClassificationScope } from "@openadminos/runtime/data-classification";
+import { ClassificationLedger, classifyCacheRows, hasGraphFieldClass, hasGraphFieldClasses, withClassificationScope } from "@openadminos/runtime/data-classification";
 import { GRAPH_CACHE_RESOURCES, pathForResource } from "./planner.js";
 import { executeIntuneChatTool } from "./tools.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
@@ -192,6 +192,20 @@ it("reuses versioned cache metadata on reopen and backfills rows from older vers
     assert.equal(request.counts.credential, 1);
   } finally {
     store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("background backfill leaves a removed database absent", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-cache-removed-"));
+  const dbPath = join(dir, "openadminos.db");
+  try {
+    await assert.rejects(classifyCacheRows([], "/users", undefined, false, false, undefined, {
+      dbPath, tenantId: "tenant-1", resource: "users", afterRowId: 0, indexOnly: false,
+    }), /unable to open database file/);
+    await assert.rejects(access(dbPath), { code: "ENOENT" });
+  } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });

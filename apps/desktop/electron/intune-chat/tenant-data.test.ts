@@ -71,7 +71,11 @@ async function fixture(options: {
       });
     }
   };
-  return { dir, filePath, store, prompts, waitForClassifications, close: async () => { store.close(); await rm(dir, { recursive: true, force: true }); } };
+  return { dir, filePath, store, prompts, waitForClassifications, close: async () => {
+    await store["requireIntelligenceStore"]().waitForCacheClassification();
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  } };
 }
 
 test("Chat fences answer packs, workspace evidence and history and filters every displayed or persisted response", async () => {
@@ -460,11 +464,15 @@ for (const voice of [false, true]) {
   test(`replayed short Graph credential hint has incomplete coverage in ${voice ? "Nova" : "Chat"}`, async () => {
     const hint = "qzt";
     const path = "/applications";
+    let originalLedger: ClassificationLedger | undefined;
     const f = await fixture({
       graphResult: route => ({ value: route === path ? [{ id: "fixture-app", passwordCredentials: [{ hint }] }] : [] }),
-      respond: (_request, i) => i === 0
-        ? JSON.stringify({ kind: "tenant", tool: "graph_get", params: { path } })
-        : i === 1 ? JSON.stringify({ final: true, answer: `The hint was ${hint}.` }) : "Reviewed.",
+      respond: (_request, i) => {
+        if (i === 0) return JSON.stringify({ kind: "tenant", tool: "graph_get", params: { path } });
+        if (i !== 1) return "Reviewed.";
+        originalLedger = currentClassificationLedger();
+        return JSON.stringify({ final: true, answer: `The hint was ${hint}.` });
+      },
     });
     try {
       await f.store.setChatInvestigationMode("always-agentic");
@@ -472,7 +480,9 @@ for (const voice of [false, true]) {
       const id = first.conversation.id;
       assert.match(first.assistantMessage.content, /The hint was qzt/);
       await f.waitForClassifications();
-      assert.ok(f.store.getRequestClassifications(id).some(event => event.classification.counts.credential > 0 && !event.classification.coverageIncomplete));
+      assert.ok(originalLedger);
+      await originalLedger.waitForObservations();
+      assert.equal(originalLedger.classifyRequest({ prompt: JSON.stringify({ hint }) }).counts.credential, 1);
       await f.store.setChatInvestigationMode("always-deterministic");
       const before = f.prompts.length;
       await f.store.streamIntuneChatMessage({ content: "Explain that result.", conversationId: id }, () => {}, { voice });
