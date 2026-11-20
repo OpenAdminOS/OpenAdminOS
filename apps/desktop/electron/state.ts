@@ -2090,6 +2090,7 @@ export class AppStateStore {
       listProviders: () => host.listProviders(),
       verifyOnDeviceModel: (providerId, model) => verifyOnDeviceModel(providerId, model),
       providerEndpoint: (providerId) => host.novaProviderEndpoint(providerId),
+      providerDestination: (providerId) => host.providerDestination(providerId),
       now: () => host.clock(),
       buildLlm: (providerId, model, binding) => host.buildLlm(providerId, model, binding),
       buildGraph: (pinnedTenantId, agentScopes) =>
@@ -2176,6 +2177,7 @@ export class AppStateStore {
       listProviders: () => host.listProviders(),
       verifyOnDeviceModel: (providerId, model) => verifyOnDeviceModel(providerId, model),
       providerEndpoint: (providerId) => host.novaProviderEndpoint(providerId),
+      providerDestination: (providerId) => host.providerDestination(providerId),
       providerCanRun: (provider) => host.providerCanRun(provider),
       validateOfficeApproval: run => host.officeService.validateApproval(run),
       buildLlm: (providerId, model, binding) => host.buildLlm(providerId, model, binding),
@@ -7397,6 +7399,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   /** Where a provider is reached now; see novaProviderEndpoint. */
+  /** An opaque fingerprint of where a provider is reached now, for a model fit review to compare later. */
+  async providerDestination(providerId: ProviderId): Promise<string> {
+    const endpoint = await this.novaProviderEndpoint(providerId);
+    return createHash("sha256").update(`${providerId}\0${endpoint ?? ""}`).digest("hex").slice(0, 32);
+  }
+
   async novaProviderEndpoint(providerId: ProviderId): Promise<string | undefined> {
     return novaProviderEndpoint(providerId, providerId === "azure-openai" ? await this.read() : undefined);
   }

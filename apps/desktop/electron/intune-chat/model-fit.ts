@@ -8,6 +8,7 @@ import type {
   ModelFitReason,
   ProviderId,
   ProviderSummary,
+  RunLlmApi,
 } from "@openadminos/agent-sdk";
 import { classifyModelFitFailure, isRemoteBackedModel } from "../../src/shared/model-fit.js";
 import { isProviderReady } from "../../src/shared/provider-detection.js";
@@ -185,6 +186,28 @@ export function resolveChatTurnProvider(input: {
     provider: chosen,
     model,
     switchedFrom: { providerId: offer.anchor.providerId, ...(offer.anchor.model ? { model: offer.anchor.model } : {}), reason: offer.reason, toOnDevice: chosen.isLocal },
+  };
+}
+
+/**
+ * Wraps a model so every call first passes `before` (a fresh on-device
+ * check for a retry on a model on this device) and then reports that a
+ * request was dispatched. Calls the adapter makes inside one request (such
+ * as Ollama's own context retry) go to the same address and model.
+ */
+export function guardModelFitLlm(llm: RunLlmApi, guard: { before: () => Promise<void>; dispatched: () => void }): RunLlmApi {
+  return {
+    ...llm,
+    complete: async (options) => {
+      await guard.before();
+      guard.dispatched();
+      return llm.complete(options);
+    },
+    stream: async function* (options) {
+      await guard.before();
+      guard.dispatched();
+      yield* llm.stream(options);
+    },
   };
 }
 

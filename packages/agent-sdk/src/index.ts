@@ -738,6 +738,8 @@ export interface StartRunOptions {
    * later phase elsewhere.
    */
   bindProviderEndpoint?: boolean;
+  /** `getProviderDestination` as the run review saw it; with `bindProviderEndpoint`, a changed destination refuses the start. */
+  expectedProviderDestination?: string;
   /**
    * Pin the run to a specific LLM provider id, overriding the globally
    * active provider for this run only. The provider must be known and
@@ -1537,6 +1539,8 @@ export interface ChatModelOverride {
   offerId: string;
   providerId: ProviderId;
   model?: string;
+  /** `getProviderDestination` as the accept step saw it; the host refuses a hosted send to another destination. */
+  destination?: string;
 }
 
 /**
@@ -3513,6 +3517,12 @@ export interface OpenAdminOSApi {
    * blocked on the device needs no hosted confirmation.
    */
   previewIntuneChatSend?(input: { content: string }): Promise<{ reachesModel: boolean }>;
+  /**
+   * An opaque fingerprint of where a provider is reached now (its address,
+   * or the Azure OpenAI resource and deployment). A model fit review takes it
+   * when it opens; the host refuses the send or run if it changed since.
+   */
+  getProviderDestination?(providerId: ProviderId): Promise<string>;
   streamIntuneChatMessage(
     input: SendIntuneChatMessageInput,
     onEvent: (event: IntuneChatStreamEvent) => void,

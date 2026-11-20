@@ -1227,7 +1227,7 @@ function IntuneChatContent() {
   // A model fit choice runs this one request on the chosen provider. A
   // local one sends at once, since nothing leaves the device; a hosted one
   // opens the accept step first and sends only from its Send button.
-  const chooseModelFit = (offer: ModelFitOffer, choice: ModelFitChoice) => {
+  const chooseModelFit = async (offer: ModelFitOffer, choice: ModelFitChoice) => {
     const override: ChatModelOverride = {
       offerId: offer.issue.offerId,
       providerId: choice.providerId,
@@ -1240,9 +1240,11 @@ function IntuneChatContent() {
       return;
     }
     const contextSummary = offer.workspaceContextSummary;
+    // Where the provider is reached as this accept step opens; the host refuses a send that goes elsewhere.
+    const destination = await window.openAdminOS?.getProviderDestination?.(choice.providerId).catch(() => undefined);
     setModelFitAccept({
       offer,
-      override,
+      override: { ...override, ...(destination ? { destination } : {}) },
       prompt: {
         content: offer.content,
         conversationId: offer.conversationId,
@@ -1862,7 +1864,7 @@ function IntuneChatContent() {
         surface="chat"
         returnModel={modelFitReturnModel(modelFitOffer)}
         answered={modelFitOffer.answered === true}
-        onChoose={(choice) => chooseModelFit(modelFitOffer, choice)}
+        onChoose={(choice) => void chooseModelFit(modelFitOffer, choice)}
         onSplit={() => closeModelFit("split")}
         onKeep={() => closeModelFit("keep")}
         onOpenProviders={() => navigate("/settings/providers")}

@@ -3444,6 +3444,9 @@ function validateStartRunOptions(value: unknown): StartRunOptions | undefined {
     if (value.bindProviderEndpoint !== true) throw new Error("startRun.bindProviderEndpoint must be true when present.");
     options.bindProviderEndpoint = true;
   }
+  if (value.expectedProviderDestination !== undefined) {
+    options.expectedProviderDestination = requireBoundedString(value.expectedProviderDestination, "startRun.expectedProviderDestination", 64);
+  }
   if (value.providerId !== undefined) {
     options.providerId = validateProviderId(value.providerId, "startRun.providerId");
   }
@@ -4050,6 +4053,7 @@ function validateChatModelOverride(value: unknown): ChatModelOverride {
     offerId: requireBoundedString(value.offerId, "modelOverride.offerId", 128),
     providerId: validateProviderId(value.providerId, "modelOverride.providerId"),
     ...(value.model !== undefined ? { model: requireBoundedString(value.model, "modelOverride.model", 256) } : {}),
+    ...(value.destination !== undefined ? { destination: requireBoundedString(value.destination, "modelOverride.destination", 64) } : {}),
   };
 }
 
@@ -5592,6 +5596,10 @@ function registerIpcHandlers() {
         requireBoundedString(conversationId, "conversationId", 256),
       ),
     ),
+  );
+  ipcMain.handle(
+    "openadminos:get-provider-destination",
+    handleTrusted((_event, providerId: unknown) => store.providerDestination(validateProviderId(providerId))),
   );
   ipcMain.handle(
     "openadminos:preview-intune-chat-send",

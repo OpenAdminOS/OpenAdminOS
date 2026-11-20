@@ -169,7 +169,7 @@ import {
   type DocsIndexPassage,
 } from "./chat-steps.js";
 import { TenantValueIndex } from "./tenant-values.js";
-import { chatModelFitFailure, loopFailureIssue, ModelFitOffers, ModelOverrideError, repeatedFailureIssue, resolveChatTurnProvider } from "./model-fit.js";
+import { chatModelFitFailure, guardModelFitLlm, loopFailureIssue, ModelFitOffers, ModelOverrideError, repeatedFailureIssue, resolveChatTurnProvider } from "./model-fit.js";
 import { usedTenantEvidence } from "../../src/shared/chat-steps.js";
 
 type WorkspacePromptContextPayload = {
@@ -445,6 +445,8 @@ export interface ChatServiceHost {
   verifyOnDeviceModel?(providerId: ProviderId, model: string | undefined): Promise<boolean>;
   /** Where a provider is reached now (address, or Azure resource and deployment), for binding a model fit request to it. */
   providerEndpoint?(providerId: ProviderId): Promise<string | undefined>;
+  /** An opaque fingerprint of where a provider is reached now, compared with what a model fit review saw. */
+  providerDestination?(providerId: ProviderId): Promise<string>;
   /** With a binding, the model is built only for that endpoint (see ProviderEndpointBinding in state.ts). */
   buildLlm(providerId: ProviderId, model: string | undefined, binding?: { endpoint: string | undefined }): Promise<RunLlmApi>;
   buildGraph(
@@ -2585,9 +2587,18 @@ export class IntuneChatService {
     }
     // The request is built only for where the chosen provider is reached now, so a
     // settings change while it runs (another Azure resource or deployment) cannot redirect it.
+    // A hosted choice goes only to the destination its accept step saw (for
+    // Azure OpenAI the resource and deployment, not only the deployment name).
+    if (turn.switchedFrom && !provider.isLocal && this.host.providerDestination) {
+      if (input.modelOverride?.destination !== (await this.host.providerDestination(providerId))) {
+        throw new ModelOverrideError(`${provider.name}'s settings changed after you chose it, so nothing was sent. Choose it again to review where the request goes.`);
+      }
+    }
     if (turn.switchedFrom && !options.providerBinding && this.host.providerEndpoint) {
       options = { ...options, providerBinding: { endpoint: await this.host.providerEndpoint(providerId) } };
     }
+    // Whether a model request of this turn went out, so the answer says "Sent to" only when one did.
+    let modelFitDispatched = false;
     options.signal?.throwIfAborted();
     // Nova keeps requiring a tenant.
     if (noTenant && (options.voice || options.scope)) {
@@ -2635,6 +2646,16 @@ export class IntuneChatService {
     // The conversation is read again here, after the awaits above.
     if (fitOffer) {
       if (!conversation || conversation.id !== fitOffer.conversationId) throw new ModelOverrideError("That conversation was deleted, so nothing was sent.");
+      // The organization and model the offer was made for are read again here, after the awaits above,
+      // and the claim follows with no await in between.
+      const latest = await this.host.read();
+      if (
+        (latest.activeTenantId ?? undefined) !== (persisted.activeTenantId ?? undefined) ||
+        latest.activeProviderId !== persisted.activeProviderId ||
+        resolveProviderDefaultModel(activeProvider, latest.activeModelByProviderId).model !== fitOffer.anchor.model
+      ) {
+        throw new ModelOverrideError("The organization or model in Chat changed, so nothing was sent. Send the question again.");
+      }
       this.modelFitOffers.claim(fitOffer.id);
     }
     // Audited once the send is cleared: a refused send records no consent.
@@ -2754,8 +2775,8 @@ export class IntuneChatService {
         createdAt: cancelledAt,
         providerId,
         ...(selectedModel ? { model: selectedModel } : {}),
-        // A stopped request on a chosen provider still says where it went.
-        ...(turn.switchedFrom ? { switchedFrom: turn.switchedFrom } : {}),
+        // A stopped request on a chosen provider still says where it went, once a request went out.
+        ...(turn.switchedFrom && modelFitDispatched ? { switchedFrom: turn.switchedFrom } : {}),
         ...(answerPlan ? { questionKind: answerPlan.sources.kind } : {}),
         steps: steps.steps,
         sources: buildIntuneChatSources({
@@ -3033,7 +3054,27 @@ export class IntuneChatService {
       emitDelta(assistantContent);
     } else {
       // Tenant work goes through the model egress choke point; a send with no tenant has none to close.
-      const llm = withTenantDataOutputFilter(gateHostedLlm(noTenant ? await this.host.buildLlm(providerId, selectedModel, options.providerBinding) : await this.tenantLlm(providerId, selectedModel, [tenant.id], options.providerBinding), verifyConsent));
+      let built: RunLlmApi;
+      try {
+        built = noTenant ? await this.host.buildLlm(providerId, selectedModel, options.providerBinding) : await this.tenantLlm(providerId, selectedModel, [tenant.id], options.providerBinding);
+      } catch (error) {
+        if (turn.switchedFrom && error instanceof Error && error.name === "ProviderEndpointChangedError") {
+          throw new ModelOverrideError("The provider's settings changed after you chose it, so nothing was sent. Send the question again.");
+        }
+        throw error;
+      }
+      // A model fit request checks an on-device model again before every call, and records that a call went out.
+      if (turn.switchedFrom) {
+        built = guardModelFitLlm(built, {
+          before: async () => {
+            if (provider.isLocal && !(await this.host.verifyOnDeviceModel?.(providerId, selectedModel))) {
+              throw new ModelOverrideError(`OpenAdminOS could not confirm that ${selectedModel ?? provider.name} still runs on this device, so nothing more was sent to it.`);
+            }
+          },
+          dispatched: () => { modelFitDispatched = true; },
+        });
+      }
+      const llm = withTenantDataOutputFilter(gateHostedLlm(built, verifyConsent));
       const contextualQuestion =
         voiceContext?.history ??
         (conversationMemory
@@ -3386,7 +3427,8 @@ export class IntuneChatService {
             },
           }
         : {}),
-      ...(turn.switchedFrom ? { switchedFrom: turn.switchedFrom } : {}),
+      // Named only when a model request of this turn went out: an answer made without the model says nothing about it.
+      ...(turn.switchedFrom && modelFitDispatched ? { switchedFrom: turn.switchedFrom } : {}),
       ...(answerPlan ? { questionKind: answerPlan.sources.kind } : {}),
       ...(notConnectedFor(accessBlockedMessage, restriction, Boolean(namedAgent) || planned.hasWriteIntent)),
       steps: steps.steps,

@@ -14,7 +14,7 @@ import type {
 } from "@openadminos/agent-sdk";
 
 import { classifyModelFitFailure, isOllamaCloudModel, modelFitChoices, modelSizeBillions } from "../../src/shared/model-fit.js";
-import { MODEL_FIT_OFFER_TTL_MS, ModelFitOffers, ModelOverrideError, loopFailureIssue, resolveChatTurnProvider, type ModelFitOffer } from "./model-fit.js";
+import { MODEL_FIT_OFFER_TTL_MS, ModelFitOffers, ModelOverrideError, guardModelFitLlm, loopFailureIssue, resolveChatTurnProvider, type ModelFitOffer } from "./model-fit.js";
 import { IntuneChatService, type ChatServiceHost } from "./service.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 
@@ -419,6 +419,72 @@ describe("Model fit in Chat", () => {
       assert.equal(stopped.assistantMessage.providerId, "anthropic");
       assert.deepEqual(stopped.assistantMessage.switchedFrom, { providerId: "ollama", model: LOCAL_MODEL, reason: "context-too-small", toOnDevice: false });
     });
+  });
+
+  it("refuses a hosted choice whose destination changed after its accept step opened", async () => {
+    await withStore(async (store) => {
+      const built: string[] = [];
+      const host = chatHost(store, built);
+      let destination = "resource-a";
+      host.providerDestination = async () => destination;
+      const service = new IntuneChatService(host);
+      const failed = await service.streamIntuneChatMessage({ content: QUESTION }, () => undefined);
+      const offerId = failed.assistantMessage.modelFit!.offerId!;
+      built.length = 0;
+      // The accept step saw resource A; Settings now point the same deployment name at resource B.
+      destination = "resource-b";
+      const accepted = {
+        content: QUESTION,
+        conversationId: failed.conversation.id,
+        modelOverride: { offerId, providerId: "anthropic" as const, model: "claude-sonnet-5-5", destination: "resource-a" },
+        hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5", false, offerId),
+      };
+      await assert.rejects(service.streamIntuneChatMessage(accepted, () => undefined), /settings changed after you chose it/);
+      assert.deepEqual(built, []);
+      destination = "resource-a";
+      const answered = await service.streamIntuneChatMessage(accepted, () => undefined);
+      assert.equal(answered.assistantMessage.providerId, "anthropic");
+    });
+  });
+
+  it("checks an on-device retry again before each model call and names no destination when nothing went out", async () => {
+    await withStore(async (store) => {
+      const built: string[] = [];
+      let checks = 0;
+      // On this device when the request is accepted, a remote-backed alias by the time the model is called.
+      const service = new IntuneChatService(chatHost(store, built, () => (checks += 1) === 1));
+      const failed = await service.streamIntuneChatMessage({ content: QUESTION }, () => undefined);
+      const result = await service.streamIntuneChatMessage({
+        content: QUESTION,
+        conversationId: failed.conversation.id,
+        modelOverride: { offerId: failed.assistantMessage.modelFit!.offerId!, providerId: "ollama", model: "gpt-oss:20b" },
+      }, () => undefined);
+      assert.equal(result.assistantMessage.status, "failed");
+      assert.match(result.assistantMessage.error ?? "", /still runs on this device/);
+      assert.equal(result.assistantMessage.switchedFrom, undefined);
+      assert.ok(checks >= 2);
+    });
+  });
+
+  it("guards every call of a wrapped model and reports each dispatch", async () => {
+    const calls: string[] = [];
+    let allowed = true;
+    const inner: RunLlmApi = {
+      available: true,
+      async complete() { calls.push("complete"); return { text: "ok", model: "m" }; },
+      async *stream() { calls.push("stream"); yield { delta: "ok", accumulated: "ok", done: true, model: "m" }; },
+    };
+    let dispatched = 0;
+    const guarded = guardModelFitLlm(inner, {
+      before: async () => { if (!allowed) throw new Error("not on this device"); },
+      dispatched: () => { dispatched += 1; },
+    });
+    await guarded.complete({ prompt: "a" });
+    allowed = false;
+    await assert.rejects(guarded.complete({ prompt: "b" }), /not on this device/);
+    await assert.rejects((async () => { for await (const _chunk of guarded.stream({ prompt: "c" })) { /* drain */ } })(), /not on this device/);
+    assert.deepEqual(calls, ["complete"]);
+    assert.equal(dispatched, 1);
   });
 
   it("sends only one of two concurrent requests that take up the same offer", async () => {
