@@ -256,6 +256,63 @@ test("security objects classify principal and credential values at their higher 
   for (const [graphPath, payload, expected] of tests) assert.deepEqual(classifyData(payload, { graphPath }).classes, expected);
 });
 
+test("maps the documented encryption states and preserves the device and user classes", () => {
+  const result = classifyData({
+    id: "fixture-device",
+    deviceName: "LAB-WIN01",
+    userPrincipalName: "fixture@example.test",
+    osVersion: "10.0",
+    deviceType: "windowsRT",
+    tpmSpecificationVersion: "2.0",
+    encryptionReadinessState: "ready",
+    encryptionState: "encrypted",
+    encryptionPolicySettingState: "compliant",
+    advancedBitLockerStates: "success",
+    fileVaultStates: "success",
+    policyDetails: [{ policyId: "bf2e884a-1aad-4d99-b32a-c795550c9990", policyName: "Disk policy" }],
+  }, { graphPath: "/beta/deviceManagement/managedDeviceEncryptionStates/fixture-device" });
+  assert.deepEqual(result.classes, {
+    "/id": "device", "/deviceName": "device", "/userPrincipalName": "identity",
+    "/osVersion": "configuration", "/deviceType": "configuration",
+    "/tpmSpecificationVersion": "security", "/encryptionReadinessState": "security", "/encryptionState": "security",
+    "/encryptionPolicySettingState": "security", "/advancedBitLockerStates": "security", "/fileVaultStates": "security",
+    "/policyDetails/0/policyId": "security", "/policyDetails/0/policyName": "security",
+  });
+});
+
+test("classifies endpoint protection settings in legacy policy and Settings Catalog responses", () => {
+  const legacyPath = "/deviceManagement/deviceConfigurations";
+  for (const [graphPath, payload, expected] of [
+    [legacyPath, {
+      "@odata.type": "#microsoft.graph.macOSEndpointProtectionConfiguration", displayName: "Mac policy",
+      gatekeeperBlockOverride: true, fileVaultEnabled: true, firewallEnabled: true,
+    }, { "/@odata.type": "security", "/displayName": "security", "/gatekeeperBlockOverride": "security",
+      "/fileVaultEnabled": "security", "/firewallEnabled": "security" }],
+    [legacyPath, {
+      displayName: "Mixed settings", defenderRequireRealTimeMonitoring: true,
+      defenderAttackSurfaceReductionExcludedPaths: ["fixture"], bitLockerFixedDrivePolicy: { requireEncryptionForWriteAccess: true },
+    }, { "/displayName": "configuration", "/defenderRequireRealTimeMonitoring": "security",
+      "/defenderAttackSurfaceReductionExcludedPaths/0": "security", "/bitLockerFixedDrivePolicy/requireEncryptionForWriteAccess": "security" }],
+    ["/informationProtection/bitlocker/recoveryKeys", { deviceId: "fixture-device", volumeType: "operatingSystemVolume", key: "synthetic" },
+      { "/deviceId": "device", "/volumeType": "security", "/key": "credential" }],
+    ["/deviceManagement/managedDevices", { isEncrypted: true, windowsActiveMalwareCount: 1, hardwareInformation: { isEncrypted: true } },
+      { "/isEncrypted": "security", "/windowsActiveMalwareCount": "security", "/hardwareInformation/isEncrypted": "security" }],
+  ] as const) {
+    assert.deepEqual(classifyData(payload, { graphPath }).classes, expected, graphPath);
+  }
+  for (const settingDefinitionId of [
+    "device_vendor_msft_bitlocker_requiredeviceencryption",
+    "com.apple.MCX.FileVault2_Enable",
+    "device_vendor_msft_firewall_mdmstore_domainprofile_enablefirewall",
+    "device_vendor_msft_policy_config_defender_allowrealtimemonitoring",
+    "device_vendor_msft_policy_config_defender_attacksurfacereductionrules",
+  ]) {
+    const result = classifyData({ id: "fixture", settingInstance: { settingDefinitionId, simpleSettingValue: { value: true } } },
+      { graphPath: "/deviceManagement/configurationPolicies/fixture/settings" });
+    assert.equal(result.classes["/settingInstance/simpleSettingValue/value"], "security", settingDefinitionId);
+  }
+});
+
 test("classifies expanded settings and applies secret metadata from additionalData to sibling values", () => {
   const catalog = classifyData({ settings: [
     { settingInstance: { simpleSettingValue: { value: "plain setting" } } },

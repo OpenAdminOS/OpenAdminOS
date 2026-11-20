@@ -1774,6 +1774,10 @@ Identity class and secrets keep their Credential class within security objects.
 Security fields carry a mask role for names and identifiers or for setting values.
 App role and permission scope names are identifiers. App role flags,
 compliance rules and authorization policy settings stay readable in A4.
+Field map v7 classifies device encryption and endpoint protection posture as
+Security. Encryption report policy IDs and names use the identifier role.
+Encryption states and BitLocker volume types use the setting role. Recovery
+keys retain their Credential class.
 The field map gives the identifier role to Conditional Access location and role
 GUIDs, terms of use IDs, custom authentication factor IDs, and preauthorized
 delegated permission IDs. Terms such as All and AllTrusted and control values

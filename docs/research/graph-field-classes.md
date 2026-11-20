@@ -44,6 +44,25 @@ action and the agent identity blueprint cast in the bundled documentation index.
 `removePassword` had no credential response body. These route checks
 used synthetic fixtures and the bundled index.
 
+## Field map v7 endpoint security verification
+
+The bundled Graph resource schemas supplement the historical projections
+below. The runtime classifies the following fields as Security.
+
+| Resource | Name or identifier | Setting |
+|---|---|---|
+| `managedDeviceEncryptionState` | `policyDetails[].policyId`, `policyDetails[].policyName` | `encryptionReadinessState`, `encryptionState`, `encryptionPolicySettingState`, `advancedBitLockerStates`, `fileVaultStates`, `tpmSpecificationVersion` |
+| `bitlockerRecoveryKey` | | `volumeType` |
+| `managedDevice` | | `isEncrypted`, `hardwareInformation.isEncrypted`, `partnerReportedThreatState`, Windows malware counts and Device Guard hardware states |
+| `macOSEndpointProtectionConfiguration` and `windows10EndpointProtectionConfiguration` | `id`, `displayName` | FileVault, BitLocker, firewall, antivirus and attack surface reduction settings |
+| `windows10GeneralConfiguration` | | Defender settings, `securityBlockAzureADJoinedDevicesAutoEncryption`, `storageRequireMobileDeviceEncryption` |
+
+The encryption report device ID and name remain Device. Its UPN remains
+Identity. BitLocker `key` and the FileVault recovery function's `value`
+remain Credential. Settings Catalog uses the template family and setting
+definition IDs where present, including BitLocker and FileVault IDs in
+standalone settings responses.
+
 ## Endpoints
 
 ### PIM for Groups and expanded policy settings

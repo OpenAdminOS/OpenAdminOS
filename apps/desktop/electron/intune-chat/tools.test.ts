@@ -15,6 +15,7 @@ import {
 } from "@openadminos/agent-sdk";
 
 import { ClassificationLedger, classifyCacheRows, hasGraphFieldClass, hasGraphFieldClasses, withClassificationScope } from "@openadminos/runtime/data-classification";
+import { fenceTenantData } from "@openadminos/runtime";
 import { GRAPH_CACHE_RESOURCES, pathForResource } from "./planner.js";
 import { executeIntuneChatTool } from "./tools.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
@@ -1259,6 +1260,39 @@ describe("Intune Chat read-only tools", () => {
       store.close();
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it("carries encryption report settings and policy identifiers from graph_get into request classification", async t => {
+    const path = "/deviceManagement/managedDeviceEncryptionStates";
+    const policyId = "bf2e884a-1aad-4d99-b32a-c795550c9990";
+    const policyName = "Disk policy";
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 1);
+    const ledger = new ClassificationLedger();
+    t.after(async () => {
+      ledger.dispose();
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    });
+    const ctx = toolContext(store, { graphForScopes: async () => ({
+      async listManagedDevices() { return []; },
+      async retireManagedDevice() { throw new Error("write should not run"); },
+      async request() { return { value: [{ encryptionState: "encrypted", policyDetails: [{ policyId, policyName }] }] }; },
+    }) });
+    await withClassificationScope(ledger, async () => {
+      const execution = await executeIntuneChatTool(ctx, "graph_get", { path });
+      assert.equal(execution.trace.error, undefined);
+      await ledger.waitForObservations();
+      const prompt = fenceTenantData(JSON.stringify(execution.result, null, 2), "fixture");
+      const result = await ledger.classifyProviderRequest({ prompt });
+      assert.equal(result.coverageIncomplete, false);
+      assert.equal(result.effectiveClass, "security");
+      assert.deepEqual(result.spans.map(({ start, end, kind, maskRole }) => [prompt.slice(start, end), kind, maskRole]), [
+        ["encrypted", "security", "setting"],
+        [policyId, "security", "nameOrIdentifier"],
+        [policyName, "security", "nameOrIdentifier"],
+      ]);
+    });
   });
 
   it("graph_get accepts Entra and Defender read paths with their scopes", async () => {

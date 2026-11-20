@@ -36,7 +36,7 @@ export const GRAPH_CLASSIFICATION_FIXTURES: Readonly<Record<string, readonly [st
   "/deviceManagement/assignmentFilters": ["displayName", "fixture-value", "configuration"],
   "/deviceManagement/roleScopeTags": ["displayName", "fixture-value", "configuration"],
   "/deviceManagement/managedDeviceOverview": ["enrolledDeviceCount", 12, "configuration"],
-  "/deviceManagement/managedDeviceEncryptionStates": ["deviceName", "fixture-value", "device"],
+  "/deviceManagement/managedDeviceEncryptionStates": ["encryptionState", "encrypted", "security"],
   "/deviceManagement/troubleshootingEvents": ["eventDateTime", "2026-01-01T00:00:00Z", "activity"],
   "/identity/conditionalAccess/namedLocations": ["displayName", "fixture-value", "security"],
   "/policies/authenticationMethodsPolicy": ["displayName", "fixture-value", "security"],

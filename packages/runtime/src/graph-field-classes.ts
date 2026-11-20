@@ -3,7 +3,7 @@ import type { DataClass } from "@openadminos/agent-sdk";
 // Source: docs/research/graph-field-classes.md and the decisions in docs/SPEC.md.
 // [] matches an array element. * matches one property in a keyed object.
 // Mapped containers set an inherited class. Unknown branches start at the resource default.
-export const GRAPH_FIELD_CLASSES_VERSION = 6;
+export const GRAPH_FIELD_CLASSES_VERSION = 7;
 
 /** Equivalent paths in the bundled Graph index, with route parameters normalized by the classifier. */
 export const GRAPH_ROUTE_ALIASES = {
@@ -50,6 +50,7 @@ export type SecurityMaskRole = "nameOrIdentifier" | "setting";
 
 export const GRAPH_TEXT_FIELDS = /^(?:notes?|groupTag|publisher|rule|redirectUris?|.*(?:description|name|url|uri|reason)|comment|summary|details|title|message|oldValue|newValue)$/i;
 export const GRAPH_DEVICE_NAME_FIELDS = /^(?:deviceName|managedDeviceName)$/i;
+export const GRAPH_LEGACY_ENDPOINT_SECURITY_FIELDS = /^\/(?:(?:bitLocker|fileVault|firewall|defender|windowsDefender|advancedThreatProtection)[^/]+|securityBlockAzureADJoinedDevicesAutoEncryption|storageRequireMobileDeviceEncryption)$/i;
 
 export const GRAPH_SECURITY_RESOURCES = new Set([
   "/identity/conditionalAccess/policies", "/identity/conditionalAccess/namedLocations",
@@ -91,16 +92,22 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
       remoteAssistanceSessionErrorDetails preferMdmOverGroupPolicyAppliedDateTime deviceActionResults[]
       usersLoggedOn[].lastLogOnDateTime
     `,
+    security: `
+      isEncrypted hardwareInformation.isEncrypted partnerReportedThreatState windowsActiveMalwareCount
+      windowsRemediatedMalwareCount hardwareInformation.deviceGuardVirtualizationBasedSecurityHardwareRequirementState
+      hardwareInformation.deviceGuardVirtualizationBasedSecurityState
+      hardwareInformation.deviceGuardLocalSystemAuthorityCredentialGuardState
+    `,
     configuration: `
-      operatingSystem osVersion isEncrypted complianceState managementState managedDeviceOwnerType
+      operatingSystem osVersion complianceState managementState managedDeviceOwnerType
       deviceEnrollmentType manufacturer model ownerType chassisType deviceType jailBroken managementAgent
       easActivated aadRegistered azureADRegistered lostModeState deviceRegistrationState
       deviceCategoryDisplayName isSupervised exchangeAccessState exchangeAccessStateReason
       complianceGracePeriodExpirationDateTime androidSecurityPatchLevel
       configurationManagerClientEnabledFeatures deviceHealthAttestationState subscriberCarrier
-      totalStorageSpaceInBytes freeStorageSpaceInBytes partnerReportedThreatState retireAfterDateTime
+      totalStorageSpaceInBytes freeStorageSpaceInBytes retireAfterDateTime
       autopilotEnrolled requireUserEnrollmentApproval managementCertificateExpirationDate
-      roleScopeTagIds[] windowsActiveMalwareCount windowsRemediatedMalwareCount
+      roleScopeTagIds[]
       configurationManagerClientHealthState physicalMemoryInBytes processorArchitecture
       specificationVersion joinType skuFamily securityPatchLevel skuNumber managementFeatures
       enrollmentProfileName bootstrapTokenEscrowed deviceFirmwareConfigurationInterfaceManaged
@@ -108,12 +115,9 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
       hardwareInformation.freeStorageSpace hardwareInformation.manufacturer hardwareInformation.model
       hardwareInformation.subscriberCarrier hardwareInformation.cellularTechnology
       hardwareInformation.operatingSystemLanguage hardwareInformation.isSupervised
-      hardwareInformation.isEncrypted hardwareInformation.batteryHealthPercentage
+      hardwareInformation.batteryHealthPercentage
       hardwareInformation.batteryChargeCycles hardwareInformation.isSharedDevice
       hardwareInformation.tpmSpecificationVersion hardwareInformation.operatingSystemEdition
-      hardwareInformation.deviceGuardVirtualizationBasedSecurityHardwareRequirementState
-      hardwareInformation.deviceGuardVirtualizationBasedSecurityState
-      hardwareInformation.deviceGuardLocalSystemAuthorityCredentialGuardState
       hardwareInformation.osBuildNumber hardwareInformation.operatingSystemProductType
       hardwareInformation.systemManagementBIOSVersion hardwareInformation.tpmManufacturer
       hardwareInformation.tpmVersion hardwareInformation.batteryLevelPercentage
@@ -383,7 +387,11 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
   "/deviceManagement/managedDeviceEncryptionStates": {
     identity: "userPrincipalName",
     device: "id deviceName",
-    configuration: "encryptionState policyDetails[] policyDetails[].policyId policyDetails[].policyName fileVaultStates",
+    configuration: "deviceType osVersion",
+    security: `
+      encryptionReadinessState encryptionState encryptionPolicySettingState advancedBitLockerStates
+      fileVaultStates tpmSpecificationVersion policyDetails[] policyDetails[].policyId policyDetails[].policyName
+    `,
   },
   "/deviceManagement/troubleshootingEvents": {
     activity: `
@@ -592,7 +600,7 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
     credential: "key",
     device: "id deviceId",
     activity: "createdDateTime",
-    configuration: "volumeType",
+    security: "volumeType",
   },
   "/directory/deviceLocalCredentials": {
     credential: "credentials[].passwordBase64",
