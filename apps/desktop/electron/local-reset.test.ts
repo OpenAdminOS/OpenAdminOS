@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { describe, it } from "node:test";
 
 import type { TenantRecord } from "@openadminos/agent-sdk";
@@ -13,7 +13,8 @@ import {
   LocalResetRequestError,
   localResetLeftoverPaths,
   localResetLinkCheck,
-  withoutTrailingSeparators,
+  folderGoesThroughLink,
+  policyLinkProblem,
   localResetRemovalPlan,
   MACOS_SAFE_STORAGE_ACCOUNT,
   MACOS_SAFE_STORAGE_SERVICE,
@@ -598,21 +599,52 @@ describe("local reset: wipe at launch", () => {
     }
   });
 
-  it("checks the folder itself when its path ends with a separator", async () => {
+  it("treats any detour through a link to the data folder as a link", async () => {
     const dir = await tempDir();
     try {
       const shared = join(dir, "shared");
-      mkdirSync(shared);
+      mkdirSync(join(shared, "inner"), { recursive: true });
       seedDataFolder(shared, DEV_MARKER);
       const linked = join(dir, "profile-link");
       symlinkSync(shared, linked);
-      assert.equal(withoutTrailingSeparators(`${linked}/`), linked);
-      assert.equal(withoutTrailingSeparators("/"), "/");
-      assert.equal(withoutTrailingSeparators("C:\\"), "C:\\");
-      assert.equal(localResetLinkCheck(`${linked}/`).dataFolderIsLink, true);
-      const report = runPendingLocalReset({ userDataDir: `${linked}/`, packaged: false, platform: "linux", home: dir, env: {} });
+      for (const path of [linked, `${linked}/`, `${linked}/.`, `${linked}/inner/..`]) {
+        assert.equal(folderGoesThroughLink(path), true, path);
+        assert.equal(localResetLinkCheck(path).dataFolderIsLink, true, path);
+        const report = runPendingLocalReset({ userDataDir: path, packaged: false, platform: "linux", home: dir, env: {} });
+        assert.equal(report?.status, "incomplete", path);
+        assert.ok(existsSync(join(shared, "state.json")), path);
+      }
+      assert.equal(folderGoesThroughLink(shared), false);
+      assert.equal(folderGoesThroughLink(`${shared}/`), false);
+      assert.equal(folderGoesThroughLink(join(dir, "missing")), false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("stops before removing anything when the policy file links to a file in the data folder", async () => {
+    const dir = await tempDir();
+    try {
+      seedDataFolder(dir, DEV_MARKER);
+      rmSync(join(dir, "policy.json"));
+      mkdirSync(join(dir, "managed"));
+      writeFileSync(join(dir, "managed", "current.json"), "{}");
+      symlinkSync(join(dir, "managed", "current.json"), join(dir, "policy.json"));
+      assert.match(policyLinkProblem(dir) ?? "", /is a link to a file in the data folder/);
+      const report = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", home: dir, env: {} });
       assert.equal(report?.status, "incomplete");
-      assert.ok(existsSync(join(shared, "state.json")));
+      assert.ok(existsSync(join(dir, "managed", "current.json")));
+      assert.ok(existsSync(join(dir, "state.json")));
+
+      // A link to a policy file outside the data folder is kept and the reset goes on.
+      const outsidePolicy = join(dir, "..", `${basename(dir)}-policy.json`);
+      writeFileSync(outsidePolicy, "{}");
+      rmSync(join(dir, "policy.json"));
+      symlinkSync(outsidePolicy, join(dir, "policy.json"));
+      assert.equal(policyLinkProblem(dir), undefined);
+      assert.equal(runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", home: dir, env: {} })?.status, "completed");
+      assert.ok(existsSync(outsidePolicy));
+      rmSync(outsidePolicy);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -873,13 +905,7 @@ function failingFileSystem(fails: (path: string) => boolean): LocalResetFileSyst
       rmSync(path, { recursive: true, force: true });
     },
     writeMarker: (path, content) => writeFileSync(path, content),
-    isLink: (path) => {
-      try {
-        return lstatSync(path).isSymbolicLink();
-      } catch {
-        return false;
-      }
-    },
+    isLink: (path) => folderGoesThroughLink(path),
     isShared: (path) => {
       try {
         const stat = lstatSync(path);
