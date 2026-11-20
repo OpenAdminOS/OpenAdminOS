@@ -601,12 +601,21 @@ describe("Ollama context size", () => {
 
   it("stops the retry at once when the user stops", async () => {
     const stop = new AbortController();
-    const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384, delayRetryMs: () => 2000, onRetry: () => stop.abort() });
+    let stoppedAt = 0;
+    const fake = await fakeOllama({
+      modelMax: 131072,
+      limit: (numCtx) => numCtx ?? 16384,
+      delayRetryMs: () => 2000,
+      onRetry: () => {
+        stoppedAt = Date.now();
+        stop.abort();
+      },
+    });
     try {
       const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "stop-retry", timeoutMs: 5000 });
-      const started = Date.now();
       await assert.rejects(llm.complete({ prompt: "big", signal: stop.signal }), /^Error: Ollama request stopped by user\.$/);
-      assert.ok(Date.now() - started < 1000);
+      // Ended well before the retry's 2s answer or its 5s timeout.
+      assert.ok(Date.now() - stoppedAt < 1000);
       assert.equal(fake.chats.length, 2);
     } finally {
       fake.close().catch(() => {});
@@ -700,26 +709,28 @@ describe("Ollama context size", () => {
 
   it("drops a size a concurrent request kept when this request's retry with it runs out of memory", async () => {
     let lookups = 0;
+    let releaseSecondLookup!: () => void;
+    const secondLookup = new Promise<void>((resolve) => (releaseSecondLookup = resolve));
     const answerShow = (res: ServerResponse) => res.end(JSON.stringify({ model_info: { "qwen3.context_length": 131072 } }));
     const fake = await fakeOllama({
       limit: (numCtx) => numCtx ?? 16384,
       onShow: (res) => {
         lookups += 1;
-        if (lookups === 1) {
-          answerShow(res);
-          return;
-        }
-        // B's lookup waits until A has kept 45,056; B's retry then runs out of memory.
-        setTimeout(() => {
-          fake.options.retryMemoryError = ["http", "model requires more system memory (24.1 GiB) than is available (12.0 GiB)"];
-          answerShow(res);
-        }, 200);
+        // The second lookup waits until the first request has kept 45,056.
+        if (lookups === 1) answerShow(res);
+        else void secondLookup.then(() => answerShow(res));
       },
     });
     try {
       const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "concurrent-memory" });
-      // Whichever lookup arrives first is answered first.
-      const results = await Promise.allSettled([llm.complete({ prompt: "big" }), llm.complete({ prompt: "big" })]);
+      // Both start with nothing kept; whichever lookup arrives first is answered first.
+      const runs = [llm.complete({ prompt: "big" }), llm.complete({ prompt: "big" })];
+      const settled = Promise.allSettled(runs);
+      await Promise.any(runs);
+      // The other request's retry with 45,056 then runs out of memory.
+      fake.options.retryMemoryError = ["http", "model requires more system memory (24.1 GiB) than is available (12.0 GiB)"];
+      releaseSecondLookup();
+      const results = await settled;
       assert.deepEqual(results.map((result) => result.status).sort(), ["fulfilled", "rejected"]);
       const failed = results.find((result) => result.status === "rejected") as PromiseRejectedResult;
       assert.match(String(failed.reason), /could not load concurrent-memory with 45,056/);
