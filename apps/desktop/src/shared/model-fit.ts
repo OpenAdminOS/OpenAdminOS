@@ -327,7 +327,9 @@ export function modelFitChoices(input: {
         }
       }
     }
-    local.sort((a, b) => (modelSizeBillions(a.model) ?? 0) - (modelSizeBillions(b.model) ?? 0));
+    // The next larger models first; with the failed size unknown, the largest first, since a small
+    // one is the likeliest to have the same small context.
+    local.sort((a, b) => (sizeUnknownContext ? -1 : 1) * ((modelSizeBillions(a.model) ?? 0) - (modelSizeBillions(b.model) ?? 0)));
   }
   // The main process already left out what the policy does not allow; this
   // only says so when the policy is the reason nothing hosted is offered.

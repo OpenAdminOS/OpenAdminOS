@@ -205,7 +205,7 @@ describe("Model fit: the choices", () => {
   it("offers sized local models after a context failure on a model whose size is unknown", () => {
     const apple: ProviderSummary = { id: "apple-foundation", name: "Apple Intelligence", description: "", isLocal: true, status: "connected", models: ["system-language-model"], defaultModel: "system-language-model" };
     const choices = modelFitChoices({ issue: { reason: "context-too-small", providerId: "apple-foundation", model: "system-language-model" }, providers: [apple, ollama] });
-    assert.deepEqual(choices.local.map((choice) => choice.model), [LOCAL_MODEL, "gpt-oss:20b"]);
+    assert.deepEqual(choices.local.map((choice) => choice.model), ["gpt-oss:20b", LOCAL_MODEL]);
     // A reasoning-only reply is about the model's size, so an unknown size still offers none.
     assert.deepEqual(modelFitChoices({ issue: { reason: "thinking-only", providerId: "apple-foundation", model: "system-language-model" }, providers: [apple, ollama] }).local, []);
   });
