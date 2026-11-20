@@ -815,7 +815,10 @@ the IT policy file.
       classed under an older revision is reclassified from its field path,
       keeping every class it held, and a value that cannot be rebuilt counts
       as unexamined. A follow-up never uses a class from before a raise
-      because the conversation stayed open.
+      because the conversation stayed open. When such a value withholds the
+      follow-up, it shows the same designed state and recovery as a
+      reopened conversation (mockup 34, F, "A follow-up in a conversation
+      that stayed open").
 - [ ] Agent manifests declare `descriptor.dataClasses`, derived when absent, with
       a qa-graph check and the JSON Schema updated in the same commit. Agent
       details show what an agent reads. Preflight refuses a run the policy would
