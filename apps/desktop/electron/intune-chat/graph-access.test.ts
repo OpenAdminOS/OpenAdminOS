@@ -20,7 +20,7 @@ it("persists each cache denial and keeps consent, role, and licence readiness di
     async request() {
       if (succeed) return { value: [{ id: "device" }] };
       if (evidence) throw new GraphAccessDeniedError(evidence);
-      throw new Error("Graph responded with HTTP 403 for https://graph.microsoft.com/beta/deviceManagement/managedDevices: {\"error\":{\"code\":\"Forbidden\"}}");
+      throw new GraphAccessDeniedError({ errorCode: "Forbidden" });
     },
   };
   const options = { filePath, userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => {} }, graphFactory: () => graph };

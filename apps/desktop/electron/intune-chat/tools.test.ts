@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 
 import {
   DEFAULT_GRAPH_READ_SCOPE_NAMES,
+  GraphAccessDeniedError,
   type GraphCacheResourceKind,
   type RunGraphApi,
 } from "@openadminos/agent-sdk";
@@ -495,7 +496,7 @@ describe("Intune Chat read-only tools", () => {
           async listManagedDevices() { return []; },
           async retireManagedDevice() { throw new Error("write should not run"); },
           async request() {
-            throw new Error('Graph responded with HTTP 403 for https://graph.microsoft.com/beta/users: {"error":{"code":"Authorization_RequestDenied"}}');
+            throw new GraphAccessDeniedError({ errorCode: "Authorization_RequestDenied" });
           },
         }),
       });
