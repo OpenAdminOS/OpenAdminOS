@@ -16,6 +16,7 @@ import type {
 } from "../shared/openAdminOS";
 import { CHAT_COPY } from "../copy";
 import { MODEL_FIT_COPY } from "../copy/model-fit";
+import { modelFitModelName } from "../components/ModelFitNotice";
 import { readChatDraft } from "../shared/chat-drafts";
 
 const QUESTION = "List every device with its compliance policies, profiles and last sign-in, grouped by owner.";
@@ -80,6 +81,10 @@ async function sendTooLarge(bridge: ReturnType<typeof fitBridge>) {
 afterEach(() => window.localStorage.clear());
 
 describe("IntuneChat model fit (mockup 36)", () => {
+  it("names Apple Foundation's one model by the provider, not its internal id", () => {
+    expect(modelFitModelName({ providerId: "apple-foundation", model: "system-language-model" })).toBe("Apple Intelligence");
+  });
+
   it("shows the notice with the numbers and each hosted provider's location label, with nothing preselected", async () => {
     const bridge = fitBridge();
     const { notice } = await sendTooLarge(bridge);
@@ -211,6 +216,11 @@ describe("IntuneChat model fit (mockup 36)", () => {
     expect(screen.queryByText("Sending to")).toBeNull();
     // The error says to choose again, so the choices are there to choose from.
     expect(await screen.findByRole("region", { name: "llama3.1 cannot fit this request" })).toBeInTheDocument();
+    // A second refusal of the same offer does not bring it back again.
+    await user.click(within(screen.getByRole("region", { name: "llama3.1 cannot fit this request" })).getByRole("button", { name: "Run with Codex" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "Run this request with Codex?" })).getByRole("button", { name: "Send through Codex" }));
+    await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "llama3.1 cannot fit this request" })).toBeNull());
   });
 
   it("does not show the choices again when a retry fails after the host started it", async () => {

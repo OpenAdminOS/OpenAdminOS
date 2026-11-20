@@ -9,6 +9,8 @@ import type { ModelFitIssue } from "../shared/openAdminOS";
 
 /** What the admin knows a model as: "OpenAdmin 8B" for the OpenAdmin model, the name otherwise. */
 export function modelFitModelName(issue: Pick<ModelFitIssue, "model" | "providerId">, providerName?: string): string {
+  // Apple Foundation's one model has an internal id; the admin knows it by the provider's name.
+  if (issue.providerId === "apple-foundation") return providerName ?? PROVIDER_TOOL_NAMES[issue.providerId] ?? "Apple Foundation";
   return modelDisplayName(issue.model) ?? providerName ?? PROVIDER_TOOL_NAMES[issue.providerId] ?? issue.providerId;
 }
 
