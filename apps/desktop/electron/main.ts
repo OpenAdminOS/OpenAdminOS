@@ -10,7 +10,9 @@ import {
   localResetLinkCheck,
   MANAGED_POLICY_FILE,
   localResetPolicyProblem,
+  parseWhoamiUser,
   windowsTaskBelongsToThisAccount,
+  windowsTaskUserId,
   readLocalResetMarker,
   requestLocalReset,
   runPendingLocalReset,
@@ -5465,9 +5467,14 @@ function removeSchedulerRegistration(): void {
     // its own user cannot read is not a case this app creates.
     if (windowsSchedulerTaskPresence() === "absent") return;
     const xml = windowsSchedulerTaskXml();
-    if (!windowsTaskBelongsToThisAccount(xml === undefined ? undefined : windowsTaskBinary(xml), app.getPath("home"))) {
+    const whoami = spawnSync("whoami", ["/user", "/fo", "csv", "/nh"], { encoding: "utf8", windowsHide: true, timeout: 5_000 });
+    const account = whoami.status === 0 ? parseWhoamiUser(whoami.stdout) : undefined;
+    if (!windowsTaskBelongsToThisAccount(xml === undefined ? undefined : windowsTaskBinary(xml), app.getPath("home"), {
+      taskUserId: windowsTaskUserId(xml),
+      account,
+    })) {
       throw new Error(
-        `the scheduled task ${WINDOWS_SCHEDULER_TASK} runs a copy of OpenAdminOS outside this account's profile, so it may belong to another account and was left in place. Check Run As User in Task Scheduler and remove it there if it is yours`,
+        `the scheduled task ${WINDOWS_SCHEDULER_TASK} could not be confirmed as this account's (its program or the account it runs as is another), so it was left in place. Check Run As User in Task Scheduler and remove it there if it is yours`,
       );
     }
     removeWindowsSchedulerTask();

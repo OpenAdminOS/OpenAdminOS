@@ -265,8 +265,9 @@ export function folderGoesThroughLink(
     // A folder on another device than its parent is a mount point, such as
     // a volume or disk image mounted at the data folder path.
     if (here.dev !== statSync(dirname(realpathSync(path))).dev) return true;
-    // A volume mounted anywhere inside: rmSync would empty it.
-    if (treeCrossesDevice(path, here.dev)) return true;
+    // A volume mounted anywhere inside: rmSync would empty it. Only a folder
+    // has an inside; a plain file (such as a cookie store) has none.
+    if (here.isDirectory() && treeCrossesDevice(path, here.dev)) return true;
     if ((options.platform ?? process.platform) === "linux" && hasMountAtOrUnder(realpathSync(path), options.mountInfo)) return true;
     return false;
   } catch (cause) {
@@ -356,6 +357,9 @@ export function localResetPolicyProblem(userDataDir: string): string | undefined
     }
     if (stat.isDirectory()) {
       return `${name} is a folder, not the IT policy file, and the reset would keep everything in it. Move it out of the data folder, then reset`;
+    }
+    if (!stat.isFile()) {
+      return `${name} is not a plain file. Ask whoever manages this device to place the policy file itself in the data folder, then reset`;
     }
   }
   return undefined;
@@ -761,11 +765,38 @@ function recordLeftoversDone(
  * for all users (Program Files) or elsewhere could be shared, so its task is
  * left in place with a warning, even when it runs this same program.
  */
-export function windowsTaskBelongsToThisAccount(taskBinary: string | undefined, home: string): boolean {
+export function windowsTaskBelongsToThisAccount(
+  taskBinary: string | undefined,
+  home: string,
+  principal?: { taskUserId: string | undefined; account: { name: string; sid: string } | undefined },
+): boolean {
   if (!taskBinary) return false;
+  // The task must also run as this account: a task of a service account can
+  // point at a program in anyone's profile. Unknown on either side: not ours.
+  if (principal) {
+    const { taskUserId, account } = principal;
+    if (!taskUserId || !account) return false;
+    const id = taskUserId.trim().toLowerCase();
+    const name = account.name.toLowerCase();
+    const bareName = name.includes("\\") ? name.slice(name.lastIndexOf("\\") + 1) : name;
+    if (id !== account.sid.toLowerCase() && id !== name && id !== bareName) return false;
+  }
   const binary = win32.normalize(taskBinary).toLowerCase();
   const homePrefix = `${win32.normalize(home).toLowerCase().replace(/\\+$/, "")}\\`;
   return binary.startsWith(homePrefix);
+}
+
+/** The account a Windows task runs as, from its XML definition (`<Principal><UserId>`). */
+export function windowsTaskUserId(xml: string | undefined): string | undefined {
+  if (!xml) return undefined;
+  const match = /<Principal\b[^>]*>[\s\S]*?<UserId>([^<]+)<\/UserId>/i.exec(xml);
+  return match?.[1]?.trim() || undefined;
+}
+
+/** Parses `whoami /user /fo csv /nh`: "domain\\name","S-1-5-...". */
+export function parseWhoamiUser(output: string): { name: string; sid: string } | undefined {
+  const match = /^"([^"]+)","(S-[0-9-]+)"/m.exec(output.trim());
+  return match ? { name: match[1]!, sid: match[2]! } : undefined;
 }
 
 /** `security` exits 44 when no item matches. */
