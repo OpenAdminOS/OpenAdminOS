@@ -299,8 +299,12 @@ export function modelFitChoices(input: {
   const currentSize = modelSizeBillions(issue.model);
   const local: ModelFitChoice[] = [];
   // Repeated failures and reasoning budgets are about the model, so any
-  // larger model helps; a size is needed to call one larger at all.
-  if (currentSize !== undefined) {
+  // larger model helps; a size is needed to call one larger at all. A prompt
+  // that did not fit a model whose size cannot be read from its name (Apple
+  // Foundation, a custom alias) is offered every sized model on this device,
+  // since its row already says the context size is not checked.
+  const sizeUnknownContext = currentSize === undefined && issue.reason === "context-too-small";
+  if (currentSize !== undefined || sizeUnknownContext) {
     for (const provider of providers) {
       if (!provider.isLocal || !isProviderReady(provider) || !managedProviderAllowed(input.managedPolicy, provider.id)) continue;
       for (const model of provider.models) {
@@ -310,7 +314,7 @@ export function modelFitChoices(input: {
         const locked = managedLockedModel(input.managedPolicy, provider.id);
         if (locked !== undefined && model !== locked) continue;
         const size = modelSizeBillions(model);
-        if (size !== undefined && size > currentSize) {
+        if (size !== undefined && (currentSize === undefined || size > currentSize)) {
           local.push({ providerId: provider.id, providerName: provider.name, isLocal: true, model });
         }
       }
