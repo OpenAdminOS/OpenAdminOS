@@ -235,12 +235,20 @@ export async function ollamaRequestNumCtx(
   // kept size is always checked against the loaded one, whatever the
   // request's size: a larger one loaded since (by another client) must not
   // be reloaded smaller.
-  if (neededTokens <= SMALLEST_DEFAULT_CONTEXT && input.currentNumCtx === undefined) return undefined;
+  // An agent run still checks the model's limit, which can be below 2,048.
+  if (neededTokens <= SMALLEST_DEFAULT_CONTEXT && input.currentNumCtx === undefined && !input.enforce) return undefined;
   const fetchImpl = input.fetchImpl ?? fetch;
   const timeoutMs = input.timeoutMs ?? LOOKUP_TIMEOUT_MS;
   const base = input.endpoint.replace(/\/$/, "");
   const fresh = await readShow(fetchImpl, base, input.model, timeoutMs, input.signal);
-  const show = ollamaShowKnown(fresh) || !input.fallbackShow ? fresh : input.fallbackShow;
+  const fallback = input.fallbackShow;
+  let show = ollamaShowKnown(fresh) || !fallback ? fresh : fallback;
+  // A partial answer for the same model (no parameters) keeps the pin the
+  // size check saw; a different revision is a new model and does not.
+  if (fallback?.pinnedNumCtx !== undefined && show.pinnedNumCtx === undefined &&
+    (show.revision === undefined || show.revision === fallback.revision)) {
+    show = { ...show, pinnedNumCtx: fallback.pinnedNumCtx };
+  }
   const seen = {
     ...(show.revision !== undefined ? { revision: show.revision } : {}),
     ...(show.pinnedNumCtx !== undefined ? { pinnedNumCtx: show.pinnedNumCtx } : {}),
