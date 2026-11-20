@@ -7,7 +7,8 @@ import { graphAccessDenialFromError } from "@openadminos/agent-sdk";
 interface Suggestion {
   match: (error: string) => boolean;
   title: string;
-  body: string;
+  /** Fixed advice, or advice read from the error when it carries the specifics. */
+  body: string | ((error: string) => string);
 }
 
 /** A failed lookup of the model's context limit has its own playbook only. */
@@ -17,7 +18,22 @@ const isContextLimitLookup = (e: string) => /ollama/i.test(e) && /context limit|
  * LM Studio's context error from the runtime. It quotes LM Studio and token
  * counts, so no other playbook and no Graph denial is read from its text.
  */
-const isLmStudioContextTooSmall = (e: string) => e.includes("LM Studio context length too small:");
+const LM_STUDIO_CONTEXT_PREFIX = "LM Studio context length too small:";
+const isLmStudioContextTooSmall = (e: string) => e.includes(LM_STUDIO_CONTEXT_PREFIX);
+
+/**
+ * The sizes and the reload command from the runtime's LM Studio context
+ * error, without LM Studio's own text. The run header truncates the error,
+ * so the playbook repeats what the admin needs to act on.
+ */
+function lmStudioContextAdvice(error: string): string {
+  const start = error.indexOf(LM_STUDIO_CONTEXT_PREFIX) + LM_STUDIO_CONTEXT_PREFIX.length;
+  const end = error.indexOf(" LM Studio said:", start);
+  const advice = error.slice(start, end === -1 ? undefined : end).trim();
+  return advice.length > 0
+    ? advice
+    : "LM Studio sets a model's context length when the model is loaded, and this request did not fit. In LM Studio, raise Context Length in the model's load settings and reload the model, then re-run.";
+}
 
 /** Errors with one cause and one recovery: only their own playbook is shown. */
 const EXCLUSIVE = [isContextLimitLookup, isLmStudioContextTooSmall];
@@ -41,7 +57,7 @@ const SUGGESTIONS: Suggestion[] = [
   {
     match: isLmStudioContextTooSmall,
     title: "LM Studio context too small",
-    body: "LM Studio sets a model's context length when the model is loaded, and this request did not fit. The error names the sizes. In LM Studio, raise Context Length in the model's load settings and reload the model, or run `lms load <model> --context-length <tokens>`, then re-run. If the model is already at its limit, narrow the question or the agent's scope, or pick a model with a larger context window in Settings → LLM Providers.",
+    body: lmStudioContextAdvice,
   },
   {
     match: (e) =>
@@ -137,7 +153,7 @@ export function RunFailureRemediation({ run }: { run: RunRecord }) {
                     {suggestion.title}
                   </div>
                   <p className="mt-1 text-sm leading-relaxed text-[var(--color-text-soft)]">
-                    {suggestion.body}
+                    {typeof suggestion.body === "function" ? suggestion.body(run.error!) : suggestion.body}
                   </p>
                 </div>
               ))}
