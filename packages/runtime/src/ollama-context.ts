@@ -77,6 +77,34 @@ function normalizeModelName(name: string): string {
 
 /** The model revision each kept size was kept for, per endpoint and model. */
 const keptRevisions = new Map<string, string>();
+/** The revision the latest /api/show reading reported, per endpoint and model. */
+const seenRevisions = new Map<string, string>();
+
+const revisionKey = (endpoint: string, model: string) => `${endpoint.replace(/\/$/, "")}\0${model}`;
+
+/** Note the revision an /api/show answer reports, for the size kept next. */
+export function recordOllamaRevision(endpoint: string, model: string, show: unknown): void {
+  const revision = parseOllamaShow(show).revision;
+  if (revision !== undefined) seenRevisions.set(revisionKey(endpoint, model), revision);
+}
+
+/** Tie a size the adapter keeps now to the revision it was sized for. */
+export function bindKeptOllamaSize(endpoint: string, model: string): void {
+  const key = revisionKey(endpoint, model);
+  const revision = seenRevisions.get(key);
+  if (revision !== undefined) keptRevisions.set(key, revision);
+}
+
+/**
+ * What the adapter does before its first send: send `numCtx`, stop sending
+ * a kept size (`dropKept`), or refuse (`tooLarge`).
+ */
+export interface OllamaRequestContext {
+  numCtx?: number;
+  neededTokens: number;
+  dropKept?: boolean;
+  tooLarge?: ContextTooSmallFailure;
+}
 
 /** Ollama's smallest default context; a request this size needs no num_ctx. */
 const SMALLEST_DEFAULT_CONTEXT = 2048;
@@ -113,11 +141,13 @@ async function readShow(
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<OllamaShowContext> {
-  return parseOllamaShow(await readJson(fetchImpl, `${base}/api/show`, {
+  const data = await readJson(fetchImpl, `${base}/api/show`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ model }),
-  }, timeoutMs, signal));
+  }, timeoutMs, signal);
+  recordOllamaRevision(base, model, data);
+  return parseOllamaShow(data);
 }
 
 export interface OllamaRequestContextInput {
@@ -150,7 +180,7 @@ export interface OllamaRequestContextInput {
  */
 export async function ollamaRequestNumCtx(
   input: OllamaRequestContextInput,
-): Promise<{ numCtx: number; neededTokens: number } | { dropKept: true } | { tooLarge: ContextTooSmallFailure } | undefined> {
+): Promise<OllamaRequestContext | undefined> {
   // The same count as the run's size check, chat template tokens included.
   const fitInput = {
     ...(input.system ? { system: input.system } : {}),
@@ -164,41 +194,55 @@ export async function ollamaRequestNumCtx(
   // request's size: a larger one loaded since (by another client) must not
   // be reloaded smaller.
   if (neededTokens <= SMALLEST_DEFAULT_CONTEXT && input.currentNumCtx === undefined) return undefined;
-  const key = `${input.endpoint.replace(/\/$/, "")}\0${input.model}`;
+  const key = revisionKey(input.endpoint, input.model);
   const fetchImpl = input.fetchImpl ?? fetch;
   const timeoutMs = input.timeoutMs ?? LOOKUP_TIMEOUT_MS;
   const base = input.endpoint.replace(/\/$/, "");
   const show = await readShow(fetchImpl, base, input.model, timeoutMs, input.signal);
-  // A kept size belongs to the model it was kept for. A model created again
-  // under the same name (a new revision) starts from its own settings.
-  if (input.currentNumCtx !== undefined && show.revision !== undefined) {
+  // The fresh limit comes before anything kept: the pin, else the
+  // architecture maximum. If the run's own lookup could not see it (Ollama
+  // briefly unavailable, or the model created again since), refuse here with
+  // the same typed reason rather than send a request that overflows.
+  const limit = show.pinnedNumCtx !== undefined
+    ? Math.min(show.pinnedNumCtx, show.modelMaxContext ?? Infinity)
+    : show.modelMaxContext;
+  if (input.enforce && limit !== undefined) {
+    const fit = checkPromptFit({ ...fitInput, contextWindow: limit });
+    if (fit.failure) return { tooLarge: fit.failure, neededTokens };
+  }
+  // A kept size belongs to the model revision it was kept for. A model
+  // created again under the same name starts from its own settings.
+  let current = input.currentNumCtx;
+  let dropKept = false;
+  if (current !== undefined && show.revision !== undefined) {
     const keptFor = keptRevisions.get(key);
     if (keptFor === undefined) keptRevisions.set(key, show.revision);
     else if (keptFor !== show.revision) {
       keptRevisions.delete(key);
-      return { dropKept: true };
+      dropKept = true;
+      current = undefined;
     }
   }
   if (show.pinnedNumCtx !== undefined) {
-    // The size check holds a pinned model to its pin. If the run's own
-    // lookup could not see the pin (Ollama briefly unavailable), refuse here
-    // with the same typed reason rather than send a request that overflows.
-    if (input.enforce) {
-      const fit = checkPromptFit({ ...fitInput, contextWindow: show.pinnedNumCtx });
-      if (fit.failure) return { tooLarge: fit.failure };
-    }
-    // A kept size below the pin (from before the model was created again
-    // with a pin) would override it: Ollama applies a request's num_ctx over
-    // the Modelfile. Drop it so the pin applies. A kept size at or above the
-    // pin, raised for an earlier overflow, stays.
-    return input.currentNumCtx !== undefined && input.currentNumCtx < show.pinnedNumCtx ? { dropKept: true } : undefined;
+    // A kept size below the pin would override it: Ollama applies a
+    // request's num_ctx over the Modelfile. Drop it so the pin applies. A
+    // kept size at or above the pin, raised for an earlier overflow, stays.
+    if (current !== undefined && current < show.pinnedNumCtx) dropKept = true;
+    return dropKept ? { dropKept: true, neededTokens } : undefined;
   }
+  // An unpinned model whose kept size was dropped is still sized, so it is
+  // never served at Ollama's own default.
+  if (current === undefined && neededTokens <= SMALLEST_DEFAULT_CONTEXT) return dropKept ? { dropKept: true, neededTokens } : undefined;
   const loaded = parseOllamaLoadedContext(await readJson(fetchImpl, `${base}/api/ps`, { method: "GET" }, timeoutMs, input.signal), input.model) ?? 0;
-  if (input.currentNumCtx !== undefined && input.currentNumCtx >= neededTokens && loaded <= input.currentNumCtx) return undefined;
+  if (current !== undefined && current >= neededTokens && loaded <= current) return undefined;
   let target = 4096;
   while (target < neededTokens) target *= 2;
-  target = Math.max(target, loaded, input.currentNumCtx ?? 0);
-  return { numCtx: show.modelMaxContext !== undefined ? Math.min(target, show.modelMaxContext) : target, neededTokens };
+  target = Math.max(target, loaded, current ?? 0);
+  return {
+    numCtx: show.modelMaxContext !== undefined ? Math.min(target, show.modelMaxContext) : target,
+    neededTokens,
+    ...(dropKept ? { dropKept: true } : {}),
+  };
 }
 
 /**
