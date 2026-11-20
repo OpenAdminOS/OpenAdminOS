@@ -496,7 +496,8 @@ describe("Ollama context size", () => {
       await llm.complete({ prompt: "big" });
       assert.deepEqual(fake.chats.at(-1), { num_ctx: 45056 });
       assert.equal(fake.chats.length, 3);
-      assert.equal(fake.shows.length, 1);
+      // One lookup for the retry, one check of the model before the kept size is reused.
+      assert.equal(fake.shows.length, 2);
     } finally {
       await fake.close();
     }
@@ -1232,6 +1233,9 @@ describe("Ollama context for an unpinned model", () => {
       // Another client loads the model at 32,768.
       loaded = 32768;
       await llm.complete({ prompt: words(2500), maxTokens: 1000 });
+      assert.equal(ollama.chats.at(-1), 32768);
+      // A short request with the kept size keeps the larger loaded one too.
+      await llm.complete({ prompt: "short", maxTokens: 100 });
       assert.equal(ollama.chats.at(-1), 32768);
     } finally {
       globalThis.fetch = original;

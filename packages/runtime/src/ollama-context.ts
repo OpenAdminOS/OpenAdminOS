@@ -95,29 +95,22 @@ async function readJson(
 }
 
 /**
- * /api/show answers per endpoint and model. A model's Modelfile parameters
- * and architecture limit do not change while it stays pulled, so a
- * successful reading is kept; an empty one is asked again next time.
+ * The model's /api/show reading, asked fresh on each call: a model can be
+ * created again under the same name with another num_ctx, and the size check
+ * reads it fresh too, so both always agree.
  */
-const showCache = new Map<string, OllamaShowContext>();
-
-async function cachedShow(
+async function readShow(
   fetchImpl: typeof fetch,
   base: string,
   model: string,
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<OllamaShowContext> {
-  const key = `${base}\0${model}`;
-  const kept = showCache.get(key);
-  if (kept) return kept;
-  const show = parseOllamaShow(await readJson(fetchImpl, `${base}/api/show`, {
+  return parseOllamaShow(await readJson(fetchImpl, `${base}/api/show`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ model }),
   }, timeoutMs, signal));
-  if (show.pinnedNumCtx !== undefined || show.modelMaxContext !== undefined) showCache.set(key, show);
-  return show;
 }
 
 export interface OllamaRequestContextInput {
@@ -155,14 +148,16 @@ export async function ollamaRequestNumCtx(
     prompt: input.prompt,
     ...(input.maxTokens !== undefined ? { maxTokens: input.maxTokens } : {}),
   });
-  if (neededTokens <= SMALLEST_DEFAULT_CONTEXT) return undefined;
+  // A short request with no kept size runs at Ollama's default untouched. A
+  // kept size is always checked against the loaded one, whatever the
+  // request's size: a larger one loaded since (by another client) must not
+  // be reloaded smaller.
+  if (neededTokens <= SMALLEST_DEFAULT_CONTEXT && input.currentNumCtx === undefined) return undefined;
   const fetchImpl = input.fetchImpl ?? fetch;
   const timeoutMs = input.timeoutMs ?? LOOKUP_TIMEOUT_MS;
   const base = input.endpoint.replace(/\/$/, "");
-  const show = await cachedShow(fetchImpl, base, input.model, timeoutMs, input.signal);
+  const show = await readShow(fetchImpl, base, input.model, timeoutMs, input.signal);
   if (show.pinnedNumCtx !== undefined) return undefined;
-  // Read the loaded size even when this app keeps a large enough size: a
-  // larger one loaded since (by another client) must not be reloaded smaller.
   const loaded = parseOllamaLoadedContext(await readJson(fetchImpl, `${base}/api/ps`, { method: "GET" }, timeoutMs, input.signal), input.model) ?? 0;
   if (input.currentNumCtx !== undefined && input.currentNumCtx >= neededTokens && loaded <= input.currentNumCtx) return undefined;
   let target = 4096;
