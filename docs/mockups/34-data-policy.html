@@ -1021,8 +1021,8 @@
                     <ul class="calls" aria-label="Calls for this question">
                       <li><span class="tm">09:52:10</span><span class="loc">Local</span><span>Tenant lookup. Ollama answered from the Woodgrove Bank cache: WGB Expenses, its detection rule and the 14 failed installs. Nothing left this device.</span></li>
                       <li><span class="tm">09:52:11</span><span class="loc">Local</span><span>Search words written from public inputs only: your question and public terms, not the cache results. Your question names the app, so the draft held WGB Expenses.</span></li>
-                      <li><span class="tm">09:52:11</span><span class="loc">Local</span><span>Removed 1 configuration value, the app name from your question. Configuration on Hosted is Allow, but a web search never carries tenant data.</span></li>
-                      <li><span class="tm">09:52:12</span><span class="loc">Local</span><span>Data policy check, final check and the last check of the exact search words: no other tenant data and no placeholders left.</span></li>
+                      <li><span class="tm">09:52:11</span><span class="loc">Local</span><span>Removed 1 configuration value, the app name from your question. Configuration on Hosted is Allow, but a web search never carries tenant data the app recognizes.</span></li>
+                      <li><span class="tm">09:52:12</span><span class="loc">Local</span><span>Data policy check, final check and the last check of the exact search words: no further recognized tenant values and no placeholders left.</span></li>
                       <li><span class="tm">09:52:12</span><span class="sent">Sent</span><span>Web search with OpenAI, with the search words above.</span></li>
                     </ul>
                     <p class="xs muted" style="margin-top:10px">The app removes every value it recognizes as tenant data. Text it cannot recognize, such as a project name it has never seen, can still reach OpenAI in a search.</p>
@@ -1038,7 +1038,7 @@
             <span class="glyph" data-t="blocked"><svg><use href="#i-stop"/></svg></span>
             <div>
               <h3>This web search was not sent: without tenant data, nothing was left to search for</h3>
-              <p>Nova wrote a search that named the Conditional Access policy WGB Finance MFA and nothing else. A web search never carries tenant data, so the app removed the name, and no search words were left. No request was made to OpenAI.</p>
+              <p>Nova wrote a search that named the Conditional Access policy WGB Finance MFA and nothing else. A web search never carries tenant data the app recognizes, so the app removed the name, and no search words were left. No request was made to OpenAI.</p>
               <div class="swords"><span class="h">Search words, kept on this device</span><span class="rm">WGB Finance MFA</span></div>
               <div class="acts"><button class="bt primary sm" type="button">Write the search words</button><button class="bt secondary sm" type="button">Answer without searching</button></div>
               <p class="xs muted" style="margin-top:10px">Write the search words opens an empty search for you to describe the setting in public terms; tenant data is removed again before it is sent. Answer without searching lets Ollama answer from the tenant data on this device. Switching models and changing a rule are not offered: every web search goes to OpenAI, and no rule lets tenant data into a search.</p>
