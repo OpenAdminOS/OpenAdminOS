@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -412,6 +412,28 @@ describe("local reset: wipe at launch", () => {
     }
   });
 
+  it("never writes through a link planted where a marker temp file used to go", async () => {
+    const dir = await tempDir();
+    try {
+      const data = join(dir, "data");
+      mkdirSync(data);
+      const outside = join(dir, "outside.txt");
+      writeFileSync(outside, "keep me");
+      symlinkSync(outside, join(data, `${LOCAL_RESET_MARKER}.tmp`));
+      await writeLocalResetMarker(data, DEV_MARKER);
+      assert.equal(readFileSync(outside, "utf8"), "keep me");
+      assert.equal(readLocalResetMarker(data)?.build, "development");
+      assert.deepEqual(readdirSync(data).filter((name) => name.endsWith(".tmp")), [`${LOCAL_RESET_MARKER}.tmp`]);
+      const report = runPendingLocalReset({ userDataDir: data, packaged: false, platform: "linux", home: dir, env: {} });
+      assert.equal(report?.status, "completed");
+      assert.deepEqual(readdirSync(data), []);
+      assert.equal(readFileSync(outside, "utf8"), "keep me");
+      assert.ok(lstatSync(outside).isFile());
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("treats the marker as written once it is renamed into place, even if the folder flush fails", async () => {
     const dir = await tempDir();
     try {
@@ -584,6 +606,16 @@ describe("local reset: end to end with the store", () => {
         // A refused reset does not hold back confirmations.
         assert.match((await store.beginLocalReset()) ?? "", /is applying a confirmed change/);
         await assert.rejects(store.confirmRun("missing-run", "X"), (error: Error) => !/is resetting/.test(error.message));
+        // A cancelled apply still settling a request it sent counts too.
+        const persisted = JSON.parse(readFileSync(statePath, "utf8")) as { runs: Array<Record<string, unknown>> };
+        persisted.runs[0] = { ...persisted.runs[0], status: "cancelled" };
+        writeFileSync(statePath, JSON.stringify(persisted));
+        const runService = (store as unknown as { runService: { isDriving(id: string): boolean } }).runService;
+        const original = runService.isDriving.bind(runService);
+        runService.isDriving = (id) => id === "run-1";
+        assert.match((await store.localResetBlocker()) ?? "", /is applying a confirmed change/);
+        runService.isDriving = original;
+        assert.equal(await store.localResetBlocker(), undefined);
       } finally {
         store.close();
       }
