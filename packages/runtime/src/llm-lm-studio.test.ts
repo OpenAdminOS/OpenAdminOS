@@ -329,6 +329,43 @@ describe("LM Studio context length too small", () => {
     }
   });
 
+  it("names the model key in the command when the request used a loaded instance id", async () => {
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url === "/api/v1/models") {
+        return sendJson(res, 200, {
+          models: [{ type: "llm", key: "qwen3-8b", loaded_instances: [{ id: "qwen3-8b", config: { context_length: 32768 } }, { id: "qwen3-8b:2", config: { context_length: 4096 } }], max_context_length: 32768 }],
+        });
+      }
+      sendJson(res, 400, { error: OLD_OVERFLOW });
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b:2" });
+      await assert.rejects(llm.complete({ prompt: "big" }), (error: Error) => {
+        assert.match(error.message, /but qwen3-8b:2 is loaded in LM Studio with a context length of 4,096/);
+        assert.match(error.message, /`lms load qwen3-8b --context-length 20480`/);
+        return true;
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("asks /api/v0 when /api/v1 lists the model without its loaded size", async () => {
+    const server = await fakeLmStudio((req, res) => {
+      if (req.url === "/api/v1/models") {
+        return sendJson(res, 200, { models: [{ type: "llm", key: "qwen3-8b", loaded_instances: [{ id: "qwen3-8b", config: {} }], max_context_length: 40960 }] });
+      }
+      if (req.url === "/api/v0/models/qwen3-8b") return sendJson(res, 200, { id: "qwen3-8b", loaded_context_length: 8192 });
+      sendJson(res, 400, { error: { message: NEW_OVERFLOW } });
+    });
+    try {
+      const llm = createLmStudioLlm({ endpoint: server.endpoint, defaultModel: "qwen3-8b" });
+      await assert.rejects(llm.complete({ prompt: "big" }), /does not fit in the 8,192 tokens of context qwen3-8b is loaded with in LM Studio\. Raise Context Length \(qwen3-8b supports up to 40,960\)/);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("reads the counts from an error sent inside the stream", async () => {
     const server = await fakeLmStudio((req, res) => {
       if (req.url === "/api/v1/models") return sendJson(res, 200, v1Models("qwen3-8b", 8192, 32768));

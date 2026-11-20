@@ -66,6 +66,8 @@ export function parseLmStudioContextOverflow(detail: string): { requested?: numb
 interface LmStudioContextInfo {
   loaded?: number;
   max?: number;
+  /** The model key `lms load` takes, when the request named a loaded instance such as `qwen3-8b:2`. */
+  key?: string;
 }
 
 /**
@@ -80,11 +82,14 @@ async function readLmStudioContext(endpoint: string, model: string, signal?: Abo
   const trimmed = endpoint.trim().replace(/\/+$/, "");
   if (!/\/v1$/i.test(trimmed)) return {};
   const base = trimmed.slice(0, -"/v1".length);
-  const timeout = AbortSignal.timeout(LM_STUDIO_LOOKUP_TIMEOUT_MS);
-  const lookupSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (signal?.aborted) return {};
+  signal?.addEventListener("abort", abort, { once: true });
+  const timer = setTimeout(abort, LM_STUDIO_LOOKUP_TIMEOUT_MS);
   const getJson = async (url: string): Promise<unknown> => {
     try {
-      const response = await fetchLocal(url, { signal: lookupSignal });
+      const response = await fetchLocal(url, { signal: controller.signal });
       if (isRefusedRedirect(response, url) || !response.ok) return undefined;
       return (await response.json()) as unknown;
     } catch {
@@ -92,21 +97,30 @@ async function readLmStudioContext(endpoint: string, model: string, signal?: Abo
     }
   };
 
-  const v1 = await getJson(`${base}/api/v1/models`);
-  const models = isRecord(v1) && Array.isArray(v1.models) ? v1.models.filter(isRecord) : undefined;
-  if (models) {
+  try {
+    let found: LmStudioContextInfo = {};
+    const v1 = await getJson(`${base}/api/v1/models`);
+    const models = isRecord(v1) && Array.isArray(v1.models) ? v1.models.filter(isRecord) : [];
     for (const entry of models) {
       const instances = Array.isArray(entry.loaded_instances) ? entry.loaded_instances.filter(isRecord) : [];
       const instance = instances.find((item) => item.id === model) ?? (entry.key === model ? instances[0] : undefined);
       if (!instance) continue;
       const config = isRecord(instance.config) ? instance.config : {};
-      return { ...tokenCount("loaded", config.context_length), ...tokenCount("max", entry.max_context_length) };
+      found = {
+        ...tokenCount("loaded", config.context_length),
+        ...tokenCount("max", entry.max_context_length),
+        ...(typeof entry.key === "string" && entry.key.length > 0 && entry.key !== model ? { key: entry.key } : {}),
+      };
+      break;
     }
+    if (found.loaded !== undefined || controller.signal.aborted) return found;
+    const v0 = await getJson(`${base}/api/v0/models/${encodeURIComponent(model)}`);
+    if (!isRecord(v0)) return found;
+    return { ...tokenCount("loaded", v0.loaded_context_length), ...tokenCount("max", v0.max_context_length), ...found };
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", abort);
   }
-  if (signal?.aborted || timeout.aborted) return {};
-  const v0 = await getJson(`${base}/api/v0/models/${encodeURIComponent(model)}`);
-  if (!isRecord(v0)) return {};
-  return { ...tokenCount("loaded", v0.loaded_context_length), ...tokenCount("max", v0.max_context_length) };
 }
 
 function tokenCount<K extends string>(key: K, value: unknown): Partial<Record<K, number>> {
@@ -152,7 +166,7 @@ async function lmStudioContextOverflowMessage(failure: OpenAiCompatibleFailure):
     const size = target === undefined ? "" : ` to at least ${n(target)}`;
     const limit = max === undefined ? "" : ` (${model} supports up to ${n(max)})`;
     parts.push(
-      `Raise Context Length${size}${limit} in the model's load settings in LM Studio and reload it, or run \`lms load ${model} --context-length ${target ?? "<tokens>"}\`, then re-run. OpenAdminOS does not reload the model itself, because that would replace the model you loaded.`,
+      `Raise Context Length${size}${limit} in the model's load settings in LM Studio and reload it, or run \`lms load ${info.key ?? model} --context-length ${target ?? "<tokens>"}\`, then re-run. OpenAdminOS does not reload the model itself, because that would replace the model you loaded.`,
     );
   }
   parts.push(`LM Studio said: ${truncate(serverMessage(failure.detail), 200)}`);
