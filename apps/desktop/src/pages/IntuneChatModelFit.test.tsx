@@ -15,6 +15,7 @@ import type {
   SendIntuneChatMessageResult,
 } from "../shared/openAdminOS";
 import { CHAT_COPY } from "../copy";
+import { readChatDraft } from "../shared/chat-drafts";
 
 const QUESTION = "List every device with its compliance policies, profiles and last sign-in, grouped by owner.";
 const tenantId = createMockAppState().activeTenantId!;
@@ -28,7 +29,7 @@ const conversation: IntuneChatConversation = {
 };
 
 /** The first send fails for its size on the local model; a send with an override answers on the chosen provider. */
-function fitBridge(state = createMockAppState()) {
+function fitBridge(state = createMockAppState(), failedModel = "llama3.1") {
   let saved: IntuneChatMessage[] = [];
   let count = 0;
   return makeMockBridge(
@@ -49,9 +50,9 @@ function fitBridge(state = createMockAppState()) {
           : {
               id: `assistant-${count}`, conversationId: conversation.id, role: "assistant", status: "failed", createdAt: "2026-11-19T09:00:01.000Z",
               content: "The selected LLM provider failed while answering this chat message.",
-              providerId: "ollama", model: "llama3.1",
+              providerId: "ollama", model: failedModel,
               error: "Ollama context size too small",
-              modelFit: { reason: "context-too-small", providerId: "ollama", model: "llama3.1", neededTokens: 40652, limitTokens: 16384, offerId: `fit_${count}` },
+              modelFit: { reason: "context-too-small", providerId: "ollama", model: failedModel, neededTokens: 40652, limitTokens: 16384, offerId: `fit_${count}` },
             };
         saved = [...saved, userMessage, assistantMessage];
         const cacheStatus: GraphCacheStatus = { tenantId, resources: [] };
@@ -186,6 +187,29 @@ describe("IntuneChat model fit (mockup 36)", () => {
     await screen.findByText(/settings changed after you chose it, so nothing was sent/);
     expect(screen.queryByText("Sent to")).toBeNull();
     expect(screen.queryByText("Sending to")).toBeNull();
+  });
+
+  it("keeps the admin's narrower draft stored when a larger local model fails too", async () => {
+    const providers = mockProviders.map((provider) => (provider.id === "ollama" ? { ...provider, models: ["llama3.1:8b", "gpt-oss:20b"], defaultModel: "llama3.1:8b" } : provider));
+    // The failed model is 8B by name, so gpt-oss:20b is offered as a larger local model.
+    const bridge = fitBridge(createMockAppState({ providers, activeModelByProviderId: { ollama: "llama3.1:8b" } }), "llama3.1:8b");
+    const stream = bridge.streamIntuneChatMessage;
+    bridge.streamIntuneChatMessage = vi.fn<OpenAdminOSApi["streamIntuneChatMessage"]>(async (input, onEvent, options) => {
+      // The larger local model fails for its size as well.
+      if (input.modelOverride?.providerId === "ollama") return stream({ ...input, modelOverride: undefined }, onEvent, options);
+      return stream(input, onEvent, options);
+    });
+    const user = userEvent.setup();
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+    await user.click(await screen.findByRole("combobox", { name: CHAT_COPY.composerLabel }));
+    await user.paste(QUESTION);
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await screen.findByDisplayValue(QUESTION);
+    fireEvent.change(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel }), { target: { value: "List devices by owner." } });
+    await user.click(within(await screen.findByRole("region", { name: "llama3.1:8b cannot fit this request" })).getByRole("button", { name: "Use gpt-oss:20b" }));
+    await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(readChatDraft(conversation.id)).toBe("List devices by owner."));
+    expect(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel })).toHaveValue("List devices by owner.");
   });
 
   it("asks for the accept even when hosted sends to Codex were remembered for this tenant", async () => {
