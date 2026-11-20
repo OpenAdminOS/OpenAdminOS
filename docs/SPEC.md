@@ -2462,18 +2462,33 @@ not send, only the Send button does. Approval is per request in v1: a
 remembered "do not ask again" for that provider never covers it.
 A local choice sends at once, since nothing leaves the device.
 
-Host checks (`apps/desktop/electron/intune-chat/model-fit.ts`). The renderer
-sends `modelOverride` on `SendIntuneChatMessageInput` with the chosen provider
-and model and the local provider and model it replaces. The service refuses it
-unless the active provider is that local one with that model, the chosen
-provider is listed and ready and lists the model, and a hosted one comes with a
-`hostedProviderConsent` for it that is not a remembered one; the usual consent
-check (age, tenant, model) and `buildLlm`'s policy check then apply as for any
-hosted send, and the consent is audited. The override changes nothing
-persistent: the next send uses the active provider. Nova and the non-streaming
-send refuse an override. Masking from the data policy (PR #209 onward) applies
-to this send like any hosted send, since it goes through the same model choke
-point; no masking exists on main yet.
+Host checks (`apps/desktop/electron/intune-chat/model-fit.ts`). A failed
+answer that may be run again carries a host-issued, single-use `offerId`,
+bound to its conversation, organization, the exact question and the provider
+and model active at the time; offers live in memory for 15 minutes. The
+renderer sends `modelOverride` (`offerId`, chosen provider and model) on
+`SendIntuneChatMessageInput`. The service refuses it unless the offer exists
+for this conversation (not deleted), organization and question, the same
+provider and model are still active, the chosen provider is listed and ready,
+lists the model and is not the model that failed, a model on this device is
+not an Ollama Cloud model (`name:tag-cloud` or `name:cloud`, whose prompts go
+to ollama.com), and a hosted one comes with a `hostedProviderConsent` for it
+that is not a remembered one. The usual consent check (age, tenant, model,
+workspace selection) and `buildLlm`'s policy check then apply as for any
+hosted send, the consent is audited, and the offer is used up once the request
+is cleared to send. A larger local model tried for one request that fails too
+gets a new offer that still names the active model as the one it stands in
+for. The override changes nothing persistent: the next send uses the active
+provider. Nova and the non-streaming send refuse an override. Masking from the
+data policy (PR #209 onward) applies to this send like any hosted send, since
+it goes through the same model choke point; no masking exists on main yet. The
+renderer shows an offer only in its own conversation and withdraws it when the
+organization or the active model changes.
+
+Apple Foundation reports the prompt's own tokens and the model's total; the
+helper also reserves room for the answer, so a prompt below the total reads
+"uses about N of the M tokens <model> supports, which leaves too little room
+for an answer."
 
 After. The stored answer carries `switchedFrom` (the provider and model it
 replaced and why) and shows "Answered by <location label> for this request
@@ -2491,7 +2506,10 @@ runs keep their own review in Agent Team.
 
 Open questions (TODO(ugur) in code): a "remember for this conversation"
 option; reading each local model's context length so only models that can
-take the request are offered; whether hosted rows should show a cost estimate.
+take the request are offered; whether hosted rows should show a cost estimate;
+whether provider detection should read Ollama's `remote_host` and label Ollama
+Cloud models everywhere (today an active cloud model on a loopback Ollama is
+treated as local outside this offer).
 
 #### Agents as skills
 
