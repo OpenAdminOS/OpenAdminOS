@@ -38,8 +38,9 @@ cache classifications and scans larger model requests. A model request scan
 can examine up to 16 million UTF-16 code units each for the system text and
 the prompt, subject to the match work limit. If the scan cannot examine all
 the evidence, its local record marks coverage incomplete separately from
-the credentials it found and uses Credential as the effective class. The
-provider starts with the original request. Chat, agent steps, Graph paging
+the credentials it found. When the missing evidence could be a credential,
+the effective class is Credential. The provider starts with the original
+request. Chat, agent steps, Graph paging
 and cache reads also run independently of classification. Cache field
 classifications are loaded in background batches. The local record reports
 incomplete coverage if evidence for that request is still pending or was
@@ -48,8 +49,16 @@ This includes pending classification of a value clipped for Chat, and
 cache classification that is still pending while the app retries a busy
 database, or is missing after those retries end. Template filters preserve
 source classes when the app can trace the rendered values to their original
-fields. When a transformation loses that link, the scan reports incomplete
-coverage.
+fields. Chat cache breakdown keys and counts keep the class of the field
+they group. When a transformation loses that link, the scan reports
+incomplete coverage.
+
+After a sandboxed script agent reads organization data, the app records
+incomplete coverage for the system text and prompt supplied by the script.
+It still records the values it can identify. The effective class reflects
+the most sensitive data the script run has read, with Credential used when
+that class is unknown. Script requests that have read no organization data
+use normal scanning.
 Local diagnostics keep the total counts and report how many offsets were
 omitted when a record reaches its size limit.
 The local evidence budget favors credentials and identity
@@ -60,13 +69,16 @@ for up to four completed turns in each of eight conversations, with a
 desktop Nova reasoning has incomplete coverage if its original observations
 were dropped, expired or are otherwise unavailable. A short credential such
 as an application secret hint can also leave a range incomplete when a
-follow-up repeats it outside its original field. Cancelling a turn clears
+follow-up repeats it outside its original field. The observer checks escaped
+text in retained history and marks the replay incomplete if it exceeds its
+decoding limits. Cancelling a turn clears
 its active observations. Deleting the conversation or switching organizations
 also releases associated observations. Disconnect clears the organization's
 classification observations, identity indexes and local classification
 diagnostics, including indexes still being built at startup. Disconnect
-waits for the worker holding the removed organization's data to exit, even
-if other local cleanup needs a retry. Classification diagnostics use static
+waits for the classification worker holding the removed organization's data
+to exit, even if other local cleanup needs a retry. Disconnect cleanup also
+waits for the organization's cached classifications to be deleted. Classification diagnostics use static
 Graph route labels and expire after 15 minutes.
 
 Desktop Nova command routing uses the connected organization's identity
