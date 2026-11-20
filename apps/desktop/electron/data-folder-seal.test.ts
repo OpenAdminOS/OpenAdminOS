@@ -55,6 +55,14 @@ describe("data folder seal", () => {
       sealDataFolder(data);
       await assert.rejects(writeFile(join(base, "alias", "state.json"), "old"), { code: "EROFS" });
       await assert.rejects(writeFile(join(base, "alias", "agents", "new", "manifest.yaml"), "x"), { code: "EROFS" });
+      // A link elsewhere whose target in the data folder does not exist yet.
+      unsealDataFolder();
+      symlinkSync(join(data, "not-yet.json"), join(outside, "dangling"));
+      sealDataFolder(data);
+      await assert.rejects(writeFile(join(outside, "dangling"), "x"), { code: "EROFS" });
+      assert.ok(!existsSync(join(data, "not-yet.json")));
+      // No new hard link to a file inside.
+      assert.throws(() => fs.linkSync(join(data, "state.json"), join(outside, "hard")), { code: "EROFS" });
 
       // Outside the data folder everything still works.
       await writeFile(join(outside, "file"), "ok");

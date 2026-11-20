@@ -365,7 +365,7 @@ import {
   type UsageTelemetryPayload,
 } from "./telemetry/usage.js";
 import { DataFolderSealedError, dataFolderSealed, sealDataFolder, unsealDataFolder } from "./data-folder-seal.js";
-import { LOCAL_RESET_MARKER } from "./local-reset.js";
+import { LOCAL_RESET_MARKER_FILES } from "./local-reset.js";
 import { LocalResetInProgressError, OrganizationBoundaryError, RunService, gatewayRejectionCoolingDown, type RunGraphExecution, type SplashtopRunClient } from "./runs.js";
 import { RunDeliveryService } from "./run-delivery.js";
 import {
@@ -2460,7 +2460,7 @@ export class AppStateStore {
     this.whatsappWebClientInstance?.dispose();
     // The known writers skip quietly, and every other change by path inside
     // the data folder through Node's file system API is refused.
-    sealDataFolder(this.userDataPath, { allowNamePrefixes: [LOCAL_RESET_MARKER] });
+    sealDataFolder(this.userDataPath, { allowNames: LOCAL_RESET_MARKER_FILES });
   }
 
   /**

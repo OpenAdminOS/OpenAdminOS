@@ -951,6 +951,7 @@ describe("local reset: wipe at launch", () => {
         assert.deepEqual(readLocalResetMarker(dir)?.requestWarnings, marker.requestWarnings);
         // Everything else in the folder stays sealed.
         assert.throws(() => writeFileSync(join(dir, "local-reset-pending.json.d", "x"), "x"), { code: "EROFS" });
+        assert.throws(() => writeFileSync(join(dir, "local-reset-pending.json.other"), "x"), { code: "EROFS" });
         assert.throws(() => writeFileSync(join(dir, "state.json"), "x"), { code: "EROFS" });
       } finally {
         store.cancelLocalReset();

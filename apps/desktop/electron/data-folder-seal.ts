@@ -22,8 +22,8 @@ import { fileURLToPath } from "node:url";
  */
 let sealed = false;
 let sealedRoots: string[] = [];
-/** Names directly in the data folder that stay writable: the reset's own marker. */
-let allowedNamePrefixes: string[] = [];
+/** Names directly in the data folder that stay writable: the reset's own marker and its temporary files. */
+let allowedNames: RegExp | undefined;
 
 export class DataFolderSealedError extends Error {
   readonly code = "EROFS";
@@ -35,15 +35,14 @@ export class DataFolderSealedError extends Error {
 
 /**
  * Seals the data folder at `root` (with no root, only the flag the known
- * writers check). Entries directly in it whose names start with one of
- * `allowNamePrefixes` stay writable, so the reset can still add its
- * warnings to its own marker.
+ * writers check). Entries directly in it whose names match `allowNames`
+ * stay writable, so the reset can still add its warnings to its own marker.
  */
-export function sealDataFolder(root?: string, options: { allowNamePrefixes?: string[] } = {}): void {
+export function sealDataFolder(root?: string, options: { allowNames?: RegExp } = {}): void {
   sealed = true;
   if (root) {
     sealedRoots = rootsFor(root);
-    allowedNamePrefixes = (options.allowNamePrefixes ?? []).map(normalize);
+    allowedNames = options.allowNames;
     installGuard();
     // A refused write that nobody awaited (a background save) is logged,
     // never raised as an error of the main process in the moment before
@@ -64,7 +63,7 @@ let rejectionLog: ((reason: unknown) => void) | undefined;
 export function unsealDataFolder(): void {
   sealed = false;
   sealedRoots = [];
-  allowedNamePrefixes = [];
+  allowedNames = undefined;
   if (rejectionLog) {
     process.off("unhandledRejection", rejectionLog);
     rejectionLog = undefined;
@@ -103,14 +102,28 @@ export function isSealedPath(target: unknown): boolean {
   return [lexical, realLocation(lexical)].some((candidate) => insideSealedRoot(normalize(candidate)));
 }
 
-/** The real location of a path whose last parts may not exist yet. */
-function realLocation(path: string): string {
+/**
+ * The real location of a path whose last parts may not exist yet. A link
+ * whose target does not exist yet is followed too (a write through it
+ * creates the target). Bounded, so a loop of links ends.
+ */
+function realLocation(path: string, depth = 0): string {
   const rest: string[] = [];
   let current = path;
   for (;;) {
     try {
       return join(fs.realpathSync(current), ...rest.reverse());
     } catch {
+      if (depth < 8) {
+        try {
+          if (fs.lstatSync(current).isSymbolicLink()) {
+            const target = resolve(dirname(current), fs.readlinkSync(current));
+            return realLocation(join(target, ...rest.reverse()), depth + 1);
+          }
+        } catch {
+          // Missing: go one level up.
+        }
+      }
       const parent = dirname(current);
       if (parent === current) return path;
       rest.push(basename(current));
@@ -125,7 +138,7 @@ function insideSealedRoot(full: string): boolean {
     if (full === root) return true;
     if (!full.startsWith(`${root}${separator}`)) return false;
     const rest = full.slice(root.length + 1);
-    return !(!rest.includes(separator) && allowedNamePrefixes.some((prefix) => rest.startsWith(prefix)));
+    return !(!rest.includes(separator) && allowedNames !== undefined && allowedNames.test(rest));
   });
 }
 
@@ -155,7 +168,8 @@ const MUTATING_PATH_ARGS: Record<string, number[]> = {
   cp: [1],
   truncate: [0],
   symlink: [1],
-  link: [1],
+  // A new hard link to a file inside would be a path outside that reaches it.
+  link: [0, 1],
   chmod: [0],
   lchmod: [0],
   chown: [0],
@@ -191,6 +205,9 @@ function installGuard(): void {
     callbacks.createWriteStream = function sealedStream(this: unknown, ...args: unknown[]) {
       if (!streamRefused(args)) return createWriteStream.apply(this, args);
       const stream = new Writable({ write: (_chunk, _encoding, done) => done(new DataFolderSealedError()) });
+      // Logged here too, so a caller without an error listener does not
+      // turn the refusal into an uncaught error of the main process.
+      stream.on("error", () => console.warn("[local-reset] a write stream was refused after the reset committed"));
       process.nextTick(() => stream.destroy(new DataFolderSealedError()));
       return stream;
     };
