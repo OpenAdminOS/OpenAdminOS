@@ -71,7 +71,8 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
     available: true,
     defaultModel,
     streamsIncrementally: true,
-    contextWindow: (model) => readOllamaContextWindow(endpoint, model ?? defaultModel),
+    // The retry below raises num_ctx up to the model's maximum, so that maximum is the limit.
+    contextWindow: (model) => readOllamaContextWindow(endpoint, model ?? defaultModel, { appRaisesNumCtx: true }),
     async complete(opts: LlmOptions): Promise<LlmCompletion> {
       let last: LlmStreamChunk | undefined;
       for await (const chunk of this.stream(opts)) {

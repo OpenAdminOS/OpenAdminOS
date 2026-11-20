@@ -483,11 +483,14 @@ Every LLM call in an agent run is size-checked before anything is sent.
 `RunLlmApi.contextWindow(model)` is an optional provider capability; a
 provider that cannot report a window leaves it out, and its requests are
 never blocked. Hosted providers (Claude Code, Codex, Copilot, Gemini, Azure
-OpenAI) report none. Ollama reports it from `/api/show` and `/api/ps` in
-`ollama-context.ts`: a `num_ctx` pinned in the Modelfile wins while the app
-does not raise `num_ctx` itself, a model without one uses the size Ollama
-loaded it with, and the architecture's `context_length` is the fallback. LM
-Studio reports none for now because its context fields could not be verified.
+OpenAI) report none. Ollama reports it from `/api/show` in
+`ollama-context.ts`. Because the Ollama adapter raises `num_ctx` on an
+overflow up to the model's maximum (PR #211), that maximum, the
+architecture's `context_length`, is the limit; a pinned `num_ctx` is not.
+The helper can also answer for a caller that does not raise `num_ctx`: then
+a pinned `num_ctx` wins, a model without one uses the size Ollama loaded it
+with (`/api/ps`), and the maximum is the fallback. LM Studio reports none for
+now because its context fields could not be verified.
 
 The runtime's `estimateTokens` counts letters, digits, mixed ids,
 punctuation and line breaks separately. Calibrated against OpenAdmin 8B

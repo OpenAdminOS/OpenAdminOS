@@ -14,8 +14,9 @@ export interface OllamaShowContext {
 export interface OllamaContextWindowOptions {
   /**
    * True when the app itself sends a larger `num_ctx` for a request that
-   * needs it. Then the model's maximum is the limit. Until then Ollama
-   * serves the pinned `num_ctx` (or its own default), so that size wins.
+   * needs it, as createOllamaLlm does on a context overflow. Then the
+   * model's maximum is the limit. Without it Ollama serves the pinned
+   * `num_ctx` (or its own default), so that size wins.
    */
   appRaisesNumCtx?: boolean;
   fetchImpl?: typeof fetch;
