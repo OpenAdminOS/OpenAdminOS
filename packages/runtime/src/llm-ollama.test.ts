@@ -1428,4 +1428,60 @@ describe("Ollama context for an unpinned model", () => {
       globalThis.fetch = original;
     }
   });
+
+  for (const order of ["A then B", "B then A"] as const) {
+    it(`keeps the newer revision's size when responses for two revisions finish ${order}`, async () => {
+      const original = globalThis.fetch;
+      const revisionA = { ...unpinned, modified_at: "2026-11-01T00:00:00Z" };
+      const revisionB = { ...unpinned, modified_at: "2026-11-20T00:00:00Z" };
+      let show: unknown = revisionA;
+      const ollama = scripted({ showBody: undefined });
+      globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+        if (new URL(String(input)).pathname === "/api/show") return new Response(JSON.stringify(show), { status: 200 });
+        return ollama.fetchImpl(input, init);
+      }) as typeof fetch;
+      try {
+        const llm = createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: `two-revisions-${order}` });
+        let releaseA!: () => void;
+        let releaseB!: () => void;
+        const heldA = new Promise<void>((resolve) => { releaseA = resolve; });
+        const heldB = new Promise<void>((resolve) => { releaseB = resolve; });
+        ollama.handlers.push(async () => { await heldA; return ollama.ok(); });
+        ollama.handlers.push(async () => { await heldB; return ollama.ok(); });
+        const a = llm.complete({ prompt: words(40000), maxTokens: 1000 });
+        while (ollama.chats.length < 1) await new Promise((resolve) => setImmediate(resolve));
+        show = revisionB;
+        const b = llm.complete({ prompt: words(10000), maxTokens: 1000 });
+        while (ollama.chats.length < 2) await new Promise((resolve) => setImmediate(resolve));
+        assert.deepEqual(ollama.chats, [65536, 16384]);
+        if (order === "A then B") { releaseA(); await a; releaseB(); await b; }
+        else { releaseB(); await b; releaseA(); await a; }
+        await llm.complete({ prompt: words(10000), maxTokens: 1000 });
+        assert.equal(ollama.chats.at(-1), 16384, "revision B keeps its own size, not A's 65,536");
+      } finally {
+        globalThis.fetch = original;
+      }
+    });
+  }
+
+  it("does not send an agent run a size Chat kept above the pin, and leaves it for Chat", async () => {
+    const original = globalThis.fetch;
+    const ollama = scripted({ showBody: { parameters: "num_ctx                        16384", model_info: unpinned.model_info } });
+    ollama.handlers.push(() => new Response(JSON.stringify({ error: "request (21000 tokens) exceeds the available context size (16384 tokens), try increasing it" }), { status: 400 }));
+    globalThis.fetch = ollama.fetchImpl;
+    try {
+      const llm = createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "chat-raised" });
+      // Chat raises past the pin on an overflow.
+      await llm.complete({ prompt: words(20000), maxTokens: 1000 });
+      assert.deepEqual(ollama.chats, [undefined, 22528]);
+      // An agent run that fits the pin sends no num_ctx.
+      await llm.complete({ prompt: words(8000), maxTokens: 1000, enforceContextWindow: true });
+      assert.equal(ollama.chats.at(-1), undefined);
+      // Chat still uses the size it kept.
+      await llm.complete({ prompt: "short", maxTokens: 100 });
+      assert.equal(ollama.chats.at(-1), 22528);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
 });

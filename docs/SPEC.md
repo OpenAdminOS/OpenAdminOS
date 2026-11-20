@@ -1948,7 +1948,25 @@ Intune or the required Entra ID tier. Granted scopes with denied access point to
 Entra or Intune role assignment or activation. Unverified failures list consent,
 role, licence, and access-policy possibilities without recommending reconnect.
 Structured access-denial fields are additive in run history, cache status, and
-multi-tenant readiness; persisted status values remain unchanged. Licence inventory
+multi-tenant readiness; persisted status values remain unchanged. Only an error
+from a Microsoft Graph call is classified. A new failure is classified from its
+typed error only: the runtime Graph adapter's `GraphAccessDeniedError`, or a Teams
+or Outlook connector 403, also when an agent's error, a sandboxed script's exit,
+or a failed plan check before apply carries it. Message text is never evidence
+for a new failure, because a provider can pass a gateway's text through. Text is
+read only for records stored by earlier versions, from the start of the message
+as Graph code wrote it ("Graph responded with HTTP 403 for <Graph host URL>",
+with the host checked exactly, "Microsoft Graph rejected", "Microsoft Graph denied
+access"). Graph's 403 body (`{"error":{"code":"Forbidden"|"accessDenied",...}}`)
+does not name Graph, so a 403 from Ollama, LM Studio, a vendor API, or an MCP
+server is never a Graph denial. New denials carry `source: "microsoft-graph"`,
+and every failure classified this way is recorded with `graphDenialChecked`, so
+its text is never read for Graph advice. A sandboxed script agent's failure gets
+the typed denial of the brokered Graph or connector request whose message it
+exited with. A stored denial without the tag is shown only when its stored error
+is a Graph 403 that Graph code wrote; on load, it is dropped from other runs, and
+a scheduled run's Graph advice saved as its summary is replaced by the error.
+Tenant sign-in advice for a 401 or "unauthorized" is given only for a Graph error. Licence inventory
 failures remain unknown. This Phase 1 change adds no access probes, selectable
 permission packs, onboarding questions, or changes to scopes requested at sign-in.
 Setup recommends Global Reader for daily read work, treats Global Administrator as

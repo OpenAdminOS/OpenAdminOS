@@ -17,6 +17,7 @@ import {
   contextTooSmallFromError,
   agentServiceIds,
   formatServiceList,
+  graphAccessDenialFromError,
   organizationForTenant,
   serviceById,
   invalidAgentManifestCopy,
@@ -27,6 +28,8 @@ import {
   resolveRunModel,
   runInitiator,
   type AgentSummary,
+  type GraphAccessDenial,
+  type RunFailureReason,
   type IntuneChatMessage,
   type ProviderId,
   type ProviderSummary,
@@ -234,6 +237,24 @@ export function readOnlyRevalidationTransport(
       return base(input, init);
     }) as typeof fetch,
   };
+}
+
+/** A plan that could not be checked again keeps the Graph denial of that check. */
+class PlanCheckFailedError extends Error {
+  constructor(message: string, readonly accessDenial: GraphAccessDenial | undefined, failureReason?: RunFailureReason) {
+    // contextTooSmallFromError finds the typed reason through `cause`.
+    super(message, failureReason ? { cause: { code: failureReason.code, failure: failureReason } } : undefined);
+    this.name = "PlanCheckFailedError";
+  }
+}
+
+/**
+ * The Graph denial fields of a failed run: classified from the typed error
+ * only, and marked as checked so its text is never read for Graph advice.
+ */
+function graphFailureFields(error: unknown): Pick<RunRecord, "accessDenial" | "graphDenialChecked"> {
+  const accessDenial = (error instanceof PlanCheckFailedError ? error.accessDenial : undefined) ?? graphAccessDenialFromError(error);
+  return { ...(accessDenial ? { accessDenial } : {}), graphDenialChecked: true };
 }
 
 /**
@@ -1289,7 +1310,7 @@ export class RunService {
         const message = run.confirmedAt
           ? "OpenAdminOS closed during this run. Requests already sent may have completed. Review the tenant before running it again."
           : "OpenAdminOS closed before this run finished. Run the agent again to retry.";
-        return { ...run, status: "failed", finishedAt, summary: message, error: message,
+        return { ...run, status: "failed", finishedAt, summary: message, error: message, graphDenialChecked: true,
           liveSummary: undefined,
           steps: run.steps.map((step) => ({ ...step,
             ...(step.status === "running" ? { status: "failed" as const, finishedAt, detail: message } : {}),
@@ -1442,11 +1463,11 @@ export class RunService {
       });
       controller.signal.throwIfAborted();
       if (fresh.status === "failed" || !fresh.plan) {
-        // The typed reason (a prompt that no longer fits the model) rides along as the cause.
-        throw new Error(kind === "office"
+        // The Graph denial and the typed context reason (a prompt that no
+        // longer fits the model) ride along with the failure.
+        throw new PlanCheckFailedError(kind === "office"
           ? `The proposal could not be checked against the tenant before applying, so nothing was applied. ${fresh.error ?? "Run the assignment again."}`
-          : `The plan could not be checked against the tenant before applying, so nothing was applied. ${fresh.error ?? "Select Run again to review a fresh plan."}`,
-        fresh.failureReason ? { cause: { code: fresh.failureReason.code, failure: fresh.failureReason } } : undefined);
+          : `The plan could not be checked against the tenant before applying, so nothing was applied. ${fresh.error ?? "Select Run again to review a fresh plan."}`, fresh.accessDenial, fresh.failureReason);
       }
       const change = planChangeSinceReview(input.plan, fresh.plan);
       if (change.changed) throw new Error(planChangedSinceReviewCopy(change, kind, { usesModel: (fresh.usage?.calls ?? 0) > 0 }));
@@ -1574,6 +1595,7 @@ export class RunService {
             status: "failed",
             finishedAt,
             error: message,
+            ...graphFailureFields(error),
             summary: `${noun} stopped at "${action.label}" after applying ${applied} of ${plan.actions.length} actions. Nothing after the failed action was attempted.`,
           };
           await this.persistRunSnapshot(run);
@@ -1620,6 +1642,7 @@ export class RunService {
             ? `${noun} stopped after applying ${applied} of ${plan?.actions.length ?? applied} actions: ${message}`
             : `${noun} failed before any action was applied: ${message}`,
         error: message,
+        ...graphFailureFields(error),
       });
     } finally {
       // Invalidate for every attempted request, including a cancel at
@@ -1695,6 +1718,7 @@ export class RunService {
             status: "failed",
             finishedAt,
             error: message,
+            ...graphFailureFields(error),
             summary: `Splashtop changes stopped at "${action.label}" after applying ${applied} of ${plan.actions.length}. Nothing after it was attempted.`,
           };
           await this.persistRunSnapshot(run);
@@ -1725,6 +1749,7 @@ export class RunService {
           ? `Splashtop changes stopped after applying ${applied} of ${plan?.actions.length ?? applied}: ${message}`
           : `Splashtop changes failed before any was applied: ${message}`,
         error: message,
+        ...graphFailureFields(error),
       });
     } finally {
       if (this.controllers.get(input.id) === controller) this.controllers.delete(input.id);
@@ -1745,6 +1770,7 @@ export class RunService {
       finishedAt,
       summary: `${agent.name} failed: ${message}`,
       error: message,
+      ...graphFailureFields(error),
       ...(failureReason ? { failureReason } : {}),
     });
   }

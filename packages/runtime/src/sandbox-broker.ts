@@ -11,7 +11,7 @@ import type {
   WritePlan,
   WriteLimits,
 } from "@openadminos/agent-sdk";
-import { assertWritePlanLimits, contextTooSmallFromError, WritePlanLimitError, type ContextTooSmallFailure } from "@openadminos/agent-sdk";
+import { assertWritePlanLimits, contextTooSmallFromError, graphAccessDenialFromError, WritePlanLimitError, type ContextTooSmallFailure } from "@openadminos/agent-sdk";
 import { DRY_RUN_WRITE_ERROR } from "./dry-run.js";
 import { confirmationPhraseProblem } from "./confirmation-phrase.js";
 import { fenceTenantData, withTenantDataInstructions, withTenantDataOutputFilter } from "./tenant-data.js";
@@ -29,8 +29,17 @@ export interface SandboxBroker {
   handle(request: SandboxBrokerRequest): Promise<SandboxBrokerResponse>;
   getWritePlan(): WritePlan | undefined;
   /**
+   * The typed Graph denial behind a script failure. The script only sees a
+   * denial's message, so a denial counts only when it answered the script's
+   * last brokered request (log calls aside) and the script's output carries
+   * its message. A denial the script recovered from is followed by other
+   * requests and never counts.
+   */
+  graphDenialFor(scriptOutput: string): Error | undefined;
+  /**
    * A model request refused because it did not fit the context window, when
-   * it is the latest broker failure and no model request succeeded after it.
+   * that refusal answered the script's last brokered request (log calls
+   * aside). The caller still checks that the script ended on it.
    */
   getContextFailure(): ContextTooSmallFailure | undefined;
 }
@@ -61,56 +70,52 @@ class SandboxBrokerError extends Error {
 
 export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
   let writePlan: WritePlan | undefined;
-  let contextFailure: ContextTooSmallFailure | undefined;
-
-  const answer = async (request: SandboxBrokerRequest, id: string): Promise<SandboxBrokerResponse> => {
-    switch (request.method) {
-      case "graph.request":
-        return ok(id, await handleGraphRequest(input, request.params));
-      case "llm.complete":
-        return ok(id, await handleLlmRequest(input, request.params));
-      case "connector.invoke":
-        return ok(id, await handleConnectorRequest(input, request.params));
-      case "write.plan":
-        writePlan = undefined;
-        writePlan = handleWritePlanRequest(input, request.params);
-        return ok(id, writePlan);
-      case "log":
-        input.ctx.log(
-          request.params.level,
-          request.params.message,
-          request.params.metadata,
-        );
-        return ok(id);
-      default:
-        throw new SandboxBrokerError(
-          `Unsupported sandbox broker method "${String((request as { method?: unknown }).method)}".`,
-          "invalid_request",
-        );
-    }
-  };
+  // The error that answered the last brokered request, log calls aside.
+  let lastFailure: unknown;
 
   return {
     async handle(request) {
       const id = typeof request?.id === "string" && request.id.length > 0
         ? request.id
         : "unknown";
+      if (request?.method !== "log") lastFailure = undefined;
       try {
         assertBaseRequest(request);
-        const response = await answer(request, id);
-        // Any later successful call means the script went on after an
-        // earlier refusal, so that refusal no longer explains how it ends.
-        // A log line about the refusal does not count.
-        if (request.method !== "log") contextFailure = undefined;
-        return response;
+        switch (request.method) {
+          case "graph.request":
+            return ok(id, await handleGraphRequest(input, request.params));
+          case "llm.complete":
+            return ok(id, await handleLlmRequest(input, request.params));
+          case "connector.invoke":
+            return ok(id, await handleConnectorRequest(input, request.params));
+          case "write.plan":
+            writePlan = undefined;
+            writePlan = handleWritePlanRequest(input, request.params);
+            return ok(id, writePlan);
+          case "log":
+            input.ctx.log(
+              request.params.level,
+              request.params.message,
+              request.params.metadata,
+            );
+            return ok(id);
+          default:
+            throw new SandboxBrokerError(
+              `Unsupported sandbox broker method "${String((request as { method?: unknown }).method)}".`,
+              "invalid_request",
+            );
+        }
       } catch (error) {
-        // Only the latest broker failure can explain how the script ended.
-        contextFailure = contextTooSmallFromError(error);
+        if (request?.method !== "log") lastFailure = error;
         return failure(id, error);
       }
     },
     getWritePlan: () => writePlan,
-    getContextFailure: () => contextFailure,
+    getContextFailure: () => contextTooSmallFromError(lastFailure),
+    graphDenialFor: (scriptOutput) =>
+      lastFailure instanceof Error && graphAccessDenialFromError(lastFailure) && scriptOutput.includes(lastFailure.message)
+        ? lastFailure
+        : undefined,
   };
 }
 
