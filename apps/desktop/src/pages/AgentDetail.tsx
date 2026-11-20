@@ -417,9 +417,10 @@ export default function AgentDetail({
               ...(fitLike ? { bindProviderEndpoint: true } : {}),
               ...(fitLike && choice.expectedProviderDestination ? { expectedProviderDestination: choice.expectedProviderDestination } : {}),
               // A model fit rerun starts on the provider and model this review showed, never one the
-              // host resolves again; the host refuses a model the provider no longer reports.
+              // host resolves again. A model the choice named is passed as named, so the host refuses
+              // it if the provider no longer reports it instead of running another one.
               ...(fitLike ? { providerId: pendingProviderId } : choice.providerId ? { providerId: choice.providerId } : {}),
-              ...(fitLike && pendingModel ? { model: pendingModel } : choice.model ? { model: choice.model } : {}),
+              ...(choice.model ? { model: choice.model } : fitLike && pendingModel ? { model: pendingModel } : {}),
             }
           : undefined;
       const run = await startRun(agent.slug, options);
