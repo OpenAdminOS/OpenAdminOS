@@ -2631,7 +2631,10 @@ Start passes it (`expectedProviderDestination`); Start stays disabled until
 it is read, a failed read says so in the review, and a change refuses the
 start. A refused model fit start is not retried from the same review (no Try
 again): where the provider is reached may have changed to a place the review
-does not show, so the review says to close it and open the run again. Start passes the provider and model the review showed, never one the
+does not show, so the review says to close it and open the run again. Start is
+disabled while a start is being admitted, so one review never queues two runs.
+The setup picker for a model fit rerun lists only providers the run host
+admits for it (no self-hosted server outside this device). Start passes the provider and model the review showed, never one the
 host resolves again. A model the choice named that the provider no longer
 lists keeps Start disabled, and the review says so; the host refuses it too. When the chosen provider is not ready and the review opens setup, a
 provider picked there stays on that run: setup does not change the active
