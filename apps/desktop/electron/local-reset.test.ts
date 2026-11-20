@@ -13,6 +13,7 @@ import {
   LocalResetRequestError,
   localResetLeftoverPaths,
   localResetLinkCheck,
+  withoutTrailingSeparators,
   localResetRemovalPlan,
   MACOS_SAFE_STORAGE_ACCOUNT,
   MACOS_SAFE_STORAGE_SERVICE,
@@ -521,7 +522,7 @@ describe("local reset: wipe at launch", () => {
       symlinkSync(join(dir, "unrelated.txt"), join(profile, LOCAL_RESET_MARKER));
       const report = runPendingLocalReset({ userDataDir: profile, packaged: true, platform: "darwin", home: join(dir, "home"), env: {}, run: recordingRun().run });
       assert.equal(report?.status, "incomplete");
-      assert.match(report?.failed[0]?.reason ?? "", /a link or a shared file, not one OpenAdminOS wrote, so nothing was removed/);
+      assert.match(report?.failed[0]?.reason ?? "", /not a plain file OpenAdminOS wrote \(it is a link, a shared file or a folder\), so nothing was removed/);
       assert.ok(existsSync(join(profile, "state.json")));
       assert.equal(readFileSync(join(dir, "unrelated.txt"), "utf8"), "not a marker");
     } finally {
@@ -573,14 +574,45 @@ describe("local reset: wipe at launch", () => {
     }
   });
 
-  it("treats a marker it cannot parse as a pending reset", async () => {
+  it("never wipes on a marker that is not a complete reset request", async () => {
+    for (const content of [
+      "{not json",
+      "",
+      "null",
+      JSON.stringify({ version: 1, requestedAt: "2026-11-19T10:00:00.000Z" }),
+      JSON.stringify({ version: 2, requestedAt: "2026-11-19T10:00:00.000Z", build: "installed" }),
+      JSON.stringify({ version: 1, requestedAt: "not a date", build: "development" }),
+      JSON.stringify({ version: 1, build: "development" }),
+    ]) {
+      const dir = await tempDir();
+      try {
+        writeFileSync(join(dir, LOCAL_RESET_MARKER), content);
+        writeFileSync(join(dir, "tokens.bin"), "x");
+        const report = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", home: dir, env: {} });
+        assert.equal(report?.status, "incomplete", content);
+        assert.match(report?.failed[0]?.reason ?? "", /not a complete reset request, so nothing was removed/);
+        assert.ok(existsSync(join(dir, "tokens.bin")), content);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it("checks the folder itself when its path ends with a separator", async () => {
     const dir = await tempDir();
     try {
-      writeFileSync(join(dir, LOCAL_RESET_MARKER), "{not json");
-      writeFileSync(join(dir, "tokens.bin"), "x");
-      const report = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", home: dir, env: {} });
-      assert.equal(report?.status, "completed");
-      assert.deepEqual(readdirSync(dir), []);
+      const shared = join(dir, "shared");
+      mkdirSync(shared);
+      seedDataFolder(shared, DEV_MARKER);
+      const linked = join(dir, "profile-link");
+      symlinkSync(shared, linked);
+      assert.equal(withoutTrailingSeparators(`${linked}/`), linked);
+      assert.equal(withoutTrailingSeparators("/"), "/");
+      assert.equal(withoutTrailingSeparators("C:\\"), "C:\\");
+      assert.equal(localResetLinkCheck(`${linked}/`).dataFolderIsLink, true);
+      const report = runPendingLocalReset({ userDataDir: `${linked}/`, packaged: false, platform: "linux", home: dir, env: {} });
+      assert.equal(report?.status, "incomplete");
+      assert.ok(existsSync(join(shared, "state.json")));
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
