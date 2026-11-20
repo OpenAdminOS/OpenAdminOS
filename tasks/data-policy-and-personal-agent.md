@@ -197,13 +197,32 @@ built on top of them are planned separately.
   destination (for Teams, the team and channel), the organization, Confirm
   and Cancel, and a note that every message is confirmed on its own.
 
+**Review findings adopted (2026-11-19, round 7 of the design review)**
+- Voice recovery is computed from the decision the rules in force now make on
+  the whole withheld transfer, every class it carries, never from the class
+  that withheld it. When Security moves from Block to Mask while
+  Configuration, also carried by the 09:43 transfer, moves to Block, the
+  transfer would still be withheld, so the notice offers no Ask again. The
+  recorded outcome stays as it was.
+- Only identity, device and security names and identifiers are restored on
+  the way back. Activity and configuration placeholders, when those classes
+  are masked, stay masked like credential ones in the answer, the transcript
+  and tool parameters.
+- Withholding the whole profile block at session start when a rule blocks a
+  class it carries is a proposal pending the maintainer's confirmation. The
+  alternative is per note: leave out only the instructions and notes that
+  carry the blocked class and send the rest. While the call has no profile,
+  the withheld session start says the call opened without it.
+
 ## Why
 
 Today the choice is binary. A local model keeps tenant data on the device, a
 hosted model is stronger but sees everything. Data policy adds a middle path:
-hosted quality without the model seeing who or what the data is about, with
-values the app recognizes as credentials never reaching a hosted model in clear
-text. Purview cannot do this for us because it
+the rules decide which values a hosted model receives as is, which are masked
+and which are withheld. Identities the app recognizes can be masked, while
+configuration values and names the app does not recognize, such as a person
+typed for the first time, may still be sent. Values the app recognizes as
+credentials never reach a hosted model in clear text. Purview cannot do this for us because it
 sees opaque text after the fact; we know the shape of every response at the
 moment it arrives.
 
@@ -383,8 +402,13 @@ the IT policy file.
       session start request: the profile block with standing instructions and
       confirmed notes that `nova.ts` sends when the OpenAI session opens goes
       through the same scan and rules as every later context transfer, and the
-      voice popover lists it as its own transfer. When a rule blocks a class
-      it carries, the session starts without that profile block and says so. The voice model speaks roles
+      voice popover lists it as its own transfer. Proposed 2026-11-19,
+      pending the maintainer's confirmation: when a rule blocks a class it
+      carries, the session opens without the whole profile block, and the
+      voice model, the transcript and the popover say the call opened without
+      the profile. The alternative is per note: leave out only the standing
+      instructions and confirmed notes that carry the blocked class and send
+      the rest. The voice model speaks roles
       where a value is masked, and the transcript shows real values. When a
       rule blocks a context transfer, the session continues without that
       context and the voice model and the transcript say what was withheld.
@@ -399,9 +423,10 @@ the IT policy file.
       "Next transfer under current rules", and the recovery for withheld
       context. The withheld notice names the transfer, what it carried and the
       rule that withheld it, from the record; its recovery is evaluated
-      against the current rules by the same test as a blocked prompt, and
-      offers Ask again when that rule no longer blocks the context (mockup 34,
-      A and B). What the admin says aloud goes to the hosted
+      against the current rules by the same test as a blocked prompt, on the
+      decision the current rules make for the entire transfer (every class it
+      carries, not only the class that withheld it), and offers Ask again only
+      when that decision would send the context (mockup 34, A and B). What the admin says aloud goes to the hosted
       voice provider as audio and is not gated (proposed 2026-11-19, pending
       confirmation); the hosted voice strip ("hears what you say"), the Data
       policy settings and the docs say so. Voice on this device keeps
@@ -441,12 +466,20 @@ the IT policy file.
    Block, while the next-transfer preview reads withheld; a transfer withheld
    under Block still reads withheld after the rule returns to Mask, and its
    recovery offers Ask again (renderer test).
+   The 09:43 transfer carries Security and Configuration and was withheld with
+   Security on Hosted at Block. When Security moves to Mask and Configuration
+   on Hosted moves to Block, the transfer still reads withheld by Security, the
+   next-transfer preview reads withheld by Configuration, and the recovery
+   offers no Ask again (renderer test).
 3. A test inspects the session start request `nova.ts` sends when the OpenAI
    session opens and shows that a recognized recovery key in a confirmed note
-   is masked one way as `[CREDENTIAL]` with Credential on Hosted at Mask, and
-   that the profile block is withheld with Credential on Hosted at Block, the
-   session starting without it. The voice popover lists the session start as
-   its own transfer (renderer test).
+   is masked one way as `[CREDENTIAL]` with Credential on Hosted at Mask.
+   Proposed 2026-11-19, pending the maintainer's confirmation: with Credential
+   on Hosted at Block the whole profile block is withheld, the session opens
+   without it, and the popover says the call opened without the profile; if
+   the per-note alternative is chosen instead, the test asserts that only the
+   note holding the recovery key is left out. The voice popover lists the
+   session start as its own transfer (renderer test).
 4. A test proves text from voice on this device goes through the request scan
    before a hosted reasoning call.
 5. A blocked prompt shows a designed error that names the class and offers
@@ -471,7 +504,10 @@ the IT policy file.
 - [ ] Rehydration on the way back: streaming with holdback for split tokens,
       before the agentic loop parses tool actions, and in `runLlmSkill` before a
       step result is stored. Only reversible placeholders are restored: identity,
-      device and security names and identifiers. Writes never receive tokens.
+      device and security names and identifiers. Activity and configuration
+      placeholders, when those classes are masked, are not restored: they stay
+      masked in the answer, the transcript and tool parameters, like credential
+      placeholders. Writes never receive tokens.
 - [ ] Credential placeholders are one way: a credential value is masked as
       `[CREDENTIAL]`, never rehydrated into a prompt, and stays `[CREDENTIAL]` in the answer, the transcript and tool
       parameters.
@@ -483,6 +519,10 @@ the IT policy file.
    parameters. In the same test a masked credential (a BitLocker recovery key)
    stays `[CREDENTIAL]` in the answer, in the transcript and in tool
    parameters: the test asserts the recovery key appears in none of the three.
+   With Activity and Configuration on Hosted set to Mask, a last check-in
+   ("2 Oct 08:14, Frankfurt") and a policy name ("Windows baseline 24H2") stay
+   `[ACTIVITY_1]` and `[CONFIG_1]` in the answer, the transcript and tool
+   parameters, while the device and user in the same record are restored.
 2. A token split across two stream chunks is restored correctly.
 3. A write plan built after an `llm` step contains no tokens.
 4. Follow-up questions in one conversation keep the same token for the same value.
