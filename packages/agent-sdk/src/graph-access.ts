@@ -214,8 +214,9 @@ const OWN_GRAPH_TEXT = /^(?:Microsoft Graph (?:denied|rejected|answered|responde
  * A sandboxed script agent's failure as earlier versions stored it: the
  * script's stderr, where a Node stack preamble (file and line, source line,
  * caret) can come before the thrown error's header. Only a header for a
- * brokered Graph request ("Error: graph.request: ...") is unwrapped; text
- * further down, such as a provider body that quotes a Graph error, is not.
+ * brokered Graph or connector request ("Error: graph.request: ...",
+ * "Error: connector.invoke: ...") is unwrapped; text further down, such as a
+ * provider body that quotes a Graph error, is not.
  */
 const SCRIPT_AGENT_FAILURE = /^MXC script agent "[^"\n]*" failed: /;
 const ERROR_HEADER = /^[A-Za-z]*Error: /;
@@ -227,7 +228,10 @@ function unwrapScriptAgentGraphError(raw: string): string {
   const headerAt = lines.findIndex((line) => ERROR_HEADER.test(line));
   if (headerAt < 0) return raw;
   const thrown = [lines[headerAt]!.replace(ERROR_HEADER, ""), ...lines.slice(headerAt + 1)].join("\n");
-  return thrown.startsWith("graph.request: ") ? thrown.slice("graph.request: ".length) : raw;
+  // A brokered connector call carries the connector's own Graph wording,
+  // which the stored text checks still require.
+  const brokered = thrown.match(/^(?:graph\.request|connector\.invoke): /)?.[0];
+  return brokered ? thrown.slice(brokered.length) : raw;
 }
 
 /**

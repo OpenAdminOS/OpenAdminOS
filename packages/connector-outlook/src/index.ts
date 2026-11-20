@@ -145,6 +145,7 @@ export const outlookConnector: ConnectorFactory<OutlookConnectorCapabilities> =
             return {
               healthy: false,
               message: error instanceof Error ? error.message : "Outlook health check failed.",
+              error,
             };
           }
         },

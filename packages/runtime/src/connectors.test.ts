@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import type { ConnectorInstance } from "@openadminos/agent-sdk";
-import { wrapConnector } from "./connectors.js";
+import { graphAccessDenialFromError, graphAccessDenialFromStoredText, type ConnectorInstance } from "@openadminos/agent-sdk";
+import { preflightConnectors, wrapConnector } from "./connectors.js";
 
 function options(confirmInvocation?: () => Promise<{ approved: true }>) {
   return {
@@ -73,9 +73,6 @@ describe("connector invocation confirmation", () => {
     assert.equal(invoked, false);
   });
 });
-
-import { graphAccessDenialFromError, graphAccessDenialFromStoredText } from "@openadminos/agent-sdk";
-import { preflightConnectors } from "./connectors.js";
 
 describe("required connector preflight", () => {
   it("keeps the Teams health check's Graph 403 as the cause of the preflight failure", async () => {

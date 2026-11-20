@@ -237,11 +237,6 @@ export function readOnlyRevalidationTransport(
   };
 }
 
-/**
- * A failure of a write run before apply started, such as the model, the
- * Graph sign-in or a connector failing for the replan: nothing was
- * written, so the error says so unless it already does.
- */
 /** A plan that could not be checked again keeps the Graph denial of that check. */
 class PlanCheckFailedError extends Error {
   constructor(message: string, readonly accessDenial: GraphAccessDenial | undefined) {
@@ -259,6 +254,11 @@ function graphFailureFields(error: unknown): Pick<RunRecord, "accessDenial" | "g
   return { ...(accessDenial ? { accessDenial } : {}), graphDenialChecked: true };
 }
 
+/**
+ * A failure of a write run before apply started, such as the model, the
+ * Graph sign-in or a connector failing for the replan: nothing was
+ * written, so the error says so unless it already does.
+ */
 function notAppliedError(error: unknown): unknown {
   const message = error instanceof Error ? error.message : String(error);
   if (/nothing was applied/i.test(message)) return error;

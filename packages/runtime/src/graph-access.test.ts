@@ -188,6 +188,10 @@ describe("Graph access denial classification", () => {
     assert.equal(errorComesFromGraph(graph), true);
     const nightly = 'MXC script agent "intune-device-posture-auditor" failed: Error: graph.request: Microsoft Graph denied access to GET /deviceManagement/managedDevices (HTTP 403). OpenAdminOS cannot determine the cause.';
     assert.equal(graphAccessDenialFromStoredText(nightly)?.cause, "unknown");
+    const teams = 'MXC script agent "community-notifier" failed: Error: connector.invoke: Microsoft Graph rejected the request (HTTP 403). The signed-in admin lacks the required Teams scopes.';
+    assert.equal(graphAccessDenialFromStoredText(teams)?.cause, "unknown");
+    const slack = 'MXC script agent "community-notifier" failed: Error: connector.invoke: Slack responded with HTTP 403: missing_scope';
+    assert.equal(graphAccessDenialFromStoredText(slack), undefined);
     const llm = 'MXC script agent "intune-device-posture-auditor" failed: Error: llm.complete: Ollama responded with HTTP 403: Forbidden';
     // A provider failure whose body quotes a brokered Graph error.
     const quoted = 'MXC script agent "intune-device-posture-auditor" failed: file:///agent.mjs:151\n    throw new Error(`${method}: ${message}`);\n          ^\n\nError: llm.complete: Ollama responded with HTTP 403: upstream said\nError: graph.request: Graph responded with HTTP 403 for https://graph.microsoft.com/v1.0/users: {}';
