@@ -1589,4 +1589,46 @@ describe("Ollama context for an unpinned model", () => {
       globalThis.fetch = original;
     }
   });
+
+  it("keeps the size check's pin when the adapter's lookup answers without parameters for the same model", async () => {
+    const original = globalThis.fetch;
+    let shows = 0;
+    const ollama = scripted({ showBody: undefined, loaded: () => 65536, model: "partial-show" });
+    globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+      if (new URL(String(input)).pathname === "/api/show") {
+        shows += 1;
+        const revision = { modified_at: "2026-11-01T00:00:00Z" };
+        return new Response(JSON.stringify(shows === 1
+          ? { parameters: "num_ctx                        16384", model_info: unpinned.model_info, ...revision }
+          : { model_info: unpinned.model_info, ...revision }), { status: 200 });
+      }
+      return ollama.fetchImpl(input, init);
+    }) as typeof fetch;
+    try {
+      const llm = createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "partial-show" });
+      assert.equal(await llm.contextWindow?.(), 16384);
+      await llm.complete({ prompt: words(12000), maxTokens: 1000, enforceContextWindow: true });
+      assert.deepEqual(ollama.chats, [undefined]);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("checks a short agent run request against a pin below 2,048 tokens", async () => {
+    const original = globalThis.fetch;
+    const ollama = scripted({ showBody: { parameters: "num_ctx                        1024", model_info: unpinned.model_info } });
+    globalThis.fetch = ollama.fetchImpl;
+    try {
+      await assert.rejects(
+        createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "tiny-pin" }).complete({ prompt: words(1000), maxTokens: 500, enforceContextWindow: true }),
+        (error: unknown) => error instanceof ContextTooSmallError && error.failure.limitTokens === 1024,
+      );
+      assert.equal(ollama.chats.length, 0);
+      // Chat keeps the shortcut and sends the request.
+      await createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "tiny-pin-chat" }).complete({ prompt: words(1000), maxTokens: 500 });
+      assert.equal(ollama.chats.length, 1);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
 });
