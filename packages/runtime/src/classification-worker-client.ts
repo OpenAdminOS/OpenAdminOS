@@ -32,6 +32,34 @@ const WORKER_TIMEOUT_MS = 3_000;
 export const CLASSIFICATION_QUEUE_MAX_JOBS = 24;
 export const CLASSIFICATION_QUEUE_MAX_BYTES = 128 * 1024 * 1024;
 
+export interface ClassificationReservation {
+  release(): void;
+}
+
+class ClassificationAdmission {
+  private jobs = 0;
+  private bytes = 0;
+
+  reserve(bytes: number): ClassificationReservation | undefined {
+    if (this.jobs >= CLASSIFICATION_QUEUE_MAX_JOBS || bytes > CLASSIFICATION_QUEUE_MAX_BYTES - this.bytes) return;
+    this.jobs++;
+    this.bytes += bytes;
+    let released = false;
+    return { release: () => {
+      if (released) return;
+      released = true;
+      this.jobs--;
+      this.bytes -= bytes;
+    } };
+  }
+}
+
+const requestAdmission = new ClassificationAdmission();
+
+export function reserveClassificationRequest(bytes: number): ClassificationReservation | undefined {
+  return requestAdmission.reserve(bytes);
+}
+
 export class ClassificationWorkerRetiredError extends Error {}
 
 interface QueuedJob {
@@ -60,10 +88,9 @@ export class ClassificationWorker {
   private reply?: (result: WorkerReply) => void;
   private failure?: Error;
   private nextId = 0;
-  private queuedBytes = 0;
   readonly shards = new WeakMap<object, number>();
 
-  constructor() {
+  constructor(private readonly admission = new ClassificationAdmission()) {
     // The desktop uses compiled JavaScript. Runtime tests also exercise the
     // worker directly from TypeScript via the repository's tsx loader.
     const source = import.meta.url.endsWith(".ts");
@@ -133,14 +160,12 @@ export class ClassificationWorker {
     prepare: (client: ClassificationWorker) => Promise<{
       message: Extract<WorkerJob, { type: T }>; transfers?: ArrayBuffer[];
     }>,
-    signal?: AbortSignal,
+    signal?: AbortSignal, reservation?: ClassificationReservation,
   ): Promise<WorkerReplies[T]> {
     if (this.failure) return Promise.reject(this.failure);
     if (signal?.aborted) return Promise.reject(new Error("Request classification was cancelled."));
-    if (this.queue.size + Number(Boolean(this.active)) >= CLASSIFICATION_QUEUE_MAX_JOBS ||
-        bytes > CLASSIFICATION_QUEUE_MAX_BYTES - this.queuedBytes) {
-      return Promise.reject(new Error("Classification worker queue is full."));
-    }
+    const owned = reservation ? undefined : this.admission.reserve(bytes);
+    if (!reservation && !owned) return Promise.reject(new Error("Classification worker queue is full."));
     const jobSignal = signal && AbortSignal.any([signal]);
     return new Promise<WorkerReplies[T]>((resolve, reject) => {
       const finish = () => {
@@ -151,7 +176,7 @@ export class ClassificationWorker {
           delete this.active;
           delete this.reply;
         }
-        this.queuedBytes -= bytes;
+        owned?.release();
         if (!this.failure && !this.queue.size && !this.active) this.worker.unref();
         queueMicrotask(() => this.startNext());
       };
@@ -186,7 +211,6 @@ export class ClassificationWorker {
       // Include queueing, synchronization and the worker scan in the deadline.
       const timer = setTimeout(() => cancel(new Error("Classification worker timed out.")), WORKER_TIMEOUT_MS);
       jobSignal?.addEventListener("abort", abort, { once: true });
-      this.queuedBytes += bytes;
       this.worker.ref();
       this.queue.add(job);
       this.startNext();
@@ -252,7 +276,7 @@ let shutDown = false;
 
 export function requestWorker(): ClassificationWorker {
   if (shutDown) throw new Error("Classification worker shut down.");
-  return worker ??= new ClassificationWorker();
+  return worker ??= new ClassificationWorker(requestAdmission);
 }
 
 export async function retireClassificationWorker(): Promise<void> {

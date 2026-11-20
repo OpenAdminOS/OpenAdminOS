@@ -3,7 +3,7 @@ import { setImmediate as yieldToMain } from "node:timers/promises";
 import { DATA_CLASSES_BY_SENSITIVITY, maxDataClass, type DataClass, type DataClassCounts, type LlmOptions, type ProviderId, type RunLlmApi } from "@openadminos/agent-sdk";
 import { emptyDataClassCounts, graphClassificationSource, requestTextSpans, walkDataClasses, type ClassificationOptions, type TextSpan } from "./data-classification.js";
 import { GRAPH_FIELD_CLASSES_VERSION, type SecurityMaskRole } from "./graph-field-classes.js";
-import { CLASSIFICATION_QUEUE_MAX_JOBS, ClassificationSlice, requestWorker, syncIdentityShards, type ClassificationWorker } from "./classification-worker-client.js";
+import { CLASSIFICATION_QUEUE_MAX_JOBS, ClassificationSlice, requestWorker, reserveClassificationRequest, syncIdentityShards, type ClassificationReservation, type ClassificationWorker } from "./classification-worker-client.js";
 import { graphClassificationBytes } from "./graph-ingress-classification.js";
 import { TenantValueIndex } from "./tenant-value-index.js";
 
@@ -419,8 +419,22 @@ export class ClassificationLedger {
   private readonly observationLifetime = new AbortController();
   private readonly observations = new Set<Promise<void>>();
 
-  observeRequest(work: (signal: AbortSignal) => Promise<void>): void {
-    this.trackObservation(yieldToMain().then(() => work(this.observationLifetime.signal)));
+  observeRequest(reservation: ClassificationReservation, work: (signal: AbortSignal) => Promise<void>): void {
+    const signal = this.observationLifetime.signal;
+    const release = reservation.release;
+    if (signal.aborted) {
+      release();
+      return;
+    }
+    signal.addEventListener("abort", release, { once: true });
+    this.trackObservation(yieldToMain(undefined, { signal }).then(() => work(signal)).finally(() => {
+      signal.removeEventListener("abort", release);
+      release();
+    }));
+  }
+
+  observeMetadata(work: () => void): void {
+    this.trackObservation(Promise.resolve().then(work));
   }
 
   /** Mark pending evidence before returning its input to the caller. */
@@ -1026,7 +1040,7 @@ export class ClassificationLedger {
       unexamined: { ...result.unexamined, registrations, values: droppedValues } };
   }
 
-  async classifyProviderRequest(request: RequestText & Pick<LlmOptions, "signal">, evidence = this.captureEvidence()): Promise<RequestClassification> {
+  async classifyProviderRequest(request: RequestText & Pick<LlmOptions, "signal">, evidence = this.captureEvidence(), reservation?: ClassificationReservation): Promise<RequestClassification> {
     const length = (request.system?.length ?? 0) + request.prompt.length;
     const ledgerUnits = (ledger: ClassificationLedger) => ledger.disposed ? 0 : VALUE_BUDGET - ledger.remaining;
     const retainedUnits = ledgerUnits(this) + (this.transient ? ledgerUnits(this.transient) : 0) +
@@ -1038,7 +1052,7 @@ export class ClassificationLedger {
       if (slice.elapsed) await slice.yield();
       return this.withCurrentCoverage(result, evidence);
     }
-    return this.classifyLargeRequest(request, request.signal, evidence);
+    return this.classifyLargeRequest(request, request.signal, evidence, reservation);
   }
 
   private async syncLedger(client: ClassificationWorker, slice: ClassificationSlice): Promise<number | undefined> {
@@ -1085,7 +1099,7 @@ export class ClassificationLedger {
     return state.id;
   }
 
-  async classifyLargeRequest(request: RequestText, signal?: AbortSignal, evidence = this.captureEvidence()): Promise<RequestClassification> {
+  async classifyLargeRequest(request: RequestText, signal?: AbortSignal, evidence = this.captureEvidence(), reservation?: ClassificationReservation): Promise<RequestClassification> {
     const wasDisposed = this.disposed;
     let indexCurrent = () => true;
     const bytes = 128 + 2 * ((request.system?.length ?? 0) + request.prompt.length);
@@ -1113,7 +1127,7 @@ export class ClassificationLedger {
         } },
         transfers,
       };
-    }, signal);
+    }, signal, reservation);
     const classification = await unpackWorkerResult(result);
     if (!wasDisposed && this.disposed) throw new Error("Request classification evidence was released.");
     return indexCurrent() ? classification : { ...classification, coverageIncomplete: true, effectiveClass: "credential" };
@@ -1318,6 +1332,24 @@ export function withRequestClassification(
   providerId: ProviderId,
   observe: (event: RequestClassificationEvent, tenantIds: readonly string[]) => void,
 ): RunLlmApi {
+  type EventMetadata = Omit<RequestClassificationEvent, "classification" | "failed">;
+  const publish = (
+    ledger: ClassificationLedger, metadata: EventMetadata, result: RequestClassification, failed: boolean,
+  ) => {
+    if (ledger.expired) return;
+    try { observe({ ...metadata, failed, classification: result }, ledger.tenantIds); }
+    catch { /* Development observers cannot change provider behavior. */ }
+  };
+  const failure = (systemLength: number, promptLength: number) => {
+    const ranges: UnexaminedRange[] = [];
+    if (systemLength) ranges.push({ section: "system", start: 0, end: systemLength, reason: "failure" });
+    if (promptLength) ranges.push({ section: "prompt", start: 0, end: promptLength, reason: "failure" });
+    return classification([], ranges, 0, 0, 0, true);
+  };
+  const recordUnavailable = (
+    ledger: ClassificationLedger, metadata: EventMetadata, systemLength: number, promptLength: number,
+  ) => ledger.observeMetadata(() => publish(ledger, metadata, failure(systemLength, promptLength), true));
+
   const classify = (
     scoped: ClassificationLedger | undefined, method: RequestClassificationEvent["method"], options: LlmOptions, sequence: number,
   ) => {
@@ -1325,35 +1357,37 @@ export function withRequestClassification(
     if (!scoped) unscopedRequests++;
     const ledger = scoped ?? new ClassificationLedger();
     if (ledger.expired) return;
-    const { scopeId, tenantIds } = ledger;
+    const { scopeId } = ledger;
+    const metadata = { requestSequence: sequence, providerId, method, fieldMapVersion: GRAPH_FIELD_CLASSES_VERSION,
+      timestamp: new Date().toISOString(), ...(scopeId ? { scopeId } : {}), scopePresent: scoped !== undefined };
     const { prompt, system } = options;
-    const evidence = ledger.captureEvidence();
-    ledger.observeRequest(async scanSignal => {
-      let result: RequestClassification;
-      let failed = false;
-      try {
-        scanSignal.throwIfAborted();
-        result = await ledger.classifyProviderRequest({ prompt, system, signal: scanSignal }, evidence);
-      } catch {
-        failed = true;
-        const ranges: UnexaminedRange[] = [];
-        for (const [section, length] of [["system", system?.length ?? 0], ["prompt", prompt.length]] as const) {
-          if (length) ranges.push({ section, start: 0, end: length, reason: "failure" });
+    const systemLength = system?.length ?? 0;
+    const promptLength = prompt.length;
+    const reservation = reserveClassificationRequest(128 + 2 * (systemLength + promptLength));
+    if (!reservation) {
+      recordUnavailable(ledger, metadata, systemLength, promptLength);
+      return;
+    }
+    try {
+      const evidence = ledger.captureEvidence();
+      ledger.observeRequest(reservation, async scanSignal => {
+        try {
+          scanSignal.throwIfAborted();
+          const result = await ledger.classifyProviderRequest({ prompt, system, signal: scanSignal }, evidence, reservation);
+          publish(ledger, metadata, result, false);
+        } catch {
+          publish(ledger, metadata, failure(systemLength, promptLength), true);
         }
-        result = classification([], ranges, 0, 0, 0, true);
-      }
-      if (ledger.expired) return;
-      try {
-        observe({ requestSequence: sequence, providerId, method, fieldMapVersion: GRAPH_FIELD_CLASSES_VERSION, timestamp: new Date().toISOString(),
-          ...(scopeId ? { scopeId } : {}), scopePresent: scoped !== undefined,
-          failed, classification: result }, tenantIds);
-      } catch { /* Development observers cannot change provider behavior. */ }
-    });
+      });
+    } catch {
+      reservation.release();
+      recordUnavailable(ledger, metadata, systemLength, promptLength);
+    }
   };
   return {
-    available: llm.available,
-    defaultModel: llm.defaultModel,
-    streamsIncrementally: llm.streamsIncrementally,
+    get available() { return llm.available; },
+    get defaultModel() { return llm.defaultModel; },
+    get streamsIncrementally() { return llm.streamsIncrementally; },
     async complete(options) {
       const ledger = scopes.getStore();
       const sequence = ++requestSequence;

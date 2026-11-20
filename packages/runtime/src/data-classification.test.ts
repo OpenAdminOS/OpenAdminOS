@@ -9,7 +9,7 @@ import { GRAPH_CLASSIFICATION_FIXTURES } from "./graph-classification.fixtures.j
 import { fenceTenantData } from "./tenant-data.js";
 import { renderPromptTemplate } from "./template-engine.js";
 import { REQUEST_CLASSIFICATION_MAX_SECTION } from "./request-classification.js";
-import { CLASSIFICATION_QUEUE_MAX_BYTES, CLASSIFICATION_QUEUE_MAX_JOBS, ClassificationWorker } from "./classification-worker-client.js";
+import { CLASSIFICATION_QUEUE_MAX_BYTES, CLASSIFICATION_QUEUE_MAX_JOBS, ClassificationWorker, reserveClassificationRequest } from "./classification-worker-client.js";
 import { TenantValueIndex } from "./tenant-value-index.js";
 import { agentTemplateToRegistrySummary, parseAgentTemplate } from "./agent-template.js";
 
@@ -912,6 +912,56 @@ test("a stalled classifier cannot consume the provider deadline or replace its s
   assert.equal(events[0]?.classification.coverageIncomplete, true);
   assert.equal(events[0]?.classification.effectiveClass, "credential");
   assert.equal(events[0]?.classification.counts.credential, 0);
+});
+
+test("request observation reserves capacity before scheduling and cancels without starting the scan", async t => {
+  const ledger = new ClassificationLedger();
+  const events: RequestClassificationEvent[] = [];
+  const schedule = t.mock.method(ledger, "observeRequest");
+  const scan = t.mock.method(ledger, "classifyProviderRequest");
+  const request = { prompt: "The original provider request", system: "Original system" };
+  const llm = withRequestClassification({
+    available: true,
+    async complete(options) {
+      assert.equal(options, request);
+      return { text: "completed", model: "fixture" };
+    },
+    async *stream() {},
+  }, "ollama", event => events.push(event));
+  const dispatch = () => withClassificationScope(ledger, () => llm.complete(request));
+  const jobs = Array.from({ length: CLASSIFICATION_QUEUE_MAX_JOBS }, () => reserveClassificationRequest(1)!);
+  try {
+    assert.equal((await dispatch()).text, "completed");
+    await ledger.waitForObservations();
+    assert.equal(schedule.mock.callCount(), 0);
+    for (const job of jobs) job.release();
+
+    const bytes = reserveClassificationRequest(CLASSIFICATION_QUEUE_MAX_BYTES)!;
+    try {
+      await dispatch();
+      await ledger.waitForObservations();
+      assert.equal(schedule.mock.callCount(), 0);
+    } finally { bytes.release(); }
+
+    const prior = Array.from({ length: CLASSIFICATION_QUEUE_MAX_JOBS - 1 }, () => reserveClassificationRequest(1)!);
+    try {
+      await dispatch();
+      assert.equal(schedule.mock.callCount(), 1);
+      assert.equal(reserveClassificationRequest(1), undefined);
+      ledger.dispose();
+      const reused = reserveClassificationRequest(1);
+      assert.ok(reused);
+      reused.release();
+      await ledger.waitForObservations();
+    } finally { for (const job of prior) job.release(); }
+    assert.equal(scan.mock.callCount(), 0);
+    assert.deepEqual(events.map(event => [
+      event.failed, event.classification.effectiveClass, event.classification.unexamined.textCodeUnits,
+    ]), Array.from({ length: 2 }, () => [true, "credential", request.system.length + request.prompt.length]));
+  } finally {
+    for (const job of jobs) job.release();
+    ledger.dispose();
+  }
 });
 
 test("the classification queue bounds job count and unlinks cancelled jobs before the active scan settles", async t => {
