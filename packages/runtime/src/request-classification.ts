@@ -181,6 +181,8 @@ export interface WorkerResult {
 }
 
 const VALUE_BUDGET = 2_000_000;
+const PENDING_RENDER_UNITS = 256_000;
+const PENDING_RENDER_COUNT = 512;
 export const REQUEST_CLASSIFICATION_MAX_SECTION = 16_000_000;
 const TEXT_CHUNK = 128_000;
 const MATCH_BUDGET = 200_000;
@@ -413,6 +415,10 @@ export class ClassificationLedger {
   private dropped = 0;
   private incompleteRegistrations = 0;
   private pendingRegistrations = 0;
+  private registrationGeneration = 0;
+  private pendingRenderUnits = 0;
+  private readonly pendingRenderings: Array<[Scalar, Scalar, RenderProvenance]> = [];
+  private resolvingRenderings = false;
   private disposed = false;
   private discardedIncompleteEvidence = false;
   private expiry?: ReturnType<typeof setTimeout>;
@@ -445,10 +451,14 @@ export class ClassificationLedger {
       return Promise.resolve();
     }
     this.pendingRegistrations++;
+    this.registrationGeneration++;
     const signal = this.observationLifetime.signal;
     const observation = yieldToMain(undefined, { signal }).then(() => work(signal))
       .catch(() => { if (!this.disposed) this.incompleteRegistrations++; })
-      .finally(() => { this.pendingRegistrations--; });
+      .finally(async () => {
+        this.pendingRegistrations--;
+        await this.resolveRenderings();
+      });
     this.trackObservation(observation);
     return observation;
   }
@@ -504,6 +514,8 @@ export class ClassificationLedger {
     clearTimeout(this.expiry);
     this.disposed = true;
     this.observationLifetime.abort();
+    this.pendingRenderings.length = 0;
+    this.pendingRenderUnits = 0;
     this.values.clear();
     for (const keys of this.byClass.values()) keys.clear();
     this.anchors.length = 0;
@@ -546,7 +558,7 @@ export class ClassificationLedger {
 
   private get replayEvidenceIncomplete(): boolean {
     return this.disposed || this.dropped > 0 || this.incompleteRegistrations > 0 || this.pendingRegistrations > 0 ||
-      this.discardedIncompleteEvidence || this.transient?.replayEvidenceIncomplete === true;
+      this.pendingRenderings.length > 0 || this.discardedIncompleteEvidence || this.transient?.replayEvidenceIncomplete === true;
   }
 
   discardTransient(): void {
@@ -638,12 +650,50 @@ export class ClassificationLedger {
 
   /** No pattern-table scans are needed to look up the class of a transformed scalar. */
   rendered(original: unknown, fragment: Scalar, provenance: RenderProvenance): void {
-    try { this.recordRendering(original, fragment, provenance); }
+    if (this.disposed || (typeof original !== "string" && typeof original !== "number" && typeof original !== "boolean")) return;
+    try {
+      if (this.pendingRegistrations || this.pendingRenderings.length) {
+        const units = (typeof original === "string" ? original.length : 16) +
+          (typeof fragment === "string" ? fragment.length : 16) + 64 + (provenance.key?.length ?? 0) +
+          (provenance.before?.length ?? 0) + (provenance.after?.length ?? 0) + (provenance.fence?.length ?? 0);
+        if (this.pendingRenderUnits + units > PENDING_RENDER_UNITS || this.pendingRenderings.length >= PENDING_RENDER_COUNT) {
+          this.incompleteRegistrations++;
+        } else {
+          this.pendingRenderUnits += units;
+          this.pendingRenderings.push([original, fragment, provenance]);
+        }
+        if (provenance.jsonPrefix) return;
+      }
+      this.recordRendering(original, fragment, provenance);
+    }
     catch { this.incompleteRegistrations++; }
   }
 
-  private recordRendering(original: unknown, fragment: Scalar, provenance: RenderProvenance): void {
-    if (this.disposed || (typeof original !== "string" && typeof original !== "number" && typeof original !== "boolean")) return;
+  private async resolveRenderings(): Promise<void> {
+    if (this.resolvingRenderings || this.pendingRegistrations || !this.pendingRenderings.length) return;
+    this.resolvingRenderings = true;
+    try {
+      const slice = new ClassificationSlice();
+      let generation = this.registrationGeneration;
+      for (let index = 0;;) {
+        if (this.pendingRegistrations || this.disposed) return;
+        if (generation !== this.registrationGeneration) {
+          generation = this.registrationGeneration;
+          index = 0;
+        }
+        if (index === this.pendingRenderings.length) break;
+        try { this.recordRendering(...this.pendingRenderings[index++]!); }
+        catch { this.incompleteRegistrations++; }
+        if (slice.elapsed) await slice.yield();
+      }
+      this.pendingRenderings.length = 0;
+      this.pendingRenderUnits = 0;
+    } finally {
+      this.resolvingRenderings = false;
+    }
+  }
+
+  private recordRendering(original: Scalar, fragment: Scalar, provenance: RenderProvenance): void {
     if (typeof fragment === "string" && !fragment.trim()) return;
     if (provenance.fence && typeof original === "string" && typeof fragment === "string") {
       const replays = this.historyReplays.get(original);
@@ -676,8 +726,9 @@ export class ClassificationLedger {
     }
     if (provenance.fence && typeof fragment === "string") {
       const entry = owner.add(original, best, true);
-      if (entry && owner.reserve(64, entry.kind)) {
-        entry.cost += 64;
+      const recorded = entry?.fenceIds?.has(provenance.fence);
+      if (entry && (recorded || owner.reserve(64, entry.kind))) {
+        if (!recorded) entry.cost += 64;
         (entry.fenceIds ??= new Set()).add(provenance.fence);
         owner.fences.set(provenance.fence, { body: fragment, evidence: best });
         owner.workerState?.dirty.add(original);
@@ -982,7 +1033,8 @@ export class ClassificationLedger {
     }
     return { retained, historyFences, promptReplay: this.promptReplay,
       dropped: this.dropped + (this.transient?.dropped ?? 0),
-      registrations: this.pendingRegistrations + this.incompleteRegistrations + (this.transient?.incompleteRegistrations ?? 0),
+      registrations: this.pendingRegistrations + this.pendingRenderings.length +
+        this.incompleteRegistrations + (this.transient?.incompleteRegistrations ?? 0),
       incomplete: this.disposed || this.identityIndex?.isComplete?.() === false,
       identityIndex: this.disposed ? undefined : this.identityIndex,
     };

@@ -121,6 +121,53 @@ it("classifies the exact clipped Graph script without changing either request", 
   finally { store.close(); await rm(dir, { recursive: true, force: true }); }
 });
 
+it("keeps a clipped Graph credential classified after deferred ingress settles", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "chat-classification-key-"));
+  const store = seededStore(dir);
+  const ledger = new ClassificationLedger();
+  try {
+    const path = "/applications";
+    const key = "opaque fixture value ".repeat(45);
+    const clip = key.slice(0, 800) + "...";
+    const tools = toolContext(store);
+    tools.grantedScopes = new Set([...tools.grantedScopes, "Application.Read.All"]);
+    tools.graphForScopes = async () => ({
+      request: async () => ({ value: [{ id: "fixture-app", keyCredentials: [{ key }] }] }),
+      listManagedDevices: async () => [],
+      retireManagedDevice: async () => { throw new Error("Unexpected write"); },
+    });
+    const requests: LlmOptions[] = [];
+    const events: RequestClassificationEvent[] = [];
+    const llm: RunLlmApi = { available: true, async complete(request) {
+      requests.push(request);
+      if (requests.length === 1) return { model: "test", text: JSON.stringify({ tool: "graph_get", params: { path } }) };
+      assert.ok(request.prompt.includes(clip));
+      assert.ok(!request.prompt.includes(key));
+      if (requests.length === 2) {
+        assert.equal(ledger.classifyRequest(request).coverageIncomplete, true);
+        await ledger.waitForObservations();
+        return { model: "test", text: '{"tool":"list_cached_resources","params":{}}' };
+      }
+      return { model: "test", text: '{"final":true,"answer":"Reviewed."}' };
+    }, async *stream() {} };
+    const result = await withClassificationScope(ledger, () =>
+      runAgenticChat({ ...baseInput(store, withRequestClassification(llm, "ollama", e => events.push(e))), tools }));
+    assert.equal(result.ok, true);
+    await ledger.waitForObservations();
+    assert.equal(requests.length, 3);
+    const observation = events.find(event => event.requestSequence === Math.max(...events.map(e => e.requestSequence)));
+    assert.ok(observation);
+    assert.equal(observation.classification.coverageIncomplete, false);
+    assert.equal(observation.classification.effectiveClass, "credential");
+    assert.ok(observation.classification.spans.some(span => span.section === "prompt" && span.kind === "credential" &&
+      span.source === `graph:${path}` && requests[2]!.prompt.slice(span.start, span.end) === clip));
+  } finally {
+    ledger.dispose();
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 it("classifies the fenced Splashtop organization name in the first model request", async () => {
   const dir = await mkdtemp(join(tmpdir(), "chat-classification-organization-"));
   const store = seededStore(dir);
