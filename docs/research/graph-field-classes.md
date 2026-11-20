@@ -1705,7 +1705,7 @@ Notes:
 | managedDevices (full default projection) | verified | 2 | 10 | 26 | 8 | 79 | 0 | 6 |
 | entraDevices | verified | 0 | 0 | 3 | 1 | 4 | 0 | 1 |
 | users | verified | 0 | 6 | 0 | 8 | 5 | 0 | 2 |
-| groups | verified | 0 | 0 | 0 | 0 | 6 | 0 | 2 |
+| groups | verified | 0 | 3 | 0 | 0 | 5 | 0 | 1 |
 | deviceCompliancePolicies | verified | 0 | 0 | 0 | 0 | 6 | 0 | 1 |
 | deviceConfigurations (cache $select) | verified | 0 | 0 | 0 | 0 | 7 | 0 | 1 |
 | configurationPolicies | verified | 0 | 0 | 0 | 0 | 9 | 0 | 1 |
