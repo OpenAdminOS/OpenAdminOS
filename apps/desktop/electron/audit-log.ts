@@ -217,6 +217,23 @@ export class AuditLogStore {
     this.loadPending();
   }
 
+  /**
+   * Reset OpenAdminOS committed: the side files (anchor and pending file)
+   * are written by path, and the folder at that path may no longer be the
+   * one being reset, so they are not written again. The reset removes the
+   * whole log, so events held in memory only are dropped with it.
+   */
+  freezeSideFiles(): void {
+    this.sideFilesFrozen = true;
+  }
+
+  /** A reset refused after all: the side files are written again. */
+  unfreezeSideFiles(): void {
+    this.sideFilesFrozen = false;
+  }
+
+  private sideFilesFrozen = false;
+
   /** Tries once more to save results only in memory, then closes the database. */
   close(): void {
     if (this.closed) return;
@@ -447,6 +464,9 @@ export class AuditLogStore {
 
   /** Deletes rows past the retention window, oldest first. Returns how many. */
   pruneExpired(): number {
+    // A prune must move the anchor with the rows it deletes; while the side
+    // files are frozen it would leave the anchor behind, so none runs.
+    if (this.sideFilesFrozen) return 0;
     const remove = this.db.prepare(
       `DELETE FROM audit_log
        WHERE seq = (SELECT MIN(seq) FROM audit_log) AND recorded_at <= ${RETENTION_CUTOFF_SQL}`,
@@ -552,7 +572,7 @@ export class AuditLogStore {
    * once the admin has moved it away, the next try writes a new one.
    */
   private persistPending(): void {
-    if (!this.pendingPath) return;
+    if (!this.pendingPath || this.sideFilesFrozen) return;
     if (this.pendingUnreadable) {
       if (existsSync(this.pendingPath)) {
         this.pendingOnDisk = this.pending.length === 0;
@@ -596,7 +616,7 @@ export class AuditLogStore {
    * removed, which an empty table stays chained to.
    */
   private writeAnchor(emptiedAfter?: string): void {
-    if (!this.anchorPath) return;
+    if (!this.anchorPath || this.sideFilesFrozen) return;
     const first = this.db.prepare("SELECT seq, previous_sha256 FROM audit_log ORDER BY seq ASC LIMIT 1").get() as { seq: number; previous_sha256: string } | undefined;
     const last = this.db.prepare("SELECT seq, sha256 FROM audit_log ORDER BY seq DESC LIMIT 1").get() as { seq: number; sha256: string } | undefined;
     const empty = emptiedAfter ?? AUDIT_CHAIN_START_HASH;

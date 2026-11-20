@@ -53,3 +53,23 @@ Format:
 **Why:** For PR #205 two WebFetch summaries of docs.github.com said Fusion Max was not included in Copilot Pro+. The github/docs source shows Pro+ includes it. The wrong plan names shipped in the unavailable-tier reason and the docs until a reviewer (Muse, round 2) checked the source; a Pro user would have been told to buy a larger plan than needed.
 
 **How to apply:** Any user-facing sentence naming plans, tiers, prices or regions gets a source-level check, and a test that asserts the exact sentence.
+
+---
+
+## Never load a local model on the maintainer's Mac
+
+**Pattern:** Live app checks never load an Ollama or LM Studio model: no `ollama run`, no `/api/chat` or `/api/generate`, no profile with a local provider that could answer or embed. Use a hosted provider, and check `ollama ps` after any dev-build launch.
+
+**Why:** Loading a local model makes the machine unusable. The PR #212 end-to-end check launched a dev build whose seeded profile had Ollama active; nothing was loaded, but the maintainer made the rule explicit on 2026-11-19.
+
+**How to apply:** Seed end-to-end profiles with a hosted provider or none, put the rule in every brief for an implementer or reviewer that may launch the app, and run `ollama stop <model>` at once if one is loaded.
+
+---
+
+## Do not edit a worktree while a reviewer is reading it
+
+**Pattern:** While a delegated reviewer reviews a commit in the shared worktree, keep the tree at that commit: write fixes for findings from other reviewers into a patch outside the tree (or wait), and apply them after every reviewer of the round has reported.
+
+**Why:** In PR #212 I edited files during Muse's rounds 8, 10 and 15 although the brief promised an untouched tree; Muse saw mixed states, one test run failed on a half-applied change, and its results had to be qualified.
+
+**How to apply:** After starting a review round, do not touch tracked files until all reviewers of that round report. If a finding arrives early, save the fix with `git diff > <scratchpad>/patch` and `git checkout -- .`, or prepare it only in notes. Before the first edit after any reviewer reports, list which reviewers of the round are still running and edit only when none is; it slipped again in round 26 when one report arrived and the fix felt ready.

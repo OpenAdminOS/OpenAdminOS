@@ -2562,6 +2562,324 @@ or logging noisy console warnings. That state
 is for renderer-only development; tenant-connected testing belongs in the
 Electron window.
 
+### Reset OpenAdminOS and uninstall (2026-11-19)
+
+Removing the app does not remove its data, so a reinstall restored tenant
+access with no sign-in (tester finding, 18 Nov, macOS). Settings > Data has
+**Reset OpenAdminOS**: a product modal with the data folder, what is removed and
+what stays (the enterprise application and admin consent in each tenant, the IT
+`policy.json`, exports), and the typed phrase `RESET OPENADMINOS`, checked again
+in the main process. The impact list scrolls and the buttons stay in view at
+the smallest window height; a refusal from the main process is shown in full.
+Mockup: `docs/mockups/34-local-reset.html`.
+
+- **Two phases.** The request refuses while a confirmed write run is applying
+  (also a cancelled one, or one whose organization was disconnected, while
+  its apply has not settled; tracked in memory, not in run history), while
+  any other run is running or queued, or a cancelled or disconnected run's
+  work has not settled (a run can send through a connector after its
+  approval), while a confirmation, a run start, a Nova send or a report
+  delivery pass is in flight. After the request no run starts, Nova sends
+  nothing more and deliveries are skipped. From the request
+  on, runs (including gateway, Splashtop and rollback plans), Nova sends,
+  WhatsApp test sends and report deliveries are refused by the reset flag,
+  which a refused request lifts; a schedule that meets it waits and records
+  no failure. Only after the marker is written are connector approvals
+  declined ("Nothing was sent") and every organization closed the way
+  Disconnect closes one, so a refused request never declines an approval or
+  stops work; the shutdown waits for leased work within its bound, and from then on refuses new confirmations
+  until the restart. It writes `local-reset-pending.json` into the data folder
+  first; the rename is the commit point (if it fails, nothing changed and the
+  modal says so; a failed folder flush after it is only logged). It then turns off the OS
+  scheduler and the menu bar login item (installed builds), stops the gateway
+  and MCP servers and drains every organization's work with a bounded wait
+  (the SQLite databases stay open until the process exits), and relaunches.
+- **No sign-out before the restart** (decided in review round 22; the brief
+  listed it as a phase 1 step). Signing out rewrites the token caches in
+  place, and that rewrite cannot be bound to the folder the reset was
+  accepted for: a folder swapped in between the check and the write would
+  have its caches rewritten. The token files are removed by the launch wipe
+  before anything can read them, and from the marker on no organization
+  starts new work, so the sign-ins are not used again either way. From the
+  start of the checks until the restart, a missing `state.json` is never
+  created (the normal first launch rule is off; reads fall back to the state
+  the process last knew), and closing and draining organizations uses that
+  in-memory state, not the file. From the marker's rename (before its
+  folder flush is awaited) every state write is refused when it runs, and
+  again before its own rename and each Windows retry of it ("Nothing was saved"), a write queued before
+  that included, before any audit record: an atomic write would put this
+  process's state over whatever folder is at the path now. Before the
+  marker writes go on as usual, so a refused reset loses nothing. The
+  SQLite stores write through handles opened on the original files. The restart puts the sandbox flag in the
+  environment back to how the launch found it, so the setting removed with
+  `state.json` does not come back as the next launch's default.
+- **Linux binds the marker to the device too** (review round 26). A Btrfs
+  snapshot restored as the home keeps every folder's inode and birth time,
+  so on Linux the device number must also match; a mismatch, for example a
+  Btrfs device number that changed with a reboot while a reset was
+  incomplete, stops it with nothing removed and the usual way out (remove
+  the marker, reset again).
+- **Accepted limit: a write already running when the reset commits**
+  (raised in review round 26, declined; the reviewer withdrew it in round
+  27). A state or token cache write that
+  started before the reset request, if the data folder is replaced within
+  the milliseconds it runs, lands in the replacement (a state write checks
+  the commit again right before its rename, so the window is that rename;
+  a token cache write keeps its full duration). That exposure is the
+  running app's own, with or without a reset; draining writes before the
+  marker would only move the window to writes started before the drain.
+  What the reset guarantees: nothing it does, and no state write that
+  starts after the marker, reaches a folder swapped in.
+- **Accepted limit: a folder replaced during one removal** (raised in review
+  round 23, declined). The folder's identity is checked before every
+  top-level removal and before every write, but a recursive removal and the
+  marker's file creation resolve the path again while they run, and Node has
+  no removal relative to an open folder handle. A process that replaces the
+  data folder within those milliseconds could have one top level entry
+  (which can be a whole folder tree) removed from the replacement. Only a process of the same account can do that, and it
+  could remove those files itself; a restore that puts an OpenAdminOS
+  profile back at the OpenAdminOS data path loses at most that one entry of
+  a profile the admin asked to reset. Closing the window entirely would need
+  native code; the per-entry check keeps it to one entry. Accepted by the
+  reviewers in round 24.
+- **Wipe at launch.** At the top of the main script, after the single-instance
+  lock and before `whenReady`, so before Chromium reads Local State (the Windows
+  safeStorage key) and before any store, session or safeStorage use: every entry
+  of the data folder except `policy.json`, the marker and Chromium's lock files.
+  The audit anchor and pending files go after everything else, the database
+  included, so a database that could not be removed keeps its anchor. An
+  entry that cannot be removed keeps the entries named after it (a locked
+  `openadminos.db` keeps its `-wal` and `-shm`), so the next try finds an
+  intact database; everything else still goes. On Windows an entry holding
+  a read-only file with more than one hard link stays too, and is listed: a
+  hard link shares its attributes, and removing a read-only file clears the
+  attribute first, which would make a backup's copy writable (a folder that
+  cannot be listed stays too, since its contents cannot be checked). The
+  check can take seconds on redirected storage, so the data folder and the
+  entry are checked again right after it, and the wipe stops if either was
+  replaced meanwhile (an entry without inode or birth time counts as
+  replaced). Cache folders outside the data folder get the same checks, as
+  a warning: each one's identity is taken before its link, mount and
+  hard-link checks and compared after the last, right before the removal.
+  The data folder itself is checked again before every step outside it
+  (inside the scheduler step right before the LaunchAgent bootout, the plist
+  removal and the task deletion; each Keychain deletion attempt; the
+  preferences; each cache folder), and the reset stops there, incomplete,
+  if it was replaced or holds anything but the kept files again (its
+  identity is checked before and after it is listed): a profile
+  restored meanwhile, as a new folder or file by file into the same one,
+  keeps its Keychain key, and the files that came back are listed. The same
+  check runs once more after the last step, before the cleanup is recorded
+  as done, so files that came back during it make the next try repeat all
+  of it. A restore that lands between the last check and the `security`
+  command itself remains (accepted, the same single operation limit). A
+  cache folder's identity is compared last, after this check and the Linux
+  mount check, right before its removal. From the commit on, the audit
+  log's side files (anchor and pending file, written by path) are not
+  written again, also not when it closes, and no expired rows are pruned
+  (a prune must move the anchor with them); events kept only in memory go
+  with the log the reset removes. A refused reset unfreezes them. The
+  Microsoft token caches are held the same way from the commit: no write,
+  no clear, and a read returns an empty cache without opening the file (a
+  read that cannot decrypt would otherwise delete it), so a sign-in
+  refresh that was waiting on the network when the reset started never
+  writes or deletes a token file afterwards. The commit also seals the data
+  folder for the rest of the process: every secret store (provider and
+  connector secrets, Splashtop tokens, the Nova key, the token caches)
+  neither reads a file (a decrypt failure would delete it), nor writes nor
+  removes one, and each checks the seal again right before a write or a
+  delete that follows an await. Every WhatsApp Web client of the process
+  (also one a delivery created) stops at the commit and opens no socket
+  again; its credential and key writes and its auth folder removals check
+  the stop too. The other writers of the data folder check the seal right
+  before their last write, rename or removal: the registry cache, downloaded
+  agent manifests (no rollback once sealed), agent uninstall, the
+  documentation index promotion and the saved window state. Work that
+  reaches a network service and then writes there (WhatsApp Web status,
+  login, disconnect, groups; Splashtop connect, test, rotate, disconnect;
+  registry refresh; agent install, update, uninstall; documentation index
+  install) is refused once a reset has started, and one under way holds the
+  reset like a connector send; the background registry refresh skips while
+  a reset is requested. Agent draft saves and self-training approvals,
+  rejections and resets are gated the same way. A documentation index
+  download is refused once a reset has started but does not hold one: the
+  commit aborts it, and it stops by itself after 30 minutes.
+- **Data folder guard** (review round 36). Beneath the writers' own checks,
+  the commit wraps every path based change through Node's file system API
+  in the main process (writes, appends, folders, removals, renames, copies,
+  links, mode and time changes, opens for writing, write streams, in their
+  promise, callback and sync forms, synced into ES module imports so that
+  dependencies such as Baileys are covered): any path inside the data
+  folder, as written or as the system resolves it through links, is refused
+  with "OpenAdminOS is resetting and restarts in a moment. Nothing was
+  saved." (`EROFS`; a write stream fails with that error), except the
+  reset's own marker and its temporary files directly in the folder (by
+  exact name and temporary file pattern), so the request can still add its
+  warnings. No new hard link to a file inside can be made; a hard link that
+  already exists outside the folder reaches the file without the guard
+  seeing it (accepted, nothing in the app writes through one). A refused write nobody awaited is
+  logged while the seal holds. Work that writes on its own (index downloads,
+  WhatsApp Web) stops before the guard is installed. A writer that captured
+  file system functions at load is not seen: electron-updater is the one
+  known, so the updater stops for good at the commit, a channel switch does
+  not start it again, and only a check already running can still write its
+  staging id, which holds no tenant data. Changes through a
+  handle opened earlier (SQLite, Chromium's own storage) are not paths and
+  are left as they are; the process exits right after the shutdown. A
+  refused reset lifts the guard. In the running app, the scheduler and the
+  login item are turned off only while the data folder is still the one
+  being reset; otherwise they stay on, with a warning; the retry of the
+  login item after ready at the next launch runs only while the folder is
+  still the one the wipe emptied and holds no `state.json`. The restart of
+  this app's own Linux AppImage (`APPIMAGE`, with the running executable
+  inside `APPDIR` as written or resolved) goes through a detached shell
+  that starts the AppImage file once the old process has exited: the
+  mount it runs from goes away with the old process, and Electron's
+  relaunch helper runs with no_new_privs, under which the new AppImage
+  could not mount itself. In extract-and-run the shell also waits for the
+  AppImage runtime, the parent, which removes the extracted copy; a
+  mounted runtime replaced itself with the app, so the parent there is the
+  launcher and is not waited for. Each wait lasts a minute at most. When `APPDIR` is not
+  a mount (extract-and-run, without working FUSE; the runtime strips that
+  flag), the new process gets `APPIMAGE_EXTRACT_AND_RUN=1`. An AppImage
+  that can no longer be started is logged, and the reset runs at the next
+  launch. WhatsApp Web clients leave the connected
+  and QR states when they stop, so a client resumed after a refused reset
+  reconnects. The shutdown before the restart leaves the SQLite databases open:
+  closing checkpoints the write-ahead log and deletes it by path; the
+  process exit releases the handles and the next launch removes the files.
+  On Linux the mount table is read again before every removal in the data
+  folder and right before a cache folder's removal, so a bind mount added
+  under either while the wipe runs is never removed through. On Windows the
+  task's owner is looked up first and its definition read again before the
+  delete, which runs only when that definition is unchanged and the data
+  folder passes its check after that read; schtasks cannot delete on a
+  condition, so another account replacing the shared task in the moment
+  between that read and the delete remains (accepted; the per-user task
+  name follow-up closes it). The guide's
+  PowerShell script leaves files whose `LinkType` is `HardLink` for the same
+  reason. Then,
+  installed builds only: the Keychain item by exact service
+  `OpenAdminOS Safe Storage` and account `OpenAdminOS`, searched only in the
+  login keychain (`~/Library/Keychains/login.keychain-db`, where safeStorage
+  creates it), so an item of that name in a keychain imported from another
+  Mac is left alone; then each other keychain in the user's search list is
+  looked up on its own (attributes only), and each one holding an item of
+  that name gets its own warning with its path, for an admin whose default
+  keychain is not the login keychain (the login keychain is recognized by
+  file identity, however the list spells it), the LaunchAgent or
+  scheduled task (checked to be gone afterwards), the electron-updater cache
+  `@openadminosdesktop-updater`, and on macOS the Squirrel ShipIt cache, the
+  bundle's Caches, HTTPStorages and saved state, and `defaults delete
+  com.openadminos.desktop`. The marker records when that cleanup ran and goes
+  last, so an interrupted wipe resumes at the next launch without repeating
+  the Keychain step. External commands are bounded at 5 seconds each, below
+  Chromium's wait for a second launch, except the Windows task list (15
+  seconds), which reads every task; a wipe killed by a second launch resumes
+  from the marker.
+- **Marker bound to its folder.** The data folder's identity (device, inode
+  and birth time) is taken when the request starts, before any check awaits;
+  both marker writes go only to that same folder. At launch
+  the wipe runs only when the folder still has that inode and birth time
+  (on macOS and Windows the device number is not compared, since a reboot
+  or remount can change it, except where no birth time is known; on Linux
+  it must always match too, see "Linux binds the marker to the device too" above): a copy restored or roamed to
+  another device carries the marker but not the identity, so it stops with
+  nothing removed and asks for a fresh reset there. A birth time equal to
+  the change time counts as unknown (Node reports the change time where
+  statx is blocked), and a file system with neither inode nor birth time
+  gets no marker at all. The launch right after a reset does not download
+  the embedding model into the local runtime's store. The post-reset notice is kept in memory for that
+  launch only; quitting before reading it loses its warnings (the log keeps
+  them).
+- **Folders above** the data folder or a cache are not checked (decided in
+  review round 18, after round 17 had added it): whatever `~/Library`,
+  `~/.config` or `%APPDATA%` resolve to, the OpenAdminOS folder at its real
+  location is the one the app has used, and only its contents go, so a link
+  or mount above it does not widen what is removed; checking them refused
+  resets for people who link `~/.config` with a dotfile manager.
+- **Links.** A data folder that is itself a link is refused at the request
+  and never emptied at launch (it may point at a shared folder). The wipe
+  removes links inside the folder without following them, token caches
+  that are links or hard links included. The folder counts as a link when its path has `.` or `..` segments,
+  when its real location is not its real parent plus its own name (so
+  `link/` is caught too; compared by device and inode, so letter case does
+  not matter; each marker write checks again, and the launch wipe checks
+  the folder's identity and that it is not a link before every removal and
+  write, the marker's temporary files included, and stops if it was swapped
+  for another), when it or any folder inside it is on another device (a
+  mounted volume or disk image; a folder that cannot be read counts too),
+  or, on Linux, when a mount sits at or inside it (a bind mount; an
+  unreadable mount table counts too). Cache folders outside the data folder
+  are skipped with a warning on the same checks, on every platform. A
+  `policy.json` that is a link at all, a folder or anything other than a
+  plain file at that name, stops the
+  reset at the request and at launch: a chain of links can always be built
+  that a check cannot follow the way the system does, so the reset does not
+  try to vouch for one. Only a plain marker file with a single
+  link starts a wipe: anything else at that path (a link, a shared file, a
+  folder) leaves the reset incomplete and nothing is removed. The reset-incomplete window runs from a fresh temporary
+  profile without saved window state, removed on every way out (Quit, Try
+  again, closing the window, process exit), so
+  it never writes into the folder it could not reset; if that profile cannot
+  be created, a native notice lists what is not finished and the launch
+  stops, since no window can show yet (on Linux through zenity or kdialog).
+  Chromium's own single-instance lock files are created in the data folder
+  as on every launch of that profile; nothing else is written there.
+- **Marker writes** go through a new temporary file with a random name,
+  created exclusively (`wx`), so a link planted in a restored profile is never
+  followed; the temporary file is removed when the rename fails.
+- **Scheduler wakes.** A background scheduler launch never runs or resumes a
+  reset: while a marker is pending, read before the lock and again under it,
+  it exits at once without taking the lock (on macOS it is the
+  LaunchAgent's own job, which the reset unloads) and the pre-lock scheduler
+  repair is skipped. A request made from a window that a scheduler-started
+  process shows does not unload its own LaunchAgent; the launch that wipes
+  removes it. That process restarts through a detached shell outside the
+  LaunchAgent's process group, which waits for it to exit and runs `open` on
+  the app bundle, because launchd ends the group, Electron's relaunch helper
+  included, with the job. On Windows the task name is the same for every
+  account, so the reset removes the task only when its program lies under
+  this account's profile (the default per-user install) and the account it
+  runs as (`<Principal><UserId>`) is this one by name or SID (`whoami
+  /user`); otherwise, also for a copy installed for all users or when either
+  side is unknown, it leaves the task with a warning. Presence is read from
+  the full task list, so a Task Scheduler error counts as unknown, never as
+  absent. A per-user task name is a follow-up.
+  The LaunchAgent is unloaded by its exact service
+  label, never by path (a path can name other jobs), and only a plain file
+  at the plist path is deleted. Removal is checked afterwards (`launchctl print` exit 113, a
+  `schtasks /Query` that no longer finds the task), with every command bounded.
+- **Kept names** are matched without regard to letter case, because macOS and
+  Windows volumes read `Policy.json` through the path `policy.json`.
+- **Failures.** A data folder entry that cannot be removed keeps the marker and
+  opens **Reset did not finish** instead of the app (the paths with reasons,
+  Try again relaunches, Show data folder, Quit); a background wake just exits.
+  Leftovers outside the data folder that fail are warnings on the notice after
+  the reset and are not retried, because a later retry could delete the new
+  Keychain key. After a completed reset the app opens at first run with a
+  dismissible notice.
+- **Development builds** reset `OPENADMINOS_USER_DATA_DIR` when set, otherwise
+  the default folder the installed app also uses (the modal names it). They use
+  Chromium's mock keychain on macOS, so they never touch the Keychain item, and
+  never touch the installed app's scheduler, login item or caches. The marker
+  records which build asked (`build`): a development build leaves an installed
+  build's reset alone (Reset did not finish, open the installed app), and an
+  installed build finishes a development build's reset in the data folder only,
+  with a warning. A marker that is not a complete reset request (version 1,
+  a valid request time and a known build) never starts a wipe: the launch
+  stops with nothing removed and says how to keep or reset the data.
+- **Linux** keeps the safeStorage key in the desktop keyring; the reset does
+  not remove keyring entries (the docs say how).
+- **Windows uninstaller.** `nsis.deleteAppDataOnUninstall` stays `false`. In
+  electron-builder 26.15 the flag applies to assisted installers too (the
+  uninstaller checks it outside any one-click guard) and never on an update
+  (the installer runs the old uninstaller with `--updated`), but it removes the
+  whole `%APPDATA%\OpenAdminOS` folder, including an IT `policy.json`, and not
+  the updater cache or the scheduled task. Turning it on is a trust decision
+  left open in `electron/local-reset.ts`. User docs: Basics > Uninstall and
+  reset.
+
 ### Code signing
 
 The macOS release job applies a fail-closed workaround for app-builder-lib

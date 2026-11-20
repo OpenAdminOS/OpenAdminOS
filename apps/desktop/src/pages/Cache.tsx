@@ -10,7 +10,8 @@ import {
   Toolbar,
   type DataTableColumn,
 } from "../components/ui";
-import { SERVICE_COPY, userFacingErrorReason } from "../copy";
+import { LOCAL_RESET_COPY, SERVICE_COPY, userFacingErrorReason } from "../copy";
+import { ResetOpenAdminOSDialog } from "../components/ResetOpenAdminOSDialog";
 import { ServiceAccessDialog } from "../components/ServiceAccess";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
@@ -58,6 +59,7 @@ export function DataSettingsSection() {
   const [refreshing, setRefreshing] = useState(false);
   const [clearTarget, setClearTarget] = useState<ClearTarget>(null);
   const [clearing, setClearing] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
   const [addingService, setAddingService] = useState<ServiceId | null>(null);
   const epoch = useRef(0);
   const resumedIntentRef = useRef<string | null>(null);
@@ -503,6 +505,22 @@ export function DataSettingsSection() {
         </div>
       </div>
 
+      <div
+        id="setting-local-reset"
+        tabIndex={-1}
+        className="setting-row grid gap-4 border-b border-[var(--color-border-soft)] px-5 py-4 lg:grid-cols-[minmax(220px,0.7fr)_minmax(0,1fr)] lg:items-center"
+      >
+        <div>
+          <div className="text-base font-medium text-[var(--color-text)]">{LOCAL_RESET_COPY.settingsTitle}</div>
+          <p className="mt-0.5 text-sm text-[var(--color-text-muted)]">{LOCAL_RESET_COPY.settingsDescription}</p>
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button size="sm" variant="danger" disabled={!window.openAdminOS?.resetOpenAdminOS} onClick={() => setResetOpen(true)}>
+            {LOCAL_RESET_COPY.settingsAction}
+          </Button>
+        </div>
+      </div>
+
       {activeTenant && unconnectedServiceIds.length > 0 ? (
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border-soft)] px-5 py-4">
           <p className="min-w-0 flex-1 text-sm text-[var(--color-text-muted)]">
@@ -594,6 +612,7 @@ export function DataSettingsSection() {
         onClose={() => setClearTarget(null)}
         onConfirm={() => void clearLocalData()}
       />
+      <ResetOpenAdminOSDialog open={resetOpen} onClose={() => setResetOpen(false)} />
     </div>
   );
 }
