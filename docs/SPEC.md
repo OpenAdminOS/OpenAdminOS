@@ -2527,18 +2527,30 @@ Mockup: `docs/mockups/34-local-reset.html`.
   stops work; the shutdown waits for leased work within its bound, and from then on refuses new confirmations
   until the restart. It writes `local-reset-pending.json` into the data folder
   first; the rename is the commit point (if it fails, nothing changed and the
-  modal says so; a failed folder flush after it is only logged). It then removes the Microsoft sign-in of
-  every tenant and pending disconnect from the token caches, turns off the OS
+  modal says so; a failed folder flush after it is only logged). It then turns off the OS
   scheduler and the menu bar login item (installed builds), stops the gateway,
   MCP servers and stores with a bounded wait, and relaunches.
+- **No sign-out before the restart** (decided in review round 22; the brief
+  listed it as a phase 1 step). Signing out rewrites the token caches in
+  place, and that rewrite cannot be bound to the folder the reset was
+  accepted for: a folder swapped in between the check and the write would
+  have its caches rewritten. The token files are removed by the launch wipe
+  before anything can read them, and from the marker on no organization
+  starts new work, so the sign-ins are not used again either way.
 - **Wipe at launch.** At the top of the main script, after the single-instance
   lock and before `whenReady`, so before Chromium reads Local State (the Windows
   safeStorage key) and before any store, session or safeStorage use: every entry
   of the data folder except `policy.json`, the marker and Chromium's lock files.
   The audit anchor and pending files go after everything else, the database
-  included, so a database that could not be removed keeps its anchor. Then,
+  included, so a database that could not be removed keeps its anchor. An
+  entry that cannot be removed keeps the entries named after it (a locked
+  `openadminos.db` keeps its `-wal` and `-shm`), so the next try finds an
+  intact database; everything else still goes. Then,
   installed builds only: the Keychain item by exact service
-  `OpenAdminOS Safe Storage` and account `OpenAdminOS`, the LaunchAgent or
+  `OpenAdminOS Safe Storage` and account `OpenAdminOS`, searched only in the
+  login keychain (`~/Library/Keychains/login.keychain-db`, where safeStorage
+  creates it), so an item of that name in a keychain imported from another
+  Mac is left alone, the LaunchAgent or
   scheduled task (checked to be gone afterwards), the electron-updater cache
   `@openadminosdesktop-updater`, and on macOS the Squirrel ShipIt cache, the
   bundle's Caches, HTTPStorages and saved state, and `defaults delete
@@ -2550,7 +2562,7 @@ Mockup: `docs/mockups/34-local-reset.html`.
   from the marker.
 - **Marker bound to its folder.** The data folder's identity (device, inode
   and birth time) is taken when the request starts, before any check awaits;
-  both marker writes and the sign-out go only to that same folder. At launch
+  both marker writes go only to that same folder. At launch
   the wipe runs only when the folder still has that inode and birth time
   (the device number is not compared, since a reboot or remount can change
   it, except where no birth time is known): a copy restored or roamed to
@@ -2569,10 +2581,9 @@ Mockup: `docs/mockups/34-local-reset.html`.
   or mount above it does not widen what is removed; checking them refused
   resets for people who link `~/.config` with a dotfile manager.
 - **Links.** A data folder that is itself a link is refused at the request
-  and never emptied at launch (it may point at a shared folder). Sign-out
-  skips token caches that are links or files with more than one hard link,
-  with a warning; the wipe removes links inside the folder without following
-  them. The folder counts as a link when its path has `.` or `..` segments,
+  and never emptied at launch (it may point at a shared folder). The wipe
+  removes links inside the folder without following them, token caches
+  that are links or hard links included. The folder counts as a link when its path has `.` or `..` segments,
   when its real location is not its real parent plus its own name (so
   `link/` is caught too; compared by device and inode, so letter case does
   not matter; each marker write checks again, and the launch wipe checks
@@ -2589,8 +2600,7 @@ Mockup: `docs/mockups/34-local-reset.html`.
   that a check cannot follow the way the system does, so the reset does not
   try to vouch for one. Only a plain marker file with a single
   link starts a wipe: anything else at that path (a link, a shared file, a
-  folder) leaves the reset incomplete and nothing is removed. Sign-out is also skipped when the folder
-  cannot be listed. The reset-incomplete window runs from a fresh temporary
+  folder) leaves the reset incomplete and nothing is removed. The reset-incomplete window runs from a fresh temporary
   profile without saved window state, removed on every way out (Quit, Try
   again, closing the window, process exit), so
   it never writes into the folder it could not reset; if that profile cannot

@@ -12,8 +12,9 @@
     Reset OpenAdminOS: a full local reset from Settings, Data.
 
     Two phases, so nothing is deleted while Chromium, SQLite or MSAL hold files.
-    1. The running app writes a pending reset marker, signs out of every
-       organization, stops background work and relaunches.
+    1. The running app writes a pending reset marker, closes every
+       organization to new work, stops background work and relaunches. It
+       does not sign out first; the token files go with the data folder.
     2. The next launch removes the data folder before any store, session or
        Keychain use, then opens first run.
 
@@ -419,7 +420,7 @@
       <div class="kicker">MOCKUP 34 · SETTINGS, DATA</div>
       <h1>Reset OpenAdminOS</h1>
       <p>A full local reset for an admin who hands the device on, starts over, or uninstalls. Removing the app bundle alone leaves the data folder, the Keychain item and the token caches, so a reinstall would sign straight back in.</p>
-      <p>The reset runs in two phases so nothing is deleted while Chromium, SQLite or MSAL hold files. The running app signs out of every organization, stops background work and restarts. The next launch removes the data folder before anything opens it, then shows first run.</p>
+      <p>The reset runs in two phases so nothing is deleted while Chromium, SQLite or MSAL hold files. The running app closes every organization to new work, stops background work and restarts. The next launch removes the data folder before anything opens it, then shows first run.</p>
       <nav class="toc" aria-label="Frames">
         <a href="#f1">1 Settings row</a><a href="#f2">2 Confirmation</a><a href="#f3">3 Resetting</a><a href="#f4">4 Could not start</a><a href="#f5">5 Reset did not finish</a><a href="#f6">6 First run after reset</a>
       </nav>
@@ -593,7 +594,7 @@
     <!-- 3 -->
     <section class="sect" id="f3">
       <div class="sect-h"><span class="num">3</span><h2>Resetting</h2></div>
-      <p class="lede">After Reset and restart: the pending reset marker is written, every organization is signed out, the scheduler, login item, gateway and MCP servers stop, then the app quits and starts again.</p>
+      <p class="lede">After Reset and restart: the pending reset marker is written, every organization is closed to new work, the scheduler, login item, gateway and MCP servers stop, then the app quits and starts again.</p>
       <div class="win ov">
         <div class="lights"><i></i><i></i><i></i></div>
         <div class="behind" data-behind aria-hidden="true" inert></div>
@@ -616,7 +617,7 @@
                   <svg class="match" aria-hidden="true"><use href="#i-check"/></svg>
                 </div>
               </div>
-              <div class="status" role="status"><span class="spinner" aria-hidden="true"></span><span>Signing out of every organization and stopping background work. OpenAdminOS closes in a moment.</span></div>
+              <div class="status" role="status"><span class="spinner" aria-hidden="true"></span><span>Closing every organization and stopping background work. OpenAdminOS closes in a moment.</span></div>
               <div class="actions">
                 <button class="bt ghost md" type="button" disabled>Cancel</button>
                 <button class="bt danger md" type="button" aria-disabled="true" aria-busy="true"><span class="spinner" aria-hidden="true"></span>Resetting</button>

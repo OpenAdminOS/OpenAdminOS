@@ -21,9 +21,9 @@ Open **Settings > Data** and choose **Reset OpenAdminOS**. The dialog shows the
 data folder and what is removed. Type `RESET OPENADMINOS` exactly and choose
 **Reset and restart**.
 
-OpenAdminOS then signs out of every organization, turns off the background
-scheduler and the menu bar login item, stops its background work and restarts.
-At the restart, before anything else runs, it removes:
+OpenAdminOS then closes every organization to new work, turns off the
+background scheduler and the menu bar login item, stops its background work
+and restarts. At the restart, before anything else runs, it removes:
 
 - every organization and its Microsoft sign-in tokens
 - provider settings and API keys, connector settings and secrets, including
@@ -38,7 +38,7 @@ In an installed build it also removes the per-user files outside the data
 folder:
 
 - **macOS:** the Keychain item `OpenAdminOS Safe Storage` (account
-  `OpenAdminOS`), the scheduler
+  `OpenAdminOS`) in your login keychain, the scheduler
   LaunchAgent, cached app updates (`~/Library/Caches/@openadminosdesktop-updater`,
   `~/Library/Caches/com.openadminos.desktop.ShipIt`), the app's caches,
   HTTP storage, saved window state and preferences
@@ -120,8 +120,9 @@ before the next launch: a new install that finds the old key can read any
 token files that are still there.
 
 ```bash
-# Repeat until it reports that the item could not be found.
-security delete-generic-password -s "OpenAdminOS Safe Storage" -a OpenAdminOS
+# Repeat until it reports that the item could not be found. Only the login
+# keychain is searched, so a keychain imported from another Mac is left alone.
+security delete-generic-password -s "OpenAdminOS Safe Storage" -a OpenAdminOS ~/Library/Keychains/login.keychain-db
 launchctl bootout "gui/$(id -u)/com.openadminos.scheduler"
 rm -f ~/Library/LaunchAgents/com.openadminos.scheduler.plist
 defaults delete com.openadminos.desktop
