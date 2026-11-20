@@ -39,7 +39,8 @@ import { withTenantDataInstructions, withTenantDataOutputFilter } from "./tenant
 export { TENANT_DATA_INSTRUCTIONS, fenceTenantData, stripTenantDataFences,
   withTenantDataInstructions, withTenantDataOutputFilter } from "./tenant-data.js";
 import { accumulateRunUsage } from "./run-usage.js";
-import { contextTooSmallFromError, graphAccessDenialFromError } from "@openadminos/agent-sdk";
+import { contextTooSmallFromError } from "@openadminos/agent-sdk";
+import { runFailureAccessDenial } from "./run-failure-access.js";
 import { assertPromptFits, resolveContextWindow } from "./prompt-fit.js";
 export {
   assertPromptFits,
@@ -979,7 +980,7 @@ async function failPhase(
 ): Promise<RunRecord> {
   const finishedAt = new Date().toISOString();
   const message = error instanceof Error ? error.message : String(error);
-  const accessDenial = graphAccessDenialFromError(error);
+  const accessDenial = runFailureAccessDenial(error);
   const failureReason = contextTooSmallFromError(error);
   const failed: RunRecord = {
     ...working,

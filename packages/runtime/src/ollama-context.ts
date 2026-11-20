@@ -1,7 +1,7 @@
 // Context window lookup for Ollama models, kept apart from llm-ollama.ts so
 // the request path and this lookup can change independently.
 import { modelServerRedirect } from "./llm-openai-compatible.js";
-import { estimateTokens } from "./prompt-fit.js";
+import { checkPromptFit } from "./prompt-fit.js";
 
 const LOOKUP_TIMEOUT_MS = 5000;
 
@@ -99,8 +99,8 @@ export interface OllamaRequestContextInput {
   model: string;
   system?: string;
   prompt: string;
-  /** Tokens kept for the answer. */
-  answerTokens: number;
+  /** The answer budget; unset reserves what the run's size check reserves. */
+  maxTokens?: number;
   /** num_ctx this app already sends for the model, if any. */
   currentNumCtx?: number;
   fetchImpl?: typeof fetch;
@@ -110,18 +110,27 @@ export interface OllamaRequestContextInput {
 
 /**
  * The num_ctx to send with a request to a model that has no pinned
- * num_ctx, so its first request already has room for the prompt and the
- * answer. Ollama loads such a model at its own default (a few thousand
- * tokens), and an older Ollama shortens a longer prompt without an error, so
- * waiting for an overflow would review partial data. Undefined when the
- * request needs no larger context: a pinned model (the size check holds it
- * to its pin), a small request, or a context already large enough. Sizes go
- * up in powers of two, so a model is reloaded rarely.
+ * num_ctx, and the tokens it needs, so the first send already has room for
+ * the prompt and the answer. Ollama loads such a model at its own default (a
+ * few thousand tokens), reloads it there after an eviction, and an older
+ * Ollama shortens a longer prompt without an error, so the size is always
+ * sent rather than inferred from what happens to be loaded. Never below the
+ * loaded size, so a loaded model is not reloaded smaller, and in powers of
+ * two, so it is reloaded rarely. Undefined for a pinned model (the size check
+ * holds it to its pin), a request no larger than the smallest default, or a
+ * size this app already sends that is large enough.
  */
-export async function ollamaRequestNumCtx(input: OllamaRequestContextInput): Promise<number | undefined> {
-  const needed = estimateTokens(input.system ?? "") + estimateTokens(input.prompt) + input.answerTokens;
-  if (needed <= SMALLEST_DEFAULT_CONTEXT) return undefined;
-  if (input.currentNumCtx !== undefined && input.currentNumCtx >= needed) return undefined;
+export async function ollamaRequestNumCtx(
+  input: OllamaRequestContextInput,
+): Promise<{ numCtx: number; neededTokens: number } | undefined> {
+  // The same count as the run's size check, chat template tokens included.
+  const { neededTokens } = checkPromptFit({
+    ...(input.system ? { system: input.system } : {}),
+    prompt: input.prompt,
+    ...(input.maxTokens !== undefined ? { maxTokens: input.maxTokens } : {}),
+  });
+  if (neededTokens <= SMALLEST_DEFAULT_CONTEXT) return undefined;
+  if (input.currentNumCtx !== undefined && input.currentNumCtx >= neededTokens) return undefined;
   const fetchImpl = input.fetchImpl ?? fetch;
   const timeoutMs = input.timeoutMs ?? LOOKUP_TIMEOUT_MS;
   const base = input.endpoint.replace(/\/$/, "");
@@ -131,13 +140,11 @@ export async function ollamaRequestNumCtx(input: OllamaRequestContextInput): Pro
     body: JSON.stringify({ model: input.model }),
   }, timeoutMs, input.signal));
   if (show.pinnedNumCtx !== undefined) return undefined;
-  if (input.currentNumCtx === undefined) {
-    const loaded = parseOllamaLoadedContext(await readJson(fetchImpl, `${base}/api/ps`, { method: "GET" }, timeoutMs, input.signal), input.model);
-    if (loaded !== undefined && loaded >= needed) return undefined;
-  }
+  const loaded = parseOllamaLoadedContext(await readJson(fetchImpl, `${base}/api/ps`, { method: "GET" }, timeoutMs, input.signal), input.model) ?? 0;
   let target = 4096;
-  while (target < needed) target *= 2;
-  return show.modelMaxContext !== undefined ? Math.min(target, show.modelMaxContext) : target;
+  while (target < neededTokens) target *= 2;
+  target = Math.max(target, loaded, input.currentNumCtx ?? 0);
+  return { numCtx: show.modelMaxContext !== undefined ? Math.min(target, show.modelMaxContext) : target, neededTokens };
 }
 
 /**

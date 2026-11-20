@@ -148,7 +148,8 @@ export function graphAccessDenialFromError(error: unknown, context: GraphAccessC
     return classifyGraphAccessDenied({ ...error.accessContext, ...overrides });
   }
   const raw = error instanceof Error ? error.message : String(error);
-  if (!/\b403\b|\bforbidden\b|Authentication_RequestFromNonPremiumTenantOrB2CTenant/i.test(raw)) return undefined;
+  // A 403 inside a grouped number, such as a token count of 403,121, is not a status.
+  if (!/(?<!\d,)\b403\b(?!,\d)|\bforbidden\b|Authentication_RequestFromNonPremiumTenantOrB2CTenant/i.test(raw)) return undefined;
   const errorCode = raw.match(/"code"\s*:\s*"([^"]+)"/)?.[1]
     ?? (raw.includes("Authentication_RequestFromNonPremiumTenantOrB2CTenant") ? "Authentication_RequestFromNonPremiumTenantOrB2CTenant" : undefined);
   return classifyGraphAccessDenied({ ...context, errorCode: context.errorCode ?? errorCode });

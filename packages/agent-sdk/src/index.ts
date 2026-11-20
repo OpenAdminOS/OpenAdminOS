@@ -27,6 +27,8 @@ export interface ProviderSummary {
   isLocal: boolean;
   status: ProviderStatus;
   detail?: string;
+  /** Ollama can answer, but a capability check for another model was refused. */
+  capabilityWarning?: string;
   /**
    * The check itself failed (an HTTP error, an unreachable or refused
    * endpoint, a CLI that errored), as opposed to completing with a
@@ -68,7 +70,7 @@ export function providerModelLabel(provider: Pick<ProviderSummary, "modelLabels"
 }
 
 /** One provider check in the first-launch scan, as it resolves. */
-export type ModelScanProbeState = "checking" | "found" | "not-found" | "could-not-check";
+export type ModelScanProbeState = "checking" | "found" | "not-found" | "could-not-check" | "unavailable";
 
 export interface ModelScanProbe {
   providerId: ProviderId;
@@ -83,6 +85,8 @@ export interface ModelScanProbe {
   summary: string;
   /** Further plain lines: models, versions, what to do next. */
   facts: string[];
+  /** A partial check failure on an otherwise ready provider. */
+  warning?: string;
   /** It can answer now: running with a model, or signed in. */
   ready: boolean;
   models: string[];
@@ -2115,7 +2119,7 @@ export interface RetrievalStatus {
    * The index alone cannot ground answers without it.
    */
   embeddingModelInstalled?: boolean;
-  /** Why the last background download of the embedding model failed, with the fix. */
+  /** Why the model check or latest background download failed, with the recovery. */
   embeddingModelError?: string;
 }
 
