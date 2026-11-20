@@ -237,7 +237,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           const atModelLimit = modelMax !== undefined && counted.available >= modelMax;
           if (!atModelLimit && sent !== undefined && counted.available >= sent) {
             // Ollama gave all the context asked for; the request outgrew it.
-            return new Error(`Ollama context size too small: This request needs ${formatTokens(counted.requested)} tokens of context, more than the ${formatTokens(counted.available)} Ollama loaded for ${model}.`);
+            return new Error(`Ollama context size too small: This request needs ${formatTokens(counted.requested)} tokens of context and did not fit in the ${formatTokens(counted.available)} Ollama loaded for ${model}.`);
           }
           return new Error(contextTooSmallMessage(model, counted.requested, counted.available, atModelLimit));
         }
