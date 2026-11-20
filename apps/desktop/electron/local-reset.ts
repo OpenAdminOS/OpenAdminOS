@@ -843,7 +843,7 @@ function removeLeftovers(
     warnings.push({ item: "Background scheduler", reason: reasonOf(cause) });
   }
   if (options.platform === "darwin") {
-    removeMacosKeychainItem(run, warnings);
+    removeMacosKeychainItem(run, macosLoginKeychain(options.home), warnings);
     // Preferences go through cfprefsd, which caches the plist; deleting the
     // file alone could be written back. A missing domain exits 1.
     const prefs = run("/usr/bin/defaults", ["delete", MACOS_BUNDLE_ID]);
@@ -948,12 +948,22 @@ export function parseWhoamiUser(output: string): { name: string; sid: string } |
 /** `security` exits 44 when no item matches. */
 const SECURITY_ITEM_NOT_FOUND = 44;
 
+/** The keychain Electron's safeStorage writes its key to: the user's login keychain. */
+export function macosLoginKeychain(home: string): string {
+  return posix.join(home, "Library", "Keychains", "login.keychain-db");
+}
+
 /**
  * Deletes the safeStorage Keychain item, matched by its exact service and
- * account, so an item of another app or account is never touched. Each
- * call deletes one match.
+ * account and only in the login keychain, so an item of another app or
+ * account, or one in a keychain imported from another Mac, is never
+ * touched. Each call deletes one match.
  */
-function removeMacosKeychainItem(run: (file: string, args: string[]) => CommandResult, warnings: LocalResetProblem[]): void {
+function removeMacosKeychainItem(
+  run: (file: string, args: string[]) => CommandResult,
+  keychain: string,
+  warnings: LocalResetProblem[],
+): void {
   const item = `Keychain item "${MACOS_SAFE_STORAGE_SERVICE}"`;
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const result = run("/usr/bin/security", [
@@ -962,6 +972,7 @@ function removeMacosKeychainItem(run: (file: string, args: string[]) => CommandR
       MACOS_SAFE_STORAGE_SERVICE,
       "-a",
       MACOS_SAFE_STORAGE_ACCOUNT,
+      keychain,
     ]);
     if (result.error) {
       warnings.push({ item, reason: reasonOf(result.error) });
@@ -974,7 +985,7 @@ function removeMacosKeychainItem(run: (file: string, args: string[]) => CommandR
     }
   }
   // Five removed: a lookup (attributes only, never the secret) says whether more are left.
-  const lookup = run("/usr/bin/security", ["find-generic-password", "-s", MACOS_SAFE_STORAGE_SERVICE, "-a", MACOS_SAFE_STORAGE_ACCOUNT]);
+  const lookup = run("/usr/bin/security", ["find-generic-password", "-s", MACOS_SAFE_STORAGE_SERVICE, "-a", MACOS_SAFE_STORAGE_ACCOUNT, keychain]);
   if (lookup.status !== SECURITY_ITEM_NOT_FOUND) {
     warnings.push({ item, reason: lookup.status === 0 ? "more items with this name are still in the Keychain" : "the Keychain did not confirm that none are left" });
   }

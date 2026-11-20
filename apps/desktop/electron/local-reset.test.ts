@@ -13,6 +13,7 @@ import {
   LOCAL_RESET_MARKER,
   LocalResetRequestError,
   localResetLeftoverPaths,
+  macosLoginKeychain,
   folderGoesThroughLink,
   localResetPolicyProblem,
   markerFolderMatches,
@@ -254,9 +255,13 @@ describe("local reset: wipe at launch", () => {
       assert.equal(report?.status, "completed");
       assert.deepEqual(report?.warnings, []);
       assert.equal(schedulerRemoved, 1);
+      // Only the login keychain is searched: an item of the same name in a
+      // keychain imported from another Mac is not this install's key.
+      const loginKeychain = join(home, "Library", "Keychains", "login.keychain-db");
+      assert.equal(macosLoginKeychain(home), loginKeychain);
       assert.deepEqual(calls, [
-        ["/usr/bin/security", "delete-generic-password", "-s", MACOS_SAFE_STORAGE_SERVICE, "-a", MACOS_SAFE_STORAGE_ACCOUNT],
-        ["/usr/bin/security", "delete-generic-password", "-s", MACOS_SAFE_STORAGE_SERVICE, "-a", MACOS_SAFE_STORAGE_ACCOUNT],
+        ["/usr/bin/security", "delete-generic-password", "-s", MACOS_SAFE_STORAGE_SERVICE, "-a", MACOS_SAFE_STORAGE_ACCOUNT, loginKeychain],
+        ["/usr/bin/security", "delete-generic-password", "-s", MACOS_SAFE_STORAGE_SERVICE, "-a", MACOS_SAFE_STORAGE_ACCOUNT, loginKeychain],
         ["/usr/bin/defaults", "delete", "com.openadminos.desktop"],
       ]);
       for (const path of leftovers) assert.ok(!existsSync(path), path);
@@ -585,7 +590,9 @@ describe("local reset: wipe at launch", () => {
       const { run, calls } = recordingRun({ "/usr/bin/security": [{ status: 0 }, { status: 0 }, { status: 0 }, { status: 0 }, { status: 0 }, keychainNotFound] });
       const report = runPendingLocalReset({ userDataDir: dir, packaged: true, platform: "darwin", home: join(dir, "home"), env: {}, run });
       assert.deepEqual(report?.warnings, []);
-      assert.equal(calls.filter((call) => call[0] === "/usr/bin/security").length, 6);
+      const security = calls.filter((call) => call[0] === "/usr/bin/security");
+      assert.equal(security.length, 6);
+      assert.deepEqual(security.at(-1), ["/usr/bin/security", "find-generic-password", "-s", MACOS_SAFE_STORAGE_SERVICE, "-a", MACOS_SAFE_STORAGE_ACCOUNT, macosLoginKeychain(join(dir, "home"))]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
