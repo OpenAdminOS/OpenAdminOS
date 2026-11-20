@@ -330,7 +330,7 @@ it("background backfill leaves a removed database absent", async t => {
   }
 });
 
-it("computes a backfill page under a held writer and lets Chat write before publication", async () => {
+it("retries busy sidecars without waiting on the writer and rechecks each snapshot", async t => {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-cache-writer-"));
   const path = join(dir, "openadminos.db");
   let store = new IntelligenceSqliteStore(path);
@@ -338,8 +338,10 @@ it("computes a backfill page under a held writer and lets Chat write before publ
   const tenantId = "tenant-1";
   const now = "2026-11-18T00:00:00.000Z";
   try {
-    store.replaceGraphResources({ tenantId, resource: "secureScores", label: "Secure Score", scopeSet: [],
-      refreshedAt: now, rows: [{ id: "fixture-score", currentScore: 30 }] });
+    const resource = "secureScores";
+    const rows = [{ id: "fixture-score", currentScore: 30 }, { id: "replaced-score", currentScore: 20 }];
+    store.replaceGraphResources({ tenantId, resource, label: "Secure Score", scopeSet: [],
+      refreshedAt: now, rows });
     writer.exec("UPDATE graph_resources SET classification_json = NULL");
     writer.exec("BEGIN IMMEDIATE");
     // A worker that attempts to publish cannot resolve this page while the
@@ -347,17 +349,48 @@ it("computes a backfill page under a held writer and lets Chat write before publ
     const computed = await classifyCacheRows([], "/security/secureScores", undefined, false, false, undefined, {
       dbPath: path, tenantId, resource: "secureScores", afterRowId: 0, indexOnly: false,
     });
-    assert.equal(computed.startupSidecars?.length, 1);
+    assert.equal(computed.startupSidecars?.length, 2);
     assert.equal(writer.prepare("SELECT classification_json FROM graph_resources").get()?.classification_json, null);
     writer.exec("COMMIT");
     await store.close();
     store = new IntelligenceSqliteStore(path, { backgroundClassification: true });
     writer.exec("BEGIN IMMEDIATE");
-    // The store can finish its attempt while an unrelated connection is
-    // still holding the lock, and it leaves the missing evidence visible.
-    await store.waitForCacheClassification();
+    let firstBusy!: () => void;
+    const attempted = new Promise<void>(resolve => { firstBusy = resolve; });
+    const db = store["db"];
+    const prepare = db.prepare.bind(db);
+    t.mock.method(db, "prepare", (sql: string) => {
+      const statement = prepare(sql);
+      if (sql.startsWith("INSERT INTO graph_classification_sidecars")) {
+        const run = statement.run.bind(statement);
+        t.mock.method(statement, "run", (...args: Parameters<typeof run>) => {
+          assert.equal(prepare("PRAGMA busy_timeout").get()?.timeout, 0);
+          try { return run(...args); }
+          catch (error) { firstBusy(); throw error; }
+        });
+      }
+      return statement;
+    });
+    await attempted;
+    assert.equal(writer.isTransaction, true);
     assert.equal(writer.prepare("SELECT COUNT(*) AS sidecars FROM graph_classification_sidecars").get()?.sidecars, 0);
+
+    const observe = async (search: string) => {
+      const ledger = new ClassificationLedger();
+      const result = withClassificationScope(ledger, () => store.queryGraphCache({ tenantId, resource, filters: [{ field: "id", op: "eq", value: search }] }));
+      await ledger.waitForObservations();
+      return ledger.classifyRequest({ prompt: JSON.stringify(result.rows) });
+    };
+    // Capture the missing evidence while publication is still pending.
+    assert.equal((await observe("fixture-score")).coverageIncomplete, true);
+    writer.exec("UPDATE graph_resources SET snapshot_id = 'new-snapshot' WHERE graph_id = 'replaced-score'");
     writer.exec("COMMIT");
+    await store.waitForCacheClassification();
+    const published = writer.prepare(`SELECT g.graph_id FROM graph_classification_sidecars s
+      JOIN graph_resources g ON g.rowid = s.cache_rowid ORDER BY g.graph_id`).all();
+    assert.deepEqual(published.map(row => row.graph_id), ["fixture-score"]);
+    assert.equal((await observe("fixture-score")).coverageIncomplete, false);
+    assert.equal((await observe("replaced-score")).coverageIncomplete, true);
     const conversation = store.createConversation({ id: "fixture-chat", title: "Secure Score", tenantId, now });
     assert.equal(conversation.id, "fixture-chat");
   } finally {

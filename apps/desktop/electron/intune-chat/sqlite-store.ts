@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
-import { setImmediate as yieldToMain } from "node:timers/promises";
+import { setImmediate as yieldToMain, setTimeout as waitForRetry } from "node:timers/promises";
 import { promisify } from "node:util";
 import { inflate } from "node:zlib";
 import { collectTenantValues, TenantValueIndex } from "./tenant-values.js";
@@ -2738,20 +2738,29 @@ export class IntelligenceSqliteStore {
           WHERE graph_classification_sidecars.snapshot_id <> excluded.snapshot_id
             OR graph_classification_sidecars.field_map_version <> excluded.field_map_version`);
         const prefix = `[${GRAPH_FIELD_CLASSES_VERSION},%`;
-        for (const { rowid, snapshotId, compressed } of result.startupSidecars) {
-          await yieldClassificationTurn();
-          if (!current()) return;
-          // The classification observer never waits for another SQLite writer.
-          // Each autocommit ends before the next tick or a Chat write can run.
-          this.db.exec("PRAGMA busy_timeout = 0");
-          try {
-            publish.run(GRAPH_FIELD_CLASSES_VERSION, compressed, rowid, snapshotId, tenantId, resource, prefix);
-          } catch (error) {
-            if (!(error instanceof Error) || !("errcode" in error) || typeof error.errcode !== "number" ||
-                (error.errcode & 255) !== 5) throw error;
-          } finally {
-            this.db.exec("PRAGMA busy_timeout = 5000");
+        let pending = result.startupSidecars;
+        // Keep retries scoped to this page and yield between attempts.
+        for (const delay of [0, 25, 50, 100, 200, 400]) {
+          if (delay) await waitForRetry(delay);
+          const busy: typeof pending = [];
+          for (const sidecar of pending) {
+            await yieldClassificationTurn();
+            if (!current()) return;
+            const { rowid, snapshotId, compressed } = sidecar;
+            // Each autocommit ends before another foreground operation runs.
+            this.db.exec("PRAGMA busy_timeout = 0");
+            try {
+              publish.run(GRAPH_FIELD_CLASSES_VERSION, compressed, rowid, snapshotId, tenantId, resource, prefix);
+            } catch (error) {
+              if (!(error instanceof Error) || !("errcode" in error) || typeof error.errcode !== "number" ||
+                  (error.errcode & 255) !== 5) throw error;
+              busy.push(sidecar);
+            } finally {
+              this.db.exec("PRAGMA busy_timeout = 5000");
+            }
           }
+          if (!busy.length) break;
+          pending = busy;
         }
       }
     }
