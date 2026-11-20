@@ -300,7 +300,9 @@ Notes:
 |---|---|
 | `id` | configuration |
 | `displayName` | configuration (ambiguous) |
-| `mail` | configuration (ambiguous) |
+| `mail` | identity |
+| `mailNickname` | identity |
+| `proxyAddresses[]` | identity |
 | `securityEnabled` | configuration |
 | `groupTypes[]` | configuration |
 | `createdDateTime` | configuration |
@@ -308,7 +310,7 @@ Notes:
 Notes:
 
 - Group names often carry person names ("Team <Manager>", "<User> test devices"). Configuration with a name pattern check.
-- `mail` for Microsoft 365 groups is a group address, not a person, so configuration; ambiguous for groups named after one person.
+- Field map v6 classifies group addresses and aliases as Identity, including aliases that do not look like email addresses.
 
 ### deviceCompliancePolicies
 

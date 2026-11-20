@@ -3,7 +3,7 @@ import type { DataClass } from "@openadminos/agent-sdk";
 // Source: docs/research/graph-field-classes.md and the decisions in docs/SPEC.md.
 // [] matches an array element. * matches one property in a keyed object.
 // Mapped containers set an inherited class. Unknown branches start at the resource default.
-export const GRAPH_FIELD_CLASSES_VERSION = 5;
+export const GRAPH_FIELD_CLASSES_VERSION = 6;
 
 /** Equivalent paths in the bundled Graph index, with route parameters normalized by the classifier. */
 export const GRAPH_ROUTE_ALIASES = {
@@ -142,7 +142,8 @@ export const GRAPH_FIELD_CLASSES: Readonly<Record<string, Partial<Record<DataCla
     `,
   },
   "/groups": {
-    configuration: "id displayName mail securityEnabled groupTypes[] createdDateTime",
+    identity: "mail mailNickname proxyAddresses[]",
+    configuration: "id displayName securityEnabled groupTypes[] createdDateTime",
   },
   "/deviceManagement/deviceCompliancePolicies": {
     security: "@odata.type id displayName description createdDateTime lastModifiedDateTime",

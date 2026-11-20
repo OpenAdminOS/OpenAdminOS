@@ -28,7 +28,10 @@ raise the class of a public result, including results from the built-in web sear
 
 Text checks recognize some patterns, such as email addresses and labeled
 passwords, and can find values the app already knows about the organization.
-An unfamiliar name or an opaque, unlabeled secret can evade these checks.
+A match can raise a mapped field to a more sensitive class. Group mail
+addresses, mail nicknames and proxy addresses are Identity even before the
+app has indexed organization identities. An unfamiliar name or an opaque,
+unlabeled secret can evade these checks.
 
 A background worker on this device classifies incoming Graph data, prepares
 cache classifications and scans larger model requests. A model request scan

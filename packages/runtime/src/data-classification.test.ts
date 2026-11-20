@@ -646,6 +646,43 @@ test("Conditional Access references and delegated permissions distinguish identi
   assert.deepEqual(Object.values(application.securityMaskRoles), ["nameOrIdentifier", "nameOrIdentifier"]);
 });
 
+test("group mail fields and higher-sensitivity detectors classify identity with an empty index", () => {
+  const index = new TenantValueIndex();
+  const identityIndex = {
+    matches: (text: string) => index.matches(text),
+    spans: (text: string) => TenantValueIndex.spansFor(text, [index]),
+  };
+  const group = {
+    mail: "admins@fictional.example",
+    mailNickname: "ops",
+    proxyAddresses: ["smtp:admins-alias@fictional.example", "X500:/o=Fictional/ou=Ops"],
+  };
+  const options = { graphPath: "/groups", identityIndex };
+  assert.deepEqual(classifyData(group, options).classes, {
+    "/mail": "identity", "/mailNickname": "identity",
+    "/proxyAddresses/0": "identity", "/proxyAddresses/1": "identity",
+  });
+  const ledger = new ClassificationLedger(identityIndex);
+  ledger.register("graph:groups", group, options);
+  const prompt = JSON.stringify(group);
+  const result = ledger.classifyRequest({ prompt });
+  assert.equal(result.coverageIncomplete, false);
+  for (const value of [group.mail, group.mailNickname, ...group.proxyAddresses]) {
+    assert.ok(result.spans.some(span => span.kind === "identity" && prompt.slice(span.start, span.end) === value), value);
+  }
+
+  // Simulate older mapped evidence and verify the request detector raises it.
+  const stale = new ClassificationLedger(identityIndex);
+  stale.registerClassified("graph:groups", {
+    fields: [{ key: "mail", value: group.mail, kind: "configuration" }], incomplete: false,
+  });
+  const staleResult = stale.classifyRequest({ prompt: JSON.stringify({ mail: group.mail }) });
+  assert.equal(staleResult.coverageIncomplete, false);
+  assert.equal(staleResult.spans[0]?.kind, "identity");
+  assert.equal(staleResult.spans[0]?.source, "detector:email");
+  assert.equal(classifyData({ displayName: group.mail }, options).classes["/displayName"], "identity");
+});
+
 test("confirmed tenant identity raises stale device provenance while a generic GUID keeps its field class", () => {
   const index = new TenantValueIndex();
   const ledger = new ClassificationLedger({

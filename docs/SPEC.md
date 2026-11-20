@@ -1774,7 +1774,7 @@ Identity class and secrets keep their Credential class within security objects.
 Security fields carry a mask role for names and identifiers or for setting values.
 App role and permission scope names are identifiers. App role flags,
 compliance rules and authorization policy settings stay readable in A4.
-Field map v5 gives the identifier role to Conditional Access location and role
+The field map gives the identifier role to Conditional Access location and role
 GUIDs, terms of use IDs, custom authentication factor IDs, and preauthorized
 delegated permission IDs. Terms such as All and AllTrusted and control values
 such as mfa use the setting role.
@@ -1835,9 +1835,10 @@ builds staged identity indexes in yielding slices and publishes only finished
 shards. Chat and MCP can reuse their raw identity lookup until the tenant
 cache changes, even while classification is still pending.
 The request scanner marks coverage incomplete if the worker lacks the current
-identity index. A confirmed tenant identity can raise a stale cached field
-class. Generic syntax matches such as an unconfirmed GUID honor typed field
-provenance.
+identity index. A detector match can raise a mapped class when it identifies more sensitive
+data. Generic syntax such as an unconfirmed GUID uses the type of the field
+when known. Field map v6 classifies group mail addresses, mail nicknames and
+proxy addresses as Identity.
 
 The model-facing ledger is a plaintext secret store in process memory. Never
 log, persist or send its contents outside the local classification worker.

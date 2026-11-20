@@ -1231,15 +1231,18 @@ export class ClassificationLedger {
       };
       const collect = ({ start, end }: TextSpan, evidence: Evidence, authoritative = false) => {
         const { kind, source, maskRole } = evidence;
-        const confirmedIdentity = source === "detector:tenant-index";
         const key = `${start}:${end}`;
         const previous = found.get(key);
-        // Typed provenance distinguishes, for example, a security policy id from an arbitrary GUID.
-        if (!previous || confirmedIdentity && maxDataClass(previous.kind, kind) !== previous.kind ||
-            !previous.authoritative && authoritative && kind !== "credential" && previous.kind !== "credential" ||
-            (authoritative || !previous.authoritative || kind === "credential") &&
-            (previous.kind !== kind ? maxDataClass(previous.kind, kind) === kind :
-              Boolean(maskRole) && (!previous.maskRole || maskRole === "nameOrIdentifier"))) {
+        // A bare GUID can identify a device or a policy. Use typed
+        // provenance for that syntax when available.
+        if (previous?.authoritative && source === "detector:identifier") return;
+        const higher = previous && previous.kind !== kind && maxDataClass(previous.kind, kind) === kind;
+        const sameWithBetterEvidence = previous?.kind === kind && (
+          authoritative && !previous.authoritative ||
+          (authoritative || !previous.authoritative) && Boolean(maskRole) &&
+            (!previous.maskRole || previous.maskRole === "setting" && maskRole === "nameOrIdentifier")
+        );
+        if (!previous || higher || sameWithBetterEvidence) {
           found.set(key, { section, start, end, kind, source, ...(maskRole ? { maskRole } : {}), ...(authoritative ? { authoritative } : {}) });
         }
       };

@@ -188,7 +188,7 @@ function hasWrappedPem(text: string): boolean {
 const ENCODED_UPN = /(?<![\w.+%-])[\w.+-]+(?:%[0-9a-f]{2}[\w.+-]*)*%40[\w.-]+(?:\.|%2e)[a-z]{2,}\b/gi;
 const SERIAL = /\b(?:serial(?:[ _-]*number)?[ :=]+)([a-z0-9-]{6,40})\b/gi;
 
-function* identifierSpans(text: string, kind: DataClass): Iterable<TextSpan & { kind: DataClass; source: string }> {
+function* identifierSpans(text: string, kind: DataClass, allowGenericIdentifiers = true): Iterable<TextSpan & { kind: DataClass; source: string }> {
   const security = kind === "security";
   const patterns: ReadonlyArray<readonly [RegExp, DataClass, string]> = [
     [IDENTIFIER, "identity", "identifier"], [EMAIL, "identity", "email"],
@@ -197,7 +197,7 @@ function* identifierSpans(text: string, kind: DataClass): Iterable<TextSpan & { 
     [SERIAL, "device", "serial"],
   ];
   for (const [pattern, defaultKind, source] of patterns) {
-    if (security && source === "identifier" || source === "email" && !text.includes("@") ||
+    if ((!allowGenericIdentifiers || security) && source === "identifier" || source === "email" && !text.includes("@") ||
         source === "encoded-upn" && !text.includes("%40") ||
         source === "ip" && !text.includes(":") && !text.includes(".")) continue;
     for (const match of text.matchAll(pattern)) {
@@ -314,10 +314,9 @@ export function hasGraphFieldClass(graphPath: string, field: string): boolean {
 
 function detectValueClass(text: string, detectIdentifiers: boolean, options: ClassificationOptions, kind: DataClass): DataClass {
   if (credentialSpans(text).next().done === false) return "credential";
-  if (!detectIdentifiers) return "public";
-  if (options.identityIndex?.matches(text)) return "identity";
+  if (detectIdentifiers && options.identityIndex?.matches(text)) return "identity";
   let found: DataClass = "public";
-  for (const span of identifierSpans(text, kind)) {
+  for (const span of identifierSpans(text, kind, detectIdentifiers)) {
     found = maxDataClass(found, span.kind);
     if (found === "identity") break;
   }
