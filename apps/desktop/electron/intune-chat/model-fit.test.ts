@@ -89,6 +89,9 @@ describe("Model fit: classifying a failure", () => {
     assert.equal(classifyModelFitFailure("auth-expired", local), undefined);
     const wrapped = Object.assign(new Error("The run stopped."), { kind: "context-too-small", neededTokens: 40652, failure: { stage: "plan", limitTokens: 16384 } });
     assert.deepEqual(classifyModelFitFailure(wrapped, local), { reason: "context-too-small", neededTokens: 40652, limitTokens: 16384, providerId: "ollama", model: LOCAL_MODEL });
+    // A wrapper's short `limit` may count something else, so it is not read as the context limit.
+    const toolLimit = Object.assign(new Error("Too many tool calls."), { limit: 25, failure: { code: "context-too-small" } });
+    assert.deepEqual(classifyModelFitFailure(toolLimit, local), { reason: "context-too-small", providerId: "ollama", model: LOCAL_MODEL });
   });
 
   it("reads the adapter's memory failure, a wrapped typed failure and the loop's reason", () => {

@@ -39,7 +39,8 @@ function typedIssue(error: unknown, depth = 0): Omit<ModelFitIssue, "providerId"
   // A field the record leaves out falls back to the wrapper's.
   const failure = outer.failure && typeof outer.failure === "object" ? (outer.failure as Record<string, unknown>) : undefined;
   const record = failure
-    ? Object.fromEntries(["neededTokens", "needed", "limitTokens", "limit"].map((key) => [key, failure[key] ?? outer[key]]))
+    ? // Only the unambiguous names fall back: a wrapper's `limit` may count something else, such as tool calls.
+      { needed: failure.needed, limit: failure.limit, neededTokens: failure.neededTokens ?? outer.neededTokens, limitTokens: failure.limitTokens ?? outer.limitTokens }
     : outer;
   const fitReason = (source: Record<string, unknown>) =>
     [source.kind, source.code, source.reason].find(
