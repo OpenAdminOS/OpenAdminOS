@@ -54,6 +54,10 @@ diagnostics when the removal is saved, even if local cleanup needs a retry.
 Classification diagnostics use static Graph route labels and expire after
 15 minutes.
 
+Desktop Nova command routing uses the connected organization's identity
+index. A previous request included for context has incomplete coverage
+because its original field evidence is unavailable.
+
 Hosted Nova voice uses a separate request path. Its classification coverage
 is planned with provider routing in Phase A3.
 

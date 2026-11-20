@@ -124,6 +124,7 @@ type Fence = { body: string; evidence: Evidence };
 type ScanState = {
   retained: readonly ClassificationLedger[];
   historyFences: HistoryFences;
+  promptReplay?: TextSpan;
   dropped: number;
   registrations: number;
   incomplete: boolean;
@@ -148,7 +149,7 @@ export interface WorkerScan {
   sections: Record<ClassificationSpan["section"], EncodedText | undefined>;
   ledgers: number[];
   shards: number[];
-  state: Pick<ScanState, "historyFences" | "dropped" | "registrations" | "incomplete">;
+  state: Pick<ScanState, "historyFences" | "promptReplay" | "dropped" | "registrations" | "incomplete">;
 }
 
 export interface WorkerResult {
@@ -404,6 +405,7 @@ export class ClassificationLedger {
     await Promise.allSettled(this.observations);
   }
   private workerState?: { client: ClassificationWorker; id: number; dirty: Set<Scalar>; mirrored: Set<Scalar> };
+  private promptReplay?: TextSpan;
   scopeId: string | undefined;
 
   constructor(
@@ -437,6 +439,7 @@ export class ClassificationLedger {
     }
     this.historyFences.clear();
     this.historyReplays.clear();
+    delete this.promptReplay;
     this.prior = [];
     this.discardTransient();
   }
@@ -454,6 +457,10 @@ export class ClassificationLedger {
 
   registerHistoryReplay(text: string, replays: readonly HistoryReplay[]): void {
     if (!this.disposed) this.historyReplays.set(text, replays);
+  }
+
+  markPromptReplay(start: number, end: number): void {
+    if (!this.disposed) this.promptReplay = { start, end };
   }
 
   private get replayEvidenceIncomplete(): boolean {
@@ -860,7 +867,7 @@ export class ClassificationLedger {
         start, end, incomplete: !ledger || ledger.replayEvidenceIncomplete,
       })) });
     }
-    return { retained, historyFences,
+    return { retained, historyFences, promptReplay: this.promptReplay,
       dropped: this.dropped + (this.transient?.dropped ?? 0),
       registrations: this.incompleteRegistrations + (this.transient?.incompleteRegistrations ?? 0),
       incomplete: this.disposed || this.identityIndex?.isComplete?.() === false,
@@ -1010,6 +1017,12 @@ export class ClassificationLedger {
           found.set(key, { section, start, end, kind, source, ...(maskRole ? { maskRole } : {}), ...(authoritative ? { authoritative } : {}) });
         }
       };
+      if (section === "prompt" && state.promptReplay) {
+        const { start, end } = state.promptReplay;
+        if (start < text.length && start < end) {
+          ranges.push({ section, start, end: Math.min(end, text.length), reason: "history-evidence-unavailable" });
+        }
+      }
       const preservedReplays: TextSpan[] = [];
       if (historyFences.size || retained.some(ledger => ledger.fences.size)) {
         for (const marker of text.matchAll(/<tenant_data [^<>\n]* nonce="([0-9a-f]{16})">/g)) {

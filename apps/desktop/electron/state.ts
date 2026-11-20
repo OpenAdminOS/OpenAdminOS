@@ -5633,8 +5633,15 @@ export class AppStateStore {
       throw new Error("This command exceeds the reasoning model's input budget. Repeat it as one shorter request.");
     const llm = await this.buildLlm(options.scope.providerId, options.scope.model);
     await check();
-    const result = await llm.complete({ system: novaCommandInstructions, prompt,
-      maxTokens: 400, temperature: 0, signal: options.signal });
+    const tenantId = options.scope.tenantId;
+    const ledger = new ClassificationLedger(this.intelligenceStore?.classificationIdentityIndex(tenantId), undefined, [tenantId]);
+    if (context.previousRequest) {
+      const prefix = JSON.stringify({ currentRequest: text }).slice(0, -1) + ',"previousRequest":';
+      ledger.markPromptReplay(prefix.length, prefix.length + JSON.stringify(context.previousRequest).length);
+    }
+    const result = await withTransientClassificationScope(ledger, () => llm.complete({
+      system: novaCommandInstructions, prompt, maxTokens: 400, temperature: 0, signal: options.signal,
+    }), AbortSignal.any([options.signal, this.tenantLifecycle.signal(tenantId)]));
     await check();
     return result.text;
   }

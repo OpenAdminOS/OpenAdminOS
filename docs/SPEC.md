@@ -1842,7 +1842,9 @@ replayed ranges incomplete if the original observations were dropped, expired
 or otherwise unavailable. Text detectors and the cache index still identify
 evidence in the replay. A short Credential value that matches replayed text
 without its original field or rendering provenance marks that matching range
-incomplete.
+incomplete. Desktop Nova command routing scans with the current tenant's
+identity index and marks the previous request's range incomplete when the
+original evidence is unavailable. Disconnect clears its local diagnostics.
 
 The decorator scans final system and prompt text for raw and JSON-serialized
 values and recognizes credential and identifier patterns, including UPNs,
