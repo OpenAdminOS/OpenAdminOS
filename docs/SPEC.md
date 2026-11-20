@@ -2646,13 +2646,23 @@ Mockup: `docs/mockups/34-local-reset.html`.
   links, mode and time changes, opens for writing, write streams, in their
   promise, callback and sync forms, synced into ES module imports so that
   dependencies such as Baileys are covered): any path inside the data
-  folder is refused with "OpenAdminOS is resetting and restarts in a
-  moment. Nothing was saved." (`EROFS`), except the reset's own marker and
-  its temporary files directly in the folder, so the request can still add
-  its warnings. A refused write nobody awaited is logged. Changes through a
+  folder, as written or as the system resolves it through links, is refused
+  with "OpenAdminOS is resetting and restarts in a moment. Nothing was
+  saved." (`EROFS`; a write stream fails with that error), except the
+  reset's own marker and its temporary files directly in the folder, so the
+  request can still add its warnings. A refused write nobody awaited is
+  logged while the seal holds. Work that writes on its own (index downloads,
+  WhatsApp Web) stops before the guard is installed. A writer that captured
+  file system functions at load is not seen: electron-updater is the one
+  known, so no update check starts after the commit (one already running
+  can still write its staging id, which holds no tenant data). Changes through a
   handle opened earlier (SQLite, Chromium's own storage) are not paths and
   are left as they are; the process exits right after the shutdown. A
-  refused reset lifts the guard. WhatsApp Web clients leave the connected
+  refused reset lifts the guard. In the running app, the scheduler and the
+  login item are turned off only while the data folder is still the one
+  being reset; otherwise they stay on, with a warning. The restart of a
+  Linux AppImage goes through the AppImage file (`APPIMAGE`), since the
+  mount it runs from goes away with the old process. WhatsApp Web clients leave the connected
   and QR states when they stop, so a client resumed after a refused reset
   reconnects. The shutdown before the restart leaves the SQLite databases open:
   closing checkpoints the write-ahead log and deletes it by path; the
