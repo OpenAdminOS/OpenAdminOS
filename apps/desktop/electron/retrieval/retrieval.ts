@@ -303,7 +303,7 @@ function embeddingFailure(server: string, url: string, error: unknown): Error {
  * Posts one question for embedding and reads the answer inside the same
  * time budget, so a body that stalls after its headers times out too.
  */
-async function queryEmbedding<T>(endpoint: string, path: string, server: string, body: unknown, read: (response: Response) => Promise<T>): Promise<T> {
+async function queryEmbedding<T>(endpoint: string, path: string, server: string, body: unknown, read: (response: Response, base: string) => Promise<T>): Promise<T> {
   const label = loopbackLabel(endpoint, path);
   try {
     // The question is in the body. Refuse any redirect from the local service.
@@ -314,7 +314,8 @@ async function queryEmbedding<T>(endpoint: string, path: string, server: string,
       signal: AbortSignal.timeout(EMBEDDING_QUERY_TIMEOUT_MS),
     });
     if (isRefusedRedirect(response, url)) throw new EmbeddingQueryError(redirectRefusedDetail(server, url));
-    return await read(response);
+    // The address that answered, without the request path: a localhost name may have been answered on [::1].
+    return await read(response, url.slice(0, url.length - path.length));
   } catch (error) {
     if (error instanceof EmbeddingQueryError) throw error;
     throw embeddingFailure(server, label, error);
@@ -359,7 +360,7 @@ export function ollamaEmbedQuery(
   model = DEFAULT_INDEX_EMBEDDING_MODEL,
 ): EmbedQuery {
   return async (text: string) => {
-    return queryEmbedding(endpoint, "/api/embed", "Ollama", { model, input: `search_query: ${text}` }, async (response) => {
+    return queryEmbedding(endpoint, "/api/embed", "Ollama", { model, input: `search_query: ${text}` }, async (response, base) => {
       if (!response.ok) {
         const details = response.status === 404
           ? await response.json().catch((error: unknown) => {
@@ -368,7 +369,7 @@ export function ollamaEmbedQuery(
           }) as { error?: unknown } | undefined
           : undefined;
         const missing = typeof details?.error === "string" && /model.*not found/i.test(details.error);
-        const recovery = missing ? ` The embedding model ${model} is missing. ${pullAdvice(endpoint, model)}` : "";
+        const recovery = missing ? ` The embedding model ${model} is missing. ${pullAdvice(base, model)}` : "";
         throw new EmbeddingQueryError(`Ollama's embedding request returned HTTP ${response.status}.${recovery}`);
       }
       const payload = (await response.json()) as { embeddings?: number[][] };
@@ -382,14 +383,13 @@ export function ollamaEmbedQuery(
 }
 
 /**
- * How to pull a model into the Ollama at this endpoint. The Ollama CLI talks to
- * 127.0.0.1:11434 unless OLLAMA_HOST says otherwise, so for any other endpoint
- * the advice names it, or the pull would land in another Ollama.
+ * How to pull a model into the Ollama that answered at `base` (the address
+ * dialled, path prefix included). The Ollama CLI talks to
+ * http://127.0.0.1:11434 unless OLLAMA_HOST says otherwise, so any other
+ * base is named, or the pull would land in another Ollama.
  */
-export function pullAdvice(endpoint: string, model: string): string {
-  const url = new URL(endpoint);
-  const standard = url.protocol === "http:" && url.port === "11434" && /^(127\.0\.0\.1|localhost\.?)$/i.test(url.hostname);
-  return standard ? `Run \`ollama pull ${model}\`.` : `Run \`ollama pull ${model}\` with OLLAMA_HOST set to ${url.origin}.`;
+export function pullAdvice(base: string, model: string): string {
+  return base === "http://127.0.0.1:11434" ? `Run \`ollama pull ${model}\`.` : `Run \`ollama pull ${model}\` with OLLAMA_HOST set to ${base}.`;
 }
 
 /**

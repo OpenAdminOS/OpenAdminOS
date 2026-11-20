@@ -128,4 +128,8 @@ async function pullOnce(endpoint: string, model: string, fetchImpl: typeof fetch
   if (!response.ok) {
     throw new Error(`Ollama pull failed with HTTP ${response.status}.`);
   }
+  // A finished pull says so; an empty or other answer is not one, or the day's attempt would be spent on nothing.
+  if (payload?.status !== "success") {
+    throw new Error("Ollama answered the download without saying it finished.");
+  }
 }

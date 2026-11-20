@@ -78,8 +78,11 @@ describe("local documentation retrieval never follows a redirect from this devic
       Response.json({ error: "model 'nomic-embed-text' not found" }, { status: 404 }),
     );
     await assert.rejects(ollamaEmbedQuery(endpoint)("test"), /HTTP 404\. The embedding model nomic-embed-text is missing\. Run `ollama pull nomic-embed-text`\.$/);
-    // Elsewhere the CLI's default would pull into another Ollama, so the advice names this one (PR #206 review round 10).
+    // Elsewhere the CLI's default would pull into another Ollama, so the advice names this one (PR #206 review round 10),
+    // as the address that answered, path prefix included (round 11).
     await assert.rejects(ollamaEmbedQuery("http://127.0.0.1:11435")("test"), /Run `ollama pull nomic-embed-text` with OLLAMA_HOST set to http:\/\/127\.0\.0\.1:11435\.$/);
+    await assert.rejects(ollamaEmbedQuery("http://127.0.0.1:11434/ollama")("test"), /Run `ollama pull nomic-embed-text` with OLLAMA_HOST set to http:\/\/127\.0\.0\.1:11434\/ollama\.$/);
+    await assert.rejects(ollamaEmbedQuery("http://localhost:11434")("test"), /Run `ollama pull nomic-embed-text`\.$/);
     request.mock.mockImplementation(async () => new Response("", { status: 503 }));
     await assert.rejects(ollamaEmbedQuery(endpoint)("test"), (error: Error) =>
       /HTTP 503/.test(error.message) && !error.message.includes("ollama pull"));
@@ -196,6 +199,12 @@ describe("local documentation retrieval never follows a redirect from this devic
     assert.deepEqual(await ollamaEmbedQuery("http://localhost:11434")("test"), [0.1]);
     assert.deepEqual(await embeddingModelState("http://localhost:11434"), { ollamaReachable: true, installed: true });
     assert.deepEqual(urls, ["http://127.0.0.1:11434/api/embed", "http://[::1]:11434/api/embed", "http://127.0.0.1:11434/api/tags", "http://[::1]:11434/api/tags"]);
+    // A missing model answered on [::1] is pulled there, not at the CLI's default 127.0.0.1 (PR #206 review round 11).
+    request.mock.mockImplementation(async (url: Parameters<typeof fetch>[0]) => {
+      if (String(url).startsWith("http://127.0.0.1")) refused();
+      return Response.json({ error: "model 'nomic-embed-text' not found" }, { status: 404 });
+    });
+    await assert.rejects(ollamaEmbedQuery("http://localhost:11434")("test"), /Run `ollama pull nomic-embed-text` with OLLAMA_HOST set to http:\/\/\[::1\]:11434\.$/);
 
     request.mock.mockImplementation(async () => refused());
     await assert.rejects(ollamaEmbedQuery("http://localhost:11434")("test"), (error: Error) =>
@@ -227,7 +236,7 @@ describe("local documentation retrieval never follows a redirect from this devic
     let hits = 0;
     const local = createServer((_request, response) => {
       hits += 1;
-      response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ embeddings: [[0.1]], models: [{ name: "nomic-embed-text:latest" }] }));
+      response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ embeddings: [[0.1]], models: [{ name: "nomic-embed-text:latest" }], status: "success" }));
     });
     await listen(local);
     t.after(() => new Promise<void>((resolve) => local.close(() => resolve())));
@@ -326,6 +335,18 @@ describe("local documentation retrieval never follows a redirect from this devic
     await ollamaEmbedQuery("https://localhost:8443")("test");
     await ollamaEmbedQuery("http://localhost:8443")("test");
     assert.deepEqual(sent, [null, "localhost:8443"]);
+  });
+
+  it("fails a model server that switches protocols instead of staying pending (PR #206 review round 11)", async (t) => {
+    // A raw socket: an HTTP server would not send 101 to a request that did not ask to upgrade.
+    const { createServer: createSocketServer } = await import("node:net");
+    const server = createSocketServer((socket) => {
+      socket.once("data", () => socket.end("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n"));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+    const endpoint = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    await assert.rejects(ollamaEmbedQuery(endpoint)("test"), /^Error: Ollama did not complete the embedding request\. Check the local server, then ask again\.$/);
   });
 
   it("answers an empty deflate body as empty instead of staying pending (PR #206 review round 10)", async (t) => {

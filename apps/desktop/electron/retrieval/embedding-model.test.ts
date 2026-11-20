@@ -89,6 +89,11 @@ describe("embedding model presence and pull", () => {
         ),
       /no space left/,
     );
+    // An empty 200 is not a finished pull (PR #206 review round 11).
+    await assert.rejects(
+      () => pullEmbeddingModel("http://127.0.0.1:11434", "nomic-embed-text", fetchStub(() => new Response("", { status: 200 }))),
+      /^Error: Ollama answered the download without saying it finished\.$/,
+    );
   });
 });
 

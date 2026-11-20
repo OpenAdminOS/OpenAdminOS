@@ -67,6 +67,15 @@ export function directFetch(input: string | URL | Request, init: RequestInit = {
       request.destroy(reason);
     });
     request.on("error", reject);
+    // A model server never switches protocols; Node would close the request without an answer or an error.
+    request.on("upgrade", (response, socket) => {
+      socket.destroy();
+      reject(new Error(`The model server answered with HTTP ${response.statusCode ?? 101} and tried to switch protocols.`));
+    });
+    // Closed before any answer, for any other reason: fail rather than stay pending. Settled promises ignore this.
+    request.on("close", () => {
+      if (!answered) reject(new Error("The model server closed the connection before its answer."));
+    });
     request.end(body);
   });
 }

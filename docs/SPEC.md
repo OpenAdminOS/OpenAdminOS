@@ -478,8 +478,12 @@ connection closed. A stalled model download says in Settings that the local
 Ollama stopped answering, not the registry, and like an unreachable Ollama it
 does not count as the day's attempt, so the next launch downloads it again. When
 Chat finds the embedding model missing, its `ollama pull` advice names
-`OLLAMA_HOST` for any endpoint other than 127.0.0.1:11434, where the CLI would
-otherwise pull into another Ollama. Settings never runs Check for index and an index install at
+`OLLAMA_HOST` set to the address that answered (path prefix included, `[::1]`
+after a localhost fallback) for anything other than http://127.0.0.1:11434,
+where the CLI would otherwise pull into another Ollama. A model server that
+tries to switch protocols, or closes the connection before any answer, fails
+the request instead of leaving it pending, and a pull counts as finished only
+when Ollama says so. Settings never runs Check for index and an index install at
 once, so neither reply replaces the other's. A query vector is scaled before
 scoring, so a huge but finite one cannot overflow and rank every passage as 0. A connection reset reads as a failed request with its
 code, not as a stopped Ollama. A vector with an entry that is not a finite
