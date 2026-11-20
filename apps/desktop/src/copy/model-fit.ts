@@ -77,9 +77,10 @@ export const MODEL_FIT_COPY = {
   openProviders: "Open Settings, Providers",
 
   acceptTitle: (tool: string) => `Run this request with ${tool}?`,
-  acceptBody(issue: ModelFitIssue, model: string, tool: string): string {
+  /** `model` could not do the request; `returnModel` is the active one the next message goes to. */
+  acceptBody(issue: ModelFitIssue, model: string, returnModel: string, tool: string): string {
     const why = issue.reason === "repeated-failure" ? `${model} could not investigate it.` : issue.reason === "thinking-only" ? `${model} did not finish it.` : `${model} cannot fit it.`;
-    return `${why} ${tool} answers this one request. Your next message goes to ${model} again.`;
+    return `${why} ${tool} answers this one request. Your next message goes to ${returnModel} again.`;
   },
   cost: "Cost",
   // TODO(ugur): offer "Remember for this conversation"? v1 asks for every request.

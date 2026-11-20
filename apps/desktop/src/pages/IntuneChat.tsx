@@ -157,6 +157,9 @@ type ModelFitOffer = {
   /** The provider and model active when the offer was made; a change withdraws it. */
   activeProviderId: ProviderId;
   activeModel?: string;
+  /** The workspace selection the request was sent with; the host binds the offer to it. */
+  workspaceContext?: WorkspacePromptContextInput;
+  workspaceContextSummary?: WorkspacePromptContextSummary;
 };
 
 /** The hosted choice waiting for its per-request accept. */
@@ -1090,6 +1093,8 @@ function IntuneChatContent() {
                 ...(sendTenantId ? { tenantId: sendTenantId } : {}),
                 activeProviderId: provider?.id ?? state.activeProviderId,
                 ...(activeModel ? { activeModel } : {}),
+                ...(workspaceContext ? { workspaceContext } : {}),
+                ...(workspaceContext && workspaceContextSummary ? { workspaceContextSummary } : {}),
               });
             }
             if (event.type === "failed") {
@@ -1216,12 +1221,13 @@ function IntuneChatContent() {
       providerId: choice.providerId,
       ...(choice.model ? { model: choice.model } : {}),
     };
-    const workspaceContext = buildWorkspaceContextInput();
+    // The request exactly as it failed, with the workspace selection it had.
+    const workspaceContext = offer.workspaceContext;
     if (choice.isLocal) {
       void executeSend(offer.content, undefined, offer.conversationId, workspaceContext, override);
       return;
     }
-    const contextSummary = workspaceContext ? workspaceContextSummary : undefined;
+    const contextSummary = offer.workspaceContextSummary;
     setModelFitAccept({
       offer,
       override,
@@ -1246,7 +1252,7 @@ function IntuneChatContent() {
     // Never a remembered acknowledgement: the host refuses one for an override.
     await executeSend(
       pending.prompt.content,
-      createHostedProviderConsent(pending.prompt.tenantId, pending.prompt.providerId, false, pending.prompt.workspaceContextSummary, pending.prompt.model),
+      createHostedProviderConsent(pending.prompt.tenantId, pending.prompt.providerId, false, pending.prompt.workspaceContextSummary, pending.prompt.model, pending.override.offerId),
       pending.prompt.conversationId,
       pending.prompt.workspaceContext,
       pending.override,
@@ -1260,7 +1266,7 @@ function IntuneChatContent() {
     if (!offer) return;
     if (offer.issue.reason !== "repeated-failure") {
       setInput(offer.content);
-      setNotice(next === "split" ? MODEL_FIT_COPY.splitNotice : MODEL_FIT_COPY.declined(modelFitModelName(offer.issue)));
+      setNotice(next === "split" ? MODEL_FIT_COPY.splitNotice : MODEL_FIT_COPY.declined(modelFitReturnModel(offer)));
     }
     window.requestAnimationFrame(() => composerRef.current?.focus());
   };
@@ -1810,7 +1816,7 @@ function IntuneChatContent() {
         tenantName={tenants.find((tenant) => tenant.id === modelFitAccept.prompt.tenantId)?.displayName}
         remember={false}
         onRememberChange={() => undefined}
-        modelFit={modelFitAccept.offer.issue}
+        modelFit={{ issue: modelFitAccept.offer.issue, returnModel: modelFitReturnModel(modelFitAccept.offer) }}
         onClose={() => setModelFitAccept(null)}
         onConfirm={() => void confirmModelFitAndSend()}
         onUseLocal={() => setModelFitAccept(null)}
@@ -1825,6 +1831,7 @@ function IntuneChatContent() {
           managedPolicy: state.managedPolicy,
         })}
         surface="chat"
+        returnModel={modelFitReturnModel(modelFitOffer)}
         onChoose={(choice) => chooseModelFit(modelFitOffer, choice)}
         onSplit={() => closeModelFit("split")}
         onKeep={() => closeModelFit("keep")}
@@ -4132,7 +4139,7 @@ function HostedChatConsentPanel({
    * (mockup 36, section B): no remember box, Back instead of Cancel, and
    * only the Send button sends.
    */
-  modelFit?: ModelFitIssue;
+  modelFit?: { issue: ModelFitIssue; returnModel: string };
   remember: boolean;
   onRememberChange: (remember: boolean) => void;
   onClose: () => void;
@@ -4195,7 +4202,7 @@ function HostedChatConsentPanel({
       </h2>
       <p className="mt-1 text-sm text-[var(--color-text-soft)]">
         {modelFit
-          ? MODEL_FIT_COPY.acceptBody(modelFit, modelFitModelName(modelFit), tool)
+          ? MODEL_FIT_COPY.acceptBody(modelFit.issue, modelFitModelName(modelFit.issue), modelFit.returnModel, tool)
           : through
           ? noTenant
             ? HOSTED_CONFIRM_COPY.bodyThroughNoTenant(tool)
@@ -4254,6 +4261,11 @@ function HostedChatConsentPanel({
  * for questions with nothing connected. The two are separate decisions:
  * a remembered no-tenant confirmation never covers a send with a tenant.
  */
+/** The model Chat goes back to after a model fit offer: the one active when it was made. */
+function modelFitReturnModel(offer: ModelFitOffer): string {
+  return modelFitModelName({ providerId: offer.activeProviderId, ...(offer.activeModel ? { model: offer.activeModel } : {}) });
+}
+
 function requiresHostedChatConsent(
   provider: { id: ProviderId; isLocal: boolean } | undefined,
   tenant: { id: string } | undefined,
@@ -4280,10 +4292,12 @@ export function createHostedProviderConsent(
   remember: boolean,
   workspaceContext?: WorkspacePromptContextSummary,
   model?: string,
+  /** The model fit offer this acceptance is for; it covers that one request only. */
+  modelFitOfferId?: string,
 ): HostedProviderConsentInput {
   const acknowledgedAt = new Date().toISOString();
   // The model the admin saw in the confirmation; the host refuses a send that would use another.
-  const named = model ? { model } : {};
+  const named = { ...(model ? { model } : {}), ...(modelFitOfferId ? { modelFitOfferId } : {}) };
   if (!tenantId) {
     return { noTenant: true, providerId, ...named, acknowledgedAt, ...(remember ? { remember: true } : {}) };
   }

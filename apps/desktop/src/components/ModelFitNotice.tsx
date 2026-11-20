@@ -27,7 +27,10 @@ export function ModelFitNotice({
   onSplit,
   onKeep,
   onOpenProviders,
+  returnModel,
 }: {
+  /** The active model Chat stays on; defaults to the model that failed. */
+  returnModel?: string;
   issue: ModelFitIssue;
   choices: ModelFitChoices;
   surface: "chat" | "run";
@@ -101,7 +104,7 @@ export function ModelFitNotice({
       {onSplit || onKeep ? (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           {onSplit && !answered ? <Button size="sm" variant="secondary" onClick={onSplit}>{MODEL_FIT_COPY.split}</Button> : null}
-          {onKeep ? <Button size="sm" variant="ghost" onClick={onKeep}>{answered ? MODEL_FIT_COPY.keepAnswer : MODEL_FIT_COPY.keep(model)}</Button> : null}
+          {onKeep ? <Button size="sm" variant="ghost" onClick={onKeep}>{answered ? MODEL_FIT_COPY.keepAnswer : MODEL_FIT_COPY.keep(returnModel ?? model)}</Button> : null}
         </div>
       ) : null}
     </section>
