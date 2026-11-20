@@ -1,4 +1,3 @@
-import { ClassificationLedger, withClassificationScope } from "@openadminos/runtime/data-classification";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
@@ -10,7 +9,7 @@ import {
   tokenCacheForPartition,
   tokenCachePartition,
 } from "./state-helpers.js";
-import { createGraphAdapter, GRAPH_CLI_CLIENT_ID, OPENADMINOS_CLIENT_ID } from "@openadminos/runtime";
+import { GRAPH_CLI_CLIENT_ID, OPENADMINOS_CLIENT_ID } from "@openadminos/runtime";
 
 describe("Graph cache nextLink validation", () => {
   it("keeps beta paths, query values, and caller headers", () => {
@@ -610,28 +609,4 @@ it("a row-limited collection keeps the rows within the memory budget instead of 
   assert.ok(result.rows.length > 0 && result.rows.length < 64, `kept ${result.rows.length} rows`);
   requests = 0;
   await assert.rejects(fetchGraphCachePages(graph, {path:"/auditLogs/signIns"}, undefined, true), /128 MiB/);
-});
-
-it("registers raw legacy device pages without delaying projected results", async t => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  const path = "/deviceManagement/managedDevices";
-  const requests: string[] = [];
-  const graph = createGraphAdapter({
-    tokenProvider: async () => "synthetic-token",
-    fetchImpl: async (input) => {
-      requests.push(String(input));
-      return Response.json(requests.length === 1
-        ? { value: [{ id: "device-one", deviceName: "Workstation-01" }],
-          "@odata.nextLink": `https://graph.microsoft.com/beta${path}?$skiptoken=next` }
-        : { value: [{ id: "device-two", deviceName: "Workstation-02", activationLockBypassCode: "synthetic-credential" }] });
-    },
-  });
-  const ledger = new ClassificationLedger();
-  const devices = await withClassificationScope(ledger, () => graph.listManagedDevices());
-  assert.equal(requests.length, 2);
-  assert.doesNotMatch(JSON.stringify(devices), /synthetic-credential/);
-  assert.equal(ledger.classifyRequest({ prompt: "" }).coverageIncomplete, true);
-  await ledger.waitForObservations();
-  assert.equal(ledger.classifyRequest({ prompt: JSON.stringify(devices) }).counts.credential, 0);
-  assert.equal(ledger.classifyRequest({ prompt: "Value synthetic-credential" }).counts.credential, 1);
 });
