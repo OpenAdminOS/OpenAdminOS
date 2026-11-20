@@ -92,7 +92,7 @@ and stop if any of these applies:
   "No mount found". Unmount first, or remove only the link itself.
 
   ```bash
-  if folder="$(realpath ~/.config/OpenAdminOS)" && mounts="$(findmnt -rno TARGET)"; then
+  if folder="$(realpath "${XDG_CONFIG_HOME:-$HOME/.config}/OpenAdminOS")" && mounts="$(findmnt -rno TARGET)"; then
     printf '%s\n' "$mounts" | while IFS= read -r target; do printf '%b\n' "$target"; done |
       grep -F -- "$folder" && echo "STOP: a mount is at or inside $folder" || echo "No mount found. You can continue."
   else
@@ -100,8 +100,8 @@ and stop if any of these applies:
   fi
   ```
 
-  Run it again with `~/.cache/@openadminosdesktop-updater` for the cache
-  folder. The Windows script below checks for links.
+  Run it again with `${XDG_CACHE_HOME:-$HOME/.cache}/@openadminosdesktop-updater`
+  for the cache folder. The Windows script below checks for links.
 - `policy.json` in the data folder is a link (`ls -l` shows an arrow; on
   Windows the script stops on it). Removing the other files can break the IT
   policy; ask whoever manages the device first.
@@ -231,8 +231,11 @@ the AppImage file). Then make the checks in
 data folder while keeping the IT policy file, and remove the update cache:
 
 ```bash
-find ~/.config/OpenAdminOS -mindepth 1 -maxdepth 1 ! -iname policy.json -exec rm -rf {} +
-rm -rf ~/.cache/@openadminosdesktop-updater
+# The app follows XDG_CONFIG_HOME and XDG_CACHE_HOME when they are set.
+echo "Data folder: ${XDG_CONFIG_HOME:-$HOME/.config}/OpenAdminOS"
+echo "Update cache: ${XDG_CACHE_HOME:-$HOME/.cache}/@openadminosdesktop-updater"
+find "${XDG_CONFIG_HOME:-$HOME/.config}/OpenAdminOS" -mindepth 1 -maxdepth 1 ! -iname policy.json -exec rm -rf {} +
+rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/@openadminosdesktop-updater"
 ```
 
 The key that protects the sign-ins is kept by your keyring (GNOME Keyring or KWallet). Neither the in-app reset nor
