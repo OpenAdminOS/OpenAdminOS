@@ -487,7 +487,7 @@
     .trv .def .prm { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
     .trv .def .prm li { border: 0; }
     .trv .def .prm .ty { color: var(--color-text-muted); margin-left: 4px; }
-    .trv .def .prm .ds { display: block; color: var(--color-text-soft); }
+    .trv .def .prm .ds, .trv .def dd > .ds { display: block; color: var(--color-text-soft); }
     .trv .def .ev code { margin-right: 4px; }
     .trv .def mark.hit { background: color-mix(in srgb, var(--color-danger) 16%, transparent); color: var(--color-danger); border-radius: 3px; padding: 0 2px; }
     .trv .def mark.new { background: var(--color-warning-soft); color: inherit; border-radius: 3px; padding: 0 2px; }
@@ -816,6 +816,7 @@
           <li>The disclosure says what the server receives in the words of the grant copy in Access: listing its tools sends the credential chosen here and nothing from the tenant or the conversation, and each call sends a query with recognized tenant data removed, while text the app cannot recognize can still reach it. It follows the authentication choice.</li>
           <li>Continue connects to exactly this address, lists its tools and opens step 2, the tool review below, with every tool unchecked. Step 2 names the host from this address and shows the full address it listed. Change the address here and step 2 is cleared until Continue lists the new one; press Continue again and the review starts unchecked again. An approval belongs to the endpoint it was given for and never carries over to another, even for a tool with the same name and definition.</li>
           <li>Decided in round 13: the endpoint is the full address, path included. <code>https://tools.contoso.example/mcp</code> lists the 11 policy settings tools, and <code>https://tools.contoso.example/baselines/mcp</code> on the same host lists 4 different baseline history tools; change only the path and Continue shows the other list, unchecked. The allowlist check is by host, so both pass it; a path on a listed host that lists no tools gets its own error in step 2 with nothing to approve.</li>
+          <li>Decided in round 14: the three read tools on that path describe versions "on record", never "stored" versions, because the write check here matches words, not meaning, and would flag the adjective as a write. They are labelled read-only, pass the check and can be approved. <code>restore_version</code> stays disabled: the server labels it a change, and its description says it restores a version.</li>
           <li><code>allowedMcpServers</code> is a proposed key name (open question in the plan). The Access frame above opens this step from Add a server by URL.</li>
         </ul>
       </div>
@@ -856,6 +857,7 @@
         <li>The write check walks the whole object and reads every string in it, keys included, at every depth: names, titles, descriptions, nested schema properties, enum values and annotations. <code>baseline_versions</code>, whose name and description only read, is flagged by its title, "List and apply baselines", and by the value <code>apply</code> at <code>inputSchema.properties.mode.enum[1]</code>; the reason names each path.</li>
         <li>Decided in round 12: <code>tenant_setting</code> is labelled read-only (<code>readOnlyHint: true</code>), but its description says "Edits the selected tenant setting", so it is flagged and cannot be approved in the first review. The label never outweighs a write the definition documents.</li>
         <li>The approval is bound to the JCS SHA-256 hash of the whole object: the object in the RFC 8785 JSON Canonicalization Scheme (JCS), then SHA-256 over its UTF-8 bytes. JCS sorts object keys by UTF-16 code units at every level and writes numbers and strings in its own fixed form. The raw view prints that order. <code>search_settings</code> carries <code>_meta</code> keys "10" and "2", and "10" comes first, as JCS requires. Before a tool is offered and again at every call, the app hashes the object the server lists now; any difference anywhere, a nested schema property, <code>annotations.title</code>, <code>_meta</code> or a field the app does not know, invalidates the approval. Each row shows the short form of the hash; the definition shows the full hash with Copy.</li>
+        <li>Decided in round 14: the readable view shows the same complete object as the raw JSON, nothing only in one of them. Every other field is written out with its nested values (both <code>_meta</code> keys of <code>search_settings</code> and the two page sizes under <code>contoso.example/pageSizes</code>, in JCS order), and each input and output schema shows its own type and every keyword, on the schema, on each property and on array items, with its value.</li>
         <li>The write check and the hash on this page are scripts that illustrate the plan, which governs (B5, Your own MCP servers). The write check here matches a short word list: save, change, send, delete, edit, update, modify, set, write, create, assign, remove, revoke and similar words. The implementation treats any write the definition documents as disqualifying, whatever words it uses and whatever its read-only label says. The hash here is a small JCS serializer and SHA-256, the same rule the plan names.</li>
         <li>A tool that is not approved is never offered to the model. The approval is checked again at every call, whether it comes from Chat, a skill or a scheduled check, so a skill that names <code>mcp__policy-settings__export_report</code> cannot use it.</li>
         <li>When the server later adds a tool, the new tool stays off until the admin reviews it here. The review can be reopened from the server's row in Access; approving a tool later is the same step.</li>
@@ -1621,11 +1623,11 @@ identities with graph_get. Nothing else.
     ];
     // Another path on the same host is another endpoint with its own tool list.
     const HISTORY_TOOLS = [
-      { name: "list_versions", title: "List versions", description: "Lists the stored versions of a security baseline, newest first.",
+      { name: "list_versions", title: "List versions", description: "Lists the versions on record for a security baseline, newest first.",
         inputSchema: obj({ baseline: S("string", "Baseline id") }, ["baseline"]), annotations: { title: "List versions", readOnlyHint: true, openWorldHint: false } },
-      { name: "get_version", title: "Get version", description: "Returns one stored baseline version with its settings.",
+      { name: "get_version", title: "Get version", description: "Returns one baseline version on record with its settings.",
         inputSchema: obj({ baseline: S("string", "Baseline id"), version: S("string", "Version id from list_versions") }, ["baseline", "version"]), annotations: { title: "Get version", readOnlyHint: true, openWorldHint: false } },
-      { name: "diff_versions", title: "Diff versions", description: "Shows the settings that differ between two stored versions.",
+      { name: "diff_versions", title: "Diff versions", description: "Shows the settings that differ between two versions on record.",
         inputSchema: obj({ from: S("string", "Older version id"), to: S("string", "Newer version id") }, ["from", "to"]), annotations: { title: "Diff versions", readOnlyHint: true, openWorldHint: false } },
       { name: "restore_version", title: "Restore version", description: "Restores a stored version as the current baseline.",
         inputSchema: obj({ version: S("string", "Version id") }, ["version"]), annotations: { title: "Restore version", readOnlyHint: false, destructiveHint: true } },
@@ -1741,6 +1743,22 @@ identities with graph_get. Nothing else.
       const mk = (path, html) => (mark.path !== path ? html : mark.frag ? html.replace(hl(mark.frag), `<mark class="${cls}">${hl(mark.frag)}</mark>`) : `<mark class="${cls}">${html}</mark>`);
       const cut = (mark.path || "").lastIndexOf(".");
       const gapParent = cut < 0 ? "" : mark.path.slice(0, cut), gapLeaf = cut < 0 ? "" : mark.path.slice(cut + 1);
+      // Any JSON value, read the way the raw pane prints it: keys in JCS order, every nested value written out.
+      const val = (v, path) => {
+        if (v === null || typeof v !== "object") return mk(path, `<code>${typeof v === "string" ? `"${hl(v)}"` : esc(String(v))}</code>`);
+        if (Array.isArray(v)) return v.length ? `<ul class="prm">${v.map((x, i) => `<li>${val(x, `${path}[${i}]`)}</li>`).join("")}</ul>` : "<code>[]</code>";
+        const keys = Object.keys(v).sort(byUnits);
+        return keys.length ? `<ul class="prm">${keys.map((k) => `<li><code>${hl(k)}</code>: ${val(v[k], `${path}.${k}`)}</li>`).join("")}</ul>` : "<code>{}</code>";
+      };
+      // Schema keywords the readable view lays out itself; every other keyword of a schema node is listed with its value.
+      const LAID = ["type", "description", "enum", "properties", "required", "items"];
+      const extras = (node, base) => Object.keys(node || {}).filter((k) => !LAID.includes(k)).sort(byUnits)
+        .map((k) => `<span class="ds"><code>${hl(k)}</code>: ${val(node[k], `${base}.${k}`)}</span>`).join("");
+      // Required names with no property of that name are listed too, so nothing in the object is left out.
+      const strayReq = (node, base) => {
+        const missing = ((node && node.required) || []).filter((n) => !((node.properties || {})[n]));
+        return missing.length ? `<span class="ds">Required with no property: ${missing.map((n) => `<code>${hl(n)}</code>`).join(" ")}</span>` : "";
+      };
       const props = (schema, base) => {
         const entries = Object.entries((schema && schema.properties) || {});
         const gap = gapParent === `${base}.properties` && !entries.some(([n]) => n === gapLeaf)
@@ -1749,26 +1767,37 @@ identities with graph_get. Nothing else.
         const req = (schema && schema.required) || [];
         return `<ul class="prm">${entries.map(([n, p]) => {
           const path = `${base}.properties.${n}`;
-          const nested = p.properties ? props(p, path) : p.items && p.items.properties ? props(p.items, `${path}.items`) : "";
-          const ty = p.type === "array" && p.items ? `array of ${p.items.type}` : p.type;
+          const it = p.items, ip = `${path}.items`;
+          const nested = (p.properties ? props(p, path) : "") + strayReq(p, path)
+            + (it ? (it.description ? `<span class="ds">Each item: ${mk(`${ip}.description`, hl(it.description))}</span>` : "")
+              + (it.enum ? `<span class="ds ev">Item values: ${it.enum.map((v) => `<code>${hl(v)}</code>`).join("")}</span>` : "")
+              + extras(it, ip) + (it.properties ? props(it, ip) : "") + strayReq(it, ip) : "");
+          const ty = p.type === "array" && it ? `array of ${it.type || "any type"}` : p.type || "any type";
           const nm = mark.path === path ? `<mark class="${cls}"><code>${hl(n)}</code></mark>` : `<code>${hl(n)}</code>`;
-          return (`<li>${nm}<span class="ty">${ty}${req.includes(n) ? ", required" : ""}</span>${p.description ? `<span class="ds">${mk(`${path}.description`, hl(p.description))}</span>` : ""}${p.enum ? `<span class="ds ev">Values: ${p.enum.map((v) => `<code>${hl(v)}</code>`).join("")}</span>` : ""}${nested}</li>`);
+          return (`<li>${nm}<span class="ty">${ty}${req.includes(n) ? ", required" : ""}</span>${p.description ? `<span class="ds">${mk(`${path}.description`, hl(p.description))}</span>` : ""}${p.enum ? `<span class="ds ev">Values: ${p.enum.map((v) => `<code>${hl(v)}</code>`).join("")}</span>` : ""}${extras(p, path)}${nested}</li>`);
         }).join("")}${gap}</ul>`;
       };
+      // A whole input or output schema: its own type and keywords, then every property.
+      const schemaView = (schema, base) => {
+        const list = props(schema, base);
+        return `<span class="ds">Type <code>${esc(schema.type || "any type")}</code>${list ? "" : ", no properties"}</span>`
+          + (schema.description ? `<span class="ds">${mk(`${base}.description`, hl(schema.description))}</span>` : "")
+          + extras(schema, base) + strayReq(schema, base) + list;
+      };
       const ann = def.annotations
-        ? Object.entries(def.annotations).map(([k, v]) => mk(`annotations.${k}`, `<code>${k}: ${typeof v === "string" ? `"${hl(v)}"` : v}</code>`)).join(" ")
+        ? Object.entries(def.annotations).map(([k, v]) => mk(`annotations.${k}`, `<code>${k}: ${typeof v === "string" ? `"${hl(v)}"` : esc(JSON.stringify(v))}</code>`)).join(" ")
           + (label(def) === "none" ? '<span class="ds warn">No <code>readOnlyHint</code>. The protocol reads a missing <code>readOnlyHint</code> as false.</span>' : "")
         : '<span class="warn">None sent. The protocol reads a missing <code>readOnlyHint</code> as false.</span>';
       const known = ["name", "title", "description", "inputSchema", "outputSchema", "annotations"];
-      const other = Object.keys(def).filter((k) => !known.includes(k));
+      const other = Object.keys(def).filter((k) => !known.includes(k)).sort(byUnits);
       return `<dl>
         <dt>Name</dt><dd><code>${hl(def.name)}</code></dd>
         <dt>Title</dt><dd>${def.title ? mk("title", hl(def.title)) : "None"}</dd>
         <dt>Description</dt><dd>${def.description ? mk("description", hl(def.description)) : "None"}</dd>
-        <dt>Input</dt><dd>${props(def.inputSchema, "inputSchema") || "No parameters"}</dd>
-        <dt>Output</dt><dd>${def.outputSchema ? props(def.outputSchema, "outputSchema") || "An object with no listed properties" : "No output schema"}</dd>
+        <dt>Input</dt><dd>${def.inputSchema ? schemaView(def.inputSchema, "inputSchema") : "No input schema"}</dd>
+        <dt>Output</dt><dd>${def.outputSchema ? schemaView(def.outputSchema, "outputSchema") : "No output schema"}</dd>
         <dt>Annotations</dt><dd>${ann}</dd>
-        <dt>Other fields</dt><dd>${other.length ? other.map((k) => `<code>${esc(k)}</code>`).join(" ") + ", shown in the raw JSON below" : "None"}</dd>
+        <dt>Other fields</dt><dd>${other.length ? `<ul class="prm">${other.map((k) => `<li><code>${hl(k)}</code>: ${val(def[k], k)}</li>`).join("")}</ul>` : "None"}</dd>
         <dt>Definition hash</dt><dd class="hash" data-slot="${slot}">Computed when the review opens</dd>
       </dl><p class="rawh">Raw JSON of the whole object ${slot === "was" ? "as you approved it" : "the server lists"}, in RFC 8785 (JCS) order: keys sorted by UTF-16 code units at every level. The hash is SHA-256 over the UTF-8 bytes of the compact JCS form; the line breaks here are only for reading.</p><pre class="raw" tabindex="0" aria-label="Raw JSON of ${esc(def.name)}${slot === "was" ? ", as approved" : ""}">${rawHtml(def, mark, cls)}</pre>`;
     }
