@@ -404,10 +404,10 @@ test("rendering binds standalone booleans and adjacent scalars to their exact re
   const systemEntries: TemplateInterpolation[] = [];
   const ctx = { policy };
   const prompt = renderPromptTemplate("{{ policy.passwordRequired }}", ctx, span => promptEntries.push(span));
-  const system = renderPromptTemplate("true 😀 {{ policy.passwordRequired }}{{ policy.minimumPasswordLength }} 8", ctx,
+  const system = renderPromptTemplate("true \u{10400} {{ policy.passwordRequired }}{{ policy.minimumPasswordLength }} 8", ctx,
     span => systemEntries.push(span));
   assert.equal(prompt, "true");
-  assert.equal(system, "true 😀 true8 8");
+  assert.equal(system, "true \u{10400} true8 8");
   const request = { prompt, system };
   try {
     const result = await withTemplateInterpolations({ prompt: promptEntries, system: systemEntries }, () =>
