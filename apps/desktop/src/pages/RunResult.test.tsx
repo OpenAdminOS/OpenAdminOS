@@ -15,6 +15,7 @@ import {
   renderRoute,
   renderWithAppState,
 } from "../test/test-utils";
+import { readPendingIntent } from "../setup/pending-intent";
 
 describe("RunResult write confirmation", () => {
   it("requires danger acknowledgement and the exact phrase, and marks the affected action", async () => {
@@ -485,6 +486,20 @@ it("shows the complete dry-run plan without Apply and starts a fresh normal run"
   await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({ runForRealOfRunId: run.id, tenantId: run.tenantId })));
   expect(vi.mocked(bridge.startRun).mock.calls[0]?.[1]?.dryRun).toBeUndefined();
   expect(bridge.confirmRun).not.toHaveBeenCalled();
+});
+
+it("keeps a model fit dry run's safeguards when Run for real opens setup", async () => {
+  const user = userEvent.setup();
+  window.localStorage.clear();
+  const run = { ...createAwaitingConfirmationRun({ status: "planned", dryRun: true, finishedAt: "2026-10-31T12:00:00Z", providerId: "openai", model: "gpt-5" }),
+    providerEndpointBinding: { endpoint: undefined, scope: "model-fit" as const } };
+  // Codex is not ready, so Run for real opens setup first.
+  const providers = mockProviders.map((provider) => (provider.id === "openai" ? { ...provider, status: "error" as const } : provider));
+  const bridge = makeMockBridge({}, createMockAppState({ runs: [run], providers }));
+  renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+  await user.click(await screen.findByRole("button", { name: "Run for real" }));
+  await waitFor(() => expect(readPendingIntent()).toMatchObject({ kind: "agent-run", runForRealOfRunId: run.id, providerId: "openai", safeguards: { onDevice: false } }));
+  expect(bridge.startRun).not.toHaveBeenCalled();
 });
 
 it("does not present host status text as the report while a run is live", async () => {
