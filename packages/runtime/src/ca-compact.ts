@@ -157,7 +157,15 @@ function compactGrant(value: unknown): Json | undefined {
   const controls = asStrings(grant.builtInControls);
   if (controls.length) out.controls = controls;
   const strength = asRecord(grant.authenticationStrength);
-  if (strength && typeof strength.displayName === "string") out.authStrength = strength.displayName;
+  if (strength && typeof strength.displayName === "string") {
+    // The name alone can mislead (a custom "Admin MFA" may satisfy none), so
+    // keep what it satisfies and whether it is built in.
+    out.authStrength = {
+      name: strength.displayName,
+      ...(typeof strength.policyType === "string" ? { type: strength.policyType } : {}),
+      ...(typeof strength.requirementsSatisfied === "string" ? { satisfies: strength.requirementsSatisfied } : {}),
+    };
+  }
   const terms = asStrings(grant.termsOfUse).length;
   if (terms) out.termsOfUse = terms;
   const custom = asStrings(grant.customAuthenticationFactors);
