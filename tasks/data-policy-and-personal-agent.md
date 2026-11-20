@@ -565,6 +565,28 @@ built on top of them are planned separately.
 - Mockup 34, B: the "only recognized credentials masked" note names the
   Confidential exception next to the Hosted promise.
 
+**Review findings adopted (2026-11-20, round 24 of the design review)**
+- A cut is made only inside text the scan examined completely. When the
+  scan of a part the app can clip (an instruction block, a note, a history
+  turn, an evidence excerpt) did not finish, that whole part is left out,
+  never cut, and the notice names the part and says its check did not
+  finish. When the unfinished part cannot be left out, such as the fixed
+  rules, the request is withheld: typed Chat shows "Withheld by the data
+  policy check", and hosted voice builds the fallback or shows "Hosted
+  voice did not start". The final scan of the serialized request still
+  runs. B2 criteria 3 and 4 gain a second case in which the scan before the
+  clip stops inside WGB Finance MFA (A3, B2).
+- Mockup 35, G: a second Chat frame on a hosted model with Security at
+  Block on Hosted, where the organization instructions were cut before a
+  security value. The notice names the omitted part and its class in its
+  own text, and "What this model received" lists the organization
+  instructions up to the cut with the value left out whole.
+- Mockup 34, B: the session start line of a call that opened with a
+  rebuilt start records the rebuilt start's outcome and its masking count
+  ("Rebuilt start sent, 2 values masked: the tenant id and your greeting
+  name") next to what it opened without, both from the time it was sent,
+  so a later rule change leaves both facts as recorded (A3).
+
 ## Why
 
 Today the choice is binary. With a local model the request never leaves the
@@ -974,9 +996,22 @@ the IT policy file.
       clipping notice for the profile, the note on shortened history or
       evidence) says what was left out by part and class, never the value. The
       retained ranges keep the classification the full text gave them; a
-      cut never makes the app classify a shorter text from scratch. The
-      complete scan of the serialized request (this phase) still runs on
-      what would be sent, after every cut. A prefix of a classified value,
+      cut never makes the app classify a shorter text from scratch. A cut
+      is made only inside text the scan examined completely (round 24).
+      When the scan of a part the app can clip (an instruction block, a
+      note, a history turn, an evidence excerpt) did not finish, because
+      its work budget ran out, it timed out or it failed, that whole part is
+      left out, never cut, since a cut inside unexamined text could split a
+      value no recognizer saw whole; the notice for that clip names the part
+      and says it was left out because its check did not finish. When the
+      unfinished part cannot be left out, such as the fixed rules, the
+      request is withheld, whatever the rules on Hosted are: typed Chat
+      shows the designed state "Withheld by the data policy check" with its
+      recovery, and hosted voice builds the fallback or, when the part is
+      one the fallback keeps, shows "Hosted voice did not start" (this
+      phase, the session start). The complete scan of the serialized
+      request (this phase) still runs on what would be sent, after every
+      cut and every part left out. A prefix of a classified value,
       such as "WGB Fin" of a policy name, is what a cut through it would
       send, and the index and the detectors may not recognize it (B2,
       criteria 3 and 4).
@@ -1045,7 +1080,11 @@ the IT policy file.
       force when it was sent (sent, masked with its count, or withheld, and
       what the voice model said), and the popover shows past transfers from
       that record: changing a rule later never rewrites a past transfer's
-      outcome. The rules in force now drive only the strip, a preview labelled
+      outcome. A session start that opened with the fallback records two
+      facts (round 24): what it opened without and why, and the fallback's
+      own outcome, sent with the count of values masked in it (for example
+      opened without the profile, with the tenant id and the greeting name
+      masked); the popover line shows both from the record. The rules in force now drive only the strip, a preview labelled
       "Next transfer under current rules", and the recovery for withheld
       context. The withheld notice names the transfer, what it carried and the
       rule that withheld it, from the record; its recovery is evaluated
@@ -1491,9 +1530,15 @@ the IT policy file.
       security value, which was left out whole"), never the value itself.
       The retained text keeps the classes the full text gave it, so a value
       that is recognized only in its full context keeps its class after the
-      cut. The complete scan of the serialized request still runs on what
-      would be sent, as in A3. This holds for typed Chat and for hosted voice
-      alike, and for every other clipping before a hosted request (A3).
+      cut. The cut is made only inside text the scan examined completely
+      (round 24): when the scan of a part of the profile block (the
+      standing instructions, the organization instructions or a note) did
+      not finish, that whole part is left out, never cut, and the clipping
+      notice names the part and says its check did not finish ("the
+      organization instructions were left out because their check did not
+      finish"). The complete scan of the serialized request still runs on
+      what would be sent, as in A3. This holds for typed Chat and for hosted
+      voice alike, and for every other clipping before a hosted request (A3).
 
 **Acceptance criteria:**
 1. A typed Chat answer follows a standing instruction (test with a fake model
@@ -1512,7 +1557,17 @@ the IT policy file.
    notice at the start of the conversation says a security value at the cut
    was left out whole. A clip that cut through the name would send "WGB
    Fin", which the index does not match and the scan cannot read as
-   security, and the test fails on it.
+   security, and the test fails on it. Second case, an incomplete scan
+   (round 24): the same instructions, rules and budget, and the test sets
+   the work budget of the scan before the clip so that it stops inside
+   WGB Finance MFA. The organization instructions are left out whole: the
+   fake model's request holds none of their text, the standing
+   instructions and the notes that fit stay, the scan of the serialized
+   request covers the whole text and finds no blocked content, the
+   request is sent, and the clipping notice says the organization
+   instructions were left out because their check did not finish. A cut at
+   the budget inside the unexamined text would send "WGB Fin", and the
+   test fails on it.
 4. Clipping regression test, hosted voice start: the same organization
    instructions, rules and budget. Hosted voice starts. The fake session's
    start request holds the clipped profile with no part of the policy name,
@@ -1520,7 +1575,15 @@ the IT policy file.
    and finds no blocked content, the call opens, and the clipping notice
    shown once in the call says a security value at the cut was left out
    whole. A start that cut through the name would send its
-   prefix, and the test fails on it.
+   prefix, and the test fails on it. Second case, an incomplete scan
+   (round 24): the scan before the clip stops inside WGB Finance MFA, as in
+   criterion 3. The start request holds the profile without the
+   organization instructions and with no part of the policy name, the scan
+   of the complete serialized instructions covers the whole text and finds
+   no blocked content, the call opens, and the clipping notice shown once
+   in the call says the organization instructions were left out because
+   their check did not finish. A start that cut inside the unexamined text
+   would send its prefix, and the test fails on it.
 
 ### Phase B3: Access grants
 
