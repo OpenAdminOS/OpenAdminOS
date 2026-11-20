@@ -6,6 +6,7 @@ import {
   requireOsSecureStorage,
   type SafeStorageApi,
 } from "./secret-store.js";
+import { DataFolderSealedError, dataFolderSealed } from "./data-folder-seal.js";
 
 interface ProviderSecretStoreOptions {
   loadSafeStorage?: () => Promise<SafeStorageApi>;
@@ -33,6 +34,7 @@ export class SafeStorageProviderSecretStore {
     const safeProviderId = sanitizePathSegment(providerId);
     return {
       get: async (key: string) => {
+        if (dataFolderSealed()) return undefined;
         const path = this.pathFor(safeProviderId, key);
         try {
           const encrypted = await readFile(path);
@@ -52,6 +54,7 @@ export class SafeStorageProviderSecretStore {
         }
       },
       set: async (key: string, value: string) => {
+        if (dataFolderSealed()) throw new DataFolderSealedError();
         const safeStorage = requireOsSecureStorage(
           await this.loadSafeStorage(),
           this.platform,
@@ -61,6 +64,7 @@ export class SafeStorageProviderSecretStore {
         await writeFile(path, safeStorage.encryptString(value), { mode: 0o600 });
       },
       remove: async (key: string) => {
+        if (dataFolderSealed()) return;
         await rm(this.pathFor(safeProviderId, key), { force: true });
       },
     };

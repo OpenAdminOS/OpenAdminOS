@@ -3,7 +3,7 @@ import { chmodSync, existsSync, linkSync, renameSync, lstatSync, mkdirSync, read
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 import { spawnSync } from "node:child_process";
 
 import type { TenantRecord } from "@openadminos/agent-sdk";
@@ -40,6 +40,11 @@ import {
   type LocalResetRequestSteps,
 } from "./local-reset.js";
 import { AppStateStore } from "./state.js";
+import { dataFolderSealed, unsealDataFolder } from "./data-folder-seal.js";
+
+// A committed reset seals the data folder for the whole process; each test
+// starts unsealed, as a new process does.
+afterEach(() => unsealDataFolder());
 import { OrganizationBoundaryError } from "./runs.js";
 import { blockConnectorConfirmations, requestConnectorConfirmation } from "./connector-confirm-bridge.js";
 import { LOCAL_RESET_PHRASE } from "../src/shared/local-reset.js";
@@ -1675,7 +1680,8 @@ describe("local reset: end to end with the store", () => {
         // Before the commit every call goes through.
         assert.equal(await internals.tokenStore.read(), "cached");
         await internals.tokenStore.write("x");
-        assert.deepEqual(calls.splice(0), ["default:read", "default:write"]);
+        await internals.tokenStore.clear?.();
+        assert.deepEqual(calls.splice(0), ["default:read", "default:write", "default:clear"]);
         // A sign-in refresh that comes back after the commit touches no file.
         store.markLocalResetCommitted();
         const stores = [internals.tokenStore, internals.tokenStoreFor("custom"), ...internals.legacyTokenStoresFor("custom")];
@@ -1685,6 +1691,13 @@ describe("local reset: end to end with the store", () => {
           await tokenStore.clear?.();
         }
         assert.deepEqual(calls, []);
+        assert.equal(dataFolderSealed(), true);
+        // A refused reset (not reachable after the commit today) opens all of it again.
+        store.cancelLocalReset();
+        assert.equal(dataFolderSealed(), false);
+        assert.equal(await internals.tokenStore.read(), "cached");
+        await internals.tokenStore.write("y");
+        assert.deepEqual(calls.splice(0), ["default:read", "default:write"]);
       } finally {
         store.close();
       }

@@ -2,6 +2,8 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 
+import { DataFolderSealedError, dataFolderSealed } from "./data-folder-seal.js";
+
 export interface SafeStorageApi {
   isEncryptionAvailable(): boolean;
   encryptString(plaintext: string): Buffer;
@@ -48,6 +50,7 @@ export class SafeStorageTokenCacheStore implements TokenCacheStorage {
   }
 
   async read(): Promise<string> {
+    if (dataFolderSealed()) return "";
     try {
       const safeStorage = await this.requireSafeStorage();
       const encrypted = await readFile(this.filePath);
@@ -64,6 +67,7 @@ export class SafeStorageTokenCacheStore implements TokenCacheStorage {
   }
 
   async write(plaintext: string): Promise<void> {
+    if (dataFolderSealed()) throw new DataFolderSealedError();
     const safeStorage = await this.requireSafeStorage();
     const ciphertext = safeStorage.encryptString(plaintext);
     await mkdir(dirname(this.filePath), { recursive: true });
@@ -71,6 +75,7 @@ export class SafeStorageTokenCacheStore implements TokenCacheStorage {
   }
 
   async clear(): Promise<void> {
+    if (dataFolderSealed()) return;
     await rm(this.filePath, { force: true });
   }
 

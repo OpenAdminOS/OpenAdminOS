@@ -362,6 +362,7 @@ import {
   buildUsageTelemetryPayload,
   type UsageTelemetryPayload,
 } from "./telemetry/usage.js";
+import { sealDataFolder, unsealDataFolder } from "./data-folder-seal.js";
 import { LocalResetInProgressError, OrganizationBoundaryError, RunService, gatewayRejectionCoolingDown, type RunGraphExecution, type SplashtopRunClient } from "./runs.js";
 import { RunDeliveryService } from "./run-delivery.js";
 import {
@@ -2382,6 +2383,7 @@ export class AppStateStore {
     this.localResetStarted = false;
     this.localResetCommitted = false;
     this.auditLog.unfreezeSideFiles();
+    unsealDataFolder();
     // A request refused after its checks (the marker could not be written)
     // gives every organization its work back, as an undone Disconnect does.
     if (this.localResetClosedTenants.length > 0) {
@@ -2441,6 +2443,28 @@ export class AppStateStore {
   markLocalResetCommitted(): void {
     this.localResetCommitted = true;
     this.auditLog.freezeSideFiles();
+    sealDataFolder();
+    // The WhatsApp Web client writes and deletes its auth files by path on
+    // its own (credential updates, a logged out session, a QR refresh): it
+    // stops now, not only at the shutdown.
+    this.whatsappWebClientInstance?.dispose();
+  }
+
+  /**
+   * Connector work that reaches a network service and then writes its
+   * credentials (WhatsApp Web, Splashtop): refused once a reset has started,
+   * and while it runs the reset waits for it, as for a connector send.
+   */
+  private async localResetGatedWork<T>(work: () => Promise<T>): Promise<T> {
+    if (this.localResetStarted) {
+      throw new LocalResetInProgressError("OpenAdminOS is resetting and restarts in a moment. Nothing was changed.");
+    }
+    this.localResetWorkInFlight += 1;
+    try {
+      return await work();
+    } finally {
+      this.localResetWorkInFlight -= 1;
+    }
   }
 
   async closeAllTenantWork(): Promise<void> {
@@ -2783,17 +2807,21 @@ export class AppStateStore {
   }
 
   async connectSplashtop(input: ConnectSplashtopInput): Promise<SplashtopConnectionSummary> {
-    this.requireActiveOrganization(await this.read(), input.organizationId);
-    return this.splashtop.connect(input);
+    return this.localResetGatedWork(async () => {
+      this.requireActiveOrganization(await this.read(), input.organizationId);
+      return this.splashtop.connect(input);
+    });
   }
 
   async testSplashtop(organizationId: string): Promise<SplashtopConnectionSummary> {
-    return this.splashtop.test(organizationId);
+    return this.localResetGatedWork(() => this.splashtop.test(organizationId));
   }
 
   async rotateSplashtopToken(input: RotateSplashtopTokenInput): Promise<SplashtopConnectionSummary> {
-    this.requireActiveOrganization(await this.read(), input.organizationId);
-    return this.splashtop.rotate(input);
+    return this.localResetGatedWork(async () => {
+      this.requireActiveOrganization(await this.read(), input.organizationId);
+      return this.splashtop.rotate(input);
+    });
   }
 
   /**
@@ -2802,6 +2830,10 @@ export class AppStateStore {
    * runs, no new apply can pick up the token.
    */
   async disconnectSplashtop(organizationId: string): Promise<void> {
+    return this.localResetGatedWork(() => this.disconnectSplashtopNow(organizationId));
+  }
+
+  private async disconnectSplashtopNow(organizationId: string): Promise<void> {
     this.splashtopDisconnecting.set(organizationId, (this.splashtopDisconnecting.get(organizationId) ?? 0) + 1);
     try {
       await this.runService.stopSplashtopApplies(
@@ -5862,32 +5894,36 @@ export class AppStateStore {
   }
 
   async getWhatsAppWebStatus(): Promise<WhatsAppWebStatus> {
-    return this.whatsAppWebClient().restoreSession(1_500);
+    return this.localResetGatedWork(() => this.whatsAppWebClient().restoreSession(1_500));
   }
 
   async startWhatsAppWebLogin(): Promise<WhatsAppWebStatus> {
-    const status = await this.whatsAppWebClient().startLogin();
-    await this.persistConnectorTestStatus(
-      WHATSAPP_WEB_CONNECTOR_ID,
-      whatsappWebStatusToConnectorStatus(status),
-      status.message,
-    );
-    return status;
+    return this.localResetGatedWork(async () => {
+      const status = await this.whatsAppWebClient().startLogin();
+      await this.persistConnectorTestStatus(
+        WHATSAPP_WEB_CONNECTOR_ID,
+        whatsappWebStatusToConnectorStatus(status),
+        status.message,
+      );
+      return status;
+    });
   }
 
   async disconnectWhatsAppWeb(): Promise<WhatsAppWebStatus> {
-    const status = await this.whatsAppWebClient().disconnect();
-    await this.persistConnectorTestStatus(
-      WHATSAPP_WEB_CONNECTOR_ID,
-      whatsappWebStatusToConnectorStatus(status),
-      status.message,
-    );
-    await this.clearWhatsAppTargetsAfterDisconnect();
-    return status;
+    return this.localResetGatedWork(async () => {
+      const status = await this.whatsAppWebClient().disconnect();
+      await this.persistConnectorTestStatus(
+        WHATSAPP_WEB_CONNECTOR_ID,
+        whatsappWebStatusToConnectorStatus(status),
+        status.message,
+      );
+      await this.clearWhatsAppTargetsAfterDisconnect();
+      return status;
+    });
   }
 
   async listWhatsAppWebGroups(): Promise<WhatsAppWebGroupRef[]> {
-    return this.whatsAppWebClient().listGroups();
+    return this.localResetGatedWork(() => this.whatsAppWebClient().listGroups());
   }
 
   async sendWhatsAppWebTestMessage(to: string): Promise<WhatsAppWebSendResult> {
