@@ -80,6 +80,10 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Chat's local documentation search shows why an embedding request failed and how to recover, without quoting the server's response, and searches at the same embedding endpoint Settings checks. Settings, Privacy distinguishes a failed embedding model check from an unreachable Ollama and keeps that state after an index install or a cancelled folder pick.
+- The scan's What ran and Settings, Providers show when OpenAdminOS refused a redirect during a capability check for one model while another model remains ready.
+- Chat announces when a Retry, Scan again, Start or Use in its model choice makes the active model ready, and returns keyboard focus to the composer, unless the admin already moved focus elsewhere.
+- First launch shows a signed-in tool whose IT-locked model the scan already knows it cannot use as Unavailable and explains the policy restriction. Copilot and Gemini, which the scan checks for installation only, are checked when selected.
 - Ollama: the overall timeout while an answer is streaming now fails the run with `Ollama timed out after <ms>ms at <url>/api/chat.` and the Ollama timeout playbook instead of the raw `This operation was aborted`, and a stop mid-stream reports `Ollama request stopped by user.`; this covers ordinary requests and the context retry. The run failure panel no longer reads an endpoint prefix that starts with `/api/show` as the context limit lookup.
 - Ollama: a request larger than the context Ollama loaded (for example 40,652 tokens against 16,384) no longer fails the run. OpenAdminOS raises `num_ctx` up to the model's limit, retries once and keeps that size for the model; a request the model or free memory cannot fit fails with the token counts and its own recovery steps instead of "No matching playbook".
 - Chat's model choice shows a provider whose check failed as Could not check with its reason and Retry, as the model scan does, instead of leaving LM Studio, Lemonade, Apple Intelligence or a hosted CLI out and showing Ollama as having no model; an endpoint outside this device that the scan did not contact shows as Not checked, without Retry; a signed-in tool that cannot answer, such as a Copilot model set by IT that the account cannot use, shows as Unavailable with the reason instead of Signed in.
@@ -110,6 +114,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Security
 
+- The local documentation lookup connects only to a loopback address, directly: a `localhost` name is never resolved, and no environment proxy is used, so the question cannot leave the device through either.
 - Ollama, LM Studio and Lemonade on this device never have a redirect followed: a check, a chat request, Start or a local documentation lookup that gets one fails with the reason, so no model-list read, prompt or question goes to the address it points to.
 - The audit log is an append-only SQLite table written when each event happens, hash chained on insert, with triggers that refuse changes and early deletes; every Microsoft Graph write, Outlook and Teams sends included, is recorded in the audit log before it leaves the device and refused if the audit log cannot record it, the Graph adapter refuses writes without an audit sink, run retention and Disconnect no longer remove audit history, runs record who started them, the export verifies the stored chain and can be limited to runs no person started, and CSV cells that a spreadsheet would run as a formula are prefixed with a quote.
 - While the audit log is behind, a prune or Disconnect that would remove events it has not recorded is refused, and Settings shows the last failed append.
