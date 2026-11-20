@@ -1705,10 +1705,15 @@ function transformCountByField(
       if (!missing) addBucketOrigin(origins, key, fieldPathOrigin(item, spec.field, raw));
       else if (hasTemplateOrigin(settings, "missingBucket")) {
         addBucketOrigin(origins, key, templateFieldOrigin(settings, "missingBucket", spec.missingBucket));
-      }
+      } else addBucketOrigin(origins, key, "unmapped");
     }
   }
-  if (origins) applyBucketOrigins(result, origins, remaining < 0, true);
+  if (origins) {
+    applyBucketOrigins(result, origins, remaining < 0, true);
+    for (const [bucket, count] of Object.entries(result)) {
+      if (count === 0 && !origins.has(bucket)) setTemplateOrigin(result, bucket, "unmapped");
+    }
+  }
 
   const total = (spec.source as unknown[]).length;
   const breakdown = Object.entries(result)

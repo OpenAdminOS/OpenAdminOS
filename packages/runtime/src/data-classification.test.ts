@@ -633,7 +633,7 @@ test("template filters carry source field evidence to emitted scalar and array o
     for (const [expression, text, expectedSpans] of cases) {
       const prompt = render(expression, text);
       const result = withTemplateInterpolations({ prompt: promptEntries }, () => ledger.classifyRequest({ prompt }));
-      assert.equal(result.coverageIncomplete, false, expression);
+      assert.equal(result.coverageIncomplete, expression.includes("boundedJson"), expression);
       assert.deepEqual(result.spans.filter(span => span.kind === "security")
         .map(span => prompt.slice(span.start, span.end)), expectedSpans, expression);
     }
@@ -673,7 +673,7 @@ const expectedTransforms: Array<{
     response: { value: [{ grantControls: { operator: "AND" } }, ...policyRows.value] },
     steps: [transformStep("sort-by", { field: "grantControls.operator" })],
     expressions: [{ expression: "transformed.output | boundedJson(512) | lower", body: '"operator":"or"',
-      spans: [["security", "policy-fixture"], ["security", "or"], ["security", "and"]] }],
+      spans: [["security", "policy-fixture"], ["security", "or"], ["security", "and"]], incomplete: true }],
   },
   {
     name: "group-by-age", path: "/devices",
@@ -711,6 +711,12 @@ const expectedTransforms: Array<{
     steps: [transformStep("count-by-field", { field: "grantControls.operator" })],
     expressions: [{ expression: "transformed.output", body: '{"false":2,"[object Object]":1}',
       spans: [["security", "false"], ["security", "2"]], incomplete: true }],
+  },
+  {
+    name: "zero and missing counts with no observed field",
+    response: { value: [{ grantControls: { operator: null } }] },
+    steps: [transformStep("count-by-field", { field: "grantControls.operator", buckets: ["OR"], missingBucket: "unknown" })],
+    expressions: [{ expression: "transformed.output", body: '{"OR":0,"unknown":1}', spans: [], incomplete: true }],
   },
   {
     name: "derived JSON key offsets include escaping but exclude quotes",

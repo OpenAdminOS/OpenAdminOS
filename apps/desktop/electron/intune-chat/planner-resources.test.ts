@@ -11,6 +11,8 @@ import {
   type TenantRecord,
 } from "@openadminos/agent-sdk";
 
+import { traceAnswerPack } from "./answer-pack-classification.js";
+
 import {
   DEFAULT_RESOURCE_STALENESS_MS,
   resourceStalenessMs,
@@ -424,6 +426,7 @@ describe("answer pack fallback breakdowns", () => {
     const rows = Object.fromEntries(
       GRAPH_CACHE_RESOURCE_KINDS.map((resource) => [resource, []]),
     ) as unknown as Record<GraphCacheResourceKind, unknown[]>;
+    rows.managedDevices = [{ id: "fixture", complianceState: "noncompliant" }];
     rows.conditionalAccessPolicies = [
       { id: "ca-1", state: "enabledForReportingButNotEnforced" },
       { id: "ca-2", state: "enabled" },
@@ -463,6 +466,7 @@ describe("answer pack fallback breakdowns", () => {
         question: "How many report-only Conditional Access policies?",
         tenant,
         cacheStatus: [
+          status("managedDevices", 1),
           status("conditionalAccessPolicies", 2),
           status("configurationPolicies", 3),
           status("groups", 2),
@@ -488,6 +492,27 @@ describe("answer pack fallback breakdowns", () => {
     assert.equal(byResource.get("groups")?.groupTypes?.DynamicMembership, 1);
     assert.equal(byResource.get("groups")?.securityEnabled?.true, 1);
     assert.equal(byResource.get("signIns")?.["status.errorCode"]?.["50126"], 1);
+    const body = JSON.stringify(pack);
+    const trace = traceAnswerPack(pack, body, 0);
+    const spans: Array<[string, string]> = [];
+    for (;;) {
+      const next = trace.next();
+      if (next.done) {
+        assert.equal(next.value, true);
+        break;
+      }
+      const span = next.value;
+      if (span?.classification) spans.push([body.slice(span.start, span.end), span.classification.kind]);
+    }
+    for (const [field, bucket, count, kind] of [
+      ["complianceState", "noncompliant", 1, "security"],
+      ["securityEnabled", "true", 1, "configuration"],
+      ["status.errorCode", "50126", 1, "activity"],
+    ] as const) {
+      const span = spans.findIndex(([value, category]) => value === bucket && category === kind);
+      assert.ok(span >= 0, field);
+      assert.deepEqual(spans[span + 1], [String(count), kind]);
+    }
     assert.equal(byResource.get("conditionalAccessPolicies")?.severity, undefined);
   });
 });

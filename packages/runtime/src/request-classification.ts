@@ -15,7 +15,7 @@ export interface ClassificationSpan extends TextSpan {
 
 interface UnexaminedRange extends TextSpan {
   section: ClassificationSpan["section"];
-  reason: "text-limit" | "match-limit" | "history-evidence-unavailable" | "history-provenance-unavailable" | "script-provenance-unavailable" | "clipped-provenance-unavailable" | "competing-provenance" | "failure";
+  reason: "text-limit" | "match-limit" | "history-evidence-unavailable" | "history-provenance-unavailable" | "script-provenance-unavailable" | "clipped-provenance-unavailable" | "competing-provenance" | "rendered-provenance-unavailable" | "failure";
 }
 
 interface HistoryReplay extends TextSpan {
@@ -63,8 +63,16 @@ export interface TemplateInterpolation extends TextSpan {
   value?: Scalar;
   incomplete?: boolean;
   requireEvidence?: boolean;
+  classification?: Pick<ClassificationSpan, "kind" | "source" | "maskRole">;
   trace?: () => Generator<TemplateInterpolation | undefined, boolean>;
 }
+type FencedRendering = {
+  fence: string;
+  start: number;
+  trace: (body: string, offset: number, identityIndex?: ClassificationOptions["identityIndex"]) =>
+    Generator<TemplateInterpolation | undefined, boolean>;
+};
+
 export const MAX_TEMPLATE_INTERPOLATIONS = 1024;
 const templateInterpolations = new AsyncLocalStorage<Partial<Record<ClassificationSpan["section"], readonly TemplateInterpolation[]>>>();
 
@@ -152,6 +160,7 @@ type ScanState = {
   incomplete: boolean;
   identityIndex: ClassificationOptions["identityIndex"];
   renderedSpans?: ClassificationSpan[];
+  renderedGaps?: UnexaminedRange[];
   scriptText?: Partial<Record<ClassificationSpan["section"], TextSpan>>;
   scriptReadClass?: DataClass;
 };
@@ -161,6 +170,7 @@ type EvidenceSnapshot = {
   revisions: readonly number[];
   shards: readonly TenantValueIndex[];
   interpolations: ReturnType<typeof templateInterpolations.getStore>;
+  fencedRenderings: readonly FencedRendering[];
 };
 
 export type WorkerValue = [Scalar, ValueEntry | undefined, Array<[string, Fence]>];
@@ -181,7 +191,7 @@ export interface WorkerScan {
   sections: Record<ClassificationSpan["section"], EncodedText | undefined>;
   ledgers: number[];
   shards: number[];
-  state: Pick<ScanState, "historyFences" | "promptReplay" | "dropped" | "registrations" | "incomplete" | "renderedSpans" | "scriptText" | "scriptReadClass">;
+  state: Pick<ScanState, "historyFences" | "promptReplay" | "dropped" | "registrations" | "incomplete" | "renderedSpans" | "renderedGaps" | "scriptText" | "scriptReadClass">;
 }
 
 export interface WorkerResult {
@@ -488,6 +498,7 @@ export class ClassificationLedger {
   private readonly foldedAnchors: Array<AnchorIndex | undefined> = [];
   private readonly fences = new Map<string, Fence>();
   private readonly historyFences = new Map<string, { length: number; replays: readonly HistoryReplay[] }>();
+  private fencedRenderings: FencedRendering[] = [];
   private readonly historyReplays = new Map<string, readonly HistoryReplay[]>();
   private prior: readonly ClassificationLedger[] = [];
   private transient?: ClassificationLedger;
@@ -617,6 +628,7 @@ export class ClassificationLedger {
     }
     this.historyFences.clear();
     this.historyReplays.clear();
+    this.fencedRenderings = [];
     delete this.promptReplay;
     this.prior = [];
     this.discardTransient();
@@ -632,7 +644,21 @@ export class ClassificationLedger {
     this.prior = [];
     this.historyFences.clear();
     this.historyReplays.clear();
+    this.fencedRenderings = [];
     this.revision++;
+  }
+
+  markCoverageIncomplete(): void {
+    if (!this.disposed) this.incompleteRegistrations++;
+  }
+
+  registerFencedRendering(fence: string, start: number, trace: FencedRendering["trace"]): void {
+    if (this.disposed) return;
+    if (this.fencedRenderings.length >= 4) {
+      this.incompleteRegistrations++;
+      return;
+    }
+    this.fencedRenderings = [...this.fencedRenderings, { fence, start, trace }];
   }
 
   registerHistoryReplay(text: string, replays: readonly HistoryReplay[]): void {
@@ -1209,7 +1235,7 @@ export class ClassificationLedger {
 
   classifyRequest(request: RequestText): RequestClassification {
     const evidence = this.captureEvidence();
-    return this.scanRequest(request, this.renderedState(evidence));
+    return this.scanRequest(request, this.renderedState(evidence, request));
   }
 
   captureEvidence(): EvidenceSnapshot {
@@ -1217,21 +1243,43 @@ export class ClassificationLedger {
     state.scriptText = scriptText.getStore();
     if (state.scriptText) state.scriptReadClass = this.unresolvedScriptReads ? "credential" : this.scriptReadClass;
     return { state, revisions: state.retained.map(ledger => ledger.revision),
-      shards: [...state.identityIndex?.workerShards?.() ?? []], interpolations: templateInterpolations.getStore() };
+      shards: [...state.identityIndex?.workerShards?.() ?? []], interpolations: templateInterpolations.getStore(),
+      fencedRenderings: this.fencedRenderings };
   }
 
-  private *renderedStateSteps({ state, interpolations }: EvidenceSnapshot): Generator<void, ScanState> {
-    if (!interpolations) return state;
+  private *renderedStateSteps({ state, interpolations, fencedRenderings }: EvidenceSnapshot, request: RequestText): Generator<void, ScanState> {
+    if (!interpolations && !fencedRenderings.length) return state;
     const renderedSpans: ClassificationSpan[] = [];
+    const renderedGaps: UnexaminedRange[] = [];
     let incomplete = state.incomplete;
     for (const section of ["system", "prompt"] as const) {
-      const entries = interpolations[section];
-      if (!entries) continue;
+      const entries = [...interpolations?.[section] ?? []];
+      if (section === "prompt") for (const { fence, start, trace } of fencedRenderings) {
+        // Bound the byte comparison and the allocations in the trace.
+        const matched = fence.length <= 128_000 && request.prompt.startsWith(fence, start);
+        const bodyStart = start + fence.indexOf("\n") + 1;
+        const bodyEnd = start + fence.lastIndexOf("\n");
+        if (matched) entries.push({ start: bodyStart, end: bodyEnd, key: "",
+          trace: () => trace(request.prompt.slice(bodyStart, bodyEnd), bodyStart, state.identityIndex) });
+        else if (request.prompt.startsWith(fence.slice(0, fence.indexOf("\n") + 1), start)) {
+          entries.push({ start: bodyStart, end: bodyEnd, key: "", incomplete: true });
+        }
+      }
+      if (!entries.length) continue;
       let remaining = MAX_TEMPLATE_INTERPOLATIONS;
       let traceWork = 8 * MAX_TEMPLATE_INTERPOLATIONS;
-      const collect = ({ start, end, key, value, requireEvidence, incomplete: missing }: TemplateInterpolation) => {
-        incomplete ||= Boolean(missing);
-        if (value === undefined || start >= end) return;
+      const gap = ({ start, end }: TextSpan) => {
+        incomplete = true;
+        if (start < end) renderedGaps.push({ section, start, end, reason: "rendered-provenance-unavailable" });
+      };
+      const collect = ({ start, end, key, value, classification, requireEvidence, incomplete: missing }: TemplateInterpolation) => {
+        if (missing) gap({ start, end });
+        if (start >= end) return;
+        if (classification) {
+          renderedSpans.push({ section, start, end, ...classification });
+          return;
+        }
+        if (value === undefined) return;
         let best: Evidence | undefined;
         for (const ledger of state.retained) {
           const entry = ledger.values.get(value);
@@ -1240,14 +1288,14 @@ export class ClassificationLedger {
         }
         if (best) renderedSpans.push({ section, start, end, kind: best.kind, source: best.source,
           ...(best.maskRole ? { maskRole: best.maskRole } : {}) });
-        else if (requireEvidence && (typeof value !== "string" || value.length > 32_768 || value.trim())) incomplete = true;
+        else if (requireEvidence && (typeof value !== "string" || value.length > 32_768 || value.trim())) gap({ start, end });
       };
       sectionEntries: for (const entry of entries) {
         if (--remaining < 0) {
-          incomplete = true;
+          gap(entry);
           break;
         }
-        incomplete ||= Boolean(entry.incomplete);
+        if (entry.incomplete && entry.trace) gap(entry);
         if (!entry.trace) {
           collect(entry);
           yield;
@@ -1256,17 +1304,17 @@ export class ClassificationLedger {
         const trace = entry.trace();
         for (;;) {
           if (--traceWork < 0) {
-            incomplete = true;
+            gap(entry);
             break sectionEntries;
           }
           const next = trace.next();
           if (next.done) {
-            incomplete ||= !next.value;
+            if (!next.value) gap(entry);
             break;
           }
           if (next.value) {
             if (--remaining < 0) {
-              incomplete = true;
+              gap(entry);
               break sectionEntries;
             }
             collect(next.value);
@@ -1275,19 +1323,19 @@ export class ClassificationLedger {
         }
       }
     }
-    return { ...state, renderedSpans, incomplete };
+    return { ...state, renderedSpans, renderedGaps, incomplete };
   }
 
-  private renderedState(evidence: EvidenceSnapshot): ScanState {
-    const steps = this.renderedStateSteps(evidence);
+  private renderedState(evidence: EvidenceSnapshot, request: RequestText): ScanState {
+    const steps = this.renderedStateSteps(evidence, request);
     for (;;) {
       const next = steps.next();
       if (next.done) return next.value;
     }
   }
 
-  private async renderedStateInSlices(evidence: EvidenceSnapshot, slice: ClassificationSlice): Promise<ScanState> {
-    const steps = this.renderedStateSteps(evidence);
+  private async renderedStateInSlices(evidence: EvidenceSnapshot, request: RequestText, slice: ClassificationSlice): Promise<ScanState> {
+    const steps = this.renderedStateSteps(evidence, request);
     for (;;) {
       const next = steps.next();
       if (next.done) return next.value;
@@ -1321,7 +1369,7 @@ export class ClassificationLedger {
     // No arbitrary-sized lookup or folding work enters the main-thread path.
     if (length <= MAIN_SCAN_LIMIT && retainedUnits <= 4_096 && !this.identityIndex?.workerShards) {
       const slice = new ClassificationSlice(request.signal);
-      const result = this.scanRequest(request, await this.renderedStateInSlices(evidence, slice));
+      const result = this.scanRequest(request, await this.renderedStateInSlices(evidence, request, slice));
       if (slice.elapsed) await slice.yield();
       return this.withCurrentCoverage(result, evidence);
     }
@@ -1380,7 +1428,7 @@ export class ClassificationLedger {
       const slice = new ClassificationSlice(signal);
       const sections = { system: await encodeSection(request.system, slice), prompt: await encodeSection(request.prompt, slice) };
       const transfers = Object.values(sections).flatMap(section => section ? [section.buffer] : []);
-      const { retained, identityIndex, ...state } = await this.renderedStateInSlices(evidence, slice);
+      const { retained, identityIndex, ...state } = await this.renderedStateInSlices(evidence, request, slice);
       const ledgers: number[] = [];
       for (const ledger of retained) {
         const id = await ledger.syncLedger(client, slice);
@@ -1472,6 +1520,11 @@ export class ClassificationLedger {
         }
         matchedFields.set(key, match);
       };
+      for (const gap of state.renderedGaps ?? []) {
+        if (gap.section === section && gap.start < text.length) {
+          ranges.push({ ...gap, end: Math.min(gap.end, text.length) });
+        }
+      }
       for (const span of state.renderedSpans ?? []) {
         if (span.section === section && span.end <= text.length) collect(span, { ...span, key: "" }, true);
       }

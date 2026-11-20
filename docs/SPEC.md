@@ -1909,7 +1909,11 @@ Template joins, samples, bounded JSON
 and case changes preserve source fields and individual element offsets.
 Keys and counts derived from source values, mapped scalars and correlated
 device fields carry their source evidence into the rendered request. The
-observer binds those values to the serialized key or value offsets. It resolves
+observer binds those values to the serialized key or value offsets. Chat cache
+breakdown keys and counts inherit their Graph dimension's mapped class even
+when SQLite coerces a Boolean to an integer. Aggregates without a reliable
+source dimension, such as transformed platform aliases or combined totals,
+record an incomplete range. It resolves
 bounded provenance off the provider call path. Missing evidence, unsupported
 coercions, collection aggregates that lose per-element provenance and exceeded
 trace limits leave coverage incomplete.

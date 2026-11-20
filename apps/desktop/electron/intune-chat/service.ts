@@ -1,3 +1,4 @@
+import { traceAnswerPack, traceMultiTenantCounts } from "./answer-pack-classification.js";
 import { ClassificationLedger, currentClassificationLedger, registerRenderedFragment, registerTenantData, registerTransientTenantData, withClassificationScope, withTransientClassificationScope } from "@openadminos/runtime/data-classification";
 import { voiceDeviceEvidenceAnswer, voiceDeviceEvidenceIntent } from "./voice-device-evidence.js";
 import { MAX_PROMISE_NUDGES, PROMISE_REPAIR_PROMPT, completeWithPromiseNudge, looksLikeUnkeptPromise } from "./unkept-promise.js";
@@ -1811,19 +1812,18 @@ export class IntuneChatService {
       if (!llm.available) return deterministic;
       try {
         const system = buildIntuneChatSystemPrompt(input.provider?.isLocal === true);
-        const prompt = [
+        const prefix = [
           "Summarize this read-only multi-tenant Chat result for an admin.",
           "The JSON table is the source of truth. Mention partial, failed, skipped, or stale tenants.",
           `Question: ${input.prompt}`,
-          fenceTenantData(JSON.stringify(
-            {
-              summary: input.summary,
-              tenants: input.comparisons,
-            },
-            null,
-            2,
-          ), "chat:multi-tenant-result"),
+          "",
         ].join("\n\n");
+        const fence = fenceTenantData(JSON.stringify({
+          summary: input.summary,
+          tenants: input.comparisons,
+        }, null, 2), "chat:multi-tenant-result");
+        currentClassificationLedger()?.registerFencedRendering(fence, prefix.length, traceMultiTenantCounts);
+        const prompt = prefix + fence;
         // An answer that only promises work is asked again, at most twice; the last answer is kept.
         const text = await completeWithPromiseNudge(async (attempt) => (await llm.complete({
           system,
@@ -2417,6 +2417,7 @@ export class IntuneChatService {
       responseModel = undefined;
     } else if (directDeviceAnswer !== undefined) {
       assistantContent = directDeviceAnswer;
+      currentClassificationLedger()?.markCoverageIncomplete();
       responseModel = undefined;
     } else {
       // Tenant work goes through the model egress choke point; a send with no tenant has none to close.
@@ -3096,6 +3097,7 @@ export class IntuneChatService {
       emitDelta(assistantContent);
     } else if (directVoiceAnswer !== undefined) {
       assistantContent = directVoiceAnswer;
+      currentClassificationLedger()?.markCoverageIncomplete();
       responseModel = undefined;
       emitDelta(assistantContent);
     } else {
@@ -4279,14 +4281,22 @@ function buildAnswerPrompt(
 ): string {
   const pack = answerPack ? JSON.parse(answerPack) as Record<string, unknown> : {};
   const { question, instruction, ...evidence } = pack;
-  const context = [
+  const beforeFence = [
     `Admin question:\n${typeof question === "string" ? question : ""}`,
     "Retrieved tenant context:",
-    fenceTenantData(evidence, "chat:answer-pack"),
-    typeof instruction === "string" ? instruction : "",
+    "",
   ].join("\n\n");
+  const fence = fenceTenantData(evidence, "chat:answer-pack");
+  const context = beforeFence + fence + "\n\n" + (typeof instruction === "string" ? instruction : "");
+  const withContext = (prefix: string) => {
+    if (Array.isArray(evidence.resources) && (evidence.resources.length || Array.isArray(evidence.deterministicFindings) && evidence.deterministicFindings.length)) {
+      currentClassificationLedger()?.registerFencedRendering(fence, prefix.length + beforeFence.length,
+        (body, offset, identities) => traceAnswerPack(evidence, body, offset, identities));
+    }
+    return prefix + context;
+  };
   if (documentation.length === 0) {
-    return `Use this retrieved tenant context to answer the admin.\n\n${context}`;
+    return withContext("Use this retrieved tenant context to answer the admin.\n\n");
   }
   const passages = documentation
     .map(
@@ -4294,13 +4304,13 @@ function buildAnswerPrompt(
         `[${index + 1}] ${chunk.title ? `${chunk.title} - ` : ""}${chunk.file}\n${chunk.text.trim()}`,
     )
     .join("\n\n");
-  return [
+  return withContext([
     "Microsoft documentation passages from the local docs index on this device. Call them the local docs index, never Microsoft Learn:",
     passages,
     "",
     "The documentation above describes how Microsoft 365 behaves in general. It is not this tenant's state. When you rely on it, cite the source in square brackets, for example [1]. A passage about another product or topic is not a source: do not cite it, also not to say that it does not apply. If it does not cover the question, say so rather than guessing.",
     "",
     "Retrieved tenant context, which is this tenant's actual state:",
-    context,
-  ].join("\n");
+    "",
+  ].join("\n"));
 }

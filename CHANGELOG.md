@@ -25,6 +25,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Chat and Nova retain request offsets for escaped credential evidence in replayed history and report incomplete coverage when decoding reaches its limits.
 - Cache refresh and clear invalidate classification sidecars with the snapshot and reclaim them in background batches. Disconnect waits for removal.
 - Data policy carries source evidence through Chat scalar formatting and records incomplete coverage for formatted facts whose origins cannot be recovered.
+- Chat cache breakdown keys and counts carry their source field category, and aggregate values without reliable source evidence show incomplete coverage.
 - Data policy recognizes escaped matches and competing origins in model requests and classifies device attestation, compliance and Defender posture as Security.
 
 - GitHub Copilot Fusion: the Copilot provider offers Copilot Fusion Standard, High and Max from the CLI's catalog, shows tiers your plan does not include greyed out with the reason, says when several models may see a prompt, and makes Copilot Free accounts usable (they list only Fusion Standard). Copilot models now show their catalog names, such as MAI Code 2 for Microsoft's MAI models, and models your organization's Copilot policy turns off are greyed out with the reason.

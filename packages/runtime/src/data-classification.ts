@@ -14,7 +14,7 @@ import {
 export { GRAPH_FIELD_CLASSES_VERSION } from "./graph-field-classes.js";
 export { ClassificationWorkerRetiredError, releaseClassificationIdentityShard, retireClassificationWorker, shutdownClassificationWorker } from "./classification-worker-client.js";
 export { CLASSIFICATION_TTL_MS, ClassificationLedger, clearTenantClassificationLedgers, currentClassificationLedger, classificationDiagnostics, collectClassifiedValues, registerClassifiedValues, registerGraphTenantData, registerRenderedFragment, registerTenantData, registerTransientTenantData, withTransientClassificationScope, withClassificationScope, withRequestClassification } from "./request-classification.js";
-export type { ClassifiedValues, ClassificationSpan, RequestClassification, RequestClassificationEvent } from "./request-classification.js";
+export type { ClassifiedValues, ClassificationSpan, RequestClassification, RequestClassificationEvent, TemplateInterpolation } from "./request-classification.js";
 
 export { ClassificationSlice, classifyCacheRows, yieldClassificationTurn } from "./classification-worker-client.js";
 export {
@@ -311,6 +311,22 @@ export function hasGraphFieldClass(graphPath: string, field: string): boolean {
   const pattern = "/" + mappedParts(field.replaceAll("/", ".")).map(pointerPart).join("/");
   return [...fieldMaps.get(route)?.keys() ?? []]
     .some(mapped => mapped === pattern || mapped.startsWith(pattern + "/"));
+}
+
+/** Class of a mapped Graph dimension after grouping, including detectors for the bucket spelling. */
+export function classifyGraphDimension(
+  graphPath: string, field: string, value: string, identityIndex?: ClassificationOptions["identityIndex"],
+): { kind: DataClass; source: string; maskRole?: SecurityMaskRole } | undefined {
+  const route = graphRoute(graphPath);
+  const parts = mappedParts(field);
+  const pattern = "/" + parts.map(pointerPart).join("/");
+  if (!fieldMaps.get(route)?.has(pattern)) return undefined;
+  const record = parts.reduceRight<unknown>((child, key) => ({ [key]: child }), value);
+  let evidence: ReturnType<typeof classifyGraphDimension>;
+  walkDataClasses(record, { graphPath, identityIndex }, (_value, kind, _pointer, _key, maskRole) => {
+    evidence = { kind, source: graphClassificationSource(graphPath), ...(maskRole ? { maskRole } : {}) };
+  });
+  return evidence;
 }
 
 function detectValueClass(text: string, detectIdentifiers: boolean, options: ClassificationOptions, kind: DataClass): DataClass {

@@ -36,7 +36,7 @@ import { assertWritePlanLimits } from "@openadminos/agent-sdk";
 export { assessWritePlan, assessWritePlanSafely, WRITE_PLAN_SIZE_MEDIAN_MULTIPLE } from "./write-plan-risk.js";
 import { withTenantDataInstructions, withTenantDataOutputFilter } from "./tenant-data.js";
 
-export { TENANT_DATA_INSTRUCTIONS, fenceTenantData, stripTenantDataFences,
+export { TENANT_DATA_INSTRUCTIONS, escapeTenantDataBody, fenceTenantData, stripTenantDataFences,
   withTenantDataInstructions, withTenantDataOutputFilter } from "./tenant-data.js";
 import { accumulateRunUsage } from "./run-usage.js";
 import { graphAccessDenialFromError } from "@openadminos/agent-sdk";

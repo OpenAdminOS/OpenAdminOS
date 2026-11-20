@@ -387,7 +387,8 @@ function* tracePieces(
       }
       // Only the records in boundedJson came from tenant data.
       const sourceKey = envelope ? (field === "records" ? key : "") : field.toLowerCase();
-      const valueOrigin = derivedValues.get(value)?.get(field);
+      const valueOrigin = envelope && (field === "totalRecords" || field === "includedRecords" || field === "omittedRecords" || field === "coverage")
+        ? "unmapped" : derivedValues.get(value)?.get(field);
       if (!(yield* tracePieces(property.value, sourceKey, format, ",", depth + 1, false, valueOrigin, requireEvidence))) return false;
     }
     yield { text: "}" };

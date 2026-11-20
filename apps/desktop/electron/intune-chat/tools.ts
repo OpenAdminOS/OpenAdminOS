@@ -325,17 +325,24 @@ function listResult(found: McpResultItem[], matched: number, counts: Record<stri
 export function mcpListingNote(serverName: string, read: { listed: number; matched?: number; counts?: Readonly<Record<string, number | boolean>>; pages?: boolean }): string {
   const lines: string[] = [];
   const counts = Object.entries(read.counts ?? {});
-  if (counts.length > 0) lines.push(`${serverName} result counts: ${counts.map(([key, value]) => `${key} ${String(value)}`).join(", ")}.`);
+  if (counts.length > 0) lines.push(`${serverName} result counts: ${counts.map(([key, value]) => {
+    const before = `${key} `;
+    return before + registerRenderedFragment(value, String(value), { before, requireEvidence: true });
+  }).join(", ")}.`);
   const matched = read.matched ?? read.listed;
   const left = matched - read.listed;
-  if (left > 0) lines.push(`OpenAdminOS lists ${read.listed} of the ${matched} records in this result below. The other ${left} ${left === 1 ? "was" : "were"} left out here and ${left === 1 ? "is" : "are"} not absent.`);
+  if (left > 0) {
+    const line = `OpenAdminOS lists ${read.listed} of the ${matched} records in this result below. The other ${left} ${left === 1 ? "was" : "were"} left out here and ${left === 1 ? "is" : "are"} not absent.`;
+    lines.push(registerRenderedFragment(line, line, { unknownOrigin: true }));
+  }
   const more = mcpServerHasMore(read.counts, matched);
   if (more) lines.push(`${serverName} has more records than this result returned.`);
   if (left > 0 || more) {
     const total = Math.max(matched, countsTotal(read.counts) ?? 0);
     const of = total > matched || !more ? String(total) : `more than ${matched}`;
     const further = read.pages ? "To read further records, call the same tool again for the next page." : "This tool reads no further pages, so a narrower question is the way to reach the others.";
-    lines.push(`The list below is not complete. Say so in the answer: give how many are shown and how many exist, as in "Showing ${read.listed} of ${of}". ${further}`);
+    const example = `Showing ${read.listed} of ${of}`;
+    lines.push(`The list below is not complete. Say so in the answer: give how many are shown and how many exist, as in "${registerRenderedFragment(example, example, { unknownOrigin: true })}". ${further}`);
   }
   return lines.join("\n");
 }
@@ -1407,6 +1414,17 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
         cachedRowsForResource: 0,
         note: snapshot?.refreshedAt ? `The ${resource} snapshot contains zero rows. Check snapshot coverage and freshness before making a tenant-wide claim.` : `Nothing is cached for ${resource}, so this query cannot show whether the tenant has any. Refresh the resource before concluding anything about it.`,
       };
+    }
+  }
+
+  for (const [key, count] of [
+    ["totalCount", result.totalCount],
+    ["returnedRows", result.returnedRows],
+    ["cachedRowsForResource", emptyHint?.cachedRowsForResource],
+  ] as const) {
+    if (count !== undefined) {
+      const spelling = String(count);
+      registerRenderedFragment(spelling, spelling, { before: `"${key}":`, unknownOrigin: true });
     }
   }
 

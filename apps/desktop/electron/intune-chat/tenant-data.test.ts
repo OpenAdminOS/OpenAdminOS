@@ -108,6 +108,40 @@ test("Chat fences answer packs, workspace evidence and history and filters every
   } finally { await f.close(); }
 });
 
+test("deterministic Chat labels SQL breakdown keys and counts at their request offsets", async () => {
+  const rows = [
+    { id: "fixture-a", deviceName: "Fixture A", isEncrypted: false, complianceState: "noncompliant" },
+    { id: "fixture-b", deviceName: "Fixture B", isEncrypted: false, complianceState: "noncompliant" },
+    { id: "fixture-c", deviceName: "Fixture C", isEncrypted: true, complianceState: "compliant" },
+  ];
+  const f = await fixture({ graphResult: path => ({ value: path === "/deviceManagement/managedDevices" ? rows : [] }) });
+  try {
+    const sent = await f.store.streamIntuneChatMessage({ content: "Which managed devices are noncompliant or unencrypted?" }, () => {});
+    await f.waitForClassifications();
+    const prompt = f.prompts.at(-1)!.prompt;
+    const { spans, unexamined } = f.store.getRequestClassifications(sent.conversation.id).at(-1)!.classification;
+    for (const [field, buckets] of [
+      ["isEncrypted", [["0", 2], ["1", 1]]],
+      ["complianceState", [["compliant", 1], ["noncompliant", 2]]],
+    ] as const) {
+      let cursor = prompt.indexOf(`"${field}":{`);
+      assert.ok(cursor >= 0, prompt);
+      for (const [bucket, count] of buckets) {
+        const keyStart = prompt.indexOf(`"${bucket}":${count}`, cursor) + 1;
+        assert.ok(keyStart > cursor);
+        const countStart = keyStart + bucket.length + 2;
+        for (const [start, end] of [[keyStart, keyStart + bucket.length], [countStart, countStart + 1]] as const) {
+          assert.ok(spans.some(span => span.section === "prompt" && span.kind === "security" &&
+            span.start === start && span.end === end), prompt.slice(start, end));
+        }
+        cursor = countStart + 1;
+      }
+    }
+    assert.ok(unexamined.ranges.some(range => range.reason === "rendered-provenance-unavailable" &&
+      range.start === prompt.indexOf('"cachedRows":3') + '"cachedRows":'.length));
+  } finally { await f.close(); }
+});
+
 test("workspace excerpts preserve a classified field when their JSON budget cuts an array element", async () => {
   let ledger: ClassificationLedger | undefined;
   const f = await fixture({ respond: () => { ledger = currentClassificationLedger(); return "Reviewed."; } });
