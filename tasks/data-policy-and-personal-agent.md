@@ -361,7 +361,8 @@ built on top of them are planned separately.
   so. Text the app cannot recognize can still reach the search provider,
   stated as honestly as the remote MCP boundary. The Hosted gate still
   applies to whatever remains (round 18 sets the order: placeholders are
-  removed after the gate). Whenever web search is offered, the status
+  removed after the gate; round 19 adds detector matches to the first
+  removal and a final check after the gate). Whenever web search is offered, the status
   strip names its destination (OpenAI), also when the chat model is local,
   so "No data leaves this device" is never shown while search is offered
   (A3, mockup 34, B and E).
@@ -380,9 +381,11 @@ built on top of them are planned separately.
   `[CREDENTIAL]`), then check whether meaningful text remains. When none
   remains, nothing is sent. A gate Block on what remains (for example a
   scan that ran out of its budget with a Block on the tier) makes no
-  request and has its own designed state (A3, mockup 34, E).
+  request and has its own designed state (A3, mockup 34, E). Round 19
+  widens the first step to detector matches and adds a final check after
+  the gate.
 - A redirect that changes a user-added server's endpoint (any change of
-  scheme, host, port or path) is refused during tool listing and every
+  scheme, host, port or path; round 19 adds the query string) is refused during tool listing and every
   tool call. Nothing is sent to the target, and the designed state names
   the redirect target and asks the admin to add that address as its own
   server, which gets a fresh review. This tightens the same-origin rule the
@@ -400,6 +403,31 @@ built on top of them are planned separately.
 - Mockup 35: the readable comparison marks an empty node that becomes
   populated (`inputSchema.properties` from `{}`), and the tool `name` goes
   through the same path-aware marker.
+
+**Review findings adopted (2026-11-20, round 19 of the design review)**
+- Web search step 1 removes everything the app recognizes as tenant data:
+  ledger matches, tenant value index matches and detector matches (email
+  addresses, GUIDs, IP addresses, serial numbers and credential patterns),
+  whatever the rules on Hosted allow. After the gate, a final check removes
+  any recognized span still present, also under Allow, before the
+  placeholders are removed and the meaningful text check runs. A
+  regression test covers a detector-only email address with Identity on
+  Hosted at Allow: the address never reaches the request (A3).
+- A3 criteria 18 and 19: criterion 18 covers stale tokens only; the order
+  of placeholder removal after the gate is criterion 19, which now uses a
+  token the gate produces for an unexamined tail, since step 1 removes a
+  recognized recovery key before the gate (A3).
+- A user-added MCP server's endpoint is its full URL without the fragment:
+  scheme, host, port, path and query string. A redirect that changes any of
+  them, the query string alone included, is refused during listing and
+  calls, with criteria for a query-only redirect in both (B5, mockup 35).
+- Mockup 34, E: the web search trace shows the tenant lookup (Ollama
+  answering from the cache) and the writing of the public query as
+  separate steps; the query writer gets only public inputs, and the
+  removed app name comes from the admin's question.
+- Mockup 34, F: a live follow-up in a conversation that stayed open, where
+  the effective field map revision changed and an entry without a field
+  path became unexamined, with the reason and the recovery.
 
 ## Why
 
@@ -673,29 +701,36 @@ the IT policy file.
         research) on top of the gate: a query never carries tenant data of
         any class, whatever the rules on Hosted allow. The query is written
         from public inputs only. The boundary is enforced on the final
-        outbound query, after the Hosted gate, in this order (round 18):
-        1. Every value the ledger or the tenant value index recognizes as
-           tenant data in the query (any class, configuration included, such
-           as an internal app name from the cache, and any value A4 restored
-           into the tool's parameters) is removed, never masked as a token.
-           Values only the detectors find (credential and identifier
-           patterns) are handled by the gate in step 2 and removed in
-           step 3.
+        outbound query, around the Hosted gate, in this order (round 18,
+        step 1 and the final check from round 19):
+        1. Everything the app recognizes as tenant data in the query is
+           removed, never masked as a token, whatever the rules on Hosted
+           allow: ledger matches, tenant value index matches and detector
+           matches (email addresses, GUIDs, IP addresses, serial numbers
+           and credential patterns), of any class, configuration included
+           (such as an internal app name from the cache), and any value A4
+           restored into the tool's parameters.
         2. The Hosted gate scans what remains and applies the rules on
            Hosted. Text it cannot examine follows the rule for unexamined
-           data. When the gate blocks, the search is not sent, no network
-           request is made, and Chat shows the designed state that names the
-           reason (mockup 34, E, "Withheld by the data policy check"); its
-           recovery is a shorter search or an answer without searching.
-        3. Every placeholder is removed from the gate's result: a stale one
-           with no mapping in the ledger (such as `[USER_2]` left from an
-           earlier masked answer) and any token the gate produced (such as
-           `[CREDENTIAL]` for a recovery key a detector found).
-        4. The app checks whether meaningful text remains. When none
+           data: masked one way as `[CREDENTIAL]` when Mask is the strictest
+           action on Hosted, withheld when any rule on Hosted is Block. When
+           the gate blocks, the search is not sent, no network request is
+           made, and Chat shows the designed state that names the reason
+           (mockup 34, E, "Withheld by the data policy check"); its recovery
+           is a shorter search or an answer without searching.
+        3. A final check scans the gate's result with the same recognizers
+           as step 1 and removes any recognized span still present, also
+           where the rule on Hosted is Allow, since the gate sends an
+           allowed class as is.
+        4. Every placeholder is removed from the result: a stale one with no
+           mapping in the ledger (such as `[USER_2]` left from an earlier
+           masked answer) and any token the gate produced (such as
+           `[CREDENTIAL]` for an unexamined tail it masked).
+        5. The app checks whether meaningful text remains. When none
            remains, the search is not sent, no network request is made, and
            Chat shows the designed state (mockup 34, E, "Web search without
            tenant data").
-        Only the text that passed all four steps is sent. Text the app
+        Only the text that passed all five steps is sent. Text the app
         cannot recognize, such as an internal project name it has never
         seen, can still reach the search provider; the web search copy and
         the docs say so, as the remote MCP boundary does.
@@ -908,15 +943,18 @@ the IT policy file.
    detected after install 24H2". The fake request function receives the
    query without `[USER_2]` and with the public words. A query that held
    only `[USER_2]` leaves nothing meaningful: the fake receives no call.
-   A step that removed only values with a mapping, or removed placeholders
-   before the gate, would send the token, and the test fails on it.
-19. Web search order regression test, gate token: with Credential on Hosted
-   at Mask, Nova writes a search that holds a BitLocker recovery key the
-   tenant value index does not know, followed by public words. The gate
-   masks the key as `[CREDENTIAL]`, and the fake request function receives
-   the public words with neither the key nor `[CREDENTIAL]`. A search that
-   removed placeholders before the gate would send the token, and the test
-   fails on it.
+   A step that removed only values with a mapping would send the token, and
+   the test fails on it. This test covers stale tokens only; the order of
+   placeholder removal and the gate is covered by criterion 19.
+19. Web search order regression test, gate token: with the default rules on
+   Hosted (Credential at Mask, no Block on the tier), Nova writes a search
+   with public words followed by a pasted install log longer than the
+   scan's work budget. The gate masks the unexamined tail one way as
+   `[CREDENTIAL]`, and the fake request function receives the public words
+   with neither the tail nor `[CREDENTIAL]`. A search that removed
+   placeholders before the gate would send the token, and the test fails
+   on it. This is the test for the order of placeholder removal after the
+   gate.
 20. Web search withheld by the gate (test): Activity on Hosted is Block and
    Nova writes a search with a pasted install log longer than the scan's
    work budget. Public words remain after step 1, the gate reports the
@@ -933,6 +971,16 @@ the IT policy file.
    provider request, and the follow-up shows the designed blocked state. A
    ledger that kept the class from the older revision would send the name
    as configuration, and the test fails on it.
+22. Web search regression test, detector only: Identity on Hosted is Allow,
+   and Nova writes the search "j.morgan@contoso.com Outlook profile keeps
+   asking for password". The address is in neither the ledger nor the
+   tenant value index; only the email detector finds it. Step 1 removes it,
+   and the fake request function receives the public words without the
+   address, which never reaches the search request. A step 1 that removed
+   only ledger and index matches would leave
+   the address to the gate, which sends an allowed class as is, and the
+   test fails on it. A unit test of the final check alone (step 3) is given
+   gate output that still holds the address under Allow and removes it.
 
 ### Phase A4: Masking
 
@@ -1170,18 +1218,25 @@ the IT policy file.
       recognized tenant data removed. The existing egress checks and
       query-writer boundary apply. Allowlist key: `allowedMcpServers`
       (`TODO(ugur)`: proposed name, see open decisions).
+- [ ] A server's endpoint is its full URL without the fragment: scheme,
+      host, port, path and query string (round 19). Two addresses that
+      differ in any of these, the query string alone included, are
+      different endpoints; the fragment is never sent and is not part of
+      the endpoint. Approvals, the tool review, the redirect rule and the
+      status strip all use this endpoint.
 - [ ] Step 2, the tool review, reviews exactly the endpoint step 1 continued
       with: it names the host from that address and shows the full address
       whose `tools/list` it shows. It always opens with every tool
       unchecked. Changing the address in step 1 clears step 2 until Continue
       lists the new endpoint, and opening the review again starts unchecked.
-      An approval belongs to the endpoint (the full address) it was given
-      for and never carries over to another endpoint, even for a tool with
+      An approval belongs to the endpoint (the full URL without the
+      fragment) it was given for and never carries over to another endpoint, even for a tool with
       the same name and an identical definition.
-- [ ] Redirects never change the endpoint (round 18). During tool listing
-      (step 2 and every later `tools/list`) and every tool call, a redirect
-      that changes the endpoint, meaning any change of scheme, host, port or
-      path, is refused: the target is never requested, nothing from the
+- [ ] Redirects never change the endpoint (round 18, query string from
+      round 19). During tool listing (step 2 and every later `tools/list`)
+      and every tool call, a redirect that changes the endpoint, meaning any
+      change of scheme, host, port, path or query string, including a
+      redirect that changes only the query string, is refused: the target is never requested, nothing from the
       call (credential, tool parameters) is sent there, and the listing or
       call fails with a designed state that names the redirect target and
       asks the admin to add that address as its own server, which gets its
@@ -1192,7 +1247,7 @@ the IT policy file.
       the host out. This tightens the MCP transport,
       which today follows a redirect within the same origin
       (`sameOriginFetch` in `apps/desktop/electron/mcp/host.ts`), so a path
-      redirect on the same host is refused as well (mockup 35, "A redirect
+      or query string redirect on the same host is refused as well (mockup 35, "A redirect
       to another address").
 - [ ] The boundary, stated in the grant copy: the server receives a query
       written from the admin's question with every value the app recognizes as
@@ -1328,8 +1383,8 @@ the IT policy file.
     hash of each fixture matches a reference JCS implementation.
 14. Step 2 reviews the endpoint entered in step 1 and opens with every tool
     unchecked. A tool approved at one endpoint is not approved at a
-    different endpoint, including another path on the same host and an
-    identical definition; changing the address clears the review, and
+    different endpoint, including another path on the same host, the same
+    path with another query string, and an identical definition; changing the address clears the review, and
     opening it again starts unchecked (test, mockup 35).
 15. A re-review shows, for a changed tool, the complete approved object and
     the complete current object side by side with both full hashes, and
@@ -1347,6 +1402,18 @@ the IT policy file.
     never reach it. A transport that followed same-origin redirects would
     send them, and the test fails on it. A change of scheme, host or port
     is refused the same way (test per component).
+17. Regression test, query-only redirect: the server at
+    `https://tools.contoso.example/mcp?tenant=a` answers 307 with
+    `Location: /mcp?tenant=b`, same scheme, host, port and path. In step 2,
+    `tools/list` is refused, no request reaches `/mcp?tenant=b`, the review
+    shows the designed state naming
+    `https://tools.contoso.example/mcp?tenant=b`, and Continue stays
+    disabled. For an approved server at `/mcp?tenant=a` that starts
+    answering the same redirect, a call to an approved tool fails with the
+    same state, and the fake server records no request at the target, so
+    the tool parameters and the credential never reach it. A rule that
+    compared only scheme, host, port and path would follow the redirect and
+    send them, and the test fails on it.
 
 ### Phase B6: Learning
 
