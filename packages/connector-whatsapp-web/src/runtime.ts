@@ -74,7 +74,7 @@ let stopped = false;
 
 export function stopAllWhatsAppWebClients(): void {
   stopped = true;
-  for (const client of clients.values()) client.dispose();
+  for (const client of clients.values()) client.stopForReset();
 }
 
 /** A reset refused after all: clients may open sockets again. */
@@ -284,6 +284,21 @@ export class WhatsAppWebClient {
       message: "WhatsApp Web was disconnected on this device.",
     });
     return this.getStatus();
+  }
+
+  /**
+   * Disposes the client and leaves no status that claims a live socket, so
+   * a client resumed after a refused reset reconnects on its next use.
+   */
+  stopForReset(): void {
+    this.dispose();
+    if (this.status.state === "connected" || this.status.state === "qr" || this.status.state === "connecting" || this.status.state === "reconnecting") {
+      this.setStatus(
+        this.hasAuthState()
+          ? { state: "reconnecting", message: "Restoring the saved WhatsApp Web session." }
+          : { state: "not-linked", message: "WhatsApp Web is not linked on this device." },
+      );
+    }
   }
 
   dispose(): void {
