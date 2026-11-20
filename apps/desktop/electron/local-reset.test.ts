@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { spawnSync } from "node:child_process";
 
 import type { TenantRecord } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
@@ -15,7 +16,9 @@ import {
   localResetLinkCheck,
   folderGoesThroughLink,
   localResetPolicyProblem,
+  parseWhoamiUser,
   windowsTaskBelongsToThisAccount,
+  windowsTaskUserId,
   localResetRemovalPlan,
   MACOS_SAFE_STORAGE_ACCOUNT,
   MACOS_SAFE_STORAGE_SERVICE,
@@ -205,6 +208,12 @@ describe("local reset: wipe at launch", () => {
       seedDataFolder(data);
       const leftovers = localResetLeftoverPaths("darwin", home, {});
       for (const path of leftovers) {
+        if (path.endsWith(".binarycookies")) {
+          // A cookie store is a plain file, not a folder.
+          mkdirSync(join(path, ".."), { recursive: true });
+          writeFileSync(path, "cookies");
+          continue;
+        }
         mkdirSync(path, { recursive: true });
         writeFileSync(join(path, "file"), "x");
       }
@@ -532,6 +541,17 @@ describe("local reset: wipe at launch", () => {
     }
   });
 
+  it("stops when the policy file is not a plain file", async () => {
+    const dir = await tempDir();
+    try {
+      const fifo = spawnSync("mkfifo", [join(dir, "policy.json")]);
+      if (fifo.status !== 0) return;
+      assert.match(localResetPolicyProblem(dir) ?? "", /is not a plain file/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("stops when a folder sits where the policy file belongs", async () => {
     const dir = await tempDir();
     try {
@@ -718,6 +738,25 @@ describe("local reset: wipe at launch", () => {
       await rm(dir, { recursive: true, force: true });
       await rm(outside, { recursive: true, force: true });
     }
+  });
+
+  it("removes the Windows scheduled task only when it also runs as this account", () => {
+    const home = "C:\\Users\\ada";
+    const program = "C:\\Users\\ada\\AppData\\Local\\Programs\\OpenAdminOS\\OpenAdminOS.exe";
+    const account = parseWhoamiUser('"contoso\\ada","S-1-5-21-1-2-3-1001"\r\n');
+    assert.deepEqual(account, { name: "contoso\\ada", sid: "S-1-5-21-1-2-3-1001" });
+    const xml = (userId: string) => `<Task><Principals><Principal id="Author"><UserId>${userId}</UserId><LogonType>InteractiveToken</LogonType></Principal></Principals></Task>`;
+    assert.equal(windowsTaskUserId(xml("CONTOSO\\ada")), "CONTOSO\\ada");
+    for (const userId of ["CONTOSO\\ada", "ada", "S-1-5-21-1-2-3-1001"]) {
+      assert.equal(windowsTaskBelongsToThisAccount(program, home, { taskUserId: windowsTaskUserId(xml(userId)), account }), true, userId);
+    }
+    // A service account's task pointing at Ada's program is not Ada's.
+    assert.equal(windowsTaskBelongsToThisAccount(program, home, { taskUserId: "CONTOSO\\svc-openadminos", account }), false);
+    assert.equal(windowsTaskBelongsToThisAccount(program, home, { taskUserId: "S-1-5-18", account }), false);
+    // Unknown on either side: left in place.
+    assert.equal(windowsTaskBelongsToThisAccount(program, home, { taskUserId: undefined, account }), false);
+    assert.equal(windowsTaskBelongsToThisAccount(program, home, { taskUserId: "ada", account: undefined }), false);
+    assert.equal(parseWhoamiUser("Access is denied."), undefined);
   });
 
   it("removes the Windows scheduled task only when its program is under this account's profile", () => {
