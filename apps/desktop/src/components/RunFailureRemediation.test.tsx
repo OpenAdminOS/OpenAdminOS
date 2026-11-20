@@ -6,7 +6,7 @@ import { RunFailureRemediation } from "./RunFailureRemediation";
 vi.mock("./ReportIssueModal", () => ({ useReportIssue: () => vi.fn() }));
 
 describe("Graph run failure recovery", () => {
-  const base: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", error: "HTTP 403", steps: [], logs: [] };
+  const base: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", error: 'Graph responded with HTTP 403 for https://graph.microsoft.com/v1.0/users: {"error":{"code":"Forbidden","message":"You cannot perform the requested operation, required scopes are missing in the token."}}', steps: [], logs: [] };
 
   it.each([
     ["missing-consent", { requiredScopes: ["User.Read.All"], grantedScopes: [] }, "Graph consent required"],
@@ -25,6 +25,26 @@ describe("Graph run failure recovery", () => {
     render(<RunFailureRemediation run={base} />);
     expect(screen.getByText("Graph access cause unverified")).toBeInTheDocument();
     expect(screen.queryByText("Scope or consent issue")).not.toBeInTheDocument();
+  });
+
+  it("shows the stored denial for a run whose error is the denial text", () => {
+    const accessDenial = classifyGraphAccessDenied({ requiredScopes: ["User.Read.All"], grantedScopes: [] });
+    render(<RunFailureRemediation run={{ ...base, error: `${accessDenial.message} ${accessDenial.recovery}`, accessDenial }} />);
+    expect(screen.getByText("Graph consent required")).toBeInTheDocument();
+  });
+
+  it.each([
+    "Ollama responded with HTTP 403 at http://127.0.0.1:11434/api/chat: Forbidden",
+    "LM Studio responded with HTTP 403 at http://127.0.0.1:1234/v1/chat/completions: forbidden",
+    "Anthropic API returned 403 Forbidden: permission_error",
+    "MCP server \"tickets\" responded with HTTP 403: forbidden",
+    "HTTP 403",
+  ])("ignores a stored Graph denial when the error did not come from Microsoft Graph: %s", (error) => {
+    const accessDenial = classifyGraphAccessDenied({ requiredScopes: ["User.Read.All"], grantedScopes: [] });
+    render(<RunFailureRemediation run={{ ...base, error, accessDenial }} />);
+    for (const title of ["Graph consent required", "Graph access cause unverified", "Role access required", "Tenant licence required"]) {
+      expect(screen.queryByText(title)).not.toBeInTheDocument();
+    }
   });
 });
 

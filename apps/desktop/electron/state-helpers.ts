@@ -10,6 +10,7 @@ import {
   AVAILABLE_SERVICES,
   GRAPH_CACHE_LOG_ROW_LIMIT,
   GRAPH_CACHE_LOG_WINDOW_DAYS,
+  errorComesFromGraph,
   graphAccessDenialFromError,
   graphAccessDenialText,
   SAVED_APP_REGISTRATION_LIMIT,
@@ -109,7 +110,9 @@ export function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 export function humanizeScheduledRunError(message: string, accessDenial?: GraphAccessDenial): string {
   const raw = message.trim();
   const lower = raw.toLowerCase();
-  if (accessDenial) return graphAccessDenialText(accessDenial);
+  // A denial stored by an earlier version for a 403 that did not come from
+  // Microsoft Graph (a model server, a vendor API, an MCP server) is ignored.
+  if (accessDenial && errorComesFromGraph(raw)) return graphAccessDenialText(accessDenial);
   const unknownDenial = graphAccessDenialFromError(raw);
   if (unknownDenial) return graphAccessDenialText(unknownDenial);
   if (lower.includes("graph request failed") && lower.includes("fetch failed")) {

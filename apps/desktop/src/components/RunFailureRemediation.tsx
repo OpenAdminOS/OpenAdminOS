@@ -2,7 +2,7 @@ import { IconWarning } from "./icons";
 import { Button } from "./Button";
 import { useReportIssue } from "./ReportIssueModal";
 import type { RunRecord } from "../shared/openAdminOS";
-import { graphAccessDenialFromError } from "@openadminos/agent-sdk";
+import { errorComesFromGraph, graphAccessDenialFromError } from "@openadminos/agent-sdk";
 
 interface Suggestion {
   match: (error: string) => boolean;
@@ -78,12 +78,18 @@ export function RunFailureRemediation({ run }: { run: RunRecord }) {
   const openReportIssue = useReportIssue();
   if (run.status !== "failed" || !run.error) return null;
   // A failed lookup of the Ollama model's context limit has one cause and
-  // one recovery; its HTTP status (for example 403) is not a Graph denial.
+  // one recovery.
   const lookup = isContextLimitLookup(run.error);
   const matched = lookup
     ? SUGGESTIONS.filter((suggestion) => suggestion.match === isContextLimitLookup)
     : SUGGESTIONS.filter((suggestion) => suggestion.match(run.error!));
-  const accessDenial = lookup ? undefined : run.accessDenial ?? graphAccessDenialFromError(run.error);
+  // Only a Graph error gets Graph recovery advice. Runs stored before this
+  // check can carry an accessDenial for a 403 from a model server, a vendor
+  // API, or an MCP server; the stored value is ignored when the error itself
+  // did not come from Microsoft Graph.
+  const accessDenial = errorComesFromGraph(run.error)
+    ? run.accessDenial ?? graphAccessDenialFromError(run.error)
+    : undefined;
   if (accessDenial) {
     matched.unshift({ match: () => true, title: accessDenial.title, body: `${accessDenial.message} ${accessDenial.recovery}` });
   }
