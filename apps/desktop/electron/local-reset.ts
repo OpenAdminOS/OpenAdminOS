@@ -84,6 +84,8 @@ export interface LocalResetMarker {
   requestWarnings?: LocalResetProblem[];
   /** The cleanup outside the data folder ran; a resumed wipe never runs it again. */
   leftoversDone?: true;
+  /** Set when reading, never written: the marker is a link or a shared file and is not trusted. */
+  unusable?: true;
 }
 
 // ---------------------------------------------------------------------------
@@ -213,7 +215,7 @@ const DATA_FOLDER_LINK_REASON =
  * Links in the data folder the reset must not write or delete through: the
  * folder itself, and token cache files, which sign-out would rewrite.
  */
-export function localResetLinkCheck(userDataDir: string, fs: Pick<LocalResetFileSystem, "isLink" | "readdir"> = nodeFileSystem): {
+export function localResetLinkCheck(userDataDir: string, fs: Pick<LocalResetFileSystem, "isLink" | "isShared" | "readdir"> = nodeFileSystem): {
   dataFolderIsLink: boolean;
   linkedTokenCaches: string[];
 } {
@@ -226,7 +228,7 @@ export function localResetLinkCheck(userDataDir: string, fs: Pick<LocalResetFile
   }
   return {
     dataFolderIsLink: false,
-    linkedTokenCaches: entries.filter((name) => /^tokens.*\.bin$/i.test(name) && fs.isLink(join(userDataDir, name))),
+    linkedTokenCaches: entries.filter((name) => /^tokens.*\.bin$/i.test(name) && fs.isShared(join(userDataDir, name))),
   };
 }
 
@@ -255,6 +257,12 @@ export interface LocalResetFileSystem {
   writeMarker(path: string, content: string): void;
   /** The path itself is a symbolic link (not followed). */
   isLink(path: string): boolean;
+  /**
+   * The path is a symbolic link, or a file with more than one hard link:
+   * writing it in place, or trusting its content, would reach a file that
+   * lives somewhere else too.
+   */
+  isShared(path: string): boolean;
 }
 
 export interface LocalResetWipeOptions {
@@ -275,6 +283,14 @@ const nodeFileSystem: LocalResetFileSystem = {
   isLink: (path) => {
     try {
       return lstatSync(path).isSymbolicLink();
+    } catch {
+      return false;
+    }
+  },
+  isShared: (path) => {
+    try {
+      const stat = lstatSync(path);
+      return stat.isSymbolicLink() || (stat.isFile() && stat.nlink > 1) || (!stat.isFile() && !stat.isDirectory());
     } catch {
       return false;
     }
@@ -366,6 +382,9 @@ export function localResetLeftoverPaths(platform: NodeJS.Platform, home: string,
 /** Reads the marker; a marker that cannot be parsed still means a reset is pending. */
 export function readLocalResetMarker(userDataDir: string, fs: LocalResetFileSystem = nodeFileSystem): LocalResetMarker | undefined {
   const path = join(userDataDir, LOCAL_RESET_MARKER);
+  // Only a plain file OpenAdminOS wrote starts a wipe. A link or shared file
+  // in a restored profile is never followed: it stops the launch instead.
+  if (fs.isShared(path)) return { version: 1, requestedAt: "", unusable: true };
   if (!fs.exists(path)) return undefined;
   try {
     const parsed = JSON.parse(fs.readFile(path)) as Partial<LocalResetMarker>;
@@ -402,6 +421,18 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
   const { userDataDir } = options;
   const marker = readLocalResetMarker(userDataDir, fs);
   if (!marker) return undefined;
+  if (marker.unusable) {
+    return {
+      status: "incomplete",
+      finishedAt: (options.now?.() ?? new Date()).toISOString(),
+      dataFolder: userDataDir,
+      failed: [{
+        item: LOCAL_RESET_MARKER,
+        reason: "it is a link or a shared file, not one OpenAdminOS wrote, so nothing was removed. Remove it from the data folder, then open OpenAdminOS again",
+      }],
+      warnings: [],
+    };
+  }
   const failed: LocalResetProblem[] = [];
   const warnings: LocalResetProblem[] = [...(marker.requestWarnings ?? [])];
   const finish = (status: LocalResetReport["status"]): LocalResetReport => ({
