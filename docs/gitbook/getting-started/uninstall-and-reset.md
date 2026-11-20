@@ -87,7 +87,7 @@ token files that are still there.
 
 ```bash
 security delete-generic-password -s "OpenAdminOS Safe Storage" -a OpenAdminOS
-launchctl bootout "gui/$(id -u)" ~/Library/LaunchAgents/com.openadminos.scheduler.plist
+launchctl bootout "gui/$(id -u)/com.openadminos.scheduler"
 rm -f ~/Library/LaunchAgents/com.openadminos.scheduler.plist
 defaults delete com.openadminos.desktop
 rm -rf ~/Library/Caches/@openadminosdesktop-updater \
