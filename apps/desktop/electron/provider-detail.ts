@@ -46,6 +46,9 @@ export interface OllamaTagsResponse {
   models?: Array<{
     name?: string;
     digest?: string;
+    /** Set for a model whose prompts this server sends to another host (Ollama Cloud, remote aliases). */
+    remote_model?: string;
+    remote_host?: string;
   }>;
 }
 
@@ -142,7 +145,7 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
     const payload = (await response.json()) as OllamaTagsResponse;
     clearTimeout(timeout);
     const installed =
-      payload.models?.filter((model): model is { name: string; digest?: string } => Boolean(model.name)) ?? [];
+      payload.models?.filter((model): model is { name: string; digest?: string; remote_model?: string; remote_host?: string } => Boolean(model.name)) ?? [];
     const installedModels = installed.map((model) => model.name);
     // /api/tags also includes embedding-only models. Ask Ollama instead of
     // guessing capabilities from names, which can be arbitrary local aliases.
@@ -178,6 +181,10 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
       }
     }).finally(() => clearTimeout(showTimeout));
     const models = installedModels.filter((_, i) => supported[i]);
+    // A remote-backed model is listed like a local one, but its prompts leave this device.
+    const remoteModels = installed
+      .filter((model) => Boolean(model.remote_host || model.remote_model) && models.includes(model.name))
+      .map((model) => model.name);
 
     return {
       ...trustedProvider,
@@ -194,6 +201,7 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
       ),
       models,
       defaultModel: models[0],
+      ...(remoteModels.length > 0 ? { remoteModels } : {}),
     };
   } catch (error) {
     // Only a refused connection means Ollama is not running. A timeout, a

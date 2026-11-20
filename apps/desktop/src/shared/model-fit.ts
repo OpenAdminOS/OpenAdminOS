@@ -1,4 +1,4 @@
-import { managedProviderAllowed, resolveProviderDefaultModel } from "@openadminos/agent-sdk";
+import { managedLockedModel, managedProviderAllowed, resolveProviderDefaultModel } from "@openadminos/agent-sdk";
 import type { ManagedPolicyStatus, ModelFitIssue, ModelFitReason, ProviderId, ProviderSummary } from "./openAdminOS.js";
 import { isProviderReady } from "./provider-detection.js";
 
@@ -121,6 +121,15 @@ export function isOllamaCloudModel(model: string | undefined): boolean {
   return Boolean(model && /[:-]cloud$/i.test(model.trim()));
 }
 
+/**
+ * A model whose prompts leave this device although its provider runs here:
+ * one the server marks as remote-backed, or an Ollama Cloud name.
+ */
+export function isRemoteBackedModel(provider: Pick<ProviderSummary, "id" | "remoteModels">, model: string | undefined): boolean {
+  if (!model) return false;
+  return Boolean(provider.remoteModels?.includes(model)) || (provider.id === "ollama" && isOllamaCloudModel(model));
+}
+
 /** The parameter count in a model's name, such as 8 for "openadmin-8b" or 20 for "gpt-oss:20b". */
 export function modelSizeBillions(model: string | undefined): number | undefined {
   if (!model) return undefined;
@@ -179,7 +188,10 @@ export function modelFitChoices(input: {
       if (!provider.isLocal || !isProviderReady(provider) || !managedProviderAllowed(input.managedPolicy, provider.id)) continue;
       for (const model of provider.models) {
         if (provider.id === issue.providerId && model === issue.model) continue;
-        if (provider.id === "ollama" && isOllamaCloudModel(model)) continue;
+        if (isRemoteBackedModel(provider, model)) continue;
+        // A model the managed policy locks this provider to is the only one it may use.
+        const locked = managedLockedModel(input.managedPolicy, provider.id);
+        if (locked !== undefined && model !== locked) continue;
         const size = modelSizeBillions(model);
         if (size !== undefined && size > currentSize) {
           local.push({ providerId: provider.id, providerName: provider.name, isLocal: true, model });
