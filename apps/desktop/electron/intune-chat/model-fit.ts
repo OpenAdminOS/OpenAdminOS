@@ -172,7 +172,7 @@ export function resolveChatTurnProvider(input: {
   if (!chosen.isLocal && !isListedHostedModel(chosen, model)) {
     // The approval names one model the provider lists now; otherwise it could pick its own after it.
     throw new ModelOverrideError(
-      model && !isPlaceholderModel(model) && chosen.models.length > 0
+      model && !isPlaceholderModel(model) && chosen.models.length > 0 && chosen.modelsFromPolicy !== true
         ? `${chosen.name} no longer lists ${model}, so nothing was sent. Choose it again in Chat.`
         : `${chosen.name} does not report a model yet, so nothing was sent. Check it in Settings, Providers, then choose it again.`,
     );

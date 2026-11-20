@@ -198,8 +198,9 @@ export function isPlaceholderModel(model: string | undefined): boolean {
  * placeholder, and in the list the provider reports now. Chat, the run
  * review and the run host use this one check, so they cannot disagree.
  */
-export function isListedHostedModel(provider: Pick<ProviderSummary, "models">, model: string | undefined): model is string {
-  return Boolean(model) && !isPlaceholderModel(model) && provider.models.includes(model!);
+export function isListedHostedModel(provider: Pick<ProviderSummary, "models" | "modelsFromPolicy">, model: string | undefined): model is string {
+  // A model the managed policy put in an empty list is allowed, not reported: the CLI could still run its own.
+  return Boolean(model) && !isPlaceholderModel(model) && provider.modelsFromPolicy !== true && provider.models.includes(model!);
 }
 
 /**
@@ -209,7 +210,7 @@ export function isListedHostedModel(provider: Pick<ProviderSummary, "models">, m
  * lists none, so the provider is not offered.
  */
 export function hostedModelFitModel(
-  provider: Pick<ProviderSummary, "id" | "models" | "defaultModel">,
+  provider: Pick<ProviderSummary, "id" | "models" | "defaultModel" | "modelsFromPolicy">,
   activeModelByProviderId?: Partial<Record<ProviderId, string>>,
 ): string | undefined {
   const preferred = resolveProviderDefaultModel(provider as ProviderSummary, activeModelByProviderId).model;

@@ -235,6 +235,20 @@ describe("managed policy: providers", () => {
     }
   });
 
+  it("marks a locked model passed to a CLI that reported no models, so model fit does not count it as reported", async () => {
+    const fixture = await makeFixture({
+      policy: await policyOf({ defaultProvider: "openai", defaultModel: "gpt-5" }),
+      providers: () => readyProviders().map((provider) => (provider.id === "openai" ? { ...provider, models: [], defaultModel: undefined } : provider)),
+    });
+    try {
+      const provider = (await fixture.store.getAppState()).providers.find((entry) => entry.id === "openai");
+      assert.deepEqual(provider!.models, ["gpt-5"]);
+      assert.equal(provider!.modelsFromPolicy, true);
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("never passes a locked model to a Lemonade that lists no usable chat model", async () => {
     // Lemonade's list is filtered to local chat models: an empty list is not "the CLI picks".
     const fixture = await makeFixture({

@@ -58,6 +58,12 @@ export interface ProviderSummary {
    * model on this device.
    */
   remoteModels?: string[];
+  /**
+   * The provider reported no models and its one model comes from the managed
+   * policy (the CLI picks its model, so the policy model is passed to it).
+   * Model fit does not treat it as a model the provider reported.
+   */
+  modelsFromPolicy?: true;
   cli?: {
     binaryPath?: string;
     version?: string;

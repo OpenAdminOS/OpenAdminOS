@@ -717,7 +717,7 @@ export class RunService {
       // named and the provider reports now, never a default the host or the provider picks after the approval.
       const modelFitStart = options.bindProviderEndpoint === true || inheritedEndpointBinding?.scope === "model-fit";
       if (modelFitStart && activeProvider && !activeProvider.isLocal) {
-        if (!explicitModel || isPlaceholderModel(explicitModel) || knownModels.length === 0) {
+        if (!explicitModel || isPlaceholderModel(explicitModel) || knownModels.length === 0 || activeProvider.modelsFromPolicy === true) {
           throw new Error(`${activeProvider.name} does not report a model yet, so the run did not start. Check it in Settings, Providers, then review the run again.`);
         }
         if (!isListedHostedModel(activeProvider, explicitModel)) {

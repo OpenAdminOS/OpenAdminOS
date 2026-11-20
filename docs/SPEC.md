@@ -2638,7 +2638,8 @@ checks the picked provider in full the way selecting it does. A run resumed
 from setup opens only its own review, and setup moves on from a provider
 picked for one run only once its full check is done. A hosted provider that
 reports no model, or only a CLI default placeholder such as Gemini's
-`gemini-default`, is not offered; its review does not start, Try again waits
+`gemini-default`, or only the model a managed policy lock put in its empty
+list (`modelsFromPolicy`: allowed, not reported), is not offered; its review does not start, Try again waits
 for the same thing as Start, and the host refuses a hosted model fit rerun (or
 Run for real of one) unless it names a model the provider lists now, since the
 approval names one model. Run for real of a model fit dry run goes only where
