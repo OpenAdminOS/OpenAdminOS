@@ -39,11 +39,14 @@ function typedIssue(error: unknown, depth = 0): Omit<ModelFitIssue, "providerId"
   // A field the record leaves out falls back to the wrapper's.
   const failure = outer.failure && typeof outer.failure === "object" ? (outer.failure as Record<string, unknown>) : undefined;
   const record = failure
-    ? Object.fromEntries(["kind", "code", "reason", "neededTokens", "needed", "limitTokens", "limit"].map((key) => [key, failure[key] ?? outer[key]]))
+    ? Object.fromEntries(["neededTokens", "needed", "limitTokens", "limit"].map((key) => [key, failure[key] ?? outer[key]]))
     : outer;
-  const reason = [record.kind, record.code, record.reason].find(
-    (value): value is ModelFitReason => typeof value === "string" && (FIT_REASONS as readonly string[]).includes(value),
-  );
+  const fitReason = (source: Record<string, unknown>) =>
+    [source.kind, source.code, source.reason].find(
+      (value): value is ModelFitReason => typeof value === "string" && value !== "repeated-failure" && (FIT_REASONS as readonly string[]).includes(value),
+    );
+  // The record's own reason is the more specific one; the wrapper's applies only when it names none.
+  const reason = (failure ? fitReason(failure) : undefined) ?? fitReason(outer);
   if (!reason || reason === "repeated-failure") return typedIssue(outer.cause, depth + 1);
   const neededTokens = positive(record.neededTokens) ?? positive(record.needed);
   const limitTokens = positive(record.limitTokens) ?? positive(record.limit);

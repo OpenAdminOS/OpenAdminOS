@@ -75,6 +75,12 @@ describe("Model fit: classifying a failure", () => {
     assert.equal(raw?.limitTokens, 16384);
   });
 
+  it("prefers the failure record's reason over a wrapper's", () => {
+    const local = { providerId: "ollama" as const, model: LOCAL_MODEL, isLocal: true };
+    const wrapped = Object.assign(new Error("The run stopped."), { kind: "thinking-only", failure: { code: "context-too-small", neededTokens: 40652, limitTokens: 16384 } });
+    assert.deepEqual(classifyModelFitFailure(wrapped, local), { reason: "context-too-small", neededTokens: 40652, limitTokens: 16384, providerId: "ollama", model: LOCAL_MODEL });
+  });
+
   it("reads a bare typed reason and a wrapper's reason around a failure record without one", () => {
     const local = { providerId: "ollama" as const, model: LOCAL_MODEL, isLocal: true };
     assert.deepEqual(classifyModelFitFailure("context-too-small", local), { reason: "context-too-small", providerId: "ollama", model: LOCAL_MODEL });
