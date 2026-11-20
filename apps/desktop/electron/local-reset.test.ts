@@ -29,6 +29,7 @@ import {
   MACOS_SAFE_STORAGE_SERVICE,
   readLocalResetMarker,
   sharedReadOnlyFile,
+  UPDATER_CACHE_DIR,
   requestLocalReset,
   runPendingLocalReset,
   writeLocalResetMarker,
@@ -972,6 +973,79 @@ describe("local reset: wipe at launch", () => {
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
+    }
+  });
+
+  it("stops before the Keychain item when the profile is restored during the cleanup outside it", async () => {
+    for (const when of ["scheduler", "keychain"] as const) {
+      const dir = await tempDir();
+      try {
+        const profile = join(dir, "profile");
+        mkdirSync(profile);
+        seedDataFolder(profile, MARKER);
+        const restore = () => {
+          renameSync(profile, join(dir, "profile-old"));
+          mkdirSync(profile);
+          writeFileSync(join(profile, "tokens.bin"), "restored tokens");
+        };
+        const calls: string[][] = [];
+        const run = (file: string, args: string[]): CommandResult => {
+          calls.push([file, ...args]);
+          // One item deleted, more may be left: the next attempt comes after the restore.
+          if (when === "keychain" && args[0] === "delete-generic-password" && calls.length === 1) {
+            restore();
+            return { status: 0 };
+          }
+          return { status: 44 };
+        };
+        const report = runPendingLocalReset({
+          userDataDir: profile, packaged: true, platform: "darwin", home: join(dir, "home"), env: {}, run,
+          removeScheduler: () => { if (when === "scheduler") restore(); },
+        });
+        assert.equal(report?.status, "incomplete", when);
+        assert.match(report?.failed.at(-1)?.reason ?? "", /was replaced by another folder or a link/, when);
+        // No Keychain deletion after the restore, and no later step either.
+        assert.equal(calls.filter((call) => call[1] === "delete-generic-password").length, when === "keychain" ? 1 : 0, when);
+        assert.ok(!calls.some((call) => call[0] === "/usr/bin/defaults"), when);
+        assert.equal(readFileSync(join(profile, "tokens.bin"), "utf8"), "restored tokens", when);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it("leaves a cache folder that was replaced during its link and mount check", async () => {
+    const dir = await tempDir();
+    try {
+      const profile = join(dir, "profile");
+      mkdirSync(profile);
+      seedDataFolder(profile, MARKER);
+      const cache = join(dir, "cache", UPDATER_CACHE_DIR);
+      mkdirSync(cache, { recursive: true });
+      writeFileSync(join(cache, "update.AppImage"), "old update");
+      let swapped = false;
+      const report = runPendingLocalReset({
+        userDataDir: profile,
+        packaged: true,
+        platform: "linux",
+        home: join(dir, "home"),
+        env: { XDG_CACHE_HOME: join(dir, "cache") },
+        // The mount table is read during the walk: a restore lands right then.
+        mountInfo: () => {
+          if (!swapped) {
+            swapped = true;
+            renameSync(cache, `${cache}-old`);
+            mkdirSync(cache);
+            writeFileSync(join(cache, "restored"), "restored cache");
+          }
+          return "";
+        },
+      });
+      assert.equal(report?.status, "completed");
+      assert.deepEqual(report?.warnings, [{ item: cache, reason: "it was replaced while it was being checked, so it was left in place" }]);
+      assert.equal(readFileSync(join(cache, "restored"), "utf8"), "restored cache");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
     }
   });
 

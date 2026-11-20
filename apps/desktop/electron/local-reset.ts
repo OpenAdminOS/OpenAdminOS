@@ -224,7 +224,13 @@ export async function writeLocalResetMarker(
     await rm(temp, { force: true }).catch(() => undefined);
     throw cause;
   }
-  options.onCommitted?.();
+  // The rename is the commit point: a failing callback is logged, never
+  // reported as a reset that did not start.
+  try {
+    options.onCommitted?.();
+  } catch (cause) {
+    console.warn(`[local-reset] the reset is committed but its callback failed: ${reasonOf(cause)}`);
+  }
   try {
     await (options.syncDirectory ?? syncDirectory)(userDataDir);
   } catch (cause) {
@@ -725,7 +731,18 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
 
   if (options.packaged && marker.build === "installed") {
     if (!marker.leftoversDone) {
-      removeLeftovers(options, fs, run, warnings);
+      // Checked before every step outside the folder, each Keychain
+      // deletion included: a profile restored while one runs keeps its
+      // Keychain key and its caches.
+      try {
+        removeLeftovers(options, fs, run, warnings, () => {
+          if (!sameFolder()) throw new FolderChangedDuringReset();
+        });
+      } catch (cause) {
+        if (!(cause instanceof FolderChangedDuringReset)) throw cause;
+        failed.push({ item: userDataDir, reason: DATA_FOLDER_CHANGED_REASON });
+        return finish("incomplete");
+      }
       if (!sameFolder()) {
         failed.push({ item: userDataDir, reason: DATA_FOLDER_CHANGED_REASON });
         return finish("incomplete");
@@ -890,18 +907,25 @@ export function sharedReadOnlyFile(path: string, label: string): { item: string;
   return undefined;
 }
 
-/** Device and inode of a path itself (a link is not followed); undefined when it is gone. */
-function entryIdentity(path: string): { dev: number; ino: number } | undefined {
+/**
+ * The identity of a path itself (a link is not followed), with its birth
+ * time where known: "gone" when nothing is there, "unknown" when it has
+ * neither inode nor birth time, which never counts as unchanged.
+ */
+function entryIdentity(path: string): LocalResetFolderIdentity | "gone" | "unknown" {
+  let stat;
   try {
-    const stat = lstatSync(path);
-    return { dev: stat.dev, ino: stat.ino };
-  } catch {
-    return undefined;
+    stat = lstatSync(path);
+  } catch (cause) {
+    return (cause as NodeJS.ErrnoException).code === "ENOENT" ? "gone" : "unknown";
   }
+  return identityFromStat(stat) ?? "unknown";
 }
 
-function sameEntry(a: { dev: number; ino: number } | undefined, b: { dev: number; ino: number } | undefined): boolean {
-  return a === undefined ? b === undefined : b !== undefined && a.dev === b.dev && a.ino === b.ino;
+function sameEntry(a: ReturnType<typeof entryIdentity>, b: ReturnType<typeof entryIdentity>): boolean {
+  if (a === "unknown" || b === "unknown") return false;
+  if (a === "gone" || b === "gone") return a === b;
+  return sameSessionFolder(a, b);
 }
 
 function sharedReadOnlyReason(shared: { item: string; unlisted?: true }, name: string): string {
@@ -922,12 +946,18 @@ function removeEntry(fs: LocalResetFileSystem, dir: string, name: string, failed
   }
 }
 
+/** The data folder was replaced while the cleanup outside it ran. */
+class FolderChangedDuringReset extends Error {}
+
 function removeLeftovers(
   options: LocalResetWipeOptions,
   fs: LocalResetFileSystem,
   run: (file: string, args: string[]) => CommandResult,
   warnings: LocalResetProblem[],
+  /** Throws FolderChangedDuringReset when the data folder is no longer the one being reset. */
+  guard: () => void,
 ): void {
+  guard();
   try {
     options.removeScheduler?.();
     // Removed now: a warning from the request about it no longer holds.
@@ -940,9 +970,10 @@ function removeLeftovers(
     warnings.push({ item: "Background scheduler", reason: reasonOf(cause) });
   }
   if (options.platform === "darwin") {
-    removeMacosKeychainItem(run, macosLoginKeychain(options.home), warnings);
+    removeMacosKeychainItem(run, macosLoginKeychain(options.home), warnings, guard);
     // Preferences go through cfprefsd, which caches the plist; deleting the
     // file alone could be written back. A missing domain exits 1.
+    guard();
     const prefs = run("/usr/bin/defaults", ["delete", MACOS_BUNDLE_ID]);
     if (prefs.error) {
       warnings.push({ item: `Preferences (${MACOS_BUNDLE_ID})`, reason: reasonOf(prefs.error) });
@@ -957,24 +988,32 @@ function removeLeftovers(
   for (const path of localResetLeftoverPaths(options.platform, options.home, options.env)) {
     // A cache folder that is a link or holds a mount is left alone. Folders
     // above it resolve to wherever the app keeps its cache, so they are not
-    // checked: only this OpenAdminOS folder goes.
+    // checked: only this OpenAdminOS folder goes. Its identity is taken
+    // before every check and compared after the last one, right before the
+    // removal, so a folder swapped in during a check is never removed.
+    const before = entryIdentity(path);
+    const linkReason = "it is a link or holds another mount, so it was left in place";
     if (folderGoesThroughLink(path, { platform: options.platform, mountInfo: options.mountInfo })) {
-      if (fs.exists(path)) warnings.push({ item: path, reason: "it is a link or holds another mount, so it was left in place" });
+      if (fs.exists(path)) warnings.push({ item: path, reason: linkReason });
       continue;
     }
     if (options.platform === "win32") {
-      const before = entryIdentity(path);
       const shared = (options.scanSharedFiles ?? sharedReadOnlyFile)(path, basename(path));
       if (shared !== undefined) {
         warnings.push({ item: path, reason: sharedReadOnlyReason(shared, basename(path)) });
         continue;
       }
-      // Checked again after the scan, as in the data folder.
-      if (!sameEntry(before, entryIdentity(path)) || folderGoesThroughLink(path, { platform: options.platform, mountInfo: options.mountInfo })) {
-        warnings.push({ item: path, reason: "it changed while it was being checked, so it was left in place" });
+      // The scan can take seconds: the link and mount walk runs again.
+      if (folderGoesThroughLink(path, { platform: options.platform, mountInfo: options.mountInfo })) {
+        warnings.push({ item: path, reason: linkReason });
         continue;
       }
     }
+    if (!sameEntry(before, entryIdentity(path))) {
+      warnings.push({ item: path, reason: "it was replaced while it was being checked, so it was left in place" });
+      continue;
+    }
+    guard();
     try {
       fs.remove(path);
     } catch (cause) {
@@ -1077,9 +1116,10 @@ function removeMacosKeychainItem(
   run: (file: string, args: string[]) => CommandResult,
   keychain: string,
   warnings: LocalResetProblem[],
+  guard: () => void = () => undefined,
 ): void {
   const item = `Keychain item "${MACOS_SAFE_STORAGE_SERVICE}"`;
-  removeFromLoginKeychain(run, keychain, item, warnings);
+  removeFromLoginKeychain(run, keychain, item, warnings, guard);
   const list = run("/usr/bin/security", ["list-keychains", "-d", "user"]);
   if (list.error || list.status !== 0) {
     warnings.push({ item: `${item} in other keychains`, reason: "not checked, because the keychain search list could not be read" });
@@ -1123,8 +1163,10 @@ function removeFromLoginKeychain(
   keychain: string,
   item: string,
   warnings: LocalResetProblem[],
+  guard: () => void,
 ): void {
   for (let attempt = 0; attempt < 5; attempt += 1) {
+    guard();
     const result = run("/usr/bin/security", [
       "delete-generic-password",
       "-s",
