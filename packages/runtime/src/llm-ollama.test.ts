@@ -76,6 +76,20 @@ describe("Ollama context size", () => {
   const overflow = (requested: number, available: number) =>
     JSON.stringify({ error: `request (${requested} tokens) exceeds the available context size (${available} tokens), try increasing it` });
 
+  interface HeldFailure {
+    failCtx: { numCtx: number; error: string; captured: () => void; released: Promise<void> };
+    /** Resolves once the fake server holds the request. */
+    wasCaptured: Promise<void>;
+    release: () => void;
+  }
+  function heldFailure(numCtx: number, error: string): HeldFailure {
+    let captured!: () => void;
+    let release!: () => void;
+    const wasCaptured = new Promise<void>((resolve) => (captured = resolve));
+    const released = new Promise<void>((resolve) => (release = resolve));
+    return { failCtx: { numCtx, error, captured, released }, wasCaptured, release };
+  }
+
   async function fakeOllama(options: {
     modelMax?: number;
     limit: (numCtx: number | undefined) => number;
@@ -104,8 +118,8 @@ describe("Ollama context size", () => {
     retryOneWrite?: boolean;
     /** A request with num_ctx gets Ollama's overflow without token counts. */
     retryPromptTooLong?: boolean;
-    /** A request with this num_ctx waits, then gets this memory error. */
-    failCtx?: { numCtx: number; delayMs: number; error: string };
+    /** The first request with this num_ctx is held until released, then gets this memory error. */
+    failCtx?: HeldFailure["failCtx"];
     /** Send one chunk on the first request or the retry, then keep the stream open. */
     stallStream?: { on: "first" | "retry"; open: ServerResponse[] };
   }) {
@@ -183,12 +197,13 @@ describe("Ollama context size", () => {
         }
         if (options.failCtx && numCtx === options.failCtx.numCtx) {
           // Fails one request only.
-          const { delayMs, error } = options.failCtx;
+          const { error, captured, released } = options.failCtx;
           options.failCtx = undefined;
-          setTimeout(() => {
+          captured();
+          void released.then(() => {
             res.statusCode = 500;
             res.end(JSON.stringify({ error }));
-          }, delayMs);
+          });
           return;
         }
         if (numCtx !== undefined && options.retryPromptTooLong) {
@@ -610,7 +625,7 @@ describe("Ollama context size", () => {
         fake.options.retryMemoryError = failure;
         await assert.rejects(
           llm.complete({ prompt: "big" }),
-          /^Error: Ollama could not load kept-memory-\w+ with the 45,056 token context size kept from an earlier request, usually because free memory ran out\. The next request starts from Ollama's default context size\. Ollama said: /,
+          /^Error: Ollama could not load kept-memory-\w+ with the 45,056 token context size kept from an earlier request, usually because free memory ran out\. Ollama said: /,
         );
         assert.deepEqual(fake.chats, [{}, { num_ctx: 45056 }, { num_ctx: 45056 }]);
         fake.options.retryMemoryError = undefined;
@@ -650,7 +665,7 @@ describe("Ollama context size", () => {
       fake.options.retryPromptTooLong = true;
       await assert.rejects(
         llm.complete({ prompt: "big" }),
-        /^Error: Ollama context size too small: This request did not fit in the 45,056 token context kept from an earlier request\. The next request starts from Ollama's default context size\. Ollama said: /,
+        /^Error: Ollama context size too small: This request did not fit in the 45,056 token context kept from an earlier request\. Ollama said: /,
       );
       fake.options.retryPromptTooLong = false;
       fake.options.limit = () => 65536;
@@ -754,12 +769,14 @@ describe("Ollama context size", () => {
       await llm.complete({ prompt: "huge" });
       // The older request finds 84,992 no longer fits, forgets it and retries at 45,056, which fails late.
       olderPhase = true;
-      fake.options.failCtx = { numCtx: 45056, delayMs: 300, error: "model requires more system memory (24.1 GiB) than is available (12.0 GiB)" };
-      const older = llm.complete({ prompt: "big" });
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      const held = heldFailure(45056, "model requires more system memory (24.1 GiB) than is available (12.0 GiB)");
+      fake.options.failCtx = held.failCtx;
+      const older = assert.rejects(llm.complete({ prompt: "big" }), /could not load restored with 45,056/);
+      await held.wasCaptured;
       // Meanwhile a newer request raises 84,992 again and keeps it.
       await llm.complete({ prompt: "huge" });
-      await assert.rejects(older, /could not load restored with 45,056/);
+      held.release();
+      await older;
       const before = fake.chats.length;
       await llm.complete({ prompt: "huge" });
       // One request with the restored size, no overflow and retry.
@@ -779,15 +796,36 @@ describe("Ollama context size", () => {
       const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "same-size" });
       await llm.complete({ prompt: "big" });
       // The older request forgets 45,056, then retries with 45,056, which fails late.
-      fake.options.failCtx = { numCtx: 45056, delayMs: 300, error: "model requires more system memory (24.1 GiB) than is available (12.0 GiB)" };
-      const older = llm.complete({ prompt: "big" });
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      const held = heldFailure(45056, "model requires more system memory (24.1 GiB) than is available (12.0 GiB)");
+      fake.options.failCtx = held.failCtx;
+      const older = assert.rejects(llm.complete({ prompt: "big" }), /could not load same-size with 45,056/);
+      await held.wasCaptured;
       // Meanwhile a newer request raises 45,056 again and keeps it.
       await llm.complete({ prompt: "big" });
-      await assert.rejects(older, /could not load same-size with 45,056/);
+      held.release();
+      await older;
       fake.options.limit = () => 65536;
       await llm.complete({ prompt: "small" });
       assert.deepEqual(fake.chats.at(-1), {});
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("keeps a size Ollama gave in full when a prompt exactly fills it on both attempts", async () => {
+    const fake = await fakeOllama({ modelMax: 40960, requested: () => 40960, limit: (numCtx) => numCtx ?? 16384 });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "exact-kept" });
+      await llm.complete({ prompt: "big" });
+      assert.deepEqual(fake.chats.at(-1), { num_ctx: 40960 });
+      // Ollama now rejects a prompt that exactly fills the context, on both attempts.
+      fake.options.rejectAtLimit = true;
+      await assert.rejects(llm.complete({ prompt: "big" }), /needs 40,960 tokens of context, but exact-kept supports at most 40,960/);
+      fake.options.rejectAtLimit = false;
+      fake.options.requested = () => 39000;
+      const before = fake.chats.length;
+      await llm.complete({ prompt: "smaller" });
+      assert.deepEqual(fake.chats.slice(before), [{ num_ctx: 40960 }]);
     } finally {
       await fake.close();
     }

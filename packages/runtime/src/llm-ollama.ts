@@ -216,10 +216,12 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         const counted = parseContextOverflow(text);
         const memory = isOllamaMemoryError(text);
         if (!counted && !memory && !isOllamaPromptTooLong(text)) return undefined;
-        // Ollama still giving the kept size means the prompt grew, not that
-        // memory ran out; the kept size stays.
-        const keptStillGiven = counted !== undefined && !retry && cachedCtx !== undefined && counted.available >= cachedCtx;
-        if (!keptStillGiven) forgetSize(retry ? retry.numCtx : cachedCtx);
+        // Ollama still giving all of the size this attempt sent means the
+        // prompt outgrew it (Ollama can reject a prompt that exactly fills
+        // the context), not that memory ran out; that size stays.
+        const sent = retry ? retry.numCtx : cachedCtx;
+        const sentSizeGiven = counted !== undefined && sent !== undefined && counted.available >= sent;
+        if (!sentSizeGiven) forgetSize(sent);
         if (memory) {
           if (retry) {
             return new Error(
@@ -233,7 +235,6 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         }
         if (counted) {
           const atModelLimit = modelMax !== undefined && counted.available >= modelMax;
-          const sent = retry?.numCtx ?? cachedCtx;
           if (!atModelLimit && sent !== undefined && counted.available >= sent) {
             // Ollama gave all the context asked for; the request outgrew it.
             return new Error(`Ollama context size too small: This request needs ${formatTokens(counted.requested)} tokens of context, more than the ${formatTokens(counted.available)} Ollama loaded for ${model}.`);
@@ -687,14 +688,14 @@ function contextMemoryMessage(model: string, requested: number, numCtx: number, 
 
 function cachedContextMemoryMessage(model: string, numCtx: number, detail: string, answering = false): string {
   const failed = answering ? "failed partway through an answer from" : "could not load";
-  return `Ollama ${failed} ${model} with the ${formatTokens(numCtx)} token context size kept from an earlier request, usually because free memory ran out. The next request starts from Ollama's default context size. Ollama said: ${truncate(detail, 200)}`;
+  return `Ollama ${failed} ${model} with the ${formatTokens(numCtx)} token context size kept from an earlier request, usually because free memory ran out. Ollama said: ${truncate(detail, 200)}`;
 }
 
 function notFitMessage(model: string, sent: { size: number; kept: boolean } | undefined, detail: string): string {
   const where = sent === undefined
     ? `the context Ollama loaded for ${model}`
     : sent.kept
-      ? `the ${formatTokens(sent.size)} token context kept from an earlier request. The next request starts from Ollama's default context size`
+      ? `the ${formatTokens(sent.size)} token context kept from an earlier request`
       : `the ${formatTokens(sent.size)} token context of the retry`;
   return `Ollama context size too small: This request did not fit in ${where}. Ollama said: ${truncate(detail, 200)}`;
 }
