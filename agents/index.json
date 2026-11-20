@@ -32,7 +32,7 @@
       "slug": "conditional-access-explainer",
       "name": "Conditional Access explainer",
       "description": "Reviews Conditional Access policies for coverage, exclusions, report-only controls, overlaps, and common Zero Trust gaps.",
-      "version": "1.2.0",
+      "version": "1.1.1",
       "mode": "read",
       "category": "policies",
       "tier": "agent",
@@ -48,9 +48,9 @@
       "services": [
         "entra"
       ],
-      "minAppVersion": "0.7.3-nightly.20261120040000",
+      "minAppVersion": "0.6.3",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/conditional-access-explainer/manifest.yaml",
-      "manifestSha256": "d8887f018b534aeb052444b33c80a6ce4476aa6a671a48e56b5ee51303cb0929"
+      "manifestSha256": "db3b663fe293bc1f8ba43325a5a71371d6f4696c5ad19c00f6ad6cb242a6835a"
     },
     {
       "id": "dormant-app-registrations",
