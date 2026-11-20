@@ -90,8 +90,9 @@ built on top of them are planned separately.
   they arrive and registered for the run or Chat conversation, in memory only.
   Just before each model call, the final request (system text plus prompt,
   including the admin's own words) is scanned against those values and the
-  detectors, at the one place every provider call is built. Routing and
-  masking act on that scan. Text or fields the scan cannot examine within its
+  detectors, in the one Hosted gate every request that leaves the device
+  passes (provider calls, hosted voice context and web search, A3). Routing
+  and masking act on that scan. Text or fields the scan cannot examine within its
   work budget are counted as unexamined, with `credential` as their effective
   class, and the scan reports that the budget ran out. Their action on a tier
   is the strictest action of any class on that tier (round 4).
@@ -271,8 +272,8 @@ built on top of them are planned separately.
 **Review findings adopted (2026-11-19, round 13 of the design review)**
 - Saved Chat history after a restart: each saved Chat message stores its
   classification evidence next to it in the local database (spans as
-  offsets, lengths and classes, and the field map version; no new copy of
-  the values). Reopening a conversation rebuilds the ledger from it before
+  offsets, lengths and classes, and the effective field map revision, as
+  round 16 names it; no new copy of the values). Reopening a conversation rebuilds the ledger from it before
   any follow-up. A saved message without readable evidence counts as
   unexamined, takes the strictest action on the tier, and the follow-up says
   so. Disconnect and deleting the conversation remove the evidence (A1, A3).
@@ -290,8 +291,9 @@ built on top of them are planned separately.
   stores the list of its field's classes at the time of saving (widened in
   round 15 to every class a value detector assigned as well), and
   reopening recomputes the strictest action across all of them under the
-  current rules. A same-version restart regression test covers a field
-  moved from `configuration` to `security` to `identity` (A1, A3).
+  current rules. A same-revision restart regression test covers a field
+  moved from `configuration` to `security` to `identity` before the answer
+  is saved (A1, A3).
 - Delivery confirmation is gated by run origin before anything enters the
   automatic delivery queue, for every connector the queue handles (Teams,
   Outlook, Slack, Discord, WhatsApp and Signal, and any added later). A run
@@ -300,25 +302,50 @@ built on top of them are planned separately.
 - Mockup 35: the read tools on the alternate endpoint no longer use
   "stored" as an adjective, and the readable definition pane shows the
   complete object, nested `_meta` values included.
-- Mockup 34, F: a message with readable evidence saved before a field map
-  change that raised a class counts as unexamined, and the reopened
-  conversation says why.
+- Mockup 34, F: a message with readable evidence saved before a change
+  that raised a class counts as unexamined, and the reopened conversation
+  says why. Round 16 makes this any raise of the effective field map, from
+  the shipped map, Settings or the IT policy file.
 
 **Review findings adopted (2026-11-19, round 15 of the design review)**
 - Saved Chat evidence keeps the full set of classes that applied to each
   span when saved: its field's class history and every class a value
   detector assigned (a tenant value index match, the credential and
   identifier patterns). Reopening takes the strictest action across that
-  set. A same-version restart regression test covers a display name in a
+  set. A same-revision restart regression test covers a display name in a
   configuration field that the index recognized as identity and that has
   since left the index (A1, A3).
 - Mockup 35: the readable definition pane renders every schema keyword the
   layout does not handle with the recursive value renderer, so a root
   `enum` and a description under nested `items.items` appear in both panes.
-- Mockup 34, F: evidence from before any class-raising field map change
-  counts as unexamined, not only evidence for the fields that changed.
+- Mockup 34, F: evidence from before any class raise counts as unexamined,
+  not only evidence for the fields that changed (from any source of the
+  raise since round 16).
 - Mockup 35: the saved-delivery note says the run-origin gate covers every
   connector, including ones added later, with Teams as the example.
+
+**Review findings adopted (2026-11-20, round 16 of the design review)**
+- One Hosted gate for every model request that leaves the device, not only
+  the calls built in `buildLlm`: provider calls from `buildLlm`, hosted
+  voice context and the Nova web search request, whose final query to
+  OpenAI is scanned with any value A4 restored into the tool's parameters.
+  A blocked query makes no network request and shows the designed blocked
+  state (mockup 34, E). Any future path that sends text to a hosted model
+  uses the same gate, and a test fails when a module calls a hosted model
+  endpoint outside it (A3).
+- Evidence is versioned by the effective field map revision, which changes
+  whenever the shipped map, a Settings reclassification or an IT policy
+  reclassification raises any class. Saved evidence stores that revision,
+  and evidence from before any class raise, from any source, counts as
+  unexamined. A restart regression test covers a field raised from
+  `configuration` to `security` in Settings after the answer was saved
+  (A1, A3).
+- Mockup 34: the strip reads "security names masked" for Mask and "security
+  blocked" for Block, in the generated strip and the reopened Chat
+  composer.
+- Mockup 35: the readable definition checks `required` against own
+  properties and renders structured enum values with the path-aware
+  renderer; renaming the agent updates accessible labels too.
 
 ## Why
 
@@ -337,7 +364,10 @@ moment it arrives.
 
 - Every model call goes through `RunLlmApi` (`packages/agent-sdk/src/index.ts`),
   and every adapter is built in `AppStateStore.buildLlm` (`apps/desktop/electron/state.ts`),
-  where the provider id is known. Prompts are flat strings.
+  where the provider id is known. Prompts are flat strings. Two paths send
+  text to a hosted model outside it: hosted voice in `nova.ts`, and the Nova
+  web search (`intune-chat/web-search.ts`), which posts the query to the
+  OpenAI Responses API with the Nova key.
 - `fenceTenantData` (`packages/runtime/src/tenant-data.ts`) wraps almost all tenant
   content with a source label before it is stringified. It is the place to attach
   classes. `withTenantDataOutputFilter` is the model for streaming rehydration.
@@ -441,7 +471,8 @@ the IT policy file.
       registered for the run or Chat conversation, in memory only.
 - [ ] Saved Chat history keeps its classification evidence. Each saved Chat
       message stores, next to it in the local database, the spans the ledger
-      found in its text and the field map version that classed them. Each
+      found in its text and the effective field map revision that classed
+      them (defined below). Each
       span keeps its offset, its length and the full set of classes that
       applied to it when the message was saved, never one class alone: its
       field's class history at that time (the mapped class and every later
@@ -462,13 +493,28 @@ the IT policy file.
       only the first or the last class in its set, nor from its field's
       classes without the classes the detectors assigned. A saved message without stored evidence (saved
       before the evidence existed, or evidence that cannot be read) counts as
-      unexamined, as in the budget rule below. Evidence stored under a field
-      map version older than a map change that raised any class also counts
-      as unexamined; otherwise its stored classes apply (decided by the lead
-      2026-11-20, from the unexamined rule).
+      unexamined, as in the budget rule below. Evidence stored under an
+      effective field map revision older than any later class raise also
+      counts as unexamined, whatever the source of the raise; otherwise its
+      stored classes apply (decided by the lead 2026-11-20, from the
+      unexamined rule).
+- [ ] The effective field map revision versions the field map the app
+      actually applies, not only the map it ships. It is one number kept in
+      the local database that changes whenever any source raises the class
+      of any field: an update to the shipped field map, a reclassification in
+      Settings, or a reclassification in the IT policy file
+      (`dataPolicy.fieldClasses`). A change that raises nothing leaves it as
+      it is. Saved evidence stores the revision in force when the message was
+      saved, and a reopened conversation compares it with the revision of
+      each later raise: evidence saved before any class raise, from any of
+      the three sources, counts as unexamined, even when the message used no
+      field that was raised. The shipped map version alone never decides
+      it.
 - [ ] Just before each model call, the final request (system text plus
       prompt, including the admin's own words) is scanned against the ledger
-      and the detectors, at the one place every provider call is built.
+      and the detectors, in the gate every model request passes: the
+      decorator in `buildLlm` for provider calls, and the Hosted gate for
+      hosted voice context and web search (A3).
 - [ ] When the scan runs out of its work budget, the text and fields it did not
       examine count as unexamined and are reported as `credential`, and the
       scan flags the budget exhaustion. Their action on a tier is the strictest
@@ -509,9 +555,14 @@ the IT policy file.
 10. Stored evidence: a saved Chat message keeps its spans (offset, length,
     and the full set of classes that applied to the span when the message
     was saved: every class its field had held and every class a value
-    detector assigned) and the field map version in the local database and no other
+    detector assigned) and the effective field map revision in the local
+    database and no other
     copy of its values; Disconnect and deleting the conversation remove the
     evidence with the messages (test).
+11. The effective field map revision changes when the shipped map, a
+    Settings reclassification or an IT policy reclassification raises any
+    class, and stays the same for a change that raises nothing (test per
+    source).
 
 ### Phase A2: Provider tiers
 
@@ -532,9 +583,25 @@ the IT policy file.
 
 ### Phase A3: Routing and blocked states
 
-- [ ] Routing acts on the scan of the final request: a data policy decorator
-      applied in `buildLlm`, so agent runs, Chat, Office, drafts, follow-ups
-      and the Nova command all pass through it.
+- [ ] One Hosted gate for every model request that leaves the device. Routing
+      acts on the scan of the final request, and the gate is the only code
+      that sends text to a hosted model. It covers these paths by name:
+      - provider calls built in `buildLlm`, through a data policy decorator
+        applied there, so agent runs, Chat, Office, drafts, follow-ups and the
+        Nova command all pass through it;
+      - hosted voice context, the session start included (next item);
+      - the Nova web search request (`intune-chat/web-search.ts`, which calls
+        an OpenAI model directly with the Nova key). The gate scans the final
+        query sent to OpenAI, including any value A4 restored into the tool's
+        parameters, just before the request is made. A masked value goes out
+        as its token, never as the restored value. A query the rules block
+        makes no network request at all, and Chat shows the designed blocked
+        state (mockup 34, E, "A web search the rules block"); switching to a
+        local model is not offered, since web search always goes to OpenAI.
+      Any future path that sends text to a hosted model must go through the
+      same gate. A test enforces it: it fails when a module outside the gate
+      calls a hosted model endpoint (a hosted provider SDK, a vendor CLI, or
+      a request to a hosted model host such as `api.openai.com`).
 - [ ] Hosted voice gets its own gate in `nova.ts` and the renderer for tenant
       data the app sends to the voice model as context: it goes through the
       same request scan and follows the same rules as any hosted call, class
@@ -583,7 +650,9 @@ the IT policy file.
       local model only when no Local rule is Block.
 - [ ] Saved history in a follow-up. History whose evidence was rebuilt (A1) is
       routed and masked like any other part of the request, by its stored
-      classes and by the scan of the final request. Each span's action is the
+      classes and by the scan of the final request, unless its effective
+      field map revision is older than a later class raise from any source
+      (A1), in which case it counts as unexamined. Each span's action is the
       strictest across every class in its stored set (its field's class
       history and every class a value detector assigned to it when saved),
       recomputed under the rules in force at the follow-up, so a span whose
@@ -607,7 +676,8 @@ the IT policy file.
 
 **Acceptance criteria:**
 1. A test per path (agent run, Chat deterministic, Chat streaming, agentic loop,
-   Office, follow-up) shows a blocked class never reaches the model.
+   Office, follow-up, hosted voice context, web search) shows a blocked class
+   never reaches the model.
 2. A test proves voice context goes through the same request scan and rules
    as a hosted call: a masked class reaches the voice model as tokens, an
    allowed class as is, and a blocked class is withheld while the session
@@ -664,10 +734,11 @@ the IT policy file.
    answers, and a local model only when no Local rule is Block. With no
    Block on Hosted, the earlier messages are masked one way and the answer
    says so.
-13. Same-version restart regression test: under one field map version, a
-   field mapped as `configuration` is moved to `security`, then to
-   `identity`, and a value from it is restored in a local Chat answer that
-   is saved. The value is later gone from the current tenant value index,
+13. Same-revision restart regression test: a field mapped as
+   `configuration` is moved to `security`, then to `identity`, and only then
+   is a value from it restored in a local Chat answer that is saved, so no
+   class is raised after the save and its effective field map revision
+   stays current. The value is later gone from the current tenant value index,
    the app restarts, the conversation is reopened, and a hosted follow-up is
    asked with Security on Hosted at Block. The saved span's stored class
    list holds all three classes, the span is withheld, and the value reaches
@@ -680,12 +751,37 @@ the IT policy file.
    person's display name that the tenant value index recognizes as
    `identity`, and the value is restored in a local Chat answer that is
    saved. The saved span's stored set holds `configuration` and `identity`.
-   The name is later gone from the index, the app restarts under the same
-   field map version, the conversation is reopened, and a hosted follow-up
+   The name is later gone from the index, the app restarts with no class
+   raised since the save (the same effective field map revision), the
+   conversation is reopened, and a hosted follow-up
    is asked with Identity on Hosted at Mask, then at Block: the name is
    masked, then withheld, and never reaches a provider request in clear
    text. A rebuild from the field's classes alone would send it as
    configuration, and the test fails on it.
+15. Restart regression test for a raise in Settings: a local Chat answer
+   restores the name of a Conditional Access policy from a field that is
+   `configuration` at the time, and the answer is saved with the current
+   effective field map revision. The admin then raises that field to
+   `security` in Settings, which changes the revision. The name is later
+   gone from the tenant value index, the app restarts, the conversation is
+   reopened, and a hosted follow-up is asked with Security on Hosted at
+   Block. The saved messages count as unexamined and are withheld, the name
+   reaches no provider request, and the follow-up shows the designed state.
+   A check of the shipped field map version alone would find it unchanged
+   and send the name as configuration, and the test fails on it. The same
+   test with the raise made in the IT policy file gives the same result.
+16. Web search regression test: with Security on Hosted at Block, Nova
+   answers with a local model and writes a web search query that holds the
+   name of a Conditional Access policy. The fake request function receives
+   no call, nothing is sent to `api.openai.com`, and Chat shows the designed
+   blocked state with its recovery. With hosted reasoning and Security on
+   Hosted at Mask, a query the model wrote with `[CA_POLICY_1]`, restored to
+   the name in the tool parameter by A4, reaches the fake as
+   `[CA_POLICY_1]`, never as the name. A gate only in `buildLlm` would send
+   the name, and the test fails on it.
+17. Gate coverage test: a test lists every module that calls a hosted model
+   endpoint and fails when one of them sends without the Hosted gate,
+   including a new module added later.
 
 ### Phase A4: Masking
 
@@ -1160,5 +1256,7 @@ the IT policy file.
    a list of hosts, separate from `allowedPublicReferences`, which covers
    catalog references) (mockup 35, step 1).
 10. ~~Saved Chat evidence under an older field map version~~ counts as
-    unexamined when a later map change raised any class; otherwise its stored
-    classes apply (lead, 2026-11-20, from the unexamined rule).
+    unexamined when a later change raised any class; otherwise its stored
+    classes apply (lead, 2026-11-20, from the unexamined rule). The version
+    is the effective field map revision, raised by the shipped map, Settings
+    or the IT policy file (round 16).
