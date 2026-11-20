@@ -5470,15 +5470,26 @@ function removeSchedulerRegistration(guard: () => void = () => undefined): void 
   } else if (process.platform === "win32") {
     // Presence comes from the full task list (see windowsSchedulerTaskPresence).
     if (windowsSchedulerTaskPresence() === "absent") return;
-    const xml = windowsSchedulerTaskXml();
+    // The account first, then the task: its definition is read as late as
+    // possible, and again right before the delete, which runs only when it
+    // is unchanged. schtasks cannot delete on a condition, so another
+    // account replacing the task between that last read and the delete is
+    // the one window left (the per-user task name follow-up closes it).
     const whoami = spawnSync("whoami", ["/user", "/fo", "csv", "/nh"], { encoding: "utf8", windowsHide: true, timeout: 5_000 });
     const account = whoami.status === 0 ? parseWhoamiUser(whoami.stdout) : undefined;
+    const xml = windowsSchedulerTaskXml();
     if (!windowsTaskBelongsToThisAccount(xml === undefined ? undefined : windowsTaskBinary(xml), app.getPath("home"), {
       taskUserId: windowsTaskUserId(xml),
       account,
     })) {
       throw new Error(
         `the scheduled task ${WINDOWS_SCHEDULER_TASK} could not be confirmed as this account's (its program or the account it runs as is another), so it was left in place. Check Run As User in Task Scheduler and remove it there if it is yours`,
+      );
+    }
+    guard();
+    if (windowsSchedulerTaskXml() !== xml) {
+      throw new Error(
+        `the scheduled task ${WINDOWS_SCHEDULER_TASK} changed while it was being checked, so it was left in place. Check Run As User in Task Scheduler and remove it there if it is yours`,
       );
     }
     removeWindowsSchedulerTask();
