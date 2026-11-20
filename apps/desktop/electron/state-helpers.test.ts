@@ -652,6 +652,12 @@ describe("stored runs with a Graph denial for a non-Graph error", () => {
     assert.equal(run.summary, ollama);
   });
 
+  it("drops a denial stored for a sandboxed provider failure that quotes a Graph error", () => {
+    const error = 'MXC script agent "auditor" failed: Error: llm.complete: Ollama responded with HTTP 403: upstream said\nError: graph.request: Graph responded with HTTP 403 for https://graph.microsoft.com/v1.0/users: {}';
+    const run = withoutMisclassifiedGraphDenial({ ...base, error, summary: graphAccessDenialText(legacy), accessDenial: legacy });
+    assert.equal(run.accessDenial, undefined);
+  });
+
   it("keeps another summary and every Graph denial", () => {
     const kept = withoutMisclassifiedGraphDenial({ ...base, error: ollama, summary: "Agent failed: Ollama 403", accessDenial: legacy });
     assert.equal(kept.accessDenial, undefined);

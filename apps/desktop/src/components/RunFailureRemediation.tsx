@@ -62,9 +62,14 @@ const SUGGESTIONS: Suggestion[] = [
     body: "The LLM or Microsoft Graph took longer than expected. Try a smaller model, narrow the agent's scope, or check your network.",
   },
   {
-    // A 401 or "unauthorized" counts only from Graph; a model server or vendor
-    // API that answers 401 or 403 Unauthorized is not a tenant sign-in.
-    match: (e) => (/expired token|interaction_required/i.test(e) || (errorComesFromGraph(e) && /401|unauthor/i.test(e))) && !isContextLimitLookup(e),
+    // Only a Graph 401 ("Graph rejected the access token (HTTP 401)") or a
+    // Microsoft sign-in error (an AADSTS code) is a tenant sign-in failure; a
+    // model server or vendor API that answers 401, 403 Unauthorized or
+    // "expired token" is not.
+    match: (e) =>
+      ((errorComesFromGraph(e) && /\b401\b|unauthor/i.test(e)) ||
+        (/\bAADSTS\d+/.test(e) && /interaction_required|invalid_grant|expired/i.test(e))) &&
+      !isContextLimitLookup(e),
     title: "Tenant token expired",
     body: "Disconnect and reconnect the tenant from Connections. MSAL caches a refresh token but Graph can revoke it independently.",
   },

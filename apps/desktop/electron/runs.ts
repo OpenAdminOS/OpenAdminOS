@@ -250,6 +250,15 @@ class PlanCheckFailedError extends Error {
   }
 }
 
+/**
+ * The Graph denial fields of a failed run: classified from the typed error
+ * only, and marked as checked so its text is never read for Graph advice.
+ */
+function graphFailureFields(error: unknown): Pick<RunRecord, "accessDenial" | "graphDenialChecked"> {
+  const accessDenial = (error instanceof PlanCheckFailedError ? error.accessDenial : undefined) ?? graphAccessDenialFromError(error);
+  return { ...(accessDenial ? { accessDenial } : {}), graphDenialChecked: true };
+}
+
 function notAppliedError(error: unknown): unknown {
   const message = error instanceof Error ? error.message : String(error);
   if (/nothing was applied/i.test(message)) return error;
@@ -1298,7 +1307,7 @@ export class RunService {
         const message = run.confirmedAt
           ? "OpenAdminOS closed during this run. Requests already sent may have completed. Review the tenant before running it again."
           : "OpenAdminOS closed before this run finished. Run the agent again to retry.";
-        return { ...run, status: "failed", finishedAt, summary: message, error: message,
+        return { ...run, status: "failed", finishedAt, summary: message, error: message, graphDenialChecked: true,
           liveSummary: undefined,
           steps: run.steps.map((step) => ({ ...step,
             ...(step.status === "running" ? { status: "failed" as const, finishedAt, detail: message } : {}),
@@ -1581,6 +1590,7 @@ export class RunService {
             status: "failed",
             finishedAt,
             error: message,
+            ...graphFailureFields(error),
             summary: `${noun} stopped at "${action.label}" after applying ${applied} of ${plan.actions.length} actions. Nothing after the failed action was attempted.`,
           };
           await this.persistRunSnapshot(run);
@@ -1627,6 +1637,7 @@ export class RunService {
             ? `${noun} stopped after applying ${applied} of ${plan?.actions.length ?? applied} actions: ${message}`
             : `${noun} failed before any action was applied: ${message}`,
         error: message,
+        ...graphFailureFields(error),
       });
     } finally {
       // Invalidate for every attempted request, including a cancel at
@@ -1702,6 +1713,7 @@ export class RunService {
             status: "failed",
             finishedAt,
             error: message,
+            ...graphFailureFields(error),
             summary: `Splashtop changes stopped at "${action.label}" after applying ${applied} of ${plan.actions.length}. Nothing after it was attempted.`,
           };
           await this.persistRunSnapshot(run);
@@ -1732,6 +1744,7 @@ export class RunService {
           ? `Splashtop changes stopped after applying ${applied} of ${plan?.actions.length ?? applied}: ${message}`
           : `Splashtop changes failed before any was applied: ${message}`,
         error: message,
+        ...graphFailureFields(error),
       });
     } finally {
       if (this.controllers.get(input.id) === controller) this.controllers.delete(input.id);
@@ -1744,7 +1757,6 @@ export class RunService {
     error: unknown,
   ): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
-    const accessDenial = (error instanceof PlanCheckFailedError ? error.accessDenial : undefined) ?? graphAccessDenialFromError(error);
     const finishedAt = new Date().toISOString();
     await this.persistRunSnapshot({
       ...run,
@@ -1752,8 +1764,7 @@ export class RunService {
       finishedAt,
       summary: `${agent.name} failed: ${message}`,
       error: message,
-      ...(accessDenial ? { accessDenial } : {}),
-      graphDenialChecked: true,
+      ...graphFailureFields(error),
     });
   }
 

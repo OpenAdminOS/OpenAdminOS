@@ -208,6 +208,8 @@ it("does not read Graph advice from the text of a failure classified from its ty
 it.each([
   ["Ollama responded with HTTP 403 at http://127.0.0.1:11434/api/chat: Unauthorized", false],
   ["Anthropic API returned 401 Unauthorized: invalid x-api-key", false],
+  ["Ollama responded with HTTP 403: expired token", false],
+  ["Graph rejected the access token (HTTP 401). Tenant needs reconnect.", true],
   ["Graph responded with HTTP 401 for https://graph.microsoft.com/v1.0/users: {\"error\":{\"code\":\"InvalidAuthenticationToken\"}}", true],
   ["AADSTS65001 interaction_required: consent is needed", true],
 ])("gives tenant sign-in advice only for a tenant sign-in failure: %s", (error, tenant) => {
