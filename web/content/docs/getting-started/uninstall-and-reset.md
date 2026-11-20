@@ -48,7 +48,10 @@ folder:
 - **Linux:** cached app updates (`~/.cache/@openadminosdesktop-updater`)
 
 OpenAdminOS then opens at first run, with a notice that lists anything it could
-not remove. Nothing outside these paths is touched.
+not remove. Nothing outside these paths is touched. If an item named
+`OpenAdminOS Safe Storage` is also in a keychain other than the login keychain,
+for example because that keychain was your default when OpenAdminOS first ran,
+the notice names it and leaves it for you to check in Keychain Access.
 
 What stays:
 

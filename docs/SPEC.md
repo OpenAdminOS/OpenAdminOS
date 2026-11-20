@@ -2536,7 +2536,21 @@ Mockup: `docs/mockups/34-local-reset.html`.
   accepted for: a folder swapped in between the check and the write would
   have its caches rewritten. The token files are removed by the launch wipe
   before anything can read them, and from the marker on no organization
-  starts new work, so the sign-ins are not used again either way.
+  starts new work, so the sign-ins are not used again either way. After the
+  marker the reset reads and writes nothing in the data folder: closing and
+  draining organizations uses the state the process last read, not the
+  file (a read of a missing state file would create one).
+- **Accepted limit: a folder replaced during one removal** (raised in review
+  round 23, declined). The folder's identity is checked before every
+  top-level removal and before every write, but a recursive removal and the
+  marker's file creation resolve the path again while they run, and Node has
+  no removal relative to an open folder handle. A process that replaces the
+  data folder within those milliseconds could have one entry removed from
+  the replacement. Only a process of the same account can do that, and it
+  could remove those files itself; a restore that puts an OpenAdminOS
+  profile back at the OpenAdminOS data path loses at most that one entry of
+  a profile the admin asked to reset. Closing the window entirely would need
+  native code; the per-entry check keeps it to one entry.
 - **Wipe at launch.** At the top of the main script, after the single-instance
   lock and before `whenReady`, so before Chromium reads Local State (the Windows
   safeStorage key) and before any store, session or safeStorage use: every entry
@@ -2550,7 +2564,10 @@ Mockup: `docs/mockups/34-local-reset.html`.
   `OpenAdminOS Safe Storage` and account `OpenAdminOS`, searched only in the
   login keychain (`~/Library/Keychains/login.keychain-db`, where safeStorage
   creates it), so an item of that name in a keychain imported from another
-  Mac is left alone, the LaunchAgent or
+  Mac is left alone; a lookup across the keychain search list (attributes
+  only) then warns with the keychain's path when an item of that name is in
+  another keychain, for an admin whose default keychain is not the login
+  keychain, the LaunchAgent or
   scheduled task (checked to be gone afterwards), the electron-updater cache
   `@openadminosdesktop-updater`, and on macOS the Squirrel ShipIt cache, the
   bundle's Caches, HTTPStorages and saved state, and `defaults delete
