@@ -501,10 +501,10 @@ describe("Ollama context size", () => {
     const fake = await fakeOllama({
       modelMax: 131072,
       limit: (numCtx) => numCtx ?? 16384,
-      onShow: (res) => setTimeout(() => res.end(JSON.stringify({ model_info: { "qwen3.context_length": 131072 } })), 250),
+      onShow: (res) => setTimeout(() => res.end(JSON.stringify({ model_info: { "qwen3.context_length": 131072 } })), 800),
     });
     try {
-      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "slow-lookup", timeoutMs: 150 });
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "slow-lookup", timeoutMs: 500 });
       assert.equal((await llm.complete({ prompt: "big" })).text, "ok");
       assert.deepEqual(fake.chats, [{}, { num_ctx: 45056 }]);
     } finally {
@@ -513,10 +513,10 @@ describe("Ollama context size", () => {
   });
 
   it("gives the retry a fresh timeout instead of what the first request left", async () => {
-    // Each request takes 150ms of a 250ms budget; together they take 300ms.
-    const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384, delayOverflowMs: 150, delayRetryMs: () => 150 });
+    // Each request takes 300ms of a 500ms budget; together they take 600ms.
+    const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384, delayOverflowMs: 300, delayRetryMs: () => 300 });
     try {
-      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "slow-machine", timeoutMs: 250 });
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "slow-machine", timeoutMs: 500 });
       assert.equal((await llm.complete({ prompt: "big" })).text, "ok");
       assert.deepEqual(fake.chats, [{}, { num_ctx: 45056 }]);
     } finally {
@@ -525,12 +525,12 @@ describe("Ollama context size", () => {
   });
 
   it("names the retry when the retry times out", async () => {
-    const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384, delayRetryMs: () => 400 });
+    const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384, delayRetryMs: () => 1000 });
     try {
-      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "slow-retry", timeoutMs: 150 });
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "slow-retry", timeoutMs: 500 });
       await assert.rejects(
         llm.complete({ prompt: "big" }),
-        /^Error: Ollama timed out after 150ms at http:\/\/127\.0\.0\.1:\d+\/api\/chat on the retry with a 45,056 token context\.$/,
+        /^Error: Ollama timed out after 500ms at http:\/\/127\.0\.0\.1:\d+\/api\/chat on the retry with a 45,056 token context\.$/,
       );
     } finally {
       await fake.close();
@@ -538,10 +538,10 @@ describe("Ollama context size", () => {
   });
 
   it("names the first request when it times out", async () => {
-    const fake = await fakeOllama({ limit: () => 16384, delayOverflowMs: 400 });
+    const fake = await fakeOllama({ limit: () => 16384, delayOverflowMs: 1000 });
     try {
-      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "slow-first", timeoutMs: 150 });
-      await assert.rejects(llm.complete({ prompt: "big" }), /^Error: Ollama timed out after 150ms at http:\/\/127\.0\.0\.1:\d+\/api\/chat\.$/);
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "slow-first", timeoutMs: 500 });
+      await assert.rejects(llm.complete({ prompt: "big" }), /^Error: Ollama timed out after 500ms at http:\/\/127\.0\.0\.1:\d+\/api\/chat\.$/);
       assert.equal(fake.shows.length, 0);
     } finally {
       await fake.close();
@@ -551,12 +551,12 @@ describe("Ollama context size", () => {
   it("names the kept context when a request that sends it times out", async () => {
     const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384 });
     try {
-      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "slow-kept", timeoutMs: 150 });
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "slow-kept", timeoutMs: 500 });
       await llm.complete({ prompt: "big" });
-      fake.options.delayRetryMs = () => 400;
+      fake.options.delayRetryMs = () => 1000;
       await assert.rejects(
         llm.complete({ prompt: "big" }),
-        /^Error: Ollama timed out after 150ms at http:\/\/127\.0\.0\.1:\d+\/api\/chat with the 45,056 token context kept from an earlier request\.$/,
+        /^Error: Ollama timed out after 500ms at http:\/\/127\.0\.0\.1:\d+\/api\/chat with the 45,056 token context kept from an earlier request\.$/,
       );
     } finally {
       await fake.close();
@@ -661,14 +661,79 @@ describe("Ollama context size", () => {
     }
   });
 
+  it("drops a size a concurrent request kept when this request's retry with it runs out of memory", async () => {
+    let lookups = 0;
+    const answerShow = (res: ServerResponse) => res.end(JSON.stringify({ model_info: { "qwen3.context_length": 131072 } }));
+    const fake = await fakeOllama({
+      limit: (numCtx) => numCtx ?? 16384,
+      onShow: (res) => {
+        lookups += 1;
+        if (lookups === 1) {
+          answerShow(res);
+          return;
+        }
+        // B's lookup waits until A has kept 45,056; B's retry then runs out of memory.
+        setTimeout(() => {
+          fake.options.retryMemoryError = ["http", "model requires more system memory (24.1 GiB) than is available (12.0 GiB)"];
+          answerShow(res);
+        }, 200);
+      },
+    });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "concurrent-memory" });
+      // Whichever lookup arrives first is answered first.
+      const results = await Promise.allSettled([llm.complete({ prompt: "big" }), llm.complete({ prompt: "big" })]);
+      assert.deepEqual(results.map((result) => result.status).sort(), ["fulfilled", "rejected"]);
+      const failed = results.find((result) => result.status === "rejected") as PromiseRejectedResult;
+      assert.match(String(failed.reason), /could not load concurrent-memory with 45,056/);
+      fake.options.retryMemoryError = undefined;
+      fake.options.limit = () => 65536;
+      await llm.complete({ prompt: "small" });
+      assert.deepEqual(fake.chats.at(-1), {});
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("drops the kept context on an overflow with token counts in the stream", async () => {
+    const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384 });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "kept-stream-overflow" });
+      await llm.complete({ prompt: "big" });
+      fake.options.retryPartialError = "request (50000 tokens) exceeds the available context size (16384 tokens), try increasing it";
+      await assert.rejects(llm.complete({ prompt: "big" }), /^Error: Ollama context size too small: This request needs 50,000 tokens of context, but Ollama could only give kept-stream-overflow 16,384/);
+      assert.equal(fake.chats.length, 3);
+      fake.options.retryPartialError = undefined;
+      fake.options.limit = () => 65536;
+      await llm.complete({ prompt: "small" });
+      assert.deepEqual(fake.chats.at(-1), {});
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("gives a retry that gets Ollama's overflow without token counts a context size message", async () => {
+    const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384, retryPromptTooLong: true });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "retry-no-counts" });
+      await assert.rejects(
+        llm.complete({ prompt: "big" }),
+        /^Error: Ollama context size too small: This request did not fit in the 45,056 token context of the retry\. Ollama said: \{"error":"the prompt is longer/,
+      );
+      assert.deepEqual(fake.chats, [{}, { num_ctx: 45056 }]);
+    } finally {
+      await fake.close();
+    }
+  });
+
   it("names the retry when the retry stalls after its first token", async () => {
     const open: ServerResponse[] = [];
     const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384, retryStallAfterToken: (res) => open.push(res) });
     try {
-      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "stall-retry", timeoutMs: 150 });
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "stall-retry", timeoutMs: 500 });
       await assert.rejects(
         llm.complete({ prompt: "big" }),
-        /^Error: Ollama timed out after 150ms at http:\/\/127\.0\.0\.1:\d+\/api\/chat on the retry with a 45,056 token context\.$/,
+        /^Error: Ollama timed out after 500ms at http:\/\/127\.0\.0\.1:\d+\/api\/chat on the retry with a 45,056 token context\.$/,
       );
     } finally {
       for (const res of open) res.destroy();
