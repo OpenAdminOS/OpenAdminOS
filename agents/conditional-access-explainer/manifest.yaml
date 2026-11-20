@@ -218,9 +218,9 @@ skills:
         block, device compliance, guest and external access, risky sign-ins
         and users, and session controls. Say covered, partially covered, or
         not proven, and name the policies and the reason (for not proven,
-        what remains unresolved). A policy with otherConditions, an app or
-        workload filter, or a scope given only as counts proves at most
-        partial coverage on its own. Under grant, OR
+        what remains unresolved). A policy with otherConditions, a device,
+        app or workload filter, or a scope given only as counts proves at
+        most partial coverage on its own. Under grant, OR
         means any one listed requirement satisfies the policy, so MFA is
         required only when it is the sole requirement or the operator is AND.
 
