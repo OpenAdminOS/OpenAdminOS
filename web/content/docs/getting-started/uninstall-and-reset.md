@@ -54,7 +54,7 @@ What stays:
 
 - The IT policy file `policy.json` set by whoever manages the device, both the
   machine file and the one in the data folder. If the one in the data folder
-  is a link, a folder or anything else than a plain file, the reset stops
+  is a link, a folder or anything other than a plain file, the reset stops
   before removing anything and says so: place the file itself there, or use the machine-wide policy path.
 - Exports and other files you saved outside the data folder.
 - The enterprise application and admin consent in each tenant.
@@ -160,12 +160,19 @@ removes it. To remove everything by hand instead, make the checks in
 OpenAdminOS.
 
 The scheduled task has the same name for every account on the machine. Check
-whose it is first, and delete it only if **Run As User** is your account:
+whose it is first:
 
 ```powershell
 schtasks /Query /TN "OpenAdminOS Scheduler" /V /FO LIST
+```
+
+Only if **Run As User** shows your own account, delete it:
+
+```powershell
 schtasks /Delete /TN "OpenAdminOS Scheduler" /F
 ```
+
+If it shows another account, leave it: it is that account's scheduler.
 
 Then run this in PowerShell:
 
