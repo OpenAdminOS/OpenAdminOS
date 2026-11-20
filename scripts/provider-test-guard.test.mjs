@@ -264,12 +264,13 @@ it("probes the renderer directly, never through a proxy the runner inherited", a
     socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
   });
   await new Promise((resolve) => proxy.listen(0, "127.0.0.1", resolve));
-  const probe = createServer();
-  await new Promise((resolve) => probe.listen(0, "127.0.0.1", resolve));
-  const port = probe.address().port;
-  await new Promise((resolve) => probe.close(resolve));
+  // A test-owned listener holds the port for the whole test and is never ready,
+  // so only a proxy could make the probe succeed.
+  const notReady = createServer((_request, response) => { response.statusCode = 503; response.end(); });
+  await new Promise((resolve) => notReady.listen(0, "127.0.0.1", resolve));
+  const port = notReady.address().port;
   const helper = fileURLToPath(new URL("./smoke-provider-isolation.mjs", import.meta.url));
-  // The "server" reports its address but never listens, so only a proxy could answer.
+  // The "server" reports the held port's address; that listener answers 503.
   // A proxy reaches the probe through the inherited environment or a dispatcher
   // installed before the helper runs; the probe must ignore both.
   const runner = `const { spawn } = require("node:child_process");
@@ -293,6 +294,7 @@ it("probes the renderer directly, never through a proxy the runner inherited", a
     assert.equal(proxied, 0);
   } finally {
     await new Promise((resolve) => proxy.close(resolve));
+    await new Promise((resolve) => notReady.close(resolve));
   }
 });
 
