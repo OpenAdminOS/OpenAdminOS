@@ -7,6 +7,7 @@ import { officeFullscreen } from "./office-fullscreen.js";
 import {
   LocalResetRequestError,
   MANAGED_POLICY_FILE,
+  readLocalResetMarker,
   requestLocalReset,
   runPendingLocalReset,
   writeLocalResetMarker,
@@ -42,7 +43,7 @@ import {
   type LoginItemSettingsOptions,
   type MenuItemConstructorOptions,
 } from "electron";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile, stat, writeFile } from "node:fs/promises";
@@ -440,7 +441,7 @@ function removeMacosLaunchAgent(): void {
   const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
   const domain = uid === undefined ? "gui" : `gui/${uid}`;
   try {
-    execFileSync("launchctl", ["bootout", domain, plistPath], { stdio: "ignore" });
+    execFileSync("launchctl", ["bootout", domain, plistPath], { stdio: "ignore", timeout: 5_000 });
   } catch {
     // Already unloaded.
   }
@@ -2324,6 +2325,7 @@ function windowsSchedulerTaskXml(): string | undefined {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       windowsHide: true,
+      timeout: 5_000,
     });
   } catch {
     return undefined;
@@ -2397,6 +2399,7 @@ function removeWindowsSchedulerTask(): void {
     execFileSync("schtasks.exe", ["/Delete", "/F", "/TN", WINDOWS_SCHEDULER_TASK], {
       stdio: "ignore",
       windowsHide: true,
+      timeout: 5_000,
     });
   } catch {
     // Already removed.
@@ -5380,7 +5383,8 @@ function runLocalResetAtLaunch(): LocalResetReport | undefined {
 
 /** After a completed reset: the menu bar login item needs a ready app to change. */
 function finishLocalResetAfterReady(report: LocalResetReport): void {
-  if (process.platform !== "darwin" || !app.isPackaged) return;
+  // Only an installed build's own request turns off the installed login item.
+  if (process.platform !== "darwin" || !app.isPackaged || pendingLocalResetBuild !== "installed") return;
   try {
     if (getCompanionLaunchSettings().enabled) setCompanionLaunchEnabled(false);
   } catch (error) {
@@ -5399,10 +5403,19 @@ function finishLocalResetAfterReady(report: LocalResetReport): void {
 function removeSchedulerRegistration(): void {
   if (process.platform === "darwin") {
     removeMacosLaunchAgent();
-    if (existsSync(macosSchedulerPlistPath()) || macosLaunchAgentLoaded()) {
-      throw new Error("the scheduler LaunchAgent is still registered. Remove it with launchctl bootout, as described in Uninstall and reset");
+    const loaded = macosLaunchAgentLoaded();
+    if (existsSync(macosSchedulerPlistPath()) || loaded !== "absent") {
+      throw new Error(
+        loaded === "unknown"
+          ? "launchd did not confirm that the scheduler LaunchAgent is gone. Check it with launchctl, as described in Uninstall and reset"
+          : "the scheduler LaunchAgent is still registered. Remove it with launchctl bootout, as described in Uninstall and reset",
+      );
     }
   } else if (process.platform === "win32") {
+    // A query that fails means no task: a per-user task its own user cannot
+    // read is not a case this app creates. Only a task that was there is
+    // deleted and checked again.
+    if (windowsSchedulerTaskXml() === undefined) return;
     removeWindowsSchedulerTask();
     if (windowsSchedulerTaskXml() !== undefined) {
       throw new Error(`the scheduled task ${WINDOWS_SCHEDULER_TASK} is still registered. Remove it in Task Scheduler`);
@@ -5410,15 +5423,16 @@ function removeSchedulerRegistration(): void {
   }
 }
 
-function macosLaunchAgentLoaded(): boolean {
+/** `launchctl print` exits 113 for a service it does not know. */
+const LAUNCHCTL_SERVICE_NOT_FOUND = 113;
+
+function macosLaunchAgentLoaded(): "loaded" | "absent" | "unknown" {
   const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
-  if (uid === undefined) return false;
-  try {
-    execFileSync("launchctl", ["print", `gui/${uid}/${MACOS_SCHEDULER_LABEL}`], { stdio: "ignore", timeout: 5_000 });
-    return true;
-  } catch {
-    return false;
-  }
+  if (uid === undefined) return "unknown";
+  const result = spawnSync("launchctl", ["print", `gui/${uid}/${MACOS_SCHEDULER_LABEL}`], { stdio: "ignore", timeout: 5_000 });
+  if (result.status === 0) return "loaded";
+  if (result.status === LAUNCHCTL_SERVICE_NOT_FOUND) return "absent";
+  return "unknown";
 }
 
 function localResetInfo(): LocalResetInfo {
@@ -5455,8 +5469,13 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
       forgetSignIns: () => store.forgetAllSignIns(),
       disableScheduler: async () => {
         // A development build never registered the per-user scheduler; the
-        // installed app's registration is not its to remove.
-        if (app.isPackaged) removeSchedulerRegistration();
+        // installed app's registration is not its to remove. A process that
+        // the LaunchAgent started (its window came from a later launch)
+        // would be stopped by launchd mid-request if it unloaded its own
+        // job: the launch that finishes the reset removes it instead.
+        if (!app.isPackaged) return;
+        if (process.platform === "darwin" && isBackgroundSchedulerLaunch) return;
+        removeSchedulerRegistration();
       },
       disableLoginItem: async () => {
         if (process.platform !== "darwin" || !app.isPackaged) return;
@@ -7047,12 +7066,30 @@ function registerIpcHandlers() {
   );
 }
 
+// A pending Reset OpenAdminOS, read before the lock. A scheduler wake never
+// runs or resumes a reset: on macOS it is the LaunchAgent's own job, which
+// the reset unloads, so it exits and leaves the reset to an interactive
+// launch, and it never touches the scheduler registration meanwhile.
+const pendingLocalResetBuild: "installed" | "development" | "unknown" | undefined = (() => {
+  try {
+    const marker = readLocalResetMarker(app.getPath("userData"));
+    return marker ? marker.build ?? "unknown" : undefined;
+  } catch {
+    return undefined;
+  }
+})();
+const yieldToPendingLocalReset = Boolean(pendingLocalResetBuild && isBackgroundSchedulerLaunch);
+if (yieldToPendingLocalReset) {
+  console.info("[local-reset] a reset is pending; the scheduler wake leaves it to an interactive launch");
+  app.exit(0);
+}
+
 // A scheduler registration written by a development checkout relaunches
 // it every minute. That copy holds the single-instance lock, so this launch
 // would hand off to it and show a blank dev window instead. Point such a
 // registration (or one whose binary is gone) at this copy before taking
 // the lock, and stop the other copy.
-if (app.isPackaged && !isBackgroundSchedulerLaunch) {
+if (app.isPackaged && !isBackgroundSchedulerLaunch && !pendingLocalResetBuild) {
   try {
     if (process.platform === "darwin" && macosLaunchAgentState() === "stale") {
       writeMacosLaunchAgent();
@@ -7085,7 +7122,8 @@ if (!gotLock) {
   // A pending Reset OpenAdminOS empties the data folder now: after the
   // single-instance lock, before Chromium reads Local State and before any
   // store, session or safeStorage use.
-  localResetReport = runLocalResetAtLaunch();
+  // app.exit does not stop this script, so a yielding wake skips the wipe too.
+  if (!yieldToPendingLocalReset) localResetReport = runLocalResetAtLaunch();
   app.on("second-instance", (_event, argv) => {
     if (localResetReport?.status === "incomplete") {
       if (argv.includes(BACKGROUND_SCHEDULER_ARG)) return;
@@ -7097,6 +7135,7 @@ if (!gotLock) {
       return;
     }
     if (argv.includes(BACKGROUND_SCHEDULER_ARG)) {
+      if (localResetRequested) return;
       void store?.fireDueSchedules();
       void store?.fireDueNovaFollowUps();
       void store?.refreshDueGraphCaches();
@@ -7139,6 +7178,7 @@ if (!gotLock) {
       }
     }
 
+    if (yieldToPendingLocalReset) return;
     registerStorelessIpcHandlers();
     if (localResetReport?.status === "incomplete") {
       // The app stays closed until the reset finishes, so old data is never
