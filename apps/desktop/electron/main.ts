@@ -77,6 +77,7 @@ import {
   getUpdateState,
   setUpdateChannel,
   startAutoUpdater,
+  stopAutoUpdater,
   subscribeToUpdateState,
 } from "./updates.js";
 import { UPDATE_UNAVAILABLE_DETAIL } from "../src/shared/update-channel.js";
@@ -5662,7 +5663,13 @@ async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
         // taken before the checks.
         committedFolder = await writeLocalResetMarker(dataFolder, marker, {
           expectFolder: committedFolder,
-          onCommitted: () => store.markLocalResetCommitted(),
+          onCommitted: () => {
+            // No update check starts after the commit: electron-updater writes
+            // its staging id into the data folder through file system
+            // functions it captured at load, which the guard cannot see.
+            stopAutoUpdater();
+            store.markLocalResetCommitted();
+          },
         });
       },
       // No sign-out here: it would rewrite the token caches in place, which
