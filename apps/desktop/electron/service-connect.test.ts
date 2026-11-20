@@ -7,7 +7,7 @@ import { describe, it } from "node:test";
 import { partIdsFor } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 
-import { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 
 const G = "https://graph.microsoft.com/";
 
@@ -26,7 +26,7 @@ async function makeFixture(options: {
   const storage: TokenCacheStorage = { read: async () => "", write: async () => undefined };
   const requests: string[][] = [];
   const loginHints: Array<string | undefined> = [];
-  const store = new AppStateStore({
+  const store = createTestAppStateStore({
     filePath: statePath,
     tokenStore: storage,
     tokenStoreFor: () => storage,
@@ -67,7 +67,12 @@ async function makeFixture(options: {
 }
 
 describe("connecting by service part", () => {
-  it("requests exactly the baseline plus the Intune part scopes for Intune only", async () => {
+  it("requests exactly the baseline plus the Intune part scopes for Intune only", async (t) => {
+    const guardedFetch = globalThis.fetch;
+    t.mock.method(globalThis, "fetch", (input: Parameters<typeof fetch>[0], init?: RequestInit) =>
+      String(input) === `${G}beta/subscribedSkus`
+        ? Promise.resolve(Response.json({ value: [] }))
+        : guardedFetch(input, init));
     const fixture = await makeFixture({ returnedScopes: (requested) => requested });
     try {
       await fixture.store.connectTenant({ partIds: partIdsFor(["intune"]) });

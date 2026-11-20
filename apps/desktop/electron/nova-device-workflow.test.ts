@@ -4,7 +4,7 @@ import { it } from 'node:test';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AppStateStore } from './state.js';
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 import { NovaService } from './nova.js';
 
 it('answers the reported fleet conversation through real SQLite and prepares the resulting report without an LLM or send', async () => {
@@ -13,7 +13,7 @@ it('answers the reported fleet conversation through real SQLite and prepares the
   await writeFile(filePath, JSON.stringify({ activeTenantId: 'test', activeProviderId: 'ollama', installedAgents: [], runs: [], tenants: [{ id: 'test', displayName: 'Test tenant', username: 'admin@example.test', homeAccountId: 'test', addedAt: new Date().toISOString() }] }));
   let modelCalls = 0, sends = 0;
   const requests: string[] = [];
-  const store = new AppStateStore({ filePath, userDataPath: dir, statsApiUrl: '',
+  const store = createTestAppStateStore({ filePath, userDataPath: dir, statsApiUrl: '',
     tokenStore: { read: async () => '', write: async () => {} },
     providerListFactory: () => [{ id: 'ollama', name: 'Ollama', isLocal: true, status: 'connected', models: ['test'], defaultModel: 'test' } as never],
     llmFactory: () => ({ available: true, complete: async () => { modelCalls++; throw new Error('Must not guess'); }, async *stream() { modelCalls++; throw new Error('Must not guess'); } }),

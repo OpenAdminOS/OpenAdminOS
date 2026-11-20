@@ -7,7 +7,7 @@ import { describe, it } from "node:test";
 import type { AgentSummary, RunRecord } from "@openadminos/agent-sdk";
 import { listBuiltInRegistryAgents, type TokenCacheStorage } from "@openadminos/runtime";
 
-import { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 
 const tokenStore: TokenCacheStorage = {
   read: async () => "",
@@ -117,7 +117,7 @@ async function makeFixture() {
     }),
     "utf8",
   );
-  const store = new AppStateStore({ filePath, tokenStore, userDataPath: dir, userAgentsDir, statsApiUrl: "" });
+  const store = createTestAppStateStore({ filePath, tokenStore, userDataPath: dir, userAgentsDir, statsApiUrl: "" });
   return {
     store,
     userAgentsDir,
@@ -214,7 +214,7 @@ async function bundledFixture(dir: string, options: { schedule?: boolean } = {})
     }),
     "utf8",
   );
-  return new AppStateStore({ filePath, tokenStore, userDataPath: dir, statsApiUrl: "" });
+  return createTestAppStateStore({ filePath, tokenStore, userDataPath: dir, statsApiUrl: "" });
 }
 
 describe("the manifest an installed agent would run", () => {

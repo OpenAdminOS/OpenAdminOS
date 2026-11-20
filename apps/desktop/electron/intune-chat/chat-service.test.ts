@@ -2,33 +2,19 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { after, before, describe, it } from "node:test";
-import { AppStateStore } from "../state.js";
+import { describe, it } from "node:test";
+import type { AppStateStore } from "../state.js";
+import { createTestAppStateStore } from "../../tests/app-state-store-fixture.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 import type { RunGraphApi, RunLlmApi } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 import { TENANT_DATA_INSTRUCTIONS } from "@openadminos/runtime";
-import { partIdsFor, qualifyScope, requestedScopes } from "@openadminos/agent-sdk";
+import { partIdsFor, providerCatalog, qualifyScope, requestedScopes } from "@openadminos/agent-sdk";
 
 const tokenStore: TokenCacheStorage = {
   read: async () => "",
   write: async () => undefined,
 };
-
-let originalOllamaUrl: string | undefined;
-
-before(() => {
-  originalOllamaUrl = process.env.OPENAGENTS_OLLAMA_URL;
-  process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:9";
-});
-
-after(() => {
-  if (originalOllamaUrl === undefined) {
-    delete process.env.OPENAGENTS_OLLAMA_URL;
-    return;
-  }
-  process.env.OPENAGENTS_OLLAMA_URL = originalOllamaUrl;
-});
 
 describe("Intune Chat host service", () => {
   it("refreshes Graph cache, builds an answer pack, and persists chat messages", async () => {
@@ -152,7 +138,8 @@ describe("Intune Chat host service", () => {
       },
     };
 
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
+      providerListFactory: () => [...providerCatalog],
       filePath: statePath,
       tokenStore,
       userDataPath: dir,
@@ -264,7 +251,8 @@ describe("Intune Chat host service", () => {
 
     const graphRequests: string[] = [];
     let modelCalls = 0;
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
+      providerListFactory: () => [...providerCatalog],
       filePath: statePath,
       tokenStore,
       userDataPath: dir,
@@ -345,7 +333,8 @@ describe("Intune Chat host service", () => {
     );
 
     const prompts: string[] = [];
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
+      providerListFactory: () => [...providerCatalog],
       filePath: statePath,
       tokenStore,
       userDataPath: dir,
@@ -453,7 +442,8 @@ describe("Intune Chat host service", () => {
       },
     };
 
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
+      providerListFactory: () => [...providerCatalog],
       filePath: statePath,
       tokenStore,
       userDataPath: dir,
@@ -558,7 +548,8 @@ describe("Intune Chat host service", () => {
       },
     };
 
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
+      providerListFactory: () => [...providerCatalog],
       filePath: statePath,
       tokenStore,
       userDataPath: dir,
@@ -679,7 +670,8 @@ describe("Intune Chat host service", () => {
       },
     };
 
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
+      providerListFactory: () => [...providerCatalog],
       filePath: statePath,
       tokenStore,
       userDataPath: dir,
@@ -826,7 +818,8 @@ describe("Intune Chat host service", () => {
       },
     };
 
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
+      providerListFactory: () => [...providerCatalog],
       filePath: statePath,
       tokenStore,
       userDataPath: dir,
@@ -929,7 +922,8 @@ describe("Intune Chat host service", () => {
       },
     };
 
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
+      providerListFactory: () => [...providerCatalog],
       filePath: statePath,
       tokenStore,
       userDataPath: dir,
@@ -1070,7 +1064,8 @@ describe("Intune Chat host service", () => {
     );
 
     const graphRequests: string[] = [];
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
+      providerListFactory: () => [...providerCatalog],
       filePath: statePath,
       tokenStore,
       userDataPath: dir,
@@ -1172,7 +1167,8 @@ describe("Intune Chat host service", () => {
       },
     };
 
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
+      providerListFactory: () => [...providerCatalog],
       filePath: statePath,
       tokenStore,
       userDataPath: dir,
@@ -1277,7 +1273,8 @@ describe("Intune Chat host service", () => {
       },
     };
 
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
+      providerListFactory: () => [...providerCatalog],
       filePath: statePath,
       tokenStore,
       userDataPath: dir,
@@ -1364,7 +1361,8 @@ describe("Intune Chat host service", () => {
       },
     };
 
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
+      providerListFactory: () => [...providerCatalog],
       filePath: statePath,
       tokenStore,
       userDataPath: dir,
@@ -1472,7 +1470,8 @@ describe("Intune Chat host service", () => {
       },
     };
 
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
+      providerListFactory: () => [...providerCatalog],
       filePath: statePath,
       tokenStore,
       userDataPath: dir,
@@ -1569,7 +1568,8 @@ describe("Intune Chat host service", () => {
       },
     };
 
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
+      providerListFactory: () => [...providerCatalog],
       filePath: statePath,
       tokenStore,
       userDataPath: dir,
@@ -1612,7 +1612,8 @@ describe("Intune Chat host service", () => {
     seed.insertMessage({ id: "msg_b", conversationId: "chat_b", role: "user", content: "Fabrikam secret question", status: "completed", createdAt: now });
     seed.close();
 
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
+      providerListFactory: () => [...providerCatalog],
       filePath: statePath,
       tokenStore,
       userDataPath: dir,
@@ -1690,7 +1691,8 @@ describe("Intune Chat host service", () => {
       },
     };
 
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
+      providerListFactory: () => [...providerCatalog],
       filePath: statePath,
       tokenStore,
       userDataPath: dir,
@@ -1748,7 +1750,8 @@ describe("Graph cache refresh concurrency and cancellation", () => {
       }),
       "utf8",
     );
-    return new AppStateStore({
+    return createTestAppStateStore({
+      providerListFactory: () => [...providerCatalog],
       filePath: statePath,
       tokenStore,
       userDataPath: dir,
@@ -1854,7 +1857,7 @@ it('renders device lists and app counts from SQLite and recognizes an installed 
     if (path === '/deviceManagement/detectedApps') return {value:[{id:'detected-a',displayName:'Detected app A'},{id:'detected-b',displayName:'Detected app B'}]};
     return {value:[]};
   }};
-  const store = new AppStateStore({filePath,tokenStore,userDataPath:dir,statsApiUrl:'',graphFactory:()=>graph,llmFactory:()=>{throw new Error('These requests must not invoke the reasoning model');}});
+  const store = createTestAppStateStore({providerListFactory: () => [...providerCatalog], filePath,tokenStore,userDataPath:dir,statsApiUrl:'',graphFactory:()=>graph,llmFactory:()=>{throw new Error('These requests must not invoke the reasoning model');}});
   try {
     const report = await store.streamIntuneChatMessage({content:'Show all the non-compliant devices as a list'}, ()=>{});
     assert.match(report.assistantMessage.content, /- Device A/);
@@ -1904,7 +1907,8 @@ it("answers an ungranted area deterministically without calling Graph", async ()
   );
   let graphCalls = 0;
   let llmCalls = 0;
-  const store = new AppStateStore({
+  const store = createTestAppStateStore({
+    providerListFactory: () => [...providerCatalog],
     filePath,
     tokenStore,
     userDataPath: dir,
@@ -1973,7 +1977,8 @@ it("names a service that is not connected instead of a scope", async () => {
   );
   let graphCalls = 0;
   let llmCalls = 0;
-  const store = new AppStateStore({
+  const store = createTestAppStateStore({
+    providerListFactory: () => [...providerCatalog],
     filePath,
     tokenStore,
     userDataPath: dir,
@@ -2038,7 +2043,8 @@ it("treats a partly granted Defender part as not connected in Chat", async () =>
   );
   let graphCalls = 0;
   let llmCalls = 0;
-  const store = new AppStateStore({
+  const store = createTestAppStateStore({
+    providerListFactory: () => [...providerCatalog],
     filePath,
     tokenStore,
     userDataPath: dir,
@@ -2101,7 +2107,8 @@ for (const path of ["send", "stream"] as const) {
       }),
     );
     const graphPaths: string[] = [];
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
+      providerListFactory: () => [...providerCatalog],
       filePath,
       tokenStore,
       userDataPath: dir,

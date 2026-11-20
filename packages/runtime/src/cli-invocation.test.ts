@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { it } from "node:test";
+import { registerProviderFixtureDirectory } from "../../../tests/provider-test-guard.mjs";
 import {
   cliArgs,
   cliInvocation,
@@ -13,17 +14,25 @@ import {
 } from "./cli-invocation.js";
 import { CliProviderError, spawnProvider } from "./cli-provider.js";
 
-it("passes native executable arguments without a shell", () => {
-  const payload = '"A & B" | (C) %PATH% ! ^ < >';
-  const command = cliArgs(
-    process.execPath,
-    ["-e", "console.log(JSON.stringify(process.argv.slice(1)))", payload],
-    { env: process.env, encoding: "utf8" as const },
-  );
-  const result = spawnSync(...command);
-  assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(JSON.parse(result.stdout), [payload]);
-  assert.equal(command[2].shell, false);
+it("passes native executable arguments without a shell", async () => {
+  const root = await mkdtemp(join(tmpdir(), "provider launch test "));
+  try {
+    registerProviderFixtureDirectory(root);
+    const script = join(root, "arguments.cjs");
+    await writeFile(script, "console.log(JSON.stringify(process.argv.slice(2)))");
+    const payload = '"A & B" | (C) %PATH% ! ^ < >';
+    const command = cliArgs(
+      process.execPath,
+      [script, payload],
+      { env: process.env, encoding: "utf8" as const },
+    );
+    const result = spawnSync(...command);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), [payload]);
+    assert.equal(command[2].shell, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 it(
@@ -32,6 +41,7 @@ it(
   async () => {
     const root = await mkdtemp(join(tmpdir(), "provider launch test "));
     try {
+      registerProviderFixtureDirectory(root);
       for (const [name, entry] of [
         ["codex", "@openai/codex/bin/codex.js"],
         ["gemini", "@google/gemini-cli/bundle/gemini.js"],

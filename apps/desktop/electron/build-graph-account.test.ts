@@ -7,7 +7,7 @@ import { afterEach, describe, it } from "node:test";
 import { InteractionRequiredAuthError } from "@azure/msal-node";
 import type { RunGraphApi, TenantRecord } from "@openadminos/agent-sdk";
 
-import { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 
 const TENANT: TenantRecord = {
   id: "contoso-tenant-id",
@@ -33,7 +33,7 @@ async function makeFixture(account: Account, tenant: TenantRecord = TENANT) {
   }));
   const loginHints: Array<string | undefined> = [];
   const authorities: Array<string | undefined> = [];
-  const store = new AppStateStore({
+  const store = createTestAppStateStore({
     filePath, userDataPath: dir, statsApiUrl: "", appVersion: "0.7.2",
     tokenStore: { read: async () => "", write: async () => undefined },
     tokenStoreFor: () => ({ read: async () => "", write: async () => undefined }),

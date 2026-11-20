@@ -85,6 +85,26 @@ interpretation. Unrecognized batch launchers are rejected with installation guid
 persona instructions, model names, and prompt punctuation must remain literal arguments.
 No additional runtime dependency is introduced for this resolution.
 
+Electron and runtime unit tests preload a shared provider guard. Tests register
+temporary CLI fixtures and use stubbed responses or HTTP servers they start.
+The guard clears inherited provider binary and endpoint overrides around each
+test. It blocks unregistered executable launches and requires every request
+through Fetch and Node's HTTP and HTTPS clients to use a test-owned server,
+an explicit stub, or an HTTPS origin declared by an opt-in live MCP test.
+Tests handle redirects explicitly so each destination is checked. The preload
+clears proxy settings and replaces inherited HTTP agents and the global Fetch
+dispatcher with direct connections for the lifetime of the test process.
+A caught violation still fails the test process, including after the last
+test's teardown. Electron state tests use a shared fixture that supplies a
+stub provider list unless they exercise discovery with guarded fixtures.
+
+The CI smoke scripts preload the same guard in the development Electron
+main process before importing the app. The guard allows Node HTTP and
+Fetch requests only to loopback origins supplied by the harness for that
+run. The harness checks a per-run file for startup confirmation and any
+blocked attempts, including errors caught by the app. The preload lives
+in the repository's smoke tooling, outside the packaged app.
+
 ### Public roadmap
 
 The public roadmap is the `/roadmap` page of the Next.js app in `web/`, served at the root of `roadmap.openadminos.com` by a host rewrite in `web/next.config.js` (the same pattern as the docs host). Other page paths on that host redirect to the main site, and `/roadmap` on the main site redirects to the roadmap host. The page lists ordered stages without dates, release numbers or pricing; every item has a public GitHub issue. Stage content lives in `web/src/app/roadmap/stages.ts`.
@@ -358,6 +378,10 @@ an error naming the expected provider instead of silently substituting another
 provider or a no-op model. Providers whose CLI exposes no model list (Gemini)
 advertise a single default-model entry so they stay selectable in Chat; the
 sentinel is never passed to the CLI as a model name.
+
+Model scan tests clear inherited provider executable overrides and allow subprocess
+launches only from registered fixture directories. Tests that exercise the Gemini
+connectivity prompt pin Gemini to a fixture executable.
 
 Anthropic support is delivered through the user's locally installed Claude Code
 CLI (`claude`) rather than a stored Anthropic API key. OpenAdminOS probes the CLI
@@ -2380,6 +2404,12 @@ The fixture injects deterministic local-provider readiness plus Graph and LLM
 adapters, so it never depends on Ollama or another provider being installed on
 the CI host. It does not replace a final live-tenant pilot run, but it guards the
 desktop path without requiring tenant credentials in CI or local automation.
+The Intune Chat, Office, and Report Issue smoke profiles disable retrieval and
+embedding auto-install. The smoke runners route local model endpoints to a
+fixture and load the test provider guard into the Electron main process before
+startup, only when a smoke flag is set. The guard allows only the run's fixture
+origins and writes each blocked attempt to a per-run violation log; the runner
+fails the smoke on any entry, even when app code caught the error.
 The v0.3 release gate also includes `npm run screenshots`, a dev-only Electron
 capture harness gated by `OPENADMINOS_SCREENSHOT_CAPTURE=1` and `!app.isPackaged`.
 It seeds a Contoso Demo tenant with an `.invalid` admin address, a local Ollama
@@ -3715,7 +3745,7 @@ Three more public servers that need no sign-in, probed live on 2026-11-05 (hands
 
 - **Catalog.** Microsoft Release Communications (`https://www.microsoft.com/releasecommunications/mcp`, publisher Microsoft, Microsoft API Terms of Use), WindowsForum (`https://mcp.windowsforum.com/`, publisher WindowsForum.com; the server states it is run by Fara Technologies LLC and is not affiliated with Microsoft; privacy policy linked from its MCP page) and endoflife.ai (`https://mcp.endoflife.ai/mcp`, publisher EndofLife AI Inc., an Alberta corporation named on its privacy policy and terms). The plan expected the endoflife.ai operator to be unnamed with no privacy page; both exist, so the catalog names them. Catalog entries can carry `operator`, `policy` (label and link) and `notes`; the install review and details show them.
 - **Tool allowlist.** A catalog entry can list `tools`. The host still lists tools live but keeps only allowlisted ones, so the Marketplace, Chat and the query writer never see the others, and a call to any other tool is refused before any request, also before a handshake (`unknown-tool`, nothing sent). Allowlisted tools the server did not list are `missingTools`: the install is still recorded, the card says "Installed · tools missing", the details name the missing tools, the install and check notices say Chat does not use the server, Chat skips the server and the status strip drops its host until a check finds every tool again. Persisted listings are filtered by the current allowlist too. The host enforces the same skip: while a session lacks an offered tool, every call to the server is refused before dispatch (`tools-missing`, nothing sent), also when a session opened for a call after a restart finds the tool gone, and that listing is stored so the Marketplace shows the change (review round 3). Release Communications offers its four tools; WindowsForum only `search_kb` and `get_kb_article` (it lists 29, including forum search and member lookups); endoflife.ai everything except `scan_stack` and `check_sbom`, which take whole software inventories. Entries without a list keep every listed tool.
-- **Transports.** Release Communications answers in SSE with no session id, endoflife.ai in plain JSON, WindowsForum in SSE with log notifications before the result (no session id was issued on 2026-11-05; the session case is covered by a replay test anyway). The SDK client handles all three; replay tests serve trimmed captures in each shape, and a live probe (`electron/mcp/live.test.ts`) runs the handshake, tools/list and the allowlist check against the real endpoints, skipped in CI, with `OPENADMINOS_SKIP_LIVE` and when the hosts do not resolve. The Release Communications list tools have OData guidance that makes their schemas too large; as with other oversized schemas, names and types are kept and descriptions dropped.
+- **Transports.** Release Communications answers in SSE with no session id, endoflife.ai in plain JSON, WindowsForum in SSE with log notifications before the result (no session id was issued on 2026-11-05; the session case is covered by a replay test anyway). The SDK client handles all three; replay tests serve trimmed captures in each shape, and a live probe (`electron/mcp/live.test.ts`) runs the handshake, tools/list and the allowlist check against the real endpoints, enabled locally with `OPENADMINOS_LIVE_MCP=1` and skipped in CI, with `OPENADMINOS_SKIP_LIVE` or when the hosts do not resolve. The Release Communications list tools have OData guidance that makes their schemas too large; as with other oversized schemas, names and types are kept and descriptions dropped.
 - **Item IDs.** A catalog entry can declare `itemIds` per tool: the params that take one item ID, an OData filter param with the fields in it that name one item, and the form of the tool's IDs. Forms (review round 1): roadmap IDs are ASCII digits; Azure update IDs are digits or, for older posts, lowercase slugs ("2021regions", "3-years-reserved-capacity-now-available"), as the live server returned them on 2026-11-05; KB numbers are digits with an optional `KB` prefix in any case, sent as `KB5034441`. An ID is sent only when it is a token of the admin's current question or the ID an earlier result of the same server in this answer gave. The question is split on every character the form cannot hold, so "109560-109561" gives two IDs and "50344é41" gives none; no character is dropped, so "1.09560" is not 109560; the only equivalence is the KB prefix. The canonical ID is sent, not the writer's text. This generalizes the link rule for Learn fetch URLs: a hook gives the call the links, the question and the item IDs it may use. The query writer sees earlier results with their IDs and the names of the item params and filter fields. The egress filter applies unchanged.
 - **Item IDs in filters (review round 1).** Release Communications' list tools take a free-text OData `filter`, so `id eq 109560` could name an item nobody supplied. A restricted reader (`electron/intune-chat/mcp-filter.ts`) parses the filter before sending: `and`, `or`, `not`, groups, `eq ne gt ge lt le`, `in (...)`, `contains`, `startswith`, `endswith` and `any`/`all` lambdas, with quoted text, numbers, dates, `null`, `true` and `false` right of a field path. Every value compared with an item field (`id` or `baseId`, in any case, also through a lambda variable over one) must pass the item-ID rule and is written as the server compares it: a number for roadmaps (`id eq 109560`), text for Azure updates (`id eq '466774'`), both checked live. A filter outside the grammar, such as plain words, is refused with "had a filter OpenAdminOS cannot check" and nothing is sent. The filter sent is the one rebuilt from what was read, with canonical spacing and lowercase keywords.
 - **Results.** A catalog entry can declare a result format: record shapes (title parts, required keys, link keys, text keys, short fact keys, ID keys) and, for servers that answer one record per call, a whole-result rule with count keys that mean nothing was found. Matching records become numbered, cited sources with title, link where the server gives one, and an excerpt of the text and facts (for example "status: In development", "eol_date: 2027-01-12"). Release Communications items carry no link, so their sources have none; the roadmap or update ID is in the excerpt. A format can name `inheritUrl` keys: a matched record without a link takes the nearest enclosing record's link, so endoflife.ai's KEV entries cite the product page its answer names in `source.url` (review round 1). A result with no text, or a formatted result with no matching record, is empty: its step reads "<server> found nothing", the model is told the server returned nothing and to say so, and no placeholder source is added. An error result shows "<server> returned an error" with the server's message; a call that never answered keeps "Could not reach <server>". WindowsForum results are marked community text in the third-party notice the model reads.

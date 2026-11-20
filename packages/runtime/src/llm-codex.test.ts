@@ -1,9 +1,10 @@
-import { mkdtemp, mkdir, readFile, writeFile, chmod, rm } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
+import { writeNodeCliFixture } from "../../../tests/node-cli-fixture.mjs";
 import { createCodexProcessEnv, createCodexLlm, probeCodexLlm } from "./llm-codex.js";
 import { CliWatchdogError } from "./cli-watchdog.js";
 
@@ -83,22 +84,11 @@ describe("Codex sign-in detection", () => {
     it(loggedIn ? "accepts a CLI login without auth.json" : "rejects a stale auth.json when the CLI is signed out", async () => {
       const root = await mkdtemp(join(tmpdir(), "codex-auth-probe-"));
       try {
-        const script = `#!/usr/bin/env node
-if (process.argv.includes('--version')) { console.log('codex-cli 0.100.0'); }
+        const script = `if (process.argv.includes('--version')) { console.log('codex-cli 0.100.0'); }
 else if (process.argv.slice(2).join(' ') === 'login status') { process.exit(${loggedIn ? 0 : 1}); }
 else { process.exit(99); }
 `;
-        let binaryPath = join(root, "codex");
-        if (process.platform === "win32") {
-          binaryPath += ".cmd";
-          const folder = join(root, "node_modules/@openai/codex/bin");
-          await mkdir(folder, { recursive: true });
-          await writeFile(join(folder, "codex.js"), script);
-          await writeFile(binaryPath, "@exit /b 99\r\n");
-        } else {
-          await writeFile(binaryPath, script);
-          await chmod(binaryPath, 0o755);
-        }
+        const binaryPath = await writeFakeCodex(root, script);
         if (!loggedIn) await writeFile(join(root, "auth.json"), "{}");
         const probe = await probeCodexLlm({ binaryPath, homePath: root });
         assert.equal(probe.installed, true);
@@ -112,19 +102,11 @@ else { process.exit(99); }
 it("isolates app completions from user hooks and tools while preserving the auth backend", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-isolation-"));
   try {
-    const script = `#!/usr/bin/env node
-const text=JSON.stringify({args:process.argv.slice(2),home:process.env.CODEX_HOME});
+    const script = `const text=JSON.stringify({args:process.argv.slice(2),home:process.env.CODEX_HOME});
 console.log(JSON.stringify({type:"item.completed",item:{type:"agent_message",text}}));
 process.stdout.write(JSON.stringify({type:"turn.completed",usage:{input_tokens:100,cached_input_tokens:40,output_tokens:20}}));
 `;
-    let binaryPath = join(root, "codex");
-    if (process.platform === "win32") {
-      binaryPath += ".cmd";
-      const folder = join(root, "node_modules/@openai/codex/bin");
-      await mkdir(folder, { recursive: true });
-      await writeFile(join(folder, "codex.js"), script);
-      await writeFile(binaryPath, "@exit /b 99\r\n");
-    } else { await writeFile(binaryPath, script); await chmod(binaryPath, 0o755); }
+    const binaryPath = await writeFakeCodex(root, script);
     await writeFile(join(root, "config.toml"), 'cli_auth_credentials_store = "keyring"\n[mcp_servers.private]\ncommand = "must-not-run"\n');
     const llm = createCodexLlm({ binaryPath, homePath: root });
     // codex exec --json sends the reply as one item.completed event, so callers do not stream it live.
@@ -154,8 +136,7 @@ describe("Codex CLI watchdog", () => {
       if (mode === "quiet") process.env.OPENADMINOS_CODEX_IDLE_TIMEOUT_MS = "500";
       try {
         const pidsPath = join(root, "pids.txt");
-        const script = `#!/usr/bin/env node
-const { appendFileSync } = require("node:fs");
+        const script = `const { appendFileSync } = require("node:fs");
 if (process.argv[2] === "--version") { console.log("codex-cli 0.200.0"); process.exit(0); }
 appendFileSync(${JSON.stringify(pidsPath)}, process.pid + "\\n");
 if (${JSON.stringify(mode)} !== "quiet") console.log(JSON.stringify({type: "thread.started"}));
@@ -191,8 +172,7 @@ describe("Codex CLI watchdog and a slow consumer", () => {
     const root = await mkdtemp(join(tmpdir(), "codex-slow-consumer-"));
     try {
       // 100 agent messages 10 ms apart, then a clean exit.
-      const script = `#!/usr/bin/env node
-if (process.argv[2] === "--version") { console.log("codex-cli 0.200.0"); process.exit(0); }
+      const script = `if (process.argv[2] === "--version") { console.log("codex-cli 0.200.0"); process.exit(0); }
 let parts = 0;
 setInterval(() => {
   parts += 1;
@@ -219,13 +199,5 @@ setTimeout(() => process.exit(3), 30_000);
 });
 
 async function writeFakeCodex(root: string, script: string): Promise<string> {
-  let binaryPath = join(root, "codex");
-  if (process.platform === "win32") {
-    binaryPath += ".cmd";
-    const folder = join(root, "node_modules/@openai/codex/bin");
-    await mkdir(folder, { recursive: true });
-    await writeFile(join(folder, "codex.js"), script);
-    await writeFile(binaryPath, "@exit /b 99\r\n");
-  } else { await writeFile(binaryPath, script); await chmod(binaryPath, 0o755); }
-  return binaryPath;
+  return writeNodeCliFixture(root, "codex", script, "@openai/codex/bin/codex.js");
 }

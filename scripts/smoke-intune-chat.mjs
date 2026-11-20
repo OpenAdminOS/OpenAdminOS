@@ -1,10 +1,14 @@
 import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { isolateSmokeProviders, terminateSmokeChild, waitForSmokeServer } from "./smoke-provider-isolation.mjs";
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const electronBinary = createRequire(import.meta.url)("electron");
 const viteBin = resolve(
   dirname(fileURLToPath(import.meta.resolve("vite/package.json"))),
   "bin/vite.js",
@@ -14,8 +18,7 @@ const rendererUrl = `http://127.0.0.1:${port}`;
 const userDataDir = await mkdtemp(join(tmpdir(), "openadminos-intune-chat-smoke-"));
 let renderer;
 let electron;
-const electronEnv = { ...process.env };
-delete electronEnv.ELECTRON_RUN_AS_NODE;
+let providerIsolation;
 
 try {
   renderer = spawn(
@@ -28,16 +31,17 @@ try {
     },
   );
   pipeProcess(renderer, "renderer");
-  await waitForHttp(rendererUrl, 20_000);
+  await waitForSmokeServer(renderer, rendererUrl, 20_000);
 
+  providerIsolation = await isolateSmokeProviders(rendererUrl);
   const electronArgs = ["apps/desktop"];
   // Linux CI containers cannot install Electron's helper as root-owned setuid.
   // This flag is confined to the synthetic smoke process, never the packaged app.
   if (process.platform === "linux") electronArgs.push("--no-sandbox");
-  electron = spawn(resolve(root, "node_modules/.bin/electron"), electronArgs, {
+  electron = spawn(electronBinary, electronArgs, {
     cwd: root,
     env: {
-      ...electronEnv,
+      ...providerIsolation.env,
       VITE_DEV_SERVER_URL: rendererUrl,
       OPENADMINOS_INTUNE_CHAT_SMOKE: "1",
       OPENADMINOS_INTUNE_CHAT_SMOKE_USER_DATA: userDataDir,
@@ -50,12 +54,15 @@ try {
   if (code !== 0) {
     throw new Error(`Electron Intune Chat smoke exited with code ${code}.`);
   }
-  console.log("[smoke:intune-chat] passed");
 } finally {
-  await terminateChild(electron);
-  await terminateChild(renderer);
-  await removeTempDir(userDataDir);
+  try {
+    await Promise.all([terminateSmokeChild(electron), terminateSmokeChild(renderer)]);
+    await removeTempDir(userDataDir);
+  } finally {
+    await providerIsolation?.close();
+  }
 }
+console.log("[smoke:intune-chat] passed");
 
 function pipeProcess(child, label) {
   child.stdout?.on("data", (chunk) => {
@@ -66,19 +73,6 @@ function pipeProcess(child, label) {
   });
 }
 
-async function waitForHttp(url, timeoutMs) {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    try {
-      const response = await fetch(url);
-      if (response.ok) return;
-    } catch {
-      // Server is still starting.
-    }
-    await delay(200);
-  }
-  throw new Error(`Timed out waiting for ${url}.`);
-}
 
 function waitForExit(child, timeoutMs) {
   return new Promise((resolveExit, rejectExit) => {
@@ -94,21 +88,6 @@ function waitForExit(child, timeoutMs) {
       clearTimeout(timeout);
       rejectExit(error);
     });
-  });
-}
-
-function terminateChild(child) {
-  if (!child || child.exitCode !== null) return Promise.resolve();
-  return new Promise((resolveTerminate) => {
-    const timeout = setTimeout(() => {
-      if (child.exitCode === null) child.kill("SIGKILL");
-      resolveTerminate();
-    }, 2_000);
-    child.once("exit", () => {
-      clearTimeout(timeout);
-      resolveTerminate();
-    });
-    child.kill("SIGTERM");
   });
 }
 

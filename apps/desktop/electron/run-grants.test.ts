@@ -7,7 +7,7 @@ import { describe, it } from "node:test";
 import type { AgentSummary, RunGraphApi, RunRecord, TenantRecord } from "@openadminos/agent-sdk";
 
 import { RunService, type RunPersistedState, type RunServiceHost } from "./runs.js";
-import { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
 
@@ -40,7 +40,7 @@ async function storeWithToken(tenant: TenantRecord, tokenScopes: string[]) {
   await writeFile(filePath, JSON.stringify({
     activeProviderId: "ollama", installedAgents: [], runs: [], activeTenantId: tenant.id, tenants: [tenant],
   }));
-  const store = new AppStateStore({
+  const store = createTestAppStateStore({
     filePath, userDataPath: dir, statsApiUrl: "",
     tokenStore: { read: async () => "", write: async () => undefined },
   });

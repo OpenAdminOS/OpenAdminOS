@@ -1,3 +1,4 @@
+import { providerCatalog } from "@openadminos/agent-sdk";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -16,7 +17,7 @@ import {
 } from "./configuration-audit.js";
 import { MCP_CATALOG, type McpCatalogEntry } from "./mcp/catalog.js";
 import type { McpHost } from "./mcp/host.js";
-import { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 
 const tokenStore: TokenCacheStorage = { read: async () => "", write: async () => undefined };
 const ZERO_HASH = "0".repeat(64);
@@ -89,7 +90,8 @@ async function makeFixture(initial: Record<string, unknown> = {}, options: { mcp
     "utf8",
   );
   const requests: string[][] = [];
-  const store = new AppStateStore({
+  const store = createTestAppStateStore({
+    providerListFactory: () => [...providerCatalog],
     filePath: statePath,
     tokenStore,
     tokenStoreFor: () => tokenStore,
@@ -113,6 +115,8 @@ async function makeFixture(initial: Record<string, unknown> = {}, options: { mcp
       } as never;
     },
   });
+  // The audit fixtures exercise configuration writes independently of license discovery.
+  Object.defineProperty(store, "backgroundTierProbe", { value: async () => undefined });
   return {
     store,
     statePath,
@@ -202,10 +206,6 @@ describe("configuration audit events", () => {
     const fixture = await makeFixture();
     try {
       await fixture.store.connectTenant();
-      // Connect starts a license check nobody waits for; adding access while
-      // it runs is refused as busy, so wait on the check, not on time.
-      for (let index = 0; index < 500 && (await fixture.store.getAppState()).tenantChecks?.length; index += 1)
-        await new Promise((resolve) => setTimeout(resolve, 10));
       await fixture.store.addTenantAccess(contoso.id, ["defender.incidents"]);
       const raw = JSON.stringify(await fixture.recorded());
       assert.ok(raw.length > 2);

@@ -5,6 +5,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
+import { isolateSmokeProviders, terminateSmokeChild, waitForSmokeServer } from "./smoke-provider-isolation.mjs";
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // Resolve the actual executable; .bin/electron is a shell shim on Windows.
 const electronBinary = createRequire(import.meta.url)("electron");
@@ -18,8 +20,7 @@ const userDataDir = await mkdtemp(join(tmpdir(), "openadminos-screenshot-capture
 const outDir = process.env.OPENADMINOS_OFFICE_SMOKE_OUT ?? join(userDataDir, "evidence");
 let renderer;
 let electron;
-const electronEnv = { ...process.env };
-delete electronEnv.ELECTRON_RUN_AS_NODE;
+let providerIsolation;
 
 try {
   renderer = spawn(
@@ -32,8 +33,9 @@ try {
     },
   );
   pipeProcess(renderer, "renderer");
-  await waitForHttp(rendererUrl, 20_000);
+  await waitForSmokeServer(renderer, rendererUrl, 20_000);
 
+  providerIsolation = await isolateSmokeProviders(rendererUrl);
   const electronArgs = ["apps/desktop"];
   // Linux CI containers cannot install Electron's helper as root-owned setuid.
   // This flag is confined to the synthetic capture process, never the packaged app.
@@ -41,7 +43,7 @@ try {
   electron = spawn(electronBinary, electronArgs, {
     cwd: root,
     env: {
-      ...electronEnv,
+      ...providerIsolation.env,
       VITE_DEV_SERVER_URL: rendererUrl,
       OPENADMINOS_SCREENSHOT_CAPTURE: "1",
       OPENADMINOS_OFFICE_SMOKE: "1",
@@ -56,12 +58,15 @@ try {
   if (code !== 0) {
     throw new Error(`Electron screenshot capture exited with code ${code}.`);
   }
-  console.log("[office-smoke] passed");
 } finally {
-  await terminateChild(electron);
-  await terminateChild(renderer);
-  await removeTempDir(userDataDir);
+  try {
+    await Promise.all([terminateSmokeChild(electron), terminateSmokeChild(renderer)]);
+    await removeTempDir(userDataDir);
+  } finally {
+    await providerIsolation?.close();
+  }
 }
+console.log("[office-smoke] passed");
 
 function pipeProcess(child, label) {
   child.stdout?.on("data", (chunk) => {
@@ -72,19 +77,6 @@ function pipeProcess(child, label) {
   });
 }
 
-async function waitForHttp(url, timeoutMs) {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    try {
-      const response = await fetch(url);
-      if (response.ok) return;
-    } catch {
-      // Server is still starting.
-    }
-    await delay(200);
-  }
-  throw new Error(`Timed out waiting for ${url}.`);
-}
 
 function waitForExit(child, timeoutMs) {
   return new Promise((resolveExit, rejectExit) => {
@@ -100,21 +92,6 @@ function waitForExit(child, timeoutMs) {
       clearTimeout(timeout);
       rejectExit(error);
     });
-  });
-}
-
-function terminateChild(child) {
-  if (!child || child.exitCode !== null) return Promise.resolve();
-  return new Promise((resolveTerminate) => {
-    const timeout = setTimeout(() => {
-      if (child.exitCode === null) child.kill("SIGKILL");
-      resolveTerminate();
-    }, 2_000);
-    child.once("exit", () => {
-      clearTimeout(timeout);
-      resolveTerminate();
-    });
-    child.kill("SIGTERM");
   });
 }
 

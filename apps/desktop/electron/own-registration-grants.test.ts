@@ -7,7 +7,7 @@ import { describe, it } from "node:test";
 import { InteractionRequiredAuthError } from "@azure/msal-node";
 import type { TenantRecord } from "@openadminos/agent-sdk";
 
-import { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 
 const CUSTOM_CLIENT_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const DEFAULT_SCOPE = "https://graph.microsoft.com/.default";
@@ -54,7 +54,7 @@ async function makeFixture(options: {
   const interactiveAuthorities: Array<string | undefined> = [];
   const silentRequests: Array<{ scopes: string[]; forceRefresh?: boolean }> = [];
   const silentTargets: Array<{ tenantId: string; authority?: string }> = [];
-  const store = new AppStateStore({
+  const store = createTestAppStateStore({
     filePath, userDataPath: dir, statsApiUrl: "", appVersion: "0.7.2",
     tokenStore: { read: async () => "", write: async () => undefined },
     tokenStoreFor: () => ({ read: async () => "", write: async () => undefined }),

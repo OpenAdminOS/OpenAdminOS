@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
 import type { RunRecord } from "@openadminos/agent-sdk";
-import { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 
 it("migrates old run usage to null and preserves new usage through local persistence", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-run-usage-"));
@@ -12,7 +12,7 @@ it("migrates old run usage to null and preserves new usage through local persist
   const old: RunRecord = { id: "old", agentSlug: "report", status: "completed", queuedAt: new Date().toISOString(), steps: [], logs: [], tokens: { promptTokens: 3, completionTokens: 2 } };
   const recent: RunRecord = { ...old, id: "recent", providerId: "azure-openai", model: "deployment", usage: { providerId: "azure-openai", model: "deployment", calls: 2, mixedModels: false, promptTokens: 100, completionTokens: 50, totalTokens: 150, costUsd: 0.02 } };
   await writeFile(filePath, JSON.stringify({ activeProviderId: "ollama", installedAgents: [], tenants: [], runs: [old, recent] }));
-  const store = new AppStateStore({ filePath, userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
+  const store = createTestAppStateStore({ filePath, userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
   try {
     const state = await store.getAppState();
     assert.equal(state.runs[0]?.usage, null);

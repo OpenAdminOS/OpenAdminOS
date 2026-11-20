@@ -1,6 +1,8 @@
+import { providerCatalog } from "@openadminos/agent-sdk";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
+import { stubLoopbackConnectionRefused } from "../../../../tests/provider-test-guard.mjs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -10,7 +12,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 
-import { AppStateStore } from "../state.js";
+import type { AppStateStore } from "../state.js";
+import { createTestAppStateStore } from "../../tests/app-state-store-fixture.js";
 import { MCP_CATALOG, mcpHost, type McpCatalogEntry } from "./catalog.js";
 import { MCP_SCHEMA_UNAVAILABLE, McpHost, McpHostError, type McpEndpoint } from "./host.js";
 import { isMcpQueryWriterRequest } from "../intune-chat/mcp-query-writer.js";
@@ -69,11 +72,8 @@ function buildServer(): McpServer {
 
 let httpServer: Server;
 let endpoint: McpEndpoint;
-const originalOllamaUrl = process.env.OPENAGENTS_OLLAMA_URL;
 
 before(async () => {
-  // Provider detection must not reach a real local Ollama.
-  process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:9";
   httpServer = createServer((request, response) => {
     // The endpoint moved within the same origin.
     if (request.url === "/old") { response.writeHead(308, { location: "/mcp" }).end(); return; }
@@ -94,8 +94,6 @@ before(async () => {
 });
 
 after(async () => {
-  if (originalOllamaUrl === undefined) delete process.env.OPENAGENTS_OLLAMA_URL;
-  else process.env.OPENAGENTS_OLLAMA_URL = originalOllamaUrl;
   await new Promise<void>((resolve) => httpServer.close(() => resolve()));
 });
 
@@ -287,12 +285,9 @@ describe("MCP host", () => {
 
   it("reports an unreachable server with the host name", async () => {
     const host = new McpHost({ clientVersion: "test", connectTimeoutMs: 2_000 });
-    const closed = createServer();
-    await new Promise<void>((resolve) => closed.listen(0, "127.0.0.1", resolve));
-    const { port } = closed.address() as AddressInfo;
-    await new Promise<void>((resolve) => closed.close(() => resolve()));
+    stubLoopbackConnectionRefused();
     try {
-      await assert.rejects(host.connect({ id: "gone", name: "Gone", url: `http://127.0.0.1:${port}/mcp` }), (error: unknown) =>
+      await assert.rejects(host.connect({ id: "gone", name: "Gone", url: "http://127.0.0.1:9/mcp" }), (error: unknown) =>
         error instanceof McpHostError && error.code === "unreachable" && /Gone could not be reached at 127\.0\.0\.1/.test(error.message));
     } finally { await host.closeAll(); }
   });
@@ -463,13 +458,14 @@ describe("MCP catalog", () => {
 
 describe("MCP installs in app state", () => {
   async function withStore(run: (store: AppStateStore, statePath: string, catalog: McpCatalogEntry[]) => Promise<void>) {
+    stubLoopbackConnectionRefused();
     const dir = await mkdtemp(join(tmpdir(), "openadminos-mcp-state-"));
     const statePath = join(dir, "state.json");
     const catalog: McpCatalogEntry[] = [
       { ...MCP_CATALOG[0]!, id: "test-docs", name: "Test Docs", url: endpoint.url },
       { ...MCP_CATALOG[1]!, id: "gone", name: "Gone", url: "http://127.0.0.1:9/mcp" },
     ];
-    const store = new AppStateStore({ filePath: statePath, tokenStore: { read: async () => "", write: async () => undefined }, statsApiUrl: "", mcpCatalog: catalog });
+    const store = createTestAppStateStore({ providerListFactory: () => [...providerCatalog], filePath: statePath, tokenStore: { read: async () => "", write: async () => undefined }, statsApiUrl: "", mcpCatalog: catalog });
     try { await run(store, statePath, catalog); } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
   }
   const persisted = async (statePath: string) => JSON.parse(await readFile(statePath, "utf8")).mcpServers;
@@ -502,7 +498,8 @@ describe("MCP installs in app state", () => {
   it("shows only allowlisted tools, names missing ones, and keeps Chat off the server until they are back", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-mcp-allowlist-"));
     const tenant = { id: "tenant-1", displayName: "Contoso", username: "admin@contoso.example", homeAccountId: "home-1", addedAt: "2026-06-01T10:00:00.000Z" };
-    const make = (tools: string[]) => new AppStateStore({
+    const make = (tools: string[]) => createTestAppStateStore({
+      providerListFactory: () => [...providerCatalog],
       filePath: join(dir, "state.json"), tokenStore: { read: async () => "", write: async () => undefined }, statsApiUrl: "",
       mcpCatalog: [{ ...MCP_CATALOG[0]!, id: "test-docs", name: "Test Docs", url: endpoint.url, tools }],
     });
@@ -573,7 +570,8 @@ describe("MCP installs in app state", () => {
       JSON.stringify({ final: true, answer: "Windows Autopatch is a cloud service that automates Windows updates." }),
     ];
     const writer = writerDouble();
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
+      providerListFactory: () => [...providerCatalog],
       filePath: statePath, userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
       mcpCatalog: [{ ...MCP_CATALOG[0]!, id: "test-docs", name: "Test Docs", url: endpoint.url }],
@@ -622,7 +620,8 @@ describe("MCP installs in app state", () => {
     ];
     let reply = 0;
     const writer = writerDouble();
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
+      providerListFactory: () => [...providerCatalog],
       filePath: statePath, userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
       mcpCatalog: [{ ...MCP_CATALOG[0]!, id: "test-docs", name: "Test Docs", url: endpoint.url }],
@@ -671,7 +670,8 @@ describe("MCP installs in app state", () => {
       let reply = 0;
       const writer = writerDouble();
       let store: AppStateStore;
-      store = new AppStateStore({
+      store = createTestAppStateStore({
+        providerListFactory: () => [...providerCatalog],
         filePath: statePath, userDataPath: dir, statsApiUrl: "",
         tokenStore: { read: async () => "", write: async () => undefined },
         mcpCatalog: [{ ...MCP_CATALOG[0]!, id: "test-docs", name: "Test Docs", url: endpoint.url }],
@@ -731,7 +731,8 @@ describe("MCP installs in app state", () => {
       activeProviderId: "ollama", providerChosenByUser: true, activeModelByProviderId: { ollama: "llama3.1:8b" },
       installedAgents: [], runs: [], tenants: [tenant], activeTenantId: tenant.id,
     }));
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
+      providerListFactory: () => [...providerCatalog],
       filePath: statePath, userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
       mcpCatalog: [],

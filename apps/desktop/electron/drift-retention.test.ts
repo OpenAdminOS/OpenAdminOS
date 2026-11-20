@@ -8,7 +8,8 @@ import type { TenantRecord } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 
 import { IntelligenceSqliteStore } from "./intune-chat/sqlite-store.js";
-import { AppStateStore } from "./state.js";
+import type { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 
 const tokenStore: TokenCacheStorage = {
   read: async () => "",
@@ -133,7 +134,7 @@ async function makeStoreFixture(extraState: Record<string, unknown> = {}): Promi
     )}\n`,
     "utf8",
   );
-  const store = new AppStateStore({
+  const store = createTestAppStateStore({
     filePath: statePath,
     tokenStore,
     userDataPath: dir,

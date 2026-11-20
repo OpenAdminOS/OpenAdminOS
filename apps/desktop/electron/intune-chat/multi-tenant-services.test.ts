@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { RunGraphApi, TenantRecord } from "@openadminos/agent-sdk";
-import { AppStateStore } from "../state.js";
+import { createTestAppStateStore } from "../../tests/app-state-store-fixture.js";
 
 const PROMPT = "Compare Windows compliance across tenants";
 const NOW = new Date().toISOString();
@@ -54,7 +54,10 @@ async function makeFixture(tenants: TenantRecord[], answers?: string[]) {
       };
     },
   });
-  const store = new AppStateStore({
+  const store = createTestAppStateStore({
+    providerListFactory: () => [
+      { id: "ollama", name: "Ollama", description: "Local", isLocal: true, status: "connected", models: ["mock-chat"], defaultModel: "mock-chat" },
+    ],
     filePath,
     userDataPath: dir,
     statsApiUrl: "",
@@ -72,9 +75,6 @@ async function makeFixture(tenants: TenantRecord[], answers?: string[]) {
       async *stream() { yield { delta: "", accumulated: "", done: true, model: "mock-chat" }; },
     }),
   });
-  store.listProviders = async () => [
-    { id: "ollama", name: "Ollama", description: "Local", isLocal: true, status: "connected", models: ["mock-chat"], defaultModel: "mock-chat" },
-  ];
   return {
     store,
     filePath,

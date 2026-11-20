@@ -13,7 +13,8 @@ import { MCP_CATALOG } from "./mcp/catalog.js";
 import { NOVA_FOLLOW_UP_CONSENT_NOT_KEPT, NOVA_FOLLOW_UP_PROVIDER_CHANGED, NOVA_PROFILE_CHANGED, prepareNovaProfileChange, type NovaActionHost } from "./nova-actions.js";
 import { NOVA_NOTES_OFF_BY_POLICY } from "./nova-memory.js";
 import { NOVA_FOLLOW_UP_TIMED_OUT, NovaFollowUps } from "./nova-followups.js";
-import { AppStateStore } from "./state.js";
+import type { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 import { TenantClosedError } from "./tenant-lifecycle.js";
 
 const tokenStore: TokenCacheStorage = { read: async () => "", write: async () => undefined };
@@ -57,7 +58,7 @@ async function makeStore(options: { policy?: ManagedPolicyStatus; clock?: () => 
     }),
     "utf8",
   );
-  const store = new AppStateStore({
+  const store = createTestAppStateStore({
     filePath: statePath,
     tokenStore,
     tokenStoreFor: () => tokenStore,

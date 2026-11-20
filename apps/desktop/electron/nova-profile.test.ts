@@ -32,7 +32,7 @@ import {
   novaProfilePromptParts,
   novaReasoningProfileByteLimit,
 } from "./nova-profile.js";
-import { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 
 const MACHINE = "/etc/openadminos/policy.json";
 
@@ -418,7 +418,7 @@ describe("Nova settings in the store", () => {
       JSON.stringify({ activeProviderId: "ollama", providerChosenByUser: true, installedAgents: [], runs: [], tenants: [contoso], activeTenantId: contoso.id, organizations: [] }),
       "utf8",
     );
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
       filePath: statePath,
       tokenStore,
       tokenStoreFor: () => tokenStore,

@@ -1,11 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  chmod,
   mkdtemp,
   readFile,
   rm,
-  writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +13,7 @@ import {
   createClaudeCodeProcessEnv,
   probeClaudeCodeLlm,
 } from "./llm-claude-code.js";
+import { writeNodeCliFixture } from "../../../tests/node-cli-fixture.mjs";
 import { CliWatchdogError } from "./cli-watchdog.js";
 
 // Claude Code ships a native executable on Windows, so a Node script cannot
@@ -280,10 +279,8 @@ async function createUnfinishedClaudeCodeBinary(mode: "quiet" | "silent" | "chat
   cleanup(): Promise<void>;
 }> {
   const root = await mkdtemp(join(tmpdir(), "openadminos claude-watchdog-"));
-  const binaryPath = join(root, "claude");
   const pidsPath = join(root, "pids.txt");
-  const script = `#!/usr/bin/env node
-const { appendFileSync } = require("node:fs");
+  const script = `const { appendFileSync } = require("node:fs");
 if (process.argv[2] === "--version") {
   console.log("2.1.201 (Claude Code)");
   process.exit(0);
@@ -303,8 +300,7 @@ setInterval(() => {
 // Never outlive a broken test run.
 setTimeout(() => process.exit(3), 30_000);
 `;
-  await writeFile(binaryPath, script, "utf8");
-  await chmod(binaryPath, 0o755);
+  const binaryPath = await writeNodeCliFixture(root, "claude", script);
   return {
     binaryPath,
     async readPids() {
@@ -325,13 +321,11 @@ async function createFakeClaudeCodeBinary(defaultLogin = false): Promise<{
   cleanup(): Promise<void>;
 }> {
   const root = await mkdtemp(join(tmpdir(), "openadminos claude-test-"));
-  const binaryPath = join(root, "claude");
   const homePath = join(root, "claude-home");
   const callsPath = join(root, "calls.txt");
   const envPath = join(root, "env.txt");
   const argumentsPath = join(root, "arguments.jsonl");
-  const script = `#!/usr/bin/env node
-const { appendFileSync, writeFileSync } = require("node:fs");
+  const script = `const { appendFileSync, writeFileSync } = require("node:fs");
 const args = process.argv.slice(2);
 if (${defaultLogin} && process.env.CLAUDE_CONFIG_DIR) {
   console.error("Not logged in: different credential namespace");
@@ -353,8 +347,7 @@ if (args[0] === "--version") {
   process.stdout.write(JSON.stringify({type: "result", subtype: "success", result: "Hello", message: {model: "claude-sonnet-5"}, total_cost_usd: 0.004, usage: {input_tokens: 3, cache_read_input_tokens: 7, cache_creation_input_tokens: 3, output_tokens: 2}}));
 }
 `;
-  await writeFile(binaryPath, script, "utf8");
-  await chmod(binaryPath, 0o755);
+  const binaryPath = await writeNodeCliFixture(root, "claude", script);
   return {
     binaryPath,
     homePath,

@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { once } from "node:events";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, it } from "node:test";
+import { after, afterEach, before, describe, it } from "node:test";
 
 import { providerCatalog, resolveProviderDefaultModel, type ModelScanProbe, type ProviderId, type ProviderSummary } from "@openadminos/agent-sdk";
 
@@ -18,9 +19,14 @@ import {
   type ModelScanCheck,
 } from "./model-scan.js";
 import { checkAzureOpenAI, checkLemonade, checkLmStudio, checkOllama, lemonadeStartHint } from "./provider-detail.js";
-import { chmod, readFile } from "node:fs/promises";
 import { installedOnDisk, scanProviderCheck, runScanCheck } from "./model-scan.js";
 import { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
+import { writeNodeCliFixture } from "../../../tests/node-cli-fixture.mjs";
+import { assertProviderTestGuardActive, stubLoopbackConnectionRefused, waitForProviderFixtureSpawn } from "../../../tests/provider-test-guard.mjs";
+import { fakeCli, onlyScanProviders } from "../tests/provider-cli-fixtures.js";
+
+assertProviderTestGuardActive();
 
 const catalog = (id: string) => providerCatalog.find((provider) => provider.id === id)!;
 const ollamaReady = (models: string[]): ProviderSummary => ({ ...catalog("ollama"), status: "connected", models, defaultModel: models[0] });
@@ -92,7 +98,8 @@ describe("first-launch model scan", () => {
         urls.push(String(input instanceof Request ? input.url : input));
         throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } });
       }) as typeof fetch;
-      delete process.env.OPENAGENTS_OLLAMA_URL;
+      process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:11434";
+      process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:1234/v1";
       const checks = buildModelScanChecks({
         catalog: providerCatalog.filter((provider) => provider.id === "ollama" || provider.id === "lm-studio"),
         check: (id) => (id === "ollama" ? checkOllama(catalog("ollama")) : checkLmStudio(catalog("lm-studio"))),
@@ -191,7 +198,7 @@ describe("first-launch model scan", () => {
       const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
       const lmStudio: ProviderSummary = { ...catalog("lm-studio"), status: "connected", models: ["local-model"], defaultModel: "local-model" };
       const providers = providerCatalog.map((provider) => (provider.id === "lm-studio" ? lmStudio : { ...provider, status: "not-installed" as const, models: [] }));
-      const store = new AppStateStore({
+      const store = createTestAppStateStore({
         filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
         tokenStore: { read: async () => "", write: async () => undefined },
         providerListFactory: () => providers,
@@ -214,7 +221,7 @@ describe("first-launch model scan", () => {
 
       const existing = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
       await writeFile(join(existing, "state.json"), JSON.stringify({ activeProviderId: "ollama", installedAgents: [], runs: [], tenants: [] }));
-      const upgraded = new AppStateStore({
+      const upgraded = createTestAppStateStore({
         filePath: join(existing, "state.json"), userDataPath: existing, statsApiUrl: "",
         tokenStore: { read: async () => "", write: async () => undefined },
         providerListFactory: () => providers,
@@ -233,7 +240,7 @@ describe("first-launch model scan", () => {
       const claude: ProviderSummary = { ...catalog("anthropic"), status: "connected", models: [] };
       const providers = providerCatalog.map((provider) => (provider.id === "lm-studio" ? lmStudio : provider.id === "anthropic" ? claude : { ...provider, status: "not-installed" as const, models: [] }));
       const statePath = join(dir, "state.json");
-      const store = new AppStateStore({
+      const store = createTestAppStateStore({
         filePath: statePath, userDataPath: dir, statsApiUrl: "",
         tokenStore: { read: async () => "", write: async () => undefined },
         providerListFactory: () => providers,
@@ -264,7 +271,7 @@ describe("first-launch model scan", () => {
     it("keeps Connect Microsoft 365 pending across a provider setup detour and a restart, until it is left (PR #175 onboarding round review, 4)", async () => {
       const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
       const providers = providerCatalog.map((provider) => ({ ...provider, status: "not-installed" as const, models: [] }));
-      const open = () => new AppStateStore({
+      const open = () => createTestAppStateStore({
         filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
         tokenStore: { read: async () => "", write: async () => undefined },
         providerListFactory: () => providers,
@@ -291,7 +298,7 @@ describe("first-launch model scan", () => {
 
       // Leaving the scan for Chat never defers the step: it follows the scan at once.
       const direct = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
-      const other = new AppStateStore({
+      const other = createTestAppStateStore({
         filePath: join(direct, "state.json"), userDataPath: direct, statsApiUrl: "",
         tokenStore: { read: async () => "", write: async () => undefined },
         providerListFactory: () => providers,
@@ -372,19 +379,12 @@ describe("review round 1 on PR #175", () => {
   const originalFetch = globalThis.fetch;
   afterEach(() => { globalThis.fetch = originalFetch; });
 
-  async function fakeCli(dir: string, name: string, body: string): Promise<string> {
-    const path = join(dir, name);
-    await writeFile(path, `#!/bin/sh\necho "$*" >> "${join(dir, `${name}.log`)}"\n${body}\n`);
-    await chmod(path, 0o755);
-    return path;
-  }
-
   it("keeps a remembered hosted choice and only offers the local model (finding 1)", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
     await writeFile(join(dir, "state.json"), JSON.stringify({ activeProviderId: "anthropic", providerChosenByUser: true, installedAgents: [], runs: [], tenants: [] }));
     const providers = providerCatalog.map((provider) =>
       provider.id === "ollama" ? ollamaReady(["openadminos/openadmin-8b:latest"]) : provider.id === "anthropic" ? claudeReady : { ...provider, status: "not-installed" as const, models: [] });
-    const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined }, providerListFactory: () => providers });
+    const store = createTestAppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined }, providerListFactory: () => providers });
     try {
       const result = await store.scanModels();
       assert.deepEqual(result.outcome, { kind: "local-available", providerId: "ollama", model: "openadminos/openadmin-8b:latest", selectedProviderId: "anthropic" });
@@ -429,7 +429,7 @@ describe("review round 1 on PR #175", () => {
     const urls: string[] = [];
     globalThis.fetch = (async (input: string | URL | Request) => { urls.push(String(input)); throw new Error("must not fetch"); }) as typeof fetch;
     let listed = false;
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
       filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
       // A provider check that never answers must not hold up the first screen.
@@ -465,19 +465,46 @@ describe("review round 1 on PR #175", () => {
     }
   });
 
-  it("kills a CLI that does not answer when the check times out (finding 4)", { skip: process.platform === "win32" }, async () => {
+  it("kills a CLI that does not answer when the check times out (finding 4)", { skip: process.platform === "win32" }, async (t) => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-scan-hang-"));
     try {
-      const pidFile = join(dir, "pid");
-      const claude = await fakeCli(dir, "claude", `echo $$ > "${pidFile}"\nexec sleep 30`);
-      const probe = await runScanCheck(
-        { providerId: "anthropic", name: "Claude Code", where: "hosted", target: "claude auth status", run: (signal) => scanProviderCheck(catalog("anthropic"), { signal, binaryPath: claude }).then((summary) => scanProbeFromProvider(summary)) },
-        1500,
-      );
-      assert.equal(probe.state, "could-not-check");
-      const pid = Number((await readFile(pidFile, "utf8")).trim());
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      assert.throws(() => process.kill(pid, 0), "the hanging CLI must be killed");
+      const binaryPath = await writeNodeCliFixture(dir, "claude", `
+process.once("SIGTERM", () => process.exit(23));
+process.stdout.write("ready\\n");
+setInterval(() => {}, 1_000);
+`, "@anthropic-ai/claude-code/bin/claude.exe");
+      const spawn = waitForProviderFixtureSpawn(binaryPath);
+      const timeoutMs = 1_500;
+      t.mock.timers.enable({ apis: ["setTimeout"] });
+      const scan = runScanCheck({
+        providerId: "anthropic",
+        name: "Claude Code",
+        where: "hosted",
+        target: "claude --version",
+        run: async (signal) => scanProbeFromProvider(await scanProviderCheck(catalog("anthropic"), { signal, binaryPath })),
+      }, timeoutMs);
+      const child = await Promise.race([
+        spawn,
+        scan.then(() => assert.fail("The scan finished before spawning the fixture")),
+      ]);
+      const exit = once(child, "exit");
+      try {
+        assert.ok(child.stdout);
+        const [ready] = await Promise.race([
+          once(child.stdout, "data"),
+          exit.then(() => assert.fail("The fixture exited before reporting readiness")),
+        ]);
+        assert.equal(ready, "ready\n");
+        t.mock.timers.tick(timeoutMs);
+        const probe = await scan;
+        assert.equal(probe.state, "could-not-check");
+        assert.match(probe.facts[0] ?? "", /did not answer within 1\.5 seconds/);
+      } finally {
+        // If abort missed the child, teardown exits with the fixture's own code.
+        if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+        await exit;
+      }
+      assert.deepEqual(await exit, [null, "SIGKILL"], "the scan must kill the hanging CLI before teardown");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -492,7 +519,7 @@ describe("review round 1 on PR #175", () => {
   });
 
   it("reports a failed check as could not check, not as a negative result (finding 7)", async () => {
-    delete process.env.OPENAGENTS_OLLAMA_URL;
+    process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:11434";
     globalThis.fetch = (async () => new Response("unavailable", { status: 503 })) as typeof fetch;
     const http = scanProbeFromProvider(await scanProviderCheck(catalog("ollama")));
     assert.equal(http.state, "could-not-check");
@@ -509,7 +536,7 @@ describe("one scan at a time (review round 1, finding L)", () => {
   it("shares a scan that is already running instead of starting a second set of checks", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
     let listed = 0;
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
       filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
       providerListFactory: async () => {
@@ -540,20 +567,17 @@ describe("startup while the first-run scan is pending (review round 2, items 2 a
     // to loopback, so neither the host's CLIs nor its environment decide
     // what the scan checks.
     const original = { ollama: process.env.OPENAGENTS_OLLAMA_URL, host: process.env.OLLAMA_HOST, lm: process.env.OPENADMINOS_LM_STUDIO_URL };
-    process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:11434";
-    delete process.env.OLLAMA_HOST;
-    process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:1234/v1";
-    // A Gemini CLI spy first on PATH: any spawn writes its arguments.
-    const originalPath = process.env.PATH;
+    stubLoopbackConnectionRefused();
+    process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:9";
+    process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:9/v1";
+    // A pinned Gemini CLI spy: any spawn writes its arguments.
     let geminiLog: string | undefined;
     if (process.platform !== "win32") {
       geminiLog = join(dir, "gemini.log");
-      await writeFile(join(dir, "gemini"), `#!/bin/sh\necho "$*" >> "${geminiLog}"\necho 9.9.9\n`);
-      await chmod(join(dir, "gemini"), 0o755);
-      process.env.PATH = `${dir}:${originalPath ?? ""}`;
+      process.env.OPENADMINOS_GEMINI_BINARY = await fakeCli(dir, "gemini", "echo 9.9.9");
     }
     let llmBuilt = 0;
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
       filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
       providerListFactory: () => { listed += 1; return providerCatalog.map((provider) => ({ ...provider, status: "connected" as const, models: ["m"] })); },
@@ -597,7 +621,7 @@ describe("startup while the first-run scan is pending (review round 2, items 2 a
       }
       assert.equal(listed, afterScan);
     } finally {
-      for (const [key, value] of [["OPENAGENTS_OLLAMA_URL", original.ollama], ["OLLAMA_HOST", original.host], ["OPENADMINOS_LM_STUDIO_URL", original.lm], ["PATH", originalPath]] as const) {
+      for (const [key, value] of [["OPENAGENTS_OLLAMA_URL", original.ollama], ["OLLAMA_HOST", original.host], ["OPENADMINOS_LM_STUDIO_URL", original.lm]] as const) {
         if (value === undefined) delete process.env[key];
         else process.env[key] = value;
       }
@@ -611,15 +635,12 @@ describe("startup while the first-run scan is pending (review round 2, items 2 a
     await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [] }));
     let built = 0;
     const statuses: Record<string, ProviderSummary["status"]> = {};
-    const originalPath = process.env.PATH;
     let geminiLog: string | undefined;
     if (process.platform !== "win32") {
       geminiLog = join(dir, "gemini.log");
-      await writeFile(join(dir, "gemini"), `#!/bin/sh\necho "$*" >> "${geminiLog}"\necho 9.9.9\n`);
-      await chmod(join(dir, "gemini"), 0o755);
-      process.env.PATH = `${dir}:${originalPath ?? ""}`;
+      process.env.OPENADMINOS_GEMINI_BINARY = await fakeCli(dir, "gemini", "echo 9.9.9");
     }
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
       filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
       providerListFactory: () => providerCatalog.map((provider) => ({
@@ -646,8 +667,6 @@ describe("startup while the first-run scan is pending (review round 2, items 2 a
         assert.ok((await readFile(geminiLog, "utf8")).split("\n").some((line) => line && line !== "--version"), "the test prompt reached the Gemini CLI");
       }
     } finally {
-      if (originalPath === undefined) delete process.env.PATH;
-      else process.env.PATH = originalPath;
       store.close();
       await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     }
@@ -683,7 +702,7 @@ describe("the scan names the model Chat uses (review round 3, item 6)", () => {
       activeProviderId: "ollama", providerChosenByUser: true, activeModelByProviderId: { ollama: "llama3.1:8b" },
       installedAgents: [], runs: [], tenants: [], firstRunScan: "pending",
     }));
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
       filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
       providerListFactory: () => providerCatalog.map((provider) => provider.id === "ollama" ? ollama : { ...provider, status: "not-installed" as const, models: [] }),
@@ -720,19 +739,17 @@ describe("failed checks are could not check for every provider (review round 3, 
 
   it("reports an Apple helper that fails as could not check, end to end through the scan", { skip: process.platform !== "darwin" }, async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-apple-"));
-    const helper = join(dir, "helper");
-    await writeFile(helper, "#!/bin/sh\necho 'not json'\nexit 3\n");
-    await chmod(helper, 0o755);
-    const original = process.env.OPENADMINOS_APPLE_FOUNDATION_HELPER;
-    process.env.OPENADMINOS_APPLE_FOUNDATION_HELPER = helper;
-    const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
+    process.env.OPENADMINOS_APPLE_FOUNDATION_HELPER = await fakeCli(dir, "helper", "/bin/cat >/dev/null\necho 'not json'\nexit 3");
+    const store = new AppStateStore({
+      filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
+      tokenStore: { read: async () => "", write: async () => undefined },
+      managedPolicy: onlyScanProviders("apple-foundation"),
+    });
     try {
       const apple = (await store.scanModels()).probes.find((probe) => probe.providerId === "apple-foundation");
       assert.equal(apple?.state, "could-not-check", apple?.summary);
       assert.notEqual(apple?.summary, "Not available");
     } finally {
-      if (original === undefined) delete process.env.OPENADMINOS_APPLE_FOUNDATION_HELPER;
-      else process.env.OPENADMINOS_APPLE_FOUNDATION_HELPER = original;
       store.close();
       await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     }
@@ -749,7 +766,7 @@ describe("a manual scan in a completed profile (review round 4, item 1)", () => 
   it("serves the scan's results afterwards: no unrestricted listing until Refresh providers", async () => {
     const dir = await completedProfile();
     let listed = 0;
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
       filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
       providerListFactory: () => { listed += 1; return providerCatalog.map((provider) => ({ ...provider, status: "not-installed" as const, models: [] })); },
@@ -787,10 +804,15 @@ describe("a manual scan in a completed profile (review round 4, item 1)", () => 
       }
       return realFetch(input, init);
     }) as typeof fetch;
-    const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
+    const store = new AppStateStore({
+      filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
+      tokenStore: { read: async () => "", write: async () => undefined },
+      managedPolicy: onlyScanProviders("ollama", "lm-studio"),
+    });
     try {
       const result = await store.scanModels();
-      assert.ok(result.probes.filter((probe) => probe.providerId === "ollama" || probe.providerId === "lm-studio").every((probe) => probe.notContacted));
+      assert.equal(result.probes.length, 2);
+      assert.ok(result.probes.every((probe) => probe.notContacted));
       await store.getAppState();
       await store.listProviders();
       assert.deepEqual(contacted, [], "no network probe reached the off-device endpoints");
@@ -810,7 +832,7 @@ describe("a check that times out is served as could not check (Muse round 5, B)"
   it("lists a timed-out provider as a failed check with the scan row's reason, never as not checked", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
     await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [], firstRunScan: "pending" }));
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
       filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
       // Codex never answers; the others answer at once.
@@ -852,7 +874,7 @@ describe("an endpoint the scan did not contact is served as not contacted (PR #2
       if (url.includes("10.255.255.1")) contacted.push(url);
       return realFetch(input, init);
     }) as typeof fetch;
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
       filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
       providerListFactory: async () => providerCatalog.map((provider) => ({ ...provider, status: "not-installed" as const, models: [] })),
@@ -1018,6 +1040,7 @@ describe("checking one provider again from Chat (PR #204 review round 3)", () =>
     await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [], firstRunScan: "pending" }));
     const original = process.env.OPENADMINOS_LM_STUDIO_URL;
     // On this device at scan time, and nothing listens there.
+    stubLoopbackConnectionRefused();
     process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:9/v1";
     const realFetch = globalThis.fetch;
     const contacted: string[] = [];
@@ -1029,7 +1052,11 @@ describe("checking one provider again from Chat (PR #204 review round 3)", () =>
       }
       return realFetch(input, init);
     }) as typeof fetch;
-    const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
+    const store = new AppStateStore({
+      filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
+      tokenStore: { read: async () => "", write: async () => undefined },
+      managedPolicy: onlyScanProviders("lm-studio"),
+    });
     try {
       await store.scanModels();
       await store.completeFirstRunScan({ microsoftStepPending: false });
@@ -1054,7 +1081,7 @@ describe("checking one provider again from Chat (PR #204 review round 3)", () =>
     const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
     await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [], activeProviderId: "anthropic", providerChosenByUser: true }));
     const checked: ProviderId[] = [];
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
       filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
       providerListFactory: async () => {
@@ -1084,7 +1111,7 @@ describe("checking one provider again from Chat (PR #204 review round 3)", () =>
     const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
     await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [] }));
     let listings = 0;
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
       filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
       providerListFactory: async () => {
@@ -1141,7 +1168,11 @@ describe("reads that overlap a manual scan (review round 5, item 1)", () => {
       if (url.endsWith("/v1/models")) lmStudioAsked?.();
       return realFetch(input, init);
     }) as typeof fetch;
-    const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
+    const store = new AppStateStore({
+      filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
+      tokenStore: { read: async () => "", write: async () => undefined },
+      managedPolicy: onlyScanProviders("ollama", "lm-studio"),
+    });
     try {
       const scan = store.scanModels();
       await asked;
@@ -1174,19 +1205,18 @@ describe("Gemini Test refreshes what listing serves (review round 4, item 2)", {
     await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [] }));
     const request = succeeds
       ? [
-          "cat >/dev/null",
+          "/bin/cat >/dev/null",
           `echo '{"type":"init","model":"gemini-test"}'`,
           `echo '{"type":"message","role":"assistant","content":"OPENADMINOS_PROVIDER_OK"}'`,
           `echo '{"type":"result","status":"success"}'`,
         ].join("\n")
-      : "cat >/dev/null\necho 'Error: not logged in. Please login.' >&2\nexit 1";
-    await writeFile(join(dir, "gemini"), `#!/bin/sh\nif [ "$1" = "--version" ]; then echo 0.60.0; exit 0; fi\n${request}\n`);
-    await chmod(join(dir, "gemini"), 0o755);
-    const original = { path: process.env.PATH, ollama: process.env.OPENAGENTS_OLLAMA_URL, lm: process.env.OPENADMINOS_LM_STUDIO_URL };
-    process.env.PATH = `${dir}:/usr/bin:/bin`;
-    process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:9";
-    process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:9/v1";
-    const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
+      : "/bin/cat >/dev/null\necho 'Error: not logged in. Please login.' >&2\nexit 1";
+    process.env.OPENADMINOS_GEMINI_BINARY = await fakeCli(dir, "gemini", `if [ "$1" = "--version" ]; then echo 0.60.0; exit 0; fi\n${request}`);
+    const store = new AppStateStore({
+      filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
+      tokenStore: { read: async () => "", write: async () => undefined },
+      managedPolicy: onlyScanProviders("gemini"),
+    });
     const gemini = async () => (await store.listProviders()).find((provider) => provider.id === "gemini")!;
     try {
       await store.scanModels();
@@ -1195,17 +1225,25 @@ describe("Gemini Test refreshes what listing serves (review round 4, item 2)", {
       assert.equal(result.ok, succeeds, result.message);
       return await gemini();
     } finally {
-      for (const [key, value] of [["PATH", original.path], ["OPENAGENTS_OLLAMA_URL", original.ollama], ["OPENADMINOS_LM_STUDIO_URL", original.lm]] as const) {
-        if (value === undefined) delete process.env[key];
-        else process.env[key] = value;
-      }
       store.close();
       await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     }
   };
 
-  it("shows Gemini connected after the first successful Test, so it can be activated", async () => {
-    assert.equal((await run(true)).status, "connected");
+  describe("with an inherited Gemini override", () => {
+    const inherited = process.env.OPENADMINOS_GEMINI_BINARY;
+    before(() => {
+      process.env.OPENADMINOS_GEMINI_BINARY = join(tmpdir(), "unregistered-gemini");
+    });
+    after(() => {
+      if (inherited === undefined) delete process.env.OPENADMINOS_GEMINI_BINARY;
+      else process.env.OPENADMINOS_GEMINI_BINARY = inherited;
+    });
+
+    it("clears the override before checking Gemini with the pinned fixture", async () => {
+      assert.equal(process.env.OPENADMINOS_GEMINI_BINARY, undefined);
+      assert.equal((await run(true)).status, "connected");
+    });
   });
 
   it("shows what a failed Test found", async () => {
@@ -1221,10 +1259,10 @@ describe("after the first-run scan (review round 3, item 1)", () => {
     let listed = 0;
     let generation = 0;
     const original = { ollama: process.env.OPENAGENTS_OLLAMA_URL, host: process.env.OLLAMA_HOST, lm: process.env.OPENADMINOS_LM_STUDIO_URL };
-    process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:11434";
-    delete process.env.OLLAMA_HOST;
-    process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:1234/v1";
-    const store = new AppStateStore({
+    stubLoopbackConnectionRefused();
+    process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:9";
+    process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:9/v1";
+    const store = createTestAppStateStore({
       filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
       providerListFactory: () => {
@@ -1281,7 +1319,7 @@ describe("after the first-run scan (review round 3, item 1)", () => {
 describe("review round 2: coordination and Start (items 3, 7, B)", () => {
   const fresh = async (onList?: () => void) => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
       filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
       providerListFactory: async () => {
@@ -1351,8 +1389,7 @@ describe("review round 2: coordination and Start (items 3, 7, B)", () => {
     const { createServer } = await import("node:http");
     const bin = await mkdtemp(join(tmpdir(), "openadminos-lms-"));
     const log = join(bin, "lms.log");
-    await writeFile(join(bin, "lms"), `#!/bin/sh\necho "$*" >> "${log}"\n`);
-    await chmod(join(bin, "lms"), 0o755);
+    await fakeCli(bin, "lms", "exit 0");
     const launched = () => readFile(log, "utf8").then((text) => text.trim().split("\n").filter(Boolean), () => [] as string[]);
     const server = createServer((_request, response) => {
       void launched().then((lines) => {
@@ -1396,7 +1433,7 @@ describe("review round 2: coordination and Start (items 3, 7, B)", () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
     const lm = await fakeLmStudio();
     // The provider list reads LM Studio's state when a check starts, then takes a while, like a slow scan.
-    const store = new AppStateStore({
+    const store = createTestAppStateStore({
       filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
       providerListFactory: async () => {
@@ -1459,7 +1496,7 @@ describe("Lemonade in the scan", () => {
   });
 
   it("checks Lemonade on its loopback port and reads its chat models", async () => {
-    delete process.env.OPENADMINOS_LEMONADE_URL;
+    process.env.OPENADMINOS_LEMONADE_URL = "http://127.0.0.1:13305/v1";
     const urls: string[] = [];
     globalThis.fetch = (async (input: string | URL | Request) => {
       urls.push(String(input instanceof Request ? input.url : input));
@@ -1528,7 +1565,7 @@ describe("Lemonade in the scan", () => {
   });
 
   it("names the start command for this OS in the provider detail when Lemonade refuses the connection", async () => {
-    delete process.env.OPENADMINOS_LEMONADE_URL;
+    process.env.OPENADMINOS_LEMONADE_URL = "http://127.0.0.1:13305/v1";
     globalThis.fetch = (async () => {
       throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } });
     }) as typeof fetch;

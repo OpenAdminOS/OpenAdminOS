@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
 import type { RunGraphApi } from "@openadminos/agent-sdk";
-import { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 
 it("scheduled Graph access fails with recovery instructions without opening Microsoft sign-in", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-scheduled-auth-"));
@@ -12,7 +12,7 @@ it("scheduled Graph access fails with recovery instructions without opening Micr
   await writeFile(filePath, JSON.stringify({ activeProviderId: "ollama", installedAgents: [], runs: [],
     activeTenantId: "tenant-1", tenants: [{ id: "tenant-1", displayName: "Test", username: "test@example.com", homeAccountId: "test", addedAt: new Date().toISOString() }] }));
   let browserCalls = 0;
-  const store = new AppStateStore({ filePath, userDataPath: dir, statsApiUrl: "",
+  const store = createTestAppStateStore({ filePath, userDataPath: dir, statsApiUrl: "",
     tokenStore: { read: async () => "", write: async () => undefined },
     openBrowser: async () => { browserCalls += 1; },
   });
@@ -156,7 +156,7 @@ it("the delivery host resolves the MSAL client that connected the tenant", async
     activeTenantId: "tenant-byo", tenants: [{ id: "tenant-byo", displayName: "Contoso", username: "admin@contoso.example",
       homeAccountId: "byo-home", addedAt: new Date().toISOString(), appRegistration: byoRegistration }] }));
   const storesFor: string[] = [];
-  const store = new AppStateStore({ filePath, userDataPath: dir, statsApiUrl: "",
+  const store = createTestAppStateStore({ filePath, userDataPath: dir, statsApiUrl: "",
     tokenStore: { read: async () => "", write: async () => undefined },
     tokenStoreFor: (clientId) => {
       storesFor.push(clientId);
@@ -185,7 +185,7 @@ it("Chat and cache Graph access never widens consent beyond the tenant's granted
     activeTenantId: "tenant-1", tenants: [{ id: "tenant-1", displayName: "Test", username: "test@example.com", homeAccountId: "test", addedAt: new Date().toISOString(),
       grantedScopes: ["User.Read.All", "GroupMember.Read.All", "Directory.Read.All", "Organization.Read.All"] }] }));
   let browserCalls = 0;
-  const store = new AppStateStore({ filePath, userDataPath: dir, statsApiUrl: "",
+  const store = createTestAppStateStore({ filePath, userDataPath: dir, statsApiUrl: "",
     tokenStore: { read: async () => "", write: async () => undefined },
     openBrowser: async () => { browserCalls += 1; },
   });

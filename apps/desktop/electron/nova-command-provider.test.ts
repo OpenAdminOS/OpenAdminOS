@@ -3,7 +3,7 @@ import { it } from 'node:test';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AppStateStore } from './state.js';
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 
 it('uses only the pinned reasoning provider for classification and rejects scope changes', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'nova-command-provider-'));
@@ -11,7 +11,7 @@ it('uses only the pinned reasoning provider for classification and rejects scope
   await writeFile(filePath, JSON.stringify({ activeTenantId: 'test', activeProviderId: 'ollama', installedAgents: [], runs: [], tenants: [{ id: 'test', displayName: 'Test tenant', homeAccountId: 'test', addedAt: new Date().toISOString() }] }));
   let local = true;
   const calls: unknown[] = [];
-  const store = new AppStateStore({ filePath, userDataPath: dir, statsApiUrl: '',
+  const store = createTestAppStateStore({ filePath, userDataPath: dir, statsApiUrl: '',
     tokenStore: { read: async () => '', write: async () => {} },
     providerListFactory: () => [{ id: 'ollama', name: 'Ollama', isLocal: local, status: 'connected', models: ['test'], defaultModel: 'test' } as never],
     llmFactory: (provider, model) => ({ available: true, complete: async options => {

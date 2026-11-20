@@ -12,7 +12,8 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { z } from "zod";
 import { partIdsFor, providerCatalog, qualifyScope, requestedScopes, type IntuneChatStep, type IntuneChatStreamEvent } from "@openadminos/agent-sdk";
 
-import { AppStateStore } from "../state.js";
+import type { AppStateStore } from "../state.js";
+import { createTestAppStateStore } from "../../tests/app-state-store-fixture.js";
 import { MCP_CATALOG } from "../mcp/catalog.js";
 import type { IntelligenceSqliteStore } from "./sqlite-store.js";
 import { isMcpQueryWriterRequest } from "./mcp-query-writer.js";
@@ -50,10 +51,8 @@ const MIXED_QUESTION = "Which of our macOS devices are noncompliant, and what do
 
 let httpServer: Server;
 let baseUrl: string;
-const originalOllamaUrl = process.env.OPENAGENTS_OLLAMA_URL;
 
 before(async () => {
-  process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:9";
   httpServer = createServer((request, response) => {
     void (async () => {
       const server = buildServer(request.url === "/kql" ? "kql" : "learn");
@@ -71,8 +70,6 @@ before(async () => {
 });
 
 after(async () => {
-  if (originalOllamaUrl === undefined) delete process.env.OPENAGENTS_OLLAMA_URL;
-  else process.env.OPENAGENTS_OLLAMA_URL = originalOllamaUrl;
   await new Promise<void>((resolve) => httpServer.close(() => resolve()));
 });
 
@@ -136,17 +133,12 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: {
   };
   const learn = MCP_CATALOG.find((entry) => entry.id === "microsoft-learn")!;
   const kql = MCP_CATALOG.find((entry) => entry.id === "kql-search")!;
-  const store = new AppStateStore({
+  const store = createTestAppStateStore({
     filePath: statePath, userDataPath: dir, statsApiUrl: "",
     tokenStore: { read: async () => "", write: async () => undefined },
     mcpCatalog: [{ ...learn, url: `${baseUrl}/learn` }, { ...kql, url: `${baseUrl}/kql` }],
-    // A hosted provider reports its model, so the window and the host resolve the same one; no CLI on this device is probed.
-    ...(options.provider
-      ? {
-          providerListFactory: () => providerCatalog.map((entry) =>
-            entry.id === options.provider!.id ? { ...entry, status: "available" as const, models: [options.provider!.model] } : entry),
-        }
-      : {}),
+    providerListFactory: () => providerCatalog.map((entry) =>
+      entry.id === options.provider?.id ? { ...entry, status: "available", models: [options.provider.model] } : entry),
     graphFactory: (input) => {
       graphBuilds.push(input.tenantId);
       if (options.graphError) throw new Error(options.graphError);

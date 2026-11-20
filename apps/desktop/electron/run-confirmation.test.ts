@@ -11,7 +11,8 @@ import type {
 } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 
-import { AppStateStore } from "./state.js";
+import type { AppStateStore } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 
 const tokenStore: TokenCacheStorage = {
   read: async () => "",
@@ -196,7 +197,7 @@ async function makeStoreFixture(input: {
     )}\n`,
     "utf8",
   );
-  const store = new AppStateStore({
+  const store = createTestAppStateStore({
     filePath: statePath,
     tokenStore,
     userDataPath: dir,

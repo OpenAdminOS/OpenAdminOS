@@ -431,6 +431,7 @@ function runTests(entry, env) {
   const args = [
     ...(env.MUTATION_REGISTER_ENTRY ? ["--import", hooks] : []),
     "--import", "tsx",
+    "--import", join(REPO_ROOT, "tests", "provider-test-setup.mjs"),
     "--test", "--test-reporter=tap",
     ...entry.tests.map((test) => relative(cwd, join(REPO_ROOT, test))),
   ];

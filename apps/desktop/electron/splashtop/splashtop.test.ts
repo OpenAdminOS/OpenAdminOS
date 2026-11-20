@@ -14,7 +14,8 @@ import {
 import type { TokenCacheStorage } from "@openadminos/runtime";
 
 import type { ConfigurationAuditEvent } from "../configuration-audit.js";
-import { AppStateStore } from "../state.js";
+import type { AppStateStore } from "../state.js";
+import { createTestAppStateStore } from "../../tests/app-state-store-fixture.js";
 import type { SplashtopChatContext } from "../intune-chat/tools.js";
 import { normalizeSplashtopToken, SplashtopApi, SplashtopApiError, splashtopTokenProblem, type SplashtopFetch } from "./api.js";
 import { buildSplashtopChangePlan, isPlannedSplashtopRequest, SPLASHTOP_WRITE_KIND, validateSplashtopChangeRequest } from "./plans.js";
@@ -411,7 +412,7 @@ async function withStore(run: (input: {
   const tokens = new MemorySplashtopTokenStore();
   const route = { current: splashtopTeam };
   const { calls, fetch } = recorder((call) => route.current(call));
-  const store = new AppStateStore({ filePath, tokenStore, statsApiUrl: "", userDataPath: dir, splashtopTokens: tokens, splashtopFetch: fetch });
+  const store = createTestAppStateStore({ filePath, tokenStore, statsApiUrl: "", userDataPath: dir, splashtopTokens: tokens, splashtopFetch: fetch });
   try {
     await run({ store, tokens, calls, route, file: async () => JSON.parse(await readFile(filePath, "utf8")) });
   } finally {

@@ -50,6 +50,7 @@ describe("lemonadeChatModelIds", () => {
 
 describe("probeLemonadeLlm", () => {
   it("lists chat models from /models and names the first as default", async () => {
+    process.env.OPENADMINOS_LEMONADE_URL = "http://127.0.0.1:13305/v1";
     await withFetch(async (input) => {
       assert.equal(String(input), "http://127.0.0.1:13305/v1/models");
       return jsonResponse({
@@ -205,6 +206,7 @@ describe("createLemonadeLlm sends only a listed chat model", () => {
   const list = (data: unknown[]) => jsonResponse({ object: "list", data });
 
   it("refuses a cloud-routed, a non-chat and an undownloaded model before any chat request", async () => {
+    process.env.OPENADMINOS_LEMONADE_URL = "http://127.0.0.1:13305/v1";
     const cases: Array<[string, RegExp]> = [
       ["openai.gpt-5", /^Error: Lemonade sends openai\.gpt-5 to a cloud API, so OpenAdminOS does not use it as a local model\./],
       ["nomic-embed-text-v1-GGUF", /^Error: nomic-embed-text-v1-GGUF is not a chat model in Lemonade\./],
@@ -233,6 +235,7 @@ describe("createLemonadeLlm sends only a listed chat model", () => {
   });
 
   it("checks the list on every request, then sends a listed model", async () => {
+    process.env.OPENADMINOS_LEMONADE_URL = "http://127.0.0.1:13305/v1";
     const urls: string[] = [];
     await withFetch(async (input) => {
       urls.push(String(input));

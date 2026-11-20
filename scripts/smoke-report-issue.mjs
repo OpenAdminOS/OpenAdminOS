@@ -1,11 +1,15 @@
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { isolateSmokeProviders, terminateSmokeChild, waitForSmokeServer } from "./smoke-provider-isolation.mjs";
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const electronBinary = createRequire(import.meta.url)("electron");
 const viteBin = resolve(
   dirname(fileURLToPath(import.meta.resolve("vite/package.json"))),
   "bin/vite.js",
@@ -20,8 +24,7 @@ const receivedSupportIssues = [];
 let renderer;
 let electron;
 let supportServer;
-const electronEnv = { ...process.env };
-delete electronEnv.ELECTRON_RUN_AS_NODE;
+let providerIsolation;
 
 try {
   supportServer = createServer(async (req, res) => {
@@ -58,16 +61,17 @@ try {
     },
   );
   pipeProcess(renderer, "renderer");
-  await waitForHttp(rendererUrl, 20_000);
+  await waitForSmokeServer(renderer, rendererUrl, 20_000);
 
+  providerIsolation = await isolateSmokeProviders(rendererUrl, supportApiUrl);
   const electronArgs = ["apps/desktop"];
   // Linux CI containers cannot install Electron's helper as root-owned setuid.
   // This flag is confined to the synthetic smoke process, never the packaged app.
   if (process.platform === "linux") electronArgs.push("--no-sandbox");
-  electron = spawn(resolve(root, "node_modules/.bin/electron"), electronArgs, {
+  electron = spawn(electronBinary, electronArgs, {
     cwd: root,
     env: {
-      ...electronEnv,
+      ...providerIsolation.env,
       VITE_DEV_SERVER_URL: rendererUrl,
       OPENADMINOS_REPORT_ISSUE_SMOKE: "1",
       OPENADMINOS_REPORT_ISSUE_SMOKE_USER_DATA: userDataDir,
@@ -128,15 +132,16 @@ try {
   if (parsedBundle.privacy?.publicIssueSubmissionRequiresConfirmation !== true) {
     throw new Error("Diagnostics bundle did not declare confirmation-required submission.");
   }
-  console.log("[smoke:report-issue] passed");
 } finally {
-  if (electron && electron.exitCode === null) electron.kill("SIGTERM");
-  if (renderer && renderer.exitCode === null) renderer.kill("SIGTERM");
-  if (supportServer) {
-    await closeServer(supportServer);
+  try {
+    await Promise.all([terminateSmokeChild(electron), terminateSmokeChild(renderer)]);
+    if (supportServer) await closeServer(supportServer);
+    await rm(userDataDir, { recursive: true, force: true });
+  } finally {
+    await providerIsolation?.close();
   }
-  await rm(userDataDir, { recursive: true, force: true });
 }
+console.log("[smoke:report-issue] passed");
 
 function pipeProcess(child, label) {
   child.stdout?.on("data", (chunk) => {
@@ -147,19 +152,6 @@ function pipeProcess(child, label) {
   });
 }
 
-async function waitForHttp(url, timeoutMs) {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    try {
-      const response = await fetch(url);
-      if (response.ok) return;
-    } catch {
-      // Server is still starting.
-    }
-    await delay(200);
-  }
-  throw new Error(`Timed out waiting for ${url}.`);
-}
 
 function waitForExit(child, timeoutMs) {
   return new Promise((resolveExit, rejectExit) => {
@@ -178,9 +170,6 @@ function waitForExit(child, timeoutMs) {
   });
 }
 
-function delay(ms) {
-  return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
-}
 
 function listen(server) {
   return new Promise((resolveListen, rejectListen) => {

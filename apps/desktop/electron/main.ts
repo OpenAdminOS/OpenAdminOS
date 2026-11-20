@@ -470,6 +470,7 @@ function seedIntuneChatSmokeState(userDataDir: string): void {
         ],
         activeTenantId: "smoke-tenant",
         registryInstallCountsEnabled: false,
+        retrievalAutoInstall: false,
       },
       null,
       2,
@@ -531,6 +532,7 @@ function seedReportIssueSmokeState(userDataDir: string): void {
         ],
         activeTenantId: "report-smoke-tenant",
         registryInstallCountsEnabled: false,
+        retrievalAutoInstall: false,
       },
       null,
       2,
@@ -670,6 +672,7 @@ function seedScreenshotCaptureState(userDataDir: string): void {
         ],
         activeTenantId: isWebsiteCapture ? "contoso-tenant" : "contoso-demo-tenant",
         registryInstallCountsEnabled: false,
+        retrievalAutoInstall: false,
       },
       null,
       2,
@@ -953,13 +956,14 @@ function createIntuneChatSmokeLlm(): RunLlmApi {
           done: false,
           model: smokeModelName,
         };
-        const started = Date.now();
-        while (!options.signal?.aborted && Date.now() - started < 5000) {
-          await new Promise((resolve) => setTimeout(resolve, 50));
+        const { signal } = options;
+        if (!signal) throw new Error("The smoke stream requires a cancellation signal.");
+        if (!signal.aborted) {
+          await new Promise<void>((resolve) => {
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          });
         }
-        if (options.signal?.aborted) {
-          throw new Error("Smoke stream stopped by user.");
-        }
+        throw new Error("Smoke stream stopped by user.");
       }
       yield {
         delta: "WIN-01 is stale",
@@ -977,7 +981,7 @@ function createIntuneChatSmokeLlm(): RunLlmApi {
   };
 }
 
-function createIntuneChatSmokeProviders(): ProviderSummary[] {
+function createSmokeProviders(model = smokeModelName): ProviderSummary[] {
   return providerCatalog.map((provider) =>
     provider.id === "ollama"
       ? {
@@ -987,8 +991,8 @@ function createIntuneChatSmokeProviders(): ProviderSummary[] {
           detail: isLandingCapture
             ? "Running on http://localhost:11434"
             : "Deterministic local provider fixture for Electron smoke tests.",
-          models: [smokeModelName],
-          defaultModel: smokeModelName,
+          models: [model],
+          defaultModel: model,
         }
       : { ...provider },
   );
@@ -1900,7 +1904,10 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
 
   await setTextarea("Hold response for cancellation smoke.");
   await pressEnterInTextarea();
-  await waitFor(() => Boolean(findButton("Stop")), "chat stop action", 2500);
+  await waitFor(
+    () => Boolean(findButton("Stop")) && bodyText().includes("Partial response"),
+    "chat stream ready to stop",
+  );
   await clickButton("Stop");
   await waitFor(
     () => bodyText().includes("Response stopped by user"),
@@ -3186,6 +3193,9 @@ function notificationBodyForRun(run: RunRecord): string {
 async function refreshRegistryInBackground(
   trigger: "startup" | "interval" | "focus",
 ): Promise<void> {
+  // CI smoke runs use local agents and the seeded Office registry cache.
+  if (isIntuneChatSmokeLaunch || isReportIssueSmokeLaunch ||
+      (isScreenshotCaptureLaunch && process.env.OPENADMINOS_OFFICE_SMOKE === "1")) return;
   lastBackgroundRefreshAt = Date.now();
   try {
     const result = await store.initRegistry();
@@ -6965,7 +6975,7 @@ if (!gotLock) {
     // provider or the public references. Smoke and capture launches use
     // their fixtures, never a policy on the machine that runs them.
     const managedPolicy =
-      isFirstRunCapture || isIntuneChatSmokeLaunch || isScreenshotCaptureLaunch
+      isIntuneChatSmokeLaunch || isReportIssueSmokeLaunch || isScreenshotCaptureLaunch
         ? undefined
         : await loadManagedPolicy({
             paths: resolveManagedPolicyPaths({ packaged: app.isPackaged }),
@@ -7039,8 +7049,10 @@ if (!gotLock) {
         ? {
             graphFactory: () => createIntuneChatSmokeGraph(),
             llmFactory: () => createIntuneChatSmokeLlm(),
-            providerListFactory: () => createIntuneChatSmokeProviders(),
+            providerListFactory: () => createSmokeProviders(),
           }
+        : isReportIssueSmokeLaunch
+        ? { providerListFactory: () => createSmokeProviders("report-smoke-model") }
         : {}),
     });
     // The policy's provider, model and registration are in state before the window reads it.

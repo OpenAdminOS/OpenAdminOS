@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
-import { AppStateStore, LEGACY_SAMPLE_TENANT_ID } from "./state.js";
+import { LEGACY_SAMPLE_TENANT_ID } from "./state.js";
+import { createTestAppStateStore } from "../tests/app-state-store-fixture.js";
 
 /**
  * Pilot mode and its sample data were removed (maintainer decision,
@@ -46,12 +47,12 @@ async function makeStore(state: Record<string, unknown>) {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-sample-removal-"));
   const filePath = join(dir, "state.json");
   await writeFile(filePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
-  const store = new AppStateStore({
+  const store = createTestAppStateStore({
     filePath,
     userDataPath: dir,
     statsApiUrl: "",
     tokenStore: { read: async () => "", write: async () => undefined },
-    providerListFactory: () => [],
+
   });
   const internal = store as unknown as {
     intelligenceStore: {
