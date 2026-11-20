@@ -8,7 +8,7 @@ import type {
 import { ContextTooSmallError } from "@openadminos/agent-sdk";
 import { isRefusedRedirect, modelServerRedirect, redirectRefusedDetail } from "./llm-openai-compatible.js";
 import { keepOllamaSize, keptOllamaRevision, ollamaRequestNumCtx, parseOllamaShow, readOllamaContextWindow, type OllamaShowContext } from "./ollama-context.js";
-import { DEFAULT_ANSWER_RESERVE_TOKENS } from "./prompt-fit.js";
+import { checkPromptFit, DEFAULT_ANSWER_RESERVE_TOKENS } from "./prompt-fit.js";
 
 export interface OllamaProviderOptions {
   endpoint?: string;
@@ -234,6 +234,9 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
        * the running attempt sent did not fit or could not be loaded. Forgets
        * that size and returns the message; undefined for other failures.
        */
+      // The limit this request's first lookup saw (pin, else maximum), for a
+      // typed reason when Ollama's own message carries no counts.
+      let lookupLimit: number | undefined;
       const contextFailure = (text: string, answering: boolean): Error | undefined => {
         const counted = parseContextOverflow(text);
         const memory = isOllamaMemoryError(text);
@@ -269,6 +272,25 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
             sentToProvider: true,
           });
         }
+        if (!counted && opts.enforceContextWindow) {
+          // Ollama's other wording ("the prompt is longer than the context
+          // length") has no counts. The request needed more than the size it
+          // was sent with; the estimate fills in the rest.
+          const limit = sent ?? lookupLimit;
+          if (limit !== undefined) {
+            const fit = checkPromptFit({ ...(opts.system ? { system: opts.system } : {}), prompt: opts.prompt, ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}) });
+            const neededTokens = Math.max(fit.neededTokens, limit + 1);
+            return new ContextTooSmallError({
+              code: "context-too-small",
+              promptTokens: neededTokens - fit.answerTokens,
+              answerTokens: fit.answerTokens,
+              neededTokens,
+              limitTokens: limit,
+              model,
+              sentToProvider: true,
+            });
+          }
+        }
         if (counted) {
           const atModelLimit = modelMax !== undefined && counted.available >= modelMax;
           if (!atModelLimit && sent !== undefined && counted.available >= sent) {
@@ -294,6 +316,9 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         if (opts.signal?.aborted) throw stoppedByUser();
         // The revision this request was sized for; a kept size binds to it.
         requestRevision = sized?.revision;
+        lookupLimit = sized?.pinnedNumCtx !== undefined
+          ? Math.min(sized.pinnedNumCtx, sized.modelMaxContext ?? Infinity)
+          : sized?.modelMaxContext;
         if (sized?.tooLarge) throw new ContextTooSmallError(sized.tooLarge);
         if (sized?.dropKept) {
           if (cachedCtx !== undefined && ollamaContextOverrides.get(cacheKey) === cachedCtx) ollamaContextOverrides.delete(cacheKey);
