@@ -252,6 +252,13 @@ the installed app's scheduler, login item or caches.
   (the confirmation test now waits for the delivery pass); Muse no blocking,
   lows applied (temp marker removal checked too, a cheap per-removal check,
   no identity without inode and birth time).
+- Review round 21: Claude and Muse no blocking (the sign-out check now uses
+  the shared session comparison; without a birth time the device must match
+  too); Sol two blocking (a folder swapped during the async checks before the
+  first write, fixed by taking the identity before them; the relaunch pulling
+  the embedding model into Ollama's store, skipped on that launch) and a
+  medium (the ctime fallback for blocked statx, a birth time equal to the
+  change time now counts as unknown).
 - Process lesson: twice I edited the tree while a reviewer was reading it;
   parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the

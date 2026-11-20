@@ -2548,14 +2548,18 @@ Mockup: `docs/mockups/34-local-reset.html`.
   Chromium's wait for a second launch, except the Windows task list (15
   seconds), which reads every task; a wipe killed by a second launch resumes
   from the marker.
-- **Marker bound to its folder.** The first marker write records the data
-  folder's identity (device, inode and birth time); the warnings rewrite and
-  the sign-out go only to that same folder. At launch the wipe runs only when
-  the folder still has that inode and birth time (the device number is not
-  compared, since a reboot or remount can change it): a copy restored or
-  roamed to another device carries the marker but not the identity, so it
-  stops with nothing removed and asks for a fresh reset there. A file system
-  with neither inode nor birth time gets no marker at all. The post-reset notice is kept in memory for that
+- **Marker bound to its folder.** The data folder's identity (device, inode
+  and birth time) is taken when the request starts, before any check awaits;
+  both marker writes and the sign-out go only to that same folder. At launch
+  the wipe runs only when the folder still has that inode and birth time
+  (the device number is not compared, since a reboot or remount can change
+  it, except where no birth time is known): a copy restored or roamed to
+  another device carries the marker but not the identity, so it stops with
+  nothing removed and asks for a fresh reset there. A birth time equal to
+  the change time counts as unknown (Node reports the change time where
+  statx is blocked), and a file system with neither inode nor birth time
+  gets no marker at all. The launch right after a reset does not download
+  the embedding model into the local runtime's store. The post-reset notice is kept in memory for that
   launch only; quitting before reading it loses its warnings (the log keeps
   them).
 - **Folders above** the data folder or a cache are not checked (decided in
