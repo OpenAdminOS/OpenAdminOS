@@ -1,9 +1,15 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { classifyGraphAccessDenied, type RunRecord } from "@openadminos/agent-sdk";
+import { classifyGraphAccessDenied, type GraphAccessContext, type GraphAccessDenial, type RunRecord } from "@openadminos/agent-sdk";
 import { RunFailureRemediation } from "./RunFailureRemediation";
 
 vi.mock("./ReportIssueModal", () => ({ useReportIssue: () => vi.fn() }));
+
+/** A denial as earlier versions stored it, before denials carried their source. */
+function legacyDenial(context: GraphAccessContext = {}): GraphAccessDenial {
+  const { source: _source, ...denial } = classifyGraphAccessDenied(context);
+  return denial;
+}
 
 describe("Graph run failure recovery", () => {
   const base: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", error: 'Graph responded with HTTP 403 for https://graph.microsoft.com/v1.0/users: {"error":{"code":"Forbidden","message":"You cannot perform the requested operation, required scopes are missing in the token."}}', steps: [], logs: [] };
@@ -33,14 +39,21 @@ describe("Graph run failure recovery", () => {
     expect(screen.getByText("Graph consent required")).toBeInTheDocument();
   });
 
+  it("shows a denial classified from a Graph error that an agent wrapped", () => {
+    const accessDenial = classifyGraphAccessDenied({ requiredScopes: ["User.Read.All"], grantedScopes: [] });
+    render(<RunFailureRemediation run={{ ...base, error: "Listing users failed.", accessDenial }} />);
+    expect(screen.getByText("Graph consent required")).toBeInTheDocument();
+  });
+
   it.each([
     "Ollama responded with HTTP 403 at http://127.0.0.1:11434/api/chat: Forbidden",
     "LM Studio responded with HTTP 403 at http://127.0.0.1:1234/v1/chat/completions: forbidden",
     "Anthropic API returned 403 Forbidden: permission_error",
     "MCP server \"tickets\" responded with HTTP 403: forbidden",
+    "Ollama could not report the model's context limit: HTTP 403 at http://127.0.0.1:11434/api/show: Forbidden by the Microsoft Graph lab proxy",
     "HTTP 403",
   ])("ignores a stored Graph denial when the error did not come from Microsoft Graph: %s", (error) => {
-    const accessDenial = classifyGraphAccessDenied({ requiredScopes: ["User.Read.All"], grantedScopes: [] });
+    const accessDenial = legacyDenial({ requiredScopes: ["User.Read.All"], grantedScopes: [] });
     render(<RunFailureRemediation run={{ ...base, error, accessDenial }} />);
     for (const title of ["Graph consent required", "Graph access cause unverified", "Role access required", "Tenant licence required"]) {
       expect(screen.queryByText(title)).not.toBeInTheDocument();
@@ -164,7 +177,7 @@ it("does not show the missing-model playbook for a lookup error that quotes it",
 
 it("shows only the lookup playbook for an HTTP 403 from the lookup, even with a stored Graph denial", () => {
   const error = "Ollama could not report the model's context limit: HTTP 403 at http://127.0.0.1:11434/api/show: Forbidden";
-  const accessDenial = classifyGraphAccessDenied({});
+  const accessDenial = legacyDenial();
   const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error, accessDenial };
   render(<RunFailureRemediation run={run} />);
   expect(screen.getByText("Ollama did not report the model's context limit")).toBeInTheDocument();

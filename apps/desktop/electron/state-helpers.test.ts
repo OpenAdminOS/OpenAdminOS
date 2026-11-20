@@ -611,11 +611,12 @@ it("a row-limited collection keeps the rows within the memory budget instead of 
   await assert.rejects(fetchGraphCachePages(graph, {path:"/auditLogs/signIns"}, undefined, true), /128 MiB/);
 });
 
-import { humanizeScheduledRunError } from "./state-helpers.js";
-import { classifyGraphAccessDenied, graphAccessDenialText } from "@openadminos/agent-sdk";
+import { humanizeScheduledRunError, withoutMisclassifiedGraphDenial } from "./state-helpers.js";
+import { classifyGraphAccessDenied, graphAccessDenialText, type RunRecord } from "@openadminos/agent-sdk";
 
 describe("scheduled run failure text", () => {
-  const stored = classifyGraphAccessDenied({ path: "/users", requiredScopes: ["User.Read.All"], grantedScopes: [] });
+  // As earlier versions stored it, before denials carried their source.
+  const { source: _source, ...stored } = classifyGraphAccessDenied({ path: "/users", requiredScopes: ["User.Read.All"], grantedScopes: [] });
 
   it("keeps the Graph denial for a Graph 403", () => {
     assert.equal(humanizeScheduledRunError(graphAccessDenialText(stored), stored), graphAccessDenialText(stored));
@@ -631,5 +632,28 @@ describe("scheduled run failure text", () => {
       assert.equal(text, error);
       assert.doesNotMatch(text, /Microsoft Graph denied access|consent/i);
     }
+  });
+});
+
+describe("stored runs with a Graph denial for a non-Graph error", () => {
+  const { source: _source, ...legacy } = classifyGraphAccessDenied({ path: "/users", requiredScopes: ["User.Read.All"], grantedScopes: [] });
+  const base: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", trigger: "schedule", steps: [], logs: [] };
+  const ollama = "Ollama responded with HTTP 403 at http://127.0.0.1:11434/api/chat: Forbidden";
+
+  it("drops the denial and the Graph advice saved as the summary", () => {
+    const run = withoutMisclassifiedGraphDenial({ ...base, error: ollama, summary: graphAccessDenialText(legacy), accessDenial: legacy });
+    assert.equal(run.accessDenial, undefined);
+    assert.equal(run.summary, ollama);
+  });
+
+  it("keeps another summary and every Graph denial", () => {
+    const kept = withoutMisclassifiedGraphDenial({ ...base, error: ollama, summary: "Agent failed: Ollama 403", accessDenial: legacy });
+    assert.equal(kept.accessDenial, undefined);
+    assert.equal(kept.summary, "Agent failed: Ollama 403");
+    const graphRun: RunRecord = { ...base, error: graphAccessDenialText(legacy), summary: graphAccessDenialText(legacy), accessDenial: legacy };
+    assert.equal(withoutMisclassifiedGraphDenial(graphRun), graphRun);
+    const current = classifyGraphAccessDenied({ path: "/users", requiredScopes: ["User.Read.All"], grantedScopes: [] });
+    const wrapped: RunRecord = { ...base, error: "Listing users failed.", accessDenial: current };
+    assert.equal(withoutMisclassifiedGraphDenial(wrapped), wrapped);
   });
 });

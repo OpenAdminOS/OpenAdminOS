@@ -2,7 +2,7 @@ import { IconWarning } from "./icons";
 import { Button } from "./Button";
 import { useReportIssue } from "./ReportIssueModal";
 import type { RunRecord } from "../shared/openAdminOS";
-import { errorComesFromGraph, graphAccessDenialFromError } from "@openadminos/agent-sdk";
+import { graphAccessDenialFromError, storedGraphAccessDenial } from "@openadminos/agent-sdk";
 
 interface Suggestion {
   match: (error: string) => boolean;
@@ -83,13 +83,10 @@ export function RunFailureRemediation({ run }: { run: RunRecord }) {
   const matched = lookup
     ? SUGGESTIONS.filter((suggestion) => suggestion.match === isContextLimitLookup)
     : SUGGESTIONS.filter((suggestion) => suggestion.match(run.error!));
-  // Only a Graph error gets Graph recovery advice. Runs stored before this
-  // check can carry an accessDenial for a 403 from a model server, a vendor
-  // API, or an MCP server; the stored value is ignored when the error itself
-  // did not come from Microsoft Graph.
-  const accessDenial = errorComesFromGraph(run.error)
-    ? run.accessDenial ?? graphAccessDenialFromError(run.error)
-    : undefined;
+  // Only a Graph error gets Graph recovery advice. Runs stored by earlier
+  // versions can carry an accessDenial for a 403 from a model server, a
+  // vendor API, or an MCP server; that stored value is ignored.
+  const accessDenial = storedGraphAccessDenial(run.accessDenial, run.error) ?? graphAccessDenialFromError(run.error);
   if (accessDenial) {
     matched.unshift({ match: () => true, title: accessDenial.title, body: `${accessDenial.message} ${accessDenial.recovery}` });
   }

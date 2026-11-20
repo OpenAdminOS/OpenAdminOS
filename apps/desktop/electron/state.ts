@@ -412,6 +412,7 @@ import {
   forgetAppRegistration,
   humanizeMsalError,
   humanizeScheduledRunError,
+  withoutMisclassifiedGraphDenial,
   isNodeError,
   signInTargetFor,
   normalizeWorkspaceInstructions,
@@ -9262,7 +9263,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
               // pins a tenant, so a tenant-less scheduled run can only be
               // one of these records.
               .filter((run) => !(run.trigger === "schedule" && !run.tenantId))
-              .map((run) => ({ ...run, usage: run.usage ?? null }))
+              .map((run) => withoutMisclassifiedGraphDenial({ ...run, usage: run.usage ?? null }))
           : defaultState.runs,
         tenants,
       };
