@@ -348,6 +348,7 @@ import {
   type RetrievalStatus,
 } from "./retrieval/retrieval.js";
 import {
+  EmbeddingPullStalledError,
   embeddingEndpoint,
   embeddingModelState,
   pullEmbeddingModel,
@@ -3060,7 +3061,8 @@ export class AppStateStore {
         await pullEmbeddingModel(endpoint);
       } catch (error) {
         // Not silent: Settings shows why, naming the registry and the proxy Ollama uses.
-        const message =
+        // A stall of the local Ollama is not a registry failure; its own message names the recovery.
+        const message = error instanceof EmbeddingPullStalledError ? error.message :
           (await describeNetworkFailure({ what: "The local index model download", url: "https://registry.ollama.ai/", error, path: "ollama" })) ??
           (error instanceof Error ? error.message : String(error));
         await this.serialize(async () => {

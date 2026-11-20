@@ -140,4 +140,38 @@ describe("the local index model download", () => {
       await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     }
   });
+
+  it("says the local Ollama stopped answering, not the registry, with a recovery that works during the daily wait (PR #206 review round 8)", { timeout: 10_000 }, async () => {
+    const { createServer } = await import("node:http");
+    const { loopbackTransport } = await import("./retrieval/direct-fetch.js");
+    const server = createServer((request, response) => {
+      if (request.url === "/api/tags") {
+        response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ models: [] }));
+      }
+      // The pull gets nothing: the local Ollama stalled.
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const original = process.env.OPENADMINOS_EMBEDDING_ENDPOINT;
+    process.env.OPENADMINOS_EMBEDDING_ENDPOINT = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    const idle = loopbackTransport.idleTimeoutMs;
+    loopbackTransport.idleTimeoutMs = 100;
+    const dir = await mkdtemp(join(tmpdir(), "oaos-network-"));
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [] }));
+    const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
+    try {
+      await store.autoInstallEmbeddingModel();
+      const status = await store.getRetrievalStatusWithUpdates();
+      assert.equal(status.embeddingModelInstalled, false);
+      assert.equal(status.embeddingModelError, "Ollama stopped answering while downloading nomic-embed-text. Check that Ollama is running, then run `ollama pull nomic-embed-text` and select Refresh.");
+    } finally {
+      loopbackTransport.idleTimeoutMs = idle;
+      if (original === undefined) delete process.env.OPENADMINOS_EMBEDDING_ENDPOINT;
+      else process.env.OPENADMINOS_EMBEDDING_ENDPOINT = original;
+      store.close();
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
 });

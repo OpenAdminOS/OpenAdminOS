@@ -462,15 +462,18 @@ question in it. Retrieval connects only to a loopback IP address over HTTP
 `[::ffff:127.0.0.1]` connects as its IPv4 literal). A `localhost` name is never resolved, because the
 operating system's resolver could answer with another machine: it is tried as
 127.0.0.1, then as `[::1]` when that refuses the connection, so an Ollama
-listening on IPv6 only still answers. An HTTPS endpoint named `localhost` is
+listening on IPv6 only still answers. The request still names `localhost` in
+its `Host` header, as fetch did. An HTTPS endpoint named `localhost` is
 reached by address, so its certificate must cover the address. Any other host
 name is refused. Retrieval connects directly, with its own HTTP agent per request,
 never through the global fetch or HTTP agents, which send to an environment proxy
 when `NODE_USE_ENV_PROXY` is set: a loopback address missing from `NO_PROXY`
 would otherwise reach the proxy, question included. Like fetch, it decodes a
-gzip, deflate or br answer and fails a connection that sends nothing for 5
-minutes, before the answer or while it arrives, so a stalled model download ends
-with its reason in Settings. Settings never runs Check for index and an index install at
+gzip, deflate (zlib-wrapped or raw) or br answer and fails a connection that
+sends nothing for 5 minutes, before the answer or while it arrives. A stalled
+model download says in Settings that the local Ollama stopped answering, not the
+registry, and gives `ollama pull` then Refresh as the recovery, because the
+automatic download waits a day before it tries again. Settings never runs Check for index and an index install at
 once, so neither reply replaces the other's. A query vector is scaled before
 scoring, so a huge but finite one cannot overflow and rank every passage as 0. A connection reset reads as a failed request with its
 code, not as a stopped Ollama. A vector with an entry that is not a finite

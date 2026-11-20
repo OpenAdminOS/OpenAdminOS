@@ -1,7 +1,7 @@
 import { Agent as HttpAgent, request as httpRequest } from "node:http";
 import { Agent as HttpsAgent, request as httpsRequest } from "node:https";
-import { Readable, pipeline } from "node:stream";
-import { createBrotliDecompress, createGunzip, createInflate } from "node:zlib";
+import { Readable, Transform, pipeline } from "node:stream";
+import { createBrotliDecompress, createGunzip, createInflate, createInflateRaw } from "node:zlib";
 
 /**
  * A fetch for model servers on this device that never goes through a proxy.
@@ -56,7 +56,7 @@ export function directFetch(input: string | URL | Request, init: RequestInit = {
       const decoder = encoding === "gzip" || encoding === "x-gzip"
         ? createGunzip()
         : encoding === "deflate"
-          ? createInflate()
+          ? inflateEither()
           : encoding === "br"
             ? createBrotliDecompress()
             : undefined;
@@ -82,6 +82,29 @@ export function directFetch(input: string | URL | Request, init: RequestInit = {
     });
     request.on("error", reject);
     request.end(body);
+  });
+}
+
+/**
+ * A deflate body is meant to be zlib-wrapped, but some servers send it raw;
+ * fetch accepts both, so the first byte picks the decoder, as fetch does.
+ */
+function inflateEither(): Transform {
+  let inner: Transform | undefined;
+  return new Transform({
+    transform(chunk: Buffer, _encoding, done) {
+      if (!inner) {
+        inner = (chunk[0]! & 0x0f) === 0x08 ? createInflate() : createInflateRaw();
+        inner.on("data", (decoded: Buffer) => this.push(decoded));
+        inner.on("error", (error) => this.destroy(error));
+      }
+      inner.write(chunk, () => done());
+    },
+    flush(done) {
+      if (!inner) return done();
+      inner.once("end", () => done());
+      inner.end();
+    },
   });
 }
 

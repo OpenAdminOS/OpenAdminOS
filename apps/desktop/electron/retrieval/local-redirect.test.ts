@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, globalAgent as httpGlobalAgent, type Server } from "node:http";
 import { describe, it } from "node:test";
-import { brotliCompressSync, deflateSync, gzipSync } from "node:zlib";
+import { brotliCompressSync, deflateRawSync, deflateSync, gzipSync } from "node:zlib";
 
 import { AppStateStore } from "../state.js";
 import { embeddingModelState, pullEmbeddingModel } from "./embedding-model.js";
@@ -265,13 +265,14 @@ describe("local documentation retrieval never follows a redirect from this devic
       "/api/tags": { status: 200, body: { models: [{ name: "nomic-embed-text:latest" }] } },
       "/api/pull": { status: 500, body: { error: "pull model manifest: registry unreachable" } },
     };
-    let encodings = ["gzip", "deflate", "br"];
+    // "deflate raw" is a deflate body without its zlib wrapper, which fetch also accepts (PR #206 review round 8).
+    let encodings = ["gzip", "deflate", "deflate raw", "br"];
     const server = createServer((request, response) => {
       const encoding = encodings[0]!;
       const answer = answers[request.url ?? ""]!;
       const raw = Buffer.from(JSON.stringify(answer.body));
-      const packed = encoding === "gzip" ? gzipSync(raw) : encoding === "deflate" ? deflateSync(raw) : brotliCompressSync(raw);
-      response.writeHead(answer.status, { "content-type": "application/json", "content-encoding": encoding, "content-length": packed.length }).end(packed);
+      const packed = encoding === "gzip" ? gzipSync(raw) : encoding === "deflate" ? deflateSync(raw) : encoding === "deflate raw" ? deflateRawSync(raw) : brotliCompressSync(raw);
+      response.writeHead(answer.status, { "content-type": "application/json", "content-encoding": encoding.split(" ")[0]!, "content-length": packed.length }).end(packed);
     });
     await listen(server);
     t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
@@ -281,6 +282,36 @@ describe("local documentation retrieval never follows a redirect from this devic
       assert.deepEqual(await embeddingModelState(endpoint), { ollamaReachable: true, installed: true }, encodings[0]);
       await assert.rejects(pullEmbeddingModel(endpoint), /Ollama pull failed: pull model manifest: registry unreachable/, encodings[0]);
     }
+  });
+
+  it("dials localhost by address but sends the name it was given as Host, as fetch did (PR #206 review round 8)", async (t) => {
+    const hosts: string[] = [];
+    const server = createServer((request, response) => {
+      hosts.push(`${request.url} ${request.headers.host}`);
+      const body = request.url === "/api/tags"
+        ? { models: [{ name: "nomic-embed-text:latest" }] }
+        : request.url === "/v1/embeddings"
+          ? { data: [{ embedding: [0.1] }] }
+          : request.url === "/api/pull"
+            ? { status: "success" }
+            : { embeddings: [[0.1]] };
+      response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(body));
+    });
+    await listen(server);
+    t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+    const port = (server.address() as { port: number }).port;
+    await ollamaEmbedQuery(`http://localhost:${port}`)("test");
+    await loopbackEmbedQuery(`http://localhost:${port}`)("test");
+    await embeddingModelState(`http://localhost:${port}`);
+    await pullEmbeddingModel(`http://localhost:${port}`);
+    await ollamaEmbedQuery(`http://127.0.0.1:${port}`)("test");
+    assert.deepEqual(hosts, [
+      `/api/embed localhost:${port}`,
+      `/v1/embeddings localhost:${port}`,
+      `/api/tags localhost:${port}`,
+      `/api/pull localhost:${port}`,
+      `/api/embed 127.0.0.1:${port}`,
+    ]);
   });
 
   it("fails a model pull that stalls before its answer or while sending it, with the reason (PR #206 review round 7)", { timeout: 10_000 }, async (t) => {
@@ -303,7 +334,7 @@ describe("local documentation retrieval never follows a redirect from this devic
       loopbackTransport.idleTimeoutMs = previous;
     });
     const endpoint = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-    const stopped = /Ollama stopped answering while downloading nomic-embed-text\. Check that Ollama is running and can reach its registry, then restart OpenAdminOS to try again\.$/;
+    const stopped = /Ollama stopped answering while downloading nomic-embed-text\. Check that Ollama is running, then run `ollama pull nomic-embed-text` and select Refresh\.$/;
     await assert.rejects(pullEmbeddingModel(endpoint), stopped);
     mode = "during";
     await assert.rejects(pullEmbeddingModel(endpoint), stopped);

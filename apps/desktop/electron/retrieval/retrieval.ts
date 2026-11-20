@@ -451,10 +451,15 @@ export async function fetchLoopback(
   fetchImpl: typeof fetch = loopbackTransport.fetch,
 ): Promise<{ response: Response; url: string }> {
   const candidates = loopbackEndpoints(endpoint);
+  // A localhost name is dialled by address, but the server still sees the name it was given, as with fetch.
+  const named = new URL(endpoint);
+  const host = /^localhost\.?$/i.test(named.hostname) ? named.host : undefined;
   for (const [index, base] of candidates.entries()) {
     const url = `${base}${path}`;
+    const headers = new Headers(init.headers);
+    if (host) headers.set("host", host);
     try {
-      return { response: await fetchImpl(url, { ...init, redirect: modelServerRedirect(url) }), url };
+      return { response: await fetchImpl(url, { ...init, headers, redirect: modelServerRedirect(url) }), url };
     } catch (error) {
       const refused = connectionCode(error) !== "ECONNRESET" && isConnectionRefused(error);
       if (!refused || index === candidates.length - 1) throw error;

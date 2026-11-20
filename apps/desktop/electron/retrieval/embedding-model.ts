@@ -89,10 +89,20 @@ export async function pullEmbeddingModel(
   try {
     await pullOnce(endpoint, model, fetchImpl);
   } catch (error) {
-    if (error instanceof Error && error.name === "TimeoutError") {
-      throw new Error(`Ollama stopped answering while downloading ${model}. Check that Ollama is running and can reach its registry, then restart OpenAdminOS to try again.`, { cause: error });
-    }
+    if (error instanceof Error && error.name === "TimeoutError") throw new EmbeddingPullStalledError(model, error);
     throw error;
+  }
+}
+
+/**
+ * The local Ollama stopped answering during a model pull. It is about this
+ * device, not the registry, and the automatic pull waits a day before it
+ * tries again, so the recovery is a manual pull.
+ */
+export class EmbeddingPullStalledError extends Error {
+  constructor(model: string, cause: Error) {
+    super(`Ollama stopped answering while downloading ${model}. Check that Ollama is running, then run \`ollama pull ${model}\` and select Refresh.`, { cause });
+    this.name = "EmbeddingPullStalledError";
   }
 }
 
