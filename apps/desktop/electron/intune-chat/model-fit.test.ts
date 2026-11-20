@@ -112,6 +112,8 @@ describe("Model fit: classifying a failure", () => {
       const issue = classifyModelFitFailure(new Error(message), { providerId: "ollama", model: LOCAL_MODEL, isLocal: true });
       assert.deepEqual([issue?.reason, issue?.limitTokens, issue?.limitIsMemory], ["context-too-small", 45056, true], message);
     }
+    const wrapped = classifyModelFitFailure(`Agent failed: Ollama could not load ${LOCAL_MODEL} with the 45,056 token context size kept from an earlier request, usually because free memory ran out.`, { providerId: "ollama", isLocal: true });
+    assert.equal(wrapped?.limitTokens, 45056);
     const retrySize = classifyModelFitFailure("Ollama context size too small: This request did not fit in the 32,768 token context of the retry. Ollama said: x", { providerId: "ollama", isLocal: true });
     assert.equal(retrySize?.limitTokens, 32768);
     // A remote-backed model on a loopback server already sent its prompt elsewhere: no on-device offer.

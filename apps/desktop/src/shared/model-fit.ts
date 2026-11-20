@@ -100,7 +100,8 @@ function contextIssueFromText(text: string): Omit<ModelFitIssue, "providerId" | 
   }
   // Ollama could not run the model at a context size for lack of memory: the size kept from an
   // earlier request, or the retry's, before or partway through an answer.
-  const memorySize = /^(?:Error: )?Ollama (?:could not load|failed partway through an answer from) .+? (?:with the|on the retry with a) ([\d,]+) token context size(?: kept from an earlier request)?, usually because free memory ran out/i.exec(text.trim());
+  // Not anchored, so a wrapper that adds words in front (such as "Agent failed:") keeps the reason.
+  const memorySize = /\bOllama (?:could not load|failed partway through an answer from) .+? (?:with the|on the retry with a) ([\d,]+) token context size(?: kept from an earlier request)?, usually because free memory ran out/i.exec(text);
   if (memorySize) {
     const limitTokens = count(memorySize[1]);
     return { reason: "context-too-small", ...(limitTokens ? { limitTokens, limitIsMemory: true as const } : {}) };
@@ -112,7 +113,7 @@ function contextIssueFromText(text: string): Omit<ModelFitIssue, "providerId" | 
     return { reason: "context-too-small", ...(limitTokens ? { limitTokens } : {}) };
   }
   // Any other form of either adapter's context message, without numbers.
-  if (/^(?:Error: )?(?:Ollama context size too small|LM Studio context length too small):/i.test(text.trim())) return { reason: "context-too-small" };
+  if (/\b(?:Ollama context size too small|LM Studio context length too small):/i.test(text)) return { reason: "context-too-small" };
   // Ollama's HTTP 400 for a prompt larger than the loaded context.
   const ollama = /request \((\d+) tokens\) exceeds the available context size \((\d+) tokens\)/i.exec(text);
   if (ollama) {

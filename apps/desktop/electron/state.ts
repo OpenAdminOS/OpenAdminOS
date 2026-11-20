@@ -7412,7 +7412,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     };
   }
 
-  /** Where a provider is reached now; see novaProviderEndpoint. */
   /** An opaque fingerprint of where a provider is reached now, for a model fit review to compare later. */
   async providerDestination(providerId: ProviderId): Promise<string> {
     return (await this.providerTarget(providerId)).destination;
