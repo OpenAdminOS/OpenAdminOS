@@ -112,6 +112,50 @@ it("publishes only complete startup identity shards to the request worker", asyn
   }
 });
 
+it("memoizes the raw egress index by cache generation while classification is pending", async t => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-pending-identity-"));
+  let finishStartup!: () => void;
+  const startup = new Promise<void>(resolve => { finishStartup = resolve; });
+  const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"), {
+    backgroundClassification: true, beforeClassification: () => startup,
+  });
+  const collect = t.mock.method(store, "collectTenantIdentityValues");
+  const snapshot = { tenantId: "tenant-1", resource: "users" as const, label: "Users", scopeSet: [],
+    refreshedAt: "2026-11-18T00:00:00.000Z" };
+  const lookup = () => store.tenantIdentityValues(snapshot.tenantId);
+  try {
+    store.replaceGraphResources({ ...snapshot, rows: [{ id: "first", displayName: "Juniper Fixture" }] });
+    const first = lookup();
+    assert.equal(first.matches("Juniper Fixture"), true);
+    assert.equal(lookup(), first);
+    assert.equal(collect.mock.callCount(), 1);
+
+    store.replaceGraphResources({ ...snapshot, rows: [{ id: "second", displayName: "Cypress Fixture" }] });
+    const second = lookup();
+    assert.equal(second.matches("Juniper Fixture"), false);
+    assert.equal(second.matches("Cypress Fixture"), true);
+    assert.equal(lookup(), second);
+    assert.equal(collect.mock.callCount(), 2);
+
+    store.clearGraphCache(snapshot.tenantId);
+    assert.equal(lookup().size, 0);
+    assert.equal(lookup().size, 0);
+    assert.equal(collect.mock.callCount(), 3);
+
+    store.replaceGraphResources({ ...snapshot, rows: [{ id: "third", displayName: "Willow Fixture" }] });
+    const third = lookup();
+    assert.equal(third.matches("Willow Fixture"), true);
+    await store.disconnectClassification(snapshot.tenantId);
+    assert.equal(third.size, 0);
+    assert.equal(lookup().size, 0);
+    assert.equal(collect.mock.callCount(), 4);
+  } finally {
+    finishStartup();
+    await store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 it("Disconnect clears staged shards while startup is waiting on a different tenant", async t => {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-classification-disconnect-"));
   const path = join(dir, "openadminos.db");

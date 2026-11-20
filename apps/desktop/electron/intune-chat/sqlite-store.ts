@@ -2503,14 +2503,11 @@ export class IntelligenceSqliteStore {
    */
   tenantIdentityValues(tenantId: string): TenantValueIndex {
     if (this.disconnectedClassificationTenants.has(tenantId)) return new TenantValueIndex();
-    if (!this.cacheClassificationReady || this.unavailableIdentityResources.has(tenantId)) {
-      const index = new TenantValueIndex();
-      this.collectTenantIdentityValues(tenantId, index);
-      return index;
-    }
     const cached = this.tenantIdentityIndexes.get(tenantId);
     if (cached) return cached;
-    const index = new TenantValueIndex([...this.tenantIdentityShards.get(tenantId)?.values() ?? []]);
+    const useRawRows = !this.cacheClassificationReady || this.unavailableIdentityResources.has(tenantId);
+    const index = new TenantValueIndex(useRawRows ? [] : [...this.tenantIdentityShards.get(tenantId)?.values() ?? []]);
+    if (useRawRows) this.collectTenantIdentityValues(tenantId, index);
     this.tenantIdentityIndexes.set(tenantId, index);
     return index;
   }
@@ -2615,7 +2612,6 @@ export class IntelligenceSqliteStore {
         const firstNames = new Map<string, Map<GraphCacheResourceKind, TenantValueIndex>>();
         await this.classifyStartupRows(tenantId, resource, true, current, identity, firstNames, snapshotId);
         if (!current()) return;
-        this.tenantIdentityIndexes.delete(tenantId);
         this.setIdentityShard(this.tenantIdentityShards, tenantId, resource, identity.get(tenantId)?.get(resource) ?? new TenantValueIndex());
         if (resource === "users") {
           this.setIdentityShard(this.classificationIndexes, tenantId, resource, firstNames.get(tenantId)?.get(resource) ?? new TenantValueIndex());
