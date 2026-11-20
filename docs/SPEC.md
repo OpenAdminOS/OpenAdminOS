@@ -2537,11 +2537,13 @@ in the main process. Mockup: `docs/mockups/34-local-reset.html`.
   and never emptied at launch (it may point at a shared folder). Sign-out
   skips token caches that are links or files with more than one hard link,
   with a warning; the wipe removes links inside the folder without following
-  them. The folder counts as a link unless its real location is its real
-  parent plus its own name, so forms such as `link/`, `link/.` or `link/..`
-  that the system resolves through a link are caught too. A `policy.json`
-  that is a link to a file inside the data folder stops the reset, at the
-  request and at launch, because the wipe would remove what it points to. Only a plain marker file with a single
+  them. The folder counts as a link when its path has `.` or `..` segments,
+  when its real location is not its real parent plus its own name (so
+  `link/` is caught too), or, on Linux, when it is a mount point such as a
+  bind mount. A `policy.json` whose link chain goes through the data folder
+  at any hop, or a folder where `policy.json` belongs, stops the reset at the
+  request and at launch, because the wipe would remove what the policy needs
+  or keep a folder whole. Only a plain marker file with a single
   link starts a wipe: anything else at that path (a link, a shared file, a
   folder) leaves the reset incomplete and nothing is removed. Sign-out is also skipped when the folder
   cannot be listed. The reset-incomplete window runs from a fresh temporary

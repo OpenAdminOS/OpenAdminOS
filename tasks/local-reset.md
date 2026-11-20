@@ -147,6 +147,15 @@ the installed app's scheduler, login item or caches.
   Muse one blocking (the same path forms), fixed, plus recovery profile
   removal on process exit, no saved window state for the recovery window, and
   a stricter Linux notice fallback.
+- Review round 9: Claude and Muse no blocking (follow-ups applied: folder
+  at the policy path stops the reset, Keychain loop probes once more before
+  warning, policy comparison ignores letter case on macOS and Windows); Sol
+  four blocking (`link/../name`, a Linux bind mount at the data folder, the
+  Windows manual steps through a junction, a policy link chain through the
+  data folder), all fixed with tests, the Windows and macOS manual steps
+  check for links first; an empty warning list is written with the progress
+  record. The local full suites failed only on load timeouts at a load
+  average of 137; every failed file passed alone.
 - Found in the end to end run and fixed: the incomplete screen called the
   appearance handler before it was registered, and failure reasons repeated
   full paths.
