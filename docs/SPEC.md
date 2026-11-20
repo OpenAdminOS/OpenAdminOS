@@ -2555,7 +2555,8 @@ Mockup: `docs/mockups/34-local-reset.html`.
   them. The folder counts as a link when its path has `.` or `..` segments,
   when its real location is not its real parent plus its own name (so
   `link/` is caught too; compared by device and inode, so letter case does
-  not matter), when it or any folder inside it is on another device (a
+  not matter), when a folder between the home folder and it is a link (also
+  for the caches and the LaunchAgent plist; each marker write checks again), when it or any folder inside it is on another device (a
   mounted volume or disk image; a folder that cannot be read counts too),
   or, on Linux, when a mount sits at or inside it (a bind mount; an
   unreadable mount table counts too). Cache folders outside the data folder

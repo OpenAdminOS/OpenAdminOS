@@ -221,6 +221,12 @@ the installed app's scheduler, login item or caches.
   it; the Linux guide ignored XDG paths, fixed); Muse one blocking (the
   WhatsApp test send, gated and counted now) plus the same ordering medium
   and the gateway, Splashtop and rollback starters, gated now.
+- Review round 17: Claude and Muse no blocking (Muse lows applied: shutdown
+  comment moved, Splashtop and rollback gate tests, Nova follow-up passes
+  gated and counted); Sol two blocking (a marker written again through a
+  folder that became a link, linked parent folders such as ~/Library/Caches)
+  and two mediums (plan starters checked again before saving, `defaults
+  delete` failures), all fixed.
 - Process lesson: twice I edited the tree while a reviewer was reading it;
   parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the
