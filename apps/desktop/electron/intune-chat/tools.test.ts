@@ -283,6 +283,29 @@ it("defers registration of 50 Secure Score sidecars and retains only projected f
   }
 });
 
+it("does not register sidecars from a snapshot that replaced the cache read", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-cache-read-replaced-"));
+  const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+  const ledger = new ClassificationLedger();
+  try {
+    const snapshot = { tenantId: "tenant-1", resource: "applications" as const, label: "Applications", scopeSet: [] };
+    const row = { id: "fixture-app", passwordCredentials: [{ hint: "q7z" }] };
+    store.replaceGraphResources({ ...snapshot, refreshedAt: "2026-11-18T00:00:00.000Z", rows: [row] });
+    const read = withClassificationScope(ledger, () => store.queryGraphCache(snapshot));
+    store.replaceGraphResources({ ...snapshot, refreshedAt: "2026-11-18T01:00:00.000Z", rows: [row] });
+    await ledger.waitForObservations();
+    assert.deepEqual(read.rows[0]?.row, row);
+    const result = ledger.classifyRequest({ prompt: JSON.stringify(row) });
+    assert.equal(result.counts.credential, 0);
+    assert.equal(result.unexamined.registrations, 1);
+    assert.equal(result.effectiveClass, "credential");
+  } finally {
+    ledger.dispose();
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 it("keeps the previous rows and identity index when batched preparation is cancelled", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-cache-classification-cancel-"));
   const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));

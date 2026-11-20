@@ -2831,9 +2831,9 @@ export class IntelligenceSqliteStore {
     const selected = this.db
       .prepare(sql)
       .all(...args, limit) as unknown as Array<{ rowid: number; total_count: number }>;
-    const details = this.db.prepare(`SELECT rowid, raw_json, classification_json, refreshed_at
+    const details = this.db.prepare(`SELECT rowid, raw_json, snapshot_id, refreshed_at
       FROM graph_resources WHERE rowid IN (SELECT value FROM json_each(?))`)
-      .all(JSON.stringify(selected.map(row => row.rowid))) as unknown as Array<ResourceRow & { rowid: number }>;
+      .all(JSON.stringify(selected.map(row => row.rowid))) as unknown as Array<ResourceRow & { rowid: number; snapshot_id: string }>;
     const byId = new Map(details.map(row => [row.rowid, row]));
     const rows = selected.map(row => byId.get(row.rowid)!);
     const parsed = rows.map((row) => ({
@@ -2842,7 +2842,12 @@ export class IntelligenceSqliteStore {
     }));
     const originals = parsed.map(entry => entry.row);
     const projected = input.projectRow ? parsed.map(entry => ({ ...entry, row: input.projectRow!(entry.row) })) : parsed;
-    registerCacheRows(input.resource, rows, projected.map(entry => entry.row), originals);
+    let sidecar: ReturnType<DatabaseSync["prepare"]> | undefined;
+    registerCacheRows(input.resource, rows, projected.map(entry => entry.row), originals, index => {
+      const row = rows[index]!;
+      sidecar ??= this.db.prepare("SELECT classification_json FROM graph_resources WHERE rowid = ? AND snapshot_id = ?");
+      return (sidecar.get(row.rowid, row.snapshot_id) as Pick<ResourceRow, "classification_json"> | undefined)?.classification_json;
+    });
     return {
       resource: input.resource,
       totalCount: selected[0]?.total_count ?? 0,
@@ -5025,6 +5030,7 @@ function cacheClassificationRow({ rawJson, normalized }: NormalizedGraphResource
 
 function registerCacheRows(
   resource: GraphCacheResourceKind, rows: readonly ResourceRow[], parsed: readonly unknown[], originals = parsed,
+  sidecar = (index: number) => rows[index]?.classification_json,
 ): void {
   if (!rows.length) return;
   const source = `cache:${resource}`;
@@ -5037,7 +5043,7 @@ function registerCacheRows(
     const slice = new ClassificationSlice();
     for (let index = 0; index < rows.length; index++) {
       signal.throwIfAborted();
-      const fields = cacheClassificationFields(parsed[index], rows[index]?.classification_json, originals[index]);
+      const fields = cacheClassificationFields(parsed[index], sidecar(index), originals[index]);
       let batch: Array<ClassifiedValues["fields"][number]> = [];
       let next = fields.next();
       while (!next.done) {
