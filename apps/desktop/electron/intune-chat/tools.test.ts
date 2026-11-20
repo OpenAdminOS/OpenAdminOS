@@ -235,6 +235,35 @@ it("background backfill leaves a removed database absent", async t => {
   }
 });
 
+it("computes a backfill page under a held writer and lets Chat write before publication", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-cache-writer-"));
+  const path = join(dir, "openadminos.db");
+  const store = new IntelligenceSqliteStore(path);
+  const writer = new DatabaseSync(path);
+  const tenantId = "tenant-1";
+  const now = "2026-11-18T00:00:00.000Z";
+  try {
+    store.replaceGraphResources({ tenantId, resource: "secureScores", label: "Secure Score", scopeSet: [],
+      refreshedAt: now, rows: [{ id: "fixture-score", currentScore: 30 }] });
+    writer.exec("UPDATE graph_resources SET classification_json = NULL");
+    writer.exec("BEGIN IMMEDIATE");
+    // A worker that attempts to publish cannot resolve this page while the
+    // other connection holds the write lock.
+    const computed = await classifyCacheRows([], "/security/secureScores", undefined, false, false, undefined, {
+      dbPath: path, tenantId, resource: "secureScores", afterRowId: 0, indexOnly: false,
+    });
+    assert.equal(computed.startupSidecars?.length, 1);
+    assert.equal(writer.prepare("SELECT classification_json FROM graph_resources").get()?.classification_json, null);
+    writer.exec("COMMIT");
+    assert.equal(store.createConversation({ id: "fixture-chat", title: "Secure Score", tenantId, now }).id, "fixture-chat");
+  } finally {
+    if (writer.isTransaction) writer.exec("ROLLBACK");
+    writer.close();
+    await store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 it("backfills a stale Secure Score page through bounded worker jobs", async t => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const dir = await mkdtemp(join(tmpdir(), "openadminos-score-backfill-"));

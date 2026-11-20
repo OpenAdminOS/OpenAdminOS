@@ -24,7 +24,7 @@ export function describeCacheRow(row: unknown, options: ClassificationOptions): 
 
 // A single JSON parse is indivisible. Skip legacy or unusually large sidecars
 // before parsing and let the request report incomplete coverage.
-const MAX_READ_SIDECAR_UNITS = 128 * 1024;
+export const MAX_READ_SIDECAR_UNITS = 128 * 1024;
 
 export function* cacheClassificationFields(
   row: unknown, encoded: string | null | undefined, original = row,
@@ -78,6 +78,7 @@ export interface CacheStartupPage {
 
 export interface CacheClassificationResult {
   sidecars: string[];
+  startupSidecars?: Array<{ rowid: number; snapshotId: string; sidecar: string }>;
   nextRowId?: number;
   egressIndex?: TenantValueIndexSnapshot;
   firstNames?: TenantValueIndexSnapshot;

@@ -2709,6 +2709,25 @@ export class IntelligenceSqliteStore {
             if (slice.elapsed) await slice.yield();
           }
         }
+      } else if (result.startupSidecars?.length) {
+        const update = this.db.prepare(`UPDATE graph_resources SET classification_json = ?
+          WHERE rowid = ? AND snapshot_id = ? AND tenant_id = ? AND resource = ?
+          AND (classification_json IS NULL OR classification_json NOT LIKE ?)`);
+        for (const { rowid, snapshotId, sidecar } of result.startupSidecars) {
+          await yieldToMain();
+          if (!current()) return;
+          // The classification observer never waits for another SQLite writer.
+          // Each autocommit ends before the next tick or a Chat write can run.
+          this.db.exec("PRAGMA busy_timeout = 0");
+          try {
+            update.run(sidecar, rowid, snapshotId, tenantId, resource, `[${GRAPH_FIELD_CLASSES_VERSION},%`);
+          } catch (error) {
+            if (!(error instanceof Error) || !("errcode" in error) || typeof error.errcode !== "number" ||
+                (error.errcode & 255) !== 5) throw error;
+          } finally {
+            this.db.exec("PRAGMA busy_timeout = 5000");
+          }
+        }
       }
       await yieldToMain();
     }
