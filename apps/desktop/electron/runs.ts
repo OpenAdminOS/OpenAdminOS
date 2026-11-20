@@ -1,3 +1,4 @@
+import { guardModelFitLlm } from "./intune-chat/model-fit.js";
 import { TENANT_CLOSED_COPY } from "./tenant-lifecycle.js";
 import { createHash, randomUUID } from "node:crypto";
 
@@ -345,6 +346,8 @@ export interface RunServiceHost {
   buildLlm(providerId: ProviderId, model: string | undefined, binding?: { endpoint: string | undefined }): Promise<RunLlmApi>;
   /** Where a provider is reached now (address, or Azure resource and deployment), for binding a model fit rerun. */
   providerEndpoint?(providerId: ProviderId): Promise<string | undefined>;
+  /** An opaque fingerprint of where a provider is reached now, compared with what the run review saw. */
+  providerDestination?(providerId: ProviderId): Promise<string>;
   buildGraph(
     pinnedTenantId?: string,
     agentScopes?: string[],
@@ -585,6 +588,7 @@ export class RunService {
       if (options.dryRun && (options.office || options.officeContext)) {
         throw new Error("Dry runs are available from the agent page or Chat. Run this assignment from Agent Team normally.");
       }
+      let inheritedEndpointBinding: RunRecord["providerEndpointBinding"];
       if (options.runForRealOfRunId) {
         const original = persisted.runs.find(run => run.id === options.runForRealOfRunId);
         if (
@@ -611,7 +615,10 @@ export class RunService {
           tenantId: original.tenantId,
           providerId: original.providerId,
           model: original.model,
+          // A model fit dry run keeps its safeguards into Run for real.
+          ...(original.requireOnDeviceModel ? { requireOnDeviceModel: true } : {}),
         };
+        inheritedEndpointBinding = original.providerEndpointBinding;
       }
       assertAgentCompatible(
         withAgentCompatibility(agent, this.host.appVersion),
@@ -795,7 +802,15 @@ export class RunService {
       const queuedRun = createQueuedRun({ agent, providerId, model, dryRun: options.dryRun });
       // A model fit rerun keeps its admission checks for every later phase (plan, replan, apply).
       if (options.requireOnDeviceModel) queuedRun.requireOnDeviceModel = true;
-      if (options.bindProviderEndpoint) queuedRun.providerEndpointBinding = { endpoint: await this.host.providerEndpoint?.(providerId) };
+      if (options.bindProviderEndpoint) {
+        // The destination the run review saw; a change since refuses the start before anything is sent.
+        if (this.host.providerDestination && options.expectedProviderDestination !== (await this.host.providerDestination(providerId))) {
+          throw new Error("The provider's settings changed after this run was reviewed, so it did not start. Review it again.");
+        }
+        queuedRun.providerEndpointBinding = { endpoint: await this.host.providerEndpoint?.(providerId) };
+      } else if (inheritedEndpointBinding) {
+        queuedRun.providerEndpointBinding = inheritedEndpointBinding;
+      }
       if (options.dryRun || options.runForRealOfRunId) queuedRun.inputSettings = structuredClone(agent.settings ?? {});
       if (options.runForRealOfRunId) queuedRun.runForRealOfRunId = options.runForRealOfRunId;
       queuedRun.assessmentKey = createHash("sha256").update(JSON.stringify({ schema: 1,
@@ -1337,15 +1352,29 @@ export class RunService {
         throw new Error(`OpenAdminOS could not confirm that ${model ?? provider?.name ?? providerId} still runs on this device, so nothing was sent to it. Start the run again.`);
       }
     }
-    if (!run.providerEndpointBinding) return await this.host.buildLlm(providerId, model);
+    let llm: RunLlmApi;
     try {
-      return await this.host.buildLlm(providerId, model, run.providerEndpointBinding);
+      llm = run.providerEndpointBinding
+        ? await this.host.buildLlm(providerId, model, run.providerEndpointBinding)
+        : await this.host.buildLlm(providerId, model);
     } catch (error) {
-      if (error instanceof Error && error.name === "ProviderEndpointChangedError") {
+      if (run.providerEndpointBinding && error instanceof Error && error.name === "ProviderEndpointChangedError") {
         throw new Error("The provider's settings changed after this run was reviewed, so nothing was sent with the new settings. Review the run again.");
       }
       throw error;
     }
+    if (!run.requireOnDeviceModel) return llm;
+    // Every model call of the phase checks again, since evidence gathering and the
+    // diff can take long enough for the model's alias or address to change.
+    return guardModelFitLlm(llm, {
+      before: async () => {
+        const current = (await this.host.listProviders()).find((entry) => entry.id === providerId);
+        if (current?.isLocal !== true || !(await this.host.verifyOnDeviceModel?.(providerId, model))) {
+          throw new Error(`OpenAdminOS could not confirm that ${model ?? current?.name ?? providerId} still runs on this device, so nothing more was sent to it. Start the run again.`);
+        }
+      },
+      dispatched: () => undefined,
+    });
   }
 
   private withOverlay(_run: RunRecord, llm: RunLlmApi, tenantId: string, agentSlug: string): RunLlmApi {

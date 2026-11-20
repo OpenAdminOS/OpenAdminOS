@@ -173,7 +173,7 @@ export default function AgentDetail({
   const [uninstalling, setUninstalling] = useState(false);
   const [requestedScopes, setRequestedScopes] = useState<RequestedScope[]>([]);
   const [pendingRunChoice, setPendingRunChoice] = useState<
-    { dryRun?: boolean; runForRealOfRunId?: string; retryOfRunId?: string; tenantId?: string; providerId?: ProviderId; model?: string; modelFit?: ModelFitIssue } | null
+    { dryRun?: boolean; runForRealOfRunId?: string; retryOfRunId?: string; tenantId?: string; providerId?: ProviderId; model?: string; modelFit?: ModelFitIssue; expectedProviderDestination?: string } | null
   >(null);
   const consumedStartRunOnOpen = useRef(false);
   const resumedIntentRef = useRef<string | null>(null);
@@ -226,12 +226,22 @@ export default function AgentDetail({
     /** Run with <provider> after the local model could not fit the last run. */
     modelFit?: ModelFitIssue;
   }) => {
+    const openReview = (opened: typeof choice) => {
+      const reviewed = opened ?? {};
+      setPendingRunChoice(reviewed);
+      // A model fit rerun remembers where its provider is reached as the review opens; Start refuses if that changes.
+      if (reviewed.modelFit && reviewed.providerId) {
+        void window.openAdminOS?.getProviderDestination?.(reviewed.providerId)
+          .then((destination) => setPendingRunChoice((current) => (current === reviewed ? { ...reviewed, expectedProviderDestination: destination } : current)))
+          .catch(() => undefined);
+      }
+    };
     // With no organization the preflight opens instead of setup: it names
     // the services the agent needs, and starts an agent that calls no
     // service API. Its Connect action opens setup with this run kept.
     if (agent && !activeTenant && !choice?.tenantId) {
       setRunError(null);
-      setPendingRunChoice(choice ?? {});
+      openReview(choice);
       return;
     }
     if (
@@ -254,7 +264,7 @@ export default function AgentDetail({
       return;
     }
     setRunError(null);
-    setPendingRunChoice(choice ?? {});
+    openReview(choice);
   }, [activeTenant, agent, requireTenantAndProvider]);
 
   const trackDeliverySave = (save: Promise<void>): Promise<void> => {
@@ -372,6 +382,7 @@ export default function AgentDetail({
     providerId?: ProviderId;
     model?: string;
     modelFit?: ModelFitIssue;
+    expectedProviderDestination?: string;
   }) => {
     if (!agent) return;
     setRunError(null);
@@ -394,6 +405,7 @@ export default function AgentDetail({
               ...(choice.modelFit && pendingProvider?.isLocal ? { requireOnDeviceModel: true } : {}),
               // Every later phase (replan, apply) goes only where the provider was reached when the run was admitted.
               ...(choice.modelFit ? { bindProviderEndpoint: true } : {}),
+              ...(choice.modelFit && choice.expectedProviderDestination ? { expectedProviderDestination: choice.expectedProviderDestination } : {}),
               ...(choice.providerId ? { providerId: choice.providerId } : {}),
               ...(choice.model ? { model: choice.model } : {}),
             }

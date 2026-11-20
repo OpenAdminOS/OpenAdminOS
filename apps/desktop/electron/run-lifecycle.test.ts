@@ -417,3 +417,33 @@ it('binds a model fit rerun to its endpoint and checks the model again when a ph
   assert.equal(failed?.status, 'failed');
   assert.match(failed?.error ?? '', /still runs on this device/);
 });
+
+it('refuses a model fit rerun whose destination changed after its review, and keeps the safeguards into Run for real', async () => {
+  const h = harness();
+  const agent = { id: 'writer', slug: 'writer', name: 'Writer', description: 'Writes', requiresEntraTier: 'free', version: '1.0.0', mode: 'write', category: 'devices', tier: 'agent', scopes: [], author: { name: 'Test' }, installedAt: new Date().toISOString() } as AgentSummary;
+  let onDevice = true;
+  Object.assign(h.host, {
+    appVersion: '0.7.2',
+    listProviders: async () => [{ id: 'ollama', name: 'Ollama', status: 'connected', models: ['gpt-oss:20b'], defaultModel: 'gpt-oss:20b', isLocal: true }],
+    providerCanRun: () => true,
+    verifyOnDeviceModel: async () => onDevice,
+    providerEndpoint: async () => 'http://127.0.0.1:11434',
+    providerDestination: async () => 'dest-b',
+    buildLlm: async () => new Promise(() => {}),
+  });
+  await h.host.write({ ...h.state(), installedAgents: [agent], tenants: [{ id: 'tenant-a' }] as any, activeTenantId: 'tenant-a' });
+  await assert.rejects(
+    h.service.startRun('writer', { bindProviderEndpoint: true, expectedProviderDestination: 'dest-a', providerId: 'ollama', model: 'gpt-oss:20b', tenantId: 'tenant-a' }),
+    /settings changed after this run was reviewed/,
+  );
+  // A model fit dry run that planned on this device: Run for real keeps the on-device requirement.
+  const planned = { id: 'dry-1', agentSlug: 'writer', dryRun: true, status: 'planned', tenantId: 'tenant-a', providerId: 'ollama', model: 'gpt-oss:20b', inputSettings: {},
+    requireOnDeviceModel: true, providerEndpointBinding: { endpoint: 'http://127.0.0.1:11434' }, queuedAt: new Date().toISOString(), steps: [], logs: [] } as unknown as RunRecord;
+  await h.host.write({ ...h.state(), runs: [planned] });
+  onDevice = false;
+  await assert.rejects(h.service.startRun('writer', { runForRealOfRunId: 'dry-1' }), /could not confirm that gpt-oss:20b runs on this device/);
+  onDevice = true;
+  const real = await h.service.startRun('writer', { runForRealOfRunId: 'dry-1' });
+  assert.equal(real.requireOnDeviceModel, true);
+  assert.deepEqual(real.providerEndpointBinding, { endpoint: 'http://127.0.0.1:11434' });
+});
