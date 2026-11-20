@@ -2634,7 +2634,9 @@ again): where the provider is reached may have changed to a place the review
 does not show, so the review says to close it and open the run again. Start is
 disabled while a start is being admitted, so one review never queues two runs.
 The setup picker for a model fit rerun lists only providers the run host
-admits for it (no self-hosted server outside this device). Start passes the provider and model the review showed, never one the
+admits for it (no self-hosted server outside this device, and no connected
+hosted provider without a model the run could name), and setup does not treat
+such a provider as ready for it. Start passes the provider and model the review showed, never one the
 host resolves again. A model the choice named that the provider no longer
 lists keeps Start disabled, and the review says so; the host refuses it too. When the chosen provider is not ready and the review opens setup, a
 provider picked there stays on that run: setup does not change the active
@@ -2659,7 +2661,9 @@ accept step closes unsent, with a line saying why, when its provider stops
 being a choice (the offer stays) or when the organization or model changes
 (the offer goes and focus returns to the composer). A retry the host refuses
 before the send starts shows its choices again, once, since the refusal says
-to choose again. A prompt that did not fit a local model whose size cannot be
+to choose again; a refusal that ends the offer (expired, used, another
+question, the model changed) says "Send the question again." and its choices
+do not come back. A prompt that did not fit a local model whose size cannot be
 read from its name (Apple Foundation, a custom alias) is offered the sized
 models on this device. A multi-tenant review
 withdraws an open offer, and a new offer replaces earlier ones for the same
