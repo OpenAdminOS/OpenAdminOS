@@ -72,7 +72,14 @@ function summarizeIds(ids: string[], names: Record<string, string>, unit: string
 
 function summarizeRoles(ids: string[]): string[] {
   const out: string[] = [];
-  for (const id of ids) out.push(ROLE_NAMES[id.toLowerCase()] ?? `custom role ${id}`);
+  let unnamed = 0;
+  for (const id of ids) {
+    const name = ROLE_NAMES[id.toLowerCase()];
+    if (name) out.push(name);
+    else unnamed += 1;
+  }
+  // Built-in or custom: the id alone cannot tell, so say neither.
+  if (unnamed > 0) out.push(`${unnamed} other role${unnamed === 1 ? "" : "s"}`);
   return out;
 }
 
@@ -190,6 +197,35 @@ function compactSession(value: unknown): string[] | undefined {
   return out.length ? out : undefined;
 }
 
+const RENDERED_CONDITIONS = new Set([
+  "users", "applications", "clientAppTypes", "platforms", "locations", "signInRiskLevels", "userRiskLevels",
+  "servicePrincipalRiskLevels", "insiderRiskLevels", "devices", "authenticationFlows", "clientApplications",
+]);
+
+function isSet(value: unknown): boolean {
+  if (value === null || value === undefined || value === "") return false;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") return Object.values(value as Json).some(isSet);
+  return true;
+}
+
+/** Workload identity scope: service principals and agent identities as counts. */
+function compactClientApplications(value: unknown): Json | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const out: Json = {};
+  const side = (key: string) => summarizeIds(asStrings(record[key]), {}, "service principal");
+  const include = [...side("includeServicePrincipals"), ...summarizeIds(asStrings(record.includeAgentIdServicePrincipals), {}, "agent identity")];
+  if (include.length) out.include = include.join(", ");
+  const exclude = [...side("excludeServicePrincipals"), ...summarizeIds(asStrings(record.excludeAgentIdServicePrincipals), {}, "agent identity")];
+  if (exclude.length) out.exclude = exclude.join(", ");
+  for (const key of ["servicePrincipalFilter", "agentIdServicePrincipalFilter"]) {
+    const filter = asRecord(record[key]);
+    if (filter && typeof filter.mode === "string") out[key === "servicePrincipalFilter" ? "filter" : "agentFilter"] = filter.mode;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 function ageDays(policy: Json, now: number): number | undefined {
   for (const field of ["modifiedDateTime", "createdDateTime"]) {
     const raw = policy[field];
@@ -237,6 +273,18 @@ export function compactConditionalAccessPolicy(policy: unknown, now = Date.now()
   }
   const flows = asRecord(conditions.authenticationFlows);
   if (flows && typeof flows.transferMethods === "string") out.authFlows = flows.transferMethods;
+  const workloads = compactClientApplications(conditions.clientApplications);
+  if (workloads) out.workloadIdentities = workloads;
+  const insiderRisk = typeof conditions.insiderRiskLevels === "string"
+    ? conditions.insiderRiskLevels.split(",").map((level) => level.trim()).filter(Boolean)
+    : asStrings(conditions.insiderRiskLevels);
+  if (insiderRisk.length) out.insiderRisk = insiderRisk;
+  // Any other condition that is set still narrows the policy; name it so the
+  // review does not read the policy as broader than it is.
+  const other = Object.entries(conditions)
+    .filter(([key, value]) => !RENDERED_CONDITIONS.has(key) && isSet(value))
+    .map(([key]) => key);
+  if (other.length) out.otherConditions = other;
   const grant = compactGrant(record.grantControls);
   if (grant) out.grant = grant;
   const session = compactSession(record.sessionControls);

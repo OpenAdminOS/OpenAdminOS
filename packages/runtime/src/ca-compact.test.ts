@@ -35,7 +35,7 @@ describe("compactConditionalAccessPolicy", () => {
       state: "enabled",
       modifiedDaysAgo: 1036,
       users: {
-        include: { roles: ["Global Administrator", "custom role 0f0f0f0f-0000-4000-a000-000000000000"] },
+        include: { roles: ["Global Administrator", "1 other role"] },
         exclude: { users: "2 users", groups: 1 },
       },
       apps: { include: "All" },
@@ -99,6 +99,25 @@ describe("compactConditionalAccessPolicy", () => {
       displayName: "Block", state: "enabled", grantControls: { operator: "OR", builtInControls: ["block"] },
     }, NOW);
     assert.deepEqual(single.grant, { controls: ["block"] });
+  });
+
+    it("shows workload identity, insider risk and any other set condition", () => {
+    const record = compactConditionalAccessPolicy({
+      displayName: "Workload identities", state: "enabled",
+      conditions: {
+        users: { includeUsers: ["None"] },
+        clientApplications: { includeServicePrincipals: ["sp-1", "sp-2"], excludeServicePrincipals: [], servicePrincipalFilter: null },
+        insiderRiskLevels: "elevated,moderate",
+        times: null,
+        deviceStates: { includeStates: ["All"], excludeStates: ["Compliant"] },
+        agents: null,
+      },
+      grantControls: { operator: "OR", builtInControls: ["block"] },
+    }, NOW);
+    assert.deepEqual(record.workloadIdentities, { include: "2 service principals" });
+    assert.deepEqual(record.insiderRisk, ["elevated", "moderate"]);
+    assert.deepEqual(record.otherConditions, ["deviceStates"]);
+    assert.deepEqual(record.users, { include: { users: "None" } });
   });
 
     it("survives malformed input", () => {
