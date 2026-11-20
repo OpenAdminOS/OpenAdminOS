@@ -327,6 +327,39 @@ describe("local reset: wipe at launch", () => {
     }
   });
 
+  it("keeps the policy file in any letter case", async () => {
+    const dir = await tempDir();
+    try {
+      seedDataFolder(dir, DEV_MARKER);
+      rmSync(join(dir, "policy.json"));
+      writeFileSync(join(dir, "Policy.json"), "{}\n");
+      const report = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "darwin", home: join(dir, "home"), env: {} });
+      assert.equal(report?.status, "completed");
+      assert.deepEqual(readdirSync(dir).sort(), ["Policy.json", "SingletonLock"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the cleanup warnings for a resumed wipe", async () => {
+    const dir = await tempDir();
+    try {
+      seedDataFolder(dir, MARKER);
+      const { run } = recordingRun({ "/usr/bin/security": [{ status: 51 }] });
+      const keychainWarning = { item: `Keychain item "${MACOS_SAFE_STORAGE_SERVICE}"`, reason: "security exited with code 51" };
+      const first = runPendingLocalReset({
+        userDataDir: dir, packaged: true, platform: "darwin", home: join(dir, "home"), env: {}, run,
+        fs: failingFileSystem((path) => path.endsWith(LOCAL_RESET_MARKER)),
+      });
+      assert.equal(first?.status, "incomplete");
+      const second = runPendingLocalReset({ userDataDir: dir, packaged: true, platform: "darwin", home: join(dir, "home"), env: {}, run });
+      assert.equal(second?.status, "completed");
+      assert.deepEqual(second?.warnings, [keychainWarning]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("treats the marker as written once it is renamed into place, even if the folder flush fails", async () => {
     const dir = await tempDir();
     try {

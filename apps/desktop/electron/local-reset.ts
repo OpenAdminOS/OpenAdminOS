@@ -235,7 +235,11 @@ function runCommand(file: string, args: string[]): CommandResult {
 
 /** True when this entry of the data folder stays through a reset. */
 export function isKeptThroughReset(name: string): boolean {
-  return name === MANAGED_POLICY_FILE || name === LOCAL_RESET_MARKER || CHROMIUM_LOCK_FILES.has(name);
+  // macOS and Windows volumes usually match names without regard to case, so
+  // the policy loader reads "Policy.json" through the path "policy.json".
+  // Keeping every case spelling is safe on a case-sensitive volume too.
+  const lower = name.toLowerCase();
+  return lower === MANAGED_POLICY_FILE || lower === LOCAL_RESET_MARKER || CHROMIUM_LOCK_FILES.has(name);
 }
 
 function isAuditSideFile(name: string): boolean {
@@ -365,7 +369,7 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
       removeLeftovers(options, fs, run, warnings);
       // Recorded before the marker goes, so a marker that cannot be removed
       // never makes a later launch remove a Keychain item made since.
-      recordLeftoversDone(fs, userDataDir, marker);
+      recordLeftoversDone(fs, userDataDir, marker, warnings);
     }
   } else if (options.packaged) {
     warnings.push({
@@ -420,9 +424,19 @@ function removeLeftovers(
   }
 }
 
-function recordLeftoversDone(fs: LocalResetFileSystem, userDataDir: string, marker: LocalResetMarker): void {
+/**
+ * Records that the cleanup outside the data folder ran, with its warnings,
+ * so a resumed wipe neither repeats it nor loses what it could not remove.
+ */
+function recordLeftoversDone(
+  fs: LocalResetFileSystem,
+  userDataDir: string,
+  marker: LocalResetMarker,
+  warnings: readonly LocalResetProblem[],
+): void {
+  const next: LocalResetMarker = { ...marker, leftoversDone: true, ...(warnings.length > 0 ? { requestWarnings: [...warnings] } : {}) };
   try {
-    fs.writeMarker(join(userDataDir, LOCAL_RESET_MARKER), `${JSON.stringify({ ...marker, leftoversDone: true }, null, 2)}\n`);
+    fs.writeMarker(join(userDataDir, LOCAL_RESET_MARKER), `${JSON.stringify(next, null, 2)}\n`);
   } catch (cause) {
     console.warn(`[local-reset] could not record that the cleanup outside the data folder ran: ${reasonOf(cause)}`);
   }
