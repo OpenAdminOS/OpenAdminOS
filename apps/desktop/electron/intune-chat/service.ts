@@ -3254,13 +3254,13 @@ export class IntuneChatService {
                 emitDelta(assistantContent);
               } else {
                 // The investigation failed on this local model often enough that Chat stops trying it.
-                if (!options.voice && agentic.reason !== "context-limit" && agenticModelHasFailedRepeatedly(providerId, selectedModel ?? llm.defaultModel)) modelFit = repeatedFailureIssue(provider, selectedModel ?? llm.defaultModel);
+                if (!options.voice && !options.scope && agentic.reason !== "context-limit" && agenticModelHasFailedRepeatedly(providerId, selectedModel ?? llm.defaultModel)) modelFit = repeatedFailureIssue(provider, selectedModel ?? llm.defaultModel);
                 await streamDeterministicAnswer(agentic.fallbackNotice);
               }
             }
           } else {
             const notice = withMcpSkippedNotice(capability, answerPlan?.mcpInstalled ?? false);
-            if (capability.reason === "capability-fallback" && !capability.tooSmall && !options.voice) modelFit = repeatedFailureIssue(provider, selectedModel);
+            if (capability.reason === "capability-fallback" && !capability.tooSmall && !options.voice && !options.scope) modelFit = repeatedFailureIssue(provider, selectedModel);
             if (capability.reason === "capability-fallback" && notice) {
               sendProgress({
                 message: notice,
@@ -3292,7 +3292,8 @@ export class IntuneChatService {
           } else {
             assistantStatus = "failed";
             assistantError = caught instanceof Error ? caught.message : String(caught);
-            modelFit = options.voice ? undefined : chatModelFitFailure(caught, provider, selectedModel);
+            // Nova (voice or a follow-up's scope) never gets an offer: it cannot take an override.
+            modelFit = options.voice || options.scope ? undefined : chatModelFitFailure(caught, provider, selectedModel);
             assistantContent = assistantContent.trim()
               ? `${assistantContent.trim()}\n\nThe selected LLM provider failed while answering this chat message. ${assistantError}`
               : `The selected LLM provider failed while answering this chat message. ${assistantError}`;

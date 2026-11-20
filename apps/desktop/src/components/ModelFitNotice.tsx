@@ -51,11 +51,13 @@ export function ModelFitNotice({
       data-model-fit=""
       // Focus returns here when the accept step closes with Back or Escape.
       tabIndex={-1}
-      className="mb-3 rounded-[10px] bg-[var(--color-surface)] px-[18px] py-4 text-sm ring-1 ring-[var(--color-border)] focus-visible:outline-none"
+      className="mb-3 rounded-[10px] bg-[var(--color-surface)] px-[18px] py-4 text-sm ring-1 ring-[var(--color-border)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)]"
     >
       <h2 id={titleId} className="text-base font-medium text-[var(--color-text)]">
         {MODEL_FIT_COPY.title(issue, model, surface)}
       </h2>
+      {/* Announced when the notice replaces the error, so a screen reader hears why and that choices follow. */}
+      <span role="status" className="sr-only">{`${MODEL_FIT_COPY.title(issue, model, surface)}. ${MODEL_FIT_COPY.why(issue, model, surface)}`}</span>
       <p className="mt-1 text-[var(--color-text-soft)]">{MODEL_FIT_COPY.why(issue, model, surface)}</p>
       {answered ? null : <p className="mt-1 text-xs text-[var(--color-text-muted)]">{MODEL_FIT_COPY.nothingSent}</p>}
       {rows.length > 0 ? (
