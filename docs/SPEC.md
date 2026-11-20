@@ -2636,7 +2636,25 @@ Mockup: `docs/mockups/34-local-reset.html`.
   registry refresh; agent install, update, uninstall; documentation index
   install) is refused once a reset has started, and one under way holds the
   reset like a connector send; the background registry refresh skips while
-  a reset is requested. The shutdown before the restart leaves the SQLite databases open:
+  a reset is requested. Agent draft saves and self-training approvals,
+  rejections and resets are gated the same way. A documentation index
+  download is refused once a reset has started but does not hold one: the
+  commit aborts it, and it stops by itself after 30 minutes.
+- **Data folder guard** (review round 36). Beneath the writers' own checks,
+  the commit wraps every path based change through Node's file system API
+  in the main process (writes, appends, folders, removals, renames, copies,
+  links, mode and time changes, opens for writing, write streams, in their
+  promise, callback and sync forms, synced into ES module imports so that
+  dependencies such as Baileys are covered): any path inside the data
+  folder is refused with "OpenAdminOS is resetting and restarts in a
+  moment. Nothing was saved." (`EROFS`), except the reset's own marker and
+  its temporary files directly in the folder, so the request can still add
+  its warnings. A refused write nobody awaited is logged. Changes through a
+  handle opened earlier (SQLite, Chromium's own storage) are not paths and
+  are left as they are; the process exits right after the shutdown. A
+  refused reset lifts the guard. WhatsApp Web clients leave the connected
+  and QR states when they stop, so a client resumed after a refused reset
+  reconnects. The shutdown before the restart leaves the SQLite databases open:
   closing checkpoints the write-ahead log and deletes it by path; the
   process exit releases the handles and the next launch removes the files.
   On Linux the mount table is read again before every removal in the data
