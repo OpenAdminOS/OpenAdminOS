@@ -414,8 +414,10 @@ export class RunService {
         })
       : run();
     const settled = leased.catch(() => undefined).finally(() => {
-      ledger.dispose();
-      if (this.runClassifications.get(runId) === ledger) this.runClassifications.delete(runId);
+      void ledger.waitForObservations().then(() => {
+        ledger.dispose();
+        if (this.runClassifications.get(runId) === ledger) this.runClassifications.delete(runId);
+      });
       if (this.drives.get(runId) === settled) this.drives.delete(runId);
     });
     this.drives.set(runId, settled);

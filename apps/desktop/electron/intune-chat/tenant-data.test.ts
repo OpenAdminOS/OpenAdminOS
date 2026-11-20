@@ -56,7 +56,20 @@ async function fixture(options: {
   });
   if (options.bypassClassification) Object.defineProperty(store, "buildLlm", { value: async () => llm });
   await store.setChatInvestigationMode("always-deterministic");
-  return { dir, filePath, store, prompts, close: async () => { store.close(); await rm(dir, { recursive: true, force: true }); } };
+  const observations: RequestClassificationEvent[] = [];
+  const listeners = new Set<() => void>();
+  store.observeRequestClassifications(event => {
+    observations.push(event);
+    for (const listener of listeners) listener();
+  });
+  const waitForClassifications = async () => {
+    while (observations.length < prompts.length) {
+      const { promise, resolve } = Promise.withResolvers<void>();
+      listeners.add(resolve);
+      try { await promise; } finally { listeners.delete(resolve); }
+    }
+  };
+  return { dir, filePath, store, prompts, waitForClassifications, close: async () => { store.close(); await rm(dir, { recursive: true, force: true }); } };
 }
 
 test("Chat fences answer packs, workspace evidence and history and filters every displayed or persisted response", async () => {
@@ -253,6 +266,7 @@ for (const agentic of [false, true]) {
           assert.match(result.assistantMessage.content, /Reviewed/);
           assert.equal(f.prompts.at(-1)?.prompt.includes(`"${hint}"`), !omitted);
           if (!bypassClassification) {
+            await f.waitForClassifications();
             assert.equal(counts.length, agentic ? 2 : 1);
             const observed = counts.at(-1)!;
             assert.equal(observed.providerId, "ollama");
@@ -292,18 +306,22 @@ test("Chat observations expire with the four-turn window and stay scoped to thei
     await f.store.setChatInvestigationMode("always-agentic");
     const first = await f.store.streamIntuneChatMessage({ content: "Which application registrations need review?" }, () => {});
     const id = first.conversation.id;
+    await f.waitForClassifications();
     assert.ok(f.store.getRequestClassifications(id).some(event => event.classification.counts.credential > 0));
     offerHint = false;
     await f.store.setChatInvestigationMode("always-deterministic");
     const question = `Explain this JSON example {"hint":"${hint}"}`;
     const get = (scope: string) => f.store.getRequestClassifications(scope).at(-1)!;
     const other = await f.store.streamIntuneChatMessage({ content: question }, () => {});
+    await f.waitForClassifications();
     assert.equal(get(other.conversation.id).classification.counts.credential, 0);
     for (let turn = 0; turn < 4; turn++) {
       await f.store.streamIntuneChatMessage({ content: question, conversationId: id }, () => {});
+      await f.waitForClassifications();
       assert.ok(get(id).classification.counts.credential > 0, `turn ${turn}`);
     }
     await f.store.streamIntuneChatMessage({ content: question, conversationId: id }, () => {});
+    await f.waitForClassifications();
     assert.equal(get(id).classification.counts.credential, 0);
   } finally { await f.close(); }
 });
@@ -318,10 +336,12 @@ test("a replayed Chat turn whose credential evidence expired has incomplete cove
   try {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const first = await f.store.streamIntuneChatMessage({ content: "Explain device compliance." }, () => {});
+    await f.waitForClassifications();
     t.mock.timers.tick(15 * 60_000);
     await f.store.streamIntuneChatMessage({
       conversationId: first.conversation.id, content: "Explain that result.",
     }, () => {});
+    await f.waitForClassifications();
     const { classification } = f.store.getRequestClassifications(first.conversation.id).at(-1)!;
     const request = f.prompts.at(-1)!;
     assert.match(request.prompt, /The hint was q7z/);
@@ -357,6 +377,7 @@ for (const voice of [false, true]) {
       await f.store.streamIntuneChatMessage({
         conversationId: first.conversation.id, content: "Explain that result.",
       }, () => {}, { voice });
+      await f.waitForClassifications();
       const { classification } = f.store.getRequestClassifications(first.conversation.id).at(-1)!;
       const { prompt } = f.prompts.at(-1)!;
       const missing = classification.unexamined.ranges.filter(range => range.reason === "history-evidence-unavailable");
@@ -386,6 +407,7 @@ test("Graph diagnostics retain only static source labels, expire, and clear on D
     await f.store.setChatInvestigationMode("always-agentic");
     const { conversation } = await f.store.streamIntuneChatMessage({ content: "Review the tenant's configuration." }, () => {});
     const read = () => f.store.getRequestClassifications(conversation.id);
+    await f.waitForClassifications();
     const events = read();
     assert.ok(events.some(event => event.classification.spans.some(span => span.source === "graph:/users")));
     const diagnostics = JSON.stringify(events);
@@ -394,6 +416,7 @@ test("Graph diagnostics retain only static source labels, expire, and clear on D
     assert.deepEqual(read(), []);
     await f.store.setChatInvestigationMode("always-deterministic");
     await f.store.streamIntuneChatMessage({ conversationId: conversation.id, content: "Explain that result." }, () => {});
+    await f.waitForClassifications();
     assert.ok(read().length > 0);
     await f.store.disconnectTenant("tenant-a");
     assert.deepEqual(read(), []);

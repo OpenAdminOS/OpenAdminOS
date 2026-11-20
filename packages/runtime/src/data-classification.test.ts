@@ -502,15 +502,17 @@ test("the provider observer receives each method's scoped result without extendi
   }, "ollama", event => seen.push(event));
   const run = new ClassificationLedger();
   run.register("graph:/applications", { secretText: "server-side-value" }, { graphPath: "/applications" });
+  const other = new ClassificationLedger();
   await Promise.all([
     withClassificationScope(run, async () => {
       await Promise.resolve();
       await model.complete(request);
     }),
-    withClassificationScope(new ClassificationLedger(), async () => {
+    withClassificationScope(other, async () => {
       for await (const item of model.stream(request)) assert.equal(item.accumulated, "Done");
     }),
   ]);
+  await Promise.all([run.waitForObservations(), other.waitForObservations()]);
   assert.equal(seen.length, 2);
   const complete = seen.find(event => event.method === "complete")!;
   const stream = seen.find(event => event.method === "stream")!;
@@ -523,6 +525,7 @@ test("the provider observer receives each method's scoped result without extendi
 
 test("stream captures the call scope and failed classification still calls the provider", async () => {
   const events: RequestClassificationEvent[] = [];
+  const { promise: unscoped, resolve: observedUnscoped } = Promise.withResolvers<void>();
   const request = { prompt: '{"hint":"abc"}' };
   const scoped = new ClassificationLedger(undefined, "fixture-run");
   scoped.register("graph:/applications", { passwordCredentials: [{ hint: "abc" }] }, { graphPath: "/applications" });
@@ -538,10 +541,12 @@ test("stream captures the call scope and failed classification still calls the p
     },
   }, "ollama", event => {
     events.push(event);
+    if (!event.scopePresent) observedUnscoped();
     throw new Error("observer fixture");
   });
   const iterator = withClassificationScope(scoped, () => model.stream(request));
   for await (const chunk of iterator) assert.equal(chunk.accumulated, "stream");
+  await scoped.waitForObservations();
   assert.equal(events[0]?.scopeId, "fixture-run");
   assert.equal(events[0]?.scopePresent, true);
   assert.equal(events[0]?.fieldMapVersion, GRAPH_FIELD_CLASSES_VERSION);
@@ -549,6 +554,7 @@ test("stream captures the call scope and failed classification still calls the p
   assert.equal(events[0]?.classification.counts.credential, 1);
   const broken = new ClassificationLedger({ matches() { throw new Error("index fixture"); } }, "broken-run");
   assert.equal((await withClassificationScope(broken, () => model.complete(request))).text, "complete");
+  await broken.waitForObservations();
   assert.equal(events[1]?.failed, true);
   assert.equal(events[1]?.classification.coverageIncomplete, true);
   assert.equal(events[1]?.classification.counts.credential, 0);
@@ -556,6 +562,7 @@ test("stream captures the call scope and failed classification still calls the p
   const diagnostics = classificationDiagnostics();
   registerTenantData("unscoped fixture", "value");
   await model.complete(request);
+  await unscoped;
   assert.equal(events[2]?.scopeId, undefined);
   assert.equal(events[2]?.scopePresent, false);
   assert.deepEqual(classificationDiagnostics(), {
@@ -729,6 +736,7 @@ test("Graph ingress sends field classification to the worker and a worker failur
         await registerGraphTenantData("/applications", payload);
         assert.equal((await llm.complete(request)).text, "reviewed");
       });
+      await ledger.waitForObservations();
       assert.equal(events[0]?.classification.counts.credential, fails ? 0 : 1);
       assert.equal(events[0]?.classification.coverageIncomplete, fails);
       if (fails) assert.equal(events[0]?.classification.unexamined.registrations, 1);
@@ -737,7 +745,7 @@ test("Graph ingress sends field classification to the worker and a worker failur
   assert.equal(sent.filter(type => type === "graph").length, 2);
 });
 
-test("worker timeout reports incomplete coverage and still calls the provider with the original options", async t => {
+test("a stalled classifier cannot consume the provider deadline or replace its signal", async t => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   let markSent!: () => void;
   const sent = new Promise<void>(resolve => { markSent = resolve; });
@@ -748,20 +756,28 @@ test("worker timeout reports incomplete coverage and still calls the provider wi
     if (args[0].type === "scan") markSent();
     else post.apply(this, args);
   });
-  const request = { prompt: " ".repeat(4000) + "password=q7z" };
+  const controller = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), 250);
+  const request = { prompt: " ".repeat(4000) + "password=q7z", signal: controller.signal };
+  const ledger = new ClassificationLedger();
   const events: RequestClassificationEvent[] = [];
   const model = withRequestClassification({
     available: true,
     async complete(options) {
       assert.equal(options, request);
+      assert.equal(options.signal, controller.signal);
+      options.signal?.throwIfAborted();
       return { text: "complete", model: "fixture" };
     },
     async *stream() { throw new Error("Unused"); },
   }, "ollama", event => events.push(event));
-  const completion = model.complete(request);
-  await sent;
-  t.mock.timers.tick(3_000);
+  const completion = withClassificationScope(ledger, () => model.complete(request));
   assert.equal((await completion).text, "complete");
+  await sent;
+  t.mock.timers.tick(250);
+  assert.equal(request.signal.aborted, true);
+  await ledger.waitForObservations();
+  clearTimeout(deadline);
   assert.equal(events[0]?.failed, true);
   assert.equal(events[0]?.classification.coverageIncomplete, true);
   assert.equal(events[0]?.classification.effectiveClass, "credential");
@@ -794,6 +810,7 @@ test("a failed worker transport reports incomplete coverage and recovers on the 
   });
   const request = { prompt: " ".repeat(4000) + "password=q7z" };
   const events: RequestClassificationEvent[] = [];
+  const ledger = new ClassificationLedger();
   const model = withRequestClassification({
     available: true,
     async complete(options) {
@@ -802,11 +819,13 @@ test("a failed worker transport reports incomplete coverage and recovers on the 
     },
     async *stream() { throw new Error("Unused"); },
   }, "ollama", event => events.push(event));
-  assert.equal((await model.complete(request)).text, "complete");
+  assert.equal((await withClassificationScope(ledger, () => model.complete(request))).text, "complete");
+  await ledger.waitForObservations();
   assert.equal(events[0]?.failed, true);
   assert.equal(events[0]?.classification.effectiveClass, "credential");
   transport.mock.restore();
-  assert.equal((await model.complete(request)).text, "complete");
+  assert.equal((await withClassificationScope(ledger, () => model.complete(request))).text, "complete");
+  await ledger.waitForObservations();
   assert.equal(events[1]?.failed, false);
   assert.equal(events[1]?.classification.counts.credential, 1);
 });

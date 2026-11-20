@@ -1875,9 +1875,11 @@ If work or retention limits leave evidence unexamined, the
 effective class is Credential, with a separate coverage-incomplete flag,
 unexamined quantities and text ranges where applicable. Observed counts and
 spans only include evidence the classifier found. A turn's dropped evidence
-does not mark a later turn incomplete. If classification fails or the worker
-times out, the observer
-marks the request failed and the provider call proceeds with unchanged options.
+does not mark a later turn incomplete. In Phase A1 the provider starts with
+the original options and signal while the observer scans concurrently.
+The observer records incomplete coverage on failure or timeout. Phase A3
+will scan before dispatch with its own budget and designed states for
+incomplete coverage and policy decisions.
 
 Each local diagnostic event includes the field map version, timestamp and
 available run or conversation ID. Graph evidence sources use static route

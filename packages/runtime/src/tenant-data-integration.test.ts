@@ -117,11 +117,13 @@ for (const omit of [false, true]) {
       },
       async *stream() {},
     }, "ollama", event => seen.push(event.classification));
-    await withClassificationScope(new ClassificationLedger(), () => runAgentTemplate(manifest, {
+    const ledger = new ClassificationLedger();
+    await withClassificationScope(ledger, () => runAgentTemplate(manifest, {
       agent: { id: slug }, providerId: "ollama", realWrites: false, llm,
       graph: { request: async () => ({ value: evidence }) }, log: () => {},
       step: async (_label: string, _detail: string, work: () => Promise<unknown>) => work(),
     } as unknown as RunContext));
+    await ledger.waitForObservations();
     assert.equal(seen.length, 1);
     assert.equal(seen[0]!.counts.credential, omit ? 0 : 1);
   });

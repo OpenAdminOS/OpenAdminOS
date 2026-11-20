@@ -169,9 +169,13 @@ describe("multi-tenant Chat and connected services", () => {
     const tenants = [tenant("contoso", "Contoso"), tenant("fabrikam", "Fabrikam")];
     const repaired = await makeFixture(tenants, ["I'll check that now.", "Both tenants have 1 compliant Windows device."]);
     try {
+      let observed = 0;
+      const { promise: classified, resolve } = Promise.withResolvers<void>();
+      repaired.store.observeRequestClassifications(() => { if (++observed === 2) resolve(); });
       const { job } = await repaired.store.runMultiTenantIntuneChat({ prompt: PROMPT, tenantScope: { kind: "all" } });
       assert.equal(job.assistantText, "Both tenants have 1 compliant Windows device.");
       assert.equal(repaired.prompts.length, 2);
+      await classified;
       assert.equal(repaired.store.getRequestClassifications(job.id).length, 2);
       assert.match(repaired.prompts[1]!, /Your previous reply:\nI'll check that now\./);
     } finally {

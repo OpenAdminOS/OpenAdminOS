@@ -564,7 +564,6 @@ export class IntuneChatService {
 
   private retainCompletedClassification(message: IntuneChatMessage, tenantId: string | undefined): void {
     const ledger = currentClassificationLedger();
-    ledger?.discardTransient();
     if (!ledger || ledger.expired || message.status !== "completed" || ledger.scopeId !== message.conversationId) return;
     const id = message.conversationId;
     const previous = this.classificationTurns.get(id);
@@ -684,9 +683,12 @@ export class IntuneChatService {
     try {
       return await (tenantId ? this.leased(tenantId, signal, run) : run(signal));
     } finally {
-      this.activeClassification.delete(ledger);
-      ledger.releaseHistory();
-      if (!ledger.scopeId || !this.classificationTurns.get(ledger.scopeId)?.turns.some(turn => turn.ledger === ledger)) ledger.dispose();
+      void ledger.waitForObservations().then(() => {
+        this.activeClassification.delete(ledger);
+        ledger.discardTransient();
+        ledger.releaseHistory();
+        if (!ledger.scopeId || !this.classificationTurns.get(ledger.scopeId)?.turns.some(turn => turn.ledger === ledger)) ledger.dispose();
+      });
     }
   }
 

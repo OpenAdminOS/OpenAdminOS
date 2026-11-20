@@ -92,12 +92,14 @@ it("classifies the exact clipped Graph script without changing either request", 
         JSON.stringify({ tool: "graph_get", params: { path } }) :
         JSON.stringify({ final: true, answer: "Reviewed." }) };
     }, async *stream() {} };
-    const result = await withClassificationScope(new ClassificationLedger(), () =>
+    const ledger = new ClassificationLedger();
+    const result = await withClassificationScope(ledger, () =>
       runAgenticChat({ ...baseInput(store, classify ? withRequestClassification(llm, "ollama", e => events.push(e)) : llm), tools }));
     assert.equal(result.ok, true);
     assert.ok(requests[1]?.prompt.includes(clip));
     assert.ok(!requests[1]?.prompt.includes(script));
     if (classify) {
+      await ledger.waitForObservations();
       const request = requests[1]!;
       const spans = events[1]!.classification.spans;
       assert.ok(spans.some(span => span.kind === "credential" && span.source === `graph:${path}` &&
@@ -137,6 +139,7 @@ it("classifies the fenced Splashtop organization name in the first model request
       ...baseInput(store, withRequestClassification(model, "ollama", e => events.push(e))), tools, plannedResources: [], questionKind: "mixed", smallTalk: true,
     }));
     assert.equal(result.ok, true);
+    await ledger.waitForObservations();
     assert.equal(events.length, 1);
     const span = events[0]?.classification.spans.find(span => span.section === "system" && span.source === "organization:name");
     assert.ok(span);

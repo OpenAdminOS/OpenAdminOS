@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { setImmediate as yieldToMain } from "node:timers/promises";
 import { DATA_CLASSES_BY_SENSITIVITY, maxDataClass, type DataClass, type DataClassCounts, type LlmOptions, type ProviderId, type RunLlmApi } from "@openadminos/agent-sdk";
 import { emptyDataClassCounts, graphClassificationSource, requestTextSpans, walkDataClasses, type ClassificationOptions, type TextSpan } from "./data-classification.js";
 import { GRAPH_FIELD_CLASSES_VERSION, type SecurityMaskRole } from "./graph-field-classes.js";
@@ -388,6 +389,19 @@ export class ClassificationLedger {
   private disposed = false;
   private discardedIncompleteEvidence = false;
   private expiry?: ReturnType<typeof setTimeout>;
+  private readonly observationLifetime = new AbortController();
+  private readonly observations = new Set<Promise<void>>();
+
+  observeRequest(work: (signal: AbortSignal) => Promise<void>): void {
+    const pending = yieldToMain().then(() => work(this.observationLifetime.signal));
+    this.observations.add(pending);
+    const remove = () => { this.observations.delete(pending); };
+    void pending.then(remove, remove);
+  }
+
+  async waitForObservations(): Promise<void> {
+    await Promise.allSettled(this.observations);
+  }
   private workerState?: { client: ClassificationWorker; id: number; dirty: Set<Scalar>; mirrored: Set<Scalar> };
   scopeId: string | undefined;
 
@@ -410,6 +424,7 @@ export class ClassificationLedger {
   dispose(): void {
     clearTimeout(this.expiry);
     this.disposed = true;
+    this.observationLifetime.abort();
     this.values.clear();
     for (const keys of this.byClass.values()) keys.clear();
     this.anchors.length = 0;
@@ -1054,8 +1069,10 @@ export async function withTransientClassificationScope<T>(
     signal?.throwIfAborted();
     return await withClassificationScope(ledger, work);
   } finally {
-    signal?.removeEventListener("abort", dispose);
-    dispose();
+    void ledger.waitForObservations().then(() => {
+      signal?.removeEventListener("abort", dispose);
+      dispose();
+    });
   }
 }
 
@@ -1098,41 +1115,49 @@ export function withRequestClassification(
   providerId: ProviderId,
   observe: (event: RequestClassificationEvent, tenantIds: readonly string[]) => void,
 ): RunLlmApi {
-  const classify = async (ledger: ClassificationLedger | undefined, method: RequestClassificationEvent["method"], request: LlmOptions) => {
+  const classify = (
+    scoped: ClassificationLedger | undefined, method: RequestClassificationEvent["method"], options: LlmOptions,
+  ) => {
     if (!llm.available) return;
-    if (!ledger) unscopedRequests++;
-    let result: RequestClassification;
-    let failed = false;
-    try {
-      const active = ledger ?? new ClassificationLedger();
-      result = await active.classifyProviderRequest(request);
-    } catch {
-      failed = true;
-      const ranges: UnexaminedRange[] = [];
-      for (const section of ["system", "prompt"] as const) {
-        const length = request[section]?.length ?? 0;
-        if (length) ranges.push({ section, start: 0, end: length, reason: "failure" });
+    if (!scoped) unscopedRequests++;
+    const ledger = scoped ?? new ClassificationLedger();
+    const { scopeId, tenantIds } = ledger;
+    const { prompt, system, signal } = options;
+    ledger.observeRequest(async lifetime => {
+      const scanSignal = signal ? AbortSignal.any([signal, lifetime]) : lifetime;
+      let result: RequestClassification;
+      let failed = false;
+      try {
+        scanSignal.throwIfAborted();
+        result = await ledger.classifyProviderRequest({ prompt, system, signal: scanSignal });
+      } catch {
+        failed = true;
+        const ranges: UnexaminedRange[] = [];
+        for (const [section, length] of [["system", system?.length ?? 0], ["prompt", prompt.length]] as const) {
+          if (length) ranges.push({ section, start: 0, end: length, reason: "failure" });
+        }
+        result = classification([], ranges, 0, 0, 0, true);
       }
-      result = classification([], ranges, 0, 0, 0, true);
-    }
-    try {
-      observe({ providerId, method, fieldMapVersion: GRAPH_FIELD_CLASSES_VERSION, timestamp: new Date().toISOString(),
-        ...(ledger?.scopeId ? { scopeId: ledger.scopeId } : {}), scopePresent: ledger !== undefined,
-        failed, classification: result }, ledger?.tenantIds ?? []);
-    } catch { /* Development observers cannot change provider behavior. */ }
+      try {
+        observe({ providerId, method, fieldMapVersion: GRAPH_FIELD_CLASSES_VERSION, timestamp: new Date().toISOString(),
+          ...(scopeId ? { scopeId } : {}), scopePresent: scoped !== undefined,
+          failed, classification: result }, tenantIds);
+      } catch { /* Development observers cannot change provider behavior. */ }
+    });
   };
   return {
     available: llm.available,
     defaultModel: llm.defaultModel,
     streamsIncrementally: llm.streamsIncrementally,
     async complete(options) {
-      await classify(scopes.getStore(), "complete", options);
-      return llm.complete(options);
+      const ledger = scopes.getStore();
+      try { return llm.complete(options); }
+      finally { classify(ledger, "complete", options); }
     },
     stream(options) {
       const ledger = scopes.getStore();
       return (async function* () {
-        await classify(ledger, "stream", options);
+        classify(ledger, "stream", options);
         yield* llm.stream(options);
       })();
     },
