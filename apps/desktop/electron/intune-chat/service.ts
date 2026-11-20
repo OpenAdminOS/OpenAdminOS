@@ -169,7 +169,7 @@ import {
   type DocsIndexPassage,
 } from "./chat-steps.js";
 import { TenantValueIndex } from "./tenant-values.js";
-import { chatModelFitFailure, ModelFitOffers, ModelOverrideError, repeatedFailureIssue, resolveChatTurnProvider } from "./model-fit.js";
+import { chatModelFitFailure, loopFailureIssue, ModelFitOffers, ModelOverrideError, repeatedFailureIssue, resolveChatTurnProvider } from "./model-fit.js";
 import { usedTenantEvidence } from "../../src/shared/chat-steps.js";
 
 type WorkspacePromptContextPayload = {
@@ -443,6 +443,8 @@ export interface ChatServiceHost {
   listProviders(): Promise<ProviderSummary[]>;
   /** A fresh check that this provider runs this model on this device, before a model fit retry on it. */
   verifyOnDeviceModel?(providerId: ProviderId, model: string | undefined): Promise<boolean>;
+  /** Where a provider is reached now (address, or Azure resource and deployment), for binding a model fit request to it. */
+  providerEndpoint?(providerId: ProviderId): Promise<string | undefined>;
   /** With a binding, the model is built only for that endpoint (see ProviderEndpointBinding in state.ts). */
   buildLlm(providerId: ProviderId, model: string | undefined, binding?: { endpoint: string | undefined }): Promise<RunLlmApi>;
   buildGraph(
@@ -2581,6 +2583,11 @@ export class IntuneChatService {
     if (turn.switchedFrom && provider.isLocal && !(await this.host.verifyOnDeviceModel?.(providerId, turn.model))) {
       throw new ModelOverrideError(`OpenAdminOS could not confirm that ${turn.model ?? provider.name} runs on this device, so nothing was sent. Choose another model, or a hosted provider.`);
     }
+    // The request is built only for where the chosen provider is reached now, so a
+    // settings change while it runs (another Azure resource or deployment) cannot redirect it.
+    if (turn.switchedFrom && !options.providerBinding && this.host.providerEndpoint) {
+      options = { ...options, providerBinding: { endpoint: await this.host.providerEndpoint(providerId) } };
+    }
     options.signal?.throwIfAborted();
     // Nova keeps requiring a tenant.
     if (noTenant && (options.voice || options.scope)) {
@@ -2747,6 +2754,8 @@ export class IntuneChatService {
         createdAt: cancelledAt,
         providerId,
         ...(selectedModel ? { model: selectedModel } : {}),
+        // A stopped request on a chosen provider still says where it went.
+        ...(turn.switchedFrom ? { switchedFrom: turn.switchedFrom } : {}),
         ...(answerPlan ? { questionKind: answerPlan.sources.kind } : {}),
         steps: steps.steps,
         sources: buildIntuneChatSources({
@@ -3254,7 +3263,7 @@ export class IntuneChatService {
                 emitDelta(assistantContent);
               } else {
                 // The investigation failed on this local model often enough that Chat stops trying it.
-                if (!options.voice && !options.scope && agentic.reason !== "context-limit" && agenticModelHasFailedRepeatedly(providerId, selectedModel ?? llm.defaultModel)) modelFit = repeatedFailureIssue(provider, selectedModel ?? llm.defaultModel);
+                if (!options.voice && !options.scope) modelFit = loopFailureIssue(agentic, provider, selectedModel) ?? (agentic.reason !== "context-limit" && agenticModelHasFailedRepeatedly(providerId, selectedModel ?? llm.defaultModel) ? repeatedFailureIssue(provider, selectedModel) : undefined);
                 await streamDeterministicAnswer(agentic.fallbackNotice);
               }
             }
@@ -3291,7 +3300,9 @@ export class IntuneChatService {
             emitDelta(assistantContent);
           } else {
             assistantStatus = "failed";
-            assistantError = caught instanceof Error ? caught.message : String(caught);
+            assistantError = turn.switchedFrom && caught instanceof Error && caught.name === "ProviderEndpointChangedError"
+              ? "The provider's settings changed after you chose it, so nothing was sent with the new settings. Send the question again."
+              : caught instanceof Error ? caught.message : String(caught);
             // Nova (voice or a follow-up's scope) never gets an offer: it cannot take an override.
             modelFit = options.voice || options.scope ? undefined : chatModelFitFailure(caught, provider, selectedModel);
             assistantContent = assistantContent.trim()

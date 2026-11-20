@@ -14,7 +14,7 @@ import type {
 } from "@openadminos/agent-sdk";
 
 import { classifyModelFitFailure, isOllamaCloudModel, modelFitChoices, modelSizeBillions } from "../../src/shared/model-fit.js";
-import { MODEL_FIT_OFFER_TTL_MS, ModelFitOffers, ModelOverrideError, resolveChatTurnProvider, type ModelFitOffer } from "./model-fit.js";
+import { MODEL_FIT_OFFER_TTL_MS, ModelFitOffers, ModelOverrideError, loopFailureIssue, resolveChatTurnProvider, type ModelFitOffer } from "./model-fit.js";
 import { IntuneChatService, type ChatServiceHost } from "./service.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 
@@ -73,6 +73,23 @@ describe("Model fit: classifying a failure", () => {
     const raw = classifyModelFitFailure(new Error(OLLAMA_400), { providerId: "ollama", model: LOCAL_MODEL, isLocal: true });
     assert.equal(raw?.neededTokens, 40652);
     assert.equal(raw?.limitTokens, 16384);
+  });
+
+  it("reads the adapter's memory failure, a wrapped typed failure and the loop's reason", () => {
+    const memory = classifyModelFitFailure(
+      `Ollama context size too small: This request needs 40,652 tokens of context, but Ollama could not load ${LOCAL_MODEL} with 40,960, usually because free memory ran out. Ollama said: model requires more system memory`,
+      { providerId: "ollama", model: LOCAL_MODEL, isLocal: true },
+    );
+    assert.deepEqual([memory?.neededTokens, memory?.limitTokens, memory?.limitIsMemory], [40652, 40960, true]);
+    // The agent runtime's prompt fit check: a `failure` record, behind a wrapper's `cause`.
+    const failure = { code: "context-too-small", promptTokens: 30000, answerTokens: 1100, neededTokens: 31100, limitTokens: 16384 };
+    const wrapped = new Error("Nothing was applied: the plan could not be checked.", { cause: { code: "context-too-small", failure } });
+    const fromCause = classifyModelFitFailure(wrapped, { providerId: "ollama", model: LOCAL_MODEL, isLocal: true });
+    assert.deepEqual([fromCause?.neededTokens, fromCause?.limitTokens], [31100, 16384]);
+    assert.equal(classifyModelFitFailure(failure, { providerId: "ollama", isLocal: true })?.limitTokens, 16384);
+    assert.equal(loopFailureIssue({ failureReason: "thinking-only" }, ollama, LOCAL_MODEL)?.reason, "thinking-only");
+    assert.equal(loopFailureIssue({ failureReason: "malformed" }, ollama, LOCAL_MODEL), undefined);
+    assert.equal(loopFailureIssue({ failureReason: "context-too-small" }, claude, "claude-sonnet-5-5"), undefined);
   });
 
   it("reads a typed failure from the runtime by its shape, and llama.cpp's error", () => {
@@ -233,7 +250,7 @@ describe("Model fit: offers", () => {
 });
 
 /** A local model that rejects every prompt for its size, and a hosted one that answers. */
-function chatHost(store: IntelligenceSqliteStore, built: string[], onDevice: (model: string | undefined) => boolean = () => true): ChatServiceHost {
+function chatHost(store: IntelligenceSqliteStore, built: string[], onDevice: (model: string | undefined) => boolean = () => true, bindings: Array<{ endpoint: string | undefined } | undefined> = []): ChatServiceHost {
   const failingLocal: RunLlmApi = {
     available: true,
     defaultModel: LOCAL_MODEL,
@@ -253,8 +270,10 @@ function chatHost(store: IntelligenceSqliteStore, built: string[], onDevice: (mo
     requireIntelligenceStore: () => store,
     listProviders: async () => [ollama, claude],
     verifyOnDeviceModel: async (_providerId: ProviderId, model: string | undefined) => onDevice(model),
-    buildLlm: async (providerId: ProviderId) => {
+    providerEndpoint: async (providerId: ProviderId) => (providerId === "anthropic" ? "claude-code" : undefined),
+    buildLlm: async (providerId: ProviderId, _model: string | undefined, binding?: { endpoint: string | undefined }) => {
       built.push(providerId);
+      bindings.push(binding);
       return providerId === "anthropic" ? hosted : failingLocal;
     },
     intelligenceStore: store,
@@ -346,6 +365,25 @@ describe("Model fit in Chat", () => {
       const next = await service.streamIntuneChatMessage({ content: QUESTION, conversationId }, () => undefined);
       assert.equal(next.assistantMessage.providerId, "ollama");
       assert.equal(next.assistantMessage.switchedFrom, undefined);
+    });
+  });
+
+  it("binds the chosen request to where its provider is reached when it is sent", async () => {
+    await withStore(async (store) => {
+      const built: string[] = [];
+      const bindings: Array<{ endpoint: string | undefined } | undefined> = [];
+      const service = new IntuneChatService(chatHost(store, built, () => true, bindings));
+      const failed = await service.streamIntuneChatMessage({ content: QUESTION }, () => undefined);
+      assert.ok(bindings.every((binding) => binding === undefined), "an ordinary send is not bound");
+      bindings.length = 0;
+      const offerId = failed.assistantMessage.modelFit!.offerId!;
+      await service.streamIntuneChatMessage({
+        content: QUESTION,
+        conversationId: failed.conversation.id,
+        modelOverride: { offerId, providerId: "anthropic", model: "claude-sonnet-5-5" },
+        hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5", false, offerId),
+      }, () => undefined);
+      assert.ok(bindings.length > 0 && bindings.every((binding) => binding?.endpoint === "claude-code"), JSON.stringify(bindings));
     });
   });
 

@@ -198,6 +198,23 @@ export function chatModelFitFailure(
 }
 
 /**
+ * A finer reason the investigation loop reports when it falls back to cached
+ * data (`failureReason`, from the local model accuracy work): a prompt that
+ * did not fit, or a reply that was reasoning only. Read by its shape, so it
+ * applies once that loop reports it.
+ */
+export function loopFailureIssue(
+  result: object,
+  provider: Pick<ProviderSummary, "id" | "isLocal">,
+  model: string | undefined,
+): ModelFitIssue | undefined {
+  if (!provider.isLocal) return undefined;
+  const failureReason = (result as { failureReason?: unknown }).failureReason;
+  const reason = failureReason === "context-too-small" || failureReason === "thinking-only" ? failureReason : undefined;
+  return reason ? { reason, providerId: provider.id, ...(model ? { model } : {}) } : undefined;
+}
+
+/**
  * The investigation failed on this local model often enough that Chat stops
  * trying it and answers from cached data: offer the alternatives with that
  * answer.
