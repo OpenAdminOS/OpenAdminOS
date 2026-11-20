@@ -265,8 +265,10 @@ Supported filters are `size`, `total`, `length`, `sample(n)`, `default(...)`,
 `join(...)`, `boundedJson(maxChars)`, `counts`, `top(n)`, `upper`, `lower`, and
 `type`. In prompts, prefer counts and bounded samples to whole inventories:
 `counts` turns a `group-by-field` result into bucket counts, `top(n)` keeps the
-n largest buckets of a count and sums the rest into one "(other N values)"
-bucket, and `boundedJson(maxChars)` keeps whole records up to a character budget
+n largest buckets of a count (when buckets are left out the result is
+`{ top: { ... }, otherValues, otherCount }`, so no tenant value collides with
+the summary; read one bucket exactly with its own expression, such as
+`{{ by_location.output.(unset) | size }}`), and `boundedJson(maxChars)` keeps whole records up to a character budget
 and says how many were left out. Every LLM call is checked against the model's
 context window before it is sent when the provider reports one. When a string is only one template
 expression, the raw value is preserved. This lets

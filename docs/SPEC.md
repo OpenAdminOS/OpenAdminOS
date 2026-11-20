@@ -484,13 +484,14 @@ Every LLM call in an agent run is size-checked before anything is sent.
 provider that cannot report a window leaves it out, and its requests are
 never blocked. Hosted providers (Claude Code, Codex, Copilot, Gemini, Azure
 OpenAI) report none. Ollama reports it from `/api/show` in
-`ollama-context.ts`. Because the Ollama adapter raises `num_ctx` on an
-overflow up to the model's maximum (PR #211), that maximum, the
-architecture's `context_length`, is the limit; a pinned `num_ctx` is not.
-The helper can also answer for a caller that does not raise `num_ctx`: then
-a pinned `num_ctx` wins, a model without one uses the size Ollama loaded it
-with (`/api/ps`), and the maximum is the fallback. LM Studio reports none for
-now because its context fields could not be verified.
+`ollama-context.ts`. A `num_ctx` pinned in the Modelfile is the model
+author's choice and what the first request gets, so it is the limit:
+OpenAdmin 8B pins 16,384, the size its rope scaling was trained at. A model
+without a pinned `num_ctx` is limited by its architecture `context_length`,
+because the adapter raises `num_ctx` on an overflow up to that maximum
+(PR #211). A caller that does not raise `num_ctx` gets the size Ollama loaded
+the model with (`/api/ps`) instead. LM Studio reports none for now because its
+context fields could not be verified.
 
 The runtime's `estimateTokens` counts letters, digits, mixed ids,
 punctuation and line breaks separately. Calibrated against OpenAdmin 8B
@@ -515,19 +516,26 @@ records reach prompts only as counts (`counts` filter or `count-by-field`
 steps), and breakdowns by high-cardinality fields keep their largest buckets
 (`top(n)` filter, which moves them under `top` with `otherValues` and
 `otherCount` beside them so no tenant value collides with the summary).
-Text appended after the check, such as the self-training overlay, is taken off
-the window the check sees. The typed reason survives write revalidation (as
+The self-training overlay is appended after the run's check, so its wrapper
+checks the composed request again; the typed reason then counts the overlay as
+prompt and keeps the model's real limit. The typed reason survives write revalidation (as
 the error's `cause`) and sandboxed script agents (the broker answers
 `context-too-small` and the script run fails with the typed error).
 
 A bundled manifest that uses a transform or filter added in a release sets
-`minAppVersion` to that release, because released apps fetch registry
-manifests from main: the Conditional Access explainer and agents that use
-`top(n)` need 0.7.3. Agents that can be bounded with older steps
-(`count-by-field`) keep their old minimum. Until the package version is
-bumped to 0.7.3, a local build from source reports 0.7.2 and shows these
-agents as needing an update; nightly builds (0.7.3-nightly) and 0.7.3 run
-them.
+`minAppVersion` to the first build that has it, because released apps fetch
+registry manifests from main. Nightlies of the next release compare as that
+release, so a feature that lands between nightlies takes a nightly minimum:
+the Conditional Access explainer and agents that use `top(n)` need
+`0.7.3-nightly.20261120040000`, a stamp after the last nightly without them.
+`appVersionSatisfies` reads a nightly minimum exactly: earlier nightlies of that
+release are refused, later ones and the stable release are accepted.
+Released apps compare it with `compareSemver`, which also refuses 0.7.2 and
+the earlier nightlies. A nightly built from main after that stamp but before
+this change merges would still accept these manifests; that window closes at
+the first nightly after the merge. Agents that can be bounded with older steps
+(`count-by-field`) keep their old minimum. A build from source reports 0.7.2
+until the version bump and shows these agents as needing an update.
 
 Per-agent model overrides are required: an agent's manifest can specify a preferred model and the user can override it.
 
