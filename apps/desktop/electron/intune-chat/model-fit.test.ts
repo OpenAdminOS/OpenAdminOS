@@ -257,6 +257,13 @@ describe("Model fit: the per-request override", () => {
       /does not report a model yet/,
     );
     assert.deepEqual(modelFitChoices({ issue: { reason: "context-too-small", providerId: "ollama", model: LOCAL_MODEL }, providers: [ollama, unpinned] }).hosted, []);
+    // A default from the CLI's config with no listed models (Codex without its model cache) is not offered either.
+    const configDefaultOnly: ProviderSummary = { ...claude, models: [], defaultModel: "claude-sonnet-5-5" };
+    assert.deepEqual(modelFitChoices({ issue: { reason: "context-too-small", providerId: "ollama", model: LOCAL_MODEL }, providers: [ollama, configDefaultOnly] }).hosted, []);
+    assert.throws(
+      () => resolveChatTurnProvider({ ...base, providers: [ollama, configDefaultOnly], override, consent: freshConsent("anthropic", "claude-sonnet-5-5") }),
+      /does not report a model yet/,
+    );
     // The placeholder is the Gemini adapter's own no `--model` value.
     assert.equal(isPlaceholderModel(GEMINI_DEFAULT_MODEL), true);
     // A CLI default placeholder is not a model: the CLI could answer with another one.

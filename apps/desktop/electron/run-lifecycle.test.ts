@@ -434,10 +434,10 @@ it('refuses a model fit rerun on a hosted provider that reports no model', async
     h.service.startRun('docs', { bindProviderEndpoint: true, expectedProviderDestination: 'dest-openai', providerId: 'openai', expectNoTenant: true }),
     /Codex does not report a model yet, so the run did not start/,
   );
-  // A model the review named that the provider no longer lists, or a CLI default placeholder, is refused too.
+  // A named model while the provider lists none, or a CLI default placeholder, is refused too.
   await assert.rejects(
     h.service.startRun('docs', { bindProviderEndpoint: true, expectedProviderDestination: 'dest-openai', providerId: 'openai', model: 'gpt-5', expectNoTenant: true }),
-    /Codex no longer lists gpt-5, so the run did not start/,
+    /Codex does not report a model yet, so the run did not start/,
   );
   Object.assign(h.host, { listProviders: async () => [{ id: 'gemini', name: 'Gemini CLI', status: 'connected', models: ['gemini-default'], defaultModel: 'gemini-default', isLocal: false }] });
   await assert.rejects(

@@ -10,7 +10,7 @@ import { InvalidAgentNotice } from "../components/InvalidAgentNotice";
 import { AGENT_COPY, PROVIDER_TOOL_NAMES, modelTrustNote, promptsGoTo, providerDataLocationDetail } from "../copy";
 import { MODEL_FIT_COPY } from "../copy/model-fit";
 import { modelFitModelName } from "../components/ModelFitNotice";
-import { isPlaceholderModel } from "../shared/model-fit";
+import { isListedHostedModel, isPlaceholderModel } from "../shared/model-fit";
 import {
   DeclaredGraphOperations,
   ManifestPreview,
@@ -1128,9 +1128,9 @@ export default function AgentDetail({
           modelFit={pendingRunChoice?.modelFit}
           deliverySaving={pendingDeliverySaveCount > 0}
           // A model fit rerun starts only once the review knows where its provider is reached.
-          {...((pendingRunChoice?.modelFit || pendingRunChoice?.safeguards) && pendingRunChoice.model && pendingProvider && pendingProvider.models.length > 0 && !pendingProvider.models.includes(pendingRunChoice.model)
+          {...((pendingRunChoice?.modelFit || pendingRunChoice?.safeguards) && pendingRunChoice.model && !isPlaceholderModel(pendingRunChoice.model) && pendingProvider && pendingProvider.models.length > 0 && !pendingProvider.models.includes(pendingRunChoice.model)
             ? { destinationState: "model-gone" as const, missingModel: pendingRunChoice.model }
-            : (pendingRunChoice?.modelFit || pendingRunChoice?.safeguards) && pendingProvider && !pendingProvider.isLocal && (!pendingModel || isPlaceholderModel(pendingModel))
+            : (pendingRunChoice?.modelFit || pendingRunChoice?.safeguards) && pendingProvider && !pendingProvider.isLocal && !isListedHostedModel(pendingProvider, pendingRunChoice.model ?? pendingModel)
             ? { destinationState: "no-model" as const }
             : (pendingRunChoice?.modelFit || pendingRunChoice?.safeguards) && pendingRunChoice.destinationFailed
             ? { destinationState: "failed" as const }

@@ -1,5 +1,5 @@
 import { guardModelFitLlm } from "./intune-chat/model-fit.js";
-import { classifyModelFitFailure, isOnDeviceModel, isPlaceholderModel, SELF_HOSTED_PROVIDER_IDS } from "../src/shared/model-fit.js";
+import { classifyModelFitFailure, isListedHostedModel, isOnDeviceModel, isPlaceholderModel, SELF_HOSTED_PROVIDER_IDS } from "../src/shared/model-fit.js";
 import { TENANT_CLOSED_COPY } from "./tenant-lifecycle.js";
 import { createHash, randomUUID } from "node:crypto";
 
@@ -717,10 +717,10 @@ export class RunService {
       // named and the provider reports now, never a default the host or the provider picks after the approval.
       const modelFitStart = options.bindProviderEndpoint === true || inheritedEndpointBinding?.scope === "model-fit";
       if (modelFitStart && activeProvider && !activeProvider.isLocal) {
-        if (!explicitModel || isPlaceholderModel(explicitModel)) {
+        if (!explicitModel || isPlaceholderModel(explicitModel) || knownModels.length === 0) {
           throw new Error(`${activeProvider.name} does not report a model yet, so the run did not start. Check it in Settings, Providers, then review the run again.`);
         }
-        if (!knownModels.includes(explicitModel)) {
+        if (!isListedHostedModel(activeProvider, explicitModel)) {
           throw new Error(`${activeProvider.name} no longer lists ${explicitModel}, so the run did not start. Choose a provider again on the run page.`);
         }
       }

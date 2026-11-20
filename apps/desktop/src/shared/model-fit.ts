@@ -187,6 +187,15 @@ export function isPlaceholderModel(model: string | undefined): boolean {
 }
 
 /**
+ * A model a hosted provider can run a model fit request on: named, not a
+ * placeholder, and in the list the provider reports now. Chat, the run
+ * review and the run host use this one check, so they cannot disagree.
+ */
+export function isListedHostedModel(provider: Pick<ProviderSummary, "models">, model: string | undefined): model is string {
+  return Boolean(model) && !isPlaceholderModel(model) && provider.models.includes(model!);
+}
+
+/**
  * An Ollama Cloud model, such as "gpt-oss:120b-cloud" or "glm-4.6:cloud".
  * A loopback Ollama that is signed in to ollama.com lists these with its
  * local models, but their prompts are processed on Ollama's servers, so
@@ -262,7 +271,7 @@ export function modelFitChoices(input: {
     .flatMap((provider) => {
       // The accept step names the exact model, so a provider that reports none yet is not offered.
       const model = resolveProviderDefaultModel(provider, input.activeModelByProviderId).model;
-      return model && !isPlaceholderModel(model) ? [{ providerId: provider.id, providerName: provider.name, isLocal: false, model }] : [];
+      return isListedHostedModel(provider, model) ? [{ providerId: provider.id, providerName: provider.name, isLocal: false, model }] : [];
     });
   const currentSize = modelSizeBillions(issue.model);
   const local: ModelFitChoice[] = [];

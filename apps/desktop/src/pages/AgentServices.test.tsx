@@ -537,7 +537,8 @@ it("does not start a model fit rerun whose named model the provider no longer li
 
 it("does not start a model fit rerun on a hosted provider that reports no model", async () => {
   const agent = createMockAgent({ id: "devices", slug: "devices", name: "Inactive devices", mode: "read", scopes: ["DeviceManagementManagedDevices.Read.All"], services: ["intune"] });
-  const providers = mockProviders.map((provider) => (provider.id === "openai" ? { ...provider, models: [], defaultModel: undefined } : provider));
+  // Codex without its model cache: no listed models, though its config may still name a default.
+  const providers = mockProviders.map((provider) => (provider.id === "openai" ? { ...provider, models: [], defaultModel: "gpt-5" } : provider));
   const state = createMockAppState({ installedAgents: [agent], activeProviderId: "ollama", providers });
   const intent = {
     kind: "agent-run", slug: "devices", tenantId: state.activeTenantId, providerId: "openai",
