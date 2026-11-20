@@ -401,6 +401,11 @@ the installed app's scheduler, login item or caches.
   followed, APPIMAGE trusted only inside APPDIR, the marker allowed by exact
   name and temporary pattern, no new hard links from inside, hard links
   that already exist recorded as accepted.
+- Review round 39: Claude and Muse no blocking. Sol one blocking (an
+  extract-and-run AppImage lost its mode at the restart): an APPDIR that is
+  not a mount now restarts with APPIMAGE_EXTRACT_AND_RUN=1, and the shell
+  waits for the AppImage runtime too. Muse lows: the AppImage is checked
+  for being executable first (logged otherwise), APPDIR compared resolved.
 - Process lesson: twice I edited the tree while a reviewer was reading it;
   parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the
