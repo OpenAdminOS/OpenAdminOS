@@ -2436,10 +2436,9 @@ export class AppStateStore {
 
   /**
    * The organizations a reset closes and drains, from the state this process
-   * last read or wrote, never from the file: once the marker is written the
-   * reset reads and writes nothing in the data folder (a read of a missing
-   * state file would create one, in whatever folder is there now). The
-   * checks before the marker read the state, so the snapshot holds them all.
+   * last read or wrote, never from the file, so closing them does not touch
+   * the data folder. The checks before the marker read the state, so the
+   * snapshot holds them all.
    */
   private localResetTenantIds(): string[] {
     return (this.lastReadSnapshot?.tenants ?? []).map((tenant) => tenant.id);
@@ -9347,6 +9346,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     try {
       raw = await readFile(this.filePath, "utf8");
     } catch (error) {
+      if (isNodeError(error) && error.code === "ENOENT" && this.localResetStarted) {
+        // A reset is being checked or is under way: a missing state file is
+        // never created, since the folder there now may be one a restore or
+        // another process put in place of the profile being reset. The
+        // reset's own checks work from the state this process last knew.
+        return this.lastReadSnapshot ?? { ...structuredClone(defaultState), firstRunScan: "pending" };
+      }
       if (isNodeError(error) && error.code === "ENOENT") {
         // A fresh install: the first-launch model scan runs once. The
         // bootstrap state is written through the same chain as every other

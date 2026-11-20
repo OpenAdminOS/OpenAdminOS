@@ -1175,8 +1175,41 @@ describe("local reset: end to end with the store", () => {
       // reset must not create one there.
       rmSync(statePath);
       await store.closeAllTenantWork();
+      const lifecycle = (store as unknown as { tenantLifecycle: { isWritable(id: string): boolean } }).tenantLifecycle;
+      assert.equal(lifecycle.isWritable(tenant.id), false);
       await store.shutdown(200);
       assert.ok(!existsSync(statePath));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("never creates a missing state file while the reset is being checked", async () => {
+    const dir = await tempDir();
+    try {
+      const statePath = join(dir, "state.json");
+      // A running app that has read its state, whose file is then moved
+      // away (a restore swapping folders) before the reset's checks.
+      await writeFile(statePath, JSON.stringify({ activeProviderId: "ollama", installedAgents: [], runs: [], tenants: [tenant] }), "utf8");
+      const store = new AppStateStore({ filePath: statePath, tokenStore: memoryTokenStore(new Map()), userDataPath: dir, statsApiUrl: "" });
+      try {
+        assert.equal((await store.getAppState()).tenants.length, 1);
+        rmSync(statePath);
+        assert.equal(await store.beginLocalReset(), undefined);
+        assert.ok(!existsSync(statePath));
+        // A refused or cancelled reset brings back the normal first launch rule.
+        store.cancelLocalReset();
+      } finally {
+        store.close();
+      }
+      // A store that never read its state creates none during the checks either.
+      const fresh = new AppStateStore({ filePath: statePath, tokenStore: memoryTokenStore(new Map()), userDataPath: dir, statsApiUrl: "" });
+      try {
+        assert.equal(await fresh.beginLocalReset(), undefined);
+        assert.ok(!existsSync(statePath));
+      } finally {
+        fresh.close();
+      }
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
