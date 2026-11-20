@@ -511,8 +511,23 @@ transform: scope as counts or `All`, built-in role names, conditions, grant
 and session controls) and policy names in its age groups, so 100 policies
 need about 14,000 estimated tokens (about 11,000 real) with an 1,100 token
 answer and fit a 16k local model; about 120 fit by the estimate. Grouped
-records reach prompts only as counts (`counts` filter), and breakdowns by
-high-cardinality fields keep their largest buckets (`top(n)` filter).
+records reach prompts only as counts (`counts` filter or `count-by-field`
+steps), and breakdowns by high-cardinality fields keep their largest buckets
+(`top(n)` filter, which moves them under `top` with `otherValues` and
+`otherCount` beside them so no tenant value collides with the summary).
+Text appended after the check, such as the self-training overlay, is taken off
+the window the check sees. The typed reason survives write revalidation (as
+the error's `cause`) and sandboxed script agents (the broker answers
+`context-too-small` and the script run fails with the typed error).
+
+A bundled manifest that uses a transform or filter added in a release sets
+`minAppVersion` to that release, because released apps fetch registry
+manifests from main: the Conditional Access explainer and agents that use
+`top(n)` need 0.7.3. Agents that can be bounded with older steps
+(`count-by-field`) keep their old minimum. Until the package version is
+bumped to 0.7.3, a local build from source reports 0.7.2 and shows these
+agents as needing an update; nightly builds (0.7.3-nightly) and 0.7.3 run
+them.
 
 Per-agent model overrides are required: an agent's manifest can specify a preferred model and the user can override it.
 
