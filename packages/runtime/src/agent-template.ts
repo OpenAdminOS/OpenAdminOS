@@ -37,7 +37,7 @@ import {
   type ServiceId,
 } from "@openadminos/agent-sdk";
 
-import { PROMPT_INSTRUCTION_ROOTS, renderDeep, renderTemplate, renderPromptTemplate, type TemplateContext } from "./template-engine.js";
+import { PROMPT_INSTRUCTION_ROOTS, renderDeep, renderTemplate, renderPromptTemplate, topBuckets, type TemplateContext } from "./template-engine.js";
 import { stripTenantDataFences, withTenantDataInstructions } from "./tenant-data.js";
 import { compactConditionalAccessPolicies } from "./ca-compact.js";
 import { confirmationPhraseProblem } from "./confirmation-phrase.js";
@@ -1591,6 +1591,12 @@ interface CountByFieldSpec {
   buckets?: string[];
   /** Optional bucket for null, absent or empty field values. */
   missingBucket?: string;
+  /**
+   * Optional: keep only the n largest buckets, with the rest summarized.
+   * Older runtimes ignore it and return every bucket, so a manifest that
+   * sets it still runs on them.
+   */
+  top?: number;
 }
 
 function transformCountByField(
@@ -1626,6 +1632,11 @@ function transformCountByField(
   }
 
   const total = (spec.source as unknown[]).length;
+  if (typeof spec.top === "number" && Number.isInteger(spec.top) && spec.top > 0) {
+    const bounded = topBuckets(result, spec.top);
+    ctx.log("info", `Counted ${total} items by "${spec.field}" into ${Object.keys(result).length} buckets; kept the ${spec.top} largest.`);
+    return bounded as Record<string, number>;
+  }
   const breakdown = Object.entries(result)
     .map(([key, count]) => `${key}=${count}`)
     .join(", ");

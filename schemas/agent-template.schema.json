@@ -325,6 +325,11 @@
                 "missingBucket": {
                   "type": "string",
                   "description": "count-by-field: bucket for null, absent, empty string and empty array values."
+                },
+                "top": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "count-by-field: keep the n largest buckets, as { top, otherValues, otherCount }. Older apps ignore it and return every bucket."
                 }
               },
               "allOf": [

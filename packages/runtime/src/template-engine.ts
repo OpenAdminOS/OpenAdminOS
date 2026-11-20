@@ -57,22 +57,10 @@ const FILTERS: Record<string, TemplateFilter> = {
     return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, entry]) =>
       [key, Array.isArray(entry) ? entry.length : typeof entry === "number" ? entry : 0]));
   },
-  // The n largest buckets of a count or grouped map, so a breakdown by a
-  // field with many distinct values (user, app, version) stays a bounded
-  // size. When buckets are left out, the kept ones move under `top` and
-  // the rest are summarized beside them, so no tenant value can collide
-  // with the summary.
   top(value, n) {
     if (!value || typeof value !== "object" || Array.isArray(value)) return value;
     const limit = typeof n === "number" && Number.isInteger(n) && n > 0 ? n : 10;
-    const entries = Object.entries(FILTERS.counts!(value) as Record<string, number>).sort((a, b) => b[1] - a[1]);
-    if (entries.length <= limit) return Object.fromEntries(entries);
-    const rest = entries.slice(limit);
-    return {
-      top: Object.fromEntries(entries.slice(0, limit)),
-      otherValues: rest.length,
-      otherCount: rest.reduce((sum, [, count]) => sum + count, 0),
-    };
+    return topBuckets(FILTERS.counts!(value) as Record<string, number>, limit);
   },
   size(value) {
     if (Array.isArray(value)) return value.length;
@@ -112,6 +100,26 @@ const FILTERS: Record<string, TemplateFilter> = {
     return typeof value;
   },
 };
+
+/**
+ * The `limit` largest buckets of a count map, so a breakdown by a field with
+ * many distinct values (user, app, version) stays a bounded size. When
+ * buckets are left out, the kept ones move under `top` and the rest are
+ * summarized beside them, so no tenant value can collide with the summary.
+ */
+export function topBuckets(
+  counts: Record<string, number>,
+  limit: number,
+): Record<string, number> | { top: Record<string, number>; otherValues: number; otherCount: number } {
+  const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  if (entries.length <= limit) return Object.fromEntries(entries);
+  const rest = entries.slice(limit);
+  return {
+    top: Object.fromEntries(entries.slice(0, limit)),
+    otherValues: rest.length,
+    otherCount: rest.reduce((sum, [, count]) => sum + count, 0),
+  };
+}
 
 /**
  * Resolve a dotted path against a context object. Returns `undefined` for

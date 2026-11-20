@@ -27,7 +27,7 @@ describe("compactConditionalAccessPolicy", () => {
       grantControls: {
         operator: "OR", builtInControls: [], customAuthenticationFactors: [], termsOfUse: [],
         "authenticationStrength@odata.context": "https://graph.microsoft.com/beta/$metadata#x",
-        authenticationStrength: { id: "00000000-0000-0000-0000-000000000004", displayName: "Phishing-resistant MFA", allowedCombinations: ["fido2"] },
+        authenticationStrength: { id: "00000000-0000-0000-0000-000000000004", displayName: "Phishing-resistant MFA", policyType: "builtIn", requirementsSatisfied: "mfa", allowedCombinations: ["fido2"] },
       },
     }, NOW);
     assert.deepEqual(record, {
@@ -39,7 +39,7 @@ describe("compactConditionalAccessPolicy", () => {
         exclude: { users: "2 users", groups: 1 },
       },
       apps: { include: "All" },
-      grant: { authStrength: "Phishing-resistant MFA" },
+      grant: { authStrength: { name: "Phishing-resistant MFA", type: "builtIn", satisfies: "mfa" } },
     });
   });
 
@@ -95,7 +95,12 @@ describe("compactConditionalAccessPolicy", () => {
       grantControls: { operator: "OR", builtInControls: ["compliantDevice"], authenticationStrength: { displayName: "Multifactor authentication" } },
     }, NOW);
     assert.equal(strength.grant && (strength.grant as { operator?: string }).operator, "OR");
-    const single = compactConditionalAccessPolicy({
+    const custom = compactConditionalAccessPolicy({
+      displayName: "Admin strength", state: "enabled",
+      grantControls: { operator: "OR", builtInControls: [], authenticationStrength: { displayName: "Admin MFA", policyType: "custom", requirementsSatisfied: "none" } },
+    }, NOW);
+    assert.deepEqual(custom.grant, { authStrength: { name: "Admin MFA", type: "custom", satisfies: "none" } });
+        const single = compactConditionalAccessPolicy({
       displayName: "Block", state: "enabled", grantControls: { operator: "OR", builtInControls: ["block"] },
     }, NOW);
     assert.deepEqual(single.grant, { controls: ["block"] });
@@ -189,6 +194,24 @@ describe("count-by-field with array values", () => {
     assert.deepEqual((named.result as { counts: unknown }).counts, { "(none)": 2, high: 1, "high,medium": 1 });
     const unnamed = await runAgentTemplate(manifest(""), ctx);
     assert.deepEqual((unnamed.result as { counts: unknown }).counts, { "": 2, high: 1, "high,medium": 1 });
+  });
+
+  it("keeps the largest buckets with the top setting and leaves smaller maps as they are", async () => {
+    const { parseAgentTemplate, runAgentTemplate } = await import("./agent-template.js");
+    const rows = ["a", "a", "a", "b", "b", "c", "d"].map((user) => ({ user }));
+    const run = async (top: number) => runAgentTemplate(parseAgentTemplate(JSON.stringify({
+      descriptor: { id: "top-test", name: "Top", description: "Top", version: "1.0.0", category: "policies", mode: "read" },
+      skills: [
+        { id: "rows", format: "graph", label: "Read", settings: { method: "GET", path: "/auditLogs/signIns" } },
+        { id: "by_user", format: "transform", label: "Count", settings: { kind: "count-by-field", source: "{{ rows.output }}", field: "user", top } },
+      ],
+      definition: { triggers: [{ id: "manual", kind: "manual" }], result: { summary: "done", data: { counts: "{{ by_user.output }}" } } },
+    })), {
+      agent: { id: "top-test" }, providerId: "ollama", graph: { request: async () => ({ value: rows }) },
+      llm: { available: false }, log: () => {}, step: async (_l: string, _d: string, fn: () => Promise<unknown>) => fn(),
+    } as never);
+    assert.deepEqual(((await run(2)).result as { counts: unknown }).counts, { top: { a: 3, b: 2 }, otherValues: 2, otherCount: 2 });
+    assert.deepEqual(((await run(10)).result as { counts: unknown }).counts, { a: 3, b: 2, c: 1, d: 1 });
   });
 });
 
