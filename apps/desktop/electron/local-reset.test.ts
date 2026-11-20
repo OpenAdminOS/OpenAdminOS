@@ -494,19 +494,26 @@ describe("local reset: wipe at launch", () => {
       chmodSync(join(dir, "backup.ldb"), 0o444);
       writeFileSync(join(profile, "state.json"), "{}");
       writeFileSync(join(profile, LOCAL_RESET_MARKER), JSON.stringify(markerFor(profile, DEV_MARKER)));
-      assert.equal(sharedReadOnlyFile(join(profile, "Local Storage"), "Local Storage"), "Local Storage/000003.ldb");
+      assert.deepEqual(sharedReadOnlyFile(join(profile, "Local Storage"), "Local Storage"), { item: "Local Storage\\000003.ldb" });
       const report = runPendingLocalReset({ userDataDir: profile, packaged: false, platform: "win32", home: dir, env: {} });
       assert.equal(report?.status, "incomplete");
       assert.deepEqual(report?.failed, [{
         item: "Local Storage",
-        reason: "Local Storage/000003.ldb is read-only and also linked from another place, such as a backup; removing it would make that copy writable too. Remove the other link first, or remove it by hand",
+        reason: "Local Storage\\000003.ldb is read-only and also linked from another place, such as a backup; removing it would make that copy writable too. Remove the other link first, or remove it by hand",
       }]);
       // Nothing about the backup's copy changed; the rest of the folder went.
       assert.equal(lstatSync(join(dir, "backup.ldb")).mode & 0o777, 0o444);
       assert.equal(lstatSync(join(dir, "backup.ldb")).nlink, 2);
       assert.ok(!existsSync(join(profile, "state.json")));
-      // A plain read-only file of the profile alone is removed as before.
       assert.equal(sharedReadOnlyFile(join(dir, "missing"), "missing"), undefined);
+      // A folder that cannot be listed is not removed unchecked.
+      mkdirSync(join(dir, "locked"));
+      chmodSync(join(dir, "locked"), 0o000);
+      try {
+        assert.deepEqual(sharedReadOnlyFile(join(dir, "locked"), "locked"), { item: "locked", unlisted: true });
+      } finally {
+        chmodSync(join(dir, "locked"), 0o755);
+      }
     } finally {
       chmodSync(join(dir, "backup.ldb"), 0o644);
       await rm(dir, { recursive: true, force: true });

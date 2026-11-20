@@ -839,36 +839,40 @@ function latestPerItem(problems: readonly LocalResetProblem[]): LocalResetProble
 }
 
 /**
- * The first read-only file with more than one hard link at or inside a
- * path (named from `label`), without following links; undefined when there
- * is none or the path is gone. A folder that cannot be listed is left to
- * the removal, which reports it.
+ * Windows only. The first read-only file with more than one hard link at or
+ * inside a path (named from `label`, with Windows separators), without
+ * following links; undefined when there is none or the path is gone. A
+ * folder that cannot be listed is returned as well: what is inside is
+ * unknown, and the removal would make its files writable to delete them.
  */
-export function sharedReadOnlyFile(path: string, label: string): string | undefined {
+export function sharedReadOnlyFile(path: string, label: string): { item: string; unlisted?: true } | undefined {
   let stat;
   try {
     stat = lstatSync(path);
   } catch {
     return undefined;
   }
-  if (stat.isFile()) return stat.nlink > 1 && (stat.mode & 0o200) === 0 ? label : undefined;
+  if (stat.isFile()) return stat.nlink > 1 && (stat.mode & 0o200) === 0 ? { item: label } : undefined;
   if (!stat.isDirectory()) return undefined;
   let children: string[];
   try {
     children = readdirSync(path);
   } catch {
-    return undefined;
+    return { item: label, unlisted: true };
   }
   for (const child of children) {
-    const found = sharedReadOnlyFile(join(path, child), `${label}/${child}`);
+    const found = sharedReadOnlyFile(join(path, child), `${label}\\${child}`);
     if (found !== undefined) return found;
   }
   return undefined;
 }
 
-function sharedReadOnlyReason(shared: string, name: string): string {
-  const what = shared === name ? "it is" : `${shared} is`;
-  return `${what} read-only and also linked from another place, such as a backup; removing it would make that copy writable too. Remove the other link first, or remove it by hand`;
+function sharedReadOnlyReason(shared: { item: string; unlisted?: true }, name: string): string {
+  const what = shared.item === name ? "it" : shared.item;
+  if (shared.unlisted) {
+    return `${what} could not be listed, so it could not be checked for files also linked from another place. Make it readable, or remove it by hand`;
+  }
+  return `${what} is read-only and also linked from another place, such as a backup; removing it would make that copy writable too. Remove the other link first, or remove it by hand`;
 }
 
 function removeEntry(fs: LocalResetFileSystem, dir: string, name: string, failed: LocalResetProblem[]): boolean {
