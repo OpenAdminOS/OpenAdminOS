@@ -93,8 +93,10 @@ export class ModelFitOffers {
    * refused before any model is built.
    */
   claim(id: string): void {
-    // An offer that expired since it was checked is gone too.
+    // An offer that expired since it was checked is gone too, and says so rather than "used".
+    const expired = this.offers.has(id) && this.offers.get(id)!.createdAt < this.now() - MODEL_FIT_OFFER_TTL_MS;
     this.prune();
+    if (expired) throw new ModelOverrideError("This choice is no longer available, so nothing was sent. Send the question again.");
     if (!this.offers.delete(id)) {
       throw new ModelOverrideError("This choice was already used, so nothing more was sent. Send the question again.");
     }

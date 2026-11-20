@@ -354,6 +354,16 @@ describe("Model fit: offers", () => {
     assert.throws(() => offers.claim(id), (error: Error) => error.message.endsWith(MODEL_FIT_RESEND));
   });
 
+  it("says an offer that expired between check and claim is no longer available, not used", () => {
+    let now = 0;
+    const offers = new ModelFitOffers(() => now);
+    const request = { conversationId: "chat_1", tenantId: undefined, content: "q", workspaceKey: undefined };
+    const id = offers.issue({ ...request, anchor: { providerId: "ollama", model: LOCAL_MODEL }, failed: { providerId: "ollama", model: LOCAL_MODEL }, reason: "context-too-small" });
+    offers.check(id, request);
+    now = MODEL_FIT_OFFER_TTL_MS + 1;
+    assert.throws(() => offers.claim(id), /no longer available/);
+  });
+
   it("lets only one send claim an offer", () => {
     const offers = new ModelFitOffers();
     const id = offers.issue({ conversationId: "chat_1", tenantId: undefined, content: "q", workspaceKey: undefined, anchor: { providerId: "ollama", model: LOCAL_MODEL }, failed: { providerId: "ollama", model: LOCAL_MODEL }, reason: "context-too-small" });
