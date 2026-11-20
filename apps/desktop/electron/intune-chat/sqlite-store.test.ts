@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
 import { DEFAULT_GRAPH_READ_SCOPE_NAMES } from "@openadminos/agent-sdk";
 
@@ -23,6 +24,45 @@ import type {
 } from "@openadminos/agent-sdk";
 
 describe("Intune Chat SQLite store", () => {
+  it("prunes drift history while a second connection attempts a sidecar write", async t => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-drift-backfill-"));
+    const path = join(dir, "openadminos.db");
+    const store = new IntelligenceSqliteStore(path);
+    const backfill = new DatabaseSync(path);
+    try {
+      const snapshot = { tenantId: "tenant-1", resource: "configurationPolicies" as const, label: "Policies", scopeSet: [] };
+      store.replaceGraphResources({ ...snapshot, rows: [{ id: "fixture-device", displayName: "Original" }],
+        refreshedAt: "2000-01-01T00:00:00.000Z" });
+      store.replaceGraphResources({ ...snapshot, rows: [{ id: "fixture-device", displayName: "Replacement" }],
+        refreshedAt: "2000-01-02T00:00:00.000Z" });
+      const db = store["db"];
+      const prepare = db.prepare.bind(db);
+      const update = backfill.prepare("UPDATE graph_resources SET classification_json = NULL");
+      let attempted = false;
+      t.mock.method(db, "prepare", (sql: string) => {
+        const statement = prepare(sql);
+        if (sql.includes("FROM drift_object_versions") && sql.includes("ORDER BY tenant_id")) {
+          const all = statement.all.bind(statement);
+          t.mock.method(statement, "all", (...args: Parameters<typeof statement.all>) => {
+            const rows = all(...args);
+            attempted = true;
+            assert.throws(() => update.run(), { errcode: 5 });
+            return rows;
+          });
+        }
+        return statement;
+      });
+      const result = store.pruneDriftHistory(snapshot.tenantId, 1);
+      assert.equal(attempted, true);
+      assert.equal(result.versionsDeleted, 1);
+      assert.equal(update.run().changes, 1);
+    } finally {
+      backfill.close();
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("does not infer removals from a capped Graph cache window", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-capped-drift-"));
     try {

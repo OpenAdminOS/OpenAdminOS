@@ -839,7 +839,7 @@ export class IntelligenceSqliteStore {
   ): string {
     this.assertTenantWritable(input.tenantId, "graph cache");
     const snapshotId = `${input.resource}-${input.refreshedAt}-${randomUUID().slice(0, 8)}`;
-    this.db.exec("BEGIN");
+    this.db.exec("BEGIN IMMEDIATE");
     try {
       if (DRIFT_TRACKED_RESOURCES.has(input.resource)) {
         this.captureDriftSnapshot({
@@ -1725,7 +1725,7 @@ export class IntelligenceSqliteStore {
     }
 
     const id = `baseline-${input.now}-${randomUUID().slice(0, 8)}`;
-    this.db.exec("BEGIN");
+    this.db.exec("BEGIN IMMEDIATE");
     try {
       const insertPin = this.db.prepare(
         `INSERT INTO drift_baseline_pins (
@@ -2166,7 +2166,9 @@ export class IntelligenceSqliteStore {
     const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
     let snapshotsDeleted = 0;
     let versionsDeleted = 0;
-    this.db.exec("BEGIN");
+    // Reserve the write transaction before reading a snapshot that a
+    // sidecar backfill on another WAL connection could otherwise invalidate.
+    this.db.exec("BEGIN IMMEDIATE");
     try {
       const rows = tenantId
         ? this.db
