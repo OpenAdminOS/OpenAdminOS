@@ -38,10 +38,6 @@ function typedIssue(error: unknown, depth = 0): Omit<ModelFitIssue, "providerId"
   // The failure record's own code wins over a wrapper's ("agent-failed" around "context-too-small").
   // A field the record leaves out falls back to the wrapper's.
   const failure = outer.failure && typeof outer.failure === "object" ? (outer.failure as Record<string, unknown>) : undefined;
-  const record = failure
-    ? // Only the unambiguous names fall back: a wrapper's `limit` may count something else, such as tool calls.
-      { needed: failure.needed, limit: failure.limit, neededTokens: failure.neededTokens ?? outer.neededTokens, limitTokens: failure.limitTokens ?? outer.limitTokens }
-    : outer;
   const fitReason = (source: Record<string, unknown>) =>
     [source.kind, source.code, source.reason].find(
       (value): value is ModelFitReason => typeof value === "string" && value !== "repeated-failure" && (FIT_REASONS as readonly string[]).includes(value),
@@ -49,8 +45,14 @@ function typedIssue(error: unknown, depth = 0): Omit<ModelFitIssue, "providerId"
   // The record's own reason is the more specific one; the wrapper's applies only when it names none.
   const reason = (failure ? fitReason(failure) : undefined) ?? fitReason(outer);
   if (!reason || reason === "repeated-failure") return typedIssue(outer.cause, depth + 1);
-  const neededTokens = positive(record.neededTokens) ?? positive(record.needed);
-  const limitTokens = positive(record.limitTokens) ?? positive(record.limit);
+  // The record's counts, under either name, come first; a wrapper fills in only its explicit token
+  // fields, since its short `limit` may count something else, such as tool calls.
+  const neededTokens = failure
+    ? positive(failure.neededTokens) ?? positive(failure.needed) ?? positive(outer.neededTokens)
+    : positive(outer.neededTokens) ?? positive(outer.needed);
+  const limitTokens = failure
+    ? positive(failure.limitTokens) ?? positive(failure.limit) ?? positive(outer.limitTokens)
+    : positive(outer.limitTokens) ?? positive(outer.limit);
   return {
     reason,
     ...(neededTokens ? { neededTokens } : {}),
