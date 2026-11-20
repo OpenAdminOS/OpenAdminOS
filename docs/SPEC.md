@@ -1822,7 +1822,13 @@ Intune or the required Entra ID tier. Granted scopes with denied access point to
 Entra or Intune role assignment or activation. Unverified failures list consent,
 role, licence, and access-policy possibilities without recommending reconnect.
 Structured access-denial fields are additive in run history, cache status, and
-multi-tenant readiness; persisted status values remain unchanged. Licence inventory
+multi-tenant readiness; persisted status values remain unchanged. Only an error
+from a Microsoft Graph call is classified: the Graph client's own error type, or
+the wrapper text the Graph clients write ("Graph responded", "Microsoft Graph", a
+Graph host). Graph's 403 body (`{"error":{"code":"Forbidden"|"accessDenied",...}}`)
+does not name Graph, so a bare "403" from Ollama, LM Studio, a vendor API, or an
+MCP server is never a Graph denial, and the run failure panel ignores a denial
+stored with such an error by an earlier version. Licence inventory
 failures remain unknown. This Phase 1 change adds no access probes, selectable
 permission packs, onboarding questions, or changes to scopes requested at sign-in.
 Setup recommends Global Reader for daily read work, treats Global Administrator as
