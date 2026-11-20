@@ -1536,9 +1536,9 @@ identities with graph_get. Nothing else.
         <span class="glyph" data-t="blocked"><svg><use href="#i-stop"/></svg></span>
         <div>
           <h3>This question was not sent: the check of the app's fixed rules did not finish</h3>
-          <p>Every request to a model starts with the app's fixed rules, and a request cannot be sent without them, so they are never shortened or left out. The data policy check ran out of its work budget inside them, and a request with text that was not examined in full is not sent, whatever your rules on Hosted allow. Your question, "Which devices became noncompliant overnight?", stays in Chat. No request was made to Claude Code.</p>
+          <p>Every request to a model starts with the app's fixed rules, and a request cannot be sent without them, so they are never shortened or left out. The data policy check ran out of its work budget inside them, and a request whose fixed rules were not examined in full is not sent, whatever your rules on Hosted allow. Your question, "Which devices became noncompliant overnight?", stays in Chat. No request was made to Claude Code.</p>
           <div class="acts"><button class="bt primary sm" type="button">Ask again</button><button class="bt secondary sm" type="button">Use a local model</button><button class="bt ghost sm" type="button">Open Data policy settings</button></div>
-          <p class="xs muted" style="margin-top:10px">Ask again runs every check from the start on the same question. Use a local model asks Ollama with gpt-oss:20b on this device, where the request is checked under the rules on Local and nothing leaves this device. Open Data policy settings shows the rules each tier applies.</p>
+          <p class="xs muted" style="margin-top:10px">Ask again runs every check from the start on the same question. Use a local model asks Ollama with gpt-oss:20b on this device, where the request is checked under the rules on Local. The model runs here, but the tools this conversation offers stay offered: queries to learn.microsoft.com and tools.contoso.example can still carry text the app did not recognize as tenant data, and the status strip names those hosts on the retry. Open Data policy settings shows the rules each tier applies.</p>
         </div>
       </div>
       <ul class="notes">
