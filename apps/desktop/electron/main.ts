@@ -3431,6 +3431,11 @@ function validateStartRunOptions(value: unknown): StartRunOptions | undefined {
   if (value.tenantId !== undefined) {
     options.tenantId = requireBoundedString(value.tenantId, "startRun.tenantId", 256);
   }
+  if (value.expectNoTenant !== undefined) {
+    if (value.expectNoTenant !== true) throw new Error("startRun.expectNoTenant must be true when present.");
+    if (options.tenantId !== undefined) throw new Error("startRun.expectNoTenant cannot be combined with a tenant.");
+    options.expectNoTenant = true;
+  }
   if (value.providerId !== undefined) {
     options.providerId = validateProviderId(value.providerId, "startRun.providerId");
   }
@@ -3942,6 +3947,9 @@ function validateHostedProviderConsent(
   }
   const providerId = validateProviderId(value.providerId, "hostedProviderConsent.providerId");
   const remember = typeof value.remember === "boolean" ? { remember: value.remember } : {};
+  const fitOffer = value.modelFitOfferId === undefined
+    ? {}
+    : { modelFitOfferId: requireBoundedString(value.modelFitOfferId, "hostedProviderConsent.modelFitOfferId", 128) };
   const model = value.model === undefined ? undefined : requireBoundedString(value.model, "hostedProviderConsent.model", 256);
   // Bound to no tenant or to one tenant, never both: a no-tenant
   // acknowledgement covers no tenant context and no workspace.
@@ -3952,7 +3960,7 @@ function validateHostedProviderConsent(
     if (value.tenantId !== undefined || workspaceContext) {
       throw new Error("hostedProviderConsent.noTenant cannot be combined with a tenant or workspace context.");
     }
-    return { noTenant: true, providerId, ...(model !== undefined ? { model } : {}), acknowledgedAt, ...remember };
+    return { noTenant: true, providerId, ...(model !== undefined ? { model } : {}), acknowledgedAt, ...remember, ...fitOffer };
   }
   return {
     tenantId: requireBoundedString(value.tenantId, "hostedProviderConsent.tenantId", 256),
@@ -3961,6 +3969,7 @@ function validateHostedProviderConsent(
     acknowledgedAt,
     ...remember,
     ...(workspaceContext ? { workspaceContext } : {}),
+    ...fitOffer,
   };
 }
 

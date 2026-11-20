@@ -2558,7 +2558,7 @@ export class IntuneChatService {
     // One request may run on a provider the admin chose after the local model could not do it (model-fit.ts),
     // once, for the offer the host made with that failed answer.
     const fitOffer = input.modelOverride
-      ? this.modelFitOffers.check(input.modelOverride.offerId, { conversationId: input.conversationId, tenantId: persisted.activeTenantId ?? undefined, content })
+      ? this.modelFitOffers.check(input.modelOverride.offerId, { conversationId: input.conversationId, tenantId: persisted.activeTenantId ?? undefined, content, workspaceKey: workspaceKeyOf(input.workspaceContext) })
       : undefined;
     if (fitOffer && !store.getConversation(fitOffer.conversationId)) {
       throw new ModelOverrideError("That conversation was deleted, so nothing was sent.");
@@ -2635,7 +2635,11 @@ export class IntuneChatService {
       }
     }
     // The offer is used up once this request is cleared to send: consent and conversation checks passed.
-    if (fitOffer) this.modelFitOffers.consume(fitOffer.id);
+    // The conversation is read again here, after the awaits above.
+    if (fitOffer) {
+      if (!conversation || conversation.id !== fitOffer.conversationId) throw new ModelOverrideError("That conversation was deleted, so nothing was sent.");
+      this.modelFitOffers.claim(fitOffer.id);
+    }
     // A new chat is named after the question until the answer gives it a title.
     const newConversationTitle = conversation ? undefined : chatTitleForPrompt(content);
     if (!conversation) {
@@ -3354,6 +3358,7 @@ export class IntuneChatService {
                 conversationId: conversation.id,
                 tenantId: noTenant ? undefined : tenant.id,
                 content,
+                workspaceKey: workspaceKeyOf(input.workspaceContext),
                 // A failed one-request retry keeps the active model as the one it stands in for.
                 anchor: turn.switchedFrom ? { providerId: turn.switchedFrom.providerId, model: turn.switchedFrom.model } : { providerId, model: selectedModel },
                 failed: { providerId, model: selectedModel },
@@ -4032,6 +4037,11 @@ type AgenticCapabilityDecision = {
   tooSmall?: true;
   notice?: string;
 };
+
+/** The workspace selection of a send, for binding a model fit offer to it. The IPC validator fixes its key order. */
+function workspaceKeyOf(context: SendIntuneChatMessageInput["workspaceContext"]): string | undefined {
+  return context ? JSON.stringify(context) : undefined;
+}
 
 /** The plain line Chat and the Marketplace show when the model is too small for tool use. */
 export function smallModelNotice(model: string): string {

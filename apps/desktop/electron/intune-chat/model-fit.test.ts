@@ -51,8 +51,8 @@ const codexSignedOut: ProviderSummary = {
   cli: { state: "signed-out" },
 };
 
-function freshConsent(providerId: ProviderId, model?: string, remember?: boolean): HostedProviderChatConsent {
-  return { noTenant: true, providerId, ...(model ? { model } : {}), acknowledgedAt: new Date().toISOString(), ...(remember ? { remember: true } : {}) };
+function freshConsent(providerId: ProviderId, model?: string, remember?: boolean, modelFitOfferId = "fit_1"): HostedProviderChatConsent {
+  return { noTenant: true, providerId, ...(model ? { model } : {}), acknowledgedAt: new Date().toISOString(), ...(remember ? { remember: true } : {}), modelFitOfferId };
 }
 
 describe("Model fit: classifying a failure", () => {
@@ -139,7 +139,7 @@ describe("Model fit: the choices", () => {
 
 describe("Model fit: the per-request override", () => {
   const offer: ModelFitOffer = {
-    id: "fit_1", conversationId: "chat_1", tenantId: undefined, content: "q",
+    id: "fit_1", conversationId: "chat_1", tenantId: undefined, content: "q", workspaceKey: undefined,
     anchor: { providerId: "ollama", model: LOCAL_MODEL }, failed: { providerId: "ollama", model: LOCAL_MODEL },
     reason: "context-too-small", createdAt: 0,
   };
@@ -157,6 +157,10 @@ describe("Model fit: the per-request override", () => {
     assert.throws(() => resolveChatTurnProvider({ ...base, override, consent: undefined }), ModelOverrideError);
     assert.throws(() => resolveChatTurnProvider({ ...base, override, consent: freshConsent("anthropic", "claude-sonnet-5-5", true) }), /needs your approval for this request/);
     assert.throws(() => resolveChatTurnProvider({ ...base, override, consent: freshConsent("openai") }), /needs your approval/);
+    // An acceptance of another offer, one made before this offer, or for another model does not cover it.
+    assert.throws(() => resolveChatTurnProvider({ ...base, override, consent: freshConsent("anthropic", "claude-sonnet-5-5", false, "fit_other") }), /needs your approval/);
+    assert.throws(() => resolveChatTurnProvider({ ...base, offer: { ...offer, createdAt: Date.now() + 60_000 }, override, consent: freshConsent("anthropic", "claude-sonnet-5-5") }), /needs your approval/);
+    assert.throws(() => resolveChatTurnProvider({ ...base, override, consent: freshConsent("anthropic", "claude-opus-5-5") }), /needs your approval/);
   });
 
   it("runs on the chosen provider with a fresh acceptance and records what it replaced", () => {
@@ -179,8 +183,15 @@ describe("Model fit: the per-request override", () => {
     const withCloud = { ...ollama, models: [...ollama.models, "gpt-oss:120b-cloud"] };
     assert.throws(
       () => resolveChatTurnProvider({ ...base, providers: [withCloud, claude], override: { offerId: "fit_1", providerId: "ollama", model: "gpt-oss:120b-cloud" }, consent: undefined }),
-      /runs on Ollama's servers/,
+      /runs on another server/,
     );
+    // A remote-backed alias with no cloud suffix, as Ollama's /api/tags marks it.
+    const withAlias = { ...ollama, models: [...ollama.models, "big-70b"], remoteModels: ["big-70b"] };
+    assert.throws(
+      () => resolveChatTurnProvider({ ...base, providers: [withAlias, claude], override: { offerId: "fit_1", providerId: "ollama", model: "big-70b" }, consent: undefined }),
+      /runs on another server/,
+    );
+    assert.deepEqual(modelFitChoices({ issue: { reason: "context-too-small", providerId: "ollama", model: LOCAL_MODEL }, providers: [withAlias] }).local.map((choice) => choice.model), ["gpt-oss:20b"]);
   });
 
   it("keeps the active model as the anchor after a larger local model also failed", () => {
@@ -192,16 +203,28 @@ describe("Model fit: the per-request override", () => {
 });
 
 describe("Model fit: offers", () => {
+  it("lets only one send claim an offer", () => {
+    const offers = new ModelFitOffers();
+    const id = offers.issue({ conversationId: "chat_1", tenantId: undefined, content: "q", workspaceKey: undefined, anchor: { providerId: "ollama", model: LOCAL_MODEL }, failed: { providerId: "ollama", model: LOCAL_MODEL }, reason: "context-too-small" });
+    const request = { conversationId: "chat_1", tenantId: undefined, content: "q", workspaceKey: undefined };
+    // Both sends pass the check before either claims it.
+    offers.check(id, request);
+    offers.check(id, request);
+    offers.claim(id);
+    assert.throws(() => offers.claim(id), /already used/);
+  });
+
   it("binds an offer to its conversation, organization and question, and lets it expire", () => {
     let now = 1_000;
     const offers = new ModelFitOffers(() => now);
-    const id = offers.issue({ conversationId: "chat_1", tenantId: "tenant-1", content: "q", anchor: { providerId: "ollama", model: LOCAL_MODEL }, failed: { providerId: "ollama", model: LOCAL_MODEL }, reason: "context-too-small" });
-    assert.equal(offers.check(id, { conversationId: "chat_1", tenantId: "tenant-1", content: "q" }).id, id);
-    assert.throws(() => offers.check(id, { conversationId: "chat_2", tenantId: "tenant-1", content: "q" }), /another question/);
-    assert.throws(() => offers.check(id, { conversationId: "chat_1", tenantId: undefined, content: "q" }), /another question/);
-    assert.throws(() => offers.check(id, { conversationId: "chat_1", tenantId: "tenant-1", content: "other" }), /another question/);
+    const id = offers.issue({ conversationId: "chat_1", tenantId: "tenant-1", content: "q", workspaceKey: undefined, anchor: { providerId: "ollama", model: LOCAL_MODEL }, failed: { providerId: "ollama", model: LOCAL_MODEL }, reason: "context-too-small" });
+    assert.equal(offers.check(id, { conversationId: "chat_1", tenantId: "tenant-1", content: "q", workspaceKey: undefined }).id, id);
+    assert.throws(() => offers.check(id, { conversationId: "chat_2", tenantId: "tenant-1", content: "q", workspaceKey: undefined }), /another question/);
+    assert.throws(() => offers.check(id, { conversationId: "chat_1", tenantId: undefined, content: "q", workspaceKey: undefined }), /another question/);
+    assert.throws(() => offers.check(id, { conversationId: "chat_1", tenantId: "tenant-1", content: "other", workspaceKey: undefined }), /another question/);
+    assert.throws(() => offers.check(id, { conversationId: "chat_1", tenantId: "tenant-1", content: "q", workspaceKey: '{"workspaceId":"w1"}' }), /another question/);
     now += MODEL_FIT_OFFER_TTL_MS + 1;
-    assert.throws(() => offers.check(id, { conversationId: "chat_1", tenantId: "tenant-1", content: "q" }), /no longer available/);
+    assert.throws(() => offers.check(id, { conversationId: "chat_1", tenantId: "tenant-1", content: "q", workspaceKey: undefined }), /no longer available/);
   });
 });
 
@@ -303,7 +326,7 @@ describe("Model fit in Chat", () => {
         content: QUESTION,
         conversationId,
         modelOverride: { offerId, providerId: "anthropic" as const, model: "claude-sonnet-5-5" },
-        hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5"),
+        hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5", false, offerId),
       };
       const result = await service.streamIntuneChatMessage(accepted, () => undefined);
       assert.equal(result.assistantMessage.status, "completed", result.assistantMessage.error);
@@ -311,11 +334,31 @@ describe("Model fit in Chat", () => {
       assert.deepEqual(result.assistantMessage.switchedFrom, { providerId: "ollama", model: LOCAL_MODEL, reason: "context-too-small" });
       assert.ok(built.length > 0 && built.every((id) => id === "anthropic"), `built ${built.join(", ")}`);
       // Single use: the same acceptance cannot send it again.
-      await assert.rejects(service.streamIntuneChatMessage({ ...accepted, hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5") }, () => undefined), /no longer available/);
+      await assert.rejects(service.streamIntuneChatMessage({ ...accepted, hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5", false, offerId) }, () => undefined), /no longer available/);
       // The next request goes to the active local model again.
       const next = await service.streamIntuneChatMessage({ content: QUESTION, conversationId }, () => undefined);
       assert.equal(next.assistantMessage.providerId, "ollama");
       assert.equal(next.assistantMessage.switchedFrom, undefined);
+    });
+  });
+
+  it("sends only one of two concurrent requests that take up the same offer", async () => {
+    await withStore(async (store) => {
+      const built: string[] = [];
+      const service = new IntuneChatService(chatHost(store, built));
+      const failed = await service.streamIntuneChatMessage({ content: QUESTION }, () => undefined);
+      const offerId = failed.assistantMessage.modelFit!.offerId!;
+      built.length = 0;
+      const send = () => service.streamIntuneChatMessage({
+        content: QUESTION,
+        conversationId: failed.conversation.id,
+        modelOverride: { offerId, providerId: "anthropic", model: "claude-sonnet-5-5" },
+        hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5", false, offerId),
+      }, () => undefined);
+      const results = await Promise.allSettled([send(), send()]);
+      assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+      const refused = results.find((result) => result.status === "rejected") as PromiseRejectedResult;
+      assert.match(String(refused.reason), /already used|no longer available/);
     });
   });
 
@@ -331,7 +374,7 @@ describe("Model fit in Chat", () => {
           content: QUESTION,
           conversationId: failed.conversation.id,
           modelOverride: { offerId: failed.assistantMessage.modelFit!.offerId!, providerId: "anthropic", model: "claude-sonnet-5-5" },
-          hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5"),
+          hostedProviderConsent: freshConsent("anthropic", "claude-sonnet-5-5", false, failed.assistantMessage.modelFit!.offerId!),
         }, () => undefined),
         /deleted/,
       );

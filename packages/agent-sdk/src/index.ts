@@ -49,6 +49,13 @@ export interface ProviderSummary {
   modelLabels?: Record<string, string>;
   /** Models the provider offers that this account cannot use. Shown greyed out with the reason; never in `models`. */
   unavailableModels?: UnavailableModel[];
+  /**
+   * Ollama: listed models whose prompts the server sends to another host
+   * (`remote_host` or `remote_model` in /api/tags), such as Ollama Cloud
+   * models and remote-backed aliases. Model fit never offers them as a
+   * model on this device.
+   */
+  remoteModels?: string[];
   cli?: {
     binaryPath?: string;
     version?: string;
@@ -709,6 +716,12 @@ export interface StartRunOptions {
    * connected tenant.
    */
   tenantId?: string;
+  /**
+   * The admin reviewed this run with no organization active: refuse it if
+   * one became active before admission, instead of running there. Not
+   * combined with `tenantId`.
+   */
+  expectNoTenant?: boolean;
   /**
    * Pin the run to a specific LLM provider id, overriding the globally
    * active provider for this run only. The provider must be known and
@@ -2610,6 +2623,8 @@ export type HostedProviderChatConsent =
       acknowledgedAt: string;
       remember?: boolean;
       workspaceContext?: HostedProviderWorkspaceContextConsent;
+      /** The model fit offer this acknowledgement accepts; an override needs it (ChatModelOverride). */
+      modelFitOfferId?: string;
     }
   | {
       tenantId?: undefined;
@@ -2621,6 +2636,8 @@ export type HostedProviderChatConsent =
       acknowledgedAt: string;
       remember?: boolean;
       workspaceContext?: undefined;
+      /** The model fit offer this acknowledgement accepts; an override needs it (ChatModelOverride). */
+      modelFitOfferId?: string;
     };
 
 export type TenantScope =

@@ -9,7 +9,7 @@ import type {
   ProviderId,
   ProviderSummary,
 } from "@openadminos/agent-sdk";
-import { classifyModelFitFailure, isOllamaCloudModel } from "../../src/shared/model-fit.js";
+import { classifyModelFitFailure, isRemoteBackedModel } from "../../src/shared/model-fit.js";
 import { isProviderReady } from "../../src/shared/provider-detection.js";
 
 /**
@@ -27,6 +27,8 @@ export class ModelOverrideError extends Error {
 
 /** How long an offer from a failed answer can be taken up. */
 export const MODEL_FIT_OFFER_TTL_MS = 15 * 60_000;
+/** The renderer and the host share this device's clock; this only absorbs millisecond rounding. */
+const ACKNOWLEDGED_CLOCK_SLACK_MS = 1_000;
 const MAX_OFFERS = 50;
 
 /** A request the local model could not do, which may be run again once with another provider. */
@@ -37,6 +39,8 @@ export interface ModelFitOffer {
   tenantId: string | undefined;
   /** The question, exactly as it was sent. */
   content: string;
+  /** The workspace context selection it was sent with, as validated JSON; undefined without one. */
+  workspaceKey: string | undefined;
   /** The active provider and model when the request failed; an override needs them still active. */
   anchor: { providerId: ProviderId; model: string | undefined };
   /** The model that could not do it: the anchor, or a larger local model tried for this request. */
@@ -65,19 +69,30 @@ export class ModelFitOffers {
   }
 
   /** The offer an override names, checked against this request. Not used up yet. */
-  check(id: string, request: { conversationId: string | undefined; tenantId: string | undefined; content: string }): ModelFitOffer {
+  check(id: string, request: { conversationId: string | undefined; tenantId: string | undefined; content: string; workspaceKey: string | undefined }): ModelFitOffer {
     this.prune();
     const offer = this.offers.get(id);
     if (!offer) throw new ModelOverrideError("This choice is no longer available, so nothing was sent. Send the question again.");
-    if (offer.conversationId !== request.conversationId || offer.tenantId !== request.tenantId || offer.content !== request.content) {
+    if (
+      offer.conversationId !== request.conversationId ||
+      offer.tenantId !== request.tenantId ||
+      offer.content !== request.content ||
+      offer.workspaceKey !== request.workspaceKey
+    ) {
       throw new ModelOverrideError("This choice belongs to another question, so nothing was sent. Send the question again.");
     }
     return offer;
   }
 
-  /** Uses up an offer once its request is cleared to send. */
-  consume(id: string): void {
-    this.offers.delete(id);
+  /**
+   * Uses up an offer once its request is cleared to send. Synchronous, so of
+   * two sends that both passed `check`, only the first gets it; the other is
+   * refused before any model is built.
+   */
+  claim(id: string): void {
+    if (!this.offers.delete(id)) {
+      throw new ModelOverrideError("This choice was already used, so nothing more was sent. Send the question again.");
+    }
   }
 
   private prune(): void {
@@ -140,14 +155,23 @@ export function resolveChatTurnProvider(input: {
   if ((chosen.id === offer.failed.providerId && model === offer.failed.model) || (chosen.id === active.id && model === activeModel)) {
     throw new ModelOverrideError("That model already could not do this request. Choose another one, or narrow the question.");
   }
-  if (chosen.isLocal && chosen.id === "ollama" && isOllamaCloudModel(model)) {
-    // A cloud model on a loopback Ollama sends the prompt to ollama.com.
-    throw new ModelOverrideError(`${model} runs on Ollama's servers, not on this device, so nothing was sent. Choose another model.`);
+  if (chosen.isLocal && isRemoteBackedModel(chosen, model)) {
+    // A cloud or remote-backed model on a loopback Ollama sends the prompt to another host.
+    throw new ModelOverrideError(`${model} runs on another server, not on this device, so nothing was sent. Choose another model.`);
   }
   if (!chosen.isLocal) {
     const consent = input.consent;
-    if (!consent || consent.providerId !== chosen.id || consent.remember === true) {
-      // A remembered "do not ask again" never covers a request the local model could not do.
+    // The acknowledgement must accept this offer, after it was made, for this provider and model.
+    // A remembered "do not ask again" never covers a request the local model could not do.
+    const acknowledged = consent ? Date.parse(consent.acknowledgedAt) : NaN;
+    if (
+      !consent ||
+      consent.providerId !== chosen.id ||
+      consent.remember === true ||
+      consent.modelFitOfferId !== offer.id ||
+      (consent.model !== undefined && consent.model !== model) ||
+      !(acknowledged >= offer.createdAt - ACKNOWLEDGED_CLOCK_SLACK_MS)
+    ) {
       throw new ModelOverrideError(`Running this request with ${chosen.name} needs your approval for this request, so nothing was sent. Choose it again in Chat.`);
     }
   }
