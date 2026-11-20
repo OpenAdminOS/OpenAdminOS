@@ -921,7 +921,8 @@ function IntuneChatContent() {
     workspaceSummary?: WorkspacePromptContextSummary,
   ) => {
     const api = window.openAdminOS;
-    if (!api || !content || sending) return;
+    // The ref also stops a second click in the same tick, before `sending` updates.
+    if (!api || !content || sending || sendInFlightRef.current) return;
     const targetConversationId =
       conversationIdOverride === null
         ? null
