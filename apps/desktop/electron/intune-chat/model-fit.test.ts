@@ -572,6 +572,19 @@ describe("Model fit in Chat", () => {
     });
   });
 
+  it("ends as stopped, with no offer, when Stop comes while the locality check runs", async () => {
+    await withStore(async (store) => {
+      const controller = new AbortController();
+      const host = chatHost(store, []);
+      // The admin presses Stop while the check after the failure is still reading the model list.
+      host.verifyOnDeviceModel = async () => { controller.abort(); return true; };
+      const service = new IntuneChatService(host);
+      const result = await service.streamIntuneChatMessage({ content: QUESTION }, () => undefined, { signal: controller.signal });
+      assert.equal(result.assistantMessage.status, "cancelled");
+      assert.equal(result.assistantMessage.modelFit, undefined);
+    });
+  });
+
   it("refuses a model fit acceptance on the non-streaming send", async () => {
     await withStore(async (store) => {
       const service = new IntuneChatService(chatHost(store, []));

@@ -2653,6 +2653,8 @@ export class IntuneChatService {
       ) {
         throw new ModelOverrideError("The organization or model in Chat changed, so nothing was sent. Send the question again.");
       }
+      // The conversation is read again after that await too; a deletion in between refuses the send.
+      if (!store.getConversation(fitOffer.conversationId)) throw new ModelOverrideError("That conversation was deleted, so nothing was sent.");
       this.modelFitOffers.claim(fitOffer.id);
     }
     // Audited once the send is cleared: a refused send records no consent.
@@ -3350,6 +3352,10 @@ export class IntuneChatService {
         }
       }
     }
+    // The model's locality is confirmed when the request failed: a provider list read before an
+    // alias turned remote-backed must not let the notice say nothing left this device. It runs
+    // before the last stop check, so a Stop during the check still ends the request as stopped.
+    if (modelFit && !(await this.host.verifyOnDeviceModel?.(providerId, selectedModel).catch(() => false))) modelFit = undefined;
     if (isCancelled()) {
       const result = finishCancelled();
       sendProgress({
@@ -3396,9 +3402,6 @@ export class IntuneChatService {
       ? this.answerFollowUps({ content, sources: answerPlan.sources, tieInResources: answerPlan.tieInResources, tenantId: tenant.id, cacheStatus, modelFollowUps, readTenantData: tenantDataRead, privatePrompt: provenance.isPrivate })
       : { followUps: [], tenantFollowUps: [] };
     // Planned resources reach the answer as tenant rows or tool evidence; docs questions have none.
-    // The model's locality is confirmed when the request failed: a provider list read before an
-    // alias turned remote-backed must not let the notice say nothing left this device.
-    if (modelFit && !(await this.host.verifyOnDeviceModel?.(providerId, selectedModel).catch(() => false))) modelFit = undefined;
     const tenantContext = answered && planned.resources.length > 0;
     const assistantMessage: IntuneChatMessage = {
       id: assistantId,
