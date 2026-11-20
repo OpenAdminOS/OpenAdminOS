@@ -72,7 +72,10 @@ function recordingRun(results: Record<string, CommandResult[]> = {}): { run: (fi
     calls,
     run: (file, args) => {
       calls.push([file, ...args]);
-      return results[file]?.shift() ?? { status: 0 };
+      const next = results[file]?.shift();
+      if (next) return next;
+      // An unscripted Keychain lookup finds nothing, as on a Mac without the item.
+      return file === "/usr/bin/security" && args[0] === "find-generic-password" ? { status: 44 } : { status: 0 };
     },
   };
 }
@@ -262,6 +265,7 @@ describe("local reset: wipe at launch", () => {
       assert.deepEqual(calls, [
         ["/usr/bin/security", "delete-generic-password", "-s", MACOS_SAFE_STORAGE_SERVICE, "-a", MACOS_SAFE_STORAGE_ACCOUNT, loginKeychain],
         ["/usr/bin/security", "delete-generic-password", "-s", MACOS_SAFE_STORAGE_SERVICE, "-a", MACOS_SAFE_STORAGE_ACCOUNT, loginKeychain],
+        ["/usr/bin/security", "find-generic-password", "-s", MACOS_SAFE_STORAGE_SERVICE, "-a", MACOS_SAFE_STORAGE_ACCOUNT],
         ["/usr/bin/defaults", "delete", "com.openadminos.desktop"],
       ]);
       for (const path of leftovers) assert.ok(!existsSync(path), path);
@@ -356,7 +360,7 @@ describe("local reset: wipe at launch", () => {
       });
       assert.equal(first?.status, "incomplete");
       assert.equal(readLocalResetMarker(dir)?.leftoversDone, true);
-      const keychainCalls = () => calls.filter((call) => call[0] === "/usr/bin/security").length;
+      const keychainCalls = () => calls.filter((call) => call[0] === "/usr/bin/security" && call[1] === "delete-generic-password").length;
       assert.equal(keychainCalls(), 1);
       const second = runPendingLocalReset({ userDataDir: dir, packaged: true, platform: "darwin", home: join(dir, "home"), env: {}, run });
       assert.equal(second?.status, "completed");
@@ -583,6 +587,31 @@ describe("local reset: wipe at launch", () => {
     }
   });
 
+  it("leaves an item of the same name in another keychain alone and says where it is", async () => {
+    const dir = await tempDir();
+    try {
+      seedDataFolder(dir, MARKER);
+      const home = join(dir, "home");
+      const other = "/Users/admin/Library/Keychains/work.keychain-db";
+      const { run, calls } = recordingRun({
+        "/usr/bin/security": [keychainNotFound, { status: 0, stdout: `keychain: "${other}"\nversion: 512\nclass: "genp"\n` }],
+      });
+      const report = runPendingLocalReset({ userDataDir: dir, packaged: true, platform: "darwin", home, env: {}, run });
+      assert.equal(report?.status, "completed");
+      // The search list lookup reads attributes only and deletes nothing.
+      assert.deepEqual(calls.filter((call) => call[0] === "/usr/bin/security"), [
+        ["/usr/bin/security", "delete-generic-password", "-s", MACOS_SAFE_STORAGE_SERVICE, "-a", MACOS_SAFE_STORAGE_ACCOUNT, macosLoginKeychain(home)],
+        ["/usr/bin/security", "find-generic-password", "-s", MACOS_SAFE_STORAGE_SERVICE, "-a", MACOS_SAFE_STORAGE_ACCOUNT],
+      ]);
+      assert.deepEqual(report?.warnings, [{
+        item: `Keychain item "${MACOS_SAFE_STORAGE_SERVICE}"`,
+        reason: `an item with this name is also in ${other}, which the reset does not change. If OpenAdminOS used that keychain, remove the item there with Keychain Access`,
+      }]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("does not warn when exactly five Keychain items were removed", async () => {
     const dir = await tempDir();
     try {
@@ -591,8 +620,10 @@ describe("local reset: wipe at launch", () => {
       const report = runPendingLocalReset({ userDataDir: dir, packaged: true, platform: "darwin", home: join(dir, "home"), env: {}, run });
       assert.deepEqual(report?.warnings, []);
       const security = calls.filter((call) => call[0] === "/usr/bin/security");
-      assert.equal(security.length, 6);
-      assert.deepEqual(security.at(-1), ["/usr/bin/security", "find-generic-password", "-s", MACOS_SAFE_STORAGE_SERVICE, "-a", MACOS_SAFE_STORAGE_ACCOUNT, macosLoginKeychain(join(dir, "home"))]);
+      // Five deletions, the login keychain lookup, then the search list lookup.
+      assert.equal(security.length, 7);
+      assert.deepEqual(security.at(-2), ["/usr/bin/security", "find-generic-password", "-s", MACOS_SAFE_STORAGE_SERVICE, "-a", MACOS_SAFE_STORAGE_ACCOUNT, macosLoginKeychain(join(dir, "home"))]);
+      assert.deepEqual(security.at(-1), ["/usr/bin/security", "find-generic-password", "-s", MACOS_SAFE_STORAGE_SERVICE, "-a", MACOS_SAFE_STORAGE_ACCOUNT]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

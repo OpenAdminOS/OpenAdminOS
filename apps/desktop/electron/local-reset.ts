@@ -381,6 +381,7 @@ export function localResetDataFolderLinkMessage(): string {
 export interface CommandResult {
   status: number | null;
   error?: Error;
+  stdout?: string;
   stderr?: string;
 }
 
@@ -459,7 +460,7 @@ const nodeFileSystem: LocalResetFileSystem = {
 
 function runCommand(file: string, args: string[]): CommandResult {
   const result = spawnSync(file, args, { encoding: "utf8", timeout: COMMAND_TIMEOUT_MS, windowsHide: true });
-  return { status: result.status, error: result.error, stderr: result.stderr };
+  return { status: result.status, error: result.error, stdout: result.stdout, stderr: result.stderr };
 }
 
 /** True when this entry of the data folder stays through a reset. */
@@ -958,7 +959,11 @@ export function macosLoginKeychain(home: string): string {
  * Deletes the safeStorage Keychain item, matched by its exact service and
  * account and only in the login keychain, so an item of another app or
  * account, or one in a keychain imported from another Mac, is never
- * touched. Each call deletes one match.
+ * touched. Then a lookup across the keychain search list (attributes only,
+ * never the secret) warns when an item of that name is in another keychain:
+ * safeStorage creates its key in the default keychain, which an admin may
+ * have set to another one, and only the admin can tell whether it is this
+ * install's key.
  */
 function removeMacosKeychainItem(
   run: (file: string, args: string[]) => CommandResult,
@@ -966,6 +971,24 @@ function removeMacosKeychainItem(
   warnings: LocalResetProblem[],
 ): void {
   const item = `Keychain item "${MACOS_SAFE_STORAGE_SERVICE}"`;
+  removeFromLoginKeychain(run, keychain, item, warnings);
+  const elsewhere = run("/usr/bin/security", ["find-generic-password", "-s", MACOS_SAFE_STORAGE_SERVICE, "-a", MACOS_SAFE_STORAGE_ACCOUNT]);
+  if (elsewhere.error || elsewhere.status !== 0) return;
+  const found = /^keychain: "(.+)"$/m.exec(elsewhere.stdout ?? "")?.[1];
+  // The login keychain's own leftovers are already reported above.
+  if (found === keychain) return;
+  warnings.push({
+    item,
+    reason: `an item with this name is also in ${found ?? "another keychain"}, which the reset does not change. If OpenAdminOS used that keychain, remove the item there with Keychain Access`,
+  });
+}
+
+function removeFromLoginKeychain(
+  run: (file: string, args: string[]) => CommandResult,
+  keychain: string,
+  item: string,
+  warnings: LocalResetProblem[],
+): void {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const result = run("/usr/bin/security", [
       "delete-generic-password",
