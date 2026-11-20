@@ -104,7 +104,8 @@ async function readLmStudioContext(endpoint: string, model: string, signal?: Abo
     const models = isRecord(v1) && Array.isArray(v1.models) ? v1.models.filter(isRecord) : [];
     for (const entry of models) {
       const instances = Array.isArray(entry.loaded_instances) ? entry.loaded_instances.filter(isRecord) : [];
-      const instance = instances.find((item) => item.id === model) ?? (entry.key === model ? instances[0] : undefined);
+      // The key names one instance only when exactly one is loaded.
+      const instance = instances.find((item) => item.id === model) ?? (entry.key === model && instances.length === 1 ? instances[0] : undefined);
       if (!instance) continue;
       const config = isRecord(instance.config) ? instance.config : {};
       found = {
@@ -117,7 +118,9 @@ async function readLmStudioContext(endpoint: string, model: string, signal?: Abo
     if (found.loaded !== undefined || controller.signal.aborted) return found;
     const v0 = await getJson(`${base}/api/v0/models/${encodeURIComponent(model)}`);
     if (!isRecord(v0)) return found;
-    return { ...tokenCount("loaded", v0.loaded_context_length), ...tokenCount("max", v0.max_context_length), ...found };
+    // A model LM Studio reports as not loaded has no loaded size.
+    const loadedV0 = v0.state === undefined || v0.state === "loaded" ? tokenCount("loaded", v0.loaded_context_length) : {};
+    return { ...loadedV0, ...tokenCount("max", v0.max_context_length), ...found };
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener("abort", abort);
@@ -174,8 +177,12 @@ async function lmStudioContextOverflowMessage(failure: OpenAiCompatibleFailure):
     // old size, so unload it and load it again under the same identifier.
     const key = info.key ?? model;
     const identifier = key === model ? "" : ` --identifier ${model}`;
+    // At the model's limit the prompt fits, but with less room for the answer than planned.
+    const room = requested !== undefined && wanted !== undefined && target !== undefined && target < wanted
+      ? ` That leaves ${n(target - requested)} tokens for the answer.`
+      : "";
     parts.push(
-      `Raise Context Length${size}${limit} in the model's load settings in LM Studio and reload it, or run \`lms unload ${model}\` and then \`lms load ${key} --context-length ${target ?? "<tokens>"}${identifier}\`, then re-run. OpenAdminOS does not reload the model itself, because that would replace the model you loaded.`,
+      `Raise Context Length${size}${limit} in the model's load settings in LM Studio and reload it, or run \`lms unload ${model}\` and then \`lms load ${key} --context-length ${target ?? "<tokens>"}${identifier}\`, then re-run. OpenAdminOS does not reload the model itself, because that would replace the model you loaded.${room}`,
     );
   }
   parts.push(`LM Studio said: ${truncate(serverMessage(failure.detail), 200)}`);
