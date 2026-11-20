@@ -227,6 +227,11 @@ export class AuditLogStore {
     this.sideFilesFrozen = true;
   }
 
+  /** A reset refused after all: the side files are written again. */
+  unfreezeSideFiles(): void {
+    this.sideFilesFrozen = false;
+  }
+
   private sideFilesFrozen = false;
 
   /** Tries once more to save results only in memory, then closes the database. */
@@ -459,6 +464,9 @@ export class AuditLogStore {
 
   /** Deletes rows past the retention window, oldest first. Returns how many. */
   pruneExpired(): number {
+    // A prune must move the anchor with the rows it deletes; while the side
+    // files are frozen it would leave the anchor behind, so none runs.
+    if (this.sideFilesFrozen) return 0;
     const remove = this.db.prepare(
       `DELETE FROM audit_log
        WHERE seq = (SELECT MIN(seq) FROM audit_log) AND recorded_at <= ${RETENTION_CUTOFF_SQL}`,

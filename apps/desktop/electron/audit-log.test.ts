@@ -599,6 +599,30 @@ describe("Graph write results the audit log could not record", () => {
 });
 
 describe("audit log during a reset", () => {
+  it("prunes nothing while frozen, so the log still verifies when kept after all", async () => {
+    await withDatabase((path) => {
+      const old = new Date(Date.now() - (AUDIT_LOG_RETENTION_DAYS + 1) * DAY_MS);
+      const oldStore = new AuditLogStore(path, () => old);
+      oldStore.append([event("old-1"), event("old-2")]);
+      oldStore.close();
+      const store = new AuditLogStore(path);
+      store.freezeSideFiles();
+      assert.equal(store.pruneExpired(), 0);
+      store.close();
+      // The marker is removed by hand and the profile kept: nothing is missing.
+      const reopened = new AuditLogStore(path);
+      try {
+        assert.deepEqual(reopened.readVerified().events.map((entry) => entry.id), ["old-1", "old-2"]);
+        // Unfrozen again, as after a refused reset, it prunes as before.
+        reopened.freezeSideFiles();
+        reopened.unfreezeSideFiles();
+        assert.equal(reopened.pruneExpired(), 2);
+      } finally {
+        reopened.close();
+      }
+    });
+  });
+
   it("writes no side file once the reset froze them, so a restored sidecar stays as it is", async () => {
     await withDatabase((path) => {
       const log = new AuditLogStore(path);

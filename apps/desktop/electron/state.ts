@@ -2377,6 +2377,7 @@ export class AppStateStore {
   cancelLocalReset(): void {
     this.localResetStarted = false;
     this.localResetCommitted = false;
+    this.auditLog.unfreezeSideFiles();
     // A request refused after its checks (the marker could not be written)
     // gives every organization its work back, as an undone Disconnect does.
     if (this.localResetClosedTenants.length > 0) {
