@@ -10,7 +10,7 @@ descriptor:
   name: Sign-in failure explainer
   description: Clusters recent failed sign-ins by error, app, user, client app, Conditional Access status, and location signals.
   version: 1.2.0
-  minAppVersion: 0.7.3
+  minAppVersion: 0.7.2
   author:
     name: OpenAdminOS
     handle: openadminos

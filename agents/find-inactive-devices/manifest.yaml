@@ -12,7 +12,7 @@ descriptor:
   name: Find inactive devices
   description: Reviews Intune-managed device inactivity by sync age, compliance, OS, ownership, and enrollment signals with review-first cleanup guidance.
   version: 1.2.0
-  minAppVersion: 0.7.3
+  minAppVersion: 0.1.0
   author:
     name: OpenAdminOS
     handle: openadminos
@@ -115,6 +115,26 @@ skills:
       field: managedDeviceOwnerType
       missing: unknown
 
+  # Counts for the prompt. The grouped steps above keep whole device
+  # records for the result data; the model only needs the numbers.
+  - id: inactive_by_os_count
+    format: transform
+    label: Count warn-band devices by operating system
+    settings:
+      kind: count-by-field
+      source: "{{ categorize_by_age.output.warn }}"
+      field: operatingSystem
+      missingBucket: unknown
+
+  - id: retire_by_owner_type_count
+    format: transform
+    label: Count retirement candidates by ownership
+    settings:
+      kind: count-by-field
+      source: "{{ categorize_by_age.output.retire }}"
+      field: managedDeviceOwnerType
+      missingBucket: unknown
+
   - id: oldest_devices
     format: transform
     label: Sample oldest inactive devices
@@ -148,8 +168,8 @@ skills:
 
         Stale compliance breakdown: {{ stale_by_compliance.output }}.
         Retirement-candidate compliance breakdown: {{ retire_by_compliance.output }}.
-        Warn-band devices by operating system: {{ inactive_by_os.output | counts }}.
-        Retirement candidates by owner type: {{ retire_by_owner_type.output | counts }}.
+        Warn-band devices by operating system: {{ inactive_by_os_count.output }}.
+        Retirement candidates by owner type: {{ retire_by_owner_type_count.output }}.
         Oldest retirement-candidate sample: {{ oldest_devices.output }}.
 
         Write a compact report with these sections:
