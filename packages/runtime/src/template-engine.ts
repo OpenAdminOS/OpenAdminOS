@@ -14,7 +14,7 @@
 // string.
 
 import { registerRenderedFragment } from "./data-classification.js";
-import type { TemplateInterpolation } from "./request-classification.js";
+import { MAX_TEMPLATE_INTERPOLATIONS, type TemplateInterpolation } from "./request-classification.js";
 import { escapeTenantDataBody, fenceTenantData } from "./tenant-data.js";
 
 const EXPRESSION_REGEX = /\{\{\s*([^}]+?)\s*\}\}/g;
@@ -35,7 +35,93 @@ type SourceTrace = {
   format: "value" | "join" | "json" | "literal" | "unmapped";
   separator?: string;
   casing: Array<"upper" | "lower">;
+  origin?: TemplateOrigin;
+  incomplete?: boolean;
 };
+
+type Scalar = NonNullable<TemplateInterpolation["value"]>;
+type SourceValue = { key: string; value: Scalar };
+export type TemplateOrigin = SourceValue | SourceValue[] | "literal" | "unmapped";
+
+// Side tables leave the objects consumed by templates, agents and providers
+// unchanged. Each property can have different evidence for its key and value.
+const derivedKeys = new WeakMap<object, Map<string, TemplateOrigin>>();
+const derivedValues = new WeakMap<object, Map<string, TemplateOrigin>>();
+const arrayFields = new WeakMap<unknown[], string>();
+const incompleteObjects = new WeakSet<object>();
+
+export function setTemplateOrigin(
+  object: object, field: string, origin: TemplateOrigin, position: "key" | "value" = "value",
+): void {
+  const table = position === "key" ? derivedKeys : derivedValues;
+  let fields = table.get(object);
+  if (!fields) table.set(object, fields = new Map());
+  fields.set(field, origin);
+}
+
+export function markTemplateOriginsIncomplete(object: object): void {
+  incompleteObjects.add(object);
+}
+
+export function copyTemplateOrigins(source: object, target: object): void {
+  for (const table of [derivedKeys, derivedValues]) {
+    const fields = table.get(source);
+    if (fields) table.set(target, new Map(fields));
+  }
+  if (incompleteObjects.has(source)) markTemplateOriginsIncomplete(target);
+}
+
+export function preserveTemplateArrayField(source: unknown[], result: unknown[], reordered = false): void {
+  const key = arrayFields.get(source);
+  if (key !== undefined) arrayFields.set(result, key);
+  if (incompleteObjects.has(source)) markTemplateOriginsIncomplete(result);
+  const origins = derivedValues.get(source);
+  if (!origins) return;
+  if (!reordered) {
+    derivedValues.set(result, origins); // A prefix keeps its indices.
+    return;
+  }
+  if (source.length > MAX_TEMPLATE_INTERPOLATIONS) {
+    markTemplateOriginsIncomplete(result);
+    return;
+  }
+  // Stable sorting preserves the order of identical values. Match each
+  // occurrence to its original position, including duplicate scalars.
+  const positions = new Map<unknown, number[]>();
+  for (let i = source.length - 1; i >= 0; i--) {
+    const value = source[i];
+    const indices = positions.get(value);
+    if (indices) indices.push(i);
+    else positions.set(value, [i]);
+  }
+  for (const [i, value] of result.entries()) {
+    const origin = origins.get(String(positions.get(value)?.pop()));
+    if (origin !== undefined) setTemplateOrigin(result, String(i), origin);
+  }
+}
+
+export function bindTemplateArrayItem(context: TemplateContext, name: string, source: unknown[], index: number): void {
+  const item = source[index];
+  if (Array.isArray(item)) {
+    const key = arrayFields.get(source);
+    if (key !== undefined && !arrayFields.has(item)) arrayFields.set(item, key);
+  } else if (isScalar(item)) setTemplateOrigin(context, name, templateFieldOrigin(source, String(index), item));
+}
+
+export function templateFieldOrigin(object: unknown, field: string, value: unknown): TemplateOrigin {
+  if (object && typeof object === "object") {
+    const origin = derivedValues.get(object)?.get(field);
+    if (origin !== undefined) return origin;
+    if (incompleteObjects.has(object)) return "unmapped";
+    if (Array.isArray(object)) field = arrayFields.get(object) ?? field;
+  }
+  return isScalar(value) ? { key: field, value } : "unmapped";
+}
+
+export function hasTemplateOrigin(object: object, field: string): boolean {
+  return derivedValues.get(object)?.has(field) === true ||
+    (Array.isArray(object) && arrayFields.has(object)) || incompleteObjects.has(object);
+}
 
 function boundedJson(value: unknown, maxChars: unknown, trace?: SourceTrace): string {
   if (!Array.isArray(value) || typeof maxChars !== "number" || !Number.isInteger(maxChars) || maxChars < 512) {
@@ -44,6 +130,7 @@ function boundedJson(value: unknown, maxChars: unknown, trace?: SourceTrace): st
   // Preserve whole records. Skipping an oversized record must not hide the
   // coverage gap, and must not prevent smaller later records from fitting.
   const records: unknown[] = [];
+  const origins = trace ? derivedValues.get(value) : undefined;
   const envelope = () => ({
     totalRecords: value.length,
     includedRecords: records.length,
@@ -51,12 +138,21 @@ function boundedJson(value: unknown, maxChars: unknown, trace?: SourceTrace): st
     coverage: records.length === value.length ? "complete" : "partial: omitted records are not assessed; do not extrapolate sample findings",
     records,
   });
+  let index = 0;
   for (const record of value) {
     records.push(record);
     if (JSON.stringify(envelope()).length > maxChars) records.pop();
+    else {
+      const origin = origins?.get(String(index));
+      if (origin !== undefined) setTemplateOrigin(records, String(records.length - 1), origin);
+    }
+    index++;
   }
   const result = envelope();
   if (trace) {
+    if (incompleteObjects.has(value)) markTemplateOriginsIncomplete(records);
+    const key = arrayFields.get(value) ?? trace.key;
+    arrayFields.set(records, key);
     trace.value = result;
     trace.format = "json";
   }
@@ -114,7 +210,12 @@ function lookup(path: string, ctx: TemplateContext, trace?: SourceTrace): unknow
   for (const segment of segments) {
     if (current === null || current === undefined) return undefined;
     if (typeof current !== "object") return undefined;
-    if (trace && !Array.isArray(current)) trace.key = segment;
+    if (trace) {
+      if (!Array.isArray(current)) trace.key = segment;
+      else trace.key = arrayFields.get(current) ?? trace.key;
+      trace.origin = derivedValues.get(current)?.get(segment);
+      trace.incomplete ||= incompleteObjects.has(current);
+    }
     current = (current as Record<string, unknown>)[segment];
   }
   return current;
@@ -207,6 +308,7 @@ function evaluateExpression(parsed: ParsedExpression, ctx: TemplateContext, trac
       switch (name) {
         case "sample":
           // The prefix retains its original elements and field key.
+          if (Array.isArray(value) && Array.isArray(rendered)) preserveTemplateArrayField(value, rendered);
           trace.value = rendered;
           break;
         case "join":
@@ -232,8 +334,7 @@ function evaluateExpression(parsed: ParsedExpression, ctx: TemplateContext, trac
   return value;
 }
 
-type Scalar = NonNullable<TemplateInterpolation["value"]>;
-type TracePiece = { text: string; key?: string; value?: Scalar };
+type TracePiece = { text: string; origin?: TemplateOrigin; requireEvidence?: boolean };
 
 function isScalar(value: unknown): value is Scalar {
   return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
@@ -244,21 +345,26 @@ const MAX_TRACE_TEXT = 128 * 1024;
 
 function* tracePieces(
   value: unknown, key: string, format: "join" | "json", separator: string, depth = 0, envelope = false,
+  origin?: TemplateOrigin, requireEvidence = true,
 ): Generator<TracePiece, boolean> {
   if (depth > 64) return false;
   if (Array.isArray(value)) {
+    key = arrayFields.get(value) ?? key;
+    if (incompleteObjects.has(value)) yield { text: "", origin: "unmapped" };
     if (format === "json") yield { text: "[" };
     for (let i = 0; i < value.length; i++) {
       if (i) yield { text: separator };
       const property = Object.getOwnPropertyDescriptor(value, i);
       if (property && !("value" in property)) return false;
-      if (!(yield* tracePieces(property?.value, key, format, ",", depth + 1))) return false;
+      const itemOrigin = derivedValues.get(value)?.get(String(i));
+      if (!(yield* tracePieces(property?.value, key, format, ",", depth + 1, false, itemOrigin, requireEvidence))) return false;
     }
     if (format === "json") yield { text: "]" };
     return true;
   }
   if (value && typeof value === "object") {
     if (format === "join") return false;
+    if (incompleteObjects.has(value)) yield { text: "", origin: "unmapped" };
     yield { text: "{" };
     let first = true;
     for (const field in value) {
@@ -272,10 +378,17 @@ function* tracePieces(
       }
       if (!first) yield { text: "," };
       first = false;
-      yield { text: JSON.stringify(field) + ":" };
+      const keyOrigin = derivedKeys.get(value)?.get(field);
+      if (keyOrigin === undefined) yield { text: JSON.stringify(field) + ":" };
+      else {
+        yield { text: '"' };
+        yield { text: JSON.stringify(field).slice(1, -1), origin: keyOrigin, requireEvidence: true };
+        yield { text: '":' };
+      }
       // Only the records in boundedJson came from tenant data.
       const sourceKey = envelope ? (field === "records" ? key : "") : field.toLowerCase();
-      if (!(yield* tracePieces(property.value, sourceKey, format, ",", depth + 1))) return false;
+      const valueOrigin = derivedValues.get(value)?.get(field);
+      if (!(yield* tracePieces(property.value, sourceKey, format, ",", depth + 1, false, valueOrigin, requireEvidence))) return false;
     }
     yield { text: "}" };
     return true;
@@ -285,15 +398,17 @@ function* tracePieces(
     yield { text: format === "json" ? "null" : "" };
     return true;
   }
+  const evidence = origin ?? (key ? { key, value } : "literal");
+  requireEvidence ||= origin !== undefined;
   if (typeof value === "string" && value.length > MAX_TRACE_PIECE) return false;
   if (typeof value === "number" && !Number.isFinite(value) && format === "json") {
     yield { text: "null" };
   } else if (format === "json" && typeof value === "string") {
     yield { text: '"' };
-    yield { text: JSON.stringify(value).slice(1, -1), key, value };
+    yield { text: JSON.stringify(value).slice(1, -1), origin: evidence, requireEvidence };
     yield { text: '"' };
   } else {
-    yield { text: String(value), key, value };
+    yield { text: String(value), origin: evidence, requireEvidence };
   }
   return true;
 }
@@ -303,7 +418,8 @@ function* traceInterpolation(
 ): Generator<TemplateInterpolation | undefined, boolean> {
   if (end - start > MAX_TRACE_TEXT) return false;
   const format = trace.format === "join" ? "join" : "json";
-  const pieces = tracePieces(trace.value, trace.key.toLowerCase(), format, trace.separator ?? ",", 0, trace.format === "json");
+  const pieces = tracePieces(trace.value, trace.key, format, trace.separator ?? ",", 0, trace.format === "json",
+    trace.origin, Array.isArray(trace.value) || trace.format !== "value");
   // start and end are prompt offsets. Read the local fence body at its
   // stable offset without making another copy of the interpolated text.
   const bodyStart = fenced ? rendered.indexOf("\n") + 1 : 0;
@@ -311,7 +427,7 @@ function* traceInterpolation(
   for (;;) {
     const next = pieces.next();
     if (next.done) return next.value && position === end;
-    const { key, value } = next.value;
+    const { origin, requireEvidence } = next.value;
     let { text } = next.value;
     if (text.length > MAX_TRACE_PIECE) return false;
     for (const casing of trace.casing) text = casing === "upper" ? text.toUpperCase() : text.toLowerCase();
@@ -319,9 +435,25 @@ function* traceInterpolation(
     const previous = position;
     position += text.length;
     if (position > end || !rendered.startsWith(text, bodyStart + previous - start)) return false;
-    yield key && value !== undefined && position > previous
-      ? { key, value, start: previous, end: position, requireEvidence: true } : undefined;
+    if (origin === "unmapped") yield { key: "", start: previous, end: position, incomplete: true };
+    else if (origin && origin !== "literal" && position > previous) {
+      for (const { key, value } of Array.isArray(origin) ? origin : [origin]) {
+        yield { key: key.toLowerCase(), value, start: previous, end: position, requireEvidence: requireEvidence ?? false };
+      }
+    } else yield undefined;
   }
+}
+
+function* traceScalar(
+  origin: TemplateOrigin, start: number, end: number,
+): Generator<TemplateInterpolation, boolean> {
+  if (origin === "unmapped") return false;
+  if (origin !== "literal") {
+    for (const { key, value } of Array.isArray(origin) ? origin : [origin]) {
+      yield { key: key.toLowerCase(), value, start, end, requireEvidence: true };
+    }
+  }
+  return true;
 }
 
 /**
@@ -331,20 +463,56 @@ function* traceInterpolation(
  * the raw (typed) value is returned so callers can preserve numbers / arrays.
  * Otherwise interpolations are coerced to strings.
  */
-export function renderTemplate(input: string, ctx: TemplateContext): unknown {
+export function renderTemplate(
+  input: string, ctx: TemplateContext, onOrigin?: (origin: TemplateOrigin) => void,
+): unknown {
   if (typeof input !== "string") return input;
 
   const standalone = STANDALONE_REGEX.exec(input);
   if (standalone && standalone[1]) {
-    return evaluateExpression(parseExpression(standalone[1]), ctx);
+    const expression = parseExpression(standalone[1]);
+    if (!onOrigin) return evaluateExpression(expression, ctx);
+    const trace: SourceTrace = { value: undefined, key: "", format: "value", casing: [] };
+    const result = evaluateExpression(expression, ctx, trace);
+    if (Array.isArray(result) && trace.format === "value") {
+      if (!arrayFields.has(result)) arrayFields.set(result, trace.key);
+      if (trace.incomplete) markTemplateOriginsIncomplete(result);
+    } else if (result !== null && typeof result !== "object") {
+      onOrigin(scalarTemplateOrigin(trace));
+    }
+    return result;
   }
 
-  return input.replace(EXPRESSION_REGEX, (_match, expr: string) => {
-    const value = evaluateExpression(parseExpression(expr), ctx);
+  let didInterpolate = false;
+  let incomplete = false;
+  const origins: SourceValue[] = [];
+  const result = input.replace(EXPRESSION_REGEX, (_match, expr: string) => {
+    const trace: SourceTrace | undefined = onOrigin && !incomplete
+      ? { value: undefined, key: "", format: "value", casing: [] } : undefined;
+    const value = evaluateExpression(parseExpression(expr), ctx, trace);
     if (value === undefined || value === null) return "";
+    if (trace) {
+      didInterpolate = true;
+      const origin = typeof value === "object" ? "unmapped" : scalarTemplateOrigin(trace);
+      if (origin === "unmapped") incomplete = true;
+      else if (origin !== "literal") {
+        const sources = Array.isArray(origin) ? origin : [origin];
+        if (sources.length > MAX_TEMPLATE_INTERPOLATIONS - origins.length) incomplete = true;
+        else origins.push(...sources);
+      }
+    }
     if (typeof value === "string") return value;
     return JSON.stringify(value);
   });
+  if (didInterpolate) onOrigin?.(incomplete ? "unmapped" : origins.length ? origins : "literal");
+  return result;
+}
+
+function scalarTemplateOrigin(trace: SourceTrace): TemplateOrigin {
+  if (trace.incomplete || trace.format === "unmapped") return "unmapped";
+  if (trace.format === "literal" || trace.value === undefined || trace.value === null) return "literal";
+  if (trace.format !== "value" || !isScalar(trace.value)) return "unmapped";
+  return trace.origin ?? { key: trace.key, value: trace.value };
 }
 
 /** Only model prompts fence interpolations; transforms and displayed results stay typed. */
@@ -374,10 +542,14 @@ export function renderPromptTemplate(
       if (trace?.format === "unmapped") {
         capture({ start, end, key: sourceKey, incomplete: true });
       } else if (trace && (trace.format === "join" || trace.format === "json" ||
-          trace.format === "value" && Array.isArray(trace.value))) {
-        capture({ start, end, key: sourceKey, trace: () => traceInterpolation(trace, rendered, start, end, fenced) });
+          trace.format === "value" && value !== null && typeof value === "object")) {
+        capture({ start, end, key: sourceKey, incomplete: trace.incomplete,
+          trace: () => traceInterpolation(trace, rendered, start, end, fenced) });
+      } else if (trace?.format === "value" && trace.origin !== undefined) {
+        const origin = trace.origin;
+        capture({ start, end, key: sourceKey, incomplete: trace.incomplete, trace: () => traceScalar(origin, start, end) });
       } else {
-        capture({ start, end, key: sourceKey,
+        capture({ start, end, key: sourceKey, incomplete: trace?.incomplete,
           ...(trace?.format === "value" && isScalar(trace.value)
             ? { value: trace.value, requireEvidence: trace.value !== value } : {}) });
       }
@@ -397,19 +569,30 @@ export function renderPromptTemplate(
  * Recursively render every string in an object or array. Non-string scalars
  * pass through unchanged.
  */
-export function renderDeep<T>(value: T, ctx: TemplateContext): T {
+export function renderDeep<T>(value: T, ctx: TemplateContext, trackOrigins = false): T {
   if (typeof value === "string") {
     return renderTemplate(value, ctx) as T;
   }
   if (Array.isArray(value)) {
-    return value.map((entry) => renderDeep(entry, ctx)) as T;
+    if (!trackOrigins) return value.map(entry => renderDeep(entry, ctx)) as T;
+    const origins: unknown[] = [];
+    const result = value.map((entry, index) => renderChild(entry, ctx, origins, String(index), true));
+    preserveTemplateArrayField(origins, result);
+    return result as T;
   }
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-      out[key] = renderDeep(child, ctx);
+      out[key] = renderChild(child, ctx, out, key, trackOrigins);
     }
     return out as T;
   }
   return value;
+}
+
+function renderChild(value: unknown, ctx: TemplateContext, parent: object, key: string, trackOrigins: boolean): unknown {
+  if (trackOrigins && typeof value === "string") {
+    return renderTemplate(value, ctx, origin => setTemplateOrigin(parent, key, origin));
+  }
+  return renderDeep(value, ctx, trackOrigins);
 }

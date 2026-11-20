@@ -1877,9 +1877,12 @@ elements, including nested arrays. Generic phrases use word boundaries.
 Transformed values carry their original class through clipping, scalar
 interpolation and standalone fences. Template joins, samples, bounded JSON
 and case changes preserve source fields and individual element offsets.
-Classification resolves bounded template provenance off the provider call
-path. Missing evidence, unsupported coercions, collection aggregates that
-lose per-element provenance and exceeded trace limits leave coverage incomplete.
+Keys and counts derived from source values, mapped scalars and correlated
+device fields carry their source evidence into the rendered request. The
+observer binds those values to the serialized key or value offsets. It resolves
+bounded provenance off the provider call path. Missing evidence, unsupported
+coercions, collection aggregates that lose per-element provenance and exceeded
+trace limits leave coverage incomplete.
 An unfamiliar name or an opaque unlabeled secret can evade detection.
 
 A turn keeps up to two million units for values and provenance, favoring

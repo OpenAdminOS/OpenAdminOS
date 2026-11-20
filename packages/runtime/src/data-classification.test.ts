@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
 import { setImmediate as nextTick } from "node:timers/promises";
-import { DATA_CLASSES_BY_SENSITIVITY, highestDataClass, maxDataClass, type DataClass } from "@openadminos/agent-sdk";
+import { DATA_CLASSES_BY_SENSITIVITY, highestDataClass, maxDataClass, type AgentTemplate,
+  type DataClass, type RunContext, type TemplateStep } from "@openadminos/agent-sdk";
 import { ClassificationLedger, classificationDiagnostics, classifyData, hasGraphFieldClasses, registerGraphTenantData, registerRenderedFragment, registerTenantData, withClassificationScope, withRequestClassification, type RequestClassificationEvent } from "./data-classification.js";
 import { GRAPH_FIELD_CLASSES, GRAPH_FIELD_CLASSES_VERSION, GRAPH_ROUTE_ALIASES } from "./graph-field-classes.js";
 import { GRAPH_CLASSIFICATION_FIXTURES } from "./graph-classification.fixtures.js";
@@ -12,7 +13,7 @@ import { renderPromptTemplate } from "./template-engine.js";
 import { REQUEST_CLASSIFICATION_MAX_SECTION } from "./request-classification.js";
 import { CLASSIFICATION_QUEUE_MAX_BYTES, CLASSIFICATION_QUEUE_MAX_JOBS, ClassificationSlice, ClassificationWorker, reserveClassificationRequest } from "./classification-worker-client.js";
 import { TenantValueIndex } from "./tenant-value-index.js";
-import { agentTemplateToRegistrySummary, parseAgentTemplate } from "./agent-template.js";
+import { agentTemplateToRegistrySummary, parseAgentTemplate, runAgentTemplate } from "./agent-template.js";
 
 for (const [graphPath, [field, value, expected]] of Object.entries(GRAPH_CLASSIFICATION_FIXTURES)) {
   test(`classifies the fixture for ${graphPath}`, () => {
@@ -438,6 +439,8 @@ test("template filters carry source field evidence to emitted scalar and array o
       '{"totalrecords":2,"includedrecords":2,"omittedrecords":0,"coverage":"complete","records":["de","us"]}', ["de", "us"]],
     ['location.countriesAndRegions.0 | upper', "DE", ["DE"]],
     ['location.countriesAndRegions.0 | length', "2", ["2"]],
+    ['location.countriesAndRegions.0 | size', "2", ["2"]],
+    ['location.countriesAndRegions.0 | total', "2", ["2"]],
     ['location.countriesAndRegions.0 | type', "string", ["string"]],
     ['location.countriesAndRegions.0 | default("unused")', "DE", ["DE"]],
     ['missing | default("DE")', "DE", []],
@@ -467,6 +470,197 @@ test("template filters carry source field evidence to emitted scalar and array o
   } finally {
     ledger.dispose();
   }
+});
+
+const transformStep = (kind: string, settings: Record<string, unknown>): TemplateStep => ({
+  id: "transformed", format: "transform", label: kind, settings: { kind, source: "{{ load.output }}", ...settings },
+});
+
+const policyPath = "/identity/conditionalAccess/policies";
+const policyRows = { value: [{ id: "policy-fixture", grantControls: { operator: "OR" } }] };
+const date = "2000-01-01T00:00:00.000Z";
+const expectedTransforms: Array<{
+  name: string; path?: string; response?: unknown; steps: TemplateStep[];
+  expressions: Array<{ expression: string; body: string; spans: string[][]; incomplete?: boolean }>;
+}> = [
+  {
+    name: "count-by-field", steps: [transformStep("count-by-field", { field: "grantControls.operator" })],
+    expressions: [
+      { expression: "transformed.output", body: '{"OR":1}', spans: [["security", "OR"], ["security", "1"]] },
+      { expression: "transformed.output.OR | type", body: "number", spans: [["security", "number"]] },
+    ],
+  },
+  {
+    name: "group-by-field", steps: [transformStep("group-by-field", { field: "grantControls.operator" })],
+    expressions: [{ expression: "transformed.output", body: '{"OR":[', spans: [["security", "OR"], ["security", "policy-fixture"], ["security", "OR"]] }],
+  },
+  {
+    name: "sort-by",
+    response: { value: [{ grantControls: { operator: "AND" } }, ...policyRows.value] },
+    steps: [transformStep("sort-by", { field: "grantControls.operator" })],
+    expressions: [{ expression: "transformed.output | boundedJson(512) | lower", body: '"operator":"or"',
+      spans: [["security", "policy-fixture"], ["security", "or"], ["security", "and"]] }],
+  },
+  {
+    name: "group-by-age", path: "/devices",
+    response: { value: [{ approximateLastSignInDateTime: date }] },
+    steps: [transformStep("group-by-age", { timestampField: "approximateLastSignInDateTime",
+      groups: [{ name: "stale", inactiveDaysAtLeast: 30 }] })],
+    expressions: [{ expression: "transformed.output", body: '{"stale":[', spans: [["activity", date]] }],
+  },
+  {
+    name: "filter-by-age", path: "/devices",
+    response: { value: [{ approximateLastSignInDateTime: date },
+      { approximateLastSignInDateTime: "9999-01-01T00:00:00.000Z" }] },
+    steps: [transformStep("filter-by-age", { timestampField: "approximateLastSignInDateTime", inactiveDaysAtLeast: 30 })],
+    expressions: [{ expression: "transformed.output", body: '[{"approximateLastSignInDateTime":', spans: [["activity", date]] }],
+  },
+  {
+    name: "correlate-stale-devices", path: "/deviceManagement/managedDevices",
+    response: { value: [{ id: "intune-fixture", azureADDeviceId: "join-fixture", lastSyncDateTime: date }] },
+    steps: [
+      { id: "entra", label: "entra", format: "graph", settings: { method: "GET", path: "/devices", scopes: [] } },
+      transformStep("correlate-stale-devices", { intuneSource: "{{ load.output }}", entraSource: "{{ entra.output }}",
+        staleDays: 30, strategy: "both" }),
+    ],
+    expressions: [
+      { expression: "transformed.output.0.entraObjectId | upper", body: "ENTRA-FIXTURE", spans: [["device", "ENTRA-FIXTURE"]] },
+      { expression: "transformed.output.0.entraAccountEnabled", body: "false", spans: [["configuration", "false"]] },
+      { expression: "transformed.output.0.entraInactiveDays | type", body: "number", spans: [["activity", "number"]] },
+      { expression: "transformed.output.0.intuneInactiveDays | type", body: "number", spans: [["activity", "number"]] },
+    ],
+  },
+  {
+    name: "count-by-field coerces scalars and knows when an object key lost evidence",
+    response: { value: [{ grantControls: { operator: false } }, { grantControls: { operator: "false" } },
+      { grantControls: { operator: { nested: "value" } } }] },
+    steps: [transformStep("count-by-field", { field: "grantControls.operator" })],
+    expressions: [{ expression: "transformed.output", body: '{"false":2,"[object Object]":1}',
+      spans: [["security", "false"], ["security", "2"]], incomplete: true }],
+  },
+  {
+    name: "derived JSON key offsets include escaping but exclude quotes",
+    response: { value: [{ grantControls: { operator: 'A<"B' } }] },
+    steps: [transformStep("count-by-field", { field: "grantControls.operator" })],
+    expressions: [{ expression: "transformed.output", body: '{"A\\u003c\\"B":1}',
+      spans: [["security", 'A\\u003c\\"B'], ["security", "1"]] }],
+  },
+  {
+    name: "interpolated bucket names in transform settings",
+    steps: [transformStep("count-by-field", { field: "grantControls.operator",
+      buckets: ["Operator {{ load.output.0.grantControls.operator | lower }}"] })],
+    expressions: [{ expression: "transformed.output", body: '{"Operator or":0,"OR":1}',
+      spans: [["security", "Operator or"], ["security", "0"], ["security", "OR"], ["security", "1"]] }],
+  },
+  {
+    name: "interpolated age bucket name", path: "/devices",
+    response: { value: [{ approximateLastSignInDateTime: date }] },
+    steps: [transformStep("group-by-age", { timestampField: "approximateLastSignInDateTime",
+      groups: [{ name: "stale {{ load.output.0.approximateLastSignInDateTime | length }}", inactiveDaysAtLeast: 30 }] })],
+    expressions: [{ expression: "transformed.output", body: '{"stale 24":[', spans: [["activity", "stale 24"], ["activity", date]] }],
+  },
+];
+
+async function observeTemplatePipeline(
+  path: string, response: unknown, steps: TemplateStep[], holdIngress = false,
+): Promise<Array<{ prompt: string; event: RequestClassificationEvent }>> {
+  const ledger = new ClassificationLedger(undefined, "fixture");
+  const prompts: string[] = [];
+  const events: RequestClassificationEvent[] = [];
+  let releaseIngress!: () => void;
+  const ingressGate = new Promise<void>(resolve => { releaseIngress = resolve; });
+  const manifest = {
+    descriptor: { id: "fixture", mode: "read" },
+    skills: [{ id: "load", label: "load", format: "graph", settings: { method: "GET", path, query: {} } }, ...steps],
+    definition: { result: { summary: "done" } },
+  } as AgentTemplate;
+  const run = async (observe: boolean) => {
+    const received: string[] = [];
+    const provider: RunContext["llm"] = {
+      available: true, defaultModel: "fixture",
+      async complete(options) { received.push(options.prompt); return { text: "done", model: "fixture" }; },
+      async *stream() {},
+    };
+    const context = {
+      agent: { id: "fixture", name: "Fixture" } as RunContext["agent"],
+      settings: {}, providerId: "ollama", realWrites: false, log() {},
+      graph: { async request({ path: requested }: { path: string }) {
+        return requested === path ? response : { value: [{
+          id: "entra-fixture", deviceId: "join-fixture", approximateLastSignInDateTime: date, accountEnabled: false,
+        }] };
+      } } as RunContext["graph"],
+      llm: observe ? withRequestClassification(provider, "ollama", event => events.push(event)) : provider,
+      async step<T>(label: string, _detail: string | undefined, work: () => T | Promise<T>) {
+        const result = await work();
+        if (observe && (label === "load" || label === "entra")) {
+          if (holdIngress) void ledger.scheduleRegistration(1, () => ingressGate);
+          else await ledger.waitForObservations();
+        }
+        return result;
+      },
+    } satisfies RunContext;
+    await runAgentTemplate(manifest, context);
+    return received;
+  };
+  try {
+    const baseline = await run(false);
+    prompts.push(...await withClassificationScope(ledger, () => run(true)));
+    releaseIngress();
+    await ledger.waitForObservations();
+    const stablePrompt = (prompt: string) => prompt.replace(/nonce="[a-f0-9]+"/g, 'nonce="fixture"');
+    assert.deepEqual(prompts.map(stablePrompt), baseline.map(stablePrompt));
+    assert.equal(events.length, prompts.length);
+    return events.sort((a, b) => a.requestSequence - b.requestSequence).map((event, i) => ({ prompt: prompts[i]!, event }));
+  } finally {
+    releaseIngress();
+    ledger.dispose();
+  }
+}
+
+for (const fixture of expectedTransforms) {
+  test(`agent template preserves rendered provenance for ${fixture.name}`, async () => {
+    const steps = fixture.expressions.map(({ expression }, index): TemplateStep => ({
+      id: `llm_${index}`, label: `llm_${index}`, format: "llm",
+      settings: { prompt: `Grant operator breakdown: OR {{ ${expression} }}` },
+    }));
+    const observations = await observeTemplatePipeline(fixture.path ?? policyPath, fixture.response ?? policyRows,
+      [...fixture.steps, ...steps]);
+    for (const [index, { prompt, event }] of observations.entries()) {
+      const expected = fixture.expressions[index]!;
+      assert.ok(prompt.includes(expected.body), prompt);
+      assert.equal(event.classification.coverageIncomplete, expected.incomplete ?? false, expected.expression);
+      assert.deepEqual(event.classification.spans.filter(span => span.section === "prompt")
+        .map(span => [span.kind, prompt.slice(span.start, span.end)]), expected.spans, expected.expression);
+      assert.ok(event.classification.spans.every(span => span.start >= "Grant operator breakdown: OR ".length));
+    }
+  });
+}
+
+test("agent template map keeps the Graph field of a scalar item bound to a new variable", async () => {
+  const [observation] = await observeTemplatePipeline("/identity/conditionalAccess/namedLocations",
+    { value: [{ countriesAndRegions: ["DE", "US"] }] }, [{
+      id: "transformed", label: "map", format: "map",
+      settings: { source: "{{ load.output.0.countriesAndRegions | sample(1) }}", as: "country", do: [
+        { id: "llm", label: "Explain", format: "llm", settings: { prompt: "Literal de. {{ country | lower }}" } },
+      ] },
+    }]);
+  assert.ok(observation);
+  const { prompt, event } = observation;
+  assert.equal(event.classification.coverageIncomplete, false);
+  assert.deepEqual(event.classification.spans.map(span => [span.kind, prompt.slice(span.start, span.end)]), [["security", "de"]]);
+  assert.ok(event.classification.spans[0]!.start > prompt.indexOf("de"));
+});
+
+test("agent template sends derived keys while evidence is still pending", async () => {
+  const [observation] = await observeTemplatePipeline(policyPath, policyRows, [
+    transformStep("count-by-field", { field: "grantControls.operator" }),
+    { id: "llm", label: "Explain", format: "llm", settings: { prompt: "Grant operators: {{ transformed.output }}" } },
+  ], true);
+  assert.ok(observation);
+  assert.ok(observation.prompt.includes('{"OR":1}'));
+  assert.equal(observation.event.classification.coverageIncomplete, true);
+  assert.equal(observation.event.classification.effectiveClass, "credential");
+  assert.ok(observation.event.classification.unexamined.registrations > 0);
 });
 
 test("template coverage is incomplete when a filter loses provenance or source evidence is missing", () => {

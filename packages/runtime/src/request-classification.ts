@@ -1071,7 +1071,8 @@ export class ClassificationLedger {
       if (!entries) continue;
       let remaining = MAX_TEMPLATE_INTERPOLATIONS;
       let traceWork = 8 * MAX_TEMPLATE_INTERPOLATIONS;
-      const collect = ({ start, end, key, value, requireEvidence }: TemplateInterpolation) => {
+      const collect = ({ start, end, key, value, requireEvidence, incomplete: missing }: TemplateInterpolation) => {
+        incomplete ||= Boolean(missing);
         if (value === undefined || start >= end) return;
         let best: Evidence | undefined;
         for (const ledger of state.retained) {
