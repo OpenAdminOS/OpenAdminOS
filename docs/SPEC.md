@@ -3802,9 +3802,11 @@ the format. Decisions:
 - Questions the data cannot answer: "why is <device> not compliant" names the
   device's cached state, says the failing rule is not in the cached data, and
   gives the last sync as the lead, with nothing invented.
-- A local model's answer that leaves out or changes a computed fact (a count,
-  a breakdown, a listed name, the not-in-data statement or the sync date) is
-  replaced by the computed answer, with the notice "The local model's answer
+- A local model's answer that leaves out or changes a computed fact is
+  replaced by the computed answer: every breakdown count, every listed name
+  for a list of up to 25, the total when the question asked for a number or
+  the list is longer, and for a device lookup the not-in-data statement and
+  the sync date. A list question answered with all its names needs no count, with the notice "The local model's answer
   did not match the counts computed from cached data, so the computed result is
   shown instead." This applies to the deterministic path for any local model
   and to the tool loop in auto mode.

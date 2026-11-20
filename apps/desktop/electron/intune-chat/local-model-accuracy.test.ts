@@ -9,7 +9,7 @@ import type { RunLlmApi } from "@openadminos/agent-sdk";
 import { AppStateStore } from "../state.js";
 import type { IntelligenceSqliteStore } from "./sqlite-store.js";
 import { LOCAL_FALLBACK_NOTICES } from "./agentic-loop.js";
-import { COMPUTED_ANSWER_NOTICE, structuredQueryForQuestion } from "./structured-question.js";
+import { COMPUTED_ANSWER_NOTICE, missingComputedFacts, structuredQueryForQuestion } from "./structured-question.js";
 
 /**
  * The tester's tenant from 2026-11-18, as a seeded cache: 9 Intune managed
@@ -271,7 +271,20 @@ describe("structured device questions", () => {
       breakdown: ["operatingSystem"],
       focus: { label: "not compliant", filters: [{ field: "complianceState", op: "neq", value: "compliant" }] },
       list: true,
+      asksCount: true,
     });
+  });
+
+  it("accepts a list answer that names every match without a count, and wants the number for a count question", () => {
+    const result = (question: string, total: number, rows: string[]) => ({
+      kind: "count" as const, resource: "managedDevices" as const, scopeLabel: "Intune managed devices", total, groups: {},
+      ...(structuredQueryForQuestion({ question, generatedAt: at })?.asksCount ? { asksCount: true } : {}),
+      rows: rows.map((name, i) => ({ id: `d${i}`, name })), rowsComplete: true, facts: [],
+      context: { version: 1 as const, question, resource: "managedDevices" as const, filters: [], label: "x", total },
+    });
+    assert.deepEqual(missingComputedFacts("WIN-01 is stale based on cached Intune evidence.", result("Which managed devices have not synced in the last 7 days?", 1, ["WIN-01"])), []);
+    assert.deepEqual(missingComputedFacts("WIN-01 has not synced.", result("How many devices have not synced in the last 7 days?", 1, ["WIN-01"])), ["the total 1"]);
+    assert.deepEqual(missingComputedFacts("WIN-01 has not synced.", result("Which devices have not synced in the last 7 days?", 2, ["WIN-01", "WIN-02"])), ["WIN-02"]);
   });
 
   it("leaves questions it does not fully understand to the planner", () => {

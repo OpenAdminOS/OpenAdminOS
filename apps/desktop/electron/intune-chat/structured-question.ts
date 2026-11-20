@@ -29,6 +29,8 @@ export interface StructuredDeviceQuery {
   focus?: { label: string; filters: GraphCacheQueryPredicate[] };
   /** List the set (or the focus) by name. */
   list: boolean;
+  /** The question asked for a number ("how many", "count"), so the answer must state it. */
+  asksCount: boolean;
   /** Set when the question narrows the previous result. */
   followUp?: { previousQuestion: string; previousLabel: string };
 }
@@ -71,6 +73,8 @@ export interface ComputedResult {
   scopeLabel: string;
   /** The result narrows the previous answer's set. */
   followUp?: boolean;
+  /** The question asked for a number, so the answer must state it; a list question is answered by its names. */
+  asksCount?: boolean;
   total: number;
   groups: Record<string, Record<string, number>>;
   focus?: { label: string; total: number; groups: Record<string, Record<string, number>>; rows: ComputedListedRow[]; complete: boolean };
@@ -248,6 +252,7 @@ export function structuredQueryForQuestion(input: {
       breakdown: breakdown.length > 0 ? breakdown : fresh.length === 0 && previous.resource === "managedDevices" ? ["operatingSystem"] : [],
       ...(fresh.length > 0 ? { focus: { label, filters: fresh.map((entry) => entry.predicate) } } : {}),
       list: true,
+      asksCount: count,
       followUp: { previousQuestion: previous.question, previousLabel: previous.label },
     };
   }
@@ -277,6 +282,7 @@ export function structuredQueryForQuestion(input: {
     breakdown,
     ...(focus ? { focus } : {}),
     list: list || Boolean(focus),
+    asksCount: count,
   };
 }
 
@@ -395,6 +401,7 @@ export function computeStructuredResult(input: {
     resource: query.resource,
     scopeLabel: query.scopeLabel,
     ...(query.followUp ? { followUp: true } : {}),
+    ...(query.asksCount ? { asksCount: true } : {}),
     total: counted.total,
     groups: counted.groups,
     ...(query.focus && focusCount
@@ -509,15 +516,19 @@ export function missingComputedFacts(answer: string, result: ComputedResult): st
     if (result.device?.lastSyncDate && !answer.includes(result.device.lastSyncDate) && !mentionsHumanDate(answer, result.device.lastSyncDate)) missing.push("the last sync date");
     return missing;
   }
-  if (!(result.followUp && result.focus) && !mentionsNumber(answer, result.total)) missing.push(`the total ${result.total}`);
+  const lower = answer.toLowerCase();
+  // Names prove a short list; a count question, a long list or a breakdown needs its numbers.
+  const names = (rows: readonly ComputedListedRow[]) => rows.filter((row) => !lower.includes(row.name.toLowerCase())).map((row) => row.name);
+  const listed = result.focus ? undefined : result.rows;
+  if (!(result.followUp && result.focus) && (result.asksCount || (listed && listed.length > 25) || (!listed && !result.focus)) && !mentionsNumber(answer, result.total)) missing.push(`the total ${result.total}`);
   for (const [field, group] of Object.entries(result.groups)) {
     for (const [value, count] of Object.entries(group)) if (!mentionsCount(answer, value, count)) missing.push(`${field} ${value} ${count}`);
   }
   if (result.focus) {
-    if (!mentionsNumber(answer, result.focus.total)) missing.push(`the ${result.focus.label} count ${result.focus.total}`);
-    if (result.focus.rows.length <= 25) for (const row of result.focus.rows) if (!answer.toLowerCase().includes(row.name.toLowerCase())) missing.push(row.name);
+    if ((result.asksCount || result.focus.rows.length > 25 || result.focus.rows.length === 0) && !mentionsNumber(answer, result.focus.total)) missing.push(`the ${result.focus.label} count ${result.focus.total}`);
+    if (result.focus.rows.length <= 25) missing.push(...names(result.focus.rows));
   }
-  if (result.rows && result.rows.length <= 25) for (const row of result.rows) if (!answer.toLowerCase().includes(row.name.toLowerCase())) missing.push(row.name);
+  if (listed && listed.length <= 25) missing.push(...names(listed));
   return missing;
 }
 
