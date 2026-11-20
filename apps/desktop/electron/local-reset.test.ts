@@ -17,6 +17,8 @@ import {
   folderGoesThroughLink,
   localResetPolicyProblem,
   markerFolderMatches,
+  identityFromStat,
+  localResetFolderIdentity,
   parseWhoamiUser,
   windowsTaskBelongsToThisAccount,
   windowsTaskListHas,
@@ -61,8 +63,7 @@ function seedDataFolder(dir: string, marker: LocalResetMarker = MARKER): void {
 
 /** A marker as writeLocalResetMarker writes it: bound to this folder's device and inode. */
 function markerFor(dir: string, marker: LocalResetMarker): LocalResetMarker {
-  const stat = lstatSync(dir);
-  return { ...marker, folder: { dev: stat.dev, ino: stat.ino, birth: stat.birthtimeMs } };
+  return { ...marker, folder: localResetFolderIdentity(dir)! };
 }
 
 function recordingRun(results: Record<string, CommandResult[]> = {}): { run: (file: string, args: string[]) => CommandResult; calls: string[][] } {
@@ -791,8 +792,13 @@ describe("local reset: wipe at launch", () => {
     assert.equal(markerFolderMatches(stored, { ...stored, dev: 16777231 }), true);
     assert.equal(markerFolderMatches(stored, { ...stored, ino: 4243 }), false);
     assert.equal(markerFolderMatches(stored, { ...stored, birth: 1763559999000 }), false);
-    // No birth time on this file system: the inode decides.
+    // No birth time on this file system: the inode and the device decide.
     assert.equal(markerFolderMatches({ ...stored, birth: 0 }, { ...stored, birth: 0 }), true);
+    assert.equal(markerFolderMatches({ ...stored, birth: 0 }, { ...stored, birth: 0, dev: 99 }), false);
+    // Where statx is blocked the birth time is the change time: unknown.
+    assert.deepEqual(identityFromStat({ dev: 1, ino: 7, birthtimeMs: 500, ctimeMs: 500 }), { dev: 1, ino: 7, birth: 0 });
+    assert.deepEqual(identityFromStat({ dev: 1, ino: 7, birthtimeMs: 400, ctimeMs: 500 }), { dev: 1, ino: 7, birth: 400 });
+    assert.equal(identityFromStat({ dev: 1, ino: 0, birthtimeMs: 500, ctimeMs: 500 }), undefined);
     // No inode: only a known, equal birth time matches.
     assert.equal(markerFolderMatches({ ...stored, ino: 0 }, { ...stored, ino: 0 }), true);
     assert.equal(markerFolderMatches({ ...stored, ino: 0, birth: 0 }, { ...stored, ino: 0, birth: 0 }), false);
