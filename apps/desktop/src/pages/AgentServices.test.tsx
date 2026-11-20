@@ -561,6 +561,36 @@ it("starts a resumed model fit rerun on a listed model when the provider's defau
   await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith("devices", expect.objectContaining({ providerId: "openai", model: "gpt-5" })));
 });
 
+it("reads the destination again after a refused model fit start, so Try again sends the current one", async () => {
+  const user = userEvent.setup();
+  const agent = createMockAgent({ id: "devices", slug: "devices", name: "Inactive devices", mode: "read", scopes: ["DeviceManagementManagedDevices.Read.All"], services: ["intune"] });
+  const state = createMockAppState({ installedAgents: [agent], activeProviderId: "ollama" });
+  const intent = {
+    kind: "agent-run", slug: "devices", tenantId: state.activeTenantId, providerId: "openai", model: "gpt-5",
+    modelFit: { reason: "context-too-small", providerId: "ollama", model: "llama3.1" },
+    returnTo: "/agents/devices", createdAt: new Date().toISOString(),
+  };
+  let reads = 0;
+  const startRun = vi.fn()
+    .mockRejectedValueOnce(new Error("The provider's settings changed after this run was reviewed, so it did not start. Review it again."))
+    .mockResolvedValue({ id: "run-2" });
+  const bridge = makeMockBridge({ startRun, getProviderDestination: vi.fn(async () => `dest-${(reads += 1)}`) }, state);
+  renderRoute(
+    <Routes>
+      <Route path="/start" element={<Navigate to="/agents/devices" state={{ resumePendingIntent: intent }} />} />
+      <Route path="/agents/:slug" element={<Agents />} />
+    </Routes>,
+    { path: "*", route: "/start", bridge },
+  );
+  const dialog = await screen.findByRole("dialog", { name: /Review run/ });
+  const start = within(dialog).getByRole("button", { name: "Start run" });
+  await waitFor(() => expect(start).toBeEnabled());
+  await user.click(start);
+  await waitFor(() => expect(startRun).toHaveBeenCalledWith("devices", expect.objectContaining({ expectedProviderDestination: "dest-1" })));
+  await user.click(await within(dialog).findByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(startRun).toHaveBeenLastCalledWith("devices", expect.objectContaining({ expectedProviderDestination: "dest-2" })));
+});
+
 it("does not start a model fit rerun on a hosted provider that reports no model", async () => {
   const agent = createMockAgent({ id: "devices", slug: "devices", name: "Inactive devices", mode: "read", scopes: ["DeviceManagementManagedDevices.Read.All"], services: ["intune"] });
   // Codex without its model cache: no listed models, though its config may still name a default.

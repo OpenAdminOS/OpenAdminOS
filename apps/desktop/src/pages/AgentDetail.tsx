@@ -439,6 +439,15 @@ export default function AgentDetail({
       navigate(`/runs/${run.id}`);
     } catch (error) {
       setRunError(error instanceof Error ? error.message : String(error));
+      // A refused model fit start reads where its provider is reached again, so Try again waits for the
+      // current destination instead of resending one that may have changed on purpose.
+      if (fitLike && choice?.providerId) {
+        const retried = { ...choice, expectedProviderDestination: undefined };
+        setPendingRunChoice((current) => (current === choice ? retried : current));
+        void (window.openAdminOS?.getProviderDestination?.(choice.providerId) ?? Promise.reject(new Error("unavailable")))
+          .then((destination) => setPendingRunChoice((current) => (current === retried ? { ...retried, expectedProviderDestination: destination } : current)))
+          .catch(() => setPendingRunChoice((current) => (current === retried ? { ...retried, destinationFailed: true } : current)));
+      }
     }
   };
 
