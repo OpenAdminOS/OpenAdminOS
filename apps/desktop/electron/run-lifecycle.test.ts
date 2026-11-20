@@ -531,6 +531,19 @@ it('records a fit issue on a failed run only after confirming its model ran on t
   assert.equal(h.state().runs.find((run) => run.id === 'r2')?.modelFit, undefined);
 });
 
+it('offers nothing for a hosted provider failure that reads like a context failure', async () => {
+  const h = harness();
+  Object.assign(h.host, {
+    listProviders: async () => [{ id: 'openai', name: 'Codex', status: 'connected', models: ['gpt-5'], defaultModel: 'gpt-5', isLocal: false }],
+    verifyOnDeviceModel: async () => true,
+  });
+  const failed = { id: 'r4', agentSlug: 'docs', status: 'failed', providerId: 'openai', model: 'gpt-5', queuedAt: new Date().toISOString(), steps: [], logs: [],
+    error: 'Context size has been exceeded.' } as unknown as RunRecord;
+  await h.host.write({ ...h.state(), runs: [{ ...failed, status: 'running' }] as RunRecord[] });
+  await h.service.persistRunSnapshot(failed);
+  assert.equal(h.state().runs.find((run) => run.id === 'r4')?.modelFit, undefined);
+});
+
 it('saves an unrelated run failure without waiting on provider discovery', async () => {
   const h = harness();
   let listed = 0;
