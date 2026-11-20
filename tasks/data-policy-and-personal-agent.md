@@ -249,6 +249,25 @@ built on top of them are planned separately.
   secrets in the keychain, the IT allowlist check with its refusal, and the
   disclosure of what the server receives (B5).
 
+**Review findings adopted (2026-11-19, round 12 of the design review)**
+- The plan is normative; the scripted behaviour in the mockups illustrates
+  it. Where a mockup computes something (the hash, the write check), it says
+  so in a note, the plan's rule governs, and the illustration agrees with it.
+- Step 2 of adding a server reviews exactly the endpoint entered in step 1,
+  names its host and shows its full address, and always opens with every
+  tool unchecked. Changing the address clears the review until Continue
+  lists the new endpoint, and reopening starts unchecked. Approvals never
+  carry across endpoints (B5).
+- The write check treats any write the definition documents as
+  disqualifying, whatever words it uses and whatever its read-only label. A
+  tool with `readOnlyHint: true` whose description says "Edits the selected
+  tenant setting" is flagged (B5).
+- The hash is named exactly: the tool object in the RFC 8785 JSON
+  Canonicalization Scheme (JCS), then SHA-256 over its UTF-8 bytes (B5).
+- A re-review shows, for each changed tool, the complete previously approved
+  object and the complete current object side by side, with full hashes
+  that can be copied and the short form in the row (B5).
+
 ## Why
 
 Today the choice is binary. With a local model the request never leaves the
@@ -717,6 +736,14 @@ the IT policy file.
       recognized tenant data removed. The existing egress checks and
       query-writer boundary apply. Allowlist key: `allowedMcpServers`
       (`TODO(ugur)`: proposed name, see open decisions).
+- [ ] Step 2, the tool review, reviews exactly the endpoint step 1 continued
+      with: it names the host from that address and shows the full address
+      whose `tools/list` it shows. It always opens with every tool
+      unchecked. Changing the address in step 1 clears step 2 until Continue
+      lists the new endpoint, and opening the review again starts unchecked.
+      An approval belongs to the endpoint (the full address) it was given
+      for and never carries over to another endpoint, even for a tool with
+      the same name and an identical definition.
 - [ ] The boundary, stated in the grant copy: the server receives a query
       written from the admin's question with every value the app recognizes as
       tenant data removed. Text the app cannot recognize, such as an internal
@@ -744,27 +771,42 @@ the IT policy file.
       and, alongside it, the raw JSON of the whole object.
 - [ ] The write check walks the whole object recursively and reads every
       string in it, object keys included, at every depth, annotations
-      included. A tool that describes saving, changing, sending or deleting
-      anywhere in it is flagged, in the first review and in every re-review;
+      included. A tool that documents a write anywhere in it is flagged
+      (saving, changing, sending, deleting, editing, updating, modifying,
+      setting, writing, creating, assigning, removing, revoking and the
+      like), in the first review and in every re-review;
       a flagged tool cannot be approved in any review state, with the reason
       (the matched words and the JSON path of each, for example
       `annotations.title` or `inputSchema.properties.mode.enum[1]`) shown in
       its row and marked in both views. The approval is enforced at every
       call, including calls from skills and scheduled checks. A tool that is
       not approved, or added by the server later and not yet reviewed, is
-      never offered.
-- [ ] Approval is bound to a SHA-256 hash of the canonical serialization of
-      the complete object: keys sorted at every level (RFC 8785 JSON
-      Canonicalization Scheme), serialized and hashed; the raw view shows
-      that canonical form. The app hashes the object the server lists before
+      never offered. The word list in mockup 35 is illustrative: the
+      implementation must treat any write the definition documents as
+      disqualifying, whatever words it uses and regardless of the read-only
+      label.
+- [ ] Approval is bound to the hash of the complete object, computed in
+      exactly this way: serialize the object with the RFC 8785 JSON
+      Canonicalization Scheme (JCS), then take SHA-256 over the UTF-8 bytes
+      of that serialization. JCS sorts object keys by their UTF-16 code
+      units at every level and emits members in that order (so a key "10"
+      comes before "2"), writes numbers with the ECMAScript number
+      serialization and strings with its fixed escaping, and refuses input
+      that is not I-JSON, such as a lone surrogate or a non-finite number.
+      The implementation must not rely on a generic JSON serializer's key
+      order. The raw view prints the object in JCS order, and each review
+      row shows the short form of the hash while the definition shows the
+      full hash with Copy. The app hashes the object the server lists before
       it offers a tool and again at every call; any change anywhere (a
       nested schema property, an enum value, `annotations.title`, `_meta`,
       an unknown field, or the name under the same id) invalidates the
       approval before the tool can be offered or called. The tool returns to
-      review, unchecked, with the old and new definition side by side and
-      both hashes, and a change that now describes saving, changing, sending
-      or deleting makes it unapprovable (mockup 35, B, "Review 5 changed
-      tools").
+      review, unchecked. Expanding a changed tool shows the complete
+      previously approved object and the complete current object side by
+      side, each readable and as raw JSON with the changed part marked, and
+      each with its full hash that can be copied; the row shows the short
+      form of both. A change that now documents a write makes it
+      unapprovable (mockup 35, B, "Review 5 changed tools").
 - [ ] Local stdio servers are out of scope for the first version
       (`TODO(ugur)`: they run code on the device).
 
@@ -820,6 +862,29 @@ the IT policy file.
     key, and Continue stays disabled; a header secret or sign-in token is
     stored in the keychain and appears in no settings file, export or run
     log (test, mockup 35).
+12. Regression test: a tool with `annotations.readOnlyHint: true` whose
+    description says "Edits the selected tenant setting" (`tenant_setting`)
+    is flagged by the write check with `description` named in the reason and
+    cannot be approved, in the first review and in a re-review (mockup 35
+    shows it disabled in the first review). The suite also covers write
+    verbs beyond save, change, send and delete (edit, update, modify, set,
+    write, create, assign, remove, revoke), and a documented write phrased
+    without any of them, so the check is not a fixed keyword list.
+13. Hash test vectors: the hash is SHA-256 over the UTF-8 bytes of the RFC
+    8785 (JCS) serialization. A fixture with a nested object whose keys are
+    "10" and "2" serializes "10" first; the RFC 8785 samples for key
+    sorting, numbers and string escaping produce the RFC's output byte for
+    byte; a lone surrogate or a non-finite number is refused. The app's
+    hash of each fixture matches a reference JCS implementation.
+14. Step 2 reviews the endpoint entered in step 1 and opens with every tool
+    unchecked. A tool approved at one endpoint is not approved at a
+    different endpoint, including another path on the same host and an
+    identical definition; changing the address clears the review, and
+    opening it again starts unchecked (test, mockup 35).
+15. A re-review shows, for a changed tool, the complete approved object and
+    the complete current object side by side with both full hashes, and
+    Copy puts the exact 64-character hash on the clipboard (test, mockup
+    35).
 
 ### Phase B6: Learning
 
