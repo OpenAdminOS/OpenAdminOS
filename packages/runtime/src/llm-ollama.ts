@@ -55,6 +55,14 @@ const OLLAMA_SHOW_TIMEOUT_MS = 5000;
 // raised size is kept for every later request.
 const ollamaContextOverrides = new Map<string, number>();
 
+/**
+ * How often a context size failed, keyed by endpoint, model and size. A retry
+ * keeps its size only if that size has not failed since the retry started, so
+ * a retry that finishes late cannot bring back a size a newer request saw fail.
+ */
+const ollamaContextFailures = new Map<string, number>();
+const contextFailureKey = (cacheKey: string, size: number) => `${cacheKey}\0${size}`;
+
 export interface OllamaEndpointTrust {
   endpoint: string;
   isLocal: boolean;
@@ -192,9 +200,14 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
        */
       const forgetSentSizes = () => {
         for (const size of [cachedCtx, retry?.numCtx]) {
-          if (size !== undefined && ollamaContextOverrides.get(cacheKey) === size) ollamaContextOverrides.delete(cacheKey);
+          if (size === undefined) continue;
+          const failureKey = contextFailureKey(cacheKey, size);
+          ollamaContextFailures.set(failureKey, (ollamaContextFailures.get(failureKey) ?? 0) + 1);
+          if (ollamaContextOverrides.get(cacheKey) === size) ollamaContextOverrides.delete(cacheKey);
         }
       };
+      // The failure count of the retry's size when the retry started.
+      let retryFailuresAtStart = 0;
       /**
        * A failure, from an HTTP answer or the stream, that shows the context
        * this request sent did not fit or could not be loaded. Forgets the
@@ -255,6 +268,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           }
           numCtx = modelMax === undefined ? wanted : Math.min(wanted, modelMax);
           retry = { requested: overflow.requested, numCtx };
+          retryFailuresAtStart = ollamaContextFailures.get(contextFailureKey(cacheKey, numCtx)) ?? 0;
           startAttempt(` on the retry with a ${formatTokens(numCtx)} token context`);
           response = await send(numCtx);
           detail = await errorDetail(response);
@@ -323,7 +337,11 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
               // with its context, or run out of room or memory mid-answer.
               throw contextFailure(errorText(chunk.error), accumulated.length > 0) ?? new Error(`Ollama error: ${chunk.error}`);
             }
-            if (chunk.done && raisedCtx !== undefined) {
+            if (
+              chunk.done &&
+              raisedCtx !== undefined &&
+              (ollamaContextFailures.get(contextFailureKey(cacheKey, raisedCtx)) ?? 0) === retryFailuresAtStart
+            ) {
               // Kept only once the stream finished cleanly, and before the
               // caller sees the last chunk and may stop reading. Concurrent
               // requests can raise it at once; keep the largest that worked.

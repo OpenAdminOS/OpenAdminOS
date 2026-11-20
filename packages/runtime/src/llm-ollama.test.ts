@@ -704,6 +704,28 @@ describe("Ollama context size", () => {
     }
   });
 
+  it("does not keep a retry's size that a newer request saw fail while the retry's last record waited", async () => {
+    const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384, retryOneWrite: true });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "late-retry" });
+      // The older request reads its first token; its final record stays buffered.
+      const older = llm.stream({ prompt: "big" })[Symbol.asyncIterator]();
+      assert.equal((await older.next()).value?.delta, "a");
+      fake.options.retryOneWrite = false;
+      fake.options.retryMemoryError = ["http", "model requires more system memory (24.1 GiB) than is available (12.0 GiB)"];
+      await assert.rejects(llm.complete({ prompt: "big" }), /could not load late-retry with 45,056/);
+      while (!(await older.next()).done) {
+        // Drain the older stream; its final record arrives after the failure.
+      }
+      fake.options.retryMemoryError = undefined;
+      fake.options.limit = () => 65536;
+      await llm.complete({ prompt: "small" });
+      assert.deepEqual(fake.chats.at(-1), {});
+    } finally {
+      await fake.close();
+    }
+  });
+
   it("drops the kept context on an overflow with token counts in the stream", async () => {
     const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384 });
     try {
