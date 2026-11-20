@@ -55,6 +55,7 @@ import {
   createAppleFoundationLlm,
   createLmStudioLlm,
   createLemonadeLlm,
+  classifyLemonadeEndpoint,
   resolveLemonadeEndpoint,
   DEFAULT_AUTHORITY,
   GRAPH_CLI_CLIENT_ID,
@@ -1840,12 +1841,13 @@ function modelFitProviderEndpoint(providerId: ProviderId, persisted?: Pick<Persi
  * reads its list on every request and refuses cloud models, and Apple
  * Foundation runs only on this Mac.
  */
-// The other local providers need no read here because the provider list the
-// caller just took (`listProviders()` per send or run start) already decides
-// whether their endpoint is on this device.
+// LM Studio and Lemonade are checked on the address they are reached at now,
+// so a change to one outside this device stops the next call too.
 async function verifyOnDeviceModel(providerId: ProviderId, model: string | undefined): Promise<boolean> {
   if (providerId === "ollama") return model ? ollamaModelIsOnDevice(model) : false;
-  return providerId === "lm-studio" || providerId === "lemonade" || providerId === "apple-foundation";
+  if (providerId === "lm-studio") return classifyLmStudioEndpoint(resolveLmStudioEndpoint()).isLocal;
+  if (providerId === "lemonade") return classifyLemonadeEndpoint(resolveLemonadeEndpoint()).isLocal;
+  return providerId === "apple-foundation";
 }
 
 export class AppStateStore {
