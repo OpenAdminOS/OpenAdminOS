@@ -411,7 +411,8 @@ export default function AgentDetail({
               ...(choice.retryOfRunId ? { retryOfRunId: choice.retryOfRunId } : {}),
               ...pinTenant,
               // A model on this device is checked again by the host before the run is admitted.
-              ...((choice.modelFit && pendingProvider?.isLocal) || choice.safeguards?.onDevice ? { requireOnDeviceModel: true } : {}),
+              // Decided by the provider this review shows, so a provider picked in setup sets it too.
+              ...(fitLike && pendingProvider?.isLocal ? { requireOnDeviceModel: true } : {}),
               // Every later phase (replan, apply) goes only where the provider was reached when the run was admitted.
               ...(fitLike ? { bindProviderEndpoint: true } : {}),
               ...(fitLike && choice.expectedProviderDestination ? { expectedProviderDestination: choice.expectedProviderDestination } : {}),
