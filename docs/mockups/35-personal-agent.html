@@ -328,6 +328,14 @@
     .pcard .sendres .sendmsg { font-size: var(--text-sm); color: var(--color-text); }
     .pcard .msg.clip { max-height: 132px; overflow: hidden; font: 11px/16px var(--font-mono); -webkit-mask-image: linear-gradient(#000 55%, transparent); mask-image: linear-gradient(#000 55%, transparent); }
     .pcard .sendres[hidden], .pcard .acts[hidden] { display: none; }
+    .runlog { margin-top: 18px; padding: 10px 14px; border-radius: var(--radius-lg); box-shadow: inset 0 0 0 1px var(--color-border-soft); font-size: var(--text-xs); line-height: var(--lh-xs); }
+    .runlog .rlh { margin: 0 0 4px; color: var(--color-text-muted); }
+    .runlog li { display: grid; grid-template-columns: 44px 128px minmax(0, 1fr); gap: 8px; padding: 6px 0; }
+    .runlog .tm { color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+    .runlog .who2 { color: var(--color-text-soft); }
+    .runlog .st { color: var(--color-text); }
+    .runlog .st.wait { color: var(--color-warning); }
+    @media (max-width: 720px) { .runlog li { grid-template-columns: 44px minmax(0, 1fr); } .runlog .st { grid-column: 2; } }
     .kv { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 0 12px; margin-top: 10px; font-size: var(--text-sm); }
     .kv dt, .kv dd { margin: 0; padding: 6px 0; border-top: 1px solid var(--color-border-soft); }
     .kv dt { color: var(--color-text-muted); }
@@ -462,6 +470,7 @@
     .trv .def .cmpg { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
     .trv .def .cmpg > section { min-width: 0; padding: 8px; border-radius: 6px; box-shadow: inset 0 0 0 1px var(--color-border-soft); }
     .trv .def .cmpg h5 { margin: 0 0 6px; font-size: var(--text-xs); line-height: var(--lh-xs); font-weight: 500; color: var(--color-text); }
+    .trv .def .absent { display: inline-block; padding: 0 4px; border-radius: 3px; border: 1px dashed var(--color-text-muted); color: var(--color-text-muted); font-style: italic; }
     .trv .def mark.was { background: color-mix(in srgb, var(--color-text-muted) 20%, transparent); color: inherit; border-radius: 3px; padding: 0 2px; }
     @container (max-width: 640px) { .trv .def .cmpg dl { grid-template-columns: minmax(0, 1fr); gap: 0; } .trv .def .cmpg dd { margin-bottom: 4px; } }
     @container (max-width: 380px) { .trv .def .cmpg { grid-template-columns: minmax(0, 1fr); } }
@@ -744,9 +753,10 @@
       <h3 id="b-add" style="margin:32px 0 6px;font-size:var(--text-base);font-weight:500">Adding a server by URL</h3>
       <p>Step 1 takes the address and how the app signs in to the server, checks the host against your IT department's list before anything connects, and says what the server will receive. Step 2 is the tool review.</p>
       <div class="tsend">
-        <p class="trvcap" style="margin:0">The address is checked as you type. Try either address IT lists, or one it does not, then Continue: step 2 follows the address.</p>
+        <p class="trvcap" style="margin:0">The address is checked as you type. Try an address on a host IT lists, another path on the same host, or a host IT does not list, then Continue: step 2 follows the full address, path included.</p>
         <span class="seg" role="group" aria-label="Server address to try" id="addseg">
           <button type="button" data-url="https://tools.contoso.example/mcp" aria-pressed="true">Listed by IT</button>
+          <button type="button" data-url="https://tools.contoso.example/baselines/mcp" aria-pressed="false">Same host, another path</button>
           <button type="button" data-url="https://docs.contoso.example/mcp" aria-pressed="false">Another listed server</button>
           <button type="button" data-url="https://mcp.fabrikam-tools.example/v1" aria-pressed="false">Not listed</button>
         </span>
@@ -805,6 +815,7 @@
           <li>Three ways to authenticate: none, a header with a secret, or the server's own sign-in. A header secret and a sign-in token go to the keychain on this device and only to that host; neither is written to a settings file, an export or a run log.</li>
           <li>The disclosure says what the server receives in the words of the grant copy in Access: listing its tools sends the credential chosen here and nothing from the tenant or the conversation, and each call sends a query with recognized tenant data removed, while text the app cannot recognize can still reach it. It follows the authentication choice.</li>
           <li>Continue connects to exactly this address, lists its tools and opens step 2, the tool review below, with every tool unchecked. Step 2 names the host from this address and shows the full address it listed. Change the address here and step 2 is cleared until Continue lists the new one; press Continue again and the review starts unchecked again. An approval belongs to the endpoint it was given for and never carries over to another, even for a tool with the same name and definition.</li>
+          <li>Decided in round 13: the endpoint is the full address, path included. <code>https://tools.contoso.example/mcp</code> lists the 11 policy settings tools, and <code>https://tools.contoso.example/baselines/mcp</code> on the same host lists 4 different baseline history tools; change only the path and Continue shows the other list, unchecked. The allowlist check is by host, so both pass it; a path on a listed host that lists no tools gets its own error in step 2 with nothing to approve.</li>
           <li><code>allowedMcpServers</code> is a proposed key name (open question in the plan). The Access frame above opens this step from Add a server by URL.</li>
         </ul>
       </div>
@@ -866,6 +877,7 @@
         <ul class="notes">
           <li>An approval belongs to the exact object the admin saw at that endpoint, bound to its JCS SHA-256 hash, every field and every nested property, under the same id. The app hashes the object the server lists before it offers a tool and again at every call; any difference sets the tool back to review, unchecked, and it is neither offered nor callable until the admin approves it again.</li>
           <li>Decided in round 12: each changed row shows the short form of both hashes, and Compare definitions opens the complete previously approved object next to the complete object listed now, each readable and as raw JSON, with the changed part marked and the full hash under each with Copy. Below about 380 px of width the two stack, approved first.</li>
+          <li>Decided in round 13: the changed JSON path is marked in both raw panes, grey on the approved side and amber on the side listed now, and in both readable views. A property present on only one side, such as <code>inputSchema.properties.apply_to_tenant</code> of <code>list_baselines</code>, is marked where it is and shown as missing, with a dashed marker in JCS order, where it is not; the marker is not part of the JSON and not part of the hash.</li>
           <li><code>get_setting</code> is the case to read first: an approved read tool whose description changed and still only reads. It returns to review with the old and new description side by side, unchecked, and can be approved again.</li>
           <li>A change in the input schema counts the same way, and the write check reads the parameters too: <code>list_baselines</code> gained <code>apply_to_tenant</code>, described as assigning a baseline, so it cannot be approved although its name and description still read as read-only. A parameter that only reads, such as a filter, returns the tool to review and it can be approved again, like <code>get_setting</code>.</li>
           <li>When the new definition describes saving, changing, sending or deleting, as <code>compare_baselines</code> now does, the tool is flagged and cannot be approved, the same check as at add time.</li>
@@ -993,6 +1005,57 @@ WB-DT-1170   12 Nov 14:22    Baseline 24H2</div><p class="xs muted" style="margi
         <li>The card only appears while Send to Teams is granted and Teams is connected in the active organization. Without the grant, <span data-name>Nova</span> gives the text in the answer for the admin to post.</li>
         <li>Decided in round 11: Confirm also rechecks that the organization named on the card is still the active one, the same guard the app runs before every Nova action today. Switch to Contoso Retail with the control above, then press Confirm: the card reads "Not sent", says the active organization changed, and offers Switch back to Woodgrove Bank. After switching back the same card can be confirmed; it still covers only its one message in Woodgrove Bank.</li>
         <li>Decided in round 11: every outgoing post has its own confirmation, so the path that split a long report into several numbered posts from one confirmation is gone. A message longer than the app's limit for one Teams message gets no Confirm: the card says it is too long and offers Send a shorter summary, which makes <span data-name>Nova</span> propose a shorter message on a new card with its own Confirm, or Save the full report, which keeps it on this device and sends nothing. Pick The full report above to try both.</li>
+      </ul>
+
+      <h3 id="b-deliver" style="margin:32px 0 6px;font-size:var(--text-base);font-weight:500">A run <span data-name>Nova</span> started, with a saved Teams route</h3>
+      <p>Find inactive devices has a saved delivery route: after each run it posts its report to the IT Operations team, Device health channel. When <span data-name>Nova</span> starts the run, that delivery does not post on its own. It waits on the same confirmation card, with the final text and the route's destination, and Confirm runs the same checks. The same agent on its own schedule delivers as it always has.</p>
+      <p class="trvcap" style="margin:0 0 8px">Confirm reads the same controls as the card above: the Send to Teams switch in Access, the active organization and the Teams connection.</p>
+      <div class="win">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="shell">
+          <aside class="side" data-side="chat"></aside>
+          <div class="appmain">
+            <div class="topbar" data-top="tools" id="deliv-top"></div>
+            <div class="page"><div class="chat">
+              <div class="q">Run Find inactive devices.</div>
+              <div class="ans">
+                <div class="who"><span class="mini" data-initial>N</span><span><span data-name>Nova</span> with Ollama, Woodgrove Bank</span></div>
+                <div class="body">Find inactive devices finished at 08:51 and found 9 devices with no check-in for 30 days. Its saved route posts the report to Teams. I started this run, so nothing is posted until you confirm the message below.</div>
+              </div>
+              <div class="pcard" id="delivcard">
+                <div class="top"><svg width="14" height="14"><use href="#i-teams"/></svg><span class="kind">Delivery from a run <span data-name>Nova</span> started</span><span>Saved route, waiting for you, not sent</span></div>
+                <div class="in">
+                  <h3>Post this message?</h3>
+                  <dl class="kv">
+                    <dt>Message</dt><dd><div class="msg">Find inactive devices, Woodgrove Bank, 19 November 08:51
+9 devices have not checked in for 30 days: 6 Windows laptops, 2 iPhones, 1 Android phone. 4 are in Finance. The full list is in OpenAdminOS, run 4812.</div></dd>
+                    <dt>To</dt><dd data-k="to">IT Operations team, Device health channel</dd>
+                    <dt>Route</dt><dd>Saved delivery route of Find inactive devices, Teams</dd>
+                    <dt>Run</dt><dd>Run 4812, started by <span data-name>Nova</span> at 08:50, finished 08:51</dd>
+                    <dt>Organization</dt><dd data-k="org">Woodgrove Bank</dd>
+                    <dt>Posted as</dt><dd>admin@woodgrove.example</dd>
+                  </dl>
+                  <p class="why">This is the exact text the route would post. Because <span data-name>Nova</span> started the run, each delivery from it is confirmed on its own card; a run with two routes shows two cards. Cancel keeps the result in Runs and posts nothing.</p>
+                </div>
+                <div class="acts" data-send="ask"><button class="bt primary sm" type="button" data-send-act="confirm">Confirm</button><button class="bt ghost sm" type="button" data-send-act="cancel">Cancel</button><span class="r">Exact text, as it will appear in Teams</span></div>
+                <div class="acts sendres" data-send="done" role="status" hidden><span class="sendmsg"></span><button class="bt ghost sm" type="button" data-send-act="reset" style="margin-left:auto">Show the card again</button></div>
+              </div>
+              <div class="runlog" aria-label="Runs of Find inactive devices today">
+                <p class="rlh">Runs of Find inactive devices today</p>
+                <ul class="rows">
+                  <li><span class="tm">08:50</span><span class="who2">Started by <span data-name>Nova</span></span><span class="st wait" id="deliv-run">Delivery to Teams waiting for your confirmation in Chat</span></li>
+                  <li><span class="tm">07:00</span><span class="who2">Scheduled</span><span class="st">Report sent to IT Operations, Device health, by the saved route. No card: <span data-name>Nova</span> did not start this run.</span></li>
+                </ul>
+              </div>
+            </div></div>
+          </div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>Decided in round 13: when <span data-name>Nova</span> starts an installed agent that has a saved delivery route, to Teams, Outlook, Slack, Discord or WhatsApp, no delivery from that run posts when the run finishes. Each is proposed on this card with the final text, the route's destination, the run and the organization, and nothing posts without Confirm.</li>
+        <li>Confirm is a call, as for any send: the organization on the card must still be active, Send to Teams must be on and Teams connected in that organization, and the message must fit in one Teams message. Each failure reads "Not sent" with its fix, and a report too long for one message gets the card above with a shorter summary or saving it on this device. Try it with the controls above the previous card.</li>
+        <li>The card is visibly a delivery, not a message <span data-name>Nova</span> wrote: its label says it comes from a run <span data-name>Nova</span> started, and Route names the saved route it would use. Runs lists the run as waiting for a confirmation until the admin confirms or cancels.</li>
+        <li>The 07:00 run is the same agent on its schedule, started without <span data-name>Nova</span>. It keeps the agent's own delivery behaviour, unchanged by this plan, and posts by its route with no card. The run card <span data-name>Nova</span> shows before it starts a run says that each delivery will wait for a confirmation.</li>
       </ul>
     </section>
 
@@ -1556,11 +1619,25 @@ identities with graph_get. Nothing else.
       { name: "get_table", title: "Get table", description: "Returns one table with its columns and types.",
         inputSchema: obj({ table: S("string", "Table name") }, ["table"]), annotations: { title: "Get table", readOnlyHint: true, openWorldHint: false } },
     ];
-    const SERVERS = {
-      "tools.contoso.example": { slug: "policy-settings", tools: TOOLS },
-      "docs.contoso.example": { slug: "contoso-docs", tools: DOCS_TOOLS },
-      "kql.contoso.example": { slug: "kql-reference", tools: KQL_TOOLS },
+    // Another path on the same host is another endpoint with its own tool list.
+    const HISTORY_TOOLS = [
+      { name: "list_versions", title: "List versions", description: "Lists the stored versions of a security baseline, newest first.",
+        inputSchema: obj({ baseline: S("string", "Baseline id") }, ["baseline"]), annotations: { title: "List versions", readOnlyHint: true, openWorldHint: false } },
+      { name: "get_version", title: "Get version", description: "Returns one stored baseline version with its settings.",
+        inputSchema: obj({ baseline: S("string", "Baseline id"), version: S("string", "Version id from list_versions") }, ["baseline", "version"]), annotations: { title: "Get version", readOnlyHint: true, openWorldHint: false } },
+      { name: "diff_versions", title: "Diff versions", description: "Shows the settings that differ between two stored versions.",
+        inputSchema: obj({ from: S("string", "Older version id"), to: S("string", "Newer version id") }, ["from", "to"]), annotations: { title: "Diff versions", readOnlyHint: true, openWorldHint: false } },
+      { name: "restore_version", title: "Restore version", description: "Restores a stored version as the current baseline.",
+        inputSchema: obj({ version: S("string", "Version id") }, ["version"]), annotations: { title: "Restore version", readOnlyHint: false, destructiveHint: true } },
+    ];
+    // Fixtures keyed by the full endpoint address, because a review belongs to the endpoint, not to the host.
+    const ENDPOINTS = {
+      "https://tools.contoso.example/mcp": { slug: "policy-settings", tools: TOOLS },
+      "https://tools.contoso.example/baselines/mcp": { slug: "baseline-history", tools: HISTORY_TOOLS },
+      "https://docs.contoso.example/mcp": { slug: "contoso-docs", tools: DOCS_TOOLS },
+      "https://kql.contoso.example/mcp": { slug: "kql-reference", tools: KQL_TOOLS },
     };
+    const LISTED_HOSTS = [...new Set(Object.keys(ENDPOINTS).map((e) => new URL(e).hostname))];
     const APPROVED_AFTER = ["search_settings", "get_setting", "get_baseline", "list_platforms", "list_baselines", "compare_baselines"];
     const byName = (n) => TOOLS.find((x) => x.name === n);
     // A copy of an approved definition with one value changed at a path, the way the server lists it a week later.
@@ -1622,6 +1699,30 @@ identities with graph_get. Nothing else.
       const keys = Object.keys(v).sort(byUnits);
       return keys.length ? `{${keys.map((k) => nl + jcs(k) + sep + jcs(v[k], ind, lvl + 1)).join(",")}${end}}` : "{}";
     }
+    // The raw view: the same JCS order, printed for reading, with the changed path of a re-review marked. When the
+    // path is missing from this object (a property present on only one side), a marker sits where JCS order would put it.
+    // The marker is not part of the JSON; the hash is always taken over jcs(def).
+    function rawHtml(v, mark = {}, cls = "new", ind = "  ") {
+      const target = mark.path || "", cut = target.lastIndexOf(".");
+      const parent = cut < 0 ? "" : target.slice(0, cut), leaf = target.slice(cut + 1);
+      const walk = (x, lvl, path) => {
+        if (x === null || typeof x !== "object") return hl(jcs(x));
+        const nl = "\n" + ind.repeat(lvl + 1), end = "\n" + ind.repeat(lvl);
+        if (Array.isArray(x)) return x.length ? `[${x.map((y, i) => nl + walk(y, lvl + 1, `${path}[${i}]`)).join(",")}${end}]` : "[]";
+        const keys = Object.keys(x).sort(byUnits);
+        const items = keys.map((k) => {
+          const p = path ? `${path}.${k}` : k, m = `${hl(jcs(k))}: ${walk(x[k], lvl + 1, p)}`;
+          return nl + (target && p === target ? `<mark class="${cls}">${m}</mark>` : m);
+        });
+        if (target && path === parent && !keys.includes(leaf)) {
+          const gap = `${nl}<span class="absent">${esc(jcs(leaf))} is not in this object</span>`;
+          const at = keys.filter((k) => byUnits(k, leaf) < 0).length;
+          if (at < items.length) items[at] = gap + items[at]; else items.push(gap);
+        }
+        return items.length ? `{${items.join(",").replace(/,(\n\s*<span class="absent">[^<]*<\/span>)$/, "$1")}${end}}` : "{}";
+      };
+      return walk(v, 0, "");
+    }
     // The hash an approval binds to: SHA-256 over the UTF-8 bytes of the compact JCS form.
     async function digest(def) {
       if (!(window.crypto && crypto.subtle)) return "";
@@ -1638,9 +1739,13 @@ identities with graph_get. Nothing else.
     function defBody(def, mark = {}, slot = "now") {
       const cls = mark.cls || "new";
       const mk = (path, html) => (mark.path !== path ? html : mark.frag ? html.replace(hl(mark.frag), `<mark class="${cls}">${hl(mark.frag)}</mark>`) : `<mark class="${cls}">${html}</mark>`);
+      const cut = (mark.path || "").lastIndexOf(".");
+      const gapParent = cut < 0 ? "" : mark.path.slice(0, cut), gapLeaf = cut < 0 ? "" : mark.path.slice(cut + 1);
       const props = (schema, base) => {
         const entries = Object.entries((schema && schema.properties) || {});
-        if (!entries.length) return "";
+        const gap = gapParent === `${base}.properties` && !entries.some(([n]) => n === gapLeaf)
+          ? `<li><span class="absent"><code>${esc(gapLeaf)}</code> is not in this object</span></li>` : "";
+        if (!entries.length && !gap) return "";
         const req = (schema && schema.required) || [];
         return `<ul class="prm">${entries.map(([n, p]) => {
           const path = `${base}.properties.${n}`;
@@ -1648,7 +1753,7 @@ identities with graph_get. Nothing else.
           const ty = p.type === "array" && p.items ? `array of ${p.items.type}` : p.type;
           const nm = mark.path === path ? `<mark class="${cls}"><code>${hl(n)}</code></mark>` : `<code>${hl(n)}</code>`;
           return (`<li>${nm}<span class="ty">${ty}${req.includes(n) ? ", required" : ""}</span>${p.description ? `<span class="ds">${mk(`${path}.description`, hl(p.description))}</span>` : ""}${p.enum ? `<span class="ds ev">Values: ${p.enum.map((v) => `<code>${hl(v)}</code>`).join("")}</span>` : ""}${nested}</li>`);
-        }).join("")}</ul>`;
+        }).join("")}${gap}</ul>`;
       };
       const ann = def.annotations
         ? Object.entries(def.annotations).map(([k, v]) => mk(`annotations.${k}`, `<code>${k}: ${typeof v === "string" ? `"${hl(v)}"` : v}</code>`)).join(" ")
@@ -1665,7 +1770,7 @@ identities with graph_get. Nothing else.
         <dt>Annotations</dt><dd>${ann}</dd>
         <dt>Other fields</dt><dd>${other.length ? other.map((k) => `<code>${esc(k)}</code>`).join(" ") + ", shown in the raw JSON below" : "None"}</dd>
         <dt>Definition hash</dt><dd class="hash" data-slot="${slot}">Computed when the review opens</dd>
-      </dl><p class="rawh">Raw JSON of the whole object ${slot === "was" ? "as you approved it" : "the server lists"}, in RFC 8785 (JCS) order: keys sorted by UTF-16 code units at every level. The hash is SHA-256 over the UTF-8 bytes of the compact JCS form; the line breaks here are only for reading.</p><pre class="raw" tabindex="0" aria-label="Raw JSON of ${esc(def.name)}${slot === "was" ? ", as approved" : ""}">${hl(jcs(def, "  "))}</pre>`;
+      </dl><p class="rawh">Raw JSON of the whole object ${slot === "was" ? "as you approved it" : "the server lists"}, in RFC 8785 (JCS) order: keys sorted by UTF-16 code units at every level. The hash is SHA-256 over the UTF-8 bytes of the compact JCS form; the line breaks here are only for reading.</p><pre class="raw" tabindex="0" aria-label="Raw JSON of ${esc(def.name)}${slot === "was" ? ", as approved" : ""}">${rawHtml(def, mark, cls)}</pre>`;
     }
     // What blocks approval, said under the object.
     function defChecks(def, found) {
@@ -1680,9 +1785,9 @@ identities with graph_get. Nothing else.
     // First review: one object. Re-review: the approved object and the object listed now, both complete, side by side.
     const defHtml = (id, def, found) => `<div class="def" id="${id}" hidden>${defBody(def)}${defChecks(def, found)}</div>`;
     const defCmpHtml = (id, old, def, found, mark = {}) => `<div class="def cmp" id="${id}" hidden>`
-      + `<p class="cmph">Both objects in full, side by side: the one you approved on 12 November and the one the server lists now. The changed part is marked in each.</p>`
+      + `<p class="cmph">Both objects in full, side by side: the one you approved on 12 November and the one the server lists now. The changed path is marked in each, in the readable view and in the raw JSON; a property present on only one side is shown as missing where it would be on the other.</p>`
       + `<div class="cmpw"><div class="cmpg">`
-      + `<section aria-label="Approved on 12 November"><h5>Approved on 12 November</h5>${defBody(old, mark.frag ? {} : { path: mark.path, cls: "was" }, "was")}</section>`
+      + `<section aria-label="Approved on 12 November"><h5>Approved on 12 November</h5>${defBody(old, { path: mark.path, cls: "was" }, "was")}</section>`
       + `<section aria-label="Listed now"><h5>Listed now, 19 November</h5>${defBody(def, mark, "now")}</section>`
       + `</div></div>${defChecks(def, found)}</div>`;
     const short = (h) => `<code>${h.slice(0, 8)}…${h.slice(-4)}</code>`;
@@ -1761,11 +1866,18 @@ identities with graph_get. Nothing else.
     // Step 2 reviews exactly the endpoint step 1 continued with, and always opens with every tool unchecked.
     let lastReviewed = "";
     function openReview(u) {
-      const srv = SERVERS[u.hostname];
+      const srv = ENDPOINTS[u.href];
       openTrv.dataset.endpoint = lastReviewed = u.href;
       openHost.textContent = `Step 2 of 2, ${u.hostname}`;
+      if (!srv) {
+        // The host is listed by IT, but nothing at this path answered tools/list: a designed error, nothing to approve.
+        openEp.innerHTML = `No tools listed by <code>${esc(u.href)}</code>`;
+        openLead.textContent = "The server did not list any tools at this address.";
+        clearTrv(openTrv, `<code>tools/list</code> at <code>${esc(u.href)}</code> returned 404 Not Found, so there is nothing to review and nothing was approved. Check the path in step 1; another path on ${esc(u.hostname)} is another endpoint with its own review.`);
+        return;
+      }
       openEp.innerHTML = `Tools listed by <code>${esc(u.href)}</code>`;
-      openLead.textContent = `The server offers ${srv.tools.length} tools, and none is approved yet.`;
+      openLead.textContent = `The server offers ${srv.tools.length} tools at this address, and none is approved yet.`;
       fillTrv(openTrv, { tools: srv.tools, slug: srv.slug });
     }
     function resetReview(href) {
@@ -1816,7 +1928,7 @@ identities with graph_get. Nothing else.
     // Add a server by URL, step 1: the address, the authentication, the IT allowlist check before any request,
     // and what the server will receive. Continue lists the tools of exactly this endpoint in step 2, every one unchecked.
     (() => {
-      const ALLOWED = Object.keys(SERVERS);
+      const ALLOWED = LISTED_HOSTS;
       const url = document.getElementById("add-url"), ck = document.getElementById("add-check");
       const recv = document.getElementById("add-recv"), refuse = document.getElementById("add-refuse"), next = document.getElementById("add-next");
       const auth = () => document.querySelector('input[name="add-auth"]:checked').value;
@@ -1940,14 +2052,15 @@ identities with graph_get. Nothing else.
       const TEAMS = { connected: true }, ACTIVE = { org: "Woodgrove Bank" };
       const INITIALS = { "Woodgrove Bank": "WB", "Contoso Retail": "CR" };
       const sendSw = document.getElementById("sw-teams-send");
-      const chip = document.querySelector("#teams-top .orgchip");
+      const chips = () => document.querySelectorAll("#teams-top .orgchip, #deliv-top .orgchip");
       const nm = () => document.querySelector("[data-name]").textContent;
       const press = (seg, attr, val) => document.querySelectorAll(`#${seg} button`).forEach((x) => x.setAttribute("aria-pressed", String(x.dataset[attr] === val)));
-      const setOrg = (o) => { ACTIVE.org = o; press("orgseg", "org", o); chip.innerHTML = `<span class="av">${INITIALS[o]}</span>${o}<svg class="chev"><use href="#i-chev"/></svg>`; };
+      const setOrg = (o) => { ACTIVE.org = o; press("orgseg", "org", o); chips().forEach((chip) => { chip.innerHTML = `<span class="av">${INITIALS[o]}</span>${o}<svg class="chev"><use href="#i-chev"/></svg>`; }); };
       const setTeams = (on) => { TEAMS.connected = on; press("teamsseg", "teams", on ? "on" : "off"); };
       function bindCard(card) {
         const org = card.querySelector('[data-k="org"]').textContent;
-        const ask = card.querySelector('[data-send="ask"]'), done = card.querySelector('[data-send="done"]'), msg = done.querySelector(".sendmsg"), state = card.querySelector(".top span:last-child"), h = card.querySelector("h3");
+        const ask = card.querySelector('[data-send="ask"]'), done = card.querySelector('[data-send="done"]'), msg = done.querySelector(".sendmsg"), state = card.querySelector(".top > span:last-child"), h = card.querySelector("h3");
+        const initialState = state.innerHTML;
         const fixBox = document.createElement("span"); fixBox.className = "sendfix"; fixBox.style.display = "contents";
         done.insertBefore(fixBox, done.querySelector('[data-send-act="reset"]'));
         const show = (res, title, top, html, fix = "") => {
@@ -1956,7 +2069,7 @@ identities with graph_get. Nothing else.
         };
         const reset = (focus = true) => {
           h.textContent = "Post this message?"; ask.hidden = false; done.hidden = true; delete done.dataset.res; fixBox.innerHTML = "";
-          state.innerHTML = `Proposed by <span data-name>${nm()}</span>, not sent`; if (focus) ask.querySelector("button").focus();
+          state.innerHTML = initialState.replace(/<span data-name>[^<]*<\/span>/g, `<span data-name>${nm()}</span>`); if (focus) ask.querySelector("button").focus();
         };
         card.addEventListener("click", (e) => {
           const b = e.target.closest("[data-send-act], [data-send-fix]");
@@ -1987,12 +2100,24 @@ identities with graph_get. Nothing else.
               `<button class="bt primary sm" type="button" data-send-fix="connect">Reconnect Teams in ${org}</button>`);
             return;
           }
-          show("posted", "Message posted", "Sent at 08:42", `Posted to Endpoint Engineering, Rollouts, in ${org} at 08:42. The next message needs its own confirmation.`);
+          const to = card.querySelector('[data-k="to"]');
+          show("posted", "Message posted", "Sent at 08:42", `Posted to ${to ? to.textContent : "Endpoint Engineering, Rollouts"}, in ${org} at 08:42. The next message needs its own confirmation.`);
         });
         return { reset };
       }
       const sendCtl = bindCard(document.getElementById("sendcard"));
       const sumCtl = bindCard(document.getElementById("sumcard"));
+      // A delivery from a run Nova started: the same card and the same checks. Runs follows the card's outcome.
+      const deliv = document.getElementById("delivcard"), delivRun = document.getElementById("deliv-run");
+      bindCard(deliv);
+      new MutationObserver(() => {
+        const res = deliv.querySelector('[data-send="done"]').dataset.res;
+        delivRun.className = res === "posted" ? "st" : "st wait";
+        delivRun.textContent = res === "posted" ? "Report sent to IT Operations, Device health, after your confirmation at 08:42"
+          : res === "cancelled" ? "Delivery cancelled, nothing posted. The result stays in Runs."
+          : res === "refused" ? "Delivery not sent. The card in Chat names the reason and the fix."
+          : "Delivery to Teams waiting for your confirmation in Chat";
+      }).observe(deliv.querySelector('[data-send="done"]'), { attributes: true, attributeFilter: ["data-res"] });
       // The full report: no Confirm. A shorter summary arrives on its own card; saving keeps the report on this device.
       const long = document.getElementById("longcard"), summary = document.querySelector("[data-summary]");
       const lAsk = long.querySelector('[data-long="ask"]'), lDone = long.querySelector('[data-long="done"]'), lMsg = lDone.querySelector(".sendmsg"), lState = long.querySelector(".top span:last-child");
