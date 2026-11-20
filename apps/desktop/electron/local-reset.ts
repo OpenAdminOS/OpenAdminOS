@@ -21,9 +21,9 @@
  */
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { closeSync, existsSync, fsyncSync, lstatSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, lstatSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeSync } from "node:fs";
 import { open, rename, rm } from "node:fs/promises";
-import { dirname, join, posix, win32 } from "node:path";
+import { basename, dirname, join, posix, resolve, sep, win32 } from "node:path";
 
 import type { LocalResetProblem, LocalResetReport } from "@openadminos/agent-sdk";
 
@@ -221,8 +221,7 @@ export function localResetLinkCheck(userDataDir: string, fs: Pick<LocalResetFile
   /** The folder could not be listed, so its token caches could not be checked. */
   scanFailed: boolean;
 } {
-  // "folder-link/" would make lstat look through the link; check the bare name.
-  if (fs.isLink(withoutTrailingSeparators(userDataDir))) return { dataFolderIsLink: true, linkedTokenCaches: [], scanFailed: false };
+  if (fs.isLink(userDataDir)) return { dataFolderIsLink: true, linkedTokenCaches: [], scanFailed: false };
   let entries: string[];
   try {
     entries = fs.readdir(userDataDir);
@@ -236,10 +235,52 @@ export function localResetLinkCheck(userDataDir: string, fs: Pick<LocalResetFile
   };
 }
 
-/** "/a/b/" and "C:\\a\\b\\" name the folder itself, so lstat does not look through a link at "b". */
-export function withoutTrailingSeparators(path: string): string {
-  const trimmed = path.replace(/[\\/]+$/, "");
-  return trimmed === "" || /^[A-Za-z]:$/.test(trimmed) ? path : trimmed;
+/**
+ * True when a folder path does not lead straight to a folder of that name:
+ * its real location must be its real parent plus its own name. A link at
+ * the end, or a form such as "link/", "link/." or "link/.." that the system
+ * resolves through a link, fails that. A path whose details cannot be read
+ * counts as a link; a missing one does not.
+ */
+export function folderGoesThroughLink(path: string): boolean {
+  try {
+    const absolute = resolve(path);
+    if (lstatSync(absolute).isSymbolicLink()) return true;
+    const expected = join(realpathSync(dirname(absolute)), basename(absolute));
+    return realpathSync(path) !== expected;
+  } catch (cause) {
+    return (cause as NodeJS.ErrnoException).code !== "ENOENT";
+  }
+}
+
+/**
+ * The IT policy file is kept, but if it is a link to another file in the
+ * data folder, the wipe would delete what it points to and the policy would
+ * stop applying. Returns a reason to stop when that is the case.
+ */
+export function policyLinkProblem(userDataDir: string): string | undefined {
+  let entries: string[];
+  let realFolder: string;
+  try {
+    entries = readdirSync(userDataDir);
+    realFolder = realpathSync(userDataDir);
+  } catch {
+    return undefined;
+  }
+  for (const name of entries) {
+    if (name.toLowerCase() !== MANAGED_POLICY_FILE) continue;
+    const path = join(userDataDir, name);
+    try {
+      if (!lstatSync(path).isSymbolicLink()) continue;
+      const target = realpathSync(path);
+      if (target.startsWith(`${realFolder}${sep}`)) {
+        return `the IT policy file ${name} is a link to a file in the data folder, which the reset would remove and the policy would stop applying. Ask whoever manages this device to place the policy file itself in the data folder, then reset`;
+      }
+    } catch {
+      // A link to nothing keeps nothing; the policy loader reports it.
+    }
+  }
+  return undefined;
 }
 
 /** The request refuses a data folder that is a link; nothing is removed. */
@@ -265,7 +306,10 @@ export interface LocalResetFileSystem {
   remove(path: string): void;
   /** Replaces the marker atomically. */
   writeMarker(path: string, content: string): void;
-  /** The path itself is a symbolic link (not followed). */
+  /**
+   * The folder path reaches its folder through a link: the folder itself is
+   * a link, or the path takes a detour such as "link/." or "link/..".
+   */
   isLink(path: string): boolean;
   /**
    * Something is at the path but it is not a plain file of its own: a
@@ -292,13 +336,7 @@ export interface LocalResetWipeOptions {
 }
 
 const nodeFileSystem: LocalResetFileSystem = {
-  isLink: (path) => {
-    try {
-      return lstatSync(path).isSymbolicLink();
-    } catch {
-      return false;
-    }
-  },
+  isLink: (path) => folderGoesThroughLink(path),
   isShared: (path) => {
     try {
       const stat = lstatSync(path);
@@ -484,8 +522,13 @@ export function runPendingLocalReset(options: LocalResetWipeOptions): LocalReset
 
   // A data folder that is a link may point at a folder other things share;
   // its entries are never listed or removed through it.
-  if (fs.isLink(withoutTrailingSeparators(userDataDir))) {
+  if (fs.isLink(userDataDir)) {
     failed.push({ item: userDataDir, reason: DATA_FOLDER_LINK_REASON });
+    return finish("incomplete");
+  }
+  const policyProblem = policyLinkProblem(userDataDir);
+  if (policyProblem) {
+    failed.push({ item: MANAGED_POLICY_FILE, reason: policyProblem });
     return finish("incomplete");
   }
 
