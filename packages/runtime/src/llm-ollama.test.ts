@@ -739,6 +739,7 @@ describe("Ollama context size", () => {
       await llm.complete({ prompt: "small" });
       assert.deepEqual(fake.chats.at(-1), {});
     } finally {
+      releaseSecondLookup();
       await fake.close();
     }
   });
@@ -775,15 +776,18 @@ describe("Ollama context size", () => {
         return olderPhase && numCtx === 84992 ? 16384 : numCtx ?? 16384;
       },
     });
+    const held = heldFailure(45056, "model requires more system memory (24.1 GiB) than is available (12.0 GiB)");
     try {
       const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "restored" });
       await llm.complete({ prompt: "huge" });
       // The older request finds 84,992 no longer fits, forgets it and retries at 45,056, which fails late.
       olderPhase = true;
-      const held = heldFailure(45056, "model requires more system memory (24.1 GiB) than is available (12.0 GiB)");
       fake.options.failCtx = held.failCtx;
-      const older = assert.rejects(llm.complete({ prompt: "big" }), /could not load restored with 45,056/);
-      await held.wasCaptured;
+      const olderRun = llm.complete({ prompt: "big" });
+      const older = assert.rejects(olderRun, /could not load restored with 45,056/);
+      // Fails, instead of hanging, if the older request ends before the server holds it.
+      const first = await Promise.race([held.wasCaptured.then(() => "held"), olderRun.then(() => "settled", () => "settled")]);
+      assert.equal(first, "held");
       // Meanwhile a newer request raises 84,992 again and keeps it.
       await llm.complete({ prompt: "huge" });
       held.release();
@@ -793,6 +797,7 @@ describe("Ollama context size", () => {
       // One request with the restored size, no overflow and retry.
       assert.deepEqual(fake.chats.slice(before), [{ num_ctx: 84992 }]);
     } finally {
+      held.release();
       await fake.close();
     }
   });
@@ -803,14 +808,17 @@ describe("Ollama context size", () => {
       // The older request's first attempt (the third request) gets only 16,384 for the kept 45,056.
       limit: (numCtx) => (numCtx === 45056 && fake.chats.length === 3 ? 16384 : numCtx ?? 16384),
     });
+    const held = heldFailure(45056, "model requires more system memory (24.1 GiB) than is available (12.0 GiB)");
     try {
       const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "same-size" });
       await llm.complete({ prompt: "big" });
       // The older request forgets 45,056, then retries with 45,056, which fails late.
-      const held = heldFailure(45056, "model requires more system memory (24.1 GiB) than is available (12.0 GiB)");
       fake.options.failCtx = held.failCtx;
-      const older = assert.rejects(llm.complete({ prompt: "big" }), /could not load same-size with 45,056/);
-      await held.wasCaptured;
+      const olderRun = llm.complete({ prompt: "big" });
+      const older = assert.rejects(olderRun, /could not load same-size with 45,056/);
+      // Fails, instead of hanging, if the older request ends before the server holds it.
+      const first = await Promise.race([held.wasCaptured.then(() => "held"), olderRun.then(() => "settled", () => "settled")]);
+      assert.equal(first, "held");
       // Meanwhile a newer request raises 45,056 again and keeps it.
       await llm.complete({ prompt: "big" });
       held.release();
@@ -819,6 +827,7 @@ describe("Ollama context size", () => {
       await llm.complete({ prompt: "small" });
       assert.deepEqual(fake.chats.at(-1), {});
     } finally {
+      held.release();
       await fake.close();
     }
   });
