@@ -48,12 +48,12 @@ it("fences the script prompt, keeps the author system prompt, and strips echoed 
 });
 
 describe("sandbox broker", () => {
-  it("reports a credential copied into a configuration field as competing provenance", async t => {
+  it("reports credentials copied into configuration fields, including coerced scalars", async t => {
     const path = "/applications";
     const agent = fakeAgent({ scopes: ["Application.Read.All"], graphOperations: [{ method: "GET", path }] });
     const ledger = new ClassificationLedger();
     t.after(() => ledger.dispose());
-    const application = { displayName: "qxz", passwordCredentials: [{ hint: "qxz" }] };
+    const application = { displayName: "qxz", api: { requestedAccessTokenVersion: 2 }, passwordCredentials: [{ hint: "qxz" }, { hint: "2" }] };
     const events: RequestClassificationEvent[] = [];
     let request: LlmOptions | undefined;
     const ctx = fakeContext(agent, {
@@ -70,19 +70,20 @@ describe("sandbox broker", () => {
       const read = await broker.handle({ id: "read", method: "graph.request", params: { method: "GET", path } });
       assert.equal(read.ok, true);
       await ledger.waitForObservations();
-      const { hint } = (read.result as { value: typeof application[] }).value[0]!.passwordCredentials[0]!;
-      const script = JSON.stringify({ displayName: hint });
+      const [name, version] = (read.result as { value: typeof application[] }).value[0]!.passwordCredentials;
+      const script = JSON.stringify({ displayName: name!.hint, api: { requestedAccessTokenVersion: Number(version!.hint) } });
       assert.equal((await broker.handle({ id: "model", method: "llm.complete", params: { prompt: script, system: script } })).ok, true);
       await ledger.waitForObservations();
       const { classification } = events[0]!;
       assert.equal(classification.coverageIncomplete, true);
       for (const section of ["system", "prompt"] as const) {
-        const start = request![section]!.indexOf(hint);
-        const end = start + hint.length;
+        const first = request![section]!.indexOf(name!.hint);
+        const second = request![section]!.indexOf(version!.hint, first + name!.hint.length);
+        const values = [[first, first + name!.hint.length], [second, second + version!.hint.length]];
         assert.deepEqual(classification.spans.filter(span => span.section === section).map(({ start, end, kind }) => [start, end, kind]),
-          [[start, end, "credential"]]);
+          values.map(([start, end]) => [start, end, "credential"]));
         assert.deepEqual(classification.unexamined.ranges.filter(range => range.section === section),
-          [{ section, start, end, reason: "competing-provenance" }]);
+          values.map(([start, end]) => ({ section, start, end, reason: "competing-provenance" })));
       }
     });
   });

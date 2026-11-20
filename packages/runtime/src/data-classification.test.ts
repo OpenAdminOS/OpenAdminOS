@@ -1188,6 +1188,25 @@ test("a serialized field keeps the most sensitive competing origin and reports a
   }
 });
 
+test("retained credential evidence competes with a coerced scalar in a replay", t => {
+  const ledger = new ClassificationLedger();
+  const prior = new ClassificationLedger();
+  t.after(() => { ledger.dispose(); prior.dispose(); });
+  const data = { api: { requestedAccessTokenVersion: 2 } };
+  ledger.register("current-app", data, { graphPath: "/applications" });
+  prior.register("earlier-app", { passwordCredentials: [{ hint: "2" }] }, { graphPath: "/applications" });
+  ledger.include(prior);
+  const body = JSON.stringify(data);
+  assert.equal(ledger.classifyRequest({ prompt: body }).spans[0]?.kind, "configuration");
+  ledger.registerHistoryReplay(body, [{ start: 0, end: body.length, ledger: prior }]);
+  const prompt = withClassificationScope(ledger, () => fenceTenantData(body, "fixture-history"));
+  const start = prompt.indexOf(body) + body.lastIndexOf("2");
+  const result = ledger.classifyRequest({ prompt });
+  assert.equal(result.coverageIncomplete, true);
+  assert.deepEqual(result.spans, [{ section: "prompt", start, end: start + 1, kind: "credential", source: "earlier-app" }]);
+  assert.deepEqual(result.unexamined.ranges, [{ section: "prompt", start, end: start + 1, reason: "competing-provenance" }]);
+});
+
 test("Conditional Access references and delegated permissions distinguish identifiers from settings", () => {
   const ids = ["aaaaaaaa-1111-2222-3333-444444444444", "bbbbbbbb-1111-2222-3333-444444444444"];
   const graphPath = "/identity/conditionalAccess/policies";

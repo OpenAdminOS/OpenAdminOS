@@ -1078,8 +1078,8 @@ export class ClassificationLedger {
     emit: (span: TextSpan, evidence: Evidence, authoritative?: boolean) => void,
     boundary: ReturnType<typeof wordBoundaries>,
     fieldAt?: (start: number, end: number) => string | undefined,
-    replayAt?: (start: number, end: number) => void,
-    scriptAt?: (start: number, end: number) => void,
+    replayAt?: (span: TextSpan, evidence: Evidence) => void,
+    scriptAt?: (span: TextSpan, evidence: Evidence) => void,
     clippedAt?: (start: number, end: number) => void,
     fieldEvidence?: (span: TextSpan, best: Evidence, bound?: Evidence) => void,
   ): boolean {
@@ -1126,11 +1126,11 @@ export class ClassificationLedger {
               continue;
             }
             if (mode === "replay") {
-              replayAt?.(start, end);
+              if (entry.best) replayAt?.({ start, end }, entry.best);
               continue;
             }
             if (mode === "script") {
-              scriptAt?.(start, end);
+              if (entry.best) scriptAt?.({ start, end }, entry.best);
               continue;
             }
             const field = mode === "field" ? fieldAt?.(start, end) : undefined;
@@ -1420,7 +1420,7 @@ export class ClassificationLedger {
           found.set(key, { section, start, end, kind, source, ...(maskRole ? { maskRole } : {}), ...(authoritative ? { authoritative } : {}) });
         }
       };
-      const collectFieldEvidence = (span: TextSpan, best: Evidence, bound?: Evidence) => {
+      const collectCandidate = (span: TextSpan, best: Evidence, bound?: Evidence) => {
         const key = `${span.start}:${span.end}`;
         const match = matchedFields.get(key) ?? { ...span, best };
         if (preferEvidence(match.best, best)) match.best = best;
@@ -1473,12 +1473,16 @@ export class ClassificationLedger {
       const ambiguousScript = new Map<string, TextSpan>();
       const clipped = new Map<string, TextSpan>();
       const scriptRange = state.scriptText?.[section];
-      const scriptAt = scriptRange && ((start: number, end: number) => {
-        if (scriptRange.start <= start && end <= scriptRange.end) ambiguousScript.set(`${start}:${end}`, { start, end });
+      const scriptAt = scriptRange && ((span: TextSpan, evidence: Evidence) => {
+        if (scriptRange.start <= span.start && span.end <= scriptRange.end) {
+          ambiguousScript.set(`${span.start}:${span.end}`, span);
+          collectCandidate(span, evidence);
+        }
       });
-      const replayAt = preservedReplays.length ? (start: number, end: number) => {
-        if (preservedReplays.some(replay => replay.start <= start && end <= replay.end)) {
-          ambiguous.set(`${start}:${end}`, { start, end });
+      const replayAt = preservedReplays.length ? (span: TextSpan, evidence: Evidence) => {
+        if (preservedReplays.some(replay => replay.start <= span.start && span.end <= replay.end)) {
+          ambiguous.set(`${span.start}:${span.end}`, span);
+          collectCandidate(span, evidence);
         }
       } : undefined;
       const folded = foldedIndex ? foldIdentity(text) : undefined;
@@ -1486,7 +1490,7 @@ export class ClassificationLedger {
       for (let from = 0; from < text.length; from += TEXT_CHUNK) {
         const to = Math.min(text.length, from + TEXT_CHUNK);
         if (!this.scan(rawIndex, text, from, to, work, collect, boundary, fieldAt, replayAt, scriptAt,
-            (start, end) => clipped.set(`${start}:${end}`, { start, end }), collectFieldEvidence) ||
+            (start, end) => clipped.set(`${start}:${end}`, { start, end }), collectCandidate) ||
             foldedIndex && folded !== undefined && !this.scan(foldedIndex, folded, from, to, work, collect, boundary)) {
           // The section-wide detector pass has not examined any of this text.
           ranges.push({ section, start: 0, end: text.length, reason: "match-limit" });
