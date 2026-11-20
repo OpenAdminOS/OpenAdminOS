@@ -300,7 +300,7 @@ describe("IntuneChat model fit (mockup 36)", () => {
     });
     const { notice } = await sendTooLarge(fitBridge(state));
     expect(within(notice).queryByRole("button", { name: /^Run with/ })).toBeNull();
-    expect(within(notice).getByText("Your organization's policy allows only providers on this device, so no hosted provider is offered.")).toBeInTheDocument();
+    expect(within(notice).getByText("Your organization's policy does not allow a hosted provider for this request.")).toBeInTheDocument();
   });
   it("still says where the request went when the switched answer fails", async () => {
     const failedSwitch: IntuneChatMessage = {

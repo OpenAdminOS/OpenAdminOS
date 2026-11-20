@@ -88,7 +88,7 @@ export const MODEL_FIT_COPY = {
   keepAnswer: "Keep this answer",
   declined: (model: string) =>
     `Kept on ${model}. Nothing was sent. Narrow the question, for example to one platform or one group, or split it into smaller questions, then send again.`,
-  policy: "Your organization's policy allows only providers on this device, so no hosted provider is offered.",
+  policy: "Your organization's policy does not allow a hosted provider for this request.",
   noneSetUp: "No hosted provider is ready, so none is offered.",
   openProviders: "Open Settings, Providers",
 
