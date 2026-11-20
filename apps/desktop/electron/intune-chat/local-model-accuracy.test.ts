@@ -9,7 +9,8 @@ import type { RunLlmApi } from "@openadminos/agent-sdk";
 import { AppStateStore } from "../state.js";
 import type { IntelligenceSqliteStore } from "./sqlite-store.js";
 import { LOCAL_FALLBACK_NOTICES } from "./agentic-loop.js";
-import { COMPUTED_ANSWER_NOTICE, missingComputedFacts, structuredQueryForQuestion } from "./structured-question.js";
+import { computeStructuredResult, deviceRowFilters, structuredQueryForQuestion } from "./structured-question.js";
+import { buildAnswerPack, GRAPH_CACHE_RESOURCES, planChatContext } from "./planner.js";
 
 /**
  * The tester's tenant from 2026-11-18, as a seeded cache: 9 Intune managed
@@ -114,19 +115,6 @@ async function withHarness(run: (harness: Harness) => Promise<void>): Promise<vo
   }
 }
 
-/** A model that copies the computed facts it was given: the pack's computedResult, or the host's observation. */
-function factsIn(prompt: string): string[] {
-  const at = [...prompt.matchAll(/"facts":\s*\[/g)].at(-1)?.index;
-  if (at === undefined) return [];
-  const start = prompt.indexOf("[", at);
-  let depth = 0;
-  for (let index = start; index < prompt.length; index += 1) {
-    if (prompt[index] === "[") depth += 1;
-    if (prompt[index] === "]" && --depth === 0) return JSON.parse(prompt.slice(start, index + 1)) as string[];
-  }
-  return [];
-}
-
 const final = (answer: string) => JSON.stringify({ final: true, answer });
 
 function assertQ1(content: string): void {
@@ -137,64 +125,68 @@ function assertQ1(content: string): void {
 }
 
 describe("local model accuracy on the tester's tenant", () => {
-  it("answers Q1 exactly in deterministic mode, from code-computed counts, with no Entra-only device", async () => {
+  it("answers Q1 exactly from code on a local model, in deterministic and auto mode, with no Entra-only device", async () => {
     await withHarness(async ({ store, calls, reply }) => {
-      await store.setChatInvestigationMode("always-deterministic");
-      // A weak model that copies the facts it was given.
-      reply(({ prompt }) => factsIn(prompt).join("\n"));
-      const copied = (await store.sendIntuneChatMessage({ content: Q1, refreshIfStale: false })).assistantMessage;
-      assertQ1(copied.content);
-      assert.equal(copied.engineNotice, undefined);
-      // The pack carries the computed result as authoritative and no Entra or sample device rows.
-      const prompt = calls[0]!.prompt;
-      assert.match(prompt, /"computedResult"/);
-      assert.match(prompt, /computedResult is authoritative/);
-      for (const name of ENTRA_ONLY) assert.ok(!prompt.includes(name), `${name} never reaches the prompt`);
-      assert.ok(!/"resource": "entraDevices"/.test(prompt), "Entra devices are not planned for an Intune question");
-
-      // A weak model that miscounts, as on 2026-11-18: its answer is replaced by the computed one.
-      reply(() => "There are 9 devices in Intune. 3 are not compliant: WIN-01, ENTRA-ONLY-01 and ENTRA-ONLY-02.");
-      const streamed = (await store.streamIntuneChatMessage({ content: Q1, refreshIfStale: false }, () => {})).assistantMessage;
-      assertQ1(streamed.content);
-      assert.equal(streamed.engineNotice, COMPUTED_ANSWER_NOTICE);
+      // A weak model that miscounts, as on 2026-11-18. A local model never writes this answer.
+      reply(({ loop }) => (loop ? final("There are 9 devices. 3 are not compliant: WIN-01, ENTRA-ONLY-01.") : "There are 9 devices. 3 are not compliant: WIN-01, ENTRA-ONLY-01."));
+      for (const mode of ["always-deterministic", "auto"] as const) {
+        await store.setChatInvestigationMode(mode);
+        for (const send of ["send", "stream"] as const) {
+          const message = (send === "send"
+            ? await store.sendIntuneChatMessage({ content: Q1, refreshIfStale: false })
+            : await store.streamIntuneChatMessage({ content: Q1, refreshIfStale: false }, () => {})).assistantMessage;
+          assertQ1(message.content);
+          assert.equal(calls.length, 0, `${mode} ${send}: no model call`);
+          assert.equal(message.engineNotice, undefined);
+          // What ran shows the cache read, with the filter of the listed set.
+          assert.deepEqual(message.toolTrace?.map((entry) => [entry.tool, (entry.params as { filters: unknown }).filters]), [["count_cached", [{ field: "complianceState", op: "eq", value: "noncompliant" }]]]);
+          assert.deepEqual(message.sources?.map((source) => source.resource), ["managedDevices"], "Entra devices are not planned for an Intune question");
+        }
+      }
+      // Always investigative keeps the loop the admin chose.
+      await store.setChatInvestigationMode("always-agentic");
+      reply(({ loop, prompt }) => (!loop ? "unused" : prompt.includes("Observation:")
+        ? final("9 devices, 6 not compliant.")
+        : JSON.stringify({ kind: "tenant", sources: [], tool: "count_cached", params: { resource: "managedDevices", groupBy: ["operatingSystem"] } })));
+      const investigated = (await store.sendIntuneChatMessage({ content: Q1, refreshIfStale: false })).assistantMessage;
+      assert.ok(calls.length >= 2);
+      assert.equal(investigated.content, "9 devices, 6 not compliant.");
     });
   });
 
-  it("answers Q1 exactly in auto mode: the host counts first and a weak model's miscount is replaced", async () => {
-    await withHarness(async ({ store, calls, reply }) => {
-      // Auto is the default mode.
-      reply(({ loop }) => (loop ? final("There are 9 devices. 3 are not compliant.") : "unused"));
-      const message = (await store.streamIntuneChatMessage({ content: Q1, refreshIfStale: false }, () => {})).assistantMessage;
-      assertQ1(message.content);
-      assert.equal(message.engineNotice, COMPUTED_ANSWER_NOTICE);
-      // One model call: the counts were in its first prompt, run by the host through count_cached.
-      assert.equal(calls.length, 1);
-      assert.match(calls[0]!.prompt, /computedByHost/);
-      const hostCalls = (message.toolTrace ?? []).filter((entry) => entry.tool === "count_cached");
-      assert.equal(hostCalls.length, 2);
-      assert.deepEqual(hostCalls.map((entry) => (entry.params as { resource: string }).resource), ["managedDevices", "managedDevices"]);
-
-      // A model that states the facts keeps its own answer.
-      reply(({ loop, prompt }) => (loop ? final(factsIn(prompt).join("\n")) : "unused"));
-      const kept = (await store.sendIntuneChatMessage({ content: Q1, refreshIfStale: false })).assistantMessage;
-      assertQ1(kept.content);
-      assert.equal(kept.engineNotice, undefined);
+  it("gives a model that writes the answer the computed result as authoritative, with no sample device rows", async () => {
+    await withHarness(async ({ cache }) => {
+      const query = structuredQueryForQuestion({ question: Q1, generatedAt: new Date().toISOString() })!;
+      const cacheStatus = cache.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
+      const computed = computeStructuredResult({ store: cache, tenantId: tenant.id, query, cacheStatus, generatedAt: new Date().toISOString() })!;
+      const rows = cache.readGraphRows({ tenantId: tenant.id, resources: ["managedDevices"], searchTerms: [], limitPerResource: 40 });
+      const pack = JSON.parse(buildAnswerPack({ question: Q1, tenant, cacheStatus, rows, hasWriteIntent: false, agentSuggestions: [], computed })) as {
+        computedResult: { authoritative: boolean; total: number; breakdowns: Record<string, Record<string, number>>; focus: { total: number; rows: Array<{ name: string }> } };
+        resources: Array<{ resource: string; sampleRows: unknown[] }>;
+        instruction: string;
+      };
+      assert.equal(pack.computedResult.authoritative, true);
+      assert.equal(pack.computedResult.total, 9);
+      assert.deepEqual(pack.computedResult.breakdowns.operatingSystem, { Windows: 5, Android: 2, macOS: 2 });
+      assert.equal(pack.computedResult.focus.total, 6);
+      assert.deepEqual(pack.computedResult.focus.rows.map((row) => row.name).sort(), [...NONCOMPLIANT].sort());
+      assert.deepEqual(pack.resources.find((block) => block.resource === "managedDevices")?.sampleRows, []);
+      assert.match(pack.instruction, /computedResult is authoritative/);
+      assert.ok(!planChatContext(Q1).resources.includes("entraDevices"));
     });
   });
 
   it("narrows a follow-up to the stored result: only Windows gives the 4 noncompliant Windows devices", async () => {
     await withHarness(async ({ store, calls, reply }) => {
-      reply(({ loop, prompt }) => (loop ? final(factsIn(prompt).join("\n")) : factsIn(prompt).join("\n")));
+      reply(({ loop }) => (loop ? final("4 of them run Windows.") : "Four Windows devices."));
       const first = await store.streamIntuneChatMessage({ content: Q1, refreshIfStale: false }, () => {});
       assertQ1(first.assistantMessage.content);
 
-      // The weak model gives the count without the names; the computed list stands in.
-      reply(({ loop }) => (loop ? final("4 of them run Windows.") : "unused"));
       const followUp = (await store.streamIntuneChatMessage({ content: "only Windows", conversationId: first.conversation.id, refreshIfStale: false }, () => {})).assistantMessage;
       assert.match(followUp.content, /Windows among the 6 Intune managed devices not compliant from the previous answer: 4:/);
       for (const name of NONCOMPLIANT_WINDOWS) assert.ok(followUp.content.includes(name), name);
       for (const name of ["WIN-05", "MAC-02", "AND-01", ...ENTRA_ONLY]) assert.ok(!followUp.content.includes(name), `${name} is not in the follow-up`);
-      // No new full plan: only the managed device cache was read, by the host, with the stored filter.
+      // No new full plan: only the managed device cache was read, with the stored filter.
       assert.deepEqual(followUp.sources?.map((source) => source.resource), ["managedDevices"]);
       const counted = (followUp.toolTrace ?? []).filter((entry) => entry.tool === "count_cached");
       assert.equal(counted.length, 1);
@@ -202,11 +194,9 @@ describe("local model accuracy on the tester's tenant", () => {
         { field: "complianceState", op: "eq", value: "noncompliant" },
         { field: "operatingSystem", op: "eq", value: "Windows" },
       ]);
-      // And to the rows of the previous answer: a device added by a later refresh is not part of it.
-      // The trace and the prompt carry how many rows that was, not hundreds of ids.
-      assert.equal((counted[0]!.params as { previousAnswerRows: number }).previousAnswerRows, 6);
+      // The trace names the filter, not hundreds of row ids.
       assert.equal((counted[0]!.params as { ids?: unknown }).ids, undefined);
-      assert.equal(calls.length, 1);
+      assert.equal(calls.length, 0);
 
       // The same narrowing on the deterministic path.
       await store.setChatInvestigationMode("always-deterministic");
@@ -254,26 +244,9 @@ describe("local model accuracy on the tester's tenant", () => {
     });
   });
 
-  it("replaces an answer that adds a device or a wrong count to the right facts", async () => {
-    await withHarness(async ({ store, reply }) => {
-      await store.setChatInvestigationMode("always-deterministic");
-      const right = "There are 9 devices: Windows 5, macOS 2, Android 2. 6 are not compliant: WIN-01, WIN-02, WIN-03, WIN-04, MAC-02, AND-01.";
-      reply(() => right);
-      const kept = (await store.sendIntuneChatMessage({ content: Q1, refreshIfStale: false })).assistantMessage;
-      assert.equal(kept.content, right);
-      for (const wrong of [`${right} ENTRA-ONLY-03 is also not compliant.`, `${right} WIN-05 is not compliant either.`, right.replace("6 are not compliant", "3 are not compliant")]) {
-        reply(() => wrong);
-        const replaced = (await store.sendIntuneChatMessage({ content: Q1, refreshIfStale: false })).assistantMessage;
-        assertQ1(replaced.content);
-        assert.equal(replaced.engineNotice, COMPUTED_ANSWER_NOTICE, wrong);
-      }
-    });
-  });
-
   it("keeps a follow-up to the previous answer's devices after a refresh adds one", async () => {
-    await withHarness(async ({ store, cache, reply }) => {
+    await withHarness(async ({ store, cache }) => {
       await store.setChatInvestigationMode("always-deterministic");
-      reply(({ prompt }) => factsIn(prompt).join("\n"));
       const first = await store.sendIntuneChatMessage({ content: Q1, refreshIfStale: false });
       cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: new Date().toISOString(),
         rows: [...managedDevices, { id: "md-w6", deviceName: "WIN-06", operatingSystem: "Windows", complianceState: "noncompliant", lastSyncDateTime: recent }] });
@@ -319,24 +292,11 @@ describe("structured device questions", () => {
       breakdown: ["operatingSystem"],
       focus: { label: "not compliant", filters: [{ field: "complianceState", op: "eq", value: "noncompliant" }] },
       list: true,
-      asksCount: true,
     });
-  });
-
-  it("accepts a list answer that names every match without a count, and wants the number for a count question", () => {
-    const result = (question: string, total: number, rows: string[]) => ({
-      kind: "count" as const, resource: "managedDevices" as const, scopeLabel: "Intune managed devices", total, groups: {},
-      ...(structuredQueryForQuestion({ question, generatedAt: at })?.asksCount ? { asksCount: true } : {}),
-      rows: rows.map((name, i) => ({ id: `d${i}`, name })), rowsComplete: true, facts: [],
-      context: { version: 1 as const, question, resource: "managedDevices" as const, filters: [], label: "x", total },
-    });
-    assert.deepEqual(missingComputedFacts("WIN-01 is stale based on cached Intune evidence.", result("Which managed devices have not synced in the last 7 days?", 1, ["WIN-01"])), []);
-    assert.deepEqual(missingComputedFacts("WIN-01 has not synced.", result("How many devices have not synced in the last 7 days?", 1, ["WIN-01"])), ["the total 1"]);
-    assert.deepEqual(missingComputedFacts("WIN-01 has not synced.", result("Which devices have not synced in the last 7 days?", 2, ["WIN-01", "WIN-02"])), ["WIN-02"]);
   });
 
   it("falls back for filters it cannot express and reads negation within its clause", () => {
-    for (const question of ["How many Windows or macOS devices are there?", "how many devices are not currently compliant", "how many are compliant and how many are not compliant", "which devices are no longer compliant"]) {
+    for (const question of ["How many devices in Intune are not Windows?", "how many non-Windows devices are there", "How many Windows or macOS devices are there?", "how many devices are not currently compliant", "how many are compliant and how many are not compliant", "which devices are no longer compliant"]) {
       assert.equal(structuredQueryForQuestion({ question, generatedAt: at }), undefined, question);
     }
     const both = structuredQueryForQuestion({ question: "How many devices are not compliant and synced today?", generatedAt: at });
@@ -350,6 +310,8 @@ describe("structured device questions", () => {
       ], question);
     }
     assert.equal(structuredQueryForQuestion({ question: "which devices are not compliant or in grace period", generatedAt: at }), undefined);
+    // The sample rows never get the inverse filter either.
+    assert.deepEqual(deviceRowFilters("How many devices in Intune are not Windows?"), []);
   });
 
   it("leaves questions it does not fully understand to the planner", () => {

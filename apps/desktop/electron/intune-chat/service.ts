@@ -130,16 +130,12 @@ import { IntelligenceSqliteStore, type HostedProviderConsentAuditRecord } from "
 import { runAgenticChat, type AgenticFailureReason, type RunAgenticChatInput } from "./agentic-loop.js";
 import {
   chatResultContextFor,
-  COMPUTED_ANSWER_NOTICE,
   computedAnswerText,
-  computedResultForModel,
   computedTraceEntry,
   computeStructuredResult,
   followUpPlanningText,
-  hostCallsForQuery,
   planStructuredQuery,
   readChatResultContext,
-  reconcileWithComputed,
   type ChatResultContext,
   type ComputedResult,
   type StructuredQuery,
@@ -2222,9 +2218,10 @@ export class IntuneChatService {
     // before any model call, so those questions keep the refresh before the answer.
     // With nothing connected, an explicit docs request is not left to the model's classification.
     const docsWithoutTenant = noTenant && !planned.hasWriteIntent && isExplicitDocsRequest(content);
-    // A local model never writes a device lookup's answer: code renders it, so the cache refreshes first, as for direct answers.
+    // A local model never writes the answer to a question code has computed: code renders it, with no model
+    // call, so no prose can contradict or pad the counts. The cache refreshes first, as for direct answers.
     // Always investigative keeps the loop the admin chose.
-    const localCodeAnswer = provider?.isLocal === true && structured?.kind === "device-detail" && store.getChatInvestigationSettings().mode !== "always-agentic";
+    const localCodeAnswer = provider?.isLocal === true && structured !== undefined && store.getChatInvestigationSettings().mode !== "always-agentic";
     const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent && !docsWithoutTenant && !localCodeAnswer;
     const veto = docsWithoutTenant ? undefined : docsVeto(content, history);
     const answerPlan = await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, modelClassifies: lazyRefresh, ...(veto ? { veto } : {}), ...(docsWithoutTenant ? { forceDocs: true } : {}), steps });
@@ -2329,12 +2326,20 @@ export class IntuneChatService {
     let modelFollowUps: string[] = [];
     let modelTitle: string | undefined;
 
+    // Marks that the visible answer came from the computed result, which a follow-up may then narrow.
+    let computedShown = false;
+    const codeAnswer = (): string | undefined => {
+      if (!localCodeAnswer || !computed) return undefined;
+      computedShown = true;
+      (toolTrace ??= []).push(computedTraceEntry(computed));
+      return computedAnswerText(computed);
+    };
     const directDeviceAnswer = !noTenant && !planned.hasWriteIntent && !accessBlockedMessage && answerPlan.sources.kind !== "docs"
       ? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant), () => {}, entry => { (toolTrace ??= []).push(entry); }) ??
         voiceAppPlatformCountAnswer(content, cacheStatus, (resource) =>
           this.graphAggregatesFor(store, tenant.id, [resource])[resource],
         ) ??
-        (localCodeAnswer && computed ? ((toolTrace ??= []).push(computedTraceEntry(computed)), computedAnswerText(computed)) : undefined)
+        codeAnswer()
       : undefined;
     const namedAgent = persisted.installedAgents.find(a => [a.name, a.slug].some(n => n.toLowerCase() === content.toLowerCase()));
     if (namedAgent) {
@@ -2399,13 +2404,8 @@ export class IntuneChatService {
           return completion.text.trim();
         }, buildAnswerPrompt(answerPack, documentation));
         finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0 });
-        if (provider?.isLocal === true) {
-          const checked = reconcileWithComputed(content, computed, this.cachedDevicesNamedIn(store, tenant.id));
-          if (checked.replaced) {
-            engineNotice = [engineNotice, COMPUTED_ANSWER_NOTICE].filter(Boolean).join(" ");
-            return { content: checked.answer, model };
-          }
-        }
+        // The answer was written from the computed result, so a follow-up may narrow it.
+        if (computed) computedShown = true;
         return {
           content,
           model,
@@ -2432,16 +2432,12 @@ export class IntuneChatService {
             const toolSteps = toolStepHooks(steps, mcp.mcp, answerModel.providerName);
             const indexLater = indexWaits(answerPlan.sources, lazyRefresh);
             const documentation = indexLater || answerPlan.sources.kind === "tenant" ? [] : await this.searchDocsIndex(modelQuestion, steps);
+            // In auto mode a local model in Chat gets the compact budget. Always investigative keeps the full loop.
             const localChat = provider?.isLocal === true && investigationSettings.mode === "auto";
-            if (localChat && structured && lazyRefresh) {
-              await loadTenantData();
-              ({ computed } = lazyPack ?? readPack());
-            }
             const agentic = await this.rememberingTenantValues(conversation.id, tenantObservations, async () => runAgenticChat({
               question: modelQuestion,
               adminQuestion: content,
               ...(localChat ? { budget: "compact" as const } : {}),
-              ...(localChat && structured && computed ? { hostCalls: hostCallsForQuery(structured), hostFacts: { source: `cache:${computed.resource}`, content: { computedByHost: computedResultForModel(computed) } } } : {}),
               ...(newConversationTitle ? { askTitle: true } : {}),
               modelStep: modelStepHooks(steps, answerModel, mcp.mcp),
               documentation,
@@ -2470,13 +2466,6 @@ export class IntuneChatService {
             if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok, agentic.ok ? undefined : agentic.failureReason);
             if (agentic.ok) {
               assistantContent = agentic.answer;
-              if (localChat) {
-                const checked = reconcileWithComputed(agentic.answer, computed, this.cachedDevicesNamedIn(store, tenant.id));
-                if (checked.replaced) {
-                  assistantContent = checked.answer;
-                  engineNotice = COMPUTED_ANSWER_NOTICE;
-                }
-              }
               modelFollowUps = agentic.followUps ?? [];
               modelTitle = agentic.title;
               documentationSources = agentic.documentationSources ?? [];
@@ -2567,7 +2556,7 @@ export class IntuneChatService {
     }
     store.touchConversation(conversation.id, this.answeredChatTitle(conversation.id, newConversationTitle, modelTitle), assistantMessage.createdAt);
     // The next question can narrow this answer's computed result; any other answer clears it.
-    if (followUp) store.setChatResultContext(conversation.id, answered && (directDeviceAnswer === undefined || localCodeAnswer) ? chatResultContextFor(computed, { tenantId: tenant.id, question: content, computedAt: assistantMessage.createdAt }) : undefined, assistantMessage.createdAt);
+    if (followUp) store.setChatResultContext(conversation.id, answered && computedShown ? chatResultContextFor(computed, { tenantId: tenant.id, question: content, computedAt: assistantMessage.createdAt }) : undefined, assistantMessage.createdAt);
 
     if (!noTenant) {
       await this.maybeCreateSelfTrainingSuggestionFromChat({
@@ -2751,9 +2740,10 @@ export class IntuneChatService {
     // before any model call, so those questions keep the refresh before the answer.
     // With nothing connected, an explicit docs request is not left to the model's classification.
     const docsWithoutTenant = noTenant && !planned.hasWriteIntent && isExplicitDocsRequest(content);
-    // A local model never writes a device lookup's answer: code renders it, so the cache refreshes first, as for direct answers.
+    // A local model never writes the answer to a question code has computed: code renders it, with no model
+    // call, so no prose can contradict or pad the counts. The cache refreshes first, as for direct answers.
     // Always investigative keeps the loop the admin chose.
-    const localCodeAnswer = !options.voice && provider?.isLocal === true && structured?.kind === "device-detail" && store.getChatInvestigationSettings().mode !== "always-agentic";
+    const localCodeAnswer = !options.voice && provider?.isLocal === true && structured !== undefined && store.getChatInvestigationSettings().mode !== "always-agentic";
     const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent && !docsWithoutTenant && !localCodeAnswer;
     const veto = docsWithoutTenant ? undefined : docsVeto(content, history);
     // Voice keeps its own bounded tool set and no source plan; MCP tools are Chat only.
@@ -3036,9 +3026,17 @@ export class IntuneChatService {
       emitDelta(content, delta);
     };
 
+    // Marks that the visible answer came from the computed result, which a follow-up may then narrow.
+    let computedShown = false;
+    const codeAnswer = (): string | undefined => {
+      if (!localCodeAnswer || !computed) return undefined;
+      computedShown = true;
+      (toolTrace ??= []).push(computedTraceEntry(computed));
+      return computedAnswerText(computed);
+    };
     const directVoiceAnswer = noTenant || accessBlockedMessage || answerPlan?.sources.kind === "docs"
       ? undefined
-      : await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant, options.signal), message => sendProgress({ message, stage: "running-tools" }), entry => { (toolTrace ??= []).push(entry); }) ?? voiceInventoryAnswer(content, cacheStatus) ?? voiceAppPlatformCountAnswer(content, cacheStatus, (resource) => this.graphAggregatesFor(store, tenant.id, [resource])[resource]) ?? voiceDeviceSummaryAnswer(content, cacheStatus, () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices) ?? (localCodeAnswer && computed ? ((toolTrace ??= []).push(computedTraceEntry(computed)), computedAnswerText(computed)) : undefined);
+      : await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant, options.signal), message => sendProgress({ message, stage: "running-tools" }), entry => { (toolTrace ??= []).push(entry); }) ?? voiceInventoryAnswer(content, cacheStatus) ?? voiceAppPlatformCountAnswer(content, cacheStatus, (resource) => this.graphAggregatesFor(store, tenant.id, [resource])[resource]) ?? voiceDeviceSummaryAnswer(content, cacheStatus, () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices) ?? codeAnswer();
     const namedAgent = persisted.installedAgents.find(a => [a.name, a.slug].some(n => n.toLowerCase() === content.toLowerCase()));
     if (namedAgent) {
       assistantContent = `${namedAgent.name} is an installed ${namedAgent.mode === "read" ? "read-only" : "write"} agent. Use its Run button to review and start it. Nothing has been started.${namedAgent.mode === "write" ? " Its change plan still requires confirmation." : ""}`;
@@ -3125,13 +3123,8 @@ export class IntuneChatService {
           attemptPrompt = repaired;
         }
         assistantContent = relabelUnverifiedLearn(assistantContent.trim(), false);
-        if (provider?.isLocal === true && !isCancelled()) {
-          const checked = reconcileWithComputed(assistantContent, computed, this.cachedDevicesNamedIn(store, tenant.id));
-          if (checked.replaced) {
-            assistantContent = checked.answer;
-            engineNotice = [engineNotice, COMPUTED_ANSWER_NOTICE].filter(Boolean).join(" ");
-          }
-        }
+        // The answer was written from the computed result, so a follow-up may narrow it.
+        if (computed) computedShown = true;
         emitDelta(assistantContent, "");
         finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0, failed: isCancelled() });
       };
@@ -3169,18 +3162,12 @@ export class IntuneChatService {
             const documentation = options.voice
               ? options.webSearch ? [] : await this.retrieveDocumentationSafely(modelQuestion)
               : indexLater || answerPlan?.sources.kind === "tenant" ? [] : await this.searchDocsIndex(modelQuestion, steps);
-            // In auto mode a local model in Chat gets the compact budget and, for a question code can count,
-            // the counts first. Always investigative keeps the full loop the admin chose.
+            // In auto mode a local model in Chat gets the compact budget. Always investigative keeps the full loop.
             const localChat = provider?.isLocal === true && !options.voice && investigationSettings.mode === "auto";
-            if (localChat && structured && lazyRefresh) {
-              await loadTenantData();
-              ({ computed } = lazyPack ?? readPack());
-            }
             const agentic = await this.rememberingTenantValues(conversation.id, tenantObservations, async () => runAgenticChat({
               question: modelQuestion,
               adminQuestion: content,
               ...(localChat ? { budget: "compact" as const } : {}),
-              ...(localChat && structured && computed ? { hostCalls: hostCallsForQuery(structured), hostFacts: { source: `cache:${computed.resource}`, content: { computedByHost: computedResultForModel(computed) } } } : {}),
               ...(newConversationTitle ? { askTitle: true } : {}),
               modelStep: modelStepHooks(steps, answerModel, mcp.mcp),
               documentation,
@@ -3261,13 +3248,6 @@ export class IntuneChatService {
             toolTrace = agentic.toolTrace;
             if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok, agentic.ok ? undefined : agentic.failureReason);
             if (agentic.ok) {
-              if (localChat) {
-                const checked = reconcileWithComputed(agentic.answer, computed, this.cachedDevicesNamedIn(store, tenant.id));
-                if (checked.replaced) {
-                  agentic.answer = checked.answer;
-                  engineNotice = COMPUTED_ANSWER_NOTICE;
-                }
-              }
               modelFollowUps = agentic.followUps ?? [];
               modelTitle = agentic.title;
               documentationSources = agentic.documentationSources ?? [];
@@ -3445,7 +3425,7 @@ export class IntuneChatService {
     }
     store.touchConversation(conversation.id, this.answeredChatTitle(conversation.id, newConversationTitle, modelTitle), assistantMessage.createdAt);
     // The next question can narrow this answer's computed result; any other answer clears it.
-    if (followUp) store.setChatResultContext(conversation.id, answered && (directVoiceAnswer === undefined || localCodeAnswer) ? chatResultContextFor(computed, { tenantId: tenant.id, question: content, computedAt: assistantMessage.createdAt }) : undefined, assistantMessage.createdAt);
+    if (followUp) store.setChatResultContext(conversation.id, answered && computedShown ? chatResultContextFor(computed, { tenantId: tenant.id, question: content, computedAt: assistantMessage.createdAt }) : undefined, assistantMessage.createdAt);
 
     if (!noTenant) {
       await this.maybeCreateSelfTrainingSuggestionFromChat({
@@ -3498,14 +3478,6 @@ export class IntuneChatService {
     const previousQuestion = [...history].reverse().find((message) => message.role === "user" && message.status === "completed")?.content;
     const result = readChatResultContext(store, conversationId, tenantId);
     return { ...(previousQuestion ? { previousQuestion } : {}), ...(result ? { result } : {}) };
-  }
-
-  /** The cached Intune and Entra devices a text names, for the answer check. */
-  private cachedDevicesNamedIn(store: IntelligenceSqliteStore, tenantId: string): (text: string) => Array<{ id: string; name: string }> {
-    return (text) => [
-      ...store.findGraphRowsNamedIn({ tenantId, resource: "managedDevices", text, limit: 200 }),
-      ...store.findGraphRowsNamedIn({ tenantId, resource: "entraDevices", text, limit: 200 }),
-    ];
   }
 
   /** Exact counts for a structured question, from the cache as it is now. */

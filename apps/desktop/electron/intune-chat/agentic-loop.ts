@@ -74,7 +74,7 @@ const MAX_NO_EVIDENCE_RETRIES = 2;
  * The compact budget a local model gets in Chat. The default budget let a
  * failing 8B model spend about 22 calls and over four minutes before the
  * fallback; a local turn that is going wrong now ends within four model
- * calls, and the host counts the question in code before the first one.
+ * calls. A question code can count never reaches the loop on a local model.
  */
 export const COMPACT_LOOP_LIMITS = { iterations: 4, malformed: 1, unfinished: 1, noEvidence: 1, promiseNudges: 1, attempts: 4 } as const;
 
@@ -197,14 +197,6 @@ export interface RunAgenticChatInput {
    * the fallback notice says what happened in plain words.
    */
   budget?: "compact";
-  /**
-   * Read-only tool calls the host runs before the first model call, such
-   * as the exact counts for a device question. They run through the same
-   * tool path as the model's calls, so they are traced and shown.
-   */
-  hostCalls?: ReadonlyArray<{ tool: IntuneChatInvestigationToolName; params: Record<string, unknown> }>;
-  /** Facts computed in code from the host calls, given to the model as an observation. */
-  hostFacts?: { source: string; content: unknown };
   promptByteLimit?: number;
   question: string;
   /**
@@ -431,33 +423,6 @@ export async function runAgenticChat(
   let attempts = 0;
   // The source guard gets as many retries as the evidence guard.
   const maxAttempts = Math.min(limits.attempts, MAX_AGENTIC_ITERATIONS + MAX_MALFORMED_RETRIES + MAX_UNFINISHED_RETRIES + MAX_PROMISE_NUDGES + 1 + MAX_NO_EVIDENCE_RETRIES * 2 + 3);
-  // The host's own read-only calls run first, through the normal tool path, and count as evidence.
-  if (input.hostCalls?.length || input.hostFacts) {
-    await input.ensureTenantData?.();
-    assertNotCancelled(input.signal);
-  }
-  for (const call of input.hostCalls ?? []) {
-    const startedAt = new Date().toISOString();
-    const shown = Array.isArray(call.params.ids) ? (({ ids, ...rest }) => ({ ...rest, previousAnswerRows: (ids as unknown[]).length }))(call.params) : call.params;
-    input.onToolStart?.({ tool: call.tool, params: shown, message: summarizeToolCallForProgress(call.tool, call.params), startedAt });
-    const execution = await executeIntuneChatTool(input.tools, call.tool, call.params);
-    // A follow-up's row ids can run to hundreds; the trace and the prompt carry their count, not the ids.
-    if (Array.isArray(call.params.ids)) {
-      const { ids, ...rest } = execution.trace.params as Record<string, unknown>;
-      execution.trace.params = { ...rest, previousAnswerRows: (ids as unknown[]).length };
-    }
-    toolTrace.push(execution.trace);
-    if (!execution.trace.error && isEvidenceResult(call.tool, execution.result)) evidenceToolCalls += 1;
-    input.onToolFinish?.({ traceEntry: execution.trace, message: execution.trace.error ? `${call.tool} failed.` : execution.trace.resultSummary });
-    turns.push({
-      role: "observation",
-      source: tenantDataSourceForTool(call.tool, call.params),
-      content: trimObservation(JSON.stringify({ tool: call.tool, params: execution.trace.params, ranBy: "host", result: execution.result }, null, 2), input.observationCharBudget ?? DEFAULT_OBSERVATION_CHAR_BUDGET),
-    });
-  }
-  if (input.hostFacts) {
-    turns.push({ role: "observation", source: input.hostFacts.source, content: JSON.stringify(input.hostFacts.content, null, 2) });
-  }
   // Streamed final text the loop did not accept is withdrawn as soon as
   // that is known, before any slow work (a refresh, a tool, a fallback).
   let answerShown = false;
@@ -792,6 +757,9 @@ export async function runAgenticChat(
       },
     } : undefined;
     const execution = await executeIntuneChatTool(input.tools, action.tool, action.params, mcpHooks);
+    // A query writer that produced nothing sendable was a failed model call: the compact budget counts it.
+    // One that prepared a query is part of a working tool call and is not counted.
+    if (compact && mcpTool && execution.trace.error && !execution.trace.mcpSource?.sentToHost) attempts += 1;
     toolTrace.push(execution.trace);
     if (!execution.trace.error && isEvidenceResult(action.tool, execution.result)) evidenceToolCalls += 1;
     const mcpSource = execution.trace.mcpSource;
@@ -851,7 +819,7 @@ export async function runAgenticChat(
     // webSearch configured the tool only errors, and that must never
     // bypass the tenant-evidence guard.
     if (action.tool === "web_search" && input.tools.webSearch) webSearchAttempts += 1;
-    if (action.tool === 'query_cache') {
+    if (action.tool === 'query_cache' || action.tool === 'count_cached') {
       const resource = String((action.params as Record<string, unknown>)?.resource ?? 'unknown');
       if (execution.trace.error) invalidQueries.set(GRAPH_CACHE_RESOURCES.some(entry => entry.resource === resource) ? resource : 'unknown', execution.trace.error);
       else {
@@ -1007,9 +975,6 @@ function buildAgenticSystemPrompt(input: RunAgenticChatInput, questionKind: Intu
       return `${resource} (${GRAPH_CACHE_RESOURCES.find(entry => entry.resource === resource)?.label ?? resource}), Graph ${pathForResource(resource).path}, fields: ${fenceTenantData(fields.slice(0, 24), "cache:fields")}.`;
     }),
     'Filters preserve JSON types: accountEnabled, securityEnabled and isEncrypted take boolean true or false. For every count, total or breakdown (per OS, per state), call count_cached with the filter and groupBy and state its totalCount and groups; never count returned rows yourself. With list:true it also returns the matching rows by name when at most 50 match. A query_cache list is capped; say so when more rows match.',
-    input.hostFacts
-      ? "The host already counted this question in code; the exact result is in the observations. Answer from it directly, state its numbers and names exactly, and call a tool only for what it does not cover. Where it says the data does not hold something, say so and give only the leads it lists."
-      : "",
 
     !docsOnly && input.plannedResources.includes('managedDevices')
       ? 'managedDevices is the Intune device inventory and the source for device counts, compliance and OS. entraDevices are directory device objects; use them only when the admin asks about Entra or directory devices, and never mix the two lists in one answer. managedDevices cache fields: operatingSystem (for example "Windows"), deviceName, complianceState, isEncrypted (boolean true = encrypted, false = not encrypted, null = unknown). Encryption is separate from compliance. For unencrypted Windows devices use query_cache with {"resource":"managedDevices","where":{"operatingSystem":"Windows","isEncrypted":false}}. Pass select as a top-level array of available field names, never inside where.'

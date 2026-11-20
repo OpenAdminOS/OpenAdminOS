@@ -1957,6 +1957,15 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
       await waitFor(() => !bodyText().includes("Thinking"), "chat send settled");
       continue;
     }
+    if (prompt === "Which managed devices have not synced in the last 7 days?") {
+      // A local model never writes a computed device answer: code renders the count and the list.
+      await waitFor(
+        () => bodyText().includes("Intune managed devices not synced in the last 7 days: 1.") && bodyText().includes("WIN-01 (Windows"),
+        "code-computed stale device answer",
+      );
+      await waitFor(() => !bodyText().includes("Thinking"), "chat send settled");
+      continue;
+    }
     if (prompt === "Which Windows devices are not encrypted?") {
       // This question now uses exact cache evidence instead of the model stub.
       await waitFor(

@@ -11,9 +11,9 @@ Branch: `chat/local-model-accuracy`. `packages/runtime/src/llm-ollama.ts` is not
 - [x] Structured questions (`structured-question.ts`): parse device questions into resource, filters (OS, compliance state, sync window), breakdowns and a list; detect follow-ups ("only Windows", "which of those synced this month") and narrow the stored result; device "why is X not compliant" lookups that say what the cache does not hold.
 - [x] Planner: Intune, managed device, compliance and OS wording plans `managedDevices` only; `entraDevices` only for Entra, directory, join or registration wording. Search terms drop question words.
 - [x] Deterministic pack: an authoritative `computedResult` (exact counts, the full filtered list, plain fact lines) replaces unfiltered samples for that resource.
-- [x] Answer check: on a local provider, an answer that misses the computed facts is replaced by the computed answer, with a notice that says so.
+- [x] Local answers from code: a local model never writes the answer to a question code has computed; code renders the facts with no model call (auto and deterministic mode). An earlier answer check that replaced prose missing a fact was dropped after review rounds 1 and 2 kept finding contradictions it let through.
 - [x] Follow-ups: the last structured result per conversation is stored and narrowed by a follow-up; follow-ups are planned with the previous question as context.
-- [x] Loop: a compact budget for local Chat (few repairs, no classification repair, fewer iterations), host-run facts seeded for local providers, a `failureReason` (`malformed`, `thinking-only`, `context-too-small`, `iteration-cap`, `no-evidence`, `empty-answer`, `unfinished`, `provider-unavailable`) for workstream E, plain fallback notices for local models, and an honest per model failure memory notice. Hosted behaviour unchanged.
+- [x] Loop: a compact budget for local Chat (few repairs, no classification repair, fewer iterations), a `failureReason` (`malformed`, `thinking-only`, `context-too-small`, `iteration-cap`, `no-evidence`, `empty-answer`, `unfinished`, `provider-unavailable`) for workstream E, plain fallback notices for local models, and an honest per model failure memory notice. Hosted behaviour unchanged.
 - [x] Docs: SPEC.md chat section, CHANGELOG [Unreleased].
 - [ ] PR, reviews (Codex gpt-6.2-sol, Muse Wonder Full 1.0, Claude code reviewer), fixes until clean.
 
@@ -28,6 +28,7 @@ Branch: `chat/local-model-accuracy`. `packages/runtime/src/llm-ollama.ts` is not
 
 ## Review
 
+- Review rounds: Sol (Codex gpt-6.2-sol, high) rounds 1 and 2 and Claude feature-dev:code-reviewer rounds 1 and 2; findings and fixes in the PR commits "review round 1 fixes", "Claude review round 2 fixes" and the round 2 Sol fix commit. Muse could not run: its SDK could not read the model catalog on this host (`muse login` needed).
 - AC1 to AC4: `electron/intune-chat/local-model-accuracy.test.ts` (seeded ground-truth tenant, scripted weak models; deterministic and auto; follow-up "only Windows"; Q2; failing local model at most 4 calls with the designed notice).
 - AC5: under Node 22, electron 1534 of 1534, renderer 814 of 814, runtime 347 passed and 0 failed (2 skipped), typecheck clean; Intune Chat smoke passed (its first run caught the list-answer check, fixed in 72dcae40).
 - AC6: live service check with Claude Code (claude-sonnet-5) on the seeded cache. Auto: Q1 exact via two `count_cached` calls (11 s), Q2 says the rule is not cached and names the 2026-05-18 sync. Deterministic: Q1, the "only Windows" follow-up (the 4 noncompliant Windows devices) and Q2 exact. A hosted model in auto mode answers "only Windows" with its own loop (all 5 Windows devices, 4 noncompliant named); stored-result narrowing reaches the model only on the deterministic path and as host facts for local models.

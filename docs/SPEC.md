@@ -3791,7 +3791,9 @@ the format. Decisions:
   mixed question whose resource the tenant grants. "Not compliant" is Intune's
   `noncompliant` state, as the direct evidence answers count it; grace period
   is its own state. Wording the parser cannot read for certain (two operating
-  systems, "not currently compliant", both states at once) goes to the planner.
+  systems, an excluded one such as "not Windows", "not currently compliant",
+  both states at once) goes to the planner, and the sample rows then get no
+  OS or compliance filter from it either.
   `count_cached` on a resource that was never refreshed returns no count.
 - Intune is the device inventory. Device, OS, sync and compliance wording plans
   `managedDevices` only; `entraDevices` joins for Entra, directory, join,
@@ -3808,30 +3810,31 @@ the format. Decisions:
   The trace and the prompt carry how many previous rows a follow-up counts,
   not their ids. Any other answer clears the context, and
   follow-up planning reads write intent from the current question only. Short
-  follow-ups are planned with the previous question as context.
+  follow-ups are planned with the previous question as context. The context is
+  stored only when the visible answer came from the computed result (code, or
+  a model writing from the pack), never from a loop answer that read the data
+  its own way.
 - Questions the data cannot answer: "why is <device> not compliant" names the
   device's cached state, says the failing rule is not in the cached data, and
-  gives the last sync as the lead, with nothing invented. For a local model
-  code writes this answer without a model call, and What ran shows the cache
-  read; always investigative mode keeps the model's loop.
-- A local model's answer that leaves out or changes a computed fact is
-  replaced by the computed answer: every breakdown count, every listed name
-  for a list of up to 25, the total when the question asked for a number or
-  the list is longer, and for a device lookup the not-in-data statement and
-  the sync date. A complete list must name no other cached Intune or Entra
-  device, and a number given for the not compliant set must be one the result
-  gives. A list question answered with all its names needs no count, with the notice "The local model's answer
-  did not match the counts computed from cached data, so the computed result is
-  shown instead." This applies to the deterministic path for any local model
-  and to the tool loop in auto mode.
+  gives the last sync as the lead, with nothing invented. The device name is
+  resolved against the cache at question time; a device first seen by this
+  turn's refresh is answered by the planner path.
+- A local model never writes the answer to a question code has computed (a
+  count, breakdown, filtered list, follow-up or device lookup): code renders
+  the facts with no model call, in auto and deterministic mode, and What ran
+  shows the cache read. Checking a small model's prose against the facts kept
+  missing contradictions ("4 are not compliant" next to the right list, an
+  invented reason next to the right sync date), so the prose is not written.
+  Always investigative mode keeps the model's loop, and a hosted model writes
+  from the authoritative pack as before.
 - Auto mode, local model, Chat: a compact loop budget (four iterations, one
   repair for malformed, empty, unfinished or evidence-free replies, no repair
   turn for a missing question kind, at most four model calls before the
   fallback; the short query-writing call of an MCP tool the model chose is not
-  a failure turn and is not counted). For a structured question
-  the host runs `count_cached` before the
-  first model call and gives the facts as an observation, so a good reply needs
-  one call. A context overflow falls back instead of failing the message.
+  a failure turn and is not counted; a writer call that produced nothing
+  sendable is). A rejected `count_cached` call blocks a zero answer as a
+  rejected `query_cache` does. A context overflow falls back instead of failing
+  the message and returns the provider's error as `failureDetail`.
   Always investigative mode and hosted providers keep the established budget,
   prompts and notices.
 - The loop returns `failureReason`: `malformed`, `thinking-only` (a reply with

@@ -679,6 +679,23 @@ const fetchTool: McpChatTool = {
 const callFetch = JSON.stringify({ tool: fetchTool.name, params: { url: "https://learn.microsoft.com/x" } });
 
 describe("The MCP query writer boundary", () => {
+  it("counts a failed query writer call against a local model's compact budget", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const prompts: Array<{ system?: string; prompt: string }> = [];
+      const writerPrompts: string[] = [];
+      // The answering model asks for the docs tool every turn; the writer never returns usable params.
+      const result = await runAgenticChat({
+        ...input(store, scriptedLlm([callDocs("intune compliance grace period")], prompts, writerPrompts, ["not json"]), mcpContext(calls)),
+        budget: "compact",
+      });
+      assert.equal(result.ok, false);
+      assert.equal(calls.length, 0, "nothing was sent");
+      // Answering calls and failed writer calls together stay within four model calls.
+      assert.ok(prompts.length + writerPrompts.length <= 4, `${prompts.length} answering and ${writerPrompts.length} writer calls`);
+    });
+  });
+
   it("tells the answering model the query is written from the current question only", async () => {
     await withStore(async (store) => {
       const prompts: Array<{ system?: string; prompt: string }> = [];

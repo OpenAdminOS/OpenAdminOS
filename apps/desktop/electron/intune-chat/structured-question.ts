@@ -31,8 +31,6 @@ export interface StructuredDeviceQuery {
   focus?: { label: string; filters: GraphCacheQueryPredicate[] };
   /** List the set (or the focus) by name. */
   list: boolean;
-  /** The question asked for a number ("how many", "count"), so the answer must state it. */
-  asksCount: boolean;
   /** Set when the question narrows the previous result. */
   followUp?: { previousQuestion: string; previousLabel: string };
   /** The previous answer's rows, so a follow-up never counts a device added by a later refresh. */
@@ -82,8 +80,6 @@ export interface ComputedResult {
   scopeLabel: string;
   /** The result narrows the previous answer's set. */
   followUp?: boolean;
-  /** The question asked for a number, so the answer must state it; a list question is answered by its names. */
-  asksCount?: boolean;
   total: number;
   groups: Record<string, Record<string, number>>;
   focus?: { label: string; total: number; groups: Record<string, Record<string, number>>; rows: ComputedListedRow[]; complete: boolean };
@@ -97,8 +93,6 @@ export interface ComputedResult {
   snapshot?: { refreshedAt?: string; rows: number; partial: boolean; lastError?: string };
   /** The context a follow-up narrows. */
   context: Omit<ChatResultContext, "tenantId" | "computedAt">;
-  /** For a device lookup: the facts an answer is checked against. */
-  device?: { name: string; complianceState?: string; lastSyncDate?: string };
 }
 
 /** How many listed rows the facts and the pack carry by name. */
@@ -171,7 +165,11 @@ function normalize(question: string): string {
   return question.toLowerCase().replace(/[’`]/g, "'").replace(/\s+/g, " ").trim();
 }
 
+/** An operating system the question excludes ("not Windows", "non-Windows", "other than macOS"): a filter the parser does not express. */
+const NEGATED_SYSTEM = /(?:\b(?:not|except|excluding|besides|other than|apart from)|n't|\bnon)[\s-]*(?:(?:on|running|a|an|any)\s+)?(?:windows|win(?:10|11)|mac ?os|macs?|os x|ios|ipad ?os|iphones?|ipads?|android|linux|ubuntu)\b/;
+
 function osFilter(lower: string): { label: string; predicate: GraphCacheQueryPredicate } | undefined {
+  if (NEGATED_SYSTEM.test(lower)) return undefined;
   // "per OS" names no system; an OS named inside a breakdown phrase is still a filter.
   const matched = OS_FILTERS.filter((entry) => entry.pattern.test(lower));
   return matched.length === 1 ? matched[0] : undefined;
@@ -262,7 +260,7 @@ export function structuredQueryForQuestion(input: {
   const constraints = [os, compliance, sync].filter(Boolean).length;
 
   // A word the parser does not know means the question asks something the counts do not answer.
-  if (unknownWords(lower).length > 0 || namesSeveralSystems(lower)) return undefined;
+  if (unknownWords(lower).length > 0 || namesSeveralSystems(lower) || NEGATED_SYSTEM.test(lower)) return undefined;
   const previous = input.previous;
   const wordCount = lower.split(" ").length;
   // A follow-up narrows the previous set: it adds a constraint after a lead such as "only" or "of those",
@@ -292,8 +290,7 @@ export function structuredQueryForQuestion(input: {
         filters,
         breakdown,
         list: true,
-        asksCount: count,
-      };
+        };
     }
     // A narrowing that repeats a filter already in force adds nothing new; the previous set is listed again.
     const fresh = added.filter((entry) => !previous.filters.some((filter) => JSON.stringify(filter) === JSON.stringify(entry.predicate)));
@@ -306,7 +303,6 @@ export function structuredQueryForQuestion(input: {
       breakdown: breakdown.length > 0 ? breakdown : fresh.length === 0 && previous.resource === "managedDevices" ? ["operatingSystem"] : [],
       ...(fresh.length > 0 ? { focus: { label, filters: fresh.map((entry) => entry.predicate) } } : {}),
       list: true,
-      asksCount: count,
       followUp: { previousQuestion: previous.question, previousLabel: previous.label },
       ...(previous.ids ? { ids: previous.ids } : {}),
     };
@@ -337,7 +333,6 @@ export function structuredQueryForQuestion(input: {
     breakdown,
     ...(focus ? { focus } : {}),
     list: list || Boolean(focus),
-    asksCount: count,
   };
 }
 
@@ -480,7 +475,6 @@ export function computeStructuredResult(input: {
     resource: query.resource,
     scopeLabel: query.scopeLabel,
     ...(query.followUp ? { followUp: true } : {}),
-    ...(query.asksCount ? { asksCount: true } : {}),
     total: counted.total,
     groups: counted.groups,
     ...(query.focus && focusCount
@@ -540,7 +534,6 @@ function computeDeviceDetail(
     notInData,
     ...(snapshot ? { snapshot } : {}),
     context: { version: 1, question: "", resource: "managedDevices", filters: [{ field: "id", op: "eq", value: query.deviceId }], label: row.name, total: 1 },
-    device: { name: row.name, ...(row.complianceState ? { complianceState: row.complianceState } : {}), ...(lastSyncDate ? { lastSyncDate } : {}) },
   };
 }
 
@@ -582,98 +575,6 @@ export function computedResultForModel(result: ComputedResult): Record<string, u
     ...(result.notInData ? { notInData: result.notInData } : {}),
     facts: result.facts,
   };
-}
-
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function mentionsNumber(answer: string, value: number): boolean {
-  return new RegExp(`(?<![\\d.,])${value}(?![\\d.,]\\d)`).test(answer);
-}
-
-/** A label and its count close together, in either order: "Windows 5", "5 Windows", "Windows: 5", "Windows | 5". */
-/** The ways an answer may write a stored value: "inGracePeriod" as "in grace period", "noncompliant" as "non-compliant". */
-function labelPattern(label: string): string {
-  const spaced = label.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
-  const variants = new Set([label.toLowerCase(), spaced]);
-  if (spaced === "noncompliant") ["non-compliant", "non compliant", "not compliant"].forEach((variant) => variants.add(variant));
-  return `(?:${[...variants].map((variant) => escapeRegExp(variant).replace(/ /g, "[\\s-]+")).join("|")})`;
-}
-
-function mentionsCount(answer: string, label: string, count: number): boolean {
-  const name = labelPattern(label);
-  const gap = "[^\\n\\d]{0,24}?";
-  return new RegExp(`\\b${name}\\b${gap}(?<![\\d.])${count}(?![\\d])|(?<![\\d.])${count}(?![\\d])${gap}\\b${name}\\b`, "i").test(answer);
-}
-
-/**
- * The facts an answer leaves out or contradicts. A local model that wrote
- * 3 where 6 devices matched, or skipped the per OS split, gets its answer
- * replaced by the computed one.
- */
-/** Numbers an answer puts next to "not compliant" ("3 are not compliant", "noncompliant devices: 3"). */
-function noncompliantNumbers(answer: string): number[] {
-  const phrase = "(?:not compliant|non-?compliant|non compliant)";
-  const found: number[] = [];
-  for (const match of answer.matchAll(new RegExp(`(?<![\\w-])(\\d+)(?:\\s+(?:of them|of those|devices?|managed devices?))?\\s+(?:are\\s+|is\\s+)?(?:marked\\s+)?${phrase}|${phrase}(?:\\s+devices?)?\\s*[:=(]\\s*(\\d+)`, "gi"))) {
-    found.push(Number(match[1] ?? match[2]));
-  }
-  return found;
-}
-
-/**
- * The facts an answer leaves out or contradicts. `named` are the cached
- * devices the answer names: a complete list must name no other device,
- * so an Entra-only or compliant device added to the noncompliant list
- * fails the check.
- */
-export function missingComputedFacts(answer: string, result: ComputedResult, named: readonly { id: string; name: string }[] = []): string[] {
-  const missing: string[] = [];
-  if (result.kind === "device-detail") {
-    if (!/\b(not (?:in|included in|part of|available in|held in|contained in|recorded in) the (?:cached |local )?(?:data|cache)|(?:cache|cached data|data) does(?: not|n't) (?:include|hold|contain|show|say|record)|not cached|isn'?t cached|no (?:cached )?(?:data|record) (?:of|on|about) (?:which|the failing))/i.test(answer)) missing.push("that the failing rule is not in the cached data");
-    if (result.device?.lastSyncDate && !answer.includes(result.device.lastSyncDate) && !mentionsHumanDate(answer, result.device.lastSyncDate)) missing.push("the last sync date");
-    return missing;
-  }
-  const lower = answer.toLowerCase();
-  // Names prove a short list; a count question, a long list or a breakdown needs its numbers.
-  const names = (rows: readonly ComputedListedRow[]) => rows.filter((row) => !lower.includes(row.name.toLowerCase())).map((row) => row.name);
-  const listed = result.focus ? undefined : result.rows;
-  if (!(result.followUp && result.focus) && (result.asksCount || (listed && listed.length > 25) || (!listed && !result.focus)) && !mentionsNumber(answer, result.total)) missing.push(`the total ${result.total}`);
-  for (const [field, group] of Object.entries(result.groups)) {
-    for (const [value, count] of Object.entries(group)) if (!mentionsCount(answer, value, count)) missing.push(`${field} ${value} ${count}`);
-  }
-  if (result.focus) {
-    if ((result.asksCount || result.focus.rows.length > 25 || result.focus.rows.length === 0) && !mentionsNumber(answer, result.focus.total)) missing.push(`the ${result.focus.label} count ${result.focus.total}`);
-    if (result.focus.rows.length <= 25) missing.push(...names(result.focus.rows));
-  }
-  if (listed && listed.length <= 25) missing.push(...names(listed));
-  // A complete list names no other cached device.
-  const expected = result.focus ? (result.focus.complete ? result.focus.rows : undefined) : result.rowsComplete ? result.rows : undefined;
-  if (expected) {
-    const ids = new Set(expected.map((row) => row.id));
-    const names = new Set(expected.map((row) => row.name.toLowerCase()));
-    for (const device of named) if (!ids.has(device.id) && !names.has(device.name.toLowerCase())) missing.push(`no other device (${device.name})`);
-  }
-  // A number stated for the noncompliant set must be one the computed result gives.
-  if (result.focus?.label === "not compliant") {
-    const allowed = new Set([result.focus.total, ...Object.values(result.focus.groups.operatingSystem ?? {})]);
-    for (const value of noncompliantNumbers(answer)) if (!allowed.has(value)) missing.push(`not ${value} noncompliant`);
-  }
-  return missing;
-}
-
-const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
-
-function mentionsHumanDate(answer: string, isoDate: string): boolean {
-  const [year, month, day] = isoDate.split("-").map(Number);
-  if (!year || !month || !day) return false;
-  const name = MONTHS[month - 1]!;
-  const short = name.slice(0, 3);
-  const lower = answer.toLowerCase();
-  return new RegExp(`\\b(?:${name}|${short})\\.? ${day}(?:st|nd|rd|th)?,? ${year}\\b|\\b${day}(?:st|nd|rd|th)? (?:of )?(?:${name}|${short})\\.?,? ${year}\\b`).test(lower)
-    || lower.includes(`${String(day).padStart(2, "0")}.${String(month).padStart(2, "0")}.${year}`)
-    || lower.includes(`${month}/${day}/${year}`);
 }
 
 /**
@@ -718,23 +619,6 @@ export function planStructuredQuery(input: {
     ?? structuredQueryForQuestion({ question: input.question, generatedAt: input.generatedAt, ...(input.previous ? { previous: input.previous } : {}) });
 }
 
-/** The read-only calls the host runs for a local model before its first turn, so the counts are traced. */
-export function hostCallsForQuery(query: StructuredQuery): Array<{ tool: "count_cached"; params: Record<string, unknown> }> {
-  if (query.kind === "device-detail") {
-    return [{ tool: "count_cached", params: { resource: "managedDevices", filters: [{ field: "id", op: "eq", value: query.deviceId }], list: true } }];
-  }
-  const calls: Array<{ tool: "count_cached"; params: Record<string, unknown> }> = [];
-  if (!query.focus || query.breakdown.length > 0 || !query.followUp) {
-    calls.push({ tool: "count_cached", params: { resource: query.resource, ...(query.filters.length ? { filters: query.filters } : {}), ...(query.breakdown.length ? { groupBy: query.breakdown } : {}), ...(query.list && !query.focus ? { list: true } : {}) } });
-  }
-  if (query.focus) {
-    calls.push({ tool: "count_cached", params: { resource: query.resource, filters: [...query.filters, ...query.focus.filters], ...(query.resource === "managedDevices" ? { groupBy: ["operatingSystem"] } : {}), list: true } });
-  }
-  // A follow-up counts within the previous answer's rows.
-  if (query.ids) for (const call of calls) call.params.ids = query.ids;
-  return calls;
-}
-
 /** The stored follow-up context of a conversation, when it belongs to this tenant. */
 export function readChatResultContext(store: IntelligenceSqliteStore, conversationId: string, tenantId: string): ChatResultContext | undefined {
   const value = store.getChatResultContext(conversationId) as Partial<ChatResultContext> | undefined;
@@ -760,18 +644,4 @@ export function followUpPlanningText(question: string, previousQuestion: string 
   const lower = normalize(question);
   const short = lower.split(" ").length <= 6;
   return short && (FOLLOW_UP_WORDS.test(lower) || FOLLOW_UP_LEAD.test(lower)) ? `${previousQuestion}\n${question}` : question;
-}
-
-/** What a replaced answer's notice says. */
-export const COMPUTED_ANSWER_NOTICE = "The local model's answer did not match the counts computed from cached data, so the computed result is shown instead.";
-
-/**
- * Keeps a local model's answer when it states the computed facts, and
- * replaces it with the computed answer when it leaves any out.
- */
-export function reconcileWithComputed(answer: string, result: ComputedResult | undefined, named: (text: string) => readonly { id: string; name: string }[] = () => []): { answer: string; replaced: boolean } {
-  if (!result || !answer.trim()) return { answer, replaced: false };
-  return missingComputedFacts(answer, result, named(answer)).length === 0
-    ? { answer, replaced: false }
-    : { answer: computedAnswerText(result), replaced: true };
 }

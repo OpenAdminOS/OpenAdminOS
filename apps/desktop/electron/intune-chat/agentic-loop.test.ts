@@ -516,6 +516,21 @@ describe("Intune Chat agentic loop", () => {
   });
 });
 
+it("does not accept a zero after a rejected count_cached call", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-count-guard-"));
+  const store = seededStore(dir);
+  try {
+    const llm = scriptedLlm([
+      JSON.stringify({ tool: "count_cached", params: { resource: "managedDevices" } }),
+      JSON.stringify({ tool: "count_cached", params: { resource: "managedDevices", groupBy: ["noSuchField"] } }),
+      JSON.stringify({ final: true, answer: "0 devices match." }),
+    ]);
+    const result = await runAgenticChat(baseInput(store, llm));
+    assert.equal(result.ok, true);
+    if (result.ok) assert.match(result.answer, /could not establish which records match/);
+  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
 describe("compact budget for a local model in Chat", () => {
   const counting = (responses: string[]) => {
     const llm = scriptedLlm(responses);
@@ -565,26 +580,6 @@ describe("compact budget for a local model in Chat", () => {
       }
       // Without the compact budget the provider error is the provider's, as before.
       await assert.rejects(runAgenticChat(baseInput(store, overflow)), /context size too small/);
-    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
-  });
-
-  it("runs the host's calls before the first model call and accepts an answer from them", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "openadminos-compact-"));
-    const store = seededStore(dir);
-    try {
-      const prompts: string[] = [];
-      const llm: RunLlmApi = { available: true, async complete(options) { prompts.push(options.prompt); return { text: JSON.stringify({ final: true, answer: "1 Windows device is cached." }), model: "test" }; }, async *stream() {} };
-      const result = await runAgenticChat({
-        ...baseInput(store, llm),
-        budget: "compact",
-        hostCalls: [{ tool: "count_cached", params: { resource: "managedDevices", groupBy: ["operatingSystem"] } }],
-        hostFacts: { source: "cache:managedDevices", content: { computedByHost: { facts: ["Intune managed devices: 1 (per OS: Windows 1)."] } } },
-      });
-      assert.equal(result.ok, true);
-      assert.equal(prompts.length, 1);
-      assert.match(prompts[0]!, /"ranBy": "host"/);
-      assert.match(prompts[0]!, /Intune managed devices: 1/);
-      assert.deepEqual(result.toolTrace.map((entry) => entry.tool), ["count_cached"]);
     } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
   });
 });
