@@ -2518,11 +2518,13 @@ Mockup: `docs/mockups/34-local-reset.html`.
   approval), while a confirmation, a run start, a Nova send or a report
   delivery pass is in flight. After the request no run starts, Nova sends
   nothing more and deliveries are skipped. From the request
-  on (only once every check passed, so a refused request never touches a
-  pending approval), connector approvals are declined ("Nothing was sent")
-  and every organization is closed the way Disconnect closes one, so no Nova
-  send, report delivery or run starts; the shutdown waits for leased work
-  within its bound, and a request refused after that reopens them, and from then on refuses new confirmations
+  on, runs (including gateway, Splashtop and rollback plans), Nova sends,
+  WhatsApp test sends and report deliveries are refused by the reset flag,
+  which a refused request lifts; a schedule that meets it waits and records
+  no failure. Only after the marker is written are connector approvals
+  declined ("Nothing was sent") and every organization closed the way
+  Disconnect closes one, so a refused request never declines an approval or
+  stops work; the shutdown waits for leased work within its bound, and from then on refuses new confirmations
   until the restart. It writes `local-reset-pending.json` into the data folder
   first; the rename is the commit point (if it fails, nothing changed and the
   modal says so; a failed folder flush after it is only logged). It then removes the Microsoft sign-in of

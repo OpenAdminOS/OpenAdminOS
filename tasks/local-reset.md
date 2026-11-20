@@ -213,6 +213,14 @@ the installed app's scheduler, login item or caches.
   Nova sends, delivery passes) and RunService.hasActiveDrive in the reset
   check, refusals for new runs and Nova sends once a reset started, plus
   the SPEC timeout sentence and "other than" wording.
+- Review round 16: Claude one important (a schedule refused during a reset
+  was recorded as a failed run, fixed with LocalResetInProgressError, an
+  organization boundary for the scheduler and companion); Sol one blocking
+  (sign-out after the folder became a link, skipped now) and two mediums
+  (approvals declined and work closed before the marker commit, moved after
+  it; the Linux guide ignored XDG paths, fixed); Muse one blocking (the
+  WhatsApp test send, gated and counted now) plus the same ordering medium
+  and the gateway, Splashtop and rollback starters, gated now.
 - Process lesson: twice I edited the tree while a reviewer was reading it;
   parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the
