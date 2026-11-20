@@ -102,6 +102,9 @@ export const MODEL_FIT_COPY = {
   answeredRest: (model: string) => `for this request only. Chat is back on ${model}.`,
   answeredLocal: (model: string, providerName: string) => `${model} on this device (${providerName})`,
 
+  destinationPending: (provider: string) => `Checking where ${provider} is reached before the run can start.`,
+  destinationFailed: (provider: string) =>
+    `OpenAdminOS could not read where ${provider} is reached, so this run cannot start. Close the review and choose the provider again.`,
   /** The run review's line when a run is started again on another provider after a fit failure. */
   runReason(issue: ModelFitIssue, model: string, tool: string): string {
     const why = issue.reason === "context-too-small" ? `${model} could not fit the last run` : `${model} could not finish the last run`;

@@ -173,7 +173,7 @@ export default function AgentDetail({
   const [uninstalling, setUninstalling] = useState(false);
   const [requestedScopes, setRequestedScopes] = useState<RequestedScope[]>([]);
   const [pendingRunChoice, setPendingRunChoice] = useState<
-    { dryRun?: boolean; runForRealOfRunId?: string; retryOfRunId?: string; tenantId?: string; providerId?: ProviderId; model?: string; modelFit?: ModelFitIssue; expectedProviderDestination?: string } | null
+    { dryRun?: boolean; runForRealOfRunId?: string; retryOfRunId?: string; tenantId?: string; providerId?: ProviderId; model?: string; modelFit?: ModelFitIssue; expectedProviderDestination?: string; destinationFailed?: true } | null
   >(null);
   const consumedStartRunOnOpen = useRef(false);
   const resumedIntentRef = useRef<string | null>(null);
@@ -231,9 +231,11 @@ export default function AgentDetail({
       setPendingRunChoice(reviewed);
       // A model fit rerun remembers where its provider is reached as the review opens; Start refuses if that changes.
       if (reviewed.modelFit && reviewed.providerId) {
-        void window.openAdminOS?.getProviderDestination?.(reviewed.providerId)
+        const read = window.openAdminOS?.getProviderDestination?.(reviewed.providerId);
+        // Without a destination the host refuses Start, so the review says so instead of waiting.
+        void (read ?? Promise.reject(new Error("unavailable")))
           .then((destination) => setPendingRunChoice((current) => (current === reviewed ? { ...reviewed, expectedProviderDestination: destination } : current)))
-          .catch(() => undefined);
+          .catch(() => setPendingRunChoice((current) => (current === reviewed ? { ...reviewed, destinationFailed: true } : current)));
       }
     };
     // With no organization the preflight opens instead of setup: it names
@@ -1109,6 +1111,12 @@ export default function AgentDetail({
           modelLabel={pendingModel ? providerModelLabel(pendingProvider, pendingModel) : undefined}
           modelFit={pendingRunChoice?.modelFit}
           deliverySaving={pendingDeliverySaveCount > 0}
+          // A model fit rerun starts only once the review knows where its provider is reached.
+          {...(pendingRunChoice?.modelFit && pendingRunChoice.destinationFailed
+            ? { destinationState: "failed" as const }
+            : pendingRunChoice?.modelFit && !pendingRunChoice.expectedProviderDestination
+              ? { destinationState: "pending" as const }
+              : {})}
           // Provider readiness is checked on its own, whatever the
           // organization state.
           providerReady={
@@ -2745,6 +2753,7 @@ function RunPreflightModal({
   model,
   modelLabel,
   deliverySaving,
+  destinationState,
   onConnect,
   onOpenConnections,
   providerReady = true,
@@ -2781,6 +2790,8 @@ function RunPreflightModal({
   /** What the model is called on screen, such as "Copilot Fusion High". */
   modelLabel?: string | undefined;
   deliverySaving: boolean;
+  /** A model fit rerun is still reading, or could not read, where its provider is reached. */
+  destinationState?: "pending" | "failed";
   onClose: () => void;
   onConfirm: () => void;
 }) {
@@ -2823,6 +2834,7 @@ function RunPreflightModal({
     providerReady &&
     !organizationInactive &&
     !deliverySaving &&
+    destinationState === undefined &&
     missingServices.length === 0 &&
     !scopeBlockCopy;
   const firstNeeded = agentServiceIds(agent)[0];
@@ -2870,7 +2882,7 @@ function RunPreflightModal({
             ? { tone: "danger", title: "This agent cannot start as declared.", body: scopeBlockCopy, hint: "Fix the agent's declared permissions to start it." }
             : null;
   const missingServicesBlock = !blocker && activeTenant && missingServices.length > 0;
-  const hint = blocker?.hint ?? (missingServicesBlock ? `Connect ${formatServiceList(missingServices.map((service) => service.title))} to start this run.` : deliverySaving ? "Saving connector delivery changes before the run starts." : undefined);
+  const hint = blocker?.hint ?? (missingServicesBlock ? `Connect ${formatServiceList(missingServices.map((service) => service.title))} to start this run.` : deliverySaving ? "Saving connector delivery changes before the run starts." : destinationState === "failed" ? MODEL_FIT_COPY.destinationFailed(providerName) : destinationState === "pending" ? MODEL_FIT_COPY.destinationPending(providerName) : undefined);
   const locationDetail = providerDataLocationDetail({ id: providerId });
   const changes = dryRun
     ? "None. This run only prepares a plan. Graph writes, connector changes and automatic result delivery are blocked."

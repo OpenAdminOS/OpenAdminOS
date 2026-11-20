@@ -116,7 +116,7 @@ describe("IntuneChat model fit (mockup 36)", () => {
     await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledTimes(2));
     const input = vi.mocked(bridge.streamIntuneChatMessage).mock.calls[1]![0];
     expect(input.content).toBe(QUESTION);
-    expect(input.modelOverride).toEqual({ offerId: "fit_1", providerId: "openai", model: "gpt-5" });
+    expect(input.modelOverride).toEqual({ offerId: "fit_1", providerId: "openai", model: "gpt-5", destination: "dest-openai" });
     expect(input.hostedProviderConsent).toMatchObject({ tenantId, providerId: "openai", model: "gpt-5" });
     expect(input.hostedProviderConsent).not.toHaveProperty("remember");
 
