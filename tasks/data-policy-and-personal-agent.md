@@ -16,7 +16,9 @@ built on top of them are planned separately.
 - Scope: all of it, each phase with user docs, a SPEC section and a CHANGELOG line.
 - Default rules: mask on hosted, as in the table below.
 - Hosted voice: the voice model speaks roles ("the user", "the device") where a
-  value is masked, and the text transcript shows the real values. Round 4 of
+  value is masked, and the text transcript shows real values for the
+  reversible placeholders only (identity, device and security names and
+  identifiers, as in A4). Round 4 of
   the design review refined which tenant data is masked: voice context follows
   the data policy rules like any hosted call. Spoken input is covered by the
   decision of 2026-11-19 below.
@@ -217,8 +219,9 @@ built on top of them are planned separately.
 
 ## Why
 
-Today the choice is binary. A local model keeps tenant data on the device, a
-hosted model is stronger but sees everything. Data policy adds a middle path:
+Today the choice is binary. With a local model the request never leaves the
+device; with a hosted model the whole request, tenant data included, goes to
+the provider. Data policy adds a middle path:
 the rules decide which values a hosted model receives as is, which are masked
 and which are withheld. Identities the app recognizes can be masked, while
 configuration values and names the app does not recognize, such as a person
@@ -407,7 +410,10 @@ the IT policy file.
       it carries, the session opens without the whole profile block (decided
       2026-11-19), and the voice model, the transcript and the popover say the
       call opened without the profile. The voice model speaks roles
-      where a value is masked, and the transcript shows real values. When a
+      where a value is masked, and the transcript restores only reversible
+      placeholders (identity, device and security names and identifiers, the
+      A4 rule); activity, configuration and credential placeholders stay
+      masked in the transcript. When a
       rule blocks a context transfer, the session continues without that
       context and the voice model and the transcript say what was withheld.
       The hosted voice strip and its popover are derived from the live rules
@@ -475,18 +481,21 @@ the IT policy file.
    session opens without it, and the popover says the call opened without the
    profile. The voice popover lists the
    session start as its own transfer (renderer test).
-4. A test proves text from voice on this device goes through the request scan
+4. A hosted voice transcript test with Identity and Activity on Hosted at
+   Mask shows the user's real name restored on screen while the
+   `[ACTIVITY_1]` placeholder and any `[CREDENTIAL]` placeholder stay masked.
+5. A test proves text from voice on this device goes through the request scan
    before a hosted reasoning call.
-5. A blocked prompt shows a designed error that names the class and offers
+6. A blocked prompt shows a designed error that names the class and offers
    only models whose tier permits every class in the request, or changing the
    rule. When Local blocks the class too, no switch is offered. When every
    applicable rule is locked by IT, the error names the policy file and keys
    instead of offering a switch or a change.
-6. An IT-locked rule cannot be changed in Settings or over IPC.
-7. `npm run qa` passes with `dataClasses` on every bundled agent.
-8. The Credential Block to Mask dialog, direct and in a reset, shows its own
+7. An IT-locked rule cannot be changed in Settings or over IPC.
+8. `npm run qa` passes with `dataClasses` on every bundled agent.
+9. The Credential Block to Mask dialog, direct and in a reset, shows its own
    text (renderer test asserts the sentences).
-9. A call withheld for unexamined data shows the designed state and never
+10. A call withheld for unexamined data shows the designed state and never
    offers a model whose tier has a Block rule.
 
 ### Phase A4: Masking
@@ -752,6 +761,7 @@ the IT policy file.
 
 1. ~~Default rules~~ mask on hosted (2026-11-18).
 2. ~~Hosted voice with masking~~ speak roles, real values in the transcript
+   for reversible placeholders only (A4 rule)
    (2026-11-18); voice context follows the data policy rules (round 4,
    2026-11-19). Spoken words are not gated in hosted voice, local voice keeps
    them under data policy (decided 2026-11-19); a blocked session start
