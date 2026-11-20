@@ -48,6 +48,20 @@ const APP_NAMES: Record<string, string> = {
   "00000003-0000-0ff1-ce00-000000000000": "Office 365 SharePoint Online",
 };
 
+/** Built-in authentication strengths, verified against GET /policies/authenticationStrengthPolicies; all satisfy mfa. */
+const BUILT_IN_STRENGTHS: Record<string, string> = {
+  "00000000-0000-0000-0000-000000000002": "Multifactor authentication",
+  "00000000-0000-0000-0000-000000000003": "Passwordless MFA",
+  "00000000-0000-0000-0000-000000000004": "Phishing-resistant MFA",
+};
+
+/** A filter's mode and its rule, shortened, so the scope it removes is visible. */
+function filterSummary(value: unknown): string | undefined {
+  const filter = asRecord(value);
+  if (!filter || typeof filter.mode !== "string") return undefined;
+  return typeof filter.rule === "string" && filter.rule.length > 0 ? `${filter.mode}: ${truncate(filter.rule, 160)}` : filter.mode;
+}
+
 /** Special values Graph uses in include and exclude lists. */
 const KEYWORDS = new Set(["All", "None", "GuestsOrExternalUsers", "Office365", "MicrosoftAdminPortals", "AllTrusted", "ServicePrincipalsInMyTenant", "Compliant", "DomainJoined"]);
 
@@ -125,8 +139,8 @@ function compactApplications(apps: Json | undefined): Json | undefined {
   if (agentActions.length) out.agentActions = agentActions.length;
   const contexts = asStrings(apps.includeAuthenticationContextClassReferences);
   if (contexts.length) out.authContexts = contexts.length;
-  const filter = asRecord(apps.applicationFilter);
-  if (filter && typeof filter.mode === "string") out.appFilter = filter.mode;
+  const appFilter = filterSummary(apps.applicationFilter);
+  if (appFilter) out.appFilter = appFilter;
   return Object.keys(out).length ? out : undefined;
 }
 
@@ -159,13 +173,16 @@ function compactGrant(value: unknown): Json | undefined {
   const controls = asStrings(grant.builtInControls);
   if (controls.length) out.controls = controls;
   const strength = asRecord(grant.authenticationStrength);
-  if (strength && typeof strength.displayName === "string") {
+  if (strength) {
     // The name alone can mislead (a custom "Admin MFA" may satisfy none), so
-    // keep what it satisfies and whether it is built in.
+    // keep what it satisfies and whether it is built in. A strength without
+    // a display name is still a requirement: built-in ids are named, others
+    // are marked unnamed.
+    const builtIn = typeof strength.id === "string" ? BUILT_IN_STRENGTHS[strength.id] : undefined;
     out.authStrength = {
-      name: strength.displayName,
-      ...(typeof strength.policyType === "string" ? { type: strength.policyType } : {}),
-      ...(typeof strength.requirementsSatisfied === "string" ? { satisfies: strength.requirementsSatisfied } : {}),
+      name: typeof strength.displayName === "string" ? strength.displayName : builtIn ?? "unnamed authentication strength",
+      ...(typeof strength.policyType === "string" ? { type: strength.policyType } : builtIn ? { type: "builtIn" } : {}),
+      ...(typeof strength.requirementsSatisfied === "string" ? { satisfies: strength.requirementsSatisfied } : builtIn ? { satisfies: "mfa" } : {}),
     };
   }
   const terms = asStrings(grant.termsOfUse).length;
@@ -192,9 +209,10 @@ function compactSession(value: unknown): string[] | undefined {
   if (mcas) out.push(`app control ${String(mcas.cloudAppSecurityType ?? "on")}`);
   const frequency = enabled("signInFrequency");
   if (frequency) {
-    out.push(frequency.frequencyInterval === "everyTime"
+    const base = frequency.frequencyInterval === "everyTime"
       ? "sign-in frequency every time"
-      : `sign-in frequency ${String(frequency.value ?? "?")} ${String(frequency.type ?? "")}`.trim());
+      : `sign-in frequency ${String(frequency.value ?? "?")} ${String(frequency.type ?? "")}`.trim();
+    out.push(frequency.authenticationType === "secondaryAuthentication" ? `${base} (secondary authentication only)` : base);
   }
   const browser = enabled("persistentBrowser");
   if (browser) out.push(`persistent browser ${String(browser.mode ?? "on")}`);
@@ -230,8 +248,8 @@ function compactClientApplications(value: unknown): Json | undefined {
   const exclude = [...side("excludeServicePrincipals"), ...summarizeIds(asStrings(record.excludeAgentIdServicePrincipals), {}, "agent identity")];
   if (exclude.length) out.exclude = exclude.join(", ");
   for (const key of ["servicePrincipalFilter", "agentIdServicePrincipalFilter"]) {
-    const filter = asRecord(record[key]);
-    if (filter && typeof filter.mode === "string") out[key === "servicePrincipalFilter" ? "filter" : "agentFilter"] = filter.mode;
+    const summary = filterSummary(record[key]);
+    if (summary) out[key === "servicePrincipalFilter" ? "filter" : "agentFilter"] = summary;
   }
   return Object.keys(out).length ? out : undefined;
 }
