@@ -779,6 +779,7 @@ export class ClassificationLedger {
     // The original is serialized JSON. A property supplies the next value's
     // key, and arrays pass their containing key to their elements.
     const stack: Array<{ array: boolean; key: string | undefined }> = [];
+    const colon = /\s*:/y;
     for (const token of original.matchAll(/"(?:[^"\\]|\\.)*"|[{}\[\]:,]|true|false|null|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/gs)) {
       const start = token.index;
       if (start >= cut) break;
@@ -791,7 +792,8 @@ export class ClassificationLedger {
       } else if (literal === "]" || literal === "}") stack.pop();
       else if (literal !== ":" && literal !== "," && literal !== "null") {
         const quoted = literal.startsWith('"');
-        const property = quoted && frame && !frame.array && original[end] === ":";
+        colon.lastIndex = end;
+        const property = quoted && frame && !frame.array && colon.test(original);
         if (end < cut || property && end === cut) {
           if (property) frame.key = JSON.parse(literal) as string;
           continue;

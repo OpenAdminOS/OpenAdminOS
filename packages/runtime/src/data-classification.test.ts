@@ -711,6 +711,7 @@ test("recovers preview cuts in arrays and marks unresolved ranges", async t => {
   const cases = [
     { data: { includeUsers: ["all", id] }, visible: fragment, evidence: true, kind: "identity" },
     { data: { includeUsers: [["all"], [[id]]] }, visible: fragment, evidence: true, kind: "identity", suffix: "\n[truncated locally]" },
+    { data: { includeUsers: [[id]] }, visible: fragment, evidence: true, kind: "identity", pretty: true },
     { data: { includeUsers: ["prefix\\opaque"] }, visible: "prefix\\", evidence: true, kind: "identity" },
     { data: { operator: ["OR"] }, visible: 'OR"', evidence: true, kind: "security" },
     { data: { operator: [[987654321]] }, visible: "98765", evidence: true, kind: "security" },
@@ -720,7 +721,7 @@ test("recovers preview cuts in arrays and marks unresolved ranges", async t => {
   for (const fixture of cases) {
     const ledger = new ClassificationLedger();
     t.after(() => ledger.dispose());
-    const original = JSON.stringify(fixture.data);
+    const original = "pretty" in fixture ? JSON.stringify(fixture.data, null, 2).replaceAll('\":', '\" :') : JSON.stringify(fixture.data);
     const cut = original.indexOf(fixture.visible) + fixture.visible.length;
     assert.ok(cut >= fixture.visible.length);
     if (fixture.evidence) ledger.register("fixture", { conditions: { users: fixture.data }, grantControls: fixture.data }, {
