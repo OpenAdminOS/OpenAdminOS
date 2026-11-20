@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import type { TenantRecord } from "@openadminos/agent-sdk";
@@ -14,7 +14,7 @@ import {
   localResetLeftoverPaths,
   localResetLinkCheck,
   folderGoesThroughLink,
-  policyLinkProblem,
+  localResetPolicyProblem,
   localResetRemovalPlan,
   MACOS_SAFE_STORAGE_ACCOUNT,
   MACOS_SAFE_STORAGE_SERVICE,
@@ -678,43 +678,73 @@ describe("local reset: wipe at launch", () => {
     }
   });
 
-  it("stops before removing anything when the policy file links to a file in the data folder", async () => {
+  it("stops before removing anything when the policy file is a link, wherever it points", async () => {
+    const dir = await tempDir();
+    const outside = await tempDir();
+    try {
+      writeFileSync(join(outside, "central.json"), "{}");
+      mkdirSync(join(outside, "central-folder"));
+      writeFileSync(join(outside, "central-folder", "current.json"), "{}");
+      const cases: Array<() => void> = [
+        // Into the data folder.
+        () => {
+          mkdirSync(join(dir, "managed"));
+          writeFileSync(join(dir, "managed", "current.json"), "{}");
+          symlinkSync(join(dir, "managed", "current.json"), join(dir, "policy.json"));
+        },
+        // Through a folder link inside the data folder.
+        () => {
+          symlinkSync(join(outside, "central-folder"), join(dir, "managed-link"));
+          symlinkSync(join(dir, "managed-link", "current.json"), join(dir, "policy.json"));
+        },
+        // Straight outside: still refused, the reset cannot vouch for a chain.
+        () => symlinkSync(join(outside, "central.json"), join(dir, "Policy.json")),
+      ];
+      for (const plant of cases) {
+        rmSync(dir, { recursive: true, force: true });
+        mkdirSync(dir);
+        seedDataFolder(dir, DEV_MARKER);
+        rmSync(join(dir, "policy.json"));
+        plant();
+        assert.match(localResetPolicyProblem(dir) ?? "", /is a link, and the reset cannot be sure/);
+        const report = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", home: dir, env: {} });
+        assert.equal(report?.status, "incomplete");
+        assert.ok(existsSync(join(dir, "state.json")));
+      }
+      assert.equal(readFileSync(join(outside, "central.json"), "utf8"), "{}");
+      assert.equal(readFileSync(join(outside, "central-folder", "current.json"), "utf8"), "{}");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves the data folder and caches alone when another mount sits inside them (Linux)", async () => {
     const dir = await tempDir();
     try {
-      seedDataFolder(dir, DEV_MARKER);
-      rmSync(join(dir, "policy.json"));
-      mkdirSync(join(dir, "managed"));
-      writeFileSync(join(dir, "managed", "current.json"), "{}");
-      symlinkSync(join(dir, "managed", "current.json"), join(dir, "policy.json"));
-      assert.match(policyLinkProblem(dir) ?? "", /is a link that goes through the data folder/);
-      const report = runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", home: dir, env: {} });
-      assert.equal(report?.status, "incomplete");
-      assert.ok(existsSync(join(dir, "managed", "current.json")));
-      assert.ok(existsSync(join(dir, "state.json")));
+      const data = join(dir, "data");
+      mkdirSync(join(data, "registry-cache", "shared"), { recursive: true });
+      writeFileSync(join(data, "registry-cache", "shared", "other.txt"), "keep");
+      const realData = realpathSync(data);
+      const mountInfo = () => `40 35 98:0 /shared ${realData}/registry-cache/shared rw - ext4 /dev/sdb1 rw\n`;
+      assert.equal(folderGoesThroughLink(data, { platform: "linux", mountInfo }), true);
+      assert.equal(folderGoesThroughLink(`${data}-other`, { platform: "linux", mountInfo }), false);
 
-      // A link to a policy file outside the data folder is kept and the reset goes on.
-      const outsidePolicy = join(dir, "..", `${basename(dir)}-policy.json`);
-      writeFileSync(outsidePolicy, "{}");
-      rmSync(join(dir, "policy.json"));
-      symlinkSync(outsidePolicy, join(dir, "policy.json"));
-      assert.equal(policyLinkProblem(dir), undefined);
-      assert.equal(runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", home: dir, env: {} })?.status, "completed");
-      assert.ok(existsSync(outsidePolicy));
-      rmSync(outsidePolicy);
-
-      // A chain through a folder link inside the data folder counts too.
-      const central = join(dir, "..", `${basename(dir)}-central`);
-      mkdirSync(central, { recursive: true });
-      writeFileSync(join(central, "current.json"), "{}");
-      writeFileSync(join(dir, LOCAL_RESET_MARKER), JSON.stringify(DEV_MARKER));
-      rmSync(join(dir, "policy.json"));
-      symlinkSync(central, join(dir, "managed-link"));
-      symlinkSync(join(dir, "managed-link", "current.json"), join(dir, "policy.json"));
-      assert.match(policyLinkProblem(dir) ?? "", /goes through the data folder/);
-      assert.equal(runPendingLocalReset({ userDataDir: dir, packaged: false, platform: "linux", home: dir, env: {} })?.status, "incomplete");
-      assert.ok(existsSync(join(dir, "managed-link")));
-      assert.equal(readFileSync(join(dir, "policy.json"), "utf8"), "{}");
-      rmSync(central, { recursive: true, force: true });
+      const home = join(dir, "home");
+      const cache = join(home, ".cache", "@openadminosdesktop-updater");
+      mkdirSync(join(cache, "mounted"), { recursive: true });
+      writeFileSync(join(cache, "mounted", "other.txt"), "keep");
+      const plainData = join(dir, "plain");
+      mkdirSync(plainData);
+      seedDataFolder(plainData, MARKER);
+      const realCache = realpathSync(cache);
+      const report = runPendingLocalReset({
+        userDataDir: plainData, packaged: true, platform: "linux", home, env: {},
+        mountInfo: () => `41 35 98:0 /x ${realCache}/mounted rw - ext4 /dev/sdc1 rw\n`,
+      });
+      assert.equal(report?.status, "completed");
+      assert.ok(existsSync(join(cache, "mounted", "other.txt")));
+      assert.match(report?.warnings.find((warning) => warning.item === cache)?.reason ?? "", /holds another mount/);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
