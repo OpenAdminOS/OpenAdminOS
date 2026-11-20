@@ -2513,9 +2513,16 @@ Mockup: `docs/mockups/34-local-reset.html`.
 - **Two phases.** The request refuses while a confirmed write run is applying
   (also a cancelled one, or one whose organization was disconnected, while
   its apply has not settled; tracked in memory, not in run history), while
-  any other run is running or queued (a run can send through a connector
-  after its approval), or while a confirmation is in flight. From the request
-  on, connector approvals are declined ("Nothing was sent"), and from then on refuses new confirmations
+  any other run is running or queued, or a cancelled or disconnected run's
+  work has not settled (a run can send through a connector after its
+  approval), while a confirmation, a run start, a Nova send or a report
+  delivery pass is in flight. After the request no run starts, Nova sends
+  nothing more and deliveries are skipped. From the request
+  on (only once every check passed, so a refused request never touches a
+  pending approval), connector approvals are declined ("Nothing was sent")
+  and every organization is closed the way Disconnect closes one, so no Nova
+  send, report delivery or run starts; the shutdown waits for leased work
+  within its bound, and a request refused after that reopens them, and from then on refuses new confirmations
   until the restart. It writes `local-reset-pending.json` into the data folder
   first; the rename is the commit point (if it fails, nothing changed and the
   modal says so; a failed folder flush after it is only logged). It then removes the Microsoft sign-in of
@@ -2536,7 +2543,9 @@ Mockup: `docs/mockups/34-local-reset.html`.
   com.openadminos.desktop`. The marker records when that cleanup ran and goes
   last, so an interrupted wipe resumes at the next launch without repeating
   the Keychain step. External commands are bounded at 5 seconds each, below
-  Chromium's wait for a second launch.
+  Chromium's wait for a second launch, except the Windows task list (15
+  seconds), which reads every task; a wipe killed by a second launch resumes
+  from the marker.
 - **Links.** A data folder that is itself a link is refused at the request
   and never emptied at launch (it may point at a shared folder). Sign-out
   skips token caches that are links or files with more than one hard link,
@@ -2549,7 +2558,7 @@ Mockup: `docs/mockups/34-local-reset.html`.
   or, on Linux, when a mount sits at or inside it (a bind mount; an
   unreadable mount table counts too). Cache folders outside the data folder
   are skipped with a warning on the same checks, on every platform. A
-  `policy.json` that is a link at all, a folder or anything else than a
+  `policy.json` that is a link at all, a folder or anything other than a
   plain file at that name, stops the
   reset at the request and at launch: a chain of links can always be built
   that a check cannot follow the way the system does, so the reset does not

@@ -63,3 +63,13 @@ Format:
 **Why:** Loading a local model makes the machine unusable. The PR #212 end-to-end check launched a dev build whose seeded profile had Ollama active; nothing was loaded, but the maintainer made the rule explicit on 2026-11-19.
 
 **How to apply:** Seed end-to-end profiles with a hosted provider or none, put the rule in every brief for an implementer or reviewer that may launch the app, and run `ollama stop <model>` at once if one is loaded.
+
+---
+
+## Do not edit a worktree while a reviewer is reading it
+
+**Pattern:** While a delegated reviewer reviews a commit in the shared worktree, keep the tree at that commit: write fixes for findings from other reviewers into a patch outside the tree (or wait), and apply them after every reviewer of the round has reported.
+
+**Why:** In PR #212 I edited files during Muse's rounds 8, 10 and 15 although the brief promised an untouched tree; Muse saw mixed states, one test run failed on a half-applied change, and its results had to be qualified.
+
+**How to apply:** After starting a review round, do not touch tracked files until all reviewers of that round report. If a finding arrives early, save the fix with `git diff > <scratchpad>/patch` and `git checkout -- .`, or prepare it only in notes.

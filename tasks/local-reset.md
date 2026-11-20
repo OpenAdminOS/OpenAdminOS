@@ -199,6 +199,22 @@ the installed app's scheduler, login item or caches.
   any running or queued run and declines connector approvals from the
   request on, the guide's Linux check reports "No mount found" or STOP
   explicitly, and task presence comes from the full task list.
+- Review round 15: Claude no blocking; Sol two blocking (Nova sends and
+  queued report deliveries during a reset, the Windows guide pasting the
+  task query and delete together) plus a medium (a refused reset declining
+  a pending approval). Fixed: once every check passes, connector approvals
+  are declined and every organization is closed through the tenant
+  lifecycle (no new Nova send, delivery or run; the shutdown drains leased
+  work; a later refusal reopens them), deliveries skip during a reset, and
+  the guide splits the task query and delete.
+- Review round 15 (Muse): three blocking, the same quiesce area: a run still
+  finishing after cancel or disconnect, Nova sends and delivery passes, and
+  run starts after the checks. Fixed with in-flight counters (run starts,
+  Nova sends, delivery passes) and RunService.hasActiveDrive in the reset
+  check, refusals for new runs and Nova sends once a reset started, plus
+  the SPEC timeout sentence and "other than" wording.
+- Process lesson: twice I edited the tree while a reviewer was reading it;
+  parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the
   appearance handler before it was registered, and failure reasons repeated
   full paths.
