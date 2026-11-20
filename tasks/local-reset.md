@@ -392,6 +392,15 @@ the installed app's scheduler, login item or caches.
   update checks stop at the commit (electron-updater captured its fs
   functions), streams fail as streams, the commit stops self-writing work
   before sealing, the rejection log listener is removed on unseal.
+- Review round 38: Claude and Muse no blocking. Sol one blocking (the
+  relaunch helper's no_new_privs keeps a new AppImage from mounting; a
+  detached shell now starts the AppImage file) and a medium (the login item
+  retry at the next launch checks the wiped folder). Claude and Muse lows
+  applied: seal before the updater stop in the commit callback, a stopped
+  updater stays stopped, refused streams log their error, dangling links
+  followed, APPIMAGE trusted only inside APPDIR, the marker allowed by exact
+  name and temporary pattern, no new hard links from inside, hard links
+  that already exist recorded as accepted.
 - Process lesson: twice I edited the tree while a reviewer was reading it;
   parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the
