@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, renameSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,7 +18,6 @@ import {
   localResetPolicyProblem,
   parseWhoamiUser,
   windowsTaskBelongsToThisAccount,
-  pathHasLinkBelow,
   windowsTaskListHas,
   windowsTaskUserId,
   localResetRemovalPlan,
@@ -744,19 +743,16 @@ describe("local reset: wipe at launch", () => {
     }
   });
 
-  it("leaves a cache alone when a folder above it is a link, and reports preferences left behind", async () => {
+  it("removes the cache at its real location when a folder above it is a link, and reports preferences left behind", async () => {
     const dir = await tempDir();
     try {
       const home = join(dir, "home");
       const archive = join(dir, "archive-caches");
       mkdirSync(join(archive, "@openadminosdesktop-updater"), { recursive: true });
-      writeFileSync(join(archive, "@openadminosdesktop-updater", "pending.zip"), "keep");
+      writeFileSync(join(archive, "@openadminosdesktop-updater", "pending.zip"), "app cache");
+      writeFileSync(join(archive, "other-app.cache"), "keep");
       mkdirSync(join(home, "Library"), { recursive: true });
       symlinkSync(archive, join(home, "Library", "Caches"));
-      const cache = join(home, "Library", "Caches", "@openadminosdesktop-updater");
-      assert.equal(pathHasLinkBelow(home, cache), true);
-      assert.equal(pathHasLinkBelow(home, join(home, "Library", "HTTPStorages", "x")), false);
-      assert.equal(pathHasLinkBelow(home, join(dir, "elsewhere", "x")), false);
 
       const data = join(dir, "data");
       mkdirSync(data);
@@ -764,9 +760,36 @@ describe("local reset: wipe at launch", () => {
       const { run } = recordingRun({ "/usr/bin/security": [keychainNotFound], "/usr/bin/defaults": [{ status: 1 }, { status: 0 }] });
       const report = runPendingLocalReset({ userDataDir: data, packaged: true, platform: "darwin", home, env: {}, run });
       assert.equal(report?.status, "completed");
-      assert.ok(existsSync(join(archive, "@openadminosdesktop-updater", "pending.zip")));
-      assert.ok(report?.warnings.some((warning) => warning.item === cache && /link/.test(warning.reason)));
+      // The app's own cache folder goes, wherever ~/Library/Caches resolves; nothing beside it.
+      assert.ok(!existsSync(join(archive, "@openadminosdesktop-updater")));
+      assert.equal(readFileSync(join(archive, "other-app.cache"), "utf8"), "keep");
       assert.ok(report?.warnings.some((warning) => /Preferences/.test(warning.item) && /still there/.test(warning.reason)));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("stops when the data folder is swapped for another while the wipe runs", async () => {
+    const dir = await tempDir();
+    try {
+      const data = join(dir, "data");
+      const other = join(dir, "other-profile");
+      mkdirSync(data);
+      mkdirSync(other);
+      writeFileSync(join(other, "state.json"), "other");
+      seedDataFolder(data, MARKER);
+      const { run } = recordingRun({ "/usr/bin/security": [keychainNotFound] });
+      const report = runPendingLocalReset({
+        userDataDir: data, packaged: true, platform: "darwin", home: join(dir, "home"), env: {}, run,
+        // Another process swaps the emptied folder for a link during the cleanup outside it.
+        removeScheduler: () => {
+          renameSync(data, `${data}-old`);
+          symlinkSync(other, data);
+        },
+      });
+      assert.equal(report?.status, "incomplete");
+      assert.match(report?.failed[0]?.reason ?? "", /replaced by another folder or a link/);
+      assert.deepEqual(readdirSync(other), ["state.json"]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -817,7 +840,8 @@ describe("local reset: wipe at launch", () => {
       assert.equal(folderGoesThroughLink(data), false);
       // On a case-insensitive volume the other spelling is the same folder.
       if (existsSync(join(dir, "profile"))) assert.equal(folderGoesThroughLink(join(dir, "profile")), false);
-      if (process.getuid?.() !== 0) {
+      // chmod cannot take away read access on Windows, and root reads anything.
+      if (process.platform !== "win32" && process.getuid?.() !== 0) {
         chmodSync(join(data, "locked"), 0o000);
         try {
           assert.equal(folderGoesThroughLink(data), true);
