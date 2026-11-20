@@ -84,10 +84,18 @@ and stop if any of these applies:
 - The data folder or a cache folder is a link, or something is mounted at it
   or inside it. Removing through it would delete files wherever it points.
   On macOS check with `ls -ld <folder>` and `mount | grep -i openadmin`. On
-  Linux check with `ls -ld <folder>` and
-  `findmnt -rno TARGET | grep -F "$(realpath <folder>)"`, which lists every
-  mount at or inside the folder. Unmount first, or remove only the link
-  itself. The Windows script below checks for links.
+  Linux check with `ls -ld <folder>` and the command below, which lists
+  every mount at or inside the folder (`findmnt` writes a space in a path as
+  `\x20`, so the targets are decoded first). If it prints anything, or
+  `findmnt` fails, stop. Unmount first, or remove only the link itself.
+
+  ```bash
+  folder="$(realpath ~/.config/OpenAdminOS)"
+  findmnt -rno TARGET | while IFS= read -r target; do printf '%b\n' "$target"; done | grep -F -- "$folder"
+  ```
+
+  Run it again with `~/.cache/@openadminosdesktop-updater` for the cache
+  folder. The Windows script below checks for links.
 - `policy.json` in the data folder is a link (`ls -l` shows an arrow; on
   Windows the script stops on it). Removing the other files can break the IT
   policy; ask whoever manages the device first.
@@ -125,11 +133,14 @@ Then empty the data folder, keeping the IT policy file if there is one:
 find "$HOME/Library/Application Support/OpenAdminOS" -mindepth 1 -maxdepth 1 ! -iname policy.json -exec rm -rf {} +
 ```
 
-If no one manages the device, you can remove the whole folder instead. If `ls -ld` shows the folder as a link (an arrow to
-another place), remove only the link with `rm`, without a trailing slash,
-and check the folder it points to before removing anything there. Commands
-that report that an item does not exist can be ignored. Turn off **OpenAdminOS Menu Bar Helper** in **System Settings >
-General > Login Items** if it is still listed.
+If no one manages the device, you can remove the whole folder instead. If
+`ls -ld` shows the folder as a link (an arrow to another place), remove only
+the link with `rm`, without a trailing slash, and check the folder it points
+to before removing anything there.
+
+Commands that report that an item does not exist can be ignored. Turn off
+**OpenAdminOS Menu Bar Helper** in **System Settings > General > Login Items**
+if it is still listed.
 
 ## Uninstall on Windows
 
@@ -209,8 +220,9 @@ data folder while keeping the IT policy file, and remove the update cache:
 ```bash
 find ~/.config/OpenAdminOS -mindepth 1 -maxdepth 1 ! -iname policy.json -exec rm -rf {} +
 rm -rf ~/.cache/@openadminosdesktop-updater
-``` The key that protects the sign-ins is
-kept by your keyring (GNOME Keyring or KWallet). Neither the in-app reset nor
+```
+
+The key that protects the sign-ins is kept by your keyring (GNOME Keyring or KWallet). Neither the in-app reset nor
 removing the package deletes it: remove the OpenAdminOS entry with your
 keyring tool if you want it gone. Without the token files it protects nothing.
 
