@@ -20,9 +20,10 @@ interface UnexaminedRange extends TextSpan {
 
 interface HistoryReplay extends TextSpan {
   ledger: ClassificationLedger | undefined;
+  hostSerialization?: true;
 }
 
-type ReplayRange = TextSpan & { incomplete: boolean };
+type ReplayRange = TextSpan & { incomplete: boolean; hostSerialization?: true };
 type HistoryFences = ReadonlyMap<string, { length: number; replays: readonly ReplayRange[] }>;
 
 export interface RequestClassification {
@@ -808,10 +809,10 @@ export class ClassificationLedger {
       if (replays) this.revision++;
       if (replays) this.historyFences.set(provenance.fence, {
         length: fragment.length,
-        replays: replays.map(({ start, end, ledger }) => ({
+        replays: replays.map(({ start, end, ledger, hostSerialization }) => ({
           start: fenceEscapes(original.slice(0, start)).length,
           end: fenceEscapes(original.slice(0, end)).length,
-          ledger,
+          ledger, hostSerialization,
         })),
       });
     }
@@ -1188,8 +1189,8 @@ export class ClassificationLedger {
     const retained = [this, ...(this.transient ? [this.transient] : []), ...this.prior].filter(ledger => !ledger.disposed);
     const historyFences = new Map<string, { length: number; replays: ReplayRange[] }>();
     for (const [nonce, { length, replays }] of this.historyFences) {
-      historyFences.set(nonce, { length, replays: replays.map(({ start, end, ledger }) => ({
-        start, end, incomplete: !ledger || ledger.replayEvidenceIncomplete,
+      historyFences.set(nonce, { length, replays: replays.map(({ start, end, ledger, hostSerialization }) => ({
+        start, end, hostSerialization, incomplete: !ledger || ledger.replayEvidenceIncomplete,
       })) });
     }
     return { retained, historyFences, promptReplay: this.promptReplay,
@@ -1475,7 +1476,7 @@ export class ClassificationLedger {
           ranges.push({ section, start, end: Math.min(end, text.length), reason: "history-evidence-unavailable" });
         }
       }
-      const preservedReplays: TextSpan[] = [];
+      const preservedReplays: Array<TextSpan & { hostSerialization?: true }> = [];
       if (historyFences.size || retained.some(ledger => ledger.fences.size)) {
         for (const marker of text.matchAll(/<tenant_data [^<>\n]* nonce="([0-9a-f]{16})">/g)) {
           const start = marker.index + marker[0].length + 1;
@@ -1490,7 +1491,7 @@ export class ClassificationLedger {
               if (replay.incomplete) {
                 ranges.push({ section, start: replayStart, end, reason: "history-evidence-unavailable" });
               } else {
-                preservedReplays.push({ start: replayStart, end });
+                preservedReplays.push({ start: replayStart, end, hostSerialization: replay.hostSerialization });
               }
             }
           }
@@ -1537,7 +1538,7 @@ export class ClassificationLedger {
         if (!retained.some(ledger => ledger.hasShortReplayValues)) break;
         let reported = false;
         const unavailable = () => {
-          if (!reported) ranges.push({ section, ...replay, reason: "history-provenance-unavailable" });
+          if (!reported) ranges.push({ section, start: replay.start, end: replay.end, reason: "history-provenance-unavailable" });
           reported = true;
         };
         if (replay.end - replay.start > decodeBudget || work.remaining < 0) {
@@ -1546,7 +1547,8 @@ export class ClassificationLedger {
         }
         let decoded = text.slice(replay.start, replay.end);
         let toOriginal = (offset: number) => replay.start + offset;
-        for (let depth = 0; depth <= MAX_REPLAY_DECODE_LAYERS; depth++) {
+        const maxLayers = MAX_REPLAY_DECODE_LAYERS + Number(replay.hostSerialization === true);
+        for (let depth = 0; depth <= maxLayers; depth++) {
           if (!decoded.includes("\\")) break;
           decodeBudget -= decoded.length;
           if (decodeBudget < 0) {
@@ -1555,9 +1557,9 @@ export class ClassificationLedger {
           }
           const layer = decodeReplayLayer(decoded, toOriginal);
           if (!layer) break;
-          if (depth === 0 && layer.uncertain || depth === MAX_REPLAY_DECODE_LAYERS && layer.changed) {
+          if (depth === 0 && layer.uncertain || depth === maxLayers && layer.changed) {
             unavailable();
-            if (depth === MAX_REPLAY_DECODE_LAYERS) break;
+            if (depth === maxLayers) break;
           }
           if (!layer.changed) break;
           ({ text: decoded, toOriginal } = layer);

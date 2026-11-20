@@ -53,7 +53,7 @@ export function voiceConversationContext(
     currentClassificationLedger()?.registerHistoryReplay(historyJson, encoded.map((turn, i) => {
       const assistantId = selected[i]?.assistantId;
       const end = start + turn.length;
-      const replay = { start, end, ledger: assistantId ? ledgerForAssistant?.(assistantId) : undefined };
+      const replay = { start, end, hostSerialization: true as const, ledger: assistantId ? ledgerForAssistant?.(assistantId) : undefined };
       start = end + 1;
       return replay;
     }));

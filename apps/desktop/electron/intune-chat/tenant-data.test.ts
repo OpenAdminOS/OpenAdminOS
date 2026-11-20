@@ -557,7 +557,8 @@ for (const voice of [false, true]) {
     const hint = "qzt";
     const escapedHint = "qx\u0000z";
     const serialized = JSON.stringify({ nested: JSON.stringify({ inner: JSON.stringify({ excerpt: escapedHint }) }) });
-    const encodedHint = [...serialized.matchAll(/qx\\+u0000z/g)][0]![0];
+    const spelling = [...serialized.matchAll(/qx\\+u0000z/g)][0]![0];
+    const encodedHint = voice ? JSON.stringify(spelling).slice(1, -1) : spelling;
     const path = "/applications";
     let originalLedger: ClassificationLedger | undefined;
     const f = await fixture({

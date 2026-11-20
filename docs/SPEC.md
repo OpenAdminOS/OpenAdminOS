@@ -1870,7 +1870,7 @@ replayed ranges incomplete if the original observations were dropped, expired
 or otherwise unavailable. Text detectors and the cache index still identify
 evidence in the replay. A short Credential value that matches replayed text
 without its original field or rendering provenance marks that matching range
-incomplete. Retained replay decodes up to three escape layers in bounded work
+incomplete. Retained replay decodes up to three escape layers plus the Nova history wrapper in bounded work
 and maps each match to the original UTF-16 spelling. Unsupported, truncated
 or over-budget escape evidence leaves the affected replay incomplete.
 Desktop Nova command routing scans with the current tenant's
