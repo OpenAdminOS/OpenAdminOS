@@ -1874,6 +1874,9 @@ and low-specificity values need field or rendering provenance, or a
 whole-word match for distinctive short identifiers. Boolean and numeric
 values need provenance. Serialized arrays preserve field provenance for all
 elements, including nested arrays. Generic phrases use word boundaries.
+When a sandboxed script uses a Graph value that needs field provenance as
+an unbound word or token in its prompt, the matching range is incomplete.
+Distinctive values still match across the full request.
 Transformed values carry their original class through clipping, scalar
 interpolation and standalone fences. Template joins, samples, bounded JSON
 and case changes preserve source fields and individual element offsets.

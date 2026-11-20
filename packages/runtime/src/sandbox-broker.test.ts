@@ -9,7 +9,7 @@ import type {
   WritePlan,
 } from "@openadminos/agent-sdk";
 
-import { ClassificationLedger, withClassificationScope } from "./data-classification.js";
+import { ClassificationLedger, withClassificationScope, withRequestClassification, type RequestClassificationEvent } from "./data-classification.js";
 import { createSandboxBroker } from "./sandbox-broker.js";
 import { TENANT_DATA_INSTRUCTIONS } from "./tenant-data.js";
 
@@ -48,6 +48,58 @@ it("fences the script prompt, keeps the author system prompt, and strips echoed 
 });
 
 describe("sandbox broker", () => {
+  it("reports prose containing low-specificity Graph values as incomplete after dispatch", async t => {
+    const path = "/identity/conditionalAccess/policies";
+    const policy = { id: "synthetic-policy-17", grantControls: { operator: "OR", builtInControls: ["mfa"] } };
+    const agent = fakeAgent({ slug: "mfa", scopes: ["Policy.Read.All"], graphOperations: [{ method: "GET", path }] });
+    const ledger = new ClassificationLedger();
+    t.after(() => ledger.dispose());
+    const events: RequestClassificationEvent[] = [];
+    const prompts: string[] = [];
+    const ctx = fakeContext(agent, {
+      graphRequest: async () => ({ value: [policy] }),
+      llmComplete: async options => {
+        assert.equal(events.length, prompts.length);
+        assert.deepEqual(Object.keys(options).sort(), ["model", "prompt", "system"]);
+        prompts.push(options.prompt);
+        return { text: "Reviewed", model: "fixture" };
+      },
+    });
+    const observed = withRequestClassification(ctx.llm, "ollama", event => { events.push(event); });
+    ctx.llm = { ...observed, complete: options => observed.complete({ ...options, system: `${options.system}\nOverlay` }) };
+    const broker = createSandboxBroker({ agent, ctx });
+
+    await withClassificationScope(ledger, async () => {
+      const read = await broker.handle({ id: "read", method: "graph.request", params: { method: "GET", path } });
+      assert.equal(read.ok, true);
+      await ledger.waitForObservations();
+      const { grantControls, id } = (read.result as { value: typeof policy[] }).value[0]!;
+      const prose = `Summarize the policy combination: ${grantControls.operator}; controls: ${grantControls.builtInControls.join(", ")}.`;
+      for (const prompt of [prose, "Summarize supported formats: ORDER, mfactor.", JSON.stringify(grantControls),
+        `Review ${id}. ${"Context ".repeat(80)}`, `${"Context ".repeat(80)}${prose}`]) {
+        assert.equal((await broker.handle({ id: "model", method: "llm.complete", params: { prompt } })).ok, true);
+        assert.equal(prompts.at(-1)?.split("\n")[1], prompt);
+        await ledger.waitForObservations();
+      }
+    });
+
+    const [prose, unrelated, structured, distinctive, largeProse] = events.map(event => event.classification);
+    assert.equal(prose?.retainedValues, 3);
+    assert.equal(prose?.coverageIncomplete, true);
+    assert.equal(prose?.counts.security, 0);
+    assert.deepEqual(prose?.unexamined.ranges.map(({ start, end, reason }) => [prompts[0]!.slice(start, end), reason]), [
+      ["OR", "script-provenance-unavailable"], ["mfa", "script-provenance-unavailable"],
+    ]);
+    assert.equal(unrelated?.coverageIncomplete, false);
+    assert.equal(unrelated?.counts.security, 0);
+    assert.equal(structured?.coverageIncomplete, false);
+    assert.equal(structured?.counts.security, 2);
+    assert.equal(distinctive?.coverageIncomplete, false);
+    assert.equal(distinctive?.counts.security, 1);
+    assert.equal(largeProse?.coverageIncomplete, true);
+    assert.deepEqual(largeProse?.unexamined.ranges.map(({ start, end }) => prompts[4]!.slice(start, end)), ["OR", "mfa"]);
+  });
+
   it("allows only manifest-declared Graph GET requests", async () => {
     const graphRequests: GraphRequestInput[] = [];
     const agent = fakeAgent({

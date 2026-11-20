@@ -15,7 +15,7 @@ export interface ClassificationSpan extends TextSpan {
 
 interface UnexaminedRange extends TextSpan {
   section: ClassificationSpan["section"];
-  reason: "text-limit" | "match-limit" | "history-evidence-unavailable" | "history-provenance-unavailable" | "failure";
+  reason: "text-limit" | "match-limit" | "history-evidence-unavailable" | "history-provenance-unavailable" | "script-provenance-unavailable" | "failure";
 }
 
 interface HistoryReplay extends TextSpan {
@@ -117,7 +117,7 @@ interface ValueEntry {
   fenceIds?: Set<string>;
   cost: number;
 }
-type MatchMode = "text" | "word" | "field" | "context" | "folded" | "replay";
+type MatchMode = "text" | "word" | "field" | "context" | "folded" | "replay" | "script";
 interface MatchPattern {
   text: string;
   offset: number;
@@ -147,6 +147,7 @@ type ScanState = {
   incomplete: boolean;
   identityIndex: ClassificationOptions["identityIndex"];
   renderedSpans?: ClassificationSpan[];
+  scriptPrompt?: TextSpan;
 };
 
 type EvidenceSnapshot = {
@@ -174,7 +175,7 @@ export interface WorkerScan {
   sections: Record<ClassificationSpan["section"], EncodedText | undefined>;
   ledgers: number[];
   shards: number[];
-  state: Pick<ScanState, "historyFences" | "promptReplay" | "dropped" | "registrations" | "incomplete" | "renderedSpans">;
+  state: Pick<ScanState, "historyFences" | "promptReplay" | "dropped" | "registrations" | "incomplete" | "renderedSpans" | "scriptPrompt">;
 }
 
 export interface WorkerResult {
@@ -600,13 +601,13 @@ export class ClassificationLedger {
     ));
   }
 
-  registerGraph(graphPath: string, data: unknown, signal?: AbortSignal): Promise<void> {
+  registerGraph(graphPath: string, data: unknown, signal?: AbortSignal, context?: "script"): Promise<void> {
     return this.scheduleRegistration(MAX_GRAPH_INPUT_BYTES, (lifetime, reservation) => this.observeIngress(
-      graphClassificationSource(graphPath), data, { graphPath }, signal ? AbortSignal.any([signal, lifetime]) : lifetime, reservation,
+      graphClassificationSource(graphPath), data, { graphPath }, signal ? AbortSignal.any([signal, lifetime]) : lifetime, reservation, context,
     ));
   }
 
-  private async observeIngress(source: string, data: unknown, options: ClassificationOptions, signal: AbortSignal, reservation: ClassificationReservation): Promise<void> {
+  private async observeIngress(source: string, data: unknown, options: ClassificationOptions, signal: AbortSignal, reservation: ClassificationReservation, context?: "script"): Promise<void> {
     if (this.disposed) return;
     const { identityIndex = this.identityIndex, ...settings } = options;
     let indexCurrent = () => true;
@@ -638,7 +639,8 @@ export class ClassificationLedger {
       for (const { value, kind, key, maskRole } of fields) {
         if (this.disposed) return;
         signal?.throwIfAborted();
-        this.add(value, { kind, source, key: key.toLowerCase(), ...(maskRole ? { maskRole } : {}) });
+        const entry = this.add(value, { kind, source, key: key.toLowerCase(), ...(maskRole ? { maskRole } : {}) });
+        if (context === "script" && entry?.mode === "field") this.indexScriptValue(entry, value);
         if (slice.elapsed) await slice.yield();
       }
       if (slice.elapsed) await slice.yield();
@@ -899,6 +901,18 @@ export class ClassificationLedger {
     }
   }
 
+  private indexScriptValue(entry: ValueEntry, value: Scalar): void {
+    if (entry.patterns.some(pattern => pattern.mode === "script")) return;
+    const raw = String(value);
+    const serialized = typeof value === "string" ? JSON.stringify(value).slice(1, -1) : JSON.stringify(value);
+    for (const text of new Set([raw, serialized, fenceEscapes(raw), fenceEscapes(serialized)])) {
+      const cost = text.length + 24;
+      if (!this.reserve(cost, entry.kind)) return;
+      entry.cost += cost;
+      this.index(entry, text, "script");
+    }
+  }
+
   private index(entry: ValueEntry, text: string, mode: MatchMode, provenance?: RenderProvenance): void {
     if (!text || entry.patterns.some(pattern => pattern.text === text && pattern.mode === mode &&
       pattern.before === provenance?.before && pattern.after === provenance?.after)) return;
@@ -980,6 +994,7 @@ export class ClassificationLedger {
     emit: (span: TextSpan, evidence: Evidence, authoritative?: boolean) => void,
     fieldAt?: (start: number, end: number) => string | undefined,
     replayAt?: (start: number, end: number) => void,
+    scriptAt?: (start: number, end: number) => void,
   ): boolean {
     for (let at = from; at < to; at++) {
       const first = text.charCodeAt(at);
@@ -1003,6 +1018,7 @@ export class ClassificationLedger {
         for (const bucket of matched) {
           for (const { text: value, offset, mode, entry, before, after } of bucket) {
             if (mode === "replay" && !replayAt) continue;
+            if (mode === "script" && (!scriptAt || entry.mode !== "field")) continue;
             if (--work.remaining < 0) return false;
             const start = at - offset;
             const end = start + value.length;
@@ -1013,11 +1029,15 @@ export class ClassificationLedger {
               if (work.remaining < 0) return false;
             }
             if (!text.startsWith(value, start)) continue;
-            if ((mode === "word" || mode === "folded" || mode === "replay") && (!wordBoundary(text, start - 1) || !wordBoundary(text, end))) continue;
+            if ((mode === "word" || mode === "folded" || mode === "replay" || mode === "script") && (!wordBoundary(text, start - 1) || !wordBoundary(text, end))) continue;
             if (mode === "context" && (before && (start < before.length || !text.startsWith(before, start - before.length)) ||
                 after && !text.startsWith(after, end))) continue;
             if (mode === "replay") {
               replayAt?.(start, end);
+              continue;
+            }
+            if (mode === "script") {
+              scriptAt?.(start, end);
               continue;
             }
             const field = mode === "field" ? fieldAt?.(start, end) : undefined;
@@ -1058,6 +1078,7 @@ export class ClassificationLedger {
 
   captureEvidence(): EvidenceSnapshot {
     const state = this.scanState();
+    state.scriptPrompt = scriptPrompt.getStore();
     return { state, revisions: state.retained.map(ledger => ledger.revision),
       shards: [...state.identityIndex?.workerShards?.() ?? []], interpolations: templateInterpolations.getStore() };
   }
@@ -1341,6 +1362,11 @@ export class ClassificationLedger {
         }
       }
       const ambiguous = new Map<string, TextSpan>();
+      const ambiguousScript = new Map<string, TextSpan>();
+      const scriptPrompt = section === "prompt" ? state.scriptPrompt : undefined;
+      const scriptAt = scriptPrompt && ((start: number, end: number) => {
+        if (scriptPrompt.start <= start && end <= scriptPrompt.end) ambiguousScript.set(`${start}:${end}`, { start, end });
+      });
       const replayAt = preservedReplays.length ? (start: number, end: number) => {
         if (preservedReplays.some(replay => replay.start <= start && end <= replay.end)) {
           ambiguous.set(`${start}:${end}`, { start, end });
@@ -1349,7 +1375,7 @@ export class ClassificationLedger {
       const folded = foldedIndex ? foldIdentity(text) : undefined;
       for (let from = 0; from < text.length; from += TEXT_CHUNK) {
         const to = Math.min(text.length, from + TEXT_CHUNK);
-        if (!this.scan(rawIndex, text, from, to, work, collect, fieldAt, replayAt) ||
+        if (!this.scan(rawIndex, text, from, to, work, collect, fieldAt, replayAt, scriptAt) ||
             foldedIndex && folded !== undefined && !this.scan(foldedIndex, folded, from, to, work, collect)) {
           // The section-wide detector pass has not examined any of this text.
           ranges.push({ section, start: 0, end: text.length, reason: "match-limit" });
@@ -1368,6 +1394,18 @@ export class ClassificationLedger {
       for (const [key, span] of ambiguous) {
         if (found.get(key)?.kind !== "credential") ranges.push({ section, ...span, reason: "history-provenance-unavailable" });
       }
+      let scriptRanges = 0;
+      let overflow: UnexaminedRange | undefined;
+      for (const [key, span] of ambiguousScript) {
+        if (found.get(key)?.authoritative) continue;
+        if (++scriptRanges <= 256) ranges.push({ section, ...span, reason: "script-provenance-unavailable" });
+        else if (!overflow) overflow = { section, ...span, reason: "script-provenance-unavailable" };
+        else {
+          overflow.start = Math.min(overflow.start, span.start);
+          overflow.end = Math.max(overflow.end, span.end);
+        }
+      }
+      if (overflow) ranges.push(overflow);
       const ordered = [...found.values()].sort((a, b) => a.start - b.start || a.end - b.end);
       for (const { authoritative: _, ...span } of ordered) spans.push(span);
     }
@@ -1383,6 +1421,12 @@ export async function clearTenantClassificationLedgers(tenantId: string): Promis
 }
 
 const scopes = new AsyncLocalStorage<ClassificationLedger>();
+const scriptPrompt = new AsyncLocalStorage<TextSpan>();
+
+/** Keep the fenced script body offsets outside the provider options. */
+export function withScriptPrompt<T>(prompt: string, work: () => T): T {
+  return scriptPrompt.run({ start: prompt.indexOf("\n") + 1, end: prompt.lastIndexOf("\n") }, work);
+}
 let unscopedRegistrations = 0;
 let unscopedRequests = 0;
 let requestSequence = 0;
@@ -1422,9 +1466,9 @@ export function registerTenantData(source: string, data: unknown, options?: Clas
   else unscopedRegistrations++;
 }
 
-export function registerGraphTenantData(graphPath: string, data: unknown, signal?: AbortSignal): void {
+export function registerGraphTenantData(graphPath: string, data: unknown, signal?: AbortSignal, context?: "script"): void {
   const ledger = scopes.getStore();
-  if (ledger) void ledger.registerGraph(graphPath, data, signal);
+  if (ledger) void ledger.registerGraph(graphPath, data, signal, context);
   else unscopedRegistrations++;
 }
 
