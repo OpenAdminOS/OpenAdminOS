@@ -1814,16 +1814,20 @@ field map version when classifications change.
 The SDK exposes `DataClass`, `DATA_CLASSES_BY_SENSITIVITY`, `DataClassCounts`,
 `highestDataClass` and `maxDataClass`. `classifyData` is a host-only API on
 `@openadminos/runtime/data-classification` and returns both field counts and
-coverage. The SQLite cache classifies a row on write and stores the versioned
-paths, classes and mask roles alongside it. The classifier reads the existing
+coverage. The SQLite cache stores versioned paths, classes and mask roles alongside
+rows after background classification. The classifier reads the existing
 row values at those paths. It stores no second copy of the values in SQLite.
 The local worker classifies incoming Graph responses and prepares cache row
-classifications and identity indexes for fresh snapshots. The existing SQLite
-snapshot replacement is atomic. If classification fails during a refresh, the
-new rows remain usable with incomplete coverage. Graph observations cross from the worker in bounded transferable batches.
+classifications and identity indexes after the raw snapshot commits atomically.
+Cache reads return before sidecars are decoded. Background batches register
+fields that survive projection when the final row shape is available. A sidecar
+is valid only for the snapshot read. The observer records incomplete coverage
+if a needed sidecar is missing, stale or too large for a bounded decode.
+Graph observations cross from the worker in bounded transferable batches.
 Startup reads, classifies and backfills cache rows in pages on the worker.
 The main process builds staged identity indexes in yielding slices and
-publishes only finished shards.
+publishes only finished shards. A drift transaction acquires the SQLite write
+lock before reading, so a concurrent backfill cannot invalidate its snapshot.
 The request scanner marks coverage incomplete if the worker lacks the current
 identity index. A confirmed tenant identity can raise a stale cached field
 class. Generic syntax matches such as an unconfirmed GUID honor typed field
@@ -1878,22 +1882,28 @@ offsets from the worker. The main thread handles up to 512 UTF-16 code units
 of combined request text with bounded matcher state. The worker has a
 three-second deadline covering queueing, synchronization and scanning. Its
 queue admits up to 24 jobs and 128 MiB of estimated input, including the active
-job. Cancellation releases queued input promptly. The app stops the worker on
-quit.
+job and observer work admitted before scheduling. A full queue records
+incomplete coverage using request lengths without retaining the request text.
+Cancellation releases queued input promptly. The app stops the worker on quit.
 Multi-tenant summaries use the job ID as their scope.
 Stopping the job releases the summary ledger.
 If work or retention limits leave evidence unexamined, the
 effective class is Credential, with a separate coverage-incomplete flag,
 unexamined quantities and text ranges where applicable. Observed counts and
 spans only include evidence the classifier found. A turn's dropped evidence
-does not mark a later turn incomplete. In Phase A1 the provider starts with
-the original options and signal while the observer scans concurrently on its
-own deadline. The observer records incomplete coverage on failure or timeout. Phase A3
-will scan before dispatch with its own budget and designed states for
-incomplete coverage and policy decisions.
+does not mark a later turn incomplete. In Phase A1 no data path waits for
+classification. Chat turn start, ingress, Graph paging, agent steps, cache
+reads and the provider proceed independently. The provider receives the original
+options and signal. The observer has its own deadline and captures the evidence
+revision at dispatch. Pending evidence in the request scope or evidence lost
+during synchronization makes coverage incomplete and gives the affected
+content Credential as its effective class. Failure and timeouts also produce
+incomplete coverage. Phase A3 will revisit which waits enforcement needs, with
+its own budget and designed states for incomplete coverage and policy decisions.
 
-Each local diagnostic event includes the field map version, timestamp and
-available run or conversation ID. Graph evidence sources use static route
+Each local diagnostic event includes the field map version, dispatch sequence,
+timestamp and available run or conversation ID. The sequence identifies the
+request even when observations finish out of order. Graph evidence sources use static route
 labels. The host retains the most recent 16 records per scope across 32 scopes,
 with up to 256 offsets per retained record. Records expire after 15 minutes.
 Disconnect clears records associated with that organization. Live observers

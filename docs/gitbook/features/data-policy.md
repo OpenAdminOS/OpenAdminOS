@@ -36,9 +36,12 @@ can examine up to 16 million UTF-16 code units each for the system text and
 the prompt, subject to the match work limit. If the scan cannot examine all
 the evidence, its local record marks coverage incomplete separately from
 the credentials it found and uses Credential as the effective class. The
-provider starts with the original request while classification runs in the
-background. The local record reports incomplete coverage if the scan fails
-or its worker times out. The local evidence budget favors credentials and identity
+provider starts with the original request. Chat, agent steps, Graph paging
+and cache reads also run independently of classification. Cache field
+classifications are loaded in background batches. The local record reports
+incomplete coverage if evidence for that request is still pending or was
+lost during synchronization, or if the scan fails or its worker times out.
+The local evidence budget favors credentials and identity
 values. Live runs keep registering evidence until they finish or are
 cancelled. Temporary Chat observations are kept on this device
 for up to four completed turns in each of eight conversations, with a
