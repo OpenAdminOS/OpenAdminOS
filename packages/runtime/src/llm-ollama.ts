@@ -198,9 +198,13 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
        * while the cache still holds it, so a size a concurrent request set
        * and this one just saw fail is not sent again.
        */
+      // Sizes this request already forgot, so a later failure of the same
+      // request does not forget one a newer request has since restored.
+      const forgotten = new Set<number>();
       const forgetSentSizes = () => {
         for (const size of [cachedCtx, retry?.numCtx]) {
-          if (size === undefined) continue;
+          if (size === undefined || forgotten.has(size)) continue;
+          forgotten.add(size);
           const failureKey = contextFailureKey(cacheKey, size);
           ollamaContextFailures.set(failureKey, (ollamaContextFailures.get(failureKey) ?? 0) + 1);
           if (ollamaContextOverrides.get(cacheKey) === size) ollamaContextOverrides.delete(cacheKey);

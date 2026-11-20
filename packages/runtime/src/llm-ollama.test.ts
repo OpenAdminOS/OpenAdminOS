@@ -104,6 +104,8 @@ describe("Ollama context size", () => {
     retryOneWrite?: boolean;
     /** A request with num_ctx gets Ollama's overflow without token counts. */
     retryPromptTooLong?: boolean;
+    /** A request with this num_ctx waits, then gets this memory error. */
+    failCtx?: { numCtx: number; delayMs: number; error: string };
     /** Send one chunk on the first request or the retry, then keep the stream open. */
     stallStream?: { on: "first" | "retry"; open: ServerResponse[] };
   }) {
@@ -177,6 +179,14 @@ describe("Ollama context size", () => {
         if (numCtx !== undefined && options.retryRedirect) {
           res.writeHead(307, { location: "http://example.com/api/chat" });
           res.end();
+          return;
+        }
+        if (options.failCtx && numCtx === options.failCtx.numCtx) {
+          const { delayMs, error } = options.failCtx;
+          setTimeout(() => {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error }));
+          }, delayMs);
           return;
         }
         if (numCtx !== undefined && options.retryPromptTooLong) {
@@ -721,6 +731,36 @@ describe("Ollama context size", () => {
       fake.options.limit = () => 65536;
       await llm.complete({ prompt: "small" });
       assert.deepEqual(fake.chats.at(-1), {});
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("does not forget a size again that a newer request restored while this request's retry ran", async () => {
+    let olderPhase = false;
+    const fake = await fakeOllama({
+      modelMax: 131072,
+      requested: (prompt) => (prompt === "huge" ? 80000 : 40652),
+      limit: (numCtx) => {
+        if (numCtx === 45056) olderPhase = false;
+        return olderPhase && numCtx === 84992 ? 16384 : numCtx ?? 16384;
+      },
+    });
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "restored" });
+      await llm.complete({ prompt: "huge" });
+      // The older request finds 84,992 no longer fits, forgets it and retries at 45,056, which fails late.
+      olderPhase = true;
+      fake.options.failCtx = { numCtx: 45056, delayMs: 300, error: "model requires more system memory (24.1 GiB) than is available (12.0 GiB)" };
+      const older = llm.complete({ prompt: "big" });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Meanwhile a newer request raises 84,992 again and keeps it.
+      await llm.complete({ prompt: "huge" });
+      await assert.rejects(older, /could not load restored with 45,056/);
+      const before = fake.chats.length;
+      await llm.complete({ prompt: "huge" });
+      // One request with the restored size, no overflow and retry.
+      assert.deepEqual(fake.chats.slice(before), [{ num_ctx: 84992 }]);
     } finally {
       await fake.close();
     }
