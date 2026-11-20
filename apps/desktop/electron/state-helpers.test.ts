@@ -613,6 +613,65 @@ it("a row-limited collection keeps the rows within the memory budget instead of 
   await assert.rejects(fetchGraphCachePages(graph, {path:"/auditLogs/signIns"}, undefined, true), /128 MiB/);
 });
 
+import { withoutMisclassifiedGraphDenial } from "./state-helpers.js";
+import type { RunRecord } from "@openadminos/agent-sdk";
+
+describe("scheduled run failure text", () => {
+  // As earlier versions stored it, before denials carried their source.
+  const { source: _source, ...stored } = classifyGraphAccessDenied({ path: "/users", requiredScopes: ["User.Read.All"], grantedScopes: [] });
+
+  it("keeps the Graph denial for a Graph 403", () => {
+    assert.equal(humanizeScheduledRunError(graphAccessDenialText(stored), stored), graphAccessDenialText(stored));
+    assert.match(humanizeScheduledRunError("Graph responded with HTTP 403 for https://graph.microsoft.com/v1.0/users: {\"error\":{\"code\":\"Forbidden\"}}"), /Graph access|Microsoft Graph denied access/);
+    assert.match(humanizeScheduledRunError("Graph request failed (https://graph.microsoft.com/v1.0/users): fetch failed"), /Check network or VPN connectivity/);
+    // A failure classified from its typed error is not read from its text.
+    const adapterWording = "Graph responded with HTTP 403 for https://graph.microsoft.com/v1.0/users: forbidden";
+    assert.equal(humanizeScheduledRunError(adapterWording, undefined, true), adapterWording);
+  });
+
+  it("ignores a stored Graph denial for a 403 that did not come from Microsoft Graph", () => {
+    for (const error of [
+      "Ollama responded with HTTP 403 at http://127.0.0.1:11434/api/chat: Forbidden",
+      "MCP server \"tickets\" responded with HTTP 403: forbidden",
+      "Ollama responded with HTTP 403: Graph request failed: unauthorized",
+      "Ollama responded with HTTP 403: Graph request failed: fetch failed",
+    ]) {
+      const text = humanizeScheduledRunError(error, stored);
+      assert.equal(text, error);
+      assert.doesNotMatch(text, /Microsoft Graph denied access|consent/i);
+    }
+  });
+});
+
+describe("stored runs with a Graph denial for a non-Graph error", () => {
+  const { source: _source, ...legacy } = classifyGraphAccessDenied({ path: "/users", requiredScopes: ["User.Read.All"], grantedScopes: [] });
+  const base: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", trigger: "schedule", steps: [], logs: [] };
+  const ollama = "Ollama responded with HTTP 403 at http://127.0.0.1:11434/api/chat: Forbidden";
+
+  it("drops the denial and the Graph advice saved as the summary", () => {
+    const run = withoutMisclassifiedGraphDenial({ ...base, error: ollama, summary: graphAccessDenialText(legacy), accessDenial: legacy });
+    assert.equal(run.accessDenial, undefined);
+    assert.equal(run.summary, ollama);
+  });
+
+  it("drops a denial stored for a sandboxed provider failure that quotes a Graph error", () => {
+    const error = 'MXC script agent "auditor" failed: Error: llm.complete: Ollama responded with HTTP 403: upstream said\nError: graph.request: Graph responded with HTTP 403 for https://graph.microsoft.com/v1.0/users: {}';
+    const run = withoutMisclassifiedGraphDenial({ ...base, error, summary: graphAccessDenialText(legacy), accessDenial: legacy });
+    assert.equal(run.accessDenial, undefined);
+  });
+
+  it("keeps another summary and every Graph denial", () => {
+    const kept = withoutMisclassifiedGraphDenial({ ...base, error: ollama, summary: "Agent failed: Ollama 403", accessDenial: legacy });
+    assert.equal(kept.accessDenial, undefined);
+    assert.equal(kept.summary, "Agent failed: Ollama 403");
+    const graphRun: RunRecord = { ...base, error: graphAccessDenialText(legacy), summary: graphAccessDenialText(legacy), accessDenial: legacy };
+    assert.equal(withoutMisclassifiedGraphDenial(graphRun), graphRun);
+    const current = classifyGraphAccessDenied({ path: "/users", requiredScopes: ["User.Read.All"], grantedScopes: [] });
+    const wrapped: RunRecord = { ...base, error: "Listing users failed.", accessDenial: current };
+    assert.equal(withoutMisclassifiedGraphDenial(wrapped), wrapped);
+  });
+});
+
 describe("humanizeScheduledRunError", () => {
   it("keeps an Ollama memory failure that mentions 403 MiB instead of calling it a Graph denial", () => {
     const message = "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. Ollama said: cudaMalloc failed: out of memory (403 MiB)";
@@ -623,7 +682,9 @@ describe("humanizeScheduledRunError", () => {
 
   it("ignores a Graph denial an older build saved from what Ollama said", () => {
     const message = "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. Ollama said: cudaMalloc failed: out of memory (403 MiB)";
-    const text = humanizeScheduledRunError(message, classifyGraphAccessDenied({}));
+    // Older builds stored denials without a source.
+    const { source: _source, ...saved } = classifyGraphAccessDenied({});
+    const text = humanizeScheduledRunError(message, saved);
     assert.ok(text.startsWith("Ollama could not load gpt-oss:20b"), text);
   });
 
@@ -633,6 +694,6 @@ describe("humanizeScheduledRunError", () => {
   });
 
   it("still reads a Graph 403 in the app's own words", () => {
-    assert.match(humanizeScheduledRunError("Graph responded with HTTP 403: reconnect to grant scopes"), /Graph/);
+    assert.match(humanizeScheduledRunError("Graph responded with HTTP 403 for https://graph.microsoft.com/v1.0/users: reconnect to grant scopes"), /Graph/);
   });
 });

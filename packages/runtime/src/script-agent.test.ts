@@ -14,7 +14,10 @@ import { setTimeout as delay } from "node:timers/promises";
 import { describe, it } from "node:test";
 
 import {
+  ConnectorScopeError,
   ContextTooSmallError,
+  GraphAccessDeniedError,
+  graphAccessDenialFromError,
   type RunContext,
   type SandboxBrokerRequest,
   type SandboxBrokerResponse,
@@ -140,6 +143,98 @@ definition:
     assert.ok(capturedInput?.readonlyPaths.includes(agentDir));
     assert.equal(capturedInput?.env?.ELECTRON_RUN_AS_NODE, "1");
     assert.ok(capturedInput?.env?.OPENADMINOS_BROKER_DIR);
+  });
+
+  it("keeps the brokered Graph denial the script exited on as the cause", async () => {
+    const consent = new GraphAccessDeniedError({ method: "GET", path: "/deviceManagement/managedDevices", requiredScopes: ["DeviceManagementManagedDevices.Read.All"], grantedScopes: [] });
+    const role = new GraphAccessDeniedError({ method: "GET", path: "/deviceManagement/managedDevices", requiredScopes: ["DeviceManagementManagedDevices.Read.All"], grantedScopes: ["DeviceManagementManagedDevices.Read.All"] });
+    const teams = new ConnectorScopeError("Microsoft Graph rejected the request (HTTP 403). The signed-in admin lacks the required Teams scopes.", { connectorId: "teams", missingScopes: [] });
+    // Each case: the errors Graph raises in order, the response the script exits on, and the cause expected.
+    const cases: Array<{ denials: Error[]; exitOn: number | "other" | "llm"; via?: "connector"; cause: string | undefined }> = [
+      { denials: [consent], exitOn: 0, cause: "missing-consent" },
+      { denials: [consent], exitOn: "other", cause: undefined },
+      { denials: [consent, role], exitOn: 1, cause: "missing-role" },
+      // The script recovered from the first denial and failed on the second request.
+      { denials: [consent, role], exitOn: 0, cause: undefined },
+      { denials: [teams], exitOn: 0, via: "connector", cause: "unknown" },
+      // The script logged a Graph denial, went on, and exited on a provider 403.
+      { denials: [consent], exitOn: "llm", cause: undefined },
+    ];
+    for (const testCase of cases) {
+      const tempRoot = await mkdtemp(path.join(tmpdir(), "openadminos-script-denial-"));
+      const agentDir = path.join(tempRoot, "agent");
+      await mkdir(agentDir, { recursive: true });
+      await writeFile(path.join(agentDir, "agent.mjs"), "process.exit(1);\n");
+      const runner: SandboxRunner = {
+        id: "mxc",
+        probe: async () => ({ backend: "mxc", status: "available", experimentalEnabled: true, supported: true, detail: "test" }),
+        run: async (input) => {
+          const messages: string[] = [];
+          for (const [index] of testCase.denials.entries()) {
+            const response = await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, testCase.via === "connector"
+              ? { id: `teams-${index}`, method: "connector.invoke", params: { connector: "teams", capability: "post-channel-message", args: {} } } as SandboxBrokerRequest
+              : { id: `graph-${index}`, method: "graph.request", params: { method: "GET", path: "/deviceManagement/managedDevices", query: { $select: "id,deviceName" } } } satisfies SandboxBrokerRequest);
+            assert.equal(response.ok, false, JSON.stringify(response));
+            messages.push(response.error?.message ?? "");
+          }
+          const method = testCase.via === "connector" ? "connector.invoke" : "graph.request";
+          let stderr: string;
+          if (testCase.exitOn === "other") stderr = "Error: result file could not be written";
+          else if (testCase.exitOn === "llm") {
+            const llm = await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, { id: "llm-1", method: "llm.complete", params: { prompt: "Summarize.", maxTokens: 10 } } satisfies SandboxBrokerRequest);
+            assert.equal(llm.ok, false);
+            stderr = `Warning: ${method}: ${messages[0]}\nError: llm.complete: ${llm.error?.message}`;
+          } else stderr = `Error: ${method}: ${messages[testCase.exitOn]}`;
+          return { exitCode: 1, signal: null, stdout: "", stderr };
+        },
+      };
+      const manifest = parseAgentTemplate(`
+descriptor:
+  id: script-auditor
+  name: Script Auditor
+  description: Test script auditor.
+  version: 0.1.0
+  author:
+    name: OpenAdminOS
+  category: devices
+  mode: read
+  connectors:
+    - id: teams
+      minVersion: 1.0.0
+      required: false
+      capabilities:
+        - id: post-channel-message
+          version: 1
+execution:
+  kind: script
+  sandbox: mxc
+  entrypoint: agent.mjs
+skills:
+  - id: load_devices
+    format: graph
+    label: Load devices
+    settings:
+      method: GET
+      path: /deviceManagement/managedDevices
+      select:
+        - id
+        - deviceName
+      scopes:
+        - DeviceManagementManagedDevices.Read.All
+definition:
+  result:
+    summary: Script result.
+`);
+      const module = scriptAgentTemplateToModule(manifest, agentDir, { sandboxRunner: runner, tempRoot, nodePath: process.execPath });
+      const ctx = fakeRunContext();
+      let call = 0;
+      ctx.graph.request = async () => { throw testCase.denials[call++]!; };
+      ctx.llm.complete = async () => { throw new Error("Ollama responded with HTTP 403 at http://127.0.0.1:11434/api/chat: Forbidden"); };
+      ctx.connectors = { teams: { capabilities: { postChannelMessage: async () => { throw testCase.denials[call++]!; } } } } as unknown as RunContext["connectors"];
+      const error = await module.run(ctx).then(() => undefined, (failure: unknown) => failure);
+      assert.ok(error instanceof Error);
+      assert.equal(graphAccessDenialFromError(error)?.cause, testCase.cause, JSON.stringify({ ...testCase, denials: undefined }));
+    }
   });
 
   it("fails a script whose model request did not fit with the typed reason", async () => {
@@ -282,6 +377,319 @@ definition:
   });
 
     it("refuses direct template-module conversion for script agents", () => {
+    const manifest = parseAgentTemplate(`
+descriptor:
+  id: script-auditor
+  name: Script Auditor
+  description: Test script auditor.
+  version: 0.1.0
+  author:
+    name: OpenAdminOS
+  category: devices
+  mode: read
+execution:
+  kind: script
+  sandbox: mxc
+  entrypoint: agent.mjs
+skills:
+  - id: load_devices
+    format: graph
+    label: Load devices
+    settings:
+      method: GET
+      path: /deviceManagement/managedDevices
+      scopes:
+        - DeviceManagementManagedDevices.Read.All
+  - id: summarize
+    format: llm
+    label: Summarize
+    settings:
+      prompt: Summarize.
+definition:
+  result:
+    summary: Script result.
+`);
+
+    assert.throws(
+      () => agentTemplateToModule(manifest),
+      /must be loaded through loadAgentModule/,
+    );
+  });
+
+  it("does not blame a recovered size refusal for a later failure", async () => {
+    const { createSandboxBroker } = await import("./sandbox-broker.js");
+    const failure = { code: "context-too-small" as const, promptTokens: 2, answerTokens: 1, neededTokens: 3, limitTokens: 2 };
+    let calls = 0;
+    const ctx = fakeRunContext();
+    ctx.llm = { ...ctx.llm, complete: async () => {
+      calls += 1;
+      if (calls === 1) throw new ContextTooSmallError(failure);
+      return { text: "ok", model: "test-model" };
+    } };
+    const broker = createSandboxBroker({ agent: { slug: "script-auditor", mode: "read", scopes: [], graphOperations: [], connectors: [] }, ctx });
+    await broker.handle({ id: "a", method: "llm.complete", params: { prompt: "big" } });
+    assert.deepEqual(broker.getContextFailure(), failure);
+    await broker.handle({ id: "b", method: "llm.complete", params: { prompt: "small" } });
+    assert.equal(broker.getContextFailure(), undefined);
+    calls = 0;
+    const refused = await broker.handle({ id: "c", method: "llm.complete", params: { prompt: "big again" } });
+    assert.equal(refused.ok, false);
+    assert.deepEqual(broker.getContextFailure(), failure);
+    const denied = await broker.handle({ id: "d", method: "graph.request", params: { method: "GET", path: "/not/declared" } });
+    assert.equal(denied.ok, false);
+    assert.equal(broker.getContextFailure(), undefined);
+  });
+
+    it("keeps a script's own error when it caught a size refusal and failed later", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "openadminos-script-caught-"));
+    const agentDir = path.join(tempRoot, "agent");
+    await mkdir(agentDir, { recursive: true });
+    await writeFile(path.join(agentDir, "agent.mjs"), "process.exit(0);\n");
+    const failure = { code: "context-too-small" as const, promptTokens: 2, answerTokens: 1, neededTokens: 3, limitTokens: 2 };
+    const runner: SandboxRunner = {
+      id: "mxc",
+      probe: async () => ({ backend: "mxc", status: "available", experimentalEnabled: true, supported: true, detail: "test" }),
+      run: async (input) => {
+        await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, { id: "llm-1", method: "llm.complete", params: { prompt: "big" } } satisfies SandboxBrokerRequest);
+        return { exitCode: 1, signal: null, stdout: "", stderr: "TypeError: Cannot read properties of undefined (reading 'value')" };
+      },
+    };
+    const manifest = parseAgentTemplate(`
+descriptor:
+  id: script-auditor
+  name: Script Auditor
+  description: Test script auditor.
+  version: 0.1.0
+  author:
+    name: OpenAdminOS
+  category: devices
+  mode: read
+execution:
+  kind: script
+  sandbox: mxc
+  entrypoint: agent.mjs
+skills:
+  - id: summarize
+    format: llm
+    label: Summarize
+    settings:
+      prompt: Summarize.
+definition:
+  result:
+    summary: Script result.
+`);
+    const ctx = fakeRunContext();
+    ctx.llm = { ...ctx.llm, complete: async () => { throw new ContextTooSmallError(failure); } };
+    const module = scriptAgentTemplateToModule(manifest, agentDir, { sandboxRunner: runner, tempRoot, nodePath: process.execPath });
+    await assert.rejects(() => module.run(ctx), (error: unknown) => {
+      assert.equal(error instanceof ContextTooSmallError, false);
+      assert.match((error as Error).message, /TypeError/);
+      return true;
+    });
+  });
+
+    it("reads only the error the script ended on", () => {
+    const refusal = "Error: llm.complete: This request needs about 20,100 tokens of context (20,000 for the prompt and 100 for the answer), but m accepts 16,384.";
+    assert.equal(endedOnSizeRefusal(`${refusal}\n    at main (agent.mjs:4:1)\n\nNode.js v22.23.5`), true);
+    assert.equal(endedOnSizeRefusal(`${refusal}\nfalling back to local counts\nTypeError: Cannot read properties of undefined (reading 'value')\n    at main (agent.mjs:9:1)`), false);
+    assert.equal(endedOnSizeRefusal("TypeError: x is not a function"), false);
+    // Node's output for an uncaught throw: the source line, a caret, then what was thrown.
+    const thrown = (value: string) => `file:///work/agent.mjs:9\n  throw ${value};\n  ^\n\n${value}\n(Use \`node --trace-uncaught ...\` to show where the exception was thrown)`;
+    assert.equal(endedOnSizeRefusal(`${refusal}\n${thrown("fallback failed")}`), false, "a string thrown after a logged refusal");
+    assert.equal(endedOnSizeRefusal(`file:///work/agent.mjs:4\n  const llm = await brokerRequest(...);\n  ^\n\n${refusal}\n    at main (agent.mjs:4:1)`), true);
+  });
+
+    it("refuses direct template-module conversion for script agents", () => {
+    const manifest = parseAgentTemplate(`
+descriptor:
+  id: script-auditor
+  name: Script Auditor
+  description: Test script auditor.
+  version: 0.1.0
+  author:
+    name: OpenAdminOS
+  category: devices
+  mode: read
+execution:
+  kind: script
+  sandbox: mxc
+  entrypoint: agent.mjs
+skills:
+  - id: load_devices
+    format: graph
+    label: Load devices
+    settings:
+      method: GET
+      path: /deviceManagement/managedDevices
+      scopes:
+        - DeviceManagementManagedDevices.Read.All
+  - id: summarize
+    format: llm
+    label: Summarize
+    settings:
+      prompt: Summarize.
+definition:
+  result:
+    summary: Script result.
+`);
+
+    assert.throws(
+      () => agentTemplateToModule(manifest),
+      /must be loaded through loadAgentModule/,
+    );
+  });
+
+  it("keeps a script's own error when it caught a size refusal and failed later", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "openadminos-script-caught-"));
+    const agentDir = path.join(tempRoot, "agent");
+    await mkdir(agentDir, { recursive: true });
+    await writeFile(path.join(agentDir, "agent.mjs"), "process.exit(0);\n");
+    const failure = { code: "context-too-small" as const, promptTokens: 2, answerTokens: 1, neededTokens: 3, limitTokens: 2 };
+    const runner: SandboxRunner = {
+      id: "mxc",
+      probe: async () => ({ backend: "mxc", status: "available", experimentalEnabled: true, supported: true, detail: "test" }),
+      run: async (input) => {
+        await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, { id: "llm-1", method: "llm.complete", params: { prompt: "big" } } satisfies SandboxBrokerRequest);
+        return { exitCode: 1, signal: null, stdout: "", stderr: "TypeError: Cannot read properties of undefined (reading 'value')" };
+      },
+    };
+    const manifest = parseAgentTemplate(`
+descriptor:
+  id: script-auditor
+  name: Script Auditor
+  description: Test script auditor.
+  version: 0.1.0
+  author:
+    name: OpenAdminOS
+  category: devices
+  mode: read
+execution:
+  kind: script
+  sandbox: mxc
+  entrypoint: agent.mjs
+skills:
+  - id: summarize
+    format: llm
+    label: Summarize
+    settings:
+      prompt: Summarize.
+definition:
+  result:
+    summary: Script result.
+`);
+    const ctx = fakeRunContext();
+    ctx.llm = { ...ctx.llm, complete: async () => { throw new ContextTooSmallError(failure); } };
+    const module = scriptAgentTemplateToModule(manifest, agentDir, { sandboxRunner: runner, tempRoot, nodePath: process.execPath });
+    await assert.rejects(() => module.run(ctx), (error: unknown) => {
+      assert.equal(error instanceof ContextTooSmallError, false);
+      assert.match((error as Error).message, /TypeError/);
+      return true;
+    });
+  });
+
+    it("reads only the error the script ended on", () => {
+    const refusal = "Error: llm.complete: This request needs about 20,100 tokens of context (20,000 for the prompt and 100 for the answer), but m accepts 16,384.";
+    assert.equal(endedOnSizeRefusal(`${refusal}\n    at main (agent.mjs:4:1)\n\nNode.js v22.23.5`), true);
+    assert.equal(endedOnSizeRefusal(`${refusal}\nfalling back to local counts\nTypeError: Cannot read properties of undefined (reading 'value')\n    at main (agent.mjs:9:1)`), false);
+    assert.equal(endedOnSizeRefusal("TypeError: x is not a function"), false);
+    // Node's output for an uncaught throw: the source line, a caret, then what was thrown.
+    const thrown = (value: string) => `file:///work/agent.mjs:9\n  throw ${value};\n  ^\n\n${value}\n(Use \`node --trace-uncaught ...\` to show where the exception was thrown)`;
+    assert.equal(endedOnSizeRefusal(`${refusal}\n${thrown("fallback failed")}`), false, "a string thrown after a logged refusal");
+    assert.equal(endedOnSizeRefusal(`file:///work/agent.mjs:4\n  const llm = await brokerRequest(...);\n  ^\n\n${refusal}\n    at main (agent.mjs:4:1)`), true);
+  });
+
+    it("refuses direct template-module conversion for script agents", () => {
+    const manifest = parseAgentTemplate(`
+descriptor:
+  id: script-auditor
+  name: Script Auditor
+  description: Test script auditor.
+  version: 0.1.0
+  author:
+    name: OpenAdminOS
+  category: devices
+  mode: read
+execution:
+  kind: script
+  sandbox: mxc
+  entrypoint: agent.mjs
+skills:
+  - id: load_devices
+    format: graph
+    label: Load devices
+    settings:
+      method: GET
+      path: /deviceManagement/managedDevices
+      scopes:
+        - DeviceManagementManagedDevices.Read.All
+  - id: summarize
+    format: llm
+    label: Summarize
+    settings:
+      prompt: Summarize.
+definition:
+  result:
+    summary: Script result.
+`);
+
+    assert.throws(
+      () => agentTemplateToModule(manifest),
+      /must be loaded through loadAgentModule/,
+    );
+  });
+
+  it("reads only the error the script ended on", () => {
+    const refusal = "Error: llm.complete: This request needs about 20,100 tokens of context (20,000 for the prompt and 100 for the answer), but m accepts 16,384.";
+    assert.equal(endedOnSizeRefusal(`${refusal}\n    at main (agent.mjs:4:1)\n\nNode.js v22.23.5`), true);
+    assert.equal(endedOnSizeRefusal(`${refusal}\nfalling back to local counts\nTypeError: Cannot read properties of undefined (reading 'value')\n    at main (agent.mjs:9:1)`), false);
+    assert.equal(endedOnSizeRefusal("TypeError: x is not a function"), false);
+    // Node's output for an uncaught throw: the source line, a caret, then what was thrown.
+    const thrown = (value: string) => `file:///work/agent.mjs:9\n  throw ${value};\n  ^\n\n${value}\n(Use \`node --trace-uncaught ...\` to show where the exception was thrown)`;
+    assert.equal(endedOnSizeRefusal(`${refusal}\n${thrown("fallback failed")}`), false, "a string thrown after a logged refusal");
+    assert.equal(endedOnSizeRefusal(`file:///work/agent.mjs:4\n  const llm = await brokerRequest(...);\n  ^\n\n${refusal}\n    at main (agent.mjs:4:1)`), true);
+  });
+
+    it("refuses direct template-module conversion for script agents", () => {
+    const manifest = parseAgentTemplate(`
+descriptor:
+  id: script-auditor
+  name: Script Auditor
+  description: Test script auditor.
+  version: 0.1.0
+  author:
+    name: OpenAdminOS
+  category: devices
+  mode: read
+execution:
+  kind: script
+  sandbox: mxc
+  entrypoint: agent.mjs
+skills:
+  - id: load_devices
+    format: graph
+    label: Load devices
+    settings:
+      method: GET
+      path: /deviceManagement/managedDevices
+      scopes:
+        - DeviceManagementManagedDevices.Read.All
+  - id: summarize
+    format: llm
+    label: Summarize
+    settings:
+      prompt: Summarize.
+definition:
+  result:
+    summary: Script result.
+`);
+
+    assert.throws(
+      () => agentTemplateToModule(manifest),
+      /must be loaded through loadAgentModule/,
+    );
+  });
+
+  it("refuses direct template-module conversion for script agents", () => {
     const manifest = parseAgentTemplate(`
 descriptor:
   id: script-auditor
