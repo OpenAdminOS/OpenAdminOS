@@ -147,7 +147,25 @@ describe("Conditional Access explainer prompt size", () => {
     assert.equal(result.failureReason, undefined);
   });
 
-  it("treats a failing context lookup as unknown", async () => {
+  it("counts an adapter's system suffix in the check, also when the prompt alone is already too large", async () => {
+    const suffix = "Approved instruction. ".repeat(400);
+    for (const count of [33, 250]) {
+      const { llm, sent } = recordingLlm(LOCAL_CONTEXT);
+      const withSuffix: RunLlmApi = { ...llm, systemSuffix: suffix };
+      const plain = await executeRun({ run: createQueuedRun({ agent, providerId: "ollama" }), agent, providerId: "ollama", llm: recordingLlm(1).llm, createGraph: () => graphReturning(syntheticConditionalAccessPolicies(count)), onProgress: () => {} });
+      const result = await executeRun({ run: createQueuedRun({ agent, providerId: "ollama" }), agent, providerId: "ollama", llm: withSuffix, createGraph: () => graphReturning(syntheticConditionalAccessPolicies(count)), onProgress: () => {} });
+      // A one token window refuses every request, so `plain` reports the size without the suffix.
+      const without = plain.failureReason!.promptTokens;
+      if (result.failureReason) {
+        assert.ok(result.failureReason.promptTokens >= without + estimateTokens(suffix), "the suffix is counted");
+        assert.equal(sent.length, 0);
+      } else {
+        assert.equal(sent.length, 1);
+      }
+    }
+  });
+
+    it("treats a failing context lookup as unknown", async () => {
     const { llm, sent } = recordingLlm(undefined);
     llm.contextWindow = async () => {
       throw new Error("lookup failed");

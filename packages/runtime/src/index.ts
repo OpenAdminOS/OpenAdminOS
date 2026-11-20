@@ -913,7 +913,8 @@ function wrapLlmWithThinking(base: RunLlmApi, hooks: ThinkingHooks, signal?: Abo
       const window = await contextWindow(model);
       signal?.throwIfAborted();
       assertPromptFits({
-        system: options.system,
+        // An adapter's own suffix (the self-training overlay) is sent too.
+        system: [options.system, base.systemSuffix].filter(Boolean).join("\n\n"),
         prompt: options.prompt,
         ...(options.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
         ...(window !== undefined ? { contextWindow: window } : {}),

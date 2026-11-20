@@ -398,6 +398,8 @@ export interface AgentUpdateInfo {
   manifestSha256: string;
   /** Minimum OpenAdminOS version required by the registry entry. */
   minAppVersion?: string;
+  /** Whether this app version meets `minAppVersion`, computed by the host. */
+  supported?: boolean;
 }
 
 export interface AgentCompatibility {
@@ -4531,6 +4533,11 @@ export interface RunLlmApi {
    * the request without a size check. Hosted providers leave this out.
    */
   contextWindow?(model?: string): Promise<number | undefined>;
+  /**
+   * Text this adapter appends to every system prompt, after a blank line
+   * (for example approved self-training instructions). Size checks count it.
+   */
+  readonly systemSuffix?: string;
 }
 
 export type SandboxBrokerRequest =
