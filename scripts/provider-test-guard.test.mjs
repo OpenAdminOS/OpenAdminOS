@@ -216,14 +216,26 @@ it("accepts only the smoke run's own server as ready, never a listener another p
     await new Promise((resolve) => foreign.close(resolve));
   }
 
-  const probe = createServer();
-  await new Promise((resolve) => probe.listen(0, "127.0.0.1", resolve));
-  const port = probe.address().port;
-  await new Promise((resolve) => probe.close(resolve));
-  const own = spawn(process.execPath, ["-e", serve], {
-    env: { ...process.env, PORT: String(port), URL: `http://127.0.0.1:${port}` }, stdio: ["ignore", "pipe", "pipe"],
-  });
+  // The positive fixture binds port 0 and keeps printing a colored banner with
+  // its assigned port, as Vite does when color is on, so no port is released
+  // and reused between choosing it and binding it.
+  const colored = `const { createServer } = require("node:http");
+    const server = createServer((_q, r) => r.end("own"));
+    server.listen(0, "127.0.0.1", () => {
+      const banner = () => console.log("Local: http://127.0.0.1:\\x1b[1m" + server.address().port + "\\x1b[22m/");
+      banner(); setInterval(banner, 100);
+    });`;
+  const own = spawn(process.execPath, ["-e", colored], { stdio: ["ignore", "pipe", "pipe"] });
   try {
+    const port = await new Promise((resolve, reject) => {
+      let text = "";
+      own.stdout.on("data", function read(chunk) {
+        text += chunk;
+        const match = text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").match(/127\.0\.0\.1:(\d+)/);
+        if (match) { own.stdout.off("data", read); resolve(Number(match[1])); }
+      });
+      own.once("exit", () => reject(new Error("fixture exited")));
+    });
     await waitForSmokeServer(own, `http://127.0.0.1:${port}`, 20_000);
     // Read over a direct connection, like the probe, so an inherited proxy cannot answer.
     const body = await new Promise((resolve, reject) => {

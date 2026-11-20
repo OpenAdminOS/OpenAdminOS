@@ -87,7 +87,9 @@ export function waitForSmokeServer(child, url, timeoutMs) {
     };
     const onData = (chunk) => {
       output += chunk;
-      if (output.includes(`:${port}`)) check();
+      // Vite colors its banner when the environment asks for color (as CI does),
+      // which puts escape codes between the colon and the port.
+      if (output.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").includes(`:${port}`)) check();
     };
     const timeout = setTimeout(() => finish(new Error(`Timed out waiting for the smoke server at ${url}.`)), timeoutMs);
     if (child.exitCode !== null || child.signalCode !== null) return onExit(child.exitCode, child.signalCode);
