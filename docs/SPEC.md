@@ -1874,7 +1874,10 @@ requests and requests with cached identity indexes. Matcher changes synchronize
 in batches. The desktop transfers request text and receives classification
 offsets from the worker. The main thread handles up to 512 UTF-16 code units
 of combined request text with bounded matcher state. The worker has a
-three-second deadline covering queueing, synchronization and scanning.
+three-second deadline covering queueing, synchronization and scanning. Its
+queue admits up to 24 jobs and 128 MiB of estimated input, including the active
+job. Cancellation releases queued input promptly. The app stops the worker on
+quit.
 Multi-tenant summaries use the job ID as their scope.
 Stopping the job releases the summary ledger.
 If work or retention limits leave evidence unexamined, the
@@ -1882,8 +1885,8 @@ effective class is Credential, with a separate coverage-incomplete flag,
 unexamined quantities and text ranges where applicable. Observed counts and
 spans only include evidence the classifier found. A turn's dropped evidence
 does not mark a later turn incomplete. In Phase A1 the provider starts with
-the original options and signal while the observer scans concurrently.
-The observer records incomplete coverage on failure or timeout. Phase A3
+the original options and signal while the observer scans concurrently on its
+own deadline. The observer records incomplete coverage on failure or timeout. Phase A3
 will scan before dispatch with its own budget and designed states for
 incomplete coverage and policy decisions.
 

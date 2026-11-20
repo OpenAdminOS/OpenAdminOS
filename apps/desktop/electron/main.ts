@@ -1,3 +1,4 @@
+import { shutdownClassificationWorker } from "@openadminos/runtime/data-classification";
 import { runNotificationTitle, tokenCachePartition } from "./state-helpers.js";
 import { saveAuditLogExport } from "./save-audit-log-export.js";
 import { NovaService } from "./nova.js";
@@ -7198,6 +7199,10 @@ if (!gotLock) {
     });
   });
 }
+
+app.on("will-quit", () => {
+  shutdownClassificationWorker();
+});
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {

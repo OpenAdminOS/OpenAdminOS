@@ -1,4 +1,5 @@
 import { walkDataClasses, type ClassificationOptions } from "./data-classification.js";
+import { CLASSIFICATION_QUEUE_MAX_BYTES, ClassificationSlice } from "./classification-worker-client.js";
 import type { ClassifiedValues } from "./request-classification.js";
 
 export interface WorkerGraphResult {
@@ -38,4 +39,32 @@ export function packWorkerGraphResult(data: unknown, options: ClassificationOpti
   });
   flush();
   return { batches, dropped, incomplete: result.budgetExhausted };
+}
+
+/** Estimate retained JSON input bytes without constructing a second copy of the page. */
+export async function graphClassificationBytes(data: unknown, signal?: AbortSignal): Promise<number> {
+  const slice = new ClassificationSlice();
+  let bytes = 0;
+  for (const amount of graphValueBytes(data, new Set())) {
+    bytes += amount;
+    if (bytes > CLASSIFICATION_QUEUE_MAX_BYTES) throw new Error("Graph classification input exceeds the worker queue budget.");
+    if (slice.elapsed) {
+      signal?.throwIfAborted();
+      await slice.yield();
+    }
+  }
+  return bytes;
+}
+
+function* graphValueBytes(value: unknown, active: Set<object>): Iterable<number> {
+  yield typeof value === "string" ? 32 + 2 * value.length : 32;
+  if (!value || typeof value !== "object" || active.has(value)) return;
+  if (active.size >= 128) throw new Error("Graph classification input exceeds the supported nesting depth.");
+  active.add(value);
+  for (const key in value) {
+    if (!Object.hasOwn(value, key)) continue;
+    yield 16 + 2 * key.length;
+    yield* graphValueBytes((value as Record<string, unknown>)[key], active);
+  }
+  active.delete(value);
 }

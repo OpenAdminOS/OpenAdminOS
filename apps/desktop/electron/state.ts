@@ -5641,7 +5641,7 @@ export class AppStateStore {
     }
     const result = await withTransientClassificationScope(ledger, () => llm.complete({
       system: novaCommandInstructions, prompt, maxTokens: 400, temperature: 0, signal: options.signal,
-    }), AbortSignal.any([options.signal, this.tenantLifecycle.signal(tenantId)]));
+    }), this.tenantLifecycle.signal(tenantId));
     await check();
     return result.text;
   }

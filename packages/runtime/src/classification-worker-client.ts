@@ -29,6 +29,13 @@ type WorkerMessage =
 
 const MAIN_SLICE_MS = 2;
 const WORKER_TIMEOUT_MS = 3_000;
+export const CLASSIFICATION_QUEUE_MAX_JOBS = 24;
+export const CLASSIFICATION_QUEUE_MAX_BYTES = 128 * 1024 * 1024;
+
+interface QueuedJob {
+  start(): void;
+  reject(error: Error): void;
+}
 
 export class ClassificationSlice {
   private deadline = performance.now() + MAIN_SLICE_MS;
@@ -45,12 +52,12 @@ export class ClassificationSlice {
 export class ClassificationWorker {
   private readonly worker: Worker;
   private readonly garbage: FinalizationRegistry<number>;
-  private tail = Promise.resolve();
+  private readonly queue = new Set<QueuedJob>();
+  private active?: QueuedJob;
   private reply?: (result: WorkerReply) => void;
-  private failReply?: (error: Error) => void;
   private failure?: Error;
   private nextId = 0;
-  private jobs = 0;
+  private queuedBytes = 0;
   readonly shards = new WeakMap<object, number>();
 
   constructor() {
@@ -93,63 +100,88 @@ export class ClassificationWorker {
     this.worker.postMessage(message, transfers);
   }
 
-  private stop(error: Error): void {
-    if (this.failure) return;
+  stop(error: Error): Promise<number> {
+    if (this.termination) return this.termination;
     this.failure = error;
     if (worker === this) worker = undefined;
-    this.failReply?.(error);
-    void this.worker.terminate();
+    this.termination = this.worker.terminate();
+    this.active?.reject(error);
+    for (const job of this.queue) job.reject(error);
+    return this.termination;
   }
 
-  run<T extends WorkerJob["type"]>(prepare: (client: ClassificationWorker) => Promise<{
-    message: Extract<WorkerJob, { type: T }>; transfers?: ArrayBuffer[];
-  }>, signal?: AbortSignal): Promise<WorkerReplies[T]> {
-    if (++this.jobs === 1) this.worker.ref();
-    let active = false;
-    let cancelled: Error | undefined;
-    let rejectCancellation!: (error: Error) => void;
-    const cancellation = new Promise<never>((_, reject) => { rejectCancellation = reject; });
-    const cancel = (error: Error) => {
-      cancelled = error;
-      if (active) this.stop(error);
-      rejectCancellation(error);
-    };
-    const abort = () => cancel(new Error("Request classification was cancelled."));
-    // The deadline includes queueing, synchronization and the worker scan.
-    const timer = setTimeout(() => cancel(new Error("Classification worker timed out.")), WORKER_TIMEOUT_MS);
-    signal?.addEventListener("abort", abort, { once: true });
-    if (signal?.aborted) abort();
-    const run = this.tail.then(async () => {
-      if (cancelled) throw cancelled;
-      if (this.failure) throw this.failure;
-      active = true;
-      const result = new Promise<WorkerReplies[T]>((resolve, reject) => {
-        this.reply = value => resolve(value as WorkerReplies[T]);
-        this.failReply = reject;
-      });
-      try {
-        const prepared = prepare(this).then(({ message, transfers }) => {
-          this.post(message, transfers);
-          return result;
-        });
-        return await Promise.race([prepared, result]);
-      } catch (error) {
-        // A partially synchronized matcher is unsafe to reuse.
-        this.stop(error instanceof Error ? error : new Error("Classification worker failed."));
-        throw error;
-      } finally {
-        active = false;
-        delete this.reply;
-        delete this.failReply;
-      }
-    });
-    this.tail = run.then(() => undefined, () => undefined);
-    return Promise.race([run, cancellation]).finally(() => {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", abort);
-      if (!--this.jobs) this.worker.unref();
+  private termination?: Promise<number>;
+
+  private startNext(): void {
+    if (this.failure || this.active) return;
+    const job = this.queue.values().next().value;
+    if (!job) return;
+    this.queue.delete(job);
+    this.active = job;
+    job.start();
+  }
+
+  run<T extends WorkerJob["type"]>(
+    bytes: number,
+    prepare: (client: ClassificationWorker) => Promise<{
+      message: Extract<WorkerJob, { type: T }>; transfers?: ArrayBuffer[];
+    }>,
+    signal?: AbortSignal,
+  ): Promise<WorkerReplies[T]> {
+    if (this.failure) return Promise.reject(this.failure);
+    if (signal?.aborted) return Promise.reject(new Error("Request classification was cancelled."));
+    if (this.queue.size + Number(Boolean(this.active)) >= CLASSIFICATION_QUEUE_MAX_JOBS ||
+        bytes > CLASSIFICATION_QUEUE_MAX_BYTES - this.queuedBytes) {
+      return Promise.reject(new Error("Classification worker queue is full."));
+    }
+    const jobSignal = signal && AbortSignal.any([signal]);
+    return new Promise<WorkerReplies[T]>((resolve, reject) => {
+      const finish = () => {
+        clearTimeout(timer);
+        jobSignal?.removeEventListener("abort", abort);
+        this.queue.delete(job);
+        if (this.active === job) {
+          delete this.active;
+          delete this.reply;
+        }
+        this.queuedBytes -= bytes;
+        if (!this.failure && !this.queue.size && !this.active) this.worker.unref();
+        queueMicrotask(() => this.startNext());
+      };
+      const cancel = (error: Error) => {
+        if (this.active === job) void this.stop(error);
+        else job.reject(error);
+      };
+      const abort = () => cancel(new Error("Request classification was cancelled."));
+      const job: QueuedJob = {
+        start: () => {
+          this.reply = result => {
+            finish();
+            resolve(result as WorkerReplies[T]);
+          };
+          void Promise.resolve().then(() => {
+            if (this.failure) throw this.failure;
+            return prepare(this);
+          }).then(({ message, transfers }) => this.post(message, transfers)).catch(error => {
+            // A partially synchronized matcher is unsafe to reuse.
+            void this.stop(error instanceof Error ? error : new Error("Classification worker failed."));
+          });
+        },
+        reject(error) {
+          finish();
+          reject(error);
+        },
+      };
+      // Include queueing, synchronization and the worker scan in the deadline.
+      const timer = setTimeout(() => cancel(new Error("Classification worker timed out.")), WORKER_TIMEOUT_MS);
+      jobSignal?.addEventListener("abort", abort, { once: true });
+      this.queuedBytes += bytes;
+      this.worker.ref();
+      this.queue.add(job);
+      this.startNext();
     });
   }
+
 }
 
 const IDENTITY_BATCH_UNITS = 16_384;
@@ -196,16 +228,25 @@ export async function classifyCacheRows(
   rows: CacheClassificationRow[], graphPath: string, identityIndex: ClassificationOptions["identityIndex"],
   indexValues: boolean, indexNames: boolean, signal?: AbortSignal, startup?: CacheStartupPage,
 ): Promise<CacheClassificationResult> {
-  return requestWorker().run<"cache">(async client => {
+  const bytes = rows.reduce((sum, row) =>
+    sum + 64 + 2 * (row.rawJson.length + row.graphId.length + (row.displayName?.length ?? 0)), 128);
+  return requestWorker().run<"cache">(bytes, async client => {
     const { shards } = await syncIdentityShards(client, identityIndex, new ClassificationSlice());
     return { message: { type: "cache", rows, graphPath, shards, indexValues, indexNames, startup } };
   }, signal);
 }
 
 let worker: ClassificationWorker | undefined;
+let shutDown = false;
 
 export function requestWorker(): ClassificationWorker {
+  if (shutDown) throw new Error("Classification worker shut down.");
   return worker ??= new ClassificationWorker();
+}
+
+export function shutdownClassificationWorker(): void {
+  shutDown = true;
+  void worker?.stop(new Error("Classification worker shut down."));
 }
 
 export function releaseClassificationIdentityShard(shard: object): void {

@@ -4,6 +4,7 @@ import { DATA_CLASSES_BY_SENSITIVITY, maxDataClass, type DataClass, type DataCla
 import { emptyDataClassCounts, graphClassificationSource, requestTextSpans, walkDataClasses, type ClassificationOptions, type TextSpan } from "./data-classification.js";
 import { GRAPH_FIELD_CLASSES_VERSION, type SecurityMaskRole } from "./graph-field-classes.js";
 import { ClassificationSlice, requestWorker, syncIdentityShards, type ClassificationWorker } from "./classification-worker-client.js";
+import { graphClassificationBytes } from "./graph-ingress-classification.js";
 import { TenantValueIndex } from "./tenant-value-index.js";
 
 export interface ClassificationSpan extends TextSpan {
@@ -494,7 +495,8 @@ export class ClassificationLedger {
     try {
       const source = graphClassificationSource(graphPath);
       let indexCurrent = () => true;
-      const classified = await requestWorker().run<"graph">(async client => {
+      const bytes = await graphClassificationBytes(data, signal);
+      const classified = await requestWorker().run<"graph">(bytes, async client => {
         const { shards, isCurrent } = await syncIdentityShards(client, this.identityIndex, new ClassificationSlice());
         indexCurrent = isCurrent;
         const record = data !== null && typeof data === "object" && !Array.isArray(data) ? data as Record<string, unknown> : undefined;
@@ -958,7 +960,8 @@ export class ClassificationLedger {
   async classifyLargeRequest(request: RequestText, signal?: AbortSignal): Promise<RequestClassification> {
     const wasDisposed = this.disposed;
     let indexCurrent = () => true;
-    const result = await requestWorker().run<"scan">(async client => {
+    const bytes = 128 + 2 * ((request.system?.length ?? 0) + request.prompt.length);
+    const result = await requestWorker().run<"scan">(bytes, async client => {
       const slice = new ClassificationSlice();
       const sections = { system: await encodeSection(request.system, slice), prompt: await encodeSection(request.prompt, slice) };
       const transfers = Object.values(sections).flatMap(section => section ? [section.buffer] : []);
@@ -1182,9 +1185,8 @@ export function withRequestClassification(
     if (!scoped) unscopedRequests++;
     const ledger = scoped ?? new ClassificationLedger();
     const { scopeId, tenantIds } = ledger;
-    const { prompt, system, signal } = options;
-    ledger.observeRequest(async lifetime => {
-      const scanSignal = signal ? AbortSignal.any([signal, lifetime]) : lifetime;
+    const { prompt, system } = options;
+    ledger.observeRequest(async scanSignal => {
       let result: RequestClassification;
       let failed = false;
       try {
