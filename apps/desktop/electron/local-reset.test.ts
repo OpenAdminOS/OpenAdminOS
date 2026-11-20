@@ -18,6 +18,7 @@ import {
   localResetPolicyProblem,
   parseWhoamiUser,
   windowsTaskBelongsToThisAccount,
+  pathHasLinkBelow,
   windowsTaskListHas,
   windowsTaskUserId,
   localResetRemovalPlan,
@@ -743,6 +744,34 @@ describe("local reset: wipe at launch", () => {
     }
   });
 
+  it("leaves a cache alone when a folder above it is a link, and reports preferences left behind", async () => {
+    const dir = await tempDir();
+    try {
+      const home = join(dir, "home");
+      const archive = join(dir, "archive-caches");
+      mkdirSync(join(archive, "@openadminosdesktop-updater"), { recursive: true });
+      writeFileSync(join(archive, "@openadminosdesktop-updater", "pending.zip"), "keep");
+      mkdirSync(join(home, "Library"), { recursive: true });
+      symlinkSync(archive, join(home, "Library", "Caches"));
+      const cache = join(home, "Library", "Caches", "@openadminosdesktop-updater");
+      assert.equal(pathHasLinkBelow(home, cache), true);
+      assert.equal(pathHasLinkBelow(home, join(home, "Library", "HTTPStorages", "x")), false);
+      assert.equal(pathHasLinkBelow(home, join(dir, "elsewhere", "x")), false);
+
+      const data = join(dir, "data");
+      mkdirSync(data);
+      seedDataFolder(data, MARKER);
+      const { run } = recordingRun({ "/usr/bin/security": [keychainNotFound], "/usr/bin/defaults": [{ status: 1 }, { status: 0 }] });
+      const report = runPendingLocalReset({ userDataDir: data, packaged: true, platform: "darwin", home, env: {}, run });
+      assert.equal(report?.status, "completed");
+      assert.ok(existsSync(join(archive, "@openadminosdesktop-updater", "pending.zip")));
+      assert.ok(report?.warnings.some((warning) => warning.item === cache && /link/.test(warning.reason)));
+      assert.ok(report?.warnings.some((warning) => /Preferences/.test(warning.item) && /still there/.test(warning.reason)));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("reads task presence from the full task list", () => {
     const csv = '"\\Microsoft Edge Update","20/11/2026 10:00:00","Ready"\r\n"\\OpenAdminOS Scheduler","N/A","Ready"\r\n';
     assert.equal(windowsTaskListHas(csv, "OpenAdminOS Scheduler"), true);
@@ -1054,6 +1083,8 @@ describe("local reset: runs and connector sends", () => {
         await assert.rejects(store.startRun("device-report"), (error: Error) =>
           error instanceof OrganizationBoundaryError && /OpenAdminOS is resetting.*The run did not start/.test(error.message));
         await assert.rejects(store.sendWhatsAppWebTestMessage("+15550100"), /OpenAdminOS is resetting. Nothing was sent/);
+        await assert.rejects(store.prepareSplashtopChange({ organizationId: "org", kind: "reboot", targets: [] } as never), /OpenAdminOS is resetting/);
+        await assert.rejects(store.startBaselineRollback({ tenantId: tenant.id, baselineId: "b" } as never), /OpenAdminOS is resetting/);
         await assert.rejects(
           store.sendNovaConnector({ connectorId: "teams", tenantId: tenant.id } as never),
           /OpenAdminOS is resetting. Nothing more was sent/,
