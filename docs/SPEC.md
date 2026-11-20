@@ -2619,7 +2619,18 @@ Mockup: `docs/mockups/34-local-reset.html`.
   no clear, and a read returns an empty cache without opening the file (a
   read that cannot decrypt would otherwise delete it), so a sign-in
   refresh that was waiting on the network when the reset started never
-  writes or deletes a token file afterwards.
+  writes or deletes a token file afterwards. The commit also seals the data
+  folder for the rest of the process: every secret store (provider and
+  connector secrets, Splashtop tokens, the Nova key, the token caches)
+  neither reads a file (a decrypt failure would delete it), nor writes nor
+  removes one. The WhatsApp Web client stops at the commit, since it writes
+  and deletes its auth files on its own. WhatsApp Web and Splashtop calls
+  that reach a network service and then write credentials (status, login,
+  disconnect, groups; connect, test, rotate, disconnect) are refused once a
+  reset has started, and one under way holds the reset like a connector
+  send. The shutdown before the restart leaves the SQLite databases open:
+  closing checkpoints the write-ahead log and deletes it by path; the
+  process exit releases the handles and the next launch removes the files.
   On Linux the mount table is read again before every removal in the data
   folder and right before a cache folder's removal, so a bind mount added
   under either while the wipe runs is never removed through. On Windows the
