@@ -1706,6 +1706,43 @@ describe("local reset: end to end with the store", () => {
     }
   });
 
+  it("refuses WhatsApp Web and Splashtop work once a reset has started, and stops WhatsApp Web at the commit", async () => {
+    const dir = await tempDir();
+    try {
+      const statePath = join(dir, "state.json");
+      await writeFile(statePath, JSON.stringify({ activeProviderId: "ollama", installedAgents: [], runs: [], tenants: [] }), "utf8");
+      const store = new AppStateStore({ filePath: statePath, tokenStore: memoryTokenStore(new Map()), userDataPath: dir, statsApiUrl: "" });
+      try {
+        let disposed = 0;
+        (store as unknown as { whatsappWebClientInstance: { dispose(): void } }).whatsappWebClientInstance = { dispose: () => { disposed += 1; } };
+        assert.equal(await store.beginLocalReset(), undefined);
+        for (const call of [
+          () => store.getWhatsAppWebStatus(),
+          () => store.startWhatsAppWebLogin(),
+          () => store.disconnectWhatsAppWeb(),
+          () => store.listWhatsAppWebGroups(),
+          () => store.testSplashtop("org-1"),
+          () => store.disconnectSplashtop("org-1"),
+        ]) {
+          await assert.rejects(call(), /OpenAdminOS is resetting/);
+        }
+        store.markLocalResetCommitted();
+        assert.equal(disposed, 1);
+        assert.equal(dataFolderSealed(), true);
+        // The shutdown leaves the databases open: closing would checkpoint
+        // and delete the write-ahead log by path.
+        await store.shutdown(100);
+        const audit = (store as unknown as { auditLog: { closed: boolean } }).auditLog;
+        assert.equal(audit.closed, false);
+      } finally {
+        store.cancelLocalReset();
+        store.close();
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("never creates a missing state file while the reset is being checked", async () => {
     const dir = await tempDir();
     try {

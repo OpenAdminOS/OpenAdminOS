@@ -2541,18 +2541,11 @@ export class AppStateStore {
     } finally {
       if (timer) clearTimeout(timer);
     }
-    for (const close of [
-      () => this.officeServiceInstance?.close(),
-      () => this.intelligenceStore?.close(),
-      () => this.novaStoresInstance?.db.close(),
-      () => this.auditLog.close(),
-    ]) {
-      try {
-        close();
-      } catch (cause) {
-        console.warn(`[local-reset] a store did not close: ${errorText(cause)}`);
-      }
-    }
+    // The SQLite databases are not closed: closing checkpoints the
+    // write-ahead log and deletes it by path, which could reach a profile
+    // restored at the data path meanwhile. The process exits next, which
+    // releases the handles without touching any file, and the launch that
+    // finishes the reset removes the databases and their side files.
   }
 
   private agentUpdatesRoot(): string | undefined {
