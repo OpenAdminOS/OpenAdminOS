@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { waitForSmokeServer } from "./smoke-provider-isolation.mjs";
+import { isolateSmokeProviders, waitForSmokeServer } from "./smoke-provider-isolation.mjs";
 
 const preload = fileURLToPath(new URL("../tests/provider-test-setup.mjs", import.meta.url));
 const fixture = fileURLToPath(new URL("../tests/fixtures/provider-test-guard.mjs", import.meta.url));
@@ -275,3 +275,21 @@ it("probes the renderer directly, never through a proxy the runner inherited", a
   }
 });
 
+it("drops inherited smoke and capture launch flags from the Electron environment", async () => {
+  const inherited = ["OPENADMINOS_SCREENSHOT_CAPTURE", "OPENADMINOS_OFFICE_SMOKE", "OPENADMINOS_FIRST_RUN_CAPTURE",
+    "OPENADMINOS_INTUNE_CHAT_SMOKE", "OPENADMINOS_SUPPORT_BUNDLE_EXPORT_PATH"];
+  const saved = Object.fromEntries(inherited.map((name) => [name, process.env[name]]));
+  for (const name of inherited) process.env[name] = "1";
+  let isolation;
+  try {
+    isolation = await isolateSmokeProviders();
+    for (const name of inherited) assert.equal(isolation.env[name], undefined, name);
+  } finally {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    // No Electron ran, so the harness reports that the guard was never installed.
+    await assert.rejects(isolation.close(), /without installing the provider guard/);
+  }
+});

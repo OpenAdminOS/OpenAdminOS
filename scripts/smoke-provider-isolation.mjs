@@ -8,6 +8,26 @@ import { fileURLToPath } from "node:url";
 
 const preload = fileURLToPath(new URL("./smoke-provider-preload.cjs", import.meta.url));
 
+// Every variable that selects an Electron smoke or capture launch mode or its
+// output paths (apps/desktop/electron/main.ts).
+const SMOKE_LAUNCH_VARIABLES = new Set([
+  "OPENADMINOS_INTUNE_CHAT_SMOKE",
+  "OPENADMINOS_INTUNE_CHAT_SMOKE_USER_DATA",
+  "OPENADMINOS_REPORT_ISSUE_SMOKE",
+  "OPENADMINOS_REPORT_ISSUE_SMOKE_USER_DATA",
+  "OPENADMINOS_OFFICE_SMOKE",
+  "OPENADMINOS_SCREENSHOT_CAPTURE",
+  "OPENADMINOS_SCREENSHOT_CAPTURE_USER_DATA",
+  "OPENADMINOS_SCREENSHOT_OUT_DIR",
+  "OPENADMINOS_SCREENSHOT_HUB_DETAILS",
+  "OPENADMINOS_FIRST_RUN_CAPTURE",
+  "OPENADMINOS_LANDING_CAPTURE",
+  "OPENADMINOS_WEBSITE_CAPTURE",
+  "OPENADMINOS_BRAND_CAPTURE",
+  "OPENADMINOS_CAPTURE_EXTERNAL_URL",
+  "OPENADMINOS_SUPPORT_BUNDLE_EXPORT_PATH",
+]);
+
 // Probe the renderer directly. The parent process may have inherited proxy
 // settings that Electron does not, so the global fetch could answer through a
 // proxy; this request uses its own socket, follows no redirect and is bounded.
@@ -96,9 +116,11 @@ export async function isolateSmokeProviders(...origins) {
     const endpoint = `http://127.0.0.1:${unavailable.address().port}`;
     const env = { ...process.env };
     for (const key of Object.keys(env)) {
-      // Capture modes other than the one a runner sets would change which code
-      // path Electron runs, so a smoke could pass without running its own flow.
-      if (/^(electron_run_as_node|node_options|node_use_env_proxy|http_proxy|https_proxy|all_proxy|no_proxy|openagents_stats_api|openadminos_(first_run|landing|website|brand)_capture|openadminos_capture_external_url)$/i.test(key)) {
+      // Inherited smoke and capture launch flags would change which code path
+      // Electron runs, so a smoke could pass without running its own flow.
+      // Each runner sets the flags for its own mode after this.
+      if (/^(electron_run_as_node|node_options|node_use_env_proxy|http_proxy|https_proxy|all_proxy|no_proxy|openagents_stats_api)$/i.test(key) ||
+          SMOKE_LAUNCH_VARIABLES.has(key.toUpperCase())) {
         delete env[key];
       }
     }
