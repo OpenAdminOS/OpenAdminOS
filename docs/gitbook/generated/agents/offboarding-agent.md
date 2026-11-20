@@ -21,7 +21,7 @@ Builds a conservative stale-device offboarding plan from Intune sync, Entra sign
 | Preferred model | `llama3.1:8b` |
 | Minimum app version | `0.1.0` |
 | Author | OpenAdminOS · verified |
-| Last changed | 2026-11-19 · `aaff3750` |
+| Last changed | 2026-11-19 · `230e66e4` |
 
 ## Execution
 

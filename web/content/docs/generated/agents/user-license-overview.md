@@ -21,7 +21,7 @@ Reviews tenant user licensing hygiene by usage location, account state, and assi
 | Preferred model | `llama3.1:8b` |
 | Minimum app version | `0.1.0` |
 | Author | OpenAdminOS · verified |
-| Last changed | 2026-11-19 · `e247d496` |
+| Last changed | 2026-11-19 · `e7327592` |
 
 ## Execution
 

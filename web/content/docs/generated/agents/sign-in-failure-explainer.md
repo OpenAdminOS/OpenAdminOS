@@ -21,7 +21,7 @@ Clusters recent failed sign-ins by error, app, user, client app, Conditional Acc
 | Preferred model | `llama3.1:8b` |
 | Minimum app version | `0.1.0` |
 | Author | OpenAdminOS · verified |
-| Last changed | 2026-11-19 · `e247d496` |
+| Last changed | 2026-11-19 · `e7327592` |
 
 ## Execution
 

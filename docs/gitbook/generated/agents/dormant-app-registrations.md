@@ -21,7 +21,7 @@ Reviews app registrations for stale experiments, risky exposure, credentials, an
 | Preferred model | `llama3.1:8b` |
 | Minimum app version | `0.6.3` |
 | Author | OpenAdminOS · verified |
-| Last changed | 2026-11-19 · `e247d496` |
+| Last changed | 2026-11-19 · `e7327592` |
 
 ## Execution
 
