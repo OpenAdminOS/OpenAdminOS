@@ -3919,7 +3919,7 @@ the format. Decisions:
   on them by id with their current values even though the previous answer
   filtered on compliance; "only the compliant ones" does not and goes to the
   planner, and so does a later "what about macOS?", which would need both
-  compliance values.
+  compliance values, also after a further narrowing such as "only Windows".
   What ran shows the filters of a follow-up, not the row ids. A device
   lookup stores no follow-up context, and a stopped turn clears the context. When the previous answer matched more
   than 500 rows, no rows were kept and "of those" goes to the planner. Any other answer clears the context, and
@@ -3953,12 +3953,16 @@ the format. Decisions:
   repair for malformed, empty, unfinished or evidence-free replies, no repair
   turn for a missing question kind, at most four model calls before the
   fallback; the short query-writing call of an MCP tool counts like any other
-  model call, so no turn exceeds four calls; a lookup that would leave no call
-  for the answer is not run and the model is told to answer from what it has,
-  and a repair that asks for a missing source runs only when its request, its
-  query writer and the answer still fit, otherwise the answer is kept and says
-  the source was not consulted. Counting the writer without these two rules
-  pushed ordinary Microsoft Learn answers into the fallback). A second
+  model call, so the tool loop never makes more than four calls (the
+  fallback's own cached-data answer is one more call after it); a lookup that
+  would leave no call for the answer is not run and the model is told to
+  answer from what it has; a repair that asks for a missing source, or for the
+  full article behind search excerpts, runs only when its request, its query
+  writer and the answer still fit, otherwise the answer is kept and says the
+  source was not consulted or that it rests on the excerpts; a late local
+  docs index with no call left keeps the answer as written. Counting the
+  writer without these rules pushed ordinary Microsoft Learn answers into the
+  fallback). A second
   progress-only reply falls back as `unfinished` instead of being kept. A rejected `count_cached` call blocks a zero answer as a
   rejected `query_cache` does. A context overflow falls back instead of failing
   the message and returns the provider's error as `failureDetail`.

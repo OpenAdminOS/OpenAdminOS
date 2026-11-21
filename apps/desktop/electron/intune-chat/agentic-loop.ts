@@ -386,6 +386,8 @@ export async function runAgenticChat(
   // Servers whose tool that reads one result in full (get_article) answered in this answer.
   const readServers = new Set<string>();
   let excerptsRepaired = false;
+  /** The server whose excerpts the answer rests on, when the compact budget had no room to read the article. */
+  let excerptsOnly: string | undefined;
   let learnAnswered = false;
   // An MCP server returned results in this answer, so the withheld local docs index stays out.
   let serverAnswered = false;
@@ -674,7 +676,12 @@ export async function runAgenticChat(
     const unread = action.kind === "final" && !excerptsRepaired && !input.voice && !input.smallTalk && invalidQueries.size === 0 && asksHowTo(input.adminQuestion ?? "")
       ? (input.tools.mcp?.tools ?? []).find((tool) => tool.itemIds?.params?.length && !readServers.has(tool.serverId) && mcpResults.some((item) => item.serverId === tool.serverId && item.id))
       : undefined;
-    if (unread) {
+    // On the compact budget the read takes three more calls (request, writer, answer); when they do not fit,
+    // the answer is kept and says it rests on the search excerpts.
+    if (unread && compact && attempts + 3 > maxAttempts) {
+      excerptsRepaired = true;
+      excerptsOnly = unread.serverName;
+    } else if (unread) {
       excerptsRepaired = true;
       await settleModelStep({ kind: "repair", reason: "excerpts" });
       turns.push({ role: "repair", content: `The ${unread.serverName} results so far are titles and short excerpts, and the question asks how to do something. Request ${unread.name} with empty params to read the best matching result in full, then answer from it. The host writes the id. If no result matches the question, answer again and say so.` });
@@ -698,7 +705,8 @@ export async function runAgenticChat(
       // without those passages. It is accepted only when none matched;
       // otherwise the model answers again with them.
       withdrawAnswer();
-      if (await pendingIndex() > 0) {
+      // With no model call left, the answer is kept as written rather than lost to the fallback.
+      if (await pendingIndex() > 0 && (!compact || attempts < maxAttempts)) {
         await settleModelStep({ kind: "repair", reason: "documentation" });
         turns.push({ role: "repair", content: "Passages from the local docs index are now in the prompt. Answer again using them, and cite them with their numbers where you rely on them." });
         continue;
@@ -717,9 +725,10 @@ export async function runAgenticChat(
       const notConsulted = missingNames.length > 0
         ? `\n\n${missingNames.join(" and ")} ${missingNames.length === 1 ? "was" : "were"} not consulted for this answer. The model answered without calling ${missingNames.length === 1 ? "it" : "them"}.`
         : "";
+      const excerptsNote = excerptsOnly ? `\n\nThis answer is based on the ${excerptsOnly} search excerpts; the full article was not read.` : "";
       return {
         ok: true,
-        answer: finalAnswer + notConsulted,
+        answer: finalAnswer + notConsulted + excerptsNote,
         toolTrace,
         iterations: iteration,
         ...(responseModel ? { model: responseModel } : {}),
@@ -733,6 +742,15 @@ export async function runAgenticChat(
       };
     }
 
+    const mcpTool = isMcpChatToolName(action.tool) ? input.tools.mcp?.tools.find((tool) => tool.name === action.tool) : undefined;
+    // The query writer is a model call and counts like any other. A lookup that would leave no call for the
+    // answer is not run; the model is told to answer from what it has, so a turn never exceeds the budget.
+    if (compact && mcpTool && attempts >= maxAttempts - 1) {
+      await settleModelStep({ kind: "repair", reason: "budget" });
+      if (attempts >= maxAttempts) break;
+      turns.push({ role: "repair", content: `No model call is left for another lookup, so ${mcpTool.serverName} was not asked again. Answer now from the results above; if they do not cover the question, say what was not consulted.` });
+      continue;
+    }
     await settleModelStep({ kind: "tool", tool: action.tool, params: action.params });
     if (isTenantTool(action.tool)) {
       // A docs answer that needs tenant data becomes mixed: it then needs tenant evidence too.
@@ -744,14 +762,6 @@ export async function runAgenticChat(
       assertNotCancelled(input.signal);
     }
     const startedAt = new Date().toISOString();
-    const mcpTool = isMcpChatToolName(action.tool) ? input.tools.mcp?.tools.find((tool) => tool.name === action.tool) : undefined;
-    // The query writer is a model call and counts like any other. A lookup that would leave no call for the
-    // answer is not run; the model is told to answer from what it has, so a turn never exceeds the budget.
-    if (compact && mcpTool && attempts >= maxAttempts - 1) {
-      if (attempts >= maxAttempts) break;
-      turns.push({ role: "repair", content: `No model call is left for another lookup. ${action.tool} was not called. Answer now from the results above; if they do not cover the question, say what was not consulted.` });
-      continue;
-    }
     let writerRan = false;
     input.onToolStart?.({
       tool: action.tool,

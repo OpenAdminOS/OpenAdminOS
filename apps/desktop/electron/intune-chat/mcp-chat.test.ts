@@ -971,6 +971,18 @@ describe("The MCP query writer boundary", () => {
       });
     });
 
+    it("keeps the cited answer on the compact budget when the full read does not fit, and says it rests on excerpts", async () => {
+      await withStore(async (store) => {
+        const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+        const prompts: Array<{ system?: string; prompt: string }> = [];
+        const result = await run(store, "how do I upload my first app?", [callSearch, final, callArticle, final], calls, prompts, { budget: "compact" });
+        assert.equal(result.ok, true);
+        if (result.ok) assert.equal(result.answer, "Open Catalog, then Add Package [1].\n\nThis answer is based on the Splashtop Agentic Packr Docs search excerpts; the full article was not read.");
+        assert.deepEqual(calls.map((call) => call.tool), ["search_articles"]);
+        assert.equal(prompts.length, 2, "the search request and the answer; the writer call makes three");
+      });
+    });
+
     it("accepts a second answer without the read, and never asks twice", async () => {
       await withStore(async (store) => {
         const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];

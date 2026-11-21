@@ -463,6 +463,18 @@ describe("local model accuracy on the tester's tenant", () => {
       const switched = (await store.sendIntuneChatMessage({ content: "What about macOS?", conversationId: first.conversation.id, refreshIfStale: false })).assistantMessage;
       assert.doesNotMatch(switched.content, /: 0[.:]/);
       assert.ok(calls.length > 0, "the switch went to the planner");
+      // The chain keeps the history safeguard through another narrowing: "only Windows", then "what about macOS?".
+      const seed = (rows: typeof managedDevices) => cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: new Date().toISOString(), rows });
+      seed(managedDevices);
+      const chain = await store.sendIntuneChatMessage({ content: Q1, refreshIfStale: false });
+      seed(managedDevices.map((device) => (device.deviceName === "WIN-01" ? { ...device, complianceState: "compliant" } : device)));
+      await store.sendIntuneChatMessage({ content: "Which of those are compliant now?", conversationId: chain.conversation.id, refreshIfStale: false });
+      const windows = (await store.sendIntuneChatMessage({ content: "only Windows", conversationId: chain.conversation.id, refreshIfStale: false })).assistantMessage;
+      assert.ok(windows.content.includes("WIN-01"), "only Windows narrows the compliant-now devices");
+      reply(() => "Planner answer.");
+      const chainSwitch = (await store.sendIntuneChatMessage({ content: "What about macOS?", conversationId: chain.conversation.id, refreshIfStale: false })).assistantMessage;
+      assert.equal(chainSwitch.content, "Planner answer.");
+      assert.ok(!chainSwitch.content.includes("MAC-01"));
       const previous = { version: 1 as const, question: Q1, resource: "managedDevices" as const, filters: [{ field: "complianceState", op: "eq" as const, value: "noncompliant" }], label: "Intune managed devices not compliant", total: 6, ids: ["md-w1"], tenantId: tenant.id, computedAt: new Date().toISOString() };
       assert.equal(structuredQueryForQuestion({ question: "only the compliant ones", generatedAt: new Date().toISOString(), previous }), undefined);
     });

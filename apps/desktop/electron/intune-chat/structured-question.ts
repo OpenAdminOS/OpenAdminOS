@@ -37,6 +37,8 @@ export interface StructuredDeviceQuery {
   followUp?: { previousQuestion: string; previousLabel: string };
   /** The previous answer's rows, so a follow-up never counts a device added by a later refresh. */
   ids?: string[];
+  /** The set was read on an earlier answer's devices with a filter replaced, so a switch cannot rebuild it afresh. */
+  historical?: true;
 }
 
 export interface DeviceDetailQuery {
@@ -431,6 +433,8 @@ function followUpQuery(text: string, previous: ChatResultContext, generatedAt: s
     list: true,
     followUp: { previousQuestion: previous.question, previousLabel: previous.label },
     ids: previous.ids,
+    // A chain that once replaced a filter of its set stays on those devices' history.
+    ...(previous.shape?.subsetReplacesSet ? { historical: true as const } : {}),
   };
 }
 
@@ -648,7 +652,7 @@ export function computeStructuredResult(input: {
       label: listedLabel,
       total: listedTotal,
       ...(contextIds ? { ids: contextIds } : {}),
-      shape: { filters: query.filters, ...(query.focus ? { focus: query.focus } : {}), breakdown: query.breakdown, list: query.list, ...(query.followUp && query.focus && query.breakdown.length > 0 ? { breakdownOnSubset: true } : {}), ...(query.focus && query.filters.some((filter) => query.focus!.filters.some((focus) => focus.field === filter.field)) ? { subsetReplacesSet: true } : {}) },
+      shape: { filters: query.filters, ...(query.focus ? { focus: query.focus } : {}), breakdown: query.breakdown, list: query.list, ...(query.followUp && query.focus && query.breakdown.length > 0 ? { breakdownOnSubset: true } : {}), ...(query.historical || (query.focus && query.filters.some((filter) => query.focus!.filters.some((focus) => focus.field === filter.field))) ? { subsetReplacesSet: true } : {}) },
     },
   };
 }
