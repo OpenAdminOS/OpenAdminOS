@@ -2,7 +2,7 @@ import { IconWarning } from "./icons";
 import { Button } from "./Button";
 import { useReportIssue } from "./ReportIssueModal";
 import type { RunRecord } from "../shared/openAdminOS";
-import { graphAccessDenialFromError } from "@openadminos/agent-sdk";
+import { errorIsGraphSignInRejection, graphAccessDenialFromStoredText, storedGraphAccessDenial } from "@openadminos/agent-sdk";
 
 interface Suggestion {
   match: (error: string) => boolean;
@@ -47,6 +47,14 @@ function lmStudioContextAdvice(error: string): string {
 
 /** Errors with one cause and one recovery: only their own playbook is shown. */
 const EXCLUSIVE = [isLmStudioContextTooSmall, isContextLimitLookup];
+
+/**
+ * A Microsoft sign-in error as MSAL reports it: the message starts with an
+ * AADSTS code, or with an OAuth error such as interaction_required followed by
+ * one, also after the app's write-plan wrappers. An AADSTS code quoted further
+ * into a provider's error is not a tenant sign-in.
+ */
+const MICROSOFT_SIGN_IN_ERROR = /^(?:The (?:plan|proposal) could not be checked[^.]*\. |Nothing was applied: )?(?:AADSTS\d+|(?:interaction_required|invalid_grant|consent_required): AADSTS\d+)/;
 
 const SUGGESTIONS: Suggestion[] = [
   {
@@ -98,7 +106,13 @@ const SUGGESTIONS: Suggestion[] = [
     body: "The LLM or Microsoft Graph took longer than expected. Try a smaller model, narrow the agent's scope, or check your network.",
   },
   {
-    match: (e) => /401|unauthor|expired token|interaction_required/i.test(e) && !isContextLimitLookup(e),
+    // Only a Graph 401 ("Graph rejected the access token (HTTP 401)") or a
+    // Microsoft sign-in error (an AADSTS code) is a tenant sign-in failure; a
+    // model server or vendor API that answers 401, 403 Unauthorized or
+    // "expired token" is not.
+    match: (e) =>
+      (errorIsGraphSignInRejection(e) || MICROSOFT_SIGN_IN_ERROR.test(e)) &&
+      !isContextLimitLookup(e),
     title: "Tenant token expired",
     body: "Disconnect and reconnect the tenant from Connections. MSAL caches a refresh token but Graph can revoke it independently.",
   },
@@ -125,10 +139,16 @@ export function RunFailureRemediation({ run }: { run: RunRecord }) {
   const matched = exclusive
     ? SUGGESTIONS.filter((suggestion) => suggestion.match === exclusive)
     : SUGGESTIONS.filter((suggestion) => suggestion.match(own));
-  // A failure that quotes Ollama is never a Graph denial; a run saved by an
-  // older build can carry one read from that quote (for example "403 MiB").
-  const quotesOllama = own !== run.error && /^Ollama /.test(run.error);
-  const accessDenial = exclusive || quotesOllama ? undefined : run.accessDenial ?? graphAccessDenialFromError(own);
+  // Only a Graph error gets Graph recovery advice. Runs stored by earlier
+  // versions can carry an accessDenial for a 403 from a model server, a
+  // vendor API, or an MCP server, for example a "403 MiB" in what Ollama
+  // said; that stored value is ignored. A failure classified from its typed
+  // error is never read from its text; a run stored by an earlier version is
+  // read from its message, as Graph code wrote it before denials were stored.
+  const accessDenial = exclusive
+    ? undefined
+    : storedGraphAccessDenial(run.accessDenial, run.error)
+      ?? (run.graphDenialChecked ? undefined : graphAccessDenialFromStoredText(run.error));
   if (accessDenial) {
     matched.unshift({ match: () => true, title: accessDenial.title, body: `${accessDenial.message} ${accessDenial.recovery}` });
   }
