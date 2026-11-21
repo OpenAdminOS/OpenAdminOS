@@ -2512,33 +2512,14 @@ export class IntelligenceSqliteStore {
     return { total, groups, rows: rows.map((row) => readJson<unknown>(row.raw_json, {})) };
   }
 
-  /**
-   * Cached rows whose display name appears in a text, longest name first,
-   * so "why is LAPTOP-07 not compliant" finds LAPTOP-07. Names shorter
-   * than four characters never match on their own.
-   */
-  findGraphRowsNamedIn(input: { tenantId: string; resource: GraphCacheResourceKind; text: string; limit: number }): Array<{ id: string; name: string }> {
+  /** Cached rows whose display name is exactly this name, ignoring case; more than one means the name is shared. */
+  findGraphRowsNamed(input: { tenantId: string; resource: GraphCacheResourceKind; name: string; limit: number }): Array<{ id: string; name: string }> {
     const rows = this.db
       .prepare(`SELECT graph_id, display_name FROM graph_resources
-        WHERE tenant_id = ? AND resource = ? AND display_name IS NOT NULL AND length(display_name) >= 4
-          AND instr(lower(?), lower(display_name)) > 0
-        ORDER BY length(display_name) DESC, display_name ASC LIMIT ?`)
-      .all(input.tenantId, input.resource, input.text, Math.max(1, Math.floor(input.limit))) as unknown as Array<{ graph_id: string; display_name: string }>;
-    // A name must stand as its own word: "PC-1" is not found inside "PC-12".
-    const lower = input.text.toLowerCase();
-    return rows
-      .filter((row) => {
-        const name = row.display_name.toLowerCase();
-        let index = lower.indexOf(name);
-        while (index >= 0) {
-          const before = lower[index - 1];
-          const after = lower[index + name.length];
-          if ((!before || !/[a-z0-9-]/.test(before)) && (!after || !/[a-z0-9-]/.test(after))) return true;
-          index = lower.indexOf(name, index + 1);
-        }
-        return false;
-      })
-      .map((row) => ({ id: row.graph_id, name: row.display_name }));
+        WHERE tenant_id = ? AND resource = ? AND display_name IS NOT NULL AND lower(display_name) = lower(?)
+        ORDER BY display_name ASC LIMIT ?`)
+      .all(input.tenantId, input.resource, input.name, Math.max(1, Math.floor(input.limit))) as unknown as Array<{ graph_id: string; display_name: string }>;
+    return rows.map((row) => ({ id: row.graph_id, name: row.display_name }));
   }
 
   /** The structured result of the last tenant answer in a conversation, for follow-ups. */

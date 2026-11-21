@@ -410,6 +410,22 @@ describe("local model accuracy on the tester's tenant", () => {
     });
   });
 
+  it("finds a device by its exact cached name, also a short one or one with a space", async () => {
+    await withHarness(async ({ store, cache, calls }) => {
+      await store.setChatInvestigationMode("always-deterministic");
+      cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: new Date().toISOString(),
+        rows: [...managedDevices,
+          { id: "md-pc1", deviceName: "PC1", operatingSystem: "Windows", complianceState: "noncompliant", lastSyncDateTime: recent },
+          { id: "md-desk", deviceName: "Front Desk", operatingSystem: "Windows", complianceState: "noncompliant", lastSyncDateTime: recent }] });
+      for (const name of ["PC1", "Front Desk"]) {
+        const message = (await store.sendIntuneChatMessage({ content: `why is ${name} not compliant?`, refreshIfStale: false })).assistantMessage;
+        assert.match(message.content, new RegExp(`^${name} \\(Windows\\) is marked noncompliant`), name);
+      }
+      assert.equal(calls.length, 0, "answered by code");
+      assert.equal(deviceComplianceReasonQuery("why is my laptop not compliant?", cache, tenant.id), undefined);
+    });
+  });
+
   it("words a device in its grace period as an unmet setting, not a failed rule", async () => {
     await withHarness(async ({ store, cache }) => {
       await store.setChatInvestigationMode("always-deterministic");
@@ -513,6 +529,27 @@ describe("local model accuracy on the tester's tenant", () => {
       const skipped = (await store.sendIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false })).assistantMessage;
       assert.equal(calls.filter((call) => call.loop).length, 0);
       assert.match(skipped.engineNotice ?? "", /openadminos\/openadmin-8b did not complete its last 2 tool-loop answers: it did not return a valid tool request once; it did not finish its plan once\./);
+    });
+  });
+});
+
+describe("The fallback after a failed compact loop", () => {
+  it("makes one cached-data call and fails plainly when that reply only promises work, in both send paths", async () => {
+    await withHarness(async ({ store, calls, reply }) => {
+      for (const send of ["send", "stream"] as const) {
+        recordAgenticOutcome("ollama", "openadminos/openadmin-8b", true);
+        reply(({ loop }) => (loop ? JSON.stringify({ tool: "list_cached_resources", params: {} }) : "I'll check that now."));
+        const request = { content: "Which of our devices need attention?", refreshIfStale: false };
+        const message = (send === "send" ? await store.sendIntuneChatMessage(request) : await store.streamIntuneChatMessage(request, () => {})).assistantMessage;
+        assert.equal(calls.filter((call) => call.loop).length, 4, `${send}: four tool-loop calls`);
+        assert.equal(calls.filter((call) => !call.loop).length, 1, `${send}: one fallback call, no promise retries`);
+        assert.equal(message.status, "failed", send);
+        assert.match(message.content, /^The local model did not finish an answer\./, send);
+        assert.doesNotMatch(message.content, /check that now/, send);
+        assert.equal(message.engineNotice, undefined, send);
+        // The fourth call's tool request is not run: no call is left to use its result.
+        assert.equal(message.toolTrace?.length, 3, send);
+      }
     });
   });
 });

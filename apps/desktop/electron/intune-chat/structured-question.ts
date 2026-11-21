@@ -461,15 +461,16 @@ function dedupe(filters: GraphCacheQueryPredicate[]): GraphCacheQueryPredicate[]
   });
 }
 
-/** "why is LAPTOP-07 not compliant", read whole; the name must be one cached managed device's, exactly. */
-const WHY_NOT_COMPLIANT = /^why (?:is|does) (?:the device |device )?(?<name>[a-z0-9][a-z0-9._-]{2,62}) (?:not compliant|noncompliant|non-compliant|non compliant|marked (?:as )?(?:noncompliant|non-compliant)|show as (?:noncompliant|non-compliant)|failing compliance|fail compliance|out of compliance)$/;
+/** "why is LAPTOP-07 not compliant", read whole; the name between the fixed words must be one cached managed device's, exactly. */
+const WHY_NOT_COMPLIANT = /^why (?:is|does) (?:the device |device )?(?<name>[a-z0-9][a-z0-9 ._'-]{0,62}?) (?:not compliant|noncompliant|non-compliant|non compliant|marked (?:as )?(?:noncompliant|non-compliant)|show as (?:noncompliant|non-compliant)|failing compliance|fail compliance|out of compliance)$/;
 
 /** Whether a question asks why a named managed device is not compliant. */
 export function deviceComplianceReasonQuery(question: string, store: IntelligenceSqliteStore, tenantId: string): DeviceDetailQuery | undefined {
   // Read from the question as typed, not shapeText: its rewrites ("non-compliant" to "noncompliant") would change a device name.
   const name = WHY_NOT_COMPLIANT.exec(normalize(question).replace(/[?!.]+$/, ""))?.groups?.name;
   if (!name) return undefined;
-  const matches = store.findGraphRowsNamedIn({ tenantId, resource: "managedDevices", text: name, limit: 5 }).filter((entry) => entry.name.toLowerCase() === name);
+  // Matched by exact name, so "PC1" and "Front Desk" are found and "my laptop" is not.
+  const matches = store.findGraphRowsNamed({ tenantId, resource: "managedDevices", name, limit: 2 });
   // None, or two records with this name: their states can differ, so code does not pick one. The planner path answers.
   if (matches.length !== 1) return undefined;
   const match = matches[0]!;
@@ -672,7 +673,7 @@ function computeDeviceDetail(
 ): ComputedResult | undefined {
   // The name is resolved again in the snapshot that answers, as the first lookup did it (whole name, any case):
   // a refresh in this turn can have renamed the device or added another of that name.
-  const named = store.findGraphRowsNamedIn({ tenantId, resource: "managedDevices", text: query.deviceName, limit: 5 }).filter((entry) => entry.name.toLowerCase() === query.deviceName.toLowerCase());
+  const named = store.findGraphRowsNamed({ tenantId, resource: "managedDevices", name: query.deviceName, limit: 2 });
   if (named.length !== 1) return undefined;
   const counted = store.countGraphCache({ tenantId, resource: "managedDevices", filters: [{ field: "id", op: "eq", value: named[0]!.id }], listLimit: 1 });
   if (counted.total !== 1) return undefined;

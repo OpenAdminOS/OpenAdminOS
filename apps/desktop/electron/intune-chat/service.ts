@@ -2378,6 +2378,7 @@ export class IntuneChatService {
       provenance.add("workspace", Boolean(workspaceContext));
       const buildDeterministicAnswer = async (
         notice?: string,
+        afterCompactLoop = false,
       ): Promise<{ content: string; model?: string }> => {
         await prepareDeterministic();
         usedDeterministic = true;
@@ -2404,6 +2405,7 @@ export class IntuneChatService {
         const system = buildIntuneChatSystemPrompt(provider?.isLocal === true);
         let model: string | undefined;
         // An answer that only promises work is asked again, at most twice; the last answer is kept.
+        // After a compact loop the fallback is one model call, so the turn stays bounded.
         const content = await completeWithPromiseNudge(async (attempt) => {
           const completion = await llm.complete({
             system,
@@ -2414,7 +2416,14 @@ export class IntuneChatService {
           });
           model = completion.model;
           return completion.text.trim();
-        }, buildAnswerPrompt(answerPack, documentation));
+        }, buildAnswerPrompt(answerPack, documentation), afterCompactLoop ? 0 : undefined);
+        if (afterCompactLoop && (!content || looksLikeUnkeptPromise(content))) {
+          finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0, failed: true });
+          assistantStatus = "failed";
+          assistantError = LOCAL_FALLBACK_UNFINISHED;
+          engineNotice = undefined;
+          return { content: LOCAL_FALLBACK_UNFINISHED, ...(model ? { model } : {}) };
+        }
         finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0 });
         // The answer was written from the computed result, so a follow-up may narrow it.
         if (computed && content.trim()) computedShown = true;
@@ -2484,7 +2493,7 @@ export class IntuneChatService {
               modelTitle = agentic.title;
               documentationSources = agentic.documentationSources ?? [];
             } else {
-              const deterministic = await buildDeterministicAnswer(agentic.fallbackNotice);
+              const deterministic = await buildDeterministicAnswer(agentic.fallbackNotice, localChat);
               assistantContent = deterministic.content;
               responseModel = deterministic.model ?? responseModel;
             }
@@ -3096,7 +3105,7 @@ export class IntuneChatService {
         : contextualQuestion;
       provenance.add("memory", Boolean(voiceContext?.history ?? conversationMemory));
       provenance.add("workspace", Boolean(workspaceContext));
-      const streamDeterministicAnswer = async (notice?: string) => {
+      const streamDeterministicAnswer = async (notice?: string, afterCompactLoop = false) => {
         await prepareDeterministic();
         usedDeterministic = true;
         engineNotice = notice;
@@ -3146,13 +3155,23 @@ export class IntuneChatService {
             // No Learn call runs on this path, so the live text is relabelled the same way as the stored one.
             emitLive(relabelUnverifiedLearn(assistantContent, false), chunk.delta);
           }
-          if (isCancelled() || nudge >= MAX_PROMISE_NUDGES || !looksLikeUnkeptPromise(assistantContent)) break;
+          // After a compact loop the fallback is one model call, so the turn stays bounded.
+          if (isCancelled() || nudge >= (afterCompactLoop ? 0 : MAX_PROMISE_NUDGES) || !looksLikeUnkeptPromise(assistantContent)) break;
           const repaired = `${prompt}\n\nYour previous reply:\n${assistantContent.trim()}\n\n${PROMISE_REPAIR_PROMPT}`;
           // A voice prompt keeps its byte budget; without room for the repair, the answer stands.
           if (options.voice && Buffer.byteLength(system) + Buffer.byteLength(repaired) > voiceByteLimit) break;
           attemptPrompt = repaired;
         }
         assistantContent = relabelUnverifiedLearn(assistantContent.trim(), false);
+        if (afterCompactLoop && !isCancelled() && (!assistantContent || looksLikeUnkeptPromise(assistantContent))) {
+          assistantStatus = "failed";
+          assistantError = LOCAL_FALLBACK_UNFINISHED;
+          assistantContent = LOCAL_FALLBACK_UNFINISHED;
+          engineNotice = undefined;
+          emitDelta(assistantContent, "");
+          finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0, failed: true });
+          return;
+        }
         // The answer was written from the computed result, so a follow-up may narrow it; a blank one shows nothing.
         if (computed && assistantContent.trim()) computedShown = true;
         emitDelta(assistantContent, "");
@@ -3321,7 +3340,7 @@ export class IntuneChatService {
                       : "Nova reached its tool-call limit before finishing. Ask a more focused question or open Chat to inspect the evidence.";
                 assistantContent = assistantError;
                 emitDelta(assistantContent);
-              } else await streamDeterministicAnswer(agentic.fallbackNotice);
+              } else await streamDeterministicAnswer(agentic.fallbackNotice, localChat);
             }
           } else {
             const notice = withMcpSkippedNotice(capability, answerPlan?.mcpInstalled ?? false);
@@ -4065,6 +4084,10 @@ export class IntuneChatService {
   }
 }
 
+
+/** A local model whose tool loop and one cached-data answer both came back without an answer. */
+const LOCAL_FALLBACK_UNFINISHED =
+  "The local model did not finish an answer. Its tool loop stopped, and its answer from cached data was empty or only a progress message, so no answer is shown. Retry, or select a larger model in Settings, Providers.";
 
 /**
  * Observed agentic capability, per provider+model.

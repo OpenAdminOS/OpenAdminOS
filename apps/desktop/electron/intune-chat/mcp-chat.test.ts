@@ -977,7 +977,7 @@ describe("The MCP query writer boundary", () => {
         const prompts: Array<{ system?: string; prompt: string }> = [];
         const result = await run(store, "how do I upload my first app?", [callSearch, final, callArticle, final], calls, prompts, { budget: "compact" });
         assert.equal(result.ok, true);
-        if (result.ok) assert.equal(result.answer, "Open Catalog, then Add Package [1].\n\nThis answer is based on the Splashtop Agentic Packr Docs search excerpts; the full article was not read.");
+        if (result.ok) assert.equal(result.answer, "Open Catalog, then Add Package [1].\n\nThis answer is based on search excerpts; the full article was not read.");
         assert.deepEqual(calls.map((call) => call.tool), ["search_articles"]);
         assert.equal(prompts.length, 2, "the search request and the answer; the writer call makes three");
       });

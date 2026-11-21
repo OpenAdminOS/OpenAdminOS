@@ -3929,7 +3929,9 @@ the format. Decisions:
   a model writing from the pack), never from a loop answer that read the data
   its own way.
 - Questions the data cannot answer: "why is <device> not compliant" names the
-  device's cached state, says the failing rule is not in the cached data, and
+  device's cached state (the device is found by its exact cached name,
+  ignoring case, so "PC1" and "Front Desk" match and "my laptop" does not),
+  says the failing rule is not in the cached data, and
   gives the last sync as the lead, with nothing invented. Only a failing state
   (noncompliant, conflict, error) and grace period get that guidance. A
   compliant device gets its premise corrected ("is compliant in this snapshot,
@@ -3960,9 +3962,13 @@ the format. Decisions:
   full article behind search excerpts, runs only when its request, its query
   writer and the answer still fit, otherwise the answer is kept and says the
   source was not consulted or that it rests on the excerpts; a late local
-  docs index with no call left keeps the answer as written. Counting the
-  writer without these rules pushed ordinary Microsoft Learn answers into the
-  fallback). A second
+  docs index with no call left is not searched and the answer is kept as
+  written; a tool requested on the fourth call is not run, since no call is
+  left to use its result. Counting the writer without these rules pushed
+  ordinary Microsoft Learn answers into the fallback). After a failed compact
+  loop the cached-data fallback is one model call with no promise retries;
+  when that reply is empty or only promises work, the message fails with
+  "The local model did not finish an answer ..." instead of showing it. A second
   progress-only reply falls back as `unfinished` instead of being kept. A rejected `count_cached` call blocks a zero answer as a
   rejected `query_cache` does. A context overflow falls back instead of failing
   the message and returns the provider's error as `failureDetail`.

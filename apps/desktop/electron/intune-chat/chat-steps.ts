@@ -533,7 +533,7 @@ export function toolStepHooks(steps: ChatStepRecorder, mcp: McpChatContext | und
 export type ModelStepOutcome =
   | { kind: "tool"; tool: IntuneChatInvestigationToolName; params: unknown }
   | { kind: "final"; passages: number; trace: readonly IntuneChatToolTraceEntry[] }
-  | { kind: "repair"; reason: "malformed" | "kind" | "sources" | "evidence" | "unfinished" | "lookup" | "empty" | "documentation" | "excerpts" | "budget" }
+  | { kind: "repair"; reason: "malformed" | "kind" | "sources" | "evidence" | "unfinished" | "lookup" | "empty" | "documentation" | "excerpts" | "budget" | "budget-spent" }
   /** The prompt did not fit the model's context window: the loop ends and Chat answers from cached data. */
   | { kind: "context-limit" }
   /** The request did not reach the model: the loop ends with provider-unavailable. */
@@ -566,6 +566,7 @@ const REPAIR: Record<Extract<ModelStepOutcome, { kind: "repair" }>["reason"], st
   documentation: "Answered before the local docs passages arrived",
   excerpts: "Answered from search excerpts",
   budget: "Lookup skipped: no model call left",
+  "budget-spent": "Tool skipped: no model call left",
 };
 
 /** A resource label inside a sentence: product names keep their capital, other labels read as plain words. */
@@ -621,7 +622,7 @@ export function modelStepHooks(steps: ChatStepRecorder, model: AnswerModel, mcp:
             : outcome.kind === "unreachable" ? "Could not reach the model"
               : REPAIR[outcome.reason];
       const detail = outcome.kind === "final" ? `${name} · ${answerInputs(outcome.passages, outcome.trace)}`
-        : outcome.kind === "repair" ? `${name} · ${outcome.reason === "excerpts" ? "asked the model to read the best match first" : outcome.reason === "budget" ? "asked the model to answer now" : "asked the model to try again"}`
+        : outcome.kind === "repair" ? `${name} · ${outcome.reason === "excerpts" ? "asked the model to read the best match first" : outcome.reason === "budget" ? "asked the model to answer now" : outcome.reason === "budget-spent" ? "answered from cached data instead" : "asked the model to try again"}`
           : outcome.kind === "context-limit" ? `${name} · answered from cached data instead`
             : outcome.kind === "unreachable" ? `${name} · the request did not connect` : name;
       steps.finish(current.id, { title, detail: classification ? `${detail} · ${classification}` : detail, durationMs: Math.max(0, Date.now() - current.startedAt) });

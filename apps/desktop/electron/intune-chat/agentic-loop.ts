@@ -386,8 +386,8 @@ export async function runAgenticChat(
   // Servers whose tool that reads one result in full (get_article) answered in this answer.
   const readServers = new Set<string>();
   let excerptsRepaired = false;
-  /** The server whose excerpts the answer rests on, when the compact budget had no room to read the article. */
-  let excerptsOnly: string | undefined;
+  /** The answer rests on search excerpts: the compact budget had no room to read the article. */
+  let excerptsOnly = false;
   let learnAnswered = false;
   // An MCP server returned results in this answer, so the withheld local docs index stays out.
   let serverAnswered = false;
@@ -680,7 +680,7 @@ export async function runAgenticChat(
     // the answer is kept and says it rests on the search excerpts.
     if (unread && compact && attempts + 3 > maxAttempts) {
       excerptsRepaired = true;
-      excerptsOnly = unread.serverName;
+      excerptsOnly = true;
     } else if (unread) {
       excerptsRepaired = true;
       await settleModelStep({ kind: "repair", reason: "excerpts" });
@@ -700,13 +700,14 @@ export async function runAgenticChat(
         }
       : undefined;
     const pendingIndex = indexLoad ?? lateIndex;
-    if (action.kind === "final" && pendingIndex) {
+    // With no model call left the index is not searched: the answer is kept as written, and What ran does not
+    // count passages the model never read.
+    if (action.kind === "final" && pendingIndex && (!compact || attempts < maxAttempts)) {
       // The local docs index loads only now, so the answer was written
       // without those passages. It is accepted only when none matched;
       // otherwise the model answers again with them.
       withdrawAnswer();
-      // With no model call left, the answer is kept as written rather than lost to the fallback.
-      if (await pendingIndex() > 0 && (!compact || attempts < maxAttempts)) {
+      if (await pendingIndex() > 0) {
         await settleModelStep({ kind: "repair", reason: "documentation" });
         turns.push({ role: "repair", content: "Passages from the local docs index are now in the prompt. Answer again using them, and cite them with their numbers where you rely on them." });
         continue;
@@ -725,7 +726,8 @@ export async function runAgenticChat(
       const notConsulted = missingNames.length > 0
         ? `\n\n${missingNames.join(" and ")} ${missingNames.length === 1 ? "was" : "were"} not consulted for this answer. The model answered without calling ${missingNames.length === 1 ? "it" : "them"}.`
         : "";
-      const excerptsNote = excerptsOnly ? `\n\nThis answer is based on the ${excerptsOnly} search excerpts; the full article was not read.` : "";
+      // Worded without the server: a later docs index repair may have added local passages to the answer.
+      const excerptsNote = excerptsOnly ? "\n\nThis answer is based on search excerpts; the full article was not read." : "";
       return {
         ok: true,
         answer: finalAnswer + notConsulted + excerptsNote,
@@ -745,10 +747,17 @@ export async function runAgenticChat(
     const mcpTool = isMcpChatToolName(action.tool) ? input.tools.mcp?.tools.find((tool) => tool.name === action.tool) : undefined;
     // The query writer is a model call and counts like any other. A lookup that would leave no call for the
     // answer is not run; the model is told to answer from what it has, so a turn never exceeds the budget.
+    // Any other tool needs one more call to use its result; with none left it is not run either (a Graph refresh
+    // would read tenant data no answer uses).
+    if (compact && attempts >= maxAttempts) {
+      await settleModelStep({ kind: "repair", reason: "budget-spent" });
+      break;
+    }
     if (compact && mcpTool && attempts >= maxAttempts - 1) {
       await settleModelStep({ kind: "repair", reason: "budget" });
-      if (attempts >= maxAttempts) break;
-      turns.push({ role: "repair", content: `No model call is left for another lookup, so ${mcpTool.serverName} was not asked again. Answer now from the results above; if they do not cover the question, say what was not consulted.` });
+      turns.push({ role: "repair", content: mcpResults.length > 0
+        ? `No model call is left for another lookup, so ${mcpTool.serverName} was not asked again. Answer now from the results above; if they do not cover the question, say what was not consulted.`
+        : `No model call is left for a lookup, so ${mcpTool.serverName} was not asked. Answer now from what is in this prompt, and say that no documentation source was consulted.` });
       continue;
     }
     await settleModelStep({ kind: "tool", tool: action.tool, params: action.params });
