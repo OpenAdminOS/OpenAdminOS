@@ -238,7 +238,7 @@ describe("sandbox broker", () => {
     const path = "/deviceManagement/managedDevices";
     const agent = fakeAgent({
       graphOperations: [{ method: "GET", path }],
-      connectors: [{ id: "teams", required: true, capabilities: [{ id: "list-teams", version: 1 }] }],
+      connectors: [{ id: "teams", minVersion: "1.0.0", required: true, capabilities: [{ id: "list-teams", version: 1 }] }],
     });
     for (const [name, data, connector, precedingRead] of [
       ["empty Graph collection", { value: [] }, false, false],
