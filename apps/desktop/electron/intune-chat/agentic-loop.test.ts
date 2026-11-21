@@ -73,6 +73,68 @@ it("fences every tenant tool observation, tenant names and errors without changi
   } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
 });
 
+for (const voice of [false, true]) {
+  it(`traces tool counts and derived facts in ${voice ? "compact Nova" : "pretty Chat"} JSON`, async t => {
+    const dir = await mkdtemp(join(tmpdir(), "fixture-chat-counts-"));
+    const store = seededStore(dir);
+    t.after(async () => { store.close(); await rm(dir, { recursive: true, force: true }); });
+    const path = "/deviceManagement/managedDevices";
+    const tools = toolContext(store, async () => ({ "@odata.count": 913, value: [{ id: "fixture-row" }] }));
+    tools.refreshResource = async resource => ({ resource, label: resource, rows: 717, pages: 21, ok: true,
+      refreshedAt: "2026-01-09T03:04:05.000Z", pageLimitReached: true });
+    const cases = [
+      [{ tool: "list_cached_resources", params: {} }, [["rows", "1"]]],
+      [{ tool: "query_cache", params: { resource: "managedDevices" } },
+        [["totalCount", "1"], ["returnedRows", "1"], ["rows", "1"], ["limit", "25"], ["capped", "false"]]],
+      [{ tool: "query_cache", params: { resource: "managedDevices", where: { deviceName: "fixture-missing" } } },
+        [["cachedRowsForResource", "1"], ["totalCount", "0"], ["returnedRows", "0"]]],
+      [{ tool: "graph_get", params: { path } },
+        [["totalCount", "913"], ["rowCountInPage", "1"], ["returnedRows", "1"], ["pagesFetched", "1"], ["nextLinkPresent", "false"]]],
+      [{ tool: "refresh_resource", params: { resource: "managedDevices" } },
+        [["rows", "717"], ["pages", "21"], ["pageLimitReached", "true"]]],
+      [{ tool: "query_drift", params: {} }, [["returnedRows", "0"], ["matchedRows", "0"]]],
+    ] as const;
+    for (const [call, fields] of cases) await t.test(JSON.stringify(call), async () => {
+      const ledger = new ClassificationLedger();
+      const requests: LlmOptions[] = [];
+      const events: RequestClassificationEvent[] = [];
+      const reply = (options: LlmOptions) => {
+        requests.push(options);
+        return { model: "fixture", text: JSON.stringify(requests.length === 1 ? call : { final: true, answer: "Reviewed." }) };
+      };
+      const llm = withRequestClassification({ available: true, streamsIncrementally: voice,
+        async complete(options) { return reply(options); },
+        async *stream(options) {
+          const { text, model } = reply(options);
+          yield { model, delta: text, accumulated: text, done: true };
+        },
+      }, "ollama", event => events.push(event));
+      try {
+        const result = await withClassificationScope(ledger, () => runAgenticChat({
+          ...baseInput(store, llm), tools, voice, smallTalk: true, onAnswerText: () => {}, promptByteLimit: 40_000,
+        }));
+        assert.equal(result.ok, true);
+        await ledger.waitForObservations();
+        assert.equal(requests.length, 2);
+        const { prompt } = requests[1]!;
+        const { unexamined, coverageIncomplete } = events.sort((a, b) => b.requestSequence - a.requestSequence)[0]!.classification;
+        assert.equal(coverageIncomplete, true);
+        for (const [key, value] of fields) {
+          const matches = [...prompt.matchAll(new RegExp(`"${key}":${voice ? "" : " "}(${value})(?![0-9])`, "g"))];
+          assert.ok(matches.length, `${key} was absent: ${prompt}`);
+          for (const match of matches) {
+            const end = match.index + match[0].length;
+            assert.ok(unexamined.ranges.some(range => range.section === "prompt" && range.end === end &&
+              range.start === end - value.length && range.reason === "rendered-provenance-unavailable"),
+            `missing ${key} at ${end - value.length}`);
+          }
+        }
+        assert.ok(unexamined.ranges.some(range => prompt.slice(range.start, range.end) === result.toolTrace[0]?.resultSummary));
+      } finally { ledger.dispose(); }
+    });
+  });
+}
+
 it("classifies the exact clipped Graph script without changing either request", async () => {
   const dir = await mkdtemp(join(tmpdir(), "chat-classification-script-"));
   const store = seededStore(dir);
@@ -157,7 +219,9 @@ it("keeps a clipped Graph credential classified after deferred ingress settles",
     assert.equal(requests.length, 3);
     const observation = events.find(event => event.requestSequence === Math.max(...events.map(e => e.requestSequence)));
     assert.ok(observation);
-    assert.equal(observation.classification.coverageIncomplete, false);
+    assert.equal(observation.classification.coverageIncomplete, true);
+    assert.ok(observation.classification.unexamined.ranges.some(range =>
+      range.reason === "rendered-provenance-unavailable" && requests[2]!.prompt.slice(range.start, range.end) === "1"));
     assert.equal(observation.classification.effectiveClass, "credential");
     assert.ok(observation.classification.spans.some(span => span.section === "prompt" && span.kind === "credential" &&
       span.source === `graph:${path}` && requests[2]!.prompt.slice(span.start, span.end) === clip));
@@ -207,7 +271,7 @@ it("observes managed device posture in the final Chat provider request", async t
   assert.equal(requests.length, 3);
   const finalEvent = events.reduce((last, event) => event.requestSequence > last.requestSequence ? event : last);
   const final = finalEvent.classification;
-  assert.equal(final.coverageIncomplete, false);
+  assert.equal(final.coverageIncomplete, true);
   assert.deepEqual(final.spans.filter(span => span.section === "prompt" && span.source === `graph:${path}`)
     .map(({ start, end, kind, maskRole }) => [requests[2]!.prompt.slice(start, end), kind, maskRole]), [
     ["Disabled", "security", "setting"], ["Disabled", "security", "setting"], ["Disabled", "security", "setting"],
@@ -259,7 +323,7 @@ it("classifies the identity cut inside a Graph preview array in the next Chat re
   assert.equal(prompt.lastIndexOf(partial), start);
   assert.ok(!prompt.includes(userId));
   const classification = events.sort((a, b) => b.requestSequence - a.requestSequence)[0]!.classification;
-  assert.equal(classification.coverageIncomplete, false);
+  assert.equal(classification.coverageIncomplete, true);
   assert.ok(classification.spans.some(span => span.section === "prompt" && span.kind === "identity" &&
     span.source === `graph:${path}` && span.start === start && span.end === start + partial.length));
 });

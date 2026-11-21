@@ -13,7 +13,7 @@ import {
 
 export { GRAPH_FIELD_CLASSES_VERSION } from "./graph-field-classes.js";
 export { ClassificationWorkerRetiredError, releaseClassificationIdentityShard, retireClassificationWorker, shutdownClassificationWorker } from "./classification-worker-client.js";
-export { CLASSIFICATION_TTL_MS, ClassificationLedger, clearTenantClassificationLedgers, currentClassificationLedger, classificationDiagnostics, collectClassifiedValues, registerClassifiedValues, registerGraphTenantData, registerRenderedFragment, registerTenantData, registerTransientTenantData, withTransientClassificationScope, withClassificationScope, withRequestClassification } from "./request-classification.js";
+export { CLASSIFICATION_TTL_MS, ClassificationLedger, clearTenantClassificationLedgers, currentClassificationLedger, classificationDiagnostics, collectClassifiedValues, registerClassifiedValues, registerGraphTenantData, registerRenderedFragment, registerTenantData, registerTransientTenantData, withTransientClassificationScope, withClassificationScope, withRequestClassification, withTemplateInterpolations } from "./request-classification.js";
 export type { ClassifiedValues, ClassificationSpan, RequestClassification, RequestClassificationEvent, TemplateInterpolation } from "./request-classification.js";
 
 export { ClassificationSlice, classifyCacheRows, yieldClassificationTurn } from "./classification-worker-client.js";

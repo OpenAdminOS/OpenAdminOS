@@ -1417,17 +1417,6 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
     }
   }
 
-  for (const [key, count] of [
-    ["totalCount", result.totalCount],
-    ["returnedRows", result.returnedRows],
-    ["cachedRowsForResource", emptyHint?.cachedRowsForResource],
-  ] as const) {
-    if (count !== undefined) {
-      const spelling = String(count);
-      registerRenderedFragment(spelling, spelling, { before: `"${key}":`, unknownOrigin: true });
-    }
-  }
-
   return {
     resource,
     // Kept at the front, outside the snapshot: compaction drops trailing
