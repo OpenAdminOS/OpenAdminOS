@@ -508,6 +508,7 @@ export class ClassificationLedger {
   private incompleteRegistrations = 0;
   private pendingRegistrations = 0;
   private registrationGeneration = 0;
+  private hasScriptRead = false;
   private unresolvedScriptReads = 0;
   private scriptReadClass?: DataClass;
   private pendingRenderUnits = 0;
@@ -701,14 +702,20 @@ export class ClassificationLedger {
   }
 
   registerIngress(source: string, data: unknown, options: ClassificationOptions, context?: "script"): void {
-    if (context === "script") this.unresolvedScriptReads++;
+    if (context === "script") {
+      this.hasScriptRead = true;
+      this.unresolvedScriptReads++;
+    }
     void this.scheduleRegistration(MAX_GRAPH_INPUT_BYTES, (signal, reservation) => this.observeIngress(
       source.startsWith("graph:") && options.graphPath ? graphClassificationSource(options.graphPath) : source, data, options, signal, reservation, context,
     ));
   }
 
   registerGraph(graphPath: string, data: unknown, signal?: AbortSignal, context?: "script"): Promise<void> {
-    if (context === "script") this.unresolvedScriptReads++;
+    if (context === "script") {
+      this.hasScriptRead = true;
+      this.unresolvedScriptReads++;
+    }
     return this.scheduleRegistration(MAX_GRAPH_INPUT_BYTES, (lifetime, reservation) => this.observeIngress(
       graphClassificationSource(graphPath), data, { graphPath }, signal ? AbortSignal.any([signal, lifetime]) : lifetime, reservation, context,
     ));
@@ -741,18 +748,20 @@ export class ClassificationLedger {
     if (classified.incomplete || !indexCurrent()) this.incompleteRegistrations++;
     const slice = new ClassificationSlice(signal);
     const decoder = new TextDecoder();
+    let observedField = false;
     for (const batch of classified.batches) {
       const fields = JSON.parse(decoder.decode(batch)) as ClassifiedValues["fields"];
       for (const { value, kind, key, maskRole } of fields) {
         if (this.disposed) return;
         signal?.throwIfAborted();
         this.add(value, { kind, source, key: key.toLowerCase(), ...(maskRole ? { maskRole } : {}) });
+        observedField = true;
         if (context === "script") this.scriptReadClass = maxDataClass(this.scriptReadClass ?? kind, kind);
         if (slice.elapsed) await slice.yield();
       }
       if (slice.elapsed) await slice.yield();
     }
-    if (context === "script" && !classified.dropped && !classified.incomplete && indexCurrent()) this.unresolvedScriptReads--;
+    if (context === "script" && observedField && !classified.dropped && !classified.incomplete && indexCurrent()) this.unresolvedScriptReads--;
   }
 
   registerClassified(source: string, observations: ClassifiedValues): void {
@@ -1244,7 +1253,9 @@ export class ClassificationLedger {
   captureEvidence(): EvidenceSnapshot {
     const state = this.scanState();
     state.scriptText = scriptText.getStore();
-    if (state.scriptText) state.scriptReadClass = this.unresolvedScriptReads ? "credential" : this.scriptReadClass;
+    if (state.scriptText && this.hasScriptRead) {
+      state.scriptReadClass = this.unresolvedScriptReads ? "credential" : this.scriptReadClass ?? "credential";
+    }
     return { state, revisions: state.retained.map(ledger => ledger.revision),
       shards: [...state.identityIndex?.workerShards?.() ?? []], interpolations: templateInterpolations.getStore(),
       fencedRenderings: this.fencedRenderings };

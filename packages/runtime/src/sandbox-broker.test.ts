@@ -234,6 +234,63 @@ describe("sandbox broker", () => {
     });
   });
 
+  it("applies the script rule to leafless results from Graph and connectors", async t => {
+    const path = "/deviceManagement/managedDevices";
+    const agent = fakeAgent({
+      graphOperations: [{ method: "GET", path }],
+      connectors: [{ id: "teams", required: true, capabilities: [{ id: "list-teams" }] }],
+    });
+    for (const [name, data, connector, precedingRead] of [
+      ["empty Graph collection", { value: [] }, false, false],
+      ["empty Graph object", {}, false, false],
+      ["Graph null and blank leaves", { value: [{ a: null, b: "" }] }, false, false],
+      ["empty connector collection", [], true, false],
+      ["undefined connector result", undefined, true, false],
+      ["empty connector result after a classified Graph read", [], true, true],
+    ] as const) await t.test(name, async t => {
+      const ledger = new ClassificationLedger();
+      t.after(() => ledger.dispose());
+      const events: RequestClassificationEvent[] = [];
+      const ctx = {
+        ...fakeContext(agent, {
+          graphRequest: async () => connector ? { value: [{ isEncrypted: true }] } : data,
+        }),
+        connectors: { teams: { capabilities: { listTeams: async () => data } } } as RunContext["connectors"],
+      };
+      ctx.llm = withRequestClassification(ctx.llm, "ollama", event => events.push(event));
+      const broker = createSandboxBroker({ agent, ctx });
+      await withClassificationScope(ledger, async () => {
+        const graphRead = (requestPath: string) => broker.handle({
+          id: "graph", method: "graph.request", params: { method: "GET", path: requestPath },
+        });
+        const send = async () => {
+          const { ok } = await broker.handle({
+            id: "model", method: "llm.complete", params: { prompt: "There are no results.", system: "Summarize." },
+          });
+          assert.equal(ok, true);
+          await ledger.waitForObservations();
+          return events.at(-1)!.classification;
+        };
+        assert.equal((await graphRead("/users")).ok, false);
+        assert.equal((await send()).coverageIncomplete, false);
+        if (precedingRead) assert.equal((await graphRead(path)).ok, true);
+        const result = connector ? await broker.handle({
+          id: "connector", method: "connector.invoke", params: { connector: "teams", capability: "list-teams", args: {} },
+        }) : await graphRead(path);
+        assert.equal(result.ok, true);
+        await ledger.waitForObservations();
+        const classification = await send();
+        assert.equal(classification.coverageIncomplete, true);
+        assert.equal(classification.effectiveClass, "credential");
+        assert.deepEqual(classification.unexamined.ranges.map(({ section, reason, start, end }) =>
+          [section, reason, end - start]), [
+          ["system", "script-provenance-unavailable", "Summarize.".length],
+          ["prompt", "script-provenance-unavailable", "There are no results.".length],
+        ]);
+      });
+    });
+  });
+
   it("allows only manifest-declared Graph GET requests", async () => {
     const graphRequests: GraphRequestInput[] = [];
     const agent = fakeAgent({
