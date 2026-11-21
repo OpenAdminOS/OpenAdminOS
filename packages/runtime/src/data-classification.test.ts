@@ -1273,6 +1273,51 @@ test("retained credential evidence competes with a coerced scalar in a replay", 
   assert.deepEqual(result.unexamined.ranges, [{ section: "prompt", start, end: start + 1, reason: "competing-provenance" }]);
 });
 
+test("scalar replay flags every class, including booleans and numbers with escaped spellings", async t => {
+  for (const kind of ["credential", "identity", "security", "device", "activity", "configuration", "public"] as const) {
+    await t.test(kind, t => {
+      const original = new ClassificationLedger();
+      const current = new ClassificationLedger();
+      t.after(() => { original.dispose(); current.dispose(); });
+      original.registerClassified("fixture", { incomplete: false, fields: [
+        { kind, key: "flag", value: false }, { kind, key: "size", value: -12.5 },
+      ] });
+      current.include(original);
+      const body = String.raw`Reported false and -12.5. Escaped \u0066alse. Neither 12.5, -12.50 nor falsely is the same value.`;
+      current.registerHistoryReplay(body, [{ start: 0, end: body.length, ledger: original }]);
+      const prompt = withClassificationScope(current, () => fenceTenantData(body, "fixture-history"));
+      const { spans, unexamined } = current.classifyRequest({ prompt });
+      const expected = ["false", "-12.5", String.raw`\u0066alse`];
+      assert.deepEqual(spans.filter(span => span.kind === kind).map(span => prompt.slice(span.start, span.end)), expected);
+      assert.deepEqual(unexamined.ranges.filter(range => range.reason === "history-provenance-unavailable")
+        .map(range => prompt.slice(range.start, range.end)), expected);
+    });
+  }
+});
+
+test("replay dependencies survive release of temporary history and propagate across multiple answers", t => {
+  const origin = new ClassificationLedger();
+  const middle = new ClassificationLedger();
+  const latest = new ClassificationLedger();
+  const next = new ClassificationLedger();
+  t.after(() => { origin.dispose(); middle.dispose(); latest.dispose(); next.dispose(); });
+  origin.register("fixture", { passwordCredentials: [{ hint: "qxz" }] }, { graphPath: "/applications" });
+  middle.include(origin);
+  middle.recordReplayDependencies();
+  middle.releaseHistory();
+  latest.include(middle);
+  latest.recordReplayDependencies();
+  latest.releaseHistory();
+  for (const turn of [origin, middle, latest]) next.include(turn);
+  const body = "Earlier paraphrase used the hint.";
+  next.registerHistoryReplay(body, [{ start: 0, end: body.length, ledger: latest }]);
+  const prompt = withClassificationScope(next, () => fenceTenantData(body, "fixture-history"));
+  assert.equal(next.classifyRequest({ prompt }).coverageIncomplete, false);
+  origin.dispose();
+  assert.ok(next.classifyRequest({ prompt }).unexamined.ranges.some(range =>
+    range.reason === "history-evidence-unavailable" && prompt.slice(range.start, range.end) === body));
+});
+
 test("Conditional Access references and delegated permissions distinguish identifiers from settings", () => {
   const ids = ["aaaaaaaa-1111-2222-3333-444444444444", "bbbbbbbb-1111-2222-3333-444444444444"];
   const graphPath = "/identity/conditionalAccess/policies";

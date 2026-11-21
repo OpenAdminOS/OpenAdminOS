@@ -121,6 +121,7 @@ interface Evidence {
 }
 interface ValueEntry {
   kind: DataClass;
+  scalarReplay?: true;
   mode?: MatchMode;
   folded?: boolean;
   replayEscapes?: boolean;
@@ -209,6 +210,7 @@ const TEXT_CHUNK = 128_000;
 const MATCH_BUDGET = 200_000;
 const ANCHOR_WIDTH = 8;
 const MAIN_SCAN_LIMIT = 512;
+const MAX_REPLAY_DEPENDENCIES = 8;
 const SYNC_BATCH_UNITS = 16_384;
 export const CLASSIFICATION_TTL_MS = 15 * 60_000;
 
@@ -310,6 +312,15 @@ function matchMode(value: Scalar, kind: DataClass): MatchMode {
   if (/^[\p{L}\p{N}\p{M}_]+$/u.test(value)) return hasDigit && hasLetter || kind === "credential" ? "word" : "field";
   if (/^[\p{L}\p{M}_]+(?:\s+[\p{L}\p{M}_]+)+$/u.test(value)) return "word";
   return "text";
+}
+
+function replayScalarBoundaries(text: string, start: number, end: number, boundary: ReturnType<typeof wordBoundaries>): boolean {
+  if (!boundary(start, -1) || !boundary(end, 1)) return false;
+  if (!/[0-9-]/.test(text[start]!)) return true;
+  const before = text[start - 1];
+  return before !== "+" && before !== "-" &&
+    !(before === "." && /[0-9]/.test(text[start - 2] ?? "")) &&
+    !(text[end] === "." && /[0-9]/.test(text[end + 1] ?? ""));
 }
 
 /** Index JSON value tokens once, keeping their nearest property through arrays. */
@@ -501,6 +512,11 @@ export class ClassificationLedger {
   private fencedRenderings: FencedRendering[] = [];
   private readonly historyReplays = new Map<string, readonly HistoryReplay[]>();
   private prior: readonly ClassificationLedger[] = [];
+  // Keep only turn identities. Dependencies must never extend the lifetime
+  // of the plaintext in another turn's ledger.
+  private readonly replayId = Symbol();
+  private readonly replayDependencies = new Set<symbol>();
+  private lostReplayDependency = false;
   private transient?: ClassificationLedger;
   private remaining = VALUE_BUDGET;
   private revision = 0;
@@ -664,6 +680,33 @@ export class ClassificationLedger {
 
   registerHistoryReplay(text: string, replays: readonly HistoryReplay[]): void {
     if (!this.disposed) this.historyReplays.set(text, replays);
+  }
+
+  recordReplayDependencies(): void {
+    if (this.lostReplayDependency) return;
+    const include = (ledger: ClassificationLedger | undefined) => {
+      if (!ledger || ledger.expired || ledger.lostReplayDependency) {
+        this.lostReplayDependency = true;
+        return;
+      }
+      this.replayDependencies.add(ledger.replayId);
+      for (const dependency of ledger.replayDependencies) this.replayDependencies.add(dependency);
+      if (this.replayDependencies.size > MAX_REPLAY_DEPENDENCIES) this.lostReplayDependency = true;
+    };
+    for (const ledger of this.prior) {
+      if (this.lostReplayDependency) break;
+      if (ledger.values.size || ledger.replayDependencies.size || ledger.lostReplayDependency || ledger.replayEvidenceIncomplete) {
+        include(ledger);
+      }
+    }
+    for (const { replays } of this.historyFences.values()) {
+      if (this.lostReplayDependency) break;
+      for (const { ledger } of replays) {
+        include(ledger);
+        if (this.lostReplayDependency) break;
+      }
+    }
+    if (this.lostReplayDependency) this.replayDependencies.clear();
   }
 
   markPromptReplay(start: number, end: number): void {
@@ -1027,6 +1070,7 @@ export class ClassificationLedger {
 
   private indexValue(entry: ValueEntry, value: Scalar, evidence: Evidence): void {
     const mode = matchMode(value, entry.kind);
+    if (typeof value !== "string") entry.scalarReplay = true;
     if (entry.mode !== mode) {
       const serialized = JSON.stringify(value);
       const unquoted = typeof value === "string" ? serialized.slice(1, -1) : serialized;
@@ -1161,7 +1205,7 @@ export class ClassificationLedger {
     emit: (span: TextSpan, evidence: Evidence, authoritative?: boolean) => void,
     boundary: ReturnType<typeof wordBoundaries>,
     fieldAt?: (start: number, end: number) => string | undefined,
-    replayAt?: (span: TextSpan, evidence: Evidence) => void,
+    replayAt?: (span: TextSpan, evidence: Evidence, scalar?: true) => void,
     clippedAt?: (start: number, end: number) => void,
     fieldEvidence?: (span: TextSpan, best: Evidence, bound?: Evidence) => void,
     replayOnly = false,
@@ -1187,8 +1231,9 @@ export class ClassificationLedger {
         if (!matched) continue;
         for (const bucket of matched) {
           for (const { text: value, offset, mode, entry, before, after, key } of bucket) {
+            const replayScalar = mode === "field" && entry.scalarReplay && replayAt;
             if (mode === "replay" && (!replayAt || !replayOnly && entry.kind !== "credential") ||
-                replayOnly && mode !== "replay" && mode !== "word" && mode !== "text") continue;
+                replayOnly && mode !== "replay" && mode !== "word" && mode !== "text" && !replayScalar) continue;
             if (--work.remaining < 0) return false;
             const start = at - offset;
             const end = start + value.length;
@@ -1212,6 +1257,9 @@ export class ClassificationLedger {
               if (entry.best) replayAt?.({ start, end }, entry.best);
               continue;
             }
+            if (replayScalar && entry.best && replayScalarBoundaries(text, start, end, boundary)) {
+              replayScalar({ start, end }, entry.best, true);
+            }
             const field = mode === "field" ? fieldAt?.(start, end) : undefined;
             const evidence = mode === "field" ? (field === undefined ? undefined : entry.fields.get(field)) : entry.best;
             if (evidence || field !== undefined && entry.best) {
@@ -1230,10 +1278,14 @@ export class ClassificationLedger {
 
   private scanState(): ScanState {
     const retained = [this, ...(this.transient ? [this.transient] : []), ...this.prior].filter(ledger => !ledger.disposed);
+    const available = this.historyFences.size
+      ? new Set(retained.filter(ledger => !ledger.replayEvidenceIncomplete).map(ledger => ledger.replayId))
+      : undefined;
     const historyFences = new Map<string, { length: number; replays: ReplayRange[] }>();
     for (const [nonce, { length, replays }] of this.historyFences) {
       historyFences.set(nonce, { length, replays: replays.map(({ start, end, ledger, hostSerialization }) => ({
-        start, end, hostSerialization, incomplete: !ledger || ledger.replayEvidenceIncomplete,
+        start, end, hostSerialization, incomplete: !ledger || !available?.has(ledger.replayId) ||
+          ledger.lostReplayDependency || [...ledger.replayDependencies].some(id => !available.has(id)),
       })) });
     }
     return { retained, historyFences, promptReplay: this.promptReplay,
@@ -1562,9 +1614,8 @@ export class ClassificationLedger {
               if (replayStart >= end) continue;
               if (replay.incomplete) {
                 ranges.push({ section, start: replayStart, end, reason: "history-evidence-unavailable" });
-              } else {
-                preservedReplays.push({ start: replayStart, end, hostSerialization: replay.hostSerialization });
               }
+              preservedReplays.push({ start: replayStart, end, hostSerialization: replay.hostSerialization });
             }
           }
           for (const ledger of retained) {
@@ -1584,12 +1635,13 @@ export class ClassificationLedger {
       if (state.scriptReadClass && scriptRange && scriptRange.start < scriptRange.end) {
         ranges.push({ section, ...scriptRange, reason: "script-provenance-unavailable" });
       }
-      const replayAt = preservedReplays.length ? (span: TextSpan, evidence: Evidence) => {
+      const replayAt = preservedReplays.length ? (span: TextSpan, evidence: Evidence, scalar?: true) => {
         if (preservedReplays.some(replay => replay.start <= span.start && span.end <= replay.end)) {
           const key = `${span.start}:${span.end}`;
           const previous = ambiguous.get(key);
           ambiguous.set(key, { ...span, kind: previous ? maxDataClass(previous.kind, evidence.kind) : evidence.kind });
           collectCandidate(span, evidence);
+          if (scalar) collect(span, evidence);
         }
       } : undefined;
       const folded = foldedIndex ? foldIdentity(text) : undefined;
@@ -1638,11 +1690,11 @@ export class ClassificationLedger {
           ({ text: decoded, toOriginal } = layer);
           const map = ({ start, end }: TextSpan) => ({ start: toOriginal(start), end: toOriginal(end) });
           if (!this.scan(rawIndex, decoded, 0, decoded.length, work, (span, evidence) => collect(map(span), evidence),
-            wordBoundaries(decoded), undefined, ({ start, end }, evidence) => {
+            wordBoundaries(decoded), undefined, ({ start, end }, evidence, scalar) => {
               const before = Math.max(0, start - 1);
               const after = Math.min(decoded.length, end + 1);
-              if (evidence.kind === "credential" || toOriginal(after) - toOriginal(before) > after - before) {
-                replayAt?.(map({ start, end }), evidence);
+              if (scalar || evidence.kind === "credential" || toOriginal(after) - toOriginal(before) > after - before) {
+                replayAt?.(map({ start, end }), evidence, scalar);
               }
             }, undefined, undefined, true)) {
             unavailable();
@@ -1811,6 +1863,7 @@ export function withRequestClassification(
     if (!scoped) unscopedRequests++;
     const ledger = scoped ?? new ClassificationLedger();
     if (ledger.expired) return;
+    ledger.recordReplayDependencies();
     const { scopeId } = ledger;
     const metadata = { requestSequence: sequence, providerId, method, fieldMapVersion: GRAPH_FIELD_CLASSES_VERSION,
       timestamp: new Date().toISOString(), ...(scopeId ? { scopeId } : {}), scopePresent: scoped !== undefined };

@@ -631,3 +631,55 @@ for (const voice of [false, true]) {
     } finally { await f.close(); }
   });
 }
+
+for (const voice of [false, true]) {
+  test(`replays scalar credentials and tracks inherited evidence in ${voice ? "Nova" : "Chat"}`, async () => {
+    let origin: ClassificationLedger | undefined;
+    let intermediate: ClassificationLedger | undefined;
+    const answer = "The synthetic settings were 734627 and true. The hint was qxz.";
+    const f = await fixture({
+      graphResult: () => ({ value: [] }),
+      respond: (_request, index) => {
+        const current = currentClassificationLedger();
+        if (index === 0) {
+          origin = current;
+          current?.register("fixture:oma", { omaSettings: [{ value: 734627 }, { value: true }] },
+            { graphPath: "/deviceManagement/deviceConfigurations" });
+          current?.register("fixture:hint", { passwordCredentials: [{ hint: "qxz" }] }, { graphPath: "/applications" });
+        } else if (index === 1) {
+          intermediate = current;
+          current?.register("fixture:lower", { fixtureNumber: 734627, fixtureBoolean: true });
+        } else if (index === 3) {
+          assert.ok(origin);
+          origin.dispose();
+        }
+        return index < 4 ? `${answer} Synthetic response ${index}.` : "Reviewed.";
+      },
+    });
+    try {
+      const first = await f.store.streamIntuneChatMessage({ content: "Explain device compliance." }, () => {});
+      const id = first.conversation.id;
+      const send = async () => {
+        await f.store.streamIntuneChatMessage({ conversationId: id, content: "Explain that result." }, () => {}, { voice });
+        await f.waitForClassifications();
+        const { prompt } = f.prompts.at(-1)!;
+        const { classification } = f.store.getRequestClassifications(id).at(-1)!;
+        return { prompt, classification };
+      };
+      await f.waitForClassifications();
+      const { prompt, classification } = await send();
+      for (const token of ["734627", "true"]) {
+        assert.ok(classification.spans.some(span => span.kind === "credential" && prompt.slice(span.start, span.end) === token));
+        assert.ok(classification.unexamined.ranges.some(range =>
+          range.reason === "history-provenance-unavailable" && prompt.slice(range.start, range.end) === token));
+      }
+      await send();
+      await send();
+      assert.equal(intermediate?.expired, false);
+      const after = await send();
+      assert.equal(after.classification.effectiveClass, "credential");
+      assert.ok(after.classification.unexamined.ranges.some(range =>
+        range.reason === "history-evidence-unavailable" && after.prompt.slice(range.start, range.end).includes(`${answer} Synthetic response 2.`)));
+    } finally { await f.close(); }
+  });
+}
