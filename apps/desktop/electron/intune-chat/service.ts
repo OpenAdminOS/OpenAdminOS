@@ -1,4 +1,4 @@
-import { traceAnswerPack, traceMultiTenantCounts } from "./answer-pack-classification.js";
+import { traceAnswerPack, traceMultiTenantCounts, type AnswerPackAggregates } from "./answer-pack-classification.js";
 import { ClassificationLedger, currentClassificationLedger, registerRenderedFragment, registerTenantData, registerTransientTenantData, withClassificationScope, withTransientClassificationScope } from "@openadminos/runtime/data-classification";
 import { voiceDeviceEvidenceAnswer, voiceDeviceEvidenceIntent } from "./voice-device-evidence.js";
 import { MAX_PROMISE_NUDGES, PROMISE_REPAIR_PROMPT, completeWithPromiseNudge, looksLikeUnkeptPromise } from "./unkept-promise.js";
@@ -2467,7 +2467,7 @@ export class IntuneChatService {
           });
           model = completion.model;
           return completion.text.trim();
-        }, buildAnswerPrompt(answerPack, documentation));
+        }, buildAnswerPrompt(answerPack, documentation, packAggregates));
         finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0 });
         return {
           content,
@@ -3140,7 +3140,7 @@ export class IntuneChatService {
         const finishAnswerStep = startAnswerStep(steps, answerModel);
         const overhead = Buffer.byteLength(buildAnswerPrompt("", documentation)) + Buffer.byteLength(system);
         if (options.voice) answerPack = compactVoiceAnswerPack(answerPack, voiceByteLimit - overhead);
-        const prompt = buildAnswerPrompt(answerPack, documentation);
+        const prompt = buildAnswerPrompt(answerPack, documentation, packAggregates);
         if (options.voice) assertVoicePromptBudget(system, prompt, voiceByteLimit);
         // An answer that only promises work is asked again, at most twice; the last answer is kept.
         let attemptPrompt = prompt;
@@ -4278,6 +4278,7 @@ function writeIntentBlockedMessage(
 function buildAnswerPrompt(
   answerPack: string,
   documentation: ReadonlyArray<{ file: string; title?: string; text: string }>,
+  aggregates?: AnswerPackAggregates,
 ): string {
   const pack = answerPack ? JSON.parse(answerPack) as Record<string, unknown> : {};
   const { question, instruction, ...evidence } = pack;
@@ -4291,7 +4292,7 @@ function buildAnswerPrompt(
   const withContext = (prefix: string) => {
     if (Array.isArray(evidence.resources) && (evidence.resources.length || Array.isArray(evidence.deterministicFindings) && evidence.deterministicFindings.length)) {
       currentClassificationLedger()?.registerFencedRendering(fence, prefix.length + beforeFence.length,
-        (body, offset, identities) => traceAnswerPack(evidence, body, offset, identities));
+        (body, offset) => traceAnswerPack(evidence, body, offset, aggregates));
     }
     return prefix + context;
   };

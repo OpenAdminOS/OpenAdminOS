@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { setImmediate as yieldToMain, setTimeout as waitForRetry } from "node:timers/promises";
 import { promisify } from "node:util";
-import { inflate } from "node:zlib";
+import { inflate, inflateSync } from "node:zlib";
 import { collectTenantValues, TenantValueIndex } from "./tenant-values.js";
 import {
   addCacheIdentity, addUserFirstName, ClassificationSlice, classifyCacheRows, currentClassificationLedger, decodeCacheIdentityBatch,
@@ -13,6 +13,8 @@ import {
   type CacheClassificationResult, type ClassificationOptions, type ClassifiedValues,
 } from "@openadminos/runtime/data-classification";
 import { describeCacheRow, cacheClassificationFields } from "./cache-classification.js";
+import { addBreakdownObservations, cacheBreakdownEvidence, cacheBucketItems, verifiedBreakdownClasses,
+  type BreakdownClasses, type BucketObservation, type GraphAggregate } from "./cache-breakdown-classification.js";
 import { pathForResource } from "./planner.js";
 import { GRAPH_CACHE_LOG_RESOURCES } from "@openadminos/agent-sdk";
 
@@ -155,6 +157,8 @@ interface PreparedGraphResources {
 const CLASSIFICATION_BATCH_ROWS = 256;
 const SIDECAR_CLEANUP_ROWS = 64;
 const SIDECAR_CLEANUP_BYTES = 128 * 1024;
+const MAX_BREAKDOWN_EVIDENCE_ROWS = 1024;
+const MAX_BREAKDOWN_ROW_BYTES = 256 * 1024;
 
 type SidecarCleanupRow = { id: number; bytes: number; stale: number };
 
@@ -962,6 +966,9 @@ export class IntelligenceSqliteStore {
           input.tenantTotal ?? null,
         );
       this.db.exec("COMMIT");
+      let snapshots = this.cacheSnapshots.get(input.tenantId);
+      if (!snapshots) this.cacheSnapshots.set(input.tenantId, snapshots = new Map());
+      snapshots.set(input.resource, snapshotId);
       this.scheduleStaleSidecarCleanup();
       if (egressIndex || identityUnavailable) {
         this.tenantIdentityIndexes.delete(input.tenantId);
@@ -1239,7 +1246,7 @@ export class IntelligenceSqliteStore {
   aggregateGraphResource(
     tenantId: string,
     resource: GraphCacheResourceKind,
-  ): { total: number; breakdowns: Record<string, Record<string, number>> } {
+  ): GraphAggregate {
     const totalRow = this.db
       .prepare(
         `SELECT COUNT(*) AS total FROM graph_resources
@@ -1433,7 +1440,8 @@ export class IntelligenceSqliteStore {
       configurationPolicies: ["platforms"],
       groups: ["groupTypes"],
     };
-    for (const field of arrayColumns[resource] ?? []) {
+    const arrayFields = arrayColumns[resource] ?? [];
+    for (const field of arrayFields) {
       // Graph returns these dimensions as JSON arrays, one enum string,
       // or a comma-joined flags string depending on the resource. Read
       // only the field value and split flags strings so every platform
@@ -1451,32 +1459,72 @@ export class IntelligenceSqliteStore {
       const counts: Record<string, number> = {};
       for (const entry of values) {
         if (entry.value === null) continue;
-        let items: unknown[] = [entry.value];
-        if (typeof entry.value === "string") {
-          const trimmed = entry.value.trim();
-          if (trimmed.startsWith("[")) {
-            try {
-              const parsed = JSON.parse(trimmed) as unknown;
-              items = Array.isArray(parsed) ? parsed : [parsed];
-            } catch {
-              items = [entry.value];
-            }
-          } else {
-            items = trimmed.split(",").map((part) => part.trim()).filter(Boolean);
-          }
-        }
-        for (const item of items) {
-          if (typeof item !== "string" && typeof item !== "number" && typeof item !== "boolean") {
-            continue;
-          }
-          const bucket = String(item);
-          counts[bucket] = (counts[bucket] ?? 0) + 1;
+        for (const { key } of cacheBucketItems(entry.value)) {
+          counts[key] = (counts[key] ?? 0) + 1;
         }
       }
       if (Object.keys(counts).length > 0) breakdowns[field] = counts;
     }
 
-    return { total: totalRow?.total ?? 0, breakdowns };
+    const aggregate = { total: totalRow?.total ?? 0, breakdowns };
+    if (currentClassificationLedger() && aggregate.total > 0 && aggregate.total <= MAX_BREAKDOWN_EVIDENCE_ROWS) {
+      const snapshot = this.cacheSnapshots.get(tenantId)?.get(resource);
+      const generation = this.cacheCleared.get(tenantId);
+      const current = () => !this.closed && this.cacheSnapshots.get(tenantId)?.get(resource) === snapshot &&
+        this.cacheCleared.get(tenantId) === generation && !this.disconnectedClassificationTenants.has(tenantId);
+      let verified: BreakdownClasses | undefined;
+      const store = this;
+      cacheBreakdownEvidence.set(aggregate, function* () {
+        const dimensions = columns.filter(({ field }) =>
+          field !== "policyPlatform" && field !== "appPlatform" && Object.hasOwn(breakdowns, field));
+        dimensions.push(...arrayFields.filter(field => Object.hasOwn(breakdowns, field)).map(jsonField));
+        return verified ??= yield* store.classifyGraphBreakdowns(tenantId, resource, aggregate, dimensions, arrayFields, current);
+      });
+    }
+    return aggregate;
+  }
+
+  /** Read matching rows and their current sidecars in the request observer. */
+  private *classifyGraphBreakdowns(
+    tenantId: string, resource: GraphCacheResourceKind, aggregate: GraphAggregate,
+    dimensions: readonly { field: string; expression: string }[], arrayFields: readonly string[], current: () => boolean,
+  ): Generator<undefined, BreakdownClasses> {
+    if (!dimensions.length || !current()) return new Map();
+    const buckets = this.db.prepare(`SELECT
+      g.graph_id AS _graphId, g.snapshot_id AS _snapshotId,
+      length(CAST(raw_json AS BLOB)) > ${MAX_BREAKDOWN_ROW_BYTES} AS _oversized,
+      CASE WHEN length(s.compressed) <= ? THEN s.compressed END AS _compressed,
+      CASE WHEN s.cache_rowid IS NULL AND length(CAST(g.classification_json AS BLOB)) <= ?
+        THEN g.classification_json END AS _encoded,
+      ${dimensions.map(({ expression, field }) =>
+        `CASE WHEN length(CAST(raw_json AS BLOB)) <= ${MAX_BREAKDOWN_ROW_BYTES} THEN ${expression} END AS "${field}"`).join(", ")}
+      FROM graph_resources g LEFT JOIN graph_classification_sidecars s
+        ON s.cache_rowid = g.rowid AND s.snapshot_id = g.snapshot_id AND s.field_map_version = ?
+        AND s.tenant_id = g.tenant_id AND s.resource = g.resource
+      WHERE g.tenant_id = ? AND g.resource = ? AND g.graph_id > ? ORDER BY g.graph_id LIMIT 1`);
+    const fields = dimensions.map(({ field }) => field);
+    const arrays = new Set(arrayFields);
+    const observations = new Map<string, Map<string, BucketObservation>>();
+    let after = "";
+    let snapshot: string | undefined;
+    for (let i = 0; i < aggregate.total; i++) {
+      if (!current()) return new Map();
+      const row = buckets.get(MAX_READ_SIDECAR_UNITS, MAX_READ_SIDECAR_UNITS, GRAPH_FIELD_CLASSES_VERSION,
+        tenantId, resource, after) as ({
+        _graphId: string; _snapshotId: string; _oversized: number; _compressed: Uint8Array | null; _encoded: string | null;
+      } & Record<string, string | number | null>) | undefined;
+      if (!row || row._oversized || snapshot !== undefined && row._snapshotId !== snapshot) return new Map();
+      after = row._graphId;
+      snapshot = row._snapshotId;
+      let encoded = row._encoded;
+      if (row._compressed) {
+        try { encoded = inflateSync(row._compressed, { maxOutputLength: MAX_READ_SIDECAR_UNITS }).toString(); }
+        catch { encoded = null; }
+      }
+      addBreakdownObservations(observations, `cache:${resource}`, fields, arrays, row, encoded);
+      yield;
+    }
+    return current() ? verifiedBreakdownClasses(aggregate.breakdowns, observations) : new Map();
   }
 
   listDriftSnapshots(
@@ -2702,9 +2750,6 @@ export class IntelligenceSqliteStore {
   }
 
   private scheduleCacheSnapshotClassification(tenantId: string, resource: GraphCacheResourceKind, snapshotId: string): void {
-    let snapshots = this.cacheSnapshots.get(tenantId);
-    if (!snapshots) this.cacheSnapshots.set(tenantId, snapshots = new Map());
-    snapshots.set(resource, snapshotId);
     this.stagedIdentityShards.get(tenantId)?.delete(resource);
     this.stagedFirstNames.get(tenantId)?.delete(resource);
     const generation = this.cacheCleared.get(tenantId);

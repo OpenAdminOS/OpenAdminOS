@@ -114,8 +114,12 @@ test("deterministic Chat labels SQL breakdown keys and counts at their request o
     { id: "fixture-b", deviceName: "Fixture B", isEncrypted: false, complianceState: "noncompliant" },
     { id: "fixture-c", deviceName: "Fixture C", isEncrypted: true, complianceState: "compliant" },
   ];
-  const f = await fixture({ graphResult: path => ({ value: path === "/deviceManagement/managedDevices" ? rows : [] }) });
+  const f = await fixture();
   try {
+    f.store["requireIntelligenceStore"]().replaceGraphResources({
+      tenantId: "tenant-a", resource: "managedDevices", label: "Managed devices",
+      rows, scopeSet: [], refreshedAt: new Date().toISOString(),
+    });
     const sent = await f.store.streamIntuneChatMessage({ content: "Which managed devices are noncompliant or unencrypted?" }, () => {});
     await f.waitForClassifications();
     const prompt = f.prompts.at(-1)!.prompt;

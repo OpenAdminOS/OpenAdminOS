@@ -26,13 +26,22 @@ export function describeCacheRow(row: unknown, options: ClassificationOptions): 
 // before parsing and let the request report incomplete coverage.
 export const MAX_READ_SIDECAR_UNITS = 128 * 1024;
 
+export function decodeCacheRowClassification(encoded: string | null | undefined): RowClassification | undefined {
+  if (!encoded || encoded.length > MAX_READ_SIDECAR_UNITS) return undefined;
+  try {
+    const result = JSON.parse(encoded) as RowClassification;
+    if (result[0] === GRAPH_FIELD_CLASSES_VERSION && Array.isArray(result[2])) return result;
+  } catch { /* The caller records unavailable sidecar evidence. */ }
+  return undefined;
+}
+
 export function* cacheClassificationFields(
   row: unknown, encoded: string | null | undefined, original = row,
 ): Generator<ClassifiedValues["fields"][number] | undefined, boolean> {
-  if (!encoded || encoded.length > MAX_READ_SIDECAR_UNITS) return true;
+  const decoded = decodeCacheRowClassification(encoded);
+  if (!decoded) return true;
   try {
-    const [version, incomplete, fields] = JSON.parse(encoded) as RowClassification;
-    if (version !== GRAPH_FIELD_CLASSES_VERSION) return true;
+    const [, incomplete, fields] = decoded;
     for (const [path, key, kind, maskRole] of fields) {
       const value = fieldAt(row, path);
       if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
