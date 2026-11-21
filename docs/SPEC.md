@@ -3929,7 +3929,9 @@ the format. Decisions:
   (noncompliant, conflict, error) and grace period get that guidance. A
   compliant device gets its premise corrected ("is compliant in this snapshot,
   so no compliance rule is failing for it here") and no failed-rule or lead
-  wording; any other state says the snapshot does not establish a failure. A name two cached
+  wording; a grace period device is worded as an unmet setting; any other
+  state says the snapshot does not establish a failure. The last sync is
+  named as a lead only when it is at least 7 days old. A name two cached
   records share goes to the planner, so code never picks one. The device name
   is resolved against the cache at question time; a device first seen by this
   turn's refresh is answered by the planner path.

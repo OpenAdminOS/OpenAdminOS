@@ -641,6 +641,9 @@ export function computeStructuredResult(input: {
   };
 }
 
+/** A last sync at least this old is named as a lead for a device short of a policy. */
+const STALE_SYNC_LEAD_DAYS = 7;
+
 /** Intune compliance states that mean a policy is failing; unknown, configManager and grace period do not. */
 const FAILING_COMPLIANCE_STATES = new Set(["noncompliant", "conflict", "error"]);
 
@@ -674,18 +677,20 @@ function computeDeviceDetail(
   // A device short of a policy (failing or in grace) has an unmet setting the cache cannot name; a compliant one has none.
   const notInData = state === "compliant"
     ? []
-    : FAILING_COMPLIANCE_STATES.has(state) || state === "inGracePeriod"
+    : FAILING_COMPLIANCE_STATES.has(state)
       ? ["The cached data does not include which compliance policy or setting failed for this device, so the failing rule cannot be named from it. Open the device in Intune, Device compliance, to see the failing setting."]
-      : ["The cached data does not include per policy compliance results for this device. Open the device in Intune, Device compliance, to see each policy's state."];
+      : state === "inGracePeriod"
+        ? ["The cached data does not include which compliance setting this device does not meet, so the setting cannot be named from it. Open the device in Intune, Device compliance, to see the unmet setting."]
+        : ["The cached data does not include per policy compliance results for this device. Open the device in Intune, Device compliance, to see each policy's state."];
   if (premise) facts.push(premise);
   facts.push(...notInData);
-  // A compliant device has no failure to lead to, so its last sync is plain context, not a lead.
-  const syncLead = state === "compliant" ? "The last sync" : "Lead in the data: the last sync";
   if (row.lastSyncDateTime && syncReported(row.lastSyncDateTime)) {
     const lastSyncDate = localDate(row.lastSyncDateTime);
     const days = Math.floor((new Date(generatedAt).getTime() - new Date(row.lastSyncDateTime).getTime()) / MS_PER_DAY);
     const age = Number.isFinite(days) && days >= 0 ? `, ${days} ${days === 1 ? "day" : "days"} before this answer` : "";
-    facts.push(`${syncLead} was on ${lastSyncDate}${age}.`);
+    // An old sync is a lead for a device short of a policy; a recent one, or any sync of a compliant device, is plain context.
+    const lead = state !== "compliant" && Number.isFinite(days) && days >= STALE_SYNC_LEAD_DAYS;
+    facts.push(`${lead ? "Lead in the data: the last sync" : "The last sync"} was on ${lastSyncDate}${age}.`);
   } else if (row.lastSyncDateTime) {
     facts.push(state === "compliant" ? "Intune reports no sync for this device." : "Lead in the data: Intune reports no sync for this device.");
   } else {

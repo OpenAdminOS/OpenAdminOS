@@ -401,6 +401,25 @@ describe("local model accuracy on the tester's tenant", () => {
       assert.match(message.content, /WIN-05 is compliant in this snapshot, so no compliance rule is failing for it here\./);
       assert.doesNotMatch(message.content, /failing setting|failed for this device|Lead in the data|BitLocker/);
       assert.match(message.content, /The last sync was on /);
+
+      // A noncompliant device that synced two days ago: the guidance stays, but a recent sync is no lead.
+      const recentSync = (await store.sendIntuneChatMessage({ content: "why is WIN-01 not compliant?", refreshIfStale: false })).assistantMessage;
+      assert.match(recentSync.content, /does not include which compliance policy or setting failed/);
+      assert.match(recentSync.content, /The last sync was on .*, 2 days before this answer\./);
+      assert.doesNotMatch(recentSync.content, /Lead in the data/);
+    });
+  });
+
+  it("words a device in its grace period as an unmet setting, not a failed rule", async () => {
+    await withHarness(async ({ store, cache }) => {
+      await store.setChatInvestigationMode("always-deterministic");
+      cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: new Date().toISOString(),
+        rows: [...managedDevices, { id: "md-grace", deviceName: "WIN-GRACE", operatingSystem: "Windows", complianceState: "inGracePeriod", lastSyncDateTime: "2026-05-18T09:30:00.000Z" }] });
+      const message = (await store.sendIntuneChatMessage({ content: "why is WIN-GRACE not compliant?", refreshIfStale: false })).assistantMessage;
+      assert.match(message.content, /WIN-GRACE is in its grace period/);
+      assert.match(message.content, /which compliance setting this device does not meet/);
+      assert.doesNotMatch(message.content, /setting failed|failing rule/);
+      assert.match(message.content, /Lead in the data: the last sync was on 2026-05-18/);
     });
   });
 

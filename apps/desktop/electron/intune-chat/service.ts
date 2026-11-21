@@ -4079,6 +4079,7 @@ export class IntuneChatService {
  * restart re-evaluates rather than permanently branding the model.
  */
 const AGENTIC_FAILURE_LIMIT = 2;
+const AGENTIC_FAILURE_REASONS_KEPT = 10;
 const agenticFailuresByModel = new Map<string, number>();
 /** What went wrong on each failed tool-loop answer per model since its last success, for an honest notice. */
 const agenticFailureReasonsByModel = new Map<string, AgenticFailureReason[]>();
@@ -4112,7 +4113,8 @@ export function recordAgenticOutcome(
     return;
   }
   agenticFailuresByModel.set(key, (agenticFailuresByModel.get(key) ?? 0) + 1);
-  if (failure) agenticFailureReasonsByModel.set(key, [...(agenticFailureReasonsByModel.get(key) ?? []), failure]);
+  // Always investigative mode keeps running a failing model, so only the latest reasons are kept.
+  if (failure) agenticFailureReasonsByModel.set(key, [...(agenticFailureReasonsByModel.get(key) ?? []), failure].slice(-AGENTIC_FAILURE_REASONS_KEPT));
 }
 
 /** "the question and its data did not fit its context window twice; it did not finish its plan once", first seen first. */
