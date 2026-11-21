@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { registerRenderedFragment } from "@openadminos/runtime/data-classification";
 import {
   isManagedSettingLocked,
   managedNovaMemoryOff,
@@ -673,7 +674,8 @@ export function novaProfilePromptBlock(input: NovaProfilePromptInput): string {
 export function novaProfilePromptParts(input: NovaProfilePromptInput): { block: string; notes: string[]; adminText: boolean; clipped: boolean } {
   const instructions = input.effective.instructions.trim();
   let addendum = input.effective.addendum.trim();
-  const notes = (input.notes ?? []).map((note) => note.trim()).filter(Boolean);
+  const noteEntries = (input.notes ?? []).map(original => ({ original, text: original.trim() })).filter(note => note.text);
+  const notes = noteEntries.map(note => note.text);
   if (!instructions && !addendum && notes.length === 0) return { block: "", notes: [], adminText: false, clipped: false };
   let standing = instructions;
   const render = () => {
@@ -683,11 +685,26 @@ export function novaProfilePromptParts(input: NovaProfilePromptInput): { block: 
     if (notes.length > 0) data.confirmedNotes = notes;
     return `${NOVA_PROFILE_BLOCK_INTRO}\n${JSON.stringify(data)}`;
   };
+  const register = () => {
+    if (standing) registerRenderedFragment(input.effective.instructions, standing,
+      { before: '"text":"', after: '"', requireEvidence: standing !== instructions });
+    if (addendum) registerRenderedFragment(input.effective.addendum, addendum,
+      { before: '"organizationAddendum":"', after: '"', requireEvidence: addendum !== input.effective.addendum.trim() });
+    let before = '"confirmedNotes":["';
+    for (const [index, text] of notes.entries()) {
+      const original = noteEntries[index]!.original;
+      registerRenderedFragment(original, text, { before, after: '"' });
+      before = `${before}${JSON.stringify(text).slice(1, -1)}","`.slice(-48);
+    }
+  };
   const limit = input.byteLimit;
   let block = render();
   // Whether instructions or the organization's instructions survived clipping, for the consent record.
   const adminText = () => Boolean(standing || addendum);
-  if (limit === undefined || Buffer.byteLength(block) <= limit) return { block, notes, adminText: adminText(), clipped: false };
+  if (limit === undefined || Buffer.byteLength(block) <= limit) {
+    register();
+    return { block, notes, adminText: adminText(), clipped: false };
+  }
   while (notes.length > 0 && Buffer.byteLength(block) > limit) {
     notes.pop();
     block = render();
@@ -702,7 +719,11 @@ export function novaProfilePromptParts(input: NovaProfilePromptInput): { block: 
     clip(over * 2);
     block = render();
   }
-  return Buffer.byteLength(block) <= limit ? { block, notes, adminText: adminText(), clipped: true } : { block: clipToBytes(NOVA_PROFILE_BLOCK_INTRO, limit), notes: [], adminText: false, clipped: true };
+  if (Buffer.byteLength(block) <= limit) {
+    register();
+    return { block, notes, adminText: adminText(), clipped: true };
+  }
+  return { block: clipToBytes(NOVA_PROFILE_BLOCK_INTRO, limit), notes: [], adminText: false, clipped: true };
 }
 
 /**

@@ -4472,6 +4472,21 @@ export interface GraphRequestInput {
   signal?: AbortSignal;
 }
 
+export const DATA_CLASSES_BY_SENSITIVITY = [
+  "credential", "identity", "security", "device", "activity", "configuration", "public",
+] as const;
+
+export type DataClass = (typeof DATA_CLASSES_BY_SENSITIVITY)[number];
+export type DataClassCounts = Record<DataClass, number>;
+
+export function highestDataClass(counts: Readonly<DataClassCounts>): DataClass | undefined {
+  return DATA_CLASSES_BY_SENSITIVITY.find((kind) => counts[kind] > 0);
+}
+
+export function maxDataClass(first: DataClass, second: DataClass): DataClass {
+  return DATA_CLASSES_BY_SENSITIVITY.indexOf(first) <= DATA_CLASSES_BY_SENSITIVITY.indexOf(second) ? first : second;
+}
+
 export interface LlmOptions {
   prompt: string;
   system?: string;

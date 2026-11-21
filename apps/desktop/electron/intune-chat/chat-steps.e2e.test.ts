@@ -212,7 +212,7 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: {
       docsSearches, store, cache, graphPaths, graphBuilds, prompts, writerPrompts,
       script(next) { replies = next.map((item) => (typeof item === "string" ? item : JSON.stringify(item))); reply = 0; prompts.length = 0; writerPrompts.length = 0; graphPaths.length = 0; graphBuilds.length = 0; },
     });
-  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  } finally { await store.close(); await rm(dir, { recursive: true, force: true }); }
 }
 
 const learnTool = "mcp__microsoft-learn__microsoft_docs_search";

@@ -98,7 +98,10 @@ async function fixture(empty = false, deviceRows?: unknown[]) {
     llm,
     calls,
     prompts,
-    cleanup: () => { store.close(); return rm(dir, { recursive: true, force: true }); },
+    cleanup: async () => {
+      await store.close();
+      await rm(dir, { recursive: true, force: true });
+    },
   };
 }
 const options = {

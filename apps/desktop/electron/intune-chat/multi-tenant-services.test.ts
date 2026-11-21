@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { RunGraphApi, TenantRecord } from "@openadminos/agent-sdk";
+import { currentClassificationLedger, type ClassificationLedger } from "@openadminos/runtime/data-classification";
 import { AppStateStore } from "../state.js";
 
 const PROMPT = "Compare Windows compliance across tenants";
@@ -32,7 +33,7 @@ function stateJson(tenants: TenantRecord[]): string {
   });
 }
 
-async function makeFixture(tenants: TenantRecord[], answers?: string[]) {
+async function makeFixture(tenants: TenantRecord[], answers?: string[], beforeComplete?: () => Promise<void>) {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-mt-services-"));
   const filePath = join(dir, "state.json");
   await writeFile(filePath, stateJson(tenants));
@@ -65,6 +66,7 @@ async function makeFixture(tenants: TenantRecord[], answers?: string[]) {
       defaultModel: "mock-chat",
       async complete(request: { prompt: string }) {
         prompts.push(request.prompt);
+        await beforeComplete?.();
         const text = answers?.shift();
         if (text === undefined) throw new Error("Not used.");
         return { text, model: "mock-chat" };
@@ -81,7 +83,7 @@ async function makeFixture(tenants: TenantRecord[], answers?: string[]) {
     graphTenants,
     prompts,
     async close() {
-      store.close();
+      await store.close();
       await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     },
   };
@@ -167,9 +169,15 @@ describe("multi-tenant Chat and connected services", () => {
     const tenants = [tenant("contoso", "Contoso"), tenant("fabrikam", "Fabrikam")];
     const repaired = await makeFixture(tenants, ["I'll check that now.", "Both tenants have 1 compliant Windows device."]);
     try {
+      let observed = 0;
+      const classified = new Promise<void>(resolve => {
+        repaired.store.observeRequestClassifications(() => { if (++observed === 2) resolve(); });
+      });
       const { job } = await repaired.store.runMultiTenantIntuneChat({ prompt: PROMPT, tenantScope: { kind: "all" } });
       assert.equal(job.assistantText, "Both tenants have 1 compliant Windows device.");
       assert.equal(repaired.prompts.length, 2);
+      await classified;
+      assert.equal(repaired.store.getRequestClassifications(job.id).length, 2);
       assert.match(repaired.prompts[1]!, /Your previous reply:\nI'll check that now\./);
     } finally {
       await repaired.close();
@@ -189,6 +197,34 @@ describe("multi-tenant Chat and connected services", () => {
       assert.equal(job.assistantText, "Both tenants are compliant. I'll check the app installs next.");
     } finally {
       await answered.close();
+    }
+  });
+
+  it("disposes summary evidence when Stop is pressed while the provider is still running", async () => {
+    let markEntered!: () => void;
+    let unblock!: () => void;
+    const entered = new Promise<void>(resolve => { markEntered = resolve; });
+    const release = new Promise<void>(resolve => { unblock = resolve; });
+    const controller = new AbortController();
+    let ledger: ClassificationLedger | undefined;
+    const fixture = await makeFixture([tenant("contoso", "Contoso"), tenant("fabrikam", "Fabrikam")], ["Reviewed."], async () => {
+      ledger = currentClassificationLedger();
+      markEntered();
+      await release;
+    });
+    const run = fixture.store.runMultiTenantIntuneChat({ prompt: PROMPT, tenantScope: { kind: "all" } },
+      undefined, { signal: controller.signal });
+    const stopped = assert.rejects(run, /Multi-tenant chat run stopped/);
+    try {
+      await Promise.race([entered, run]);
+      assert.ok(ledger);
+      assert.match(ledger.scopeId ?? "", /^mtjob_/);
+      assert.equal(ledger.expired, false);
+      controller.abort();
+      assert.equal(ledger.expired, true);
+    } finally {
+      unblock();
+      try { await stopped; } finally { await fixture.close(); }
     }
   });
 });

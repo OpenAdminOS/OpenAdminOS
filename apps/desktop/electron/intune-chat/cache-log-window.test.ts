@@ -114,7 +114,7 @@ it("collects log resources as a capped recent window instead of every retained r
     assert.equal(result.resources[0]!.ok, true);
     assert.equal(result.resources[0]!.error, undefined);
   } finally {
-    store.close();
+    await store.close();
     await rm(dir, { recursive: true, force: true });
   }
 });

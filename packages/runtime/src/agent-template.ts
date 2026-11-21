@@ -37,7 +37,13 @@ import {
   type ServiceId,
 } from "@openadminos/agent-sdk";
 
-import { PROMPT_INSTRUCTION_ROOTS, renderDeep, renderTemplate, renderPromptTemplate, type TemplateContext } from "./template-engine.js";
+import {
+  PROMPT_INSTRUCTION_ROOTS, bindTemplateArrayItem, copyTemplateOrigins, hasTemplateOrigin, markTemplateOriginsIncomplete,
+  preserveTemplateArrayField, renderDeep, renderTemplate, renderPromptTemplate, setTemplateOrigin, templateFieldOrigin,
+  type TemplateContext, type TemplateOrigin,
+} from "./template-engine.js";
+import { currentClassificationLedger, registerGraphTenantData, registerTenantData } from "./data-classification.js";
+import { MAX_TEMPLATE_INTERPOLATIONS, withTemplateInterpolations, type TemplateInterpolation } from "./request-classification.js";
 import { stripTenantDataFences, withTenantDataInstructions } from "./tenant-data.js";
 import { confirmationPhraseProblem } from "./confirmation-phrase.js";
 
@@ -522,6 +528,7 @@ async function runPipelineUpTo(
 ): Promise<{ pipeline: PipelineState; settings: Record<string, unknown> }> {
   const settings = resolveSettings(manifest, ctx.settings);
   const pipeline: PipelineState = {};
+  if (ctx.officeTask) registerTenantData("office:evidence", ctx.officeTask.evidence);
 
   for (const skill of manifest.skills) {
     if (stopBefore(skill)) break;
@@ -896,7 +903,9 @@ async function runMapSkill(
   ctx: RunContext,
   templateCtx: () => TemplateContext,
 ): Promise<unknown[]> {
-  const source = renderTemplate(skill.settings.source, templateCtx());
+  const trackOrigins = Boolean(currentClassificationLedger());
+  // The source render retains its element field for scalar bindings.
+  const source = renderTemplate(skill.settings.source, templateCtx(), trackOrigins ? () => {} : undefined);
   if (!Array.isArray(source)) {
     throw new Error(
       `map step "${skill.id}": settings.source did not resolve to an array (got ${typeof source}).`,
@@ -910,11 +919,15 @@ async function runMapSkill(
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
     const childPipeline: PipelineState = {};
-    const childTemplateCtx = (): TemplateContext => ({
-      ...templateCtx(),
-      [as]: item,
-      ...childPipeline,
-    });
+    const childTemplateCtx = (): TemplateContext => {
+      const outer = templateCtx();
+      const context: TemplateContext = { ...outer, [as]: item, ...childPipeline };
+      if (trackOrigins) {
+        copyTemplateOrigins(outer, context);
+        if (!Object.hasOwn(childPipeline, as)) bindTemplateArrayItem(context, as, source, i);
+      }
+      return context;
+    };
     let lastOutput: unknown = undefined;
     for (const sub of skill.settings.do) {
       const out = await runSkill(sub, ctx, childTemplateCtx);
@@ -922,6 +935,10 @@ async function runMapSkill(
       lastOutput = out;
     }
     results.push(lastOutput);
+    if (trackOrigins && lastOutput !== null && lastOutput !== undefined && typeof lastOutput !== "object") {
+      if (i < MAX_TEMPLATE_INTERPOLATIONS) setTemplateOrigin(results, String(i), templateFieldOrigin(null, "", lastOutput));
+      else markTemplateOriginsIncomplete(results);
+    }
   }
 
   if (typeof limit === "number" && source.length > limit) {
@@ -974,7 +991,9 @@ async function runConnectorSkill(
     { connectorStepId: skill.id },
   );
   const fn = method as (args: Record<string, unknown>) => Promise<unknown>;
-  return await fn(settings.args);
+  const result = await fn(settings.args);
+  registerTenantData(`connector:${settings.connector}.${settings.capability}`, result);
+  return result;
 }
 
 function kebabToCamel(value: string): string {
@@ -1055,6 +1074,7 @@ async function requestGraphPages(input: {
     query: input.query,
     headers: input.headers,
   });
+  registerGraphTenantData(input.path, first);
   const firstPage = graphCollectionPage(first);
   if (!firstPage) return first;
 
@@ -1079,6 +1099,7 @@ async function requestGraphPages(input: {
       query: next.query,
       headers: input.headers,
     });
+    registerGraphTenantData(next.path, payload);
     const page = graphCollectionPage(payload);
     if (!page) {
       throw new Error(`Graph paging for ${input.path} returned a non-collection response.`);
@@ -1145,22 +1166,23 @@ async function runTransformSkill(
   ctx: RunContext,
   templateCtx: () => TemplateContext,
 ): Promise<unknown> {
-  const settings = renderDeep(skill.settings, templateCtx()) as Record<string, unknown>;
+  const trackOrigins = Boolean(currentClassificationLedger());
+  const settings = renderDeep(skill.settings, templateCtx(), trackOrigins) as Record<string, unknown>;
   const kind = settings.kind;
 
   switch (kind) {
     case "group-by-age":
-      return transformGroupByAge(skill.id, settings, ctx);
+      return transformGroupByAge(skill.id, settings, ctx, trackOrigins);
     case "filter-by-age":
       return transformFilterByAge(skill.id, settings, ctx);
     case "count-by-field":
-      return transformCountByField(skill.id, settings, ctx);
+      return transformCountByField(skill.id, settings, ctx, trackOrigins);
     case "group-by-field":
-      return transformGroupByField(skill.id, settings, ctx);
+      return transformGroupByField(skill.id, settings, ctx, trackOrigins);
     case "sort-by":
       return transformSortBy(skill.id, settings, ctx);
     case "correlate-stale-devices":
-      return transformCorrelateStaleDevices(skill.id, settings, ctx);
+      return transformCorrelateStaleDevices(skill.id, settings, ctx, trackOrigins);
     default:
       throw new Error(
         `transform "${skill.id}": unknown kind "${String(kind)}". Supported: group-by-age, filter-by-age, count-by-field, group-by-field, sort-by, correlate-stale-devices.`,
@@ -1172,6 +1194,7 @@ function transformGroupByField(
   skillId: string,
   settings: Record<string, unknown>,
   ctx: RunContext,
+  trackOrigins: boolean,
 ): Record<string, unknown[]> {
   const source = settings.source;
   const field = settings.field;
@@ -1187,15 +1210,20 @@ function transformGroupByField(
       : "(unknown)";
 
   const result: Record<string, unknown[]> = {};
+  const origins = trackOrigins ? new Map<string, TemplateOrigin>() : undefined;
+  let remaining = MAX_TEMPLATE_INTERPOLATIONS;
   for (const item of source as Array<Record<string, unknown>>) {
     const raw = readFieldPath(item, field);
-    const bucket =
-      raw === undefined || raw === null || raw === ""
-        ? missingBucket
-        : String(raw);
+    const missing = raw === undefined || raw === null || raw === "";
+    const bucket = missing ? missingBucket : String(raw);
     if (!result[bucket]) result[bucket] = [];
     result[bucket].push(item);
+    if (origins && remaining-- > 0) {
+      if (!missing) addBucketOrigin(origins, bucket, fieldPathOrigin(item, field, raw));
+      else if (hasTemplateOrigin(settings, "missing")) addBucketOrigin(origins, bucket, templateFieldOrigin(settings, "missing", missingBucket));
+    }
   }
+  if (origins) applyBucketOrigins(result, origins, remaining < 0);
   ctx.log(
     "info",
     `Grouped ${source.length} items into ${Object.keys(result).length} buckets by "${field}".`,
@@ -1237,6 +1265,7 @@ function transformSortBy(
   });
 
   const out = take ? sorted.slice(0, take) : sorted;
+  preserveTemplateArrayField(source, out, true);
   ctx.log(
     "info",
     `Sorted ${source.length} items by "${field}" ${direction}${take ? `, took top ${take}` : ""}.`,
@@ -1263,6 +1292,54 @@ function readFieldPath(item: unknown, fieldPath: string): unknown {
   return current;
 }
 
+function fieldPathOrigin(item: unknown, fieldPath: string, value: unknown): TemplateOrigin {
+  const segments = fieldPath.split(".");
+  const leaf = segments.pop()!;
+  let owner = item;
+  let containingField = leaf;
+  for (const segment of segments) {
+    if (!Array.isArray(owner)) containingField = segment;
+    if (!owner || typeof owner !== "object") return "unmapped";
+    const property = Object.getOwnPropertyDescriptor(owner, segment);
+    if (!property || !("value" in property)) return "unmapped";
+    owner = property.value;
+  }
+  if (Array.isArray(owner) && !hasTemplateOrigin(owner, leaf)) return templateFieldOrigin(null, containingField, value);
+  return templateFieldOrigin(owner, leaf, value);
+}
+
+function addBucketOrigin(origins: Map<string, TemplateOrigin>, bucket: string, origin: TemplateOrigin): void {
+  if (origin === "literal") return;
+  const existing = origins.get(bucket);
+  if (!existing || existing === "literal") {
+    origins.set(bucket, Array.isArray(origin) ? [...origin] : origin);
+    return;
+  }
+  if (existing === "unmapped" || origin === "unmapped") {
+    origins.set(bucket, "unmapped");
+    return;
+  }
+  const prior = Array.isArray(existing) ? existing : [existing];
+  for (const source of Array.isArray(origin) ? origin : [origin]) {
+    if (!prior.some(entry => entry.key === source.key && entry.value === source.value)) prior.push(source);
+    if (prior.length > MAX_TEMPLATE_INTERPOLATIONS) {
+      origins.set(bucket, "unmapped");
+      return;
+    }
+  }
+  if (prior.length > 1) origins.set(bucket, prior);
+}
+
+function applyBucketOrigins(
+  result: object, origins: ReadonlyMap<string, TemplateOrigin>, incomplete: boolean, count = false,
+): void {
+  for (const [bucket, origin] of origins) {
+    setTemplateOrigin(result, bucket, origin, "key");
+    if (count) setTemplateOrigin(result, bucket, origin);
+  }
+  if (incomplete) markTemplateOriginsIncomplete(result);
+}
+
 interface GroupByAgeSpec {
   source: unknown;
   timestampField: string;
@@ -1273,6 +1350,7 @@ function transformGroupByAge(
   skillId: string,
   settings: Record<string, unknown>,
   ctx: RunContext,
+  trackOrigins: boolean,
 ): Record<string, unknown[]> {
   const spec = settings as unknown as GroupByAgeSpec;
   if (!Array.isArray(spec.source)) {
@@ -1292,8 +1370,13 @@ function transformGroupByAge(
   );
 
   const result: Record<string, unknown[]> = {};
+  const origins = trackOrigins ? new Map<string, TemplateOrigin>() : undefined;
+  let remaining = MAX_TEMPLATE_INTERPOLATIONS;
   for (const group of spec.groups) {
     result[group.name] = [];
+    if (origins && hasTemplateOrigin(group, "name") && remaining-- > 0) {
+      addBucketOrigin(origins, group.name, templateFieldOrigin(group, "name", group.name));
+    }
   }
 
   for (const item of spec.source as Array<Record<string, unknown>>) {
@@ -1310,6 +1393,7 @@ function transformGroupByAge(
       }
     }
   }
+  if (origins) applyBucketOrigins(result, origins, remaining < 0);
 
   const counts = Object.entries(result)
     .map(([name, items]) => `${name}=${items.length}`)
@@ -1421,6 +1505,7 @@ function transformCorrelateStaleDevices(
   skillId: string,
   settings: Record<string, unknown>,
   ctx: RunContext,
+  trackOrigins: boolean,
 ): unknown[] {
   const spec = settings as unknown as CorrelateStaleDevicesSpec;
   if (!Array.isArray(spec.intuneSource)) {
@@ -1514,7 +1599,7 @@ function transformCorrelateStaleDevices(
     }
     if (!matches) continue;
 
-    candidates.push({
+    const candidate = {
       ...intune,
       entraObjectId: entra?.id ?? null,
       approximateLastSignInDateTime: entra?.approximateLastSignInDateTime ?? null,
@@ -1526,8 +1611,25 @@ function transformCorrelateStaleDevices(
       entraInactiveDays:
         entraAge === null ? null : Math.max(0, Math.floor(entraAge / msPerDay)),
       matchedStrategy: strategy,
-    });
+    };
+    candidates.push(candidate);
+    if (trackOrigins && candidates.length <= MAX_TEMPLATE_INTERPOLATIONS) {
+      copyTemplateOrigins(intune, candidate);
+      if (entra) {
+        for (const [field, source] of [
+          ["entraObjectId", "id"], ["approximateLastSignInDateTime", "approximateLastSignInDateTime"],
+          ["entraAccountEnabled", "accountEnabled"], ["entraTrustType", "trustType"], ["entraIsManaged", "isManaged"],
+        ] as const) {
+          if (candidate[field] !== null) setTemplateOrigin(candidate, field, templateFieldOrigin(entra, source, entra[source]));
+        }
+      }
+      if (intuneAge !== null) setTemplateOrigin(candidate, "intuneInactiveDays", templateFieldOrigin(intune, "lastSyncDateTime", intune.lastSyncDateTime));
+      if (entraAge !== null) setTemplateOrigin(candidate, "entraInactiveDays", templateFieldOrigin(entra, "approximateLastSignInDateTime", entra?.approximateLastSignInDateTime));
+      setTemplateOrigin(candidate, "matchedStrategy", hasTemplateOrigin(settings, "strategy")
+        ? templateFieldOrigin(settings, "strategy", spec.strategy) : "literal");
+    }
   }
+  if (trackOrigins && candidates.length > MAX_TEMPLATE_INTERPOLATIONS) markTemplateOriginsIncomplete(candidates);
 
   ctx.log(
     "info",
@@ -1571,6 +1673,7 @@ function transformCountByField(
   skillId: string,
   settings: Record<string, unknown>,
   ctx: RunContext,
+  trackOrigins: boolean,
 ): Record<string, number> {
   const spec = settings as unknown as CountByFieldSpec;
   if (!Array.isArray(spec.source)) {
@@ -1581,9 +1684,14 @@ function transformCountByField(
   }
 
   const result: Record<string, number> = {};
+  const origins = trackOrigins ? new Map<string, TemplateOrigin>() : undefined;
+  let remaining = MAX_TEMPLATE_INTERPOLATIONS;
   if (Array.isArray(spec.buckets)) {
-    for (const bucket of spec.buckets) {
+    for (const [index, bucket] of spec.buckets.entries()) {
       if (typeof bucket === "string") result[bucket] = 0;
+      if (origins && typeof bucket === "string" && hasTemplateOrigin(spec.buckets, String(index)) && remaining-- > 0) {
+        addBucketOrigin(origins, bucket, templateFieldOrigin(spec.buckets, String(index), bucket));
+      }
     }
   }
 
@@ -1593,6 +1701,18 @@ function transformCountByField(
     if (missing && !spec.missingBucket) continue;
     const key = missing ? spec.missingBucket! : typeof raw === "string" ? raw : String(raw);
     Object.defineProperty(result, key, { value: (Object.hasOwn(result, key) ? result[key]! : 0) + 1, writable: true, enumerable: true, configurable: true });
+    if (origins && remaining-- > 0) {
+      if (!missing) addBucketOrigin(origins, key, fieldPathOrigin(item, spec.field, raw));
+      else if (hasTemplateOrigin(settings, "missingBucket")) {
+        addBucketOrigin(origins, key, templateFieldOrigin(settings, "missingBucket", spec.missingBucket));
+      } else addBucketOrigin(origins, key, "unmapped");
+    }
+  }
+  if (origins) {
+    applyBucketOrigins(result, origins, remaining < 0, true);
+    for (const [bucket, count] of Object.entries(result)) {
+      if (count === 0 && !origins.has(bucket)) setTemplateOrigin(result, bucket, "unmapped");
+    }
   }
 
   const total = (spec.source as unknown[]).length;
@@ -1623,15 +1743,23 @@ async function runLlmSkill(
     );
   }
 
-  const settings = renderDeep(skill.settings, templateCtx());
-
-  const completion = await ctx.llm.complete({
-    prompt: renderPromptTemplate(skill.settings.prompt, templateCtx()),
-    system: withTenantDataInstructions(skill.settings.system
-      ? renderPromptTemplate(skill.settings.system, templateCtx()) : undefined),
-    ...(typeof settings.temperature === "number" ? { temperature: settings.temperature } : {}),
-    ...(typeof settings.maxTokens === "number" ? { maxTokens: settings.maxTokens } : {}),
-  });
+  const context = templateCtx();
+  const settings = renderDeep(skill.settings, context);
+  const promptInterpolations: TemplateInterpolation[] = [];
+  const systemInterpolations: TemplateInterpolation[] = [];
+  const capture = (spans: TemplateInterpolation[]) => (span: TemplateInterpolation) => {
+    // Keep one excess offset so the observer can report incomplete coverage.
+    if (spans.length <= MAX_TEMPLATE_INTERPOLATIONS) spans.push(span);
+  };
+  const prompt = renderPromptTemplate(skill.settings.prompt, context, capture(promptInterpolations));
+  const system = withTenantDataInstructions(skill.settings.system
+    ? renderPromptTemplate(skill.settings.system, context, capture(systemInterpolations)) : undefined);
+  const completion = await withTemplateInterpolations({ prompt: promptInterpolations, system: systemInterpolations }, () =>
+    ctx.llm.complete({
+      prompt, system,
+      ...(typeof settings.temperature === "number" ? { temperature: settings.temperature } : {}),
+      ...(typeof settings.maxTokens === "number" ? { maxTokens: settings.maxTokens } : {}),
+    }));
 
   const cleaned = cleanLlmText(stripTenantDataFences(completion.text));
   ctx.log(

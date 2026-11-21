@@ -1,3 +1,5 @@
+import { currentClassificationLedger, registerRenderedFragment, withTemplateInterpolations, type TemplateInterpolation } from "@openadminos/runtime/data-classification";
+import { traceToolObservation } from "./tool-observation-classification.js";
 import { assertVoicePromptBudget, clipVoiceText, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
 import { NOVA_PROFILE_BLOCK_END } from "../nova-profile.js";
 import { MAX_PROMISE_NUDGES, looksLikeUnkeptPromise } from "./unkept-promise.js";
@@ -278,7 +280,7 @@ export type RunAgenticChatResult =
 
 type LoopTurn =
   | { role: "assistant"; content: string }
-  | { role: "observation"; content: string; source?: string }
+  | { role: "observation"; content: string; source?: string; tool?: IntuneChatInvestigationToolName }
   | { role: "repair"; content: string };
 
 /** The question kind and sources a reply declared, when it declared a valid kind. */
@@ -379,7 +381,7 @@ export async function runAgenticChat(
     withdrawAnswer();
     const system = buildAgenticSystemPrompt(input, questionKind, [...required].filter((id) => !attemptedServers.has(id)), documentation.length > 0 || fallbackPending);
     const loopInput = { ...input, documentation };
-    const prompt = input.voice
+    const { prompt, interpolations } = input.voice
       ? buildVoiceLoopPrompt(loopInput, turns, system)
       : buildLoopPrompt(loopInput, turns);
     if (input.voice) {
@@ -397,25 +399,26 @@ export async function runAgenticChat(
       maxTokens: Math.max(500, input.maxTokens),
       signal: input.signal,
     };
-    let completion: { text: string; model: string };
     consultedSources = citations.sources.length;
     input.modelStep?.start();
-    if (input.onAnswerText && input.llm.streamsIncrementally) {
-      completion = { text: "", model: responseModel ?? "" };
-      for await (const chunk of input.llm.stream(options)) {
-        completion = { text: chunk.accumulated, model: chunk.model };
-        const partial = partialFinalAnswer(chunk.accumulated);
-        if (partial !== undefined && partial.trim()) {
-          if (!answerShown) input.modelStep?.writing();
-          answerShown = true;
-          input.onAnswerText(partial, learnAnswered);
+    const completion = await withTemplateInterpolations({ prompt: interpolations }, async () => {
+      if (input.onAnswerText && input.llm.streamsIncrementally) {
+        let completion = { text: "", model: responseModel ?? "" };
+        for await (const chunk of input.llm.stream(options)) {
+          completion = { text: chunk.accumulated, model: chunk.model };
+          const partial = partialFinalAnswer(chunk.accumulated);
+          if (partial !== undefined && partial.trim()) {
+            if (!answerShown) input.modelStep?.writing();
+            answerShown = true;
+            input.onAnswerText(partial, learnAnswered);
+          }
         }
+        // An adapter may end its stream quietly on abort; nothing the partial reply asked for runs.
+        assertNotCancelled(input.signal);
+        return completion;
       }
-      // An adapter may end its stream quietly on abort; nothing the partial reply asked for runs.
-      assertNotCancelled(input.signal);
-    } else {
-      completion = await input.llm.complete(options);
-    }
+      return input.llm.complete(options);
+    });
     responseModel = completion.model;
     const assistantText = completion.text.trim();
     turns.push({ role: "assistant", content: assistantText });
@@ -769,6 +772,7 @@ export async function runAgenticChat(
     });
     turns.push({
       role: "observation",
+      tool: action.tool,
       source: execution.trace.mcpSource
         ? `third-party:${execution.trace.mcpSource.host}`
         : tenantDataSourceForTool(action.tool, action.params),
@@ -853,7 +857,8 @@ export function numberedMcpResults(results: readonly McpResultItem[], cites: rea
   results.forEach((item, index) => {
     const cite = cites[index]!;
     const group = groups.get(cite) ?? { title: item.title, head: `${cite} ${item.title}${item.url ? `, ${item.url}` : ""}`, excerpts: [] };
-    const excerpt = item.excerpt && item.excerpt.length > each ? `${item.excerpt.slice(0, each).trimEnd()} [...]` : item.excerpt;
+    const excerpt = item.excerpt && item.excerpt.length > each ? registerRenderedFragment(item.excerpt,
+      `${item.excerpt.slice(0, each).trimEnd()} [...]`, { key: "excerpt", before: "\n", requireEvidence: true }) : item.excerpt;
     const own = item.title !== group.title ? item.title : undefined;
     if (own || excerpt) group.excerpts.push([own, excerpt].filter(Boolean).join("\n"));
     groups.set(cite, group);
@@ -944,16 +949,27 @@ function buildAgenticSystemPrompt(input: RunAgenticChatInput, questionKind: Intu
   ].join("\n");
 }
 
-function buildLoopPrompt(input: RunAgenticChatInput, turns: LoopTurn[]): string {
+function buildLoopPrompt(input: RunAgenticChatInput, turns: LoopTurn[]): {
+  prompt: string; interpolations: TemplateInterpolation[];
+} {
+  const observe = currentClassificationLedger() !== undefined;
+  const observations: Array<{ tool: IntuneChatInvestigationToolName; fence: string; offset: number }> = [];
+  let cursor = 0;
   const transcript = turns
     .map((turn) => {
+      let rendered: string;
       if (turn.role === "observation") {
-        return `Observation:\n${fenceTenantData(turn.content, turn.source ?? "tool:observation")}`;
+        const fence = fenceTenantData(turn.content, turn.source ?? "tool:observation");
+        const label = "Observation:\n";
+        if (observe && turn.tool) observations.push({ tool: turn.tool, fence, offset: cursor + label.length });
+        rendered = label + fence;
+      } else if (turn.role === "repair") {
+        rendered = `Repair instruction:\n${turn.content}`;
+      } else {
+        rendered = `Assistant (previous response, reference only):\n${fenceTenantData(turn.content, "chat:model-turn")}`;
       }
-      if (turn.role === "repair") {
-        return `Repair instruction:\n${turn.content}`;
-      }
-      return `Assistant (previous response, reference only):\n${fenceTenantData(turn.content, "chat:model-turn")}`;
+      cursor += rendered.length + 2;
+      return rendered;
     })
     .join("\n\n");
   const documentation = (input.documentation ?? [])
@@ -962,7 +978,7 @@ function buildLoopPrompt(input: RunAgenticChatInput, turns: LoopTurn[]): string 
         `[${(chunk as Partial<LoopPassage>).citation ?? index + 1}] ${chunk.title ? `${chunk.title} - ` : ""}${chunk.file}\n${chunk.text.trim()}`,
     )
     .join("\n\n");
-  return [
+  const sections = [
     documentation
       ? `Microsoft documentation passages from the local docs index on this device. They describe general product behaviour, not this tenant's state. Cite them with their numbers, such as [1], when you rely on them, and call them the local docs index. A passage about another product or topic is not a source: do not cite it, also not to say that it does not apply.\n\n${documentation}`
       : "",
@@ -972,11 +988,23 @@ function buildLoopPrompt(input: RunAgenticChatInput, turns: LoopTurn[]): string 
       ? "For current public facts, use web_search before answering. Local documentation is not evidence of the latest public release. For tenant facts, use cache/Graph evidence. Choose the tools the question needs."
       : "",
     "Next response:",
-  ].filter(Boolean).join("\n\n");
+  ];
+  const label = "Conversation so far:\n";
+  const transcriptStart = (sections[0] ? sections[0].length + 2 : 0) + sections[1]!.length + 2 + label.length;
+  return {
+    prompt: sections.filter(Boolean).join("\n\n"),
+    interpolations: observations.map(({ tool, fence, offset }) => {
+      const bodyStart = fence.indexOf("\n") + 1;
+      const bodyEnd = fence.lastIndexOf("\n");
+      const start = transcriptStart + offset + bodyStart;
+      return { start, end: start + bodyEnd - bodyStart, key: "",
+        trace: () => traceToolObservation(tool, fence.slice(bodyStart, bodyEnd), start) };
+    }),
+  };
 }
 
 /** Optional documentation must never crowd out the question or tool evidence. */
-function buildVoiceLoopPrompt(input: RunAgenticChatInput, turns: LoopTurn[], system: string): string {
+function buildVoiceLoopPrompt(input: RunAgenticChatInput, turns: LoopTurn[], system: string): ReturnType<typeof buildLoopPrompt> {
   const limit = input.promptByteLimit ?? VOICE_PROMPT_BYTE_LIMIT;
   const compact = {
     ...input,
@@ -995,7 +1023,7 @@ function buildVoiceLoopPrompt(input: RunAgenticChatInput, turns: LoopTurn[], sys
     ? [{ role: "repair", content: "Earlier tool exchanges were omitted to fit voice context. Do not treat missing detail as absent evidence; retrieve it again if needed." }, ...recent]
     : recent);
   let prompt = build();
-  const size = () => Buffer.byteLength(system) + Buffer.byteLength(prompt);
+  const size = () => Buffer.byteLength(system) + Buffer.byteLength(prompt.prompt);
   if (size() <= limit) return prompt;
   compact.documentation = [];
   prompt = build();
@@ -1224,16 +1252,23 @@ function trimObservation(value: string, limit: number,
   catch { parsed = value; }
   let entries = 20;
   let stringLimit = Math.min(2000, Math.max(0, limit));
-  const compact = (item: unknown): unknown => {
-    if (typeof item === "string") return item.length > stringLimit ? `${item.slice(0, stringLimit)} [truncated]` : item;
-    if (Array.isArray(item)) return item.slice(0, entries).map(compact);
+  const compact = (item: unknown, register: boolean, key?: string): unknown => {
+    if (typeof item === "string") {
+      if (item.length <= stringLimit) return item;
+      const clipped = `${item.slice(0, stringLimit)} [truncated]`;
+      return register ? registerRenderedFragment(item, clipped, { key: key ?? "observation", requireEvidence: true }) : clipped;
+    }
+    if (Array.isArray(item)) return item.slice(0, entries).map(child => compact(child, register, key));
     if (item && typeof item === "object") return Object.fromEntries(Object.entries(item)
-      .filter(([key]) => key.length <= stringLimit).slice(0, entries).map(([key, child]) => [key, compact(child)]));
+      .filter(([key]) => key.length <= stringLimit).slice(0, entries).map(([key, child]) => [key, compact(child, register, key)]));
     return item;
   };
   for (;;) {
-    const result = JSON.stringify({ _hostNotice: notice, observation: compact(parsed) });
-    if (size(result) <= limit) return result;
+    const result = JSON.stringify({ _hostNotice: notice, observation: compact(parsed, false) });
+    if (size(result) <= limit) {
+      compact(parsed, true);
+      return result;
+    }
     if (entries === 1 && stringLimit === 0) return JSON.stringify({ _hostNotice: notice });
     entries = Math.max(1, Math.floor(entries / 2));
     stringLimit = Math.floor(stringLimit / 2);

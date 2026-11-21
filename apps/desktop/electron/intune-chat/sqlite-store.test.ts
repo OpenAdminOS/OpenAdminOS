@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
 import { DEFAULT_GRAPH_READ_SCOPE_NAMES } from "@openadminos/agent-sdk";
 
@@ -23,6 +24,190 @@ import type {
 } from "@openadminos/agent-sdk";
 
 describe("Intune Chat SQLite store", () => {
+  for (const operation of ["baseline", "refresh", "backfill", "clear", "purge"] as const) {
+    it(`preserves cache transaction behavior under a competing writer during ${operation}`, async t => {
+      const dir = await mkdtemp(join(tmpdir(), "openadminos-cache-locked-"));
+      const path = join(dir, "openadminos.db");
+      const store = new IntelligenceSqliteStore(path, { backgroundClassification: true });
+      const writer = new DatabaseSync(path);
+      try {
+        const snapshot = {
+          tenantId: "tenant-1", resource: "conditionalAccessPolicies" as const, label: "Policies",
+          scopeSet: [], rows: [{ id: "policy", state: "enabled" }], refreshedAt: "2026-01-01T00:00:00.000Z",
+        };
+        await store.waitForCacheClassification();
+        await store.replaceGraphResourcesInBatches(snapshot);
+        await store.waitForCacheClassification();
+        const db = store["db"];
+        db.exec("PRAGMA busy_timeout = 50");
+        const prepare = db.prepare.bind(db);
+        let readInTransaction = false;
+        let sawFirstDelete = false;
+        t.mock.method(db, "prepare", (sql: string) => {
+          const statement = prepare(sql);
+          if (sql.includes("SELECT v.tenant_id") || sql.includes("SELECT rowid, tenant_id, resource, raw_json")) {
+            const all = statement.all.bind(statement);
+            t.mock.method(statement, "all", (...args: Parameters<typeof statement.all>) => {
+              readInTransaction ||= db.isTransaction && writer.isTransaction;
+              return all(...args);
+            });
+          }
+          if (sql.startsWith("DELETE FROM graph_resources")) sawFirstDelete = true;
+          return statement;
+        });
+        const refresh = { ...snapshot, rows: [{ id: "policy", state: "disabled" }],
+          refreshedAt: "2026-01-02T00:00:00.000Z" };
+        const operations = {
+          baseline: () => store.createDriftBaseline({
+            tenantId: snapshot.tenantId, name: "Fixture", now: refresh.refreshedAt, resources: [snapshot.resource],
+          }),
+          refresh: () => store.replaceGraphResourcesInBatches(refresh),
+          backfill: () => [...store["backfillCacheClassifications"]()],
+          clear: () => store.clearGraphCache(snapshot.tenantId),
+          purge: () => store.purgeTenant(snapshot.tenantId),
+        };
+
+        writer.exec("BEGIN IMMEDIATE");
+        if (operation === "backfill") {
+          operations.backfill();
+        } else {
+          await assert.rejects(async () => operations[operation](), { errcode: 5 });
+        }
+        if (operation === "clear") assert.equal(sawFirstDelete, true);
+        if (operation === "baseline" || operation === "refresh" || operation === "backfill") {
+          // A successful read inside the transaction forces a deferred
+          // upgrade. BEGIN IMMEDIATE fails before reaching this read.
+          assert.equal(readInTransaction, true);
+        }
+        assert.equal(db.isTransaction, false);
+        assert.equal(writer.prepare("SELECT COUNT(*) AS count FROM graph_resources").get()?.count, 1);
+        assert.equal(writer.prepare("SELECT COUNT(*) AS count FROM drift_baselines").get()?.count, 0);
+        if (operation === "backfill") {
+          assert.equal(writer.prepare("SELECT classification_json FROM graph_resources").get()?.classification_json, null);
+        }
+
+        writer.exec("ROLLBACK");
+        t.mock.restoreAll();
+        await operations[operation]();
+        const count = writer.prepare("SELECT COUNT(*) AS count FROM graph_resources").get()?.count;
+        assert.equal(count, operation === "clear" || operation === "purge" ? 0 : 1);
+        if (operation === "baseline") assert.ok(store.getActiveDriftBaseline(snapshot.tenantId));
+        if (operation === "refresh") assert.match(String(writer.prepare("SELECT raw_json FROM graph_resources").get()?.raw_json), /disabled/);
+        if (operation === "backfill") assert.equal(typeof writer.prepare("SELECT classification_json FROM graph_resources").get()?.classification_json, "string");
+      } finally {
+        writer.close();
+        await store.close();
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+  }
+
+  it("invalidates sidecars at clear and purge commit and reclaims them in batches", async t => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-sidecar-cleanup-"));
+    const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+    const db = store["db"];
+    try {
+      const snapshot = {
+        tenantId: "fixture-clear", resource: "managedDevices" as const, label: "Devices",
+        scopeSet: [], rows: Array.from({ length: 129 }, (_, i) => ({ id: `fixture-${i}` })),
+        refreshedAt: "2026-01-01T00:00:00.000Z",
+      };
+      for (const tenantId of ["fixture-clear", "fixture-purge", "fixture-keep"]) {
+        store.replaceGraphResources({ ...snapshot, tenantId });
+        db.prepare(`INSERT INTO graph_classification_sidecars
+          (cache_rowid, tenant_id, resource, snapshot_id, field_map_version, compressed)
+          SELECT rowid, tenant_id, resource, snapshot_id, 8, X'01'
+          FROM graph_resources WHERE tenant_id = ?`).run(tenantId);
+      }
+      db.exec("CREATE TABLE IF NOT EXISTS audit_events (tenant_id TEXT)");
+      // Three large sidecars cannot fit in one cleanup slice.
+      db.exec(`UPDATE graph_classification_sidecars SET compressed = zeroblob(65536)
+        WHERE cache_rowid IN (SELECT cache_rowid FROM graph_classification_sidecars
+          WHERE tenant_id = 'fixture-purge' ORDER BY cache_rowid LIMIT 3)`);
+      const deletes: string[][] = [];
+      const prepare = db.prepare.bind(db);
+      t.mock.method(db, "prepare", (sql: string) => {
+        const statement = prepare(sql);
+        if (sql.startsWith("DELETE FROM graph_classification_sidecars")) {
+          const run = statement.run.bind(statement);
+          t.mock.method(statement, "run", (...args: Parameters<typeof statement.run>) => {
+            deletes.push(JSON.parse(String(args.at(-1))));
+            return run(...args);
+          });
+        }
+        return statement;
+      });
+      const physical = db.prepare("SELECT COUNT(*) AS count FROM graph_classification_sidecars WHERE tenant_id = ?");
+      const readable = db.prepare(`SELECT COUNT(*) AS count FROM graph_classification_sidecars s JOIN graph_resources g
+        ON g.rowid = s.cache_rowid AND g.snapshot_id = s.snapshot_id WHERE s.tenant_id = ?`);
+
+      store.clearGraphCache("fixture-clear");
+      assert.equal(readable.get("fixture-clear")?.count, 0);
+      assert.equal(physical.get("fixture-clear")?.count, 129);
+      await store["staleSidecarCleanup"];
+      assert.equal(physical.get("fixture-clear")?.count, 0);
+      assert.deepEqual(deletes.map(ids => ids.length), [64, 64, 1]);
+      deletes.length = 0;
+
+      const pending = store.purgeTenant("fixture-purge");
+      assert.equal(readable.get("fixture-purge")?.count, 0);
+      assert.equal(physical.get("fixture-purge")?.count, 129);
+      await pending;
+      assert.equal(physical.get("fixture-purge")?.count, 0);
+      assert.deepEqual(deletes.map(ids => ids.length), [2, 64, 63]);
+      assert.equal(readable.get("fixture-keep")?.count, 129);
+    } finally {
+      await store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reads drift history before trying to upgrade a transaction while another writer holds the lock", async t => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-drift-locked-"));
+    const path = join(dir, "openadminos.db");
+    const store = new IntelligenceSqliteStore(path);
+    const writer = new DatabaseSync(path);
+    try {
+      const snapshot = { tenantId: "tenant-1", resource: "configurationPolicies" as const, label: "Policies", scopeSet: [] };
+      store.replaceGraphResources({ ...snapshot, rows: [{ id: "fixture-device", displayName: "Original" }],
+        refreshedAt: "2000-01-01T00:00:00.000Z" });
+      store.replaceGraphResources({ ...snapshot, rows: [{ id: "fixture-device", displayName: "Replacement" }],
+        refreshedAt: "2000-01-02T00:00:00.000Z" });
+      const db = store["db"];
+      // Keep a nonzero timeout so the test exercises the deferred upgrade.
+      // A regression attempting to acquire the lock up front reaches no read.
+      db.exec("PRAGMA busy_timeout = 50");
+      const prepare = db.prepare.bind(db);
+      let readWhileLocked = false;
+      t.mock.method(db, "prepare", (sql: string) => {
+        const statement = prepare(sql);
+        if (sql.includes("FROM drift_object_versions") && sql.includes("ORDER BY tenant_id")) {
+          const all = statement.all.bind(statement);
+          t.mock.method(statement, "all", (...args: Parameters<typeof statement.all>) => {
+            const rows = all(...args);
+            assert.equal(writer.isTransaction, true);
+            readWhileLocked = true;
+            return rows;
+          });
+        }
+        return statement;
+      });
+
+      writer.exec("BEGIN IMMEDIATE");
+      assert.throws(() => store.pruneDriftHistory(snapshot.tenantId, 1), { errcode: 5 });
+      assert.equal(readWhileLocked, true);
+      assert.equal(db.isTransaction, false);
+
+      writer.exec("ROLLBACK");
+      t.mock.restoreAll();
+      assert.equal(store.pruneDriftHistory(snapshot.tenantId, 1).versionsDeleted, 1);
+    } finally {
+      writer.close();
+      await store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("does not infer removals from a capped Graph cache window", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-capped-drift-"));
     try {

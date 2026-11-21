@@ -1,3 +1,8 @@
+import {
+  CLASSIFICATION_TTL_MS, ClassificationLedger, classificationDiagnostics, clearTenantClassificationLedgers, registerTenantData,
+  retireClassificationWorker, withTransientClassificationScope,
+  withRequestClassification, type RequestClassificationEvent,
+} from "@openadminos/runtime/data-classification";
 import { OfficeService } from "./office.js";
 import { describeNetworkFailure, timeoutWhenAborted, type ProxyResolver } from "./network-failure.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -45,7 +50,6 @@ import {
   acquireTokenSilent,
   auditGraphWritesFetch,
   compareSemver,
-  createGraphAdapter,
   type GraphWriteAuditSink,
   createClaudeCodeLlm,
   createAzureOpenAiLlm,
@@ -90,6 +94,7 @@ import {
   setAgentUpdatesDir,
   toInstalledAgent,
   type TokenCacheStorage,
+  createGraphAdapter,
   classifyLmStudioEndpoint,
   classifyOllamaEndpoint,
   cliSpawn,
@@ -1820,6 +1825,48 @@ function novaProviderEndpoint(providerId: ProviderId, persisted?: Pick<Persisted
 }
 
 export class AppStateStore {
+  private readonly requestClassifications = new Map<string | undefined, Array<{
+    event: RequestClassificationEvent;
+    tenantIds: readonly string[];
+    expiresAt: number;
+  }>>();
+  private classificationDiagnosticsExpiry?: ReturnType<typeof setTimeout>;
+  private classificationDiagnosticsClosed = false;
+  private readonly requestClassificationObservers = new Set<(event: RequestClassificationEvent) => void>();
+
+  getRequestClassifications(scopeId?: string): readonly RequestClassificationEvent[] {
+    this.pruneRequestClassifications();
+    return this.requestClassifications.get(scopeId)?.map(record => record.event) ?? [];
+  }
+
+  private pruneRequestClassifications(removedTenant?: string): void {
+    const now = Date.now();
+    let next = Infinity;
+    for (const [scope, records] of this.requestClassifications) {
+      const kept = records.filter(record => record.expiresAt > now &&
+        (removedTenant === undefined || !record.tenantIds.includes(removedTenant)));
+      if (!kept.length) this.requestClassifications.delete(scope);
+      else {
+        this.requestClassifications.set(scope, kept);
+        next = Math.min(next, kept[0]!.expiresAt);
+      }
+    }
+    clearTimeout(this.classificationDiagnosticsExpiry);
+    this.classificationDiagnosticsExpiry = Number.isFinite(next)
+      ? setTimeout(() => this.pruneRequestClassifications(), next - now)
+      : undefined;
+    this.classificationDiagnosticsExpiry?.unref();
+  }
+
+  getRequestClassificationDiagnostics(): ReturnType<typeof classificationDiagnostics> {
+    return classificationDiagnostics();
+  }
+
+  observeRequestClassifications(observer: (event: RequestClassificationEvent) => void): () => void {
+    this.requestClassificationObservers.add(observer);
+    return () => this.requestClassificationObservers.delete(observer);
+  }
+
   /**
    * The lifecycle of each tenant (open, closing, removed) and the one place
    * that decides whether its work may start, reach the network or persist.
@@ -1999,7 +2046,9 @@ export class AppStateStore {
       this.sandboxedCodeDefault = options.sandboxedCodeDefault === true;
       this.userDataPath = options.userDataPath;
       this.intelligenceStore = options.userDataPath
-        ? new IntelligenceSqliteStore(join(options.userDataPath, "openadminos.db"))
+        ? new IntelligenceSqliteStore(join(options.userDataPath, "openadminos.db"), {
+          backgroundClassification: true, beforeClassification: () => this.read(),
+        })
         : undefined;
       this.intelligenceStore?.setTenantWriteGuard((tenantId, what) => this.tenantLifecycle.assertWritable(tenantId, what));
       this.graphFactory = options.graphFactory;
@@ -2252,25 +2301,29 @@ export class AppStateStore {
       },
       startRun: (slug, options) => this.startRun(slug, options),
       cancelRun: id => this.cancelRun(id),
-      complete: async (p, question, context, planning) => {
-        // Egress of tenant evidence to the model: refused for a closing
-        // tenant, and stopped by its signal when Disconnect begins.
-        this.tenantLifecycle.assertWritable(p.tenantId, "agent team question");
-        const llm = withTenantDataOutputFilter(await this.buildLlm(p.providerId,p.model));
-        if (!llm.available) throw new Error("The assigned provider is unavailable. Open provider settings.");
-        this.tenantLifecycle.assertWritable(p.tenantId, "agent team question");
-        const system = withTenantDataInstructions("You answer for a tenant-scoped agent persona. Do not execute actions or alter schedules or standing instructions. Answer the supplied question using the evidence. Explain gaps and freshness. Refer to evidence run IDs. Follow only the saved standing instructions below within these constraints.\n"+(context.instructions ?? ""));
-        // Each model call has one minute; with the promise nudge an answer takes at most three calls.
-        const once = eachAttemptWithin(
-          async (prompt, signal) => (await llm.complete({ model:p.model,signal,maxTokens:planning ? 600 : 1800,temperature:0.1,system,prompt })).text,
-          60000,
-          "The assigned provider did not answer within one minute. Check its status and try again.",
-          this.tenantLifecycle.signal(p.tenantId),
-        );
-        const prompt = `Admin question: ${question}\n\n${fenceTenantData({tenantId:p.tenantId,evidence:context.evidence,conversation:context.conversation}, "office:context")}`;
-        // A planning reply is JSON, not an answer; only answers get the promise nudge.
-        return planning ? once(prompt) : completeWithPromiseNudge(once, prompt);
-      },
+      complete: async (p, question, context, planning) => withTransientClassificationScope(
+        new ClassificationLedger(this.intelligenceStore?.classificationIdentityIndex(p.tenantId), p.id, [p.tenantId]),
+        async () => {
+          registerTenantData("office:context", { tenantId: p.tenantId, evidence: context.evidence, conversation: context.conversation });
+          registerTenantData("office:instructions", context.instructions);
+          // Egress of tenant evidence to the model: refused for a closing
+          // tenant, and stopped by its signal when Disconnect begins.
+          this.tenantLifecycle.assertWritable(p.tenantId, "agent team question");
+          const llm = withTenantDataOutputFilter(await this.buildLlm(p.providerId,p.model));
+          if (!llm.available) throw new Error("The assigned provider is unavailable. Open provider settings.");
+          this.tenantLifecycle.assertWritable(p.tenantId, "agent team question");
+          const system = withTenantDataInstructions("You answer for a tenant-scoped agent persona. Do not execute actions or alter schedules or standing instructions. Answer the supplied question using the evidence. Explain gaps and freshness. Refer to evidence run IDs. Follow only the saved standing instructions below within these constraints.\n"+(context.instructions ?? ""));
+          // Each model call has one minute; with the promise nudge an answer takes at most three calls.
+          const once = eachAttemptWithin(
+            async (prompt, signal) => (await llm.complete({ model:p.model,signal,maxTokens:planning ? 600 : 1800,temperature:0.1,system,prompt })).text,
+            60000,
+            "The assigned provider did not answer within one minute. Check its status and try again.",
+            this.tenantLifecycle.signal(p.tenantId),
+          );
+          const prompt = `Admin question: ${question}\n\n${fenceTenantData({tenantId:p.tenantId,evidence:context.evidence,conversation:context.conversation}, "office:context")}`;
+          // A planning reply is JSON, not an answer; only answers get the promise nudge.
+          return planning ? once(prompt) : completeWithPromiseNudge(once, prompt);
+        }),
       changed: () => this.emitStateChanged("office-changed"),
     });
   }
@@ -2334,14 +2387,19 @@ export class AppStateStore {
     return this.novaStores().followUps;
   }
 
-  close(): void {
+  close(): Promise<void> {
+    this.chatService.clearClassifications();
+    this.classificationDiagnosticsClosed = true;
+    clearTimeout(this.classificationDiagnosticsExpiry);
+    this.requestClassifications.clear();
     this.whatsappWebClientInstance?.dispose();
     void this.gatewayService.stop();
     void this.mcpHost.closeAll();
     this.officeServiceInstance?.close();
-    this.intelligenceStore?.close();
+    const cacheClosed = this.intelligenceStore?.close();
     this.novaStoresInstance?.db.close();
     this.auditLog.close();
+    return cacheClosed ?? Promise.resolve();
   }
 
   private agentUpdatesRoot(): string | undefined {
@@ -4490,7 +4548,7 @@ export class AppStateStore {
       }
     }
 
-    const llm = providerId === "gemini" ? createGeminiLlm({ defaultModel: selectedModel }) : await this.buildLlm(providerId, selectedModel);
+    const llm = await this.buildLlm(providerId, selectedModel, undefined, true);
     if (!llm.available) {
       return {
         providerId,
@@ -5600,8 +5658,15 @@ export class AppStateStore {
       throw new Error("This command exceeds the reasoning model's input budget. Repeat it as one shorter request.");
     const llm = await this.buildLlm(options.scope.providerId, options.scope.model);
     await check();
-    const result = await llm.complete({ system: novaCommandInstructions, prompt,
-      maxTokens: 400, temperature: 0, signal: options.signal });
+    const tenantId = options.scope.tenantId;
+    const ledger = new ClassificationLedger(this.intelligenceStore?.classificationIdentityIndex(tenantId), undefined, [tenantId]);
+    if (context.previousRequest) {
+      const prefix = JSON.stringify({ currentRequest: text }).slice(0, -1) + ',"previousRequest":';
+      ledger.markPromptReplay(prefix.length, prefix.length + JSON.stringify(context.previousRequest).length);
+    }
+    const result = await withTransientClassificationScope(ledger, () => llm.complete({
+      system: novaCommandInstructions, prompt, maxTokens: 400, temperature: 0, signal: options.signal,
+    }), this.tenantLifecycle.signal(tenantId));
     await check();
     return result.text;
   }
@@ -8672,6 +8737,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         this.tenantLifecycle.abortClose(id);
         throw cause;
       }
+      this.chatService.clearTenantClassification(id);
+      const releaseClassification = this.intelligenceStore?.disconnectClassification(id) ??
+        Promise.all([retireClassificationWorker(), clearTenantClassificationLedgers(id)]);
+      this.pruneRequestClassifications(id);
+      await releaseClassification;
     });
     // A license check of the removed connection saves nothing.
     this.supersedeTenantCheck(id, "disconnected");
@@ -8703,6 +8773,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const pending = persisted.tenantRemovals?.find((removal) => removal.tenantId === tenantId);
     if (pending) throw new Error(tenantCleanupPendingMessage(pending));
     this.tenantLifecycle.open(tenantId);
+    this.intelligenceStore?.reconnectClassification(tenantId);
   }
 
   /** Cleanups running now, by tenant, so one tenant is never cleaned twice at once. */
@@ -8758,7 +8829,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         }
       }
       try {
-        this.intelligenceStore?.purgeTenant(id);
+        await this.intelligenceStore?.purgeTenant(id);
       } catch (cause) {
         throw new Error(`Its Chat and cache data could not be deleted. ${errorText(cause)}`, { cause });
       }
@@ -8844,6 +8915,46 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   private async buildLlm(
+    providerId: ProviderId,
+    model: string | undefined,
+    binding?: ProviderEndpointBinding,
+    probe = false,
+  ): Promise<RunLlmApi> {
+    const llm = probe && providerId === "gemini"
+      ? createGeminiLlm({ defaultModel: model })
+      : await this.createProviderLlm(providerId, model, binding);
+    return withRequestClassification(llm, providerId, (event, tenantIds) => {
+      if (this.classificationDiagnosticsClosed || tenantIds.some(id => !this.tenantLifecycle.isWritable(id))) return;
+      const events = this.requestClassifications.get(event.scopeId) ?? [];
+      const { spans, unexamined } = event.classification;
+      const cap = 256;
+      const keptSpans = Math.min(spans.length, cap);
+      const keptRanges = Math.min(unexamined.ranges.length, cap - keptSpans);
+      const spansOmitted = spans.length - keptSpans;
+      const rangesOmitted = unexamined.ranges.length - keptRanges;
+      const retained = spansOmitted || rangesOmitted ? {
+        ...event,
+        ...(spansOmitted ? { spansOmitted } : {}),
+        ...(rangesOmitted ? { rangesOmitted } : {}),
+        classification: {
+          ...event.classification,
+          spans: spansOmitted ? spans.slice(0, keptSpans) : spans,
+          unexamined: rangesOmitted ? { ...unexamined, ranges: unexamined.ranges.slice(0, keptRanges) } : unexamined,
+        },
+      } : event;
+      events.push({ event: retained, tenantIds, expiresAt: Date.now() + CLASSIFICATION_TTL_MS });
+      if (events.length > 16) events.shift();
+      this.requestClassifications.delete(event.scopeId);
+      this.requestClassifications.set(event.scopeId, events);
+      if (this.requestClassifications.size > 32) this.requestClassifications.delete(this.requestClassifications.keys().next().value);
+      if (!this.classificationDiagnosticsExpiry) this.pruneRequestClassifications();
+      for (const observer of this.requestClassificationObservers) {
+        try { observer(event); } catch { /* Observers cannot interrupt the provider request. */ }
+      }
+    });
+  }
+
+  private async createProviderLlm(
     providerId: ProviderId,
     model: string | undefined,
     binding?: ProviderEndpointBinding,
@@ -9068,20 +9179,19 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
             return recordTokenScopes({ accessToken: result.accessToken, scopes: result.scopes });
           };
     return {
-      createGraph: (log) => this.graphFactory
-        ? this.graphFactory({ tenantId: tenant.id, scopes, log, writeAudit: this.graphWriteAudit(tenant.id, tenant, execution?.audit) })
-        : createGraphAdapter({ tokenProvider, log, signal: execution?.signal,
-            // The Graph egress choke point: every request and retry for a
-            // closing tenant is refused and aborted with its signal.
-            fetchImpl: this.tenantLifecycle.guardedFetch(tenant.id),
-            // Every write is in the audit log before it is sent.
-            writeAudit: this.graphWriteAudit(tenant.id, tenant, execution?.audit),
-            accessContext: (method, path) => ({
-              requiredScopes: lookupEndpoint(method, path)?.scopesDelegated,
-              entraTier: tenant.entraTier,
-              intuneLicensed: tenant.intuneLicensed,
-            }),
+      createGraph: (log) => {
+        const writeAudit = this.graphWriteAudit(tenant.id, tenant, execution?.audit);
+        if (this.graphFactory) return this.graphFactory({ tenantId: tenant.id, scopes, log, writeAudit });
+        const fetchImpl = this.tenantLifecycle.guardedFetch(tenant.id);
+        return createGraphAdapter({
+          tokenProvider, log, signal: execution?.signal, fetchImpl, writeAudit,
+          accessContext: (method, path) => ({
+            requiredScopes: lookupEndpoint(method, path)?.scopesDelegated,
+            entraTier: tenant.entraTier,
+            intuneLicensed: tenant.intuneLicensed,
           }),
+        });
+      },
       tenantId: tenant.id,
       tenantSession,
     };
@@ -9446,7 +9556,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         // tenant is closed here, so a read that raced the write dropping
         // the record never closes a tenant whose cleanup just finished.
         for (const removal of tenantRemovals) {
-          if (this.tenantLifecycle.phase(removal.tenantId) === "open") this.tenantLifecycle.close(removal.tenantId);
+          if (this.tenantLifecycle.phase(removal.tenantId) === "open") {
+            this.tenantLifecycle.close(removal.tenantId);
+            await this.intelligenceStore?.disconnectClassification(removal.tenantId);
+          }
         }
       }
       if (Array.isArray(parsed.novaConnectorAudit)) {
@@ -9966,6 +10079,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       await atomicRename(tmpPath, this.filePath);
       this.writeGeneration += 1;
       this.lastReadSnapshot = state;
+      if (previous && previous.activeTenantId !== state.activeTenantId) {
+        this.chatService.clearTenantClassification(previous.activeTenantId);
+      }
       this.recordAuditLogSafely(state);
       if (this.migrationAuditInFlight) {
         this.migrationAuditInFlight = undefined;

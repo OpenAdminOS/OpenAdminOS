@@ -213,7 +213,7 @@ describe("Intune Chat host service", () => {
       const suggestions = await store.listSelfTrainingSuggestions("pending");
       assert.equal(suggestions.length, 0);
     } finally {
-      store.close();
+      await store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -310,7 +310,7 @@ describe("Intune Chat host service", () => {
       assert.deepEqual(graphRequests, [], "grant prompt must also block before refresh");
       assert.equal(modelCalls, 0, "grant prompt must also block before any model call");
     } finally {
-      store.close();
+      await store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -386,7 +386,7 @@ describe("Intune Chat host service", () => {
       assert.match(followUpPrompt, /Assistant: WIN-01 and MAC-01 have not synced recently\./);
       assert.match(followUpPrompt, /Current question: Show only the Windows ones/);
     } finally {
-      store.close();
+      await store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -481,7 +481,7 @@ describe("Intune Chat host service", () => {
 
       const messages = await store.getIntuneChatMessages(result.conversation.id);
       assert.equal(messages[1]?.toolTrace?.[0]?.tool, "query_cache");
-      store.close();
+      await store.close();
       closed = true;
 
       const sqlite = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
@@ -492,7 +492,7 @@ describe("Intune Chat host service", () => {
         sqlite.close();
       }
     } finally {
-      if (!closed) store.close();
+      if (!closed) await store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -585,7 +585,7 @@ describe("Intune Chat host service", () => {
       assert.equal(saved[1]?.content, "Deterministic answer.");
       assert.match(saved[1]?.engineNotice ?? "", /malformed tool JSON/i);
     } finally {
-      store.close();
+      await store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -730,7 +730,7 @@ describe("Intune Chat host service", () => {
         "breakdowns count the pre-investigation snapshot, not the refreshed cache",
       );
     } finally {
-      store.close();
+      await store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -866,7 +866,7 @@ describe("Intune Chat host service", () => {
         "breakdowns count the pre-investigation snapshot, not the refreshed cache",
       );
     } finally {
-      store.close();
+      await store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -1028,7 +1028,7 @@ describe("Intune Chat host service", () => {
       assert.equal(messages[0]?.role, "user");
       assert.equal(messages[1]?.role, "assistant");
     } finally {
-      store.close();
+      await store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -1106,7 +1106,7 @@ describe("Intune Chat host service", () => {
       assert.deepEqual(graphRequests, [], "write block must fire before any tenant refresh");
       assert.equal((await store.listMultiTenantChatJobs()).length, 0);
     } finally {
-      store.close();
+      await store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -1216,7 +1216,7 @@ describe("Intune Chat host service", () => {
       assert.equal(result.userMessage.content, "Summarize the attached workspace context.");
       assert.doesNotMatch(result.userMessage.content, /Workspace context attached/);
     } finally {
-      store.close();
+      await store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -1297,7 +1297,7 @@ describe("Intune Chat host service", () => {
       assert.equal(messages.length, 2);
       assert.equal(messages[1]?.status, "failed");
     } finally {
-      store.close();
+      await store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -1396,7 +1396,7 @@ describe("Intune Chat host service", () => {
       assert.equal(messages[1]?.status, "completed");
       assert.match(messages[1]?.content ?? "", /final token/);
     } finally {
-      store.close();
+      await store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -1508,7 +1508,7 @@ describe("Intune Chat host service", () => {
       assert.equal(messages[1]?.status, "cancelled");
       assert.doesNotMatch(messages[1]?.content ?? "", /discarded/);
     } finally {
-      store.close();
+      await store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -1587,7 +1587,7 @@ describe("Intune Chat host service", () => {
       assert.equal(llmTouched, false);
       assert.equal((await store.listIntuneChatConversations()).length, 0);
     } finally {
-      store.close();
+      await store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -1630,7 +1630,7 @@ describe("Intune Chat host service", () => {
       const renamed = await store.renameIntuneChatConversation("chat_a", "Contoso renamed");
       assert.equal(renamed.title, "Contoso renamed");
     } finally {
-      store.close();
+      await store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -1713,7 +1713,7 @@ describe("Intune Chat host service", () => {
       assert.equal(result.assistantMessage.status, "completed");
       assert.match(result.assistantMessage.content, /Hosted answer/);
     } finally {
-      store.close();
+      await store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -1793,7 +1793,7 @@ describe("Graph cache refresh concurrency and cancellation", () => {
       assert.ok(peak > 1, `expected concurrent refreshes, peak was ${peak}`);
       assert.ok(peak <= 4, `expected at most 4 concurrent refreshes, peak was ${peak}`);
     } finally {
-      store.close();
+      await store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -1830,7 +1830,7 @@ describe("Graph cache refresh concurrency and cancellation", () => {
         `aborting must stop the refresh early; ${requests} requests were made`,
       );
     } finally {
-      store.close();
+      await store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -1871,7 +1871,7 @@ it('renders device lists and app counts from SQLite and recognizes an installed 
     const agent = await store.streamIntuneChatMessage({content:'Tenant change audit',refreshIfStale:false}, ()=>{});
     assert.match(agent.assistantMessage.content, /installed read-only agent/);
     assert.doesNotMatch(agent.assistantMessage.content, /cannot perform tenant changes/);
-  } finally {store.close();await rm(dir,{recursive:true,force:true});}
+  } finally {await store.close();await rm(dir,{recursive:true,force:true});}
 });
 
 it("answers an ungranted area deterministically without calling Graph", async () => {
@@ -1939,7 +1939,7 @@ it("answers an ungranted area deterministically without calling Graph", async ()
     assert.equal(graphCalls, 0);
     assert.equal(llmCalls, 0);
   } finally {
-    store.close();
+    await store.close();
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -2008,7 +2008,7 @@ it("names a service that is not connected instead of a scope", async () => {
     assert.equal(graphCalls, 0);
     assert.equal(llmCalls, 0);
   } finally {
-    store.close();
+    await store.close();
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -2071,7 +2071,7 @@ it("treats a partly granted Defender part as not connected in Chat", async () =>
     assert.equal(graphCalls, 0);
     assert.equal(llmCalls, 0);
   } finally {
-    store.close();
+    await store.close();
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -2138,7 +2138,7 @@ for (const path of ["send", "stream"] as const) {
       const messages = await store.getIntuneChatMessages(result.conversation.id);
       assert.match(messages[1]?.content ?? "", /Not included in this answer: Defender alerts and Defender incidents\./);
     } finally {
-      store.close();
+      await store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });

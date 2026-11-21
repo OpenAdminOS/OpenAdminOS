@@ -16,9 +16,12 @@ import type {
 
 import { GRAPH_CACHE_LOG_WINDOW_DAYS, graphAccessDenialFromError, graphAccessDenialText, isGraphCacheLogResource, missingServiceCopy, omittedSnapshotsCopy } from "@openadminos/agent-sdk";
 import { fenceTenantData } from "@openadminos/runtime";
+import {
+  registerGraphTenantData, registerRenderedFragment, registerTenantData, PRIVATE_PATTERN,
+} from "@openadminos/runtime/data-classification";
 
 import { lookupEndpoint, searchEndpoints } from "../graph-catalog.js";
-import { mcpHost, type McpCatalogEntry, type McpItemIdForm, type McpItemIdRule, type McpResultFormat, type McpResultShape } from "../mcp/catalog.js";
+import { mcpHost, mcpCatalogEntry, type McpCatalogEntry, type McpItemIdForm, type McpItemIdRule, type McpResultFormat, type McpResultShape } from "../mcp/catalog.js";
 import { cleanMcpDescription, cleanMcpSchema, McpHostError } from "../mcp/host.js";
 import { canonicalEgressText, egressResidue } from "./mcp-egress.js";
 import { canonicalMcpFilter, McpFilterItemError, McpFilterSyntaxError } from "./mcp-filter.js";
@@ -322,17 +325,24 @@ function listResult(found: McpResultItem[], matched: number, counts: Record<stri
 export function mcpListingNote(serverName: string, read: { listed: number; matched?: number; counts?: Readonly<Record<string, number | boolean>>; pages?: boolean }): string {
   const lines: string[] = [];
   const counts = Object.entries(read.counts ?? {});
-  if (counts.length > 0) lines.push(`${serverName} result counts: ${counts.map(([key, value]) => `${key} ${String(value)}`).join(", ")}.`);
+  if (counts.length > 0) lines.push(`${serverName} result counts: ${counts.map(([key, value]) => {
+    const before = `${key} `;
+    return before + registerRenderedFragment(value, String(value), { before, requireEvidence: true });
+  }).join(", ")}.`);
   const matched = read.matched ?? read.listed;
   const left = matched - read.listed;
-  if (left > 0) lines.push(`OpenAdminOS lists ${read.listed} of the ${matched} records in this result below. The other ${left} ${left === 1 ? "was" : "were"} left out here and ${left === 1 ? "is" : "are"} not absent.`);
+  if (left > 0) {
+    const line = `OpenAdminOS lists ${read.listed} of the ${matched} records in this result below. The other ${left} ${left === 1 ? "was" : "were"} left out here and ${left === 1 ? "is" : "are"} not absent.`;
+    lines.push(registerRenderedFragment(line, line, { unknownOrigin: true }));
+  }
   const more = mcpServerHasMore(read.counts, matched);
   if (more) lines.push(`${serverName} has more records than this result returned.`);
   if (left > 0 || more) {
     const total = Math.max(matched, countsTotal(read.counts) ?? 0);
     const of = total > matched || !more ? String(total) : `more than ${matched}`;
     const further = read.pages ? "To read further records, call the same tool again for the next page." : "This tool reads no further pages, so a narrower question is the way to reach the others.";
-    lines.push(`The list below is not complete. Say so in the answer: give how many are shown and how many exist, as in "Showing ${read.listed} of ${of}". ${further}`);
+    const example = `Showing ${read.listed} of ${of}`;
+    lines.push(`The list below is not complete. Say so in the answer: give how many are shown and how many exist, as in "${registerRenderedFragment(example, example, { unknownOrigin: true })}". ${further}`);
   }
   return lines.join("\n");
 }
@@ -348,29 +358,40 @@ function pathValue(record: Record<string, unknown>, key: string): unknown {
   return value;
 }
 
-function textOf(value: unknown): string | undefined {
-  if (typeof value === "string") return value.trim() || undefined;
-  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+function textOf(value: unknown, before?: string, fromResult = true): string | undefined {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed) return trimmed === value || !fromResult ? trimmed : registerRenderedFragment(value, trimmed, { before, requireEvidence: true });
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return fromResult ? registerRenderedFragment(value, String(value), { before, requireEvidence: true }) : String(value);
+  }
   return undefined;
 }
 
 /** A short field as text: scalars, lists of scalars, and records or lists of records by their scalar values. */
-function factText(value: unknown): string | undefined {
-  const flat = (entry: unknown): string | undefined => {
-    if (typeof entry === "boolean") return entry ? "yes" : "no";
-    const scalar = textOf(entry);
+function factText(value: unknown, key: string): string | undefined {
+  const before = `${key}: `;
+  const flat = (entry: unknown, direct = false): string | undefined => {
+    if (typeof entry === "boolean") {
+      const text = entry ? "yes" : "no";
+      return direct ? registerRenderedFragment(entry, text, { before, requireEvidence: true }) : text;
+    }
+    const scalar = textOf(entry, before, direct);
     if (scalar !== undefined) return scalar;
     if (entry && typeof entry === "object" && !Array.isArray(entry)) {
-      const parts = Object.values(entry as Record<string, unknown>).map((part) => (typeof part === "boolean" ? undefined : textOf(part))).filter(Boolean);
+      const parts = Object.values(entry as Record<string, unknown>).map((part) => (typeof part === "boolean" ? undefined : textOf(part, undefined, false))).filter(Boolean);
       return parts.length > 0 ? parts.join(" ") : undefined;
     }
     return undefined;
   };
   const text = Array.isArray(value)
-    ? value.map(flat).filter(Boolean).join(value.some((entry) => entry && typeof entry === "object") ? "; " : ", ")
-    : flat(value);
+    ? value.map(entry => flat(entry)).filter(Boolean).join(value.some((entry) => entry && typeof entry === "object") ? "; " : ", ")
+    : flat(value, true);
   if (!text) return undefined;
-  return text.length > FACT_CHARS ? `${text.slice(0, FACT_CHARS)} [...]` : text;
+  const rendered = text.length > FACT_CHARS ? `${text.slice(0, FACT_CHARS)} [...]` : text;
+  return value && typeof value === "object" || rendered !== text
+    ? registerRenderedFragment(text, rendered, { before, unknownOrigin: true }) : rendered;
 }
 
 function httpsLink(record: Record<string, unknown>, keys: readonly string[] | undefined): string | undefined {
@@ -394,11 +415,11 @@ function shapeItem(record: Record<string, unknown>, shape: McpResultShape, clean
   const url = httpsLink(record, shape.url);
   const text = shape.text?.map((key) => textOf(pathValue(record, key))).find(Boolean);
   const facts = (shape.facts ?? []).flatMap((key) => {
-    const fact = factText(pathValue(record, key));
+    const fact = factText(pathValue(record, key), key);
     return fact ? [`${key}: ${fact}`] : [];
   });
   const excerpt = [text, ...facts].filter(Boolean).join("\n");
-  const id = shape.id?.map((key) => textOf(pathValue(record, key))).find(Boolean);
+  const id = shape.id?.map((key) => textOf(pathValue(record, key), '"id":"')).find(Boolean);
   return { title, ...(url ? { url } : {}), ...(excerpt ? { excerpt } : {}), ...(id ? { id } : {}) };
 }
 
@@ -439,10 +460,10 @@ function readFormatted(data: unknown, text: string, format: McpResultFormat, cal
   if (found.length > 0 || !format.whole || !data || typeof data !== "object" || Array.isArray(data)) return listResult(found, matched, rootMatched ? undefined : envelopeCounts(data));
   const record = data as Record<string, unknown>;
   if (format.whole.emptyWhenZero?.some((key) => record[key] === 0)) return { items: [], empty: true };
-  const params = Object.values(call.args ?? {}).flatMap((value) => (Array.isArray(value) ? value : [value])).map((value) => textOf(value)).filter(Boolean);
+  const params = Object.values(call.args ?? {}).flatMap((value) => (Array.isArray(value) ? value : [value])).map((value) => textOf(value, undefined, false)).filter(Boolean);
   const title = clean(`${call.tool ?? "Result"}${params.length > 0 ? `: ${params.join(" ")}` : ""}`);
   const url = httpsLink(record, format.whole.url);
-  return { items: [{ title, ...(url ? { url } : {}), excerpt: text.trim() || JSON.stringify(record) }], empty: false };
+  return { items: [{ title, ...(url ? { url } : {}), excerpt: textOf(text) || JSON.stringify(record) }], empty: false };
 }
 
 function isUrlOnHost(value: string, host: string): boolean {
@@ -476,7 +497,11 @@ export function parseMcpResults(text: string, call: { structured?: unknown; args
  * name with a link, as below.
  */
 export function readMcpResult(text: string, call: { structured?: unknown; args?: Record<string, unknown>; host?: string; tool?: string; format?: McpResultFormat } = {}): McpReadResult {
-  const clean = (value: string) => value.replace(/\s+/g, " ").trim().slice(0, 200);
+  const clean = (value: string) => {
+    const normalized = value.replace(/\s+/g, " ").trim();
+    const rendered = normalized.slice(0, 200);
+    return rendered === value ? value : registerRenderedFragment(value, rendered, { requireEvidence: true });
+  };
   if (!text.trim() && call.structured === undefined) return { items: [], empty: true };
   if (call.format) {
     let data = call.structured;
@@ -510,7 +535,7 @@ function readDefault(text: string, call: { structured?: unknown; args?: Record<s
       if (depth === 0) rootMatched = true;
       if (found.length >= MCP_RESULT_LIMIT) return;
       const excerpt = EXCERPT_KEYS.map((key) => record[key]).find((candidate): candidate is string => typeof candidate === "string" && candidate.trim().length > 0);
-      found.push({ title: clean(title), url, ...(excerpt ? { excerpt: excerpt.trim() } : {}) });
+      found.push({ title: clean(title), url, ...(excerpt ? { excerpt: textOf(excerpt)! } : {}) });
       return;
     }
     for (const child of Object.values(record)) walk(child, depth + 1);
@@ -532,7 +557,7 @@ function readDefault(text: string, call: { structured?: unknown; args?: Record<s
   // card link when it points at the server's own host.
   const fetched = typeof call.args?.url === "string" && call.host && isUrlOnHost(call.args.url, call.host) ? call.args.url : undefined;
   const heading = /^#\s+(.+)$/m.exec(text)?.[1];
-  if (fetched && heading && clean(heading)) return { items: [{ title: clean(heading), url: fetched, excerpt: text.trim() }] };
+  if (fetched && heading && clean(heading)) return { items: [{ title: clean(heading), url: fetched, excerpt: textOf(text)! }] };
   const seen = new Set<string>();
   for (const match of text.matchAll(/\[([^\]\n]{1,200})\]\((https?:\/\/[^)\s]+)\)/g)) {
     if (seen.has(match[2]!) || !clean(match[1]!)) continue;
@@ -664,6 +689,7 @@ export interface SplashtopChatContext {
 
 /** Splashtop read tools for the prompt, with where they read from. */
 export function splashtopToolDefinitionsForPrompt(splashtop: SplashtopChatContext): string {
+  registerTenantData("organization:name", splashtop.organizationName);
   return SPLASHTOP_READ_TOOLS.filter((tool) => splashtop.tools.includes(tool.name)).map((tool) => [
     `- ${tool.name}: ${tool.description} Reads ${fenceTenantData(splashtop.organizationName, "organization:name")} from ${splashtop.host}.`,
     `  params: ${JSON.stringify(tool.params)}`,
@@ -885,6 +911,11 @@ export async function executeIntuneChatTool(
   const traceParams = () => (isMcpChatToolName(tool) ? written.args ?? {} : params ?? {});
   try {
     const result = await executeToolUnchecked(ctx, tool, params, mcpHooks, written);
+    if (isSplashtopReadTool(tool) || tool === "query_drift") {
+      registerTenantData(tenantDataSourceForTool(tool, params) ?? `tool:${tool}`, result);
+    } else if (tool === "web_search") {
+      registerTenantData("web:search", result, { publicReference: true });
+    }
     // Tenant values this answer has seen can never leave in a later MCP query.
     if (TENANT_RESULT_TOOLS.has(tool)) {
       if (ctx.tenantObservations) collectTenantValues(result, ctx.tenantObservations);
@@ -1090,9 +1121,6 @@ function containsPrivateTerm(text: string, terms: readonly string[]): boolean {
   });
 }
 
-/** Email addresses, GUIDs with or without hyphens, IPv4 addresses and credential prefixes. Run on canonical text. */
-const PRIVATE_PATTERN = /\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b|\b[0-9a-f]{32}\b|\b(?:\d{1,3}\.){3}\d{1,3}\b|\b(?:sk-proj-|bearer\s)/i;
-
 /**
  * Whether text holds tenant data by the same rules as the MCP egress
  * check: private patterns, the tenant's names and domain, and the tenant
@@ -1188,7 +1216,12 @@ function canonicalMcpArgs(entry: McpChatTool, args: Record<string, unknown>, ref
   return { args: out, checked };
 }
 
-async function executeMcpTool(ctx: IntuneChatToolContext, tool: McpChatToolName, hooks: McpCallHooks | undefined, written: { args?: Record<string, unknown> }): Promise<unknown> {
+async function executeMcpTool(
+  ctx: IntuneChatToolContext,
+  tool: McpChatToolName,
+  hooks: McpCallHooks | undefined,
+  written: { args?: Record<string, unknown> },
+): Promise<unknown> {
   const entry = ctx.mcp?.tools.find((candidate) => candidate.name === tool);
   if (!ctx.mcp || !entry) throw new Error(`${tool} is not an installed MCP tool. Use only the tools listed in this session.`);
   // The params the model wrote are never sent: it may have read tenant data.
@@ -1239,6 +1272,9 @@ async function executeMcpTool(ctx: IntuneChatToolContext, tool: McpChatToolName,
     if (caught instanceof McpHostError && !caught.sent) throw new Error(caught.message);
     throw new McpCallFailedError(caught instanceof Error ? caught.message : String(caught), caught instanceof McpHostError && caught.code === "tool-error");
   }
+  const source = `third-party:${entry.host}`;
+  const publicReference = mcpCatalogEntry(entry.serverId)?.publicReference === true;
+  registerTenantData(source, { text: result.text, structured: result.structured }, { publicReference });
   const read = readMcpResult(result.text, {
     args,
     host: entry.host,
@@ -1246,6 +1282,7 @@ async function executeMcpTool(ctx: IntuneChatToolContext, tool: McpChatToolName,
     ...(entry.resultFormat ? { format: entry.resultFormat } : {}),
     ...(result.structured !== undefined ? { structured: result.structured } : {}),
   });
+  registerTenantData(source, read.items, { publicReference });
   return {
     server: entry.serverName,
     host: entry.host,
@@ -1343,6 +1380,9 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
     filters,
     sort,
     limit: Math.min(limit, QUERY_CACHE_ROW_CAP),
+    projectRow: row => compactValue(selectedFields && row && typeof row === "object"
+      ? Object.fromEntries(selectedFields.filter(field => Object.hasOwn(row, field))
+        .map(field => [field, (row as Record<string, unknown>)[field]])) : row),
   });
   // A query returning nothing is the most misread result in the whole
   // tool surface: models reported "the tenant has no managed devices"
@@ -1391,7 +1431,7 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
     ...(emptyHint ?? {}),
     rows: result.rows.map((entry) => ({
       refreshedAt: entry.refreshedAt,
-      row: compactValue(selectedFields && entry.row && typeof entry.row === 'object' ? Object.fromEntries(selectedFields.filter(field => Object.hasOwn(entry.row as object, field)).map(field => [field, (entry.row as Record<string, unknown>)[field]])) : entry.row),
+      row: entry.row,
     })),
   };
 }
@@ -1476,7 +1516,10 @@ function findGraphEndpoint(ctx: IntuneChatToolContext, params: unknown): unknown
   };
 }
 
-async function graphGet(ctx: IntuneChatToolContext, params: unknown): Promise<unknown> {
+async function graphGet(
+  ctx: IntuneChatToolContext,
+  params: unknown,
+): Promise<unknown> {
   const method = stringParam(params, "method") ?? "GET";
   if (method.toUpperCase() !== "GET") {
     throw new Error("graph_get is read-only. Only GET is accepted.");
@@ -1501,7 +1544,9 @@ async function graphGet(ctx: IntuneChatToolContext, params: unknown): Promise<un
   };
   const requestPage = async (input: GraphRequestInput): Promise<unknown> => {
     try {
-      return await graph.request({ ...input, ...(ctx.signal ? { signal: ctx.signal } : {}) });
+      const data = await graph.request({ ...input, ...(ctx.signal ? { signal: ctx.signal } : {}) });
+      registerGraphTenantData(input.path, data, ctx.signal);
+      return data;
     } catch (error) {
       const denial = graphAccessDenialFromError(error, { path, method: "GET", requiredScopes: validation.scopes });
       if (!denial) throw error;
@@ -1875,7 +1920,7 @@ function enforcePayloadCap(value: Record<string, unknown>): Record<string, unkno
   return {
     ...next,
     rows: undefined,
-    valuePreview: serialized.slice(0, GRAPH_GET_PAYLOAD_BYTE_CAP),
+    valuePreview: registerRenderedFragment(serialized, serialized.slice(0, GRAPH_GET_PAYLOAD_BYTE_CAP), { jsonPrefix: true }),
     truncated: true,
     payloadTruncated: true,
   };
@@ -1980,19 +2025,20 @@ export function summarizeToolCallForProgress(
   return "Running tool.";
 }
 
-function compactValue(value: unknown, depth = 0): unknown {
+function compactValue(value: unknown, depth = 0, field?: string): unknown {
   if (value === null || value === undefined) return value;
-  if (typeof value === "string") return value.length > 800 ? `${value.slice(0, 800)}...` : value;
+  if (typeof value === "string") return value.length > 800 ? registerRenderedFragment(value,
+    `${value.slice(0, 800)}...`, { key: field, requireEvidence: true }) : value;
   if (typeof value === "number" || typeof value === "boolean") return value;
   if (Array.isArray(value)) {
-    return value.slice(0, 25).map((item) => compactValue(item, depth + 1));
+    return value.slice(0, 25).map((item) => compactValue(item, depth + 1, field));
   }
   if (typeof value === "object") {
     if (depth >= 4) return "[object truncated]";
     const out: Record<string, unknown> = {};
     for (const [key, child] of Object.entries(value)) {
       if (key === "@odata.context") continue;
-      out[key] = compactValue(child, depth + 1);
+      out[key] = compactValue(child, depth + 1, key);
       if (Object.keys(out).length >= 40) {
         out.__truncatedKeys = true;
         break;

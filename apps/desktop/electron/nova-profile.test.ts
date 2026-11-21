@@ -7,6 +7,7 @@ import { describe, it } from "node:test";
 
 import { providerCatalog, type AppState, type ManagedPolicyStatus, type SecretAccessor } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
+import { ClassificationLedger, withClassificationScope } from "@openadminos/runtime/data-classification";
 
 import { diffConfigurationAudit, type ConfigurationAuditEvent } from "./configuration-audit.js";
 import { sanitizeManagedPolicyRecord } from "./managed-policy-state.js";
@@ -634,6 +635,33 @@ describe("Nova profile prompt block", () => {
     const block = novaProfilePromptBlock({ effective: effective('"\n'.repeat(1000) + "Ü".repeat(500)), byteLimit: 900 });
     assert.ok(Buffer.byteLength(block) <= 900);
     JSON.parse(block.slice(NOVA_PROFILE_BLOCK_INTRO.length + 1));
+  });
+
+  it("keeps classified provenance for clipped instructions in the reasoning prompt", async t => {
+    const instructions = "fixture".repeat(400);
+    const input = { effective: effective(instructions), byteLimit: 1800 };
+    const ledger = new ClassificationLedger();
+    t.after(() => ledger.dispose());
+    ledger.register("fixture", { secretText: instructions });
+    const block = withClassificationScope(ledger, () => novaProfilePromptBlock(input));
+    assert.equal(block, novaProfilePromptBlock(input));
+    const { standingInstructions } = JSON.parse(block.slice(NOVA_PROFILE_BLOCK_INTRO.length + 1));
+    assert.match(standingInstructions.text, /\[clipped\]$/);
+    const probe = `${block}\n${standingInstructions.text}`;
+    await ledger.waitForObservations();
+    const result = ledger.classifyRequest({ system: probe, prompt: "" });
+    assert.equal(result.coverageIncomplete, false);
+    const spans = result.spans.filter(span => span.kind === "credential");
+    assert.deepEqual(spans.map(span => probe.slice(span.start, span.end)), [standingInstructions.text]);
+
+    const missing = new ClassificationLedger();
+    t.after(() => missing.dispose());
+    assert.equal(withClassificationScope(missing, () => novaProfilePromptBlock(input)), block);
+    await missing.waitForObservations();
+    const unexamined = missing.classifyRequest({ system: probe, prompt: "" }).unexamined.ranges;
+    assert.deepEqual(unexamined.map(range => [probe.slice(range.start, range.end), range.reason]), [
+      [standingInstructions.text, "clipped-provenance-unavailable"],
+    ]);
   });
 
   it("lets a shortcut ask what needs the admin", () => {

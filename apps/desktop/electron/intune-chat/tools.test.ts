@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setImmediate as nextTick } from "node:timers/promises";
+import { Worker } from "node:worker_threads";
+import { DatabaseSync } from "node:sqlite";
+import { inflateSync } from "node:zlib";
 import { describe, it } from "node:test";
 
 import {
@@ -11,8 +15,635 @@ import {
   type RunGraphApi,
 } from "@openadminos/agent-sdk";
 
+import { ClassificationLedger, classifyCacheRows, hasGraphFieldClass, hasGraphFieldClasses, withClassificationScope } from "@openadminos/runtime/data-classification";
+import { fenceTenantData } from "@openadminos/runtime";
+import { GRAPH_CACHE_RESOURCES, pathForResource } from "./planner.js";
 import { executeIntuneChatTool } from "./tools.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
+
+const { GRAPH_CLASSIFICATION_FIXTURES } = await import(new URL(
+  "../../../../packages/runtime/src/graph-classification.fixtures.ts", import.meta.url,
+).href) as { GRAPH_CLASSIFICATION_FIXTURES: Record<string, [string, unknown, import("@openadminos/agent-sdk").DataClass]> };
+
+for (const { resource, label } of GRAPH_CACHE_RESOURCES) {
+  it(`classifies the ${resource} cache fixture and maps every planner selection`, async () => {
+    const { path, select, query } = pathForResource(resource);
+    assert.ok(hasGraphFieldClasses(path));
+    for (const field of [...select ?? [], ...query?.$select?.split(",") ?? []]) {
+      assert.ok(hasGraphFieldClass(path, field), `${path} selects ${field}`);
+    }
+    const fixture = GRAPH_CLASSIFICATION_FIXTURES[path];
+    assert.ok(fixture, path);
+    const [field, value, kind] = fixture;
+    const row = { id: "synthetic-row-id", [field]: value };
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-classification-cache-"));
+    const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+    try {
+      store.replaceGraphResources({ tenantId: "tenant-1", resource, label, scopeSet: [], rows: [row],
+        refreshedAt: "2026-11-18T00:00:00.000Z" });
+      const ledger = new ClassificationLedger();
+      const result = withClassificationScope(ledger, () => store.queryGraphCache({ tenantId: "tenant-1", resource }));
+      assert.deepEqual(result.rows[0]?.row, row);
+      const prompt = JSON.stringify(result.rows[0]?.row);
+      await ledger.waitForObservations();
+      const spans = ledger.classifyRequest({ prompt }).spans;
+      assert.ok(spans.some(span => span.source === `cache:${resource}` && span.kind === kind &&
+        prompt.slice(span.start, span.end).includes(String(value))), resource);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+it("recognizes a cached user's first name inside a device name and resolves typed user IDs", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-classification-identities-"));
+  const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+  try {
+    const tenantId = "tenant-1";
+    const knownId = "c91daa9b-3502-4b61-a461-31862371cad0";
+    const unknownId = "a10daa9b-3502-4b61-a461-31862371cad1";
+    const deviceName = "Synthea's laptop";
+    const common = { tenantId, scopeSet: [], refreshedAt: "2026-11-18T00:00:00.000Z" };
+    store.replaceGraphResources({ ...common, resource: "users", label: "Users",
+      rows: [{ id: knownId, displayName: "Synthea Fixture", userPrincipalName: "synthea@example.invalid" }] });
+    store.replaceGraphResources({ ...common, resource: "managedDevices", label: "Devices",
+      rows: [{ id: "workstation-01", deviceName }, { id: "workstation-02", deviceName: "Desk computer" }] });
+    const index = store.classificationIdentityIndex(tenantId);
+    const ledger = new ClassificationLedger(index);
+    const read = withClassificationScope(ledger, () => store.queryGraphCache({ tenantId, resource: "managedDevices" }));
+    const prompt = JSON.stringify(read.rows);
+    const system = `Compare ${knownId} with ${unknownId}`;
+    await ledger.waitForObservations();
+    const spans = ledger.classifyRequest({ system, prompt }).spans;
+    assert.ok(spans.some(span => span.kind === "identity" && span.source === "cache:managedDevices" &&
+      prompt.slice(span.start, span.end) === deviceName));
+    assert.ok(spans.some(span => span.kind === "device" && prompt.slice(span.start, span.end) === "Desk computer"));
+    assert.deepEqual(spans.filter(span => span.section === "system").map(span => system.slice(span.start, span.end)), [knownId, unknownId]);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("publishes only complete startup identity shards to the request worker", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-classification-startup-"));
+  const path = join(dir, "openadminos.db");
+  const tenantId = "fixture-tenant";
+  let store = new IntelligenceSqliteStore(path);
+  try {
+    store.replaceGraphResources({ tenantId, resource: "users", label: "Users", scopeSet: [],
+      refreshedAt: "2026-11-18T00:00:00.000Z",
+      rows: Array.from({ length: 600 }, (_, i) => ({ id: `user-${i}`, displayName: i === 599 ? "Yelena Last" : `Fixture ${i}` })),
+    });
+    store.close();
+    store = new IntelligenceSqliteStore(path, { backgroundClassification: true });
+    const index = store.classificationIdentityIndex(tenantId);
+    const ledger = new ClassificationLedger(index);
+    await nextTick();
+    assert.equal(index.isComplete?.(), false);
+    assert.deepEqual([...index.workerShards!()], []);
+    assert.equal(ledger.classifyRequest({ prompt: "Yelena" }).coverageIncomplete, true);
+    await store.waitForCacheClassification();
+    const result = await ledger.classifyProviderRequest({ prompt: "Yelena" });
+    assert.equal(result.coverageIncomplete, false);
+    assert.equal(result.counts.identity, 1);
+    ledger.dispose();
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("memoizes the raw egress index by cache generation while classification is pending", async t => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-pending-identity-"));
+  let finishStartup!: () => void;
+  const startup = new Promise<void>(resolve => { finishStartup = resolve; });
+  const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"), {
+    backgroundClassification: true, beforeClassification: () => startup,
+  });
+  const collect = t.mock.method(store, "collectTenantIdentityValues");
+  const snapshot = { tenantId: "tenant-1", resource: "users" as const, label: "Users", scopeSet: [],
+    refreshedAt: "2026-11-18T00:00:00.000Z" };
+  const lookup = () => store.tenantIdentityValues(snapshot.tenantId);
+  try {
+    store.replaceGraphResources({ ...snapshot, rows: [{ id: "first", displayName: "Juniper Fixture" }] });
+    const first = lookup();
+    assert.equal(first.matches("Juniper Fixture"), true);
+    assert.equal(lookup(), first);
+    assert.equal(collect.mock.callCount(), 1);
+
+    store.replaceGraphResources({ ...snapshot, rows: [{ id: "second", displayName: "Cypress Fixture" }] });
+    const second = lookup();
+    assert.equal(second.matches("Juniper Fixture"), false);
+    assert.equal(second.matches("Cypress Fixture"), true);
+    assert.equal(lookup(), second);
+    assert.equal(collect.mock.callCount(), 2);
+
+    store.clearGraphCache(snapshot.tenantId);
+    assert.equal(lookup().size, 0);
+    assert.equal(lookup().size, 0);
+    assert.equal(collect.mock.callCount(), 3);
+
+    store.replaceGraphResources({ ...snapshot, rows: [{ id: "third", displayName: "Willow Fixture" }] });
+    const third = lookup();
+    assert.equal(third.matches("Willow Fixture"), true);
+    await store.disconnectClassification(snapshot.tenantId);
+    assert.equal(third.size, 0);
+    assert.equal(lookup().size, 0);
+    assert.equal(collect.mock.callCount(), 4);
+  } finally {
+    finishStartup();
+    await store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("Disconnect clears staged shards while startup is waiting on a different tenant", async t => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-classification-disconnect-"));
+  const path = join(dir, "openadminos.db");
+  const tenantId = "fixture-tenant-a";
+  const otherId = "fixture-tenant-b";
+  let store = new IntelligenceSqliteStore(path);
+  try {
+    const snapshot = { resource: "users" as const, label: "Users", scopeSet: [], refreshedAt: "2026-11-18T00:00:00.000Z" };
+    store.replaceGraphResources({ ...snapshot, tenantId, rows: [{ id: "user-a", displayName: "Yelena Fixture" }] });
+    store.replaceGraphResources({ ...snapshot, tenantId: otherId, rows: [{ id: "user-b", displayName: "Cassandra Another" }] });
+    store.close();
+
+    let unblock!: () => void;
+    const started = new Promise<void>(resolve => { unblock = resolve; });
+    let blocked = false;
+    const post = Worker.prototype.postMessage;
+    t.mock.method(Worker.prototype, "postMessage", function (this: Worker, ...args: Parameters<Worker["postMessage"]>) {
+      const message = args[0] as { startup?: { tenantId: string; indexOnly: boolean } };
+      if (!blocked && message.startup?.tenantId === otherId && message.startup.indexOnly) {
+        blocked = true;
+        unblock();
+        return;
+      }
+      post.apply(this, args);
+    });
+    store = new IntelligenceSqliteStore(path, { backgroundClassification: true });
+    await started;
+
+    const stagedIdentity = store["stagedIdentityShards"].get(tenantId)?.get("users");
+    const stagedFirstName = store["stagedFirstNames"].get(tenantId)?.get("users");
+    assert.ok(stagedIdentity);
+    assert.ok(stagedFirstName);
+    assert.equal(stagedIdentity.matches("Yelena Fixture"), true);
+    assert.equal(stagedFirstName.matches("Yelena"), true);
+    assert.deepEqual([...store.classificationIdentityIndex(tenantId).workerShards!()], []);
+    await store.disconnectClassification(tenantId);
+
+    assert.equal(store["stagedIdentityShards"].has(tenantId), false);
+    assert.equal(store["stagedFirstNames"].has(tenantId), false);
+    assert.equal(stagedIdentity.size, 0);
+    assert.equal(stagedFirstName.size, 0);
+    await store.waitForCacheClassification();
+    assert.deepEqual([...store.classificationIdentityIndex(tenantId).workerShards!()], []);
+    assert.equal(store.tenantIdentityValues(tenantId).size, 0);
+    assert.equal(store.classificationIdentityIndex(otherId).matches("Cassandra"), true);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("transfers one alias-heavy startup row in bounded batches and publishes its complete shard", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-startup-identity-batches-"));
+  const path = join(dir, "openadminos.db");
+  const tenantId = "fixture-tenant";
+  const resource = "users" as const;
+  const aliases = Array.from({ length: 800 }, (_, i) => `smtp:fixture-alias-${i}@example.invalid`);
+  let store = new IntelligenceSqliteStore(path);
+  try {
+    const snapshot = { tenantId, resource, label: "Users",
+      refreshedAt: "2026-11-18T00:00:00.000Z" };
+    store.replaceGraphResources({ ...snapshot, scopeSet: [], rows: [
+      { id: "user-fixture", displayName: "Yelena Fixture", proxyAddresses: aliases },
+    ] });
+    const result = await classifyCacheRows([], "/users", undefined, true, true, undefined, {
+      dbPath: path, tenantId, resource, afterRowId: 0, indexOnly: true,
+    });
+    assert.equal(result.egressIndex, undefined);
+    assert.equal(result.firstNames, undefined);
+    assert.ok(result.identityBatches);
+    assert.equal(result.identityBatches.incomplete, false);
+    assert.ok(result.identityBatches.egress.length > 1);
+    assert.ok([...result.identityBatches.egress, ...result.identityBatches.firstNames]
+      .every(batch => batch instanceof ArrayBuffer && batch.byteLength <= 16 * 1024));
+
+    await store.close();
+    store = new IntelligenceSqliteStore(path, { backgroundClassification: true });
+    const index = store.classificationIdentityIndex(tenantId);
+    assert.equal(index.isComplete?.(), false);
+    await store.waitForCacheClassification();
+    assert.equal(index.isComplete?.(), true);
+    assert.equal(index.matches("Yelena"), true);
+    assert.ok(aliases.every(alias => index.matches(alias)));
+
+    store.replaceGraphResources({ ...snapshot, scopeSet: [], rows: [
+      { id: "oversized-fixture", proxyAddresses: ["a".repeat(18 * 1024), aliases[0]!] },
+    ] });
+    await store.close();
+    store = new IntelligenceSqliteStore(path, { backgroundClassification: true });
+    await store.waitForCacheClassification();
+    const partial = store.classificationIdentityIndex(tenantId);
+    assert.equal(partial.isComplete?.(), false);
+    assert.equal(partial.matches(aliases[0]!), true);
+    assert.equal(new ClassificationLedger(partial).classifyRequest({ prompt: "fixture" }).coverageIncomplete, true);
+  } finally {
+    await store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("reuses versioned cache metadata on reopen and backfills rows from older versions", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-cache-classification-version-"));
+  const path = join(dir, "openadminos.db");
+  const tenantId = "fixture-tenant";
+  const resource = "applications";
+  const row = { id: "fixture-app", passwordCredentials: [{ hint: "Jz7" }] };
+  const other = { id: "other-fixture-app", passwordCredentials: [{ hint: "Zq4" }] };
+  let store = new IntelligenceSqliteStore(path);
+  try {
+    store.replaceGraphResources({ tenantId, resource, label: "Applications", scopeSet: [],
+      refreshedAt: "2026-11-18T00:00:00.000Z", rows: [row, other] });
+    store.close();
+    const db = new DatabaseSync(path);
+    try {
+      const record = db.prepare("SELECT classification_json FROM graph_resources").get();
+      assert.match(String(record?.classification_json), /"hint","credential"/);
+      assert.doesNotMatch(String(record?.classification_json), /Jz7/);
+      db.exec("UPDATE graph_resources SET classification_json = NULL");
+    } finally { db.close(); }
+    store = new IntelligenceSqliteStore(path, { backgroundClassification: true });
+    await store.waitForCacheClassification();
+    const ledger = new ClassificationLedger();
+    const result = withClassificationScope(ledger, () => store.queryGraphCache({ tenantId, resource }));
+    assert.deepEqual(result.rows.map(entry => entry.row), [row, other]);
+    await ledger.waitForObservations();
+    const request = ledger.classifyRequest({ prompt: JSON.stringify([row, other]) });
+    assert.equal(request.coverageIncomplete, false);
+    assert.equal(request.counts.credential, 2);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("closing a profile drains outstanding classification before the profile can be removed", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-cache-close-"));
+  let unblock!: () => void;
+  const blocked = new Promise<void>(resolve => { unblock = resolve; });
+  let started!: () => void;
+  const entered = new Promise<void>(resolve => { started = resolve; });
+  const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"), {
+    backgroundClassification: true,
+    beforeClassification: () => { started(); return blocked; },
+  });
+  try {
+    await entered;
+    let closed = false;
+    const closing = store.close().then(() => { closed = true; });
+    await nextTick();
+    assert.equal(closed, false);
+    unblock();
+    await closing;
+    assert.equal(closed, true);
+  } finally {
+    unblock();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("background backfill leaves a removed database absent", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-cache-removed-"));
+  const dbPath = join(dir, "openadminos.db");
+  try {
+    await assert.rejects(classifyCacheRows([], "/users", undefined, false, false, undefined, {
+      dbPath, tenantId: "tenant-1", resource: "users", afterRowId: 0, indexOnly: false,
+    }), /unable to open database file/);
+    await assert.rejects(access(dbPath), { code: "ENOENT" });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("retries busy sidecars without waiting on the writer and rechecks each snapshot", async t => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-cache-writer-"));
+  const path = join(dir, "openadminos.db");
+  let store = new IntelligenceSqliteStore(path);
+  const writer = new DatabaseSync(path);
+  const tenantId = "tenant-1";
+  const now = "2026-11-18T00:00:00.000Z";
+  try {
+    const resource = "secureScores";
+    const rows = [{ id: "fixture-score", currentScore: 30 }, { id: "replaced-score", currentScore: 20 }];
+    store.replaceGraphResources({ tenantId, resource, label: "Secure Score", scopeSet: [],
+      refreshedAt: now, rows });
+    writer.exec("UPDATE graph_resources SET classification_json = NULL");
+    writer.exec("BEGIN IMMEDIATE");
+    // A worker that attempts to publish cannot resolve this page while the
+    // other connection holds the write lock.
+    const computed = await classifyCacheRows([], "/security/secureScores", undefined, false, false, undefined, {
+      dbPath: path, tenantId, resource: "secureScores", afterRowId: 0, indexOnly: false,
+    });
+    assert.equal(computed.startupSidecars?.length, 2);
+    assert.equal(writer.prepare("SELECT classification_json FROM graph_resources").get()?.classification_json, null);
+    writer.exec("COMMIT");
+    await store.close();
+    store = new IntelligenceSqliteStore(path, { backgroundClassification: true });
+    writer.exec("BEGIN IMMEDIATE");
+    let firstBusy!: () => void;
+    const attempted = new Promise<void>(resolve => { firstBusy = resolve; });
+    const db = store["db"];
+    const prepare = db.prepare.bind(db);
+    t.mock.method(db, "prepare", (sql: string) => {
+      const statement = prepare(sql);
+      if (sql.startsWith("INSERT INTO graph_classification_sidecars")) {
+        const run = statement.run.bind(statement);
+        t.mock.method(statement, "run", (...args: Parameters<typeof run>) => {
+          assert.equal(prepare("PRAGMA busy_timeout").get()?.timeout, 0);
+          try { return run(...args); }
+          catch (error) { firstBusy(); throw error; }
+        });
+      }
+      return statement;
+    });
+    await attempted;
+    assert.equal(writer.isTransaction, true);
+    assert.equal(writer.prepare("SELECT COUNT(*) AS sidecars FROM graph_classification_sidecars").get()?.sidecars, 0);
+
+    const observe = async (search: string) => {
+      const ledger = new ClassificationLedger();
+      const result = withClassificationScope(ledger, () => store.queryGraphCache({ tenantId, resource, filters: [{ field: "id", op: "eq", value: search }] }));
+      await ledger.waitForObservations();
+      return ledger.classifyRequest({ prompt: JSON.stringify(result.rows) });
+    };
+    // Capture the missing evidence while publication is still pending.
+    assert.equal((await observe("fixture-score")).coverageIncomplete, true);
+    writer.exec("UPDATE graph_resources SET snapshot_id = 'new-snapshot' WHERE graph_id = 'replaced-score'");
+    writer.exec("COMMIT");
+    await store.waitForCacheClassification();
+    const published = writer.prepare(`SELECT g.graph_id FROM graph_classification_sidecars s
+      JOIN graph_resources g ON g.rowid = s.cache_rowid ORDER BY g.graph_id`).all();
+    assert.deepEqual(published.map(row => row.graph_id), ["fixture-score"]);
+    assert.equal((await observe("fixture-score")).coverageIncomplete, false);
+    assert.equal((await observe("replaced-score")).coverageIncomplete, true);
+    const conversation = store.createConversation({ id: "fixture-chat", title: "Secure Score", tenantId, now });
+    assert.equal(conversation.id, "fixture-chat");
+  } finally {
+    if (writer.isTransaction) writer.exec("ROLLBACK");
+    writer.close();
+    await store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("backfills a stale Secure Score page through bounded worker jobs", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-score-backfill-"));
+  const path = join(dir, "openadminos.db");
+  let store = new IntelligenceSqliteStore(path);
+  try {
+    const tenantId = "fixture-tenant";
+    const resource = "secureScores";
+    const rows = Array.from({ length: 90 }, (_, i) => ({
+      id: `score-${i}`, controlScores: Array.from({ length: 242 }, (_, j) => ({
+        controlName: `Control${j}`, description: "A synthetic description for the control that applies to the organization. ".repeat(3),
+      })),
+    }));
+    const db = new DatabaseSync(path);
+    store.replaceGraphResources({ tenantId, resource, label: "Secure Score", scopeSet: [],
+      refreshedAt: "2026-11-18T00:00:00.000Z", rows });
+    store.close();
+    try { db.exec("UPDATE graph_resources SET classification_json = NULL"); }
+    finally { db.close(); }
+    const cursors: number[] = [];
+    const post = Worker.prototype.postMessage;
+    t.mock.method(Worker.prototype, "postMessage", function (
+      this: Worker, ...args: Parameters<Worker["postMessage"]>
+    ) {
+      const message = args[0] as { type?: string; graphPath?: string; rows?: unknown[]; startup?: { afterRowId: number } };
+      if (message.type === "cache" && message.graphPath === "/security/secureScores") {
+        assert.deepEqual(message.rows, []);
+        cursors.push(message.startup!.afterRowId);
+      }
+      post.apply(this, args);
+    });
+    store = new IntelligenceSqliteStore(path, { backgroundClassification: true });
+    await store.waitForCacheClassification();
+    assert.deepEqual(cursors, [0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 90]);
+    const check = new DatabaseSync(path);
+    try {
+      assert.equal(check.prepare("SELECT COUNT(*) AS sidecars FROM graph_classification_sidecars").get()?.sidecars, 90);
+      const record = check.prepare(`SELECT s.compressed FROM graph_classification_sidecars s
+        JOIN graph_resources g ON g.rowid = s.cache_rowid AND g.snapshot_id = s.snapshot_id
+        WHERE g.graph_id = 'score-89'`).get();
+      const [, incomplete, fields] = JSON.parse(inflateSync(record?.compressed as Uint8Array).toString());
+      assert.equal(incomplete, false);
+      assert.deepEqual(fields.at(-1), [["controlScores", "241", "description"], "description", "public"]);
+      store.replaceGraphResources({ tenantId, resource, label: "Secure Score", scopeSet: [],
+        refreshedAt: "2026-11-19T00:00:00.000Z", rows: [rows[0]] });
+      assert.equal(check.prepare(`SELECT COUNT(*) AS sidecars FROM graph_classification_sidecars s
+        JOIN graph_resources g ON g.rowid = s.cache_rowid AND g.snapshot_id = s.snapshot_id`).get()?.sidecars, 0);
+      assert.equal(check.prepare("SELECT COUNT(*) AS sidecars FROM graph_classification_sidecars").get()?.sidecars, 90);
+      await store["staleSidecarCleanup"];
+      assert.equal(check.prepare("SELECT COUNT(*) AS sidecars FROM graph_classification_sidecars").get()?.sidecars, 0);
+    } finally { check.close(); }
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("defers registration of 50 Secure Score sidecars and retains only projected fields", async t => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-score-cache-read-"));
+  const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+  const ledger = new ClassificationLedger();
+  try {
+    const tenantId = "tenant-1";
+    const resource = "secureScores";
+    const description = "a synthetic control description ".repeat(7);
+    store.replaceGraphResources({ tenantId, resource, label: "Secure Score", scopeSet: [],
+      refreshedAt: "2026-11-18T00:00:00.000Z",
+      rows: Array.from({ length: 50 }, (_, i) => ({
+        id: `score-${i}`, controlScores: Array.from({ length: 242 }, (_, j) => ({
+          controlName: `control-${j}`, description,
+        })),
+      })),
+    });
+    const seen: unknown[] = [];
+    const register = ledger.registerClassified.bind(ledger);
+    t.mock.method(ledger, "registerClassified", (...args: Parameters<typeof ledger.registerClassified>) => {
+      seen.push(...args[1].fields.map(field => field.key));
+      register(...args);
+    });
+    const response = withClassificationScope(ledger, () => store.queryGraphCache({
+      tenantId, resource, limit: 50, projectRow: row => ({ id: (row as { id: string }).id }),
+    }));
+    assert.equal(response.rows.length, 50);
+    assert.equal(seen.length, 0);
+    const prompt = JSON.stringify(response.rows);
+    assert.equal(ledger.classifyRequest({ prompt }).coverageIncomplete, true);
+    await ledger.waitForObservations();
+    assert.deepEqual(seen, Array<string>(50).fill("id"));
+    assert.equal(ledger.classifyRequest({ prompt }).coverageIncomplete, false);
+  } finally {
+    ledger.dispose();
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("does not register sidecars from a snapshot that replaced the cache read", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-cache-read-replaced-"));
+  const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+  const ledger = new ClassificationLedger();
+  try {
+    const snapshot = { tenantId: "tenant-1", resource: "applications" as const, label: "Applications", scopeSet: [] };
+    const row = { id: "fixture-app", passwordCredentials: [{ hint: "q7z" }] };
+    store.replaceGraphResources({ ...snapshot, refreshedAt: "2026-11-18T00:00:00.000Z", rows: [row] });
+    const read = withClassificationScope(ledger, () => store.queryGraphCache(snapshot));
+    store.replaceGraphResources({ ...snapshot, refreshedAt: "2026-11-18T01:00:00.000Z", rows: [row] });
+    await ledger.waitForObservations();
+    assert.deepEqual(read.rows[0]?.row, row);
+    const result = ledger.classifyRequest({ prompt: JSON.stringify(row) });
+    assert.equal(result.counts.credential, 0);
+    assert.equal(result.unexamined.registrations, 1);
+    assert.equal(result.effectiveClass, "credential");
+  } finally {
+    ledger.dispose();
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("defers sidecar reads for deterministic Chat and keys them to the selected snapshots", async t => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-cache-deterministic-"));
+  const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+  const ledger = new ClassificationLedger();
+  const tenantId = "tenant-1";
+  const date = "2026-11-18T00:00:00.000Z";
+  const scores = [
+    { id: "score-old", currentScore: 25, createdDateTime: "2026-11-17T00:00:00.000Z" },
+    { id: "score-1", currentScore: 30, createdDateTime: date },
+    { id: "score-2", currentScore: 35, createdDateTime: date },
+  ];
+  const device = { id: "device", lastSyncDateTime: date, activationLockBypassCode: "q7z" };
+  const resources = [
+    { resource: "secureScores", label: "Secure Score", rows: scores },
+    { resource: "managedDevices", label: "Devices", rows: [device] },
+  ] as const;
+  const seed = () => {
+    for (const input of resources) store.replaceGraphResources({ ...input, rows: [...input.rows], tenantId, scopeSet: [], refreshedAt: date });
+  };
+  try {
+    seed();
+    const prepare = DatabaseSync.prototype.prepare;
+    const sidecarReads: string[] = [];
+    t.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
+      if (/SELECT[^]*classification_json[^]*FROM graph_resources/i.test(sql)) sidecarReads.push(sql);
+      return prepare.call(this, sql);
+    });
+    const result = withClassificationScope(ledger, () => ({
+      score: store.readGraphRows({ tenantId, resources: ["secureScores"], searchTerms: ["no match"], limitPerResource: 5 }).secureScores,
+      devices: store.readManagedDevicesLastSyncBefore({ tenantId, thresholdIso: "2026-11-19T00:00:00.000Z", limit: 5 }),
+    }));
+    assert.deepEqual(result, { score: [scores[1], scores[2], scores[0]], devices: [device] });
+    assert.equal(sidecarReads.length, 0);
+    seed(); // Same row IDs and values, different snapshots.
+    await ledger.waitForObservations();
+    assert.equal(sidecarReads.length, 2);
+    assert.ok(sidecarReads.every(sql => sql.includes("snapshot_id = ?")));
+    const observation = ledger.classifyRequest({ prompt: JSON.stringify(result) });
+    assert.equal(observation.unexamined.registrations, 4);
+    assert.ok(!observation.spans.some(span => span.source === "cache:managedDevices"));
+    assert.equal(observation.coverageIncomplete, true);
+  } finally {
+    ledger.dispose();
+    await store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("keeps the previous rows and identity index when batched preparation is cancelled", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-cache-classification-cancel-"));
+  const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+  try {
+    const snapshot = { tenantId: "tenant-1", resource: "users" as const, label: "Users",
+      scopeSet: [], refreshedAt: "2026-11-18T00:00:00.000Z" };
+    const original = { id: "old-user", displayName: "Synthea Fixture" };
+    store.replaceGraphResources({ ...snapshot, rows: [original] });
+    const abort = new AbortController();
+    const rows = Array.from({ length: 300 }, (_, i) => ({ id: `new-user-${i}`, displayName: `Replacement ${i}` }));
+    const refresh = store.replaceGraphResourcesInBatches({ ...snapshot, rows }, abort.signal);
+    queueMicrotask(() => abort.abort(new Error("Cancelled fixture refresh")));
+    await assert.rejects(refresh, /Cancelled fixture refresh/);
+    assert.deepEqual(store.queryGraphCache(snapshot).rows.map(entry => entry.row), [original]);
+    const identities = store.classificationIdentityIndex(snapshot.tenantId);
+    assert.equal(identities.matches(original.displayName), true);
+    assert.equal(identities.matches("Replacement 1"), false);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("commits a refresh while startup classification is still pending", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-cache-refresh-pending-"));
+  let resolveStartup!: () => void;
+  const startup = new Promise<void>(resolve => { resolveStartup = resolve; });
+  const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"), {
+    backgroundClassification: true, beforeClassification: () => startup,
+  });
+  try {
+    const snapshot = { tenantId: "tenant-1", resource: "users" as const, label: "Users",
+      scopeSet: [], refreshedAt: "2026-11-18T00:00:00.000Z" };
+    const row = { id: "new-user", displayName: "Synthetic Person" };
+    await Promise.race([
+      store.replaceGraphResourcesInBatches({ ...snapshot, rows: [row] }),
+      nextTick().then(() => nextTick()).then(() => assert.fail("Refresh waited for startup classification")),
+    ]);
+    assert.deepEqual(store.queryGraphCache(snapshot).rows.map(entry => entry.row), [row]);
+    assert.equal(store.classificationIdentityIndex(snapshot.tenantId).isComplete?.(), false);
+  } finally {
+    resolveStartup();
+    await store.waitForCacheClassification();
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("prepares fresh cache sidecars and identity indexes in the local worker", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-classification-ingress-"));
+  const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+  try {
+    const common = { tenantId: "tenant-1", scopeSet: [], refreshedAt: "2026-11-18T00:00:00.000Z" };
+    await store.replaceGraphResourcesInBatches({ ...common, resource: "users", label: "Users",
+      rows: [{ id: "fixture-id", displayName: "Yelena Fixture" }] });
+    assert.equal(store.tenantIdentityValues(common.tenantId).matches("Yelena Fixture"), true);
+    await store.waitForCacheClassification();
+    const resource = "managedDevices";
+    const row = { id: "device-1", deviceName: "Yelena", activationLockBypassCode: "q7z" };
+    await store.replaceGraphResourcesInBatches({ ...common, resource, label: "Devices", rows: [row] });
+    await store.waitForCacheClassification();
+    const ledger = new ClassificationLedger();
+    const result = withClassificationScope(ledger, () => store.queryGraphCache({ ...common, resource }));
+    assert.deepEqual(result.rows.map(entry => entry.row), [row]);
+    await ledger.waitForObservations();
+    const { counts, coverageIncomplete } = ledger.classifyRequest({ prompt: JSON.stringify(row) });
+    assert.equal(counts.identity, 1);
+    assert.equal(counts.credential, 1);
+    assert.equal(coverageIncomplete, false);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 
 describe("Intune Chat read-only tools", () => {
   it("lists cache inventory and query_cache enforces row caps", async () => {
@@ -573,9 +1204,18 @@ describe("Intune Chat read-only tools", () => {
     }
   });
 
-  it("graph_get follows nextLink pages within the row cap", async () => {
+  it("graph_get follows nextLink pages within the row cap", async t => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
     const store = seededStore(dir, 1);
+    const ledger = new ClassificationLedger();
+    let resolveGate!: () => void;
+    const gate = new Promise<void>(resolve => { resolveGate = resolve; });
+    const registrations: Promise<void>[] = [];
+    t.mock.method(ledger, "registerGraph", () => {
+      const job = ledger.scheduleRegistration(1, () => gate);
+      registrations.push(job);
+      return job;
+    });
     try {
       const seenSkiptokens: Array<string | undefined> = [];
       const graph: RunGraphApi = {
@@ -596,10 +1236,11 @@ describe("Intune Chat read-only tools", () => {
         },
       };
       const ctx = toolContext(store, { graphForScopes: async () => graph });
-      const execution = await executeIntuneChatTool(ctx, "graph_get", {
+      const executionPromise = withClassificationScope(ledger, () => executeIntuneChatTool(ctx, "graph_get", {
         path: "/users",
         query: { $select: "id,displayName", $count: "true" },
-      });
+      }));
+      const execution = await Promise.race([executionPromise, nextTick().then(() => assert.fail("Paging waited for registration"))]);
       const result = execution.result as {
         returnedRows: number;
         truncated: boolean;
@@ -607,6 +1248,8 @@ describe("Intune Chat read-only tools", () => {
         pagesFetched?: number;
         rows: Array<{ id: string }>;
       };
+      assert.equal(registrations.length, 2);
+      assert.equal(ledger.classifyRequest({ prompt: "Paging completed" }).coverageIncomplete, true);
       assert.deepEqual(seenSkiptokens, [undefined, "page2"]);
       assert.equal(result.returnedRows, 50);
       assert.equal(result.truncated, true);
@@ -616,9 +1259,45 @@ describe("Intune Chat read-only tools", () => {
       assert.equal(result.rows[0]?.id, "user-p1-0");
       assert.equal(result.rows[30]?.id, "user-p2-0");
     } finally {
+      resolveGate();
+      await Promise.all(registrations);
+      ledger.dispose();
       store.close();
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it("carries encryption report settings and policy identifiers from graph_get into request classification", async t => {
+    const path = "/deviceManagement/managedDeviceEncryptionStates";
+    const policyId = "bf2e884a-1aad-4d99-b32a-c795550c9990";
+    const policyName = "Disk policy";
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 1);
+    const ledger = new ClassificationLedger();
+    t.after(async () => {
+      ledger.dispose();
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    });
+    const ctx = toolContext(store, { graphForScopes: async () => ({
+      async listManagedDevices() { return []; },
+      async retireManagedDevice() { throw new Error("write should not run"); },
+      async request() { return { value: [{ encryptionState: "encrypted", policyDetails: [{ policyId, policyName }] }] }; },
+    }) });
+    await withClassificationScope(ledger, async () => {
+      const execution = await executeIntuneChatTool(ctx, "graph_get", { path });
+      assert.equal(execution.trace.error, undefined);
+      await ledger.waitForObservations();
+      const prompt = fenceTenantData(JSON.stringify(execution.result, null, 2), "fixture");
+      const result = await ledger.classifyProviderRequest({ prompt });
+      assert.equal(result.coverageIncomplete, false);
+      assert.equal(result.effectiveClass, "security");
+      assert.deepEqual(result.spans.map(({ start, end, kind, maskRole }) => [prompt.slice(start, end), kind, maskRole]), [
+        ["encrypted", "security", "setting"],
+        [policyId, "security", "nameOrIdentifier"],
+        [policyName, "security", "nameOrIdentifier"],
+      ]);
+    });
   });
 
   it("graph_get accepts Entra and Defender read paths with their scopes", async () => {

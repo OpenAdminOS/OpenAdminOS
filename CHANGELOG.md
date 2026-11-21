@@ -6,6 +6,28 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Data policy groundwork classifies tenant data in agent and Chat model requests on this device, including the new Security class. Classification does not block, mask or reroute provider traffic.
+- Classification reports incomplete coverage separately from observed credentials. Cached field classifications are reused, with Credential and Identity prioritized when evidence reaches the retention limit.
+- Data classification recognizes PIM for Groups and secret settings in expanded Intune policies and SDK response wrappers.
+- The request classifier retains the class of clipped or fenced tenant data, covers equivalent FileVault and BitLocker routes, and identifies Security fields that will need masking. Large cache classification updates run in batches on this device.
+- Chat and Nova retain classification through prompt clipping and discard disconnected organizations' observations even if local cleanup needs a retry. Indexed request scanning reduces classification latency.
+- A local worker classifies Graph responses and larger requests. Chat and desktop Nova reasoning report incomplete coverage when retained evidence was lost. Disconnect clears the organization’s classification indexes and diagnostics as soon as the removal is saved.
+- Provider requests start while classification runs in the background. Startup cache classification also runs off the main thread. Chat and Nova report missing credential provenance during replay, and Disconnect clears staged and worker observations.
+
+- Data policy classification preserves template field evidence, recognizes group mail aliases as Identity, and prepares cache classifications without waiting for SQLite writers.
+- Chat, agents, Graph paging and cache reads proceed while data classification runs. Local diagnostics flag evidence that is pending or was lost and preserve exact offsets for interpolated policy values.
+- Chat preserves classification when it clips a Graph value before the background scan finishes. Cache sidecars publish without waiting for a database writer, and local diagnostics count omitted offsets.
+- Data policy keeps source field evidence for derived agent template keys and values. Drift baseline creation and tracked cache refresh return promptly when a competing SQLite writer holds the lock.
+- Data policy records script-supplied prompt and system coverage as incomplete after a sandboxed agent reads tenant data, even when the script transforms the values.
+- Data policy preserves field classification for clipped array values in previews and marks unresolved fragments in Chat and Nova as incomplete.
+- Data policy keeps the last visible value's classification when a formatted preview ends before its delimiter.
+- Data policy classifies disk encryption and endpoint protection posture as Security, including policy names and IDs in encryption reports.
+- Chat and Nova retain request offsets for escaped credential evidence in replayed history and report incomplete coverage when decoding reaches its limits.
+- Cache refresh and clear invalidate classification sidecars with the snapshot and reclaim them in background batches. Disconnect waits for removal.
+- Data policy carries source evidence through Chat scalar formatting and records incomplete coverage for formatted facts whose origins cannot be recovered.
+- Chat cache breakdown keys and counts carry their source field category, and aggregate values without reliable source evidence show incomplete coverage.
+- Data policy recognizes escaped matches and competing origins in model requests and classifies device attestation, compliance and Defender posture as Security.
+
 - GitHub Copilot Fusion: the Copilot provider offers Copilot Fusion Standard, High and Max from the CLI's catalog, shows tiers your plan does not include greyed out with the reason, says when several models may see a prompt, and makes Copilot Free accounts usable (they list only Fusion Standard). Copilot models now show their catalog names, such as MAI Code 2 for Microsoft's MAI models, and models your organization's Copilot policy turns off are greyed out with the reason.
 - Lemonade Server as a local provider: the model scan, Settings and the model choice find it on its loopback port (13305), offer its downloaded chat models (never embedding, speech, image or cloud-routed ones) and keep prompts on this device; LM Studio and Lemonade share one OpenAI-compatible adapter.
 - Website: a Book a demo button in the header, hero and closing section, and a new /book page and homepage band for a free 60-minute call where we build an agent for one of your tasks, both booked on Cal.com.

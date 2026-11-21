@@ -1,3 +1,5 @@
+import { traceAnswerPack, traceMultiTenantCounts, type AnswerPackAggregates } from "./answer-pack-classification.js";
+import { ClassificationLedger, currentClassificationLedger, registerRenderedFragment, registerTenantData, registerTransientTenantData, withClassificationScope, withTransientClassificationScope } from "@openadminos/runtime/data-classification";
 import { voiceDeviceEvidenceAnswer, voiceDeviceEvidenceIntent } from "./voice-device-evidence.js";
 import { MAX_PROMISE_NUDGES, PROMISE_REPAIR_PROMPT, completeWithPromiseNudge, looksLikeUnkeptPromise } from "./unkept-promise.js";
 import type { WebSearch } from "./web-search.js";
@@ -537,6 +539,69 @@ export function deterministicChatSystemPrompt(isLocalProvider: boolean, voice: b
 }
 
 export class IntuneChatService {
+  private readonly classificationTurns = new Map<string, {
+    tenantId: string | undefined;
+    turns: Array<{ assistantId: string; ledger: ClassificationLedger }>;
+  }>();
+  private readonly activeClassification = new Map<ClassificationLedger, string | undefined>();
+
+  private useConversationClassification(id: string, tenantId: string | undefined): void {
+    const ledger = currentClassificationLedger();
+    if (!ledger || ledger.expired) return;
+    const previous = this.classificationTurns.get(id);
+    if (previous && previous.tenantId !== tenantId) this.releaseConversationClassification(id);
+    else for (const turn of previous?.turns ?? []) if (!turn.ledger.expired) ledger.include(turn.ledger);
+    ledger.scopeId = id;
+  }
+
+  private classifiedConversationMemory(id: string, history: readonly IntuneChatMessage[]): string | undefined {
+    const retained = this.classificationTurns.get(id)?.turns;
+    const replays: Parameters<ClassificationLedger["registerHistoryReplay"]>[1][number][] = [];
+    const memory = boundedConversationMemory(history, (assistantId, start, end) => {
+      const ledger = retained?.find(turn => turn.assistantId === assistantId)?.ledger;
+      replays.push({ start, end, ledger });
+    });
+    if (memory) currentClassificationLedger()?.registerHistoryReplay(memory, replays);
+    return memory;
+  }
+
+  private retainCompletedClassification(message: IntuneChatMessage, tenantId: string | undefined): void {
+    const ledger = currentClassificationLedger();
+    if (!ledger || ledger.expired || message.status !== "completed" || ledger.scopeId !== message.conversationId) return;
+    const id = message.conversationId;
+    const previous = this.classificationTurns.get(id);
+    const turns = [...previous?.turns.filter(turn => !turn.ledger.expired) ?? [], { assistantId: message.id, ledger }];
+    if (turns.length > CHAT_MEMORY_MAX_TURNS) {
+      const evicted = turns.shift()!.ledger;
+      this.activeClassification.set(evicted, tenantId);
+      void ledger.waitForObservations().then(() => {
+        evicted.dispose();
+        this.activeClassification.delete(evicted);
+      });
+    }
+    this.classificationTurns.delete(id);
+    this.classificationTurns.set(id, { tenantId, turns });
+    if (this.classificationTurns.size > 8) this.releaseConversationClassification(this.classificationTurns.keys().next().value!);
+  }
+
+  private releaseConversationClassification(id: string): void {
+    for (const turn of this.classificationTurns.get(id)?.turns ?? []) turn.ledger.dispose();
+    this.classificationTurns.delete(id);
+    for (const ledger of this.activeClassification.keys()) if (ledger.scopeId === id) ledger.dispose();
+  }
+
+  clearClassifications(): void {
+    for (const id of this.classificationTurns.keys()) this.releaseConversationClassification(id);
+    for (const ledger of this.activeClassification.keys()) ledger.dispose();
+  }
+
+  clearTenantClassification(tenantId: string | undefined): void {
+    for (const [id, entry] of this.classificationTurns) {
+      if (entry.tenantId === tenantId) this.releaseConversationClassification(id);
+    }
+    for (const [ledger, tenant] of this.activeClassification) if (tenant === tenantId) ledger.dispose();
+  }
+
   private readonly preloadJobs = new Map<
     string,
     {
@@ -609,8 +674,31 @@ export class IntuneChatService {
    * the work runs as before.
    */
   /** `leased` for a tenant send; a send with no tenant (SPEC.md 4a) has no lease to take. */
-  private leasedScope<T>(tenantId: string | undefined, signal: AbortSignal | undefined, work: (signal: AbortSignal | undefined) => Promise<T>): Promise<T> {
-    return tenantId ? this.leased(tenantId, signal, work) : work(signal);
+  private async leasedScope<T>(tenantId: string | undefined, signal: AbortSignal | undefined, work: (signal: AbortSignal | undefined) => Promise<T>): Promise<T> {
+    const store = this.host.requireIntelligenceStore();
+    const ledger = new ClassificationLedger(tenantId ? store.classificationIdentityIndex(tenantId) : undefined, undefined, tenantId ? [tenantId] : []);
+    ledger.expireAfter();
+    this.activeClassification.set(ledger, tenantId);
+    const run = async (activeSignal: AbortSignal | undefined) => {
+      const dispose = () => ledger.dispose();
+      if (activeSignal?.aborted) dispose();
+      activeSignal?.addEventListener("abort", dispose, { once: true });
+      try {
+        activeSignal?.throwIfAborted();
+        return await withClassificationScope(ledger, () => work(activeSignal));
+      }
+      finally { activeSignal?.removeEventListener("abort", dispose); }
+    };
+    try {
+      return await (tenantId ? this.leased(tenantId, signal, run) : run(signal));
+    } finally {
+      void ledger.waitForObservations().then(() => {
+        this.activeClassification.delete(ledger);
+        ledger.discardTransient();
+        ledger.releaseHistory();
+        if (!ledger.scopeId || !this.classificationTurns.get(ledger.scopeId)?.turns.some(turn => turn.ledger === ledger)) ledger.dispose();
+      });
+    }
   }
 
   private leased<T>(tenantId: string, signal: AbortSignal | undefined, work: (signal: AbortSignal | undefined) => Promise<T>): Promise<T> {
@@ -662,11 +750,11 @@ export class IntuneChatService {
   }
 
   /** Lease every tenant a multi-tenant job reads or writes for. */
-  private leasedAll<T>(tenantIds: readonly string[], work: () => Promise<T>): Promise<T> {
+  private leasedAll<T>(tenantIds: readonly string[], work: (signal?: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<T> {
     const unique = [...new Set(tenantIds)];
-    const step = (index: number): Promise<T> =>
-      index >= unique.length ? work() : this.leased(unique[index]!, undefined, () => step(index + 1));
-    return step(0);
+    const step = (index: number, activeSignal?: AbortSignal): Promise<T> =>
+      index >= unique.length ? work(activeSignal) : this.leased(unique[index]!, activeSignal, next => step(index + 1, next));
+    return step(0, signal);
   }
 
   /** Stop a tenant's preload and wait until it has stopped writing. */
@@ -914,6 +1002,7 @@ export class IntuneChatService {
     }
     await this.requireConversationAccess(conversationId);
     this.host.requireIntelligenceStore().deleteConversation(conversationId);
+    this.releaseConversationClassification(conversationId);
   }
 
   async getIntuneChatMessages(conversationId: string): Promise<IntuneChatMessage[]> {
@@ -993,7 +1082,7 @@ export class IntuneChatService {
     const activeTenant = this.host.resolveTenant(persisted);
     // The job runs under the lease of every tenant it reads or writes for,
     // so Disconnect of any of them refuses, stops and drains it.
-    return this.leasedAll([activeTenant.id, ...preflight.resolvedTenantIds], async () => {
+    return this.leasedAll([activeTenant.id, ...preflight.resolvedTenantIds], async signal => {
     const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
     const providerId = provider.id;
     this.requireHostedBatchConsent(input.hostedProviderConsent, preflight, provider, providerId);
@@ -1049,7 +1138,7 @@ export class IntuneChatService {
       onEvent?.({ type: eventType, job });
     };
     const assertNotCancelled = () => {
-      if (options.signal?.aborted !== true) return;
+      if (!signal?.aborted) return;
       job = {
         ...job,
         status: "cancelled",
@@ -1137,7 +1226,7 @@ export class IntuneChatService {
         });
         persistJob();
       } catch (error) {
-        if (options.signal?.aborted === true) {
+        if (signal?.aborted) {
           throw error;
         }
         const message = error instanceof Error ? error.message : String(error);
@@ -1240,6 +1329,8 @@ export class IntuneChatService {
 
     const summary = buildMultiTenantSummary(comparisons);
     const assistantText = await this.buildMultiTenantAssistantText({
+      scopeId: jobId,
+      signal,
       tenantIds: [activeTenant.id, ...preflight.resolvedTenantIds],
       prompt: content,
       providerId,
@@ -1248,6 +1339,7 @@ export class IntuneChatService {
       summary,
       comparisons,
     });
+    assertNotCancelled();
     const exportDossierMarkdown = buildMultiTenantDossierMarkdown({
       prompt: content,
       providerName: preflight.providerName,
@@ -1327,7 +1419,7 @@ export class IntuneChatService {
     };
     onEvent?.({ type: "completed", result });
     return result;
-    });
+    }, options.signal);
   }
 
   async streamMultiTenantIntuneChat(
@@ -1389,21 +1481,27 @@ export class IntuneChatService {
       throw new Error("Workspace context includes evidence or notes that no longer exist.");
     }
 
+    registerTenantData("workspace:scope", [workspace.title, workspace.tenantName ?? workspace.tenantId]);
     const lines = [
       "Workspace context attached by the admin.",
       `Workspace: ${fenceTenantData(workspace.title, "workspace:title")}`,
       `Tenant: ${fenceTenantData(workspace.tenantName ?? workspace.tenantId, "workspace:tenant")}`,
     ];
     if (includesInstructions && workspace.instructions) {
+      registerTenantData("workspace:instructions", workspace.instructions.trim());
       lines.push("", "Workspace instructions:", workspace.instructions.trim());
     }
     if (notes.length > 0) {
       lines.push("", "Workspace notes:");
       notes.slice(0, 12).forEach((note, index) => {
-        lines.push(`${index + 1}. ${fenceTenantData(trimForPrompt(note.content, 1400), "workspace:note")}`);
+        registerTenantData("workspace:note", note.content);
+        const excerpt = trimForPrompt(note.content, 1400);
+        const content = registerRenderedFragment(note.content, excerpt, { requireEvidence: excerpt.endsWith("\n[truncated locally]") });
+        lines.push(`${index + 1}. ${fenceTenantData(content, "workspace:note")}`);
       });
     }
     if (evidence.length > 0) {
+      registerTenantData("workspace:evidence", evidence.slice(0, 8));
       lines.push("", "Workspace evidence:");
       evidence.slice(0, 8).forEach((entry, index) => {
         const serialized = JSON.stringify(entry.content) ?? "null";
@@ -1411,7 +1509,7 @@ export class IntuneChatService {
           `${index + 1}. ${fenceTenantData({
             title: entry.title, sourceType: entry.sourceType, createdAt: entry.createdAt,
             content: serialized.length <= 2800 ? entry.content : {
-              truncatedByHost: true, excerpt: trimForPrompt(serialized, 2800),
+              truncatedByHost: true, excerpt: registerRenderedFragment(serialized, trimForPrompt(serialized, 2800), { jsonPrefix: true }),
             },
           }, "workspace:evidence")}`,
         );
@@ -1698,6 +1796,8 @@ export class IntuneChatService {
   }
 
   private async buildMultiTenantAssistantText(input: {
+    scopeId: string;
+    signal?: AbortSignal;
     /** Every tenant whose data is in the prompt. */
     tenantIds: readonly string[];
     prompt: string;
@@ -1708,36 +1808,39 @@ export class IntuneChatService {
     comparisons: MultiTenantChatJob["comparisons"];
   }): Promise<string> {
     const deterministic = summarizeMultiTenantResult(input.summary, input.comparisons);
-    const llm = withTenantDataOutputFilter(await this.tenantLlm(input.providerId, input.model, input.tenantIds));
-    if (!llm.available) return deterministic;
-    try {
-      const system = buildIntuneChatSystemPrompt(input.provider?.isLocal === true);
-      const prompt = [
-        "Summarize this read-only multi-tenant Chat result for an admin.",
-        "The JSON table is the source of truth. Mention partial, failed, skipped, or stale tenants.",
-        `Question: ${input.prompt}`,
-        fenceTenantData(JSON.stringify(
-          {
-            summary: input.summary,
-            tenants: input.comparisons,
-          },
-          null,
-          2,
-        ), "chat:multi-tenant-result"),
-      ].join("\n\n");
-      // An answer that only promises work is asked again, at most twice; the last answer is kept.
-      const text = await completeWithPromiseNudge(async (attempt) => (await llm.complete({
-        system,
-        prompt: attempt,
-        ...(input.model ? { model: input.model } : {}),
-        temperature: 0.2,
-        maxTokens: 700,
-      })).text.trim(), prompt);
-      return text || deterministic;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return `${deterministic}\n\nThe selected LLM provider failed while summarizing this multi-tenant result. ${message}`;
-    }
+    return withTransientClassificationScope(new ClassificationLedger(undefined, input.scopeId, input.tenantIds), async () => {
+      registerTenantData("chat:multi-tenant-result", { summary: input.summary, tenants: input.comparisons });
+      const llm = withTenantDataOutputFilter(await this.tenantLlm(input.providerId, input.model, input.tenantIds));
+      if (!llm.available) return deterministic;
+      try {
+        const system = buildIntuneChatSystemPrompt(input.provider?.isLocal === true);
+        const prefix = [
+          "Summarize this read-only multi-tenant Chat result for an admin.",
+          "The JSON table is the source of truth. Mention partial, failed, skipped, or stale tenants.",
+          `Question: ${input.prompt}`,
+          "",
+        ].join("\n\n");
+        const fence = fenceTenantData(JSON.stringify({
+          summary: input.summary,
+          tenants: input.comparisons,
+        }, null, 2), "chat:multi-tenant-result");
+        currentClassificationLedger()?.registerFencedRendering(fence, prefix.length, traceMultiTenantCounts);
+        const prompt = prefix + fence;
+        // An answer that only promises work is asked again, at most twice; the last answer is kept.
+        const text = await completeWithPromiseNudge(async (attempt) => (await llm.complete({
+          system,
+          prompt: attempt,
+          ...(input.signal ? { signal: input.signal } : {}),
+          ...(input.model ? { model: input.model } : {}),
+          temperature: 0.2,
+          maxTokens: 700,
+        })).text.trim(), prompt);
+        return text || deterministic;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return `${deterministic}\n\nThe selected LLM provider failed while summarizing this multi-tenant result. ${message}`;
+      }
+    }, input.signal);
   }
 
   async getGraphCacheStatus(tenantId?: string): Promise<GraphCacheStatus> {
@@ -1803,6 +1906,7 @@ export class IntuneChatService {
 
   async clearIntuneChatHistory(): Promise<LocalDataSummary> {
     this.host.requireIntelligenceStore().clearChatHistory();
+    this.clearClassifications();
     return this.getLocalDataSummary();
   }
 
@@ -1946,7 +2050,7 @@ export class IntuneChatService {
         if (pageResult.pageLimitReached && !request.windowField && existing?.refreshedAt && !existing.pageLimitReached) {
           throw new Error("Refresh reached a collection limit. The previous complete snapshot was kept. Use Cache → Preload to collect all pages.");
         }
-        store.replaceGraphResources({
+        await store.replaceGraphResourcesInBatches({
           tenantId: tenant.id,
           resource,
           label: definition.label,
@@ -1959,7 +2063,7 @@ export class IntuneChatService {
             ? { tenantTotal: pageResult.totalCount }
             : {}),
           refreshedAt,
-        });
+        }, signal);
         slots[slot] = {
           resource,
           label: definition.label,
@@ -2169,8 +2273,11 @@ export class IntuneChatService {
       });
     }
 
+    this.useConversationClassification(conversation.id, noTenant ? undefined : tenant.id);
+    if (!noTenant) registerTenantData("tenant:displayName", tenant.displayName);
     const history = store.listMessages(conversation.id);
-    const conversationMemory = boundedConversationMemory(history);
+    const conversationMemory = this.classifiedConversationMemory(conversation.id, history);
+    registerTransientTenantData("chat:history", conversationMemory);
     const userMessage: IntuneChatMessage = {
       id: `msg_${randomUUID()}`,
       conversationId: conversation.id,
@@ -2312,6 +2419,7 @@ export class IntuneChatService {
       responseModel = undefined;
     } else if (directDeviceAnswer !== undefined) {
       assistantContent = directDeviceAnswer;
+      currentClassificationLedger()?.markCoverageIncomplete();
       responseModel = undefined;
     } else {
       // Tenant work goes through the model egress choke point; a send with no tenant has none to close.
@@ -2361,7 +2469,7 @@ export class IntuneChatService {
           });
           model = completion.model;
           return completion.text.trim();
-        }, buildAnswerPrompt(answerPack, documentation));
+        }, buildAnswerPrompt(answerPack, documentation, packAggregates));
         finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0 });
         return {
           content,
@@ -2501,6 +2609,7 @@ export class IntuneChatService {
       ...(assistantError ? { error: assistantError } : {}),
     };
     store.insertMessage(assistantMessage);
+    this.retainCompletedClassification(assistantMessage, noTenant ? undefined : tenant.id);
     if (toolTrace && toolTrace.length > 0) {
       this.persistToolTrace({
         conversationId: conversation.id,
@@ -2625,23 +2734,28 @@ export class IntuneChatService {
       });
     }
 
+    this.useConversationClassification(conversation.id, noTenant ? undefined : tenant.id);
+    if (!noTenant) registerTenantData("tenant:displayName", tenant.displayName);
     const voiceContext = options.voice
-      ? voiceConversationContext(content, input.conversationId ? store.listMessages(conversation.id) : [], providerId === "apple-foundation", options.voiceHistory)
+      ? voiceConversationContext(content, input.conversationId ? store.listMessages(conversation.id) : [], providerId === "apple-foundation", options.voiceHistory,
+        assistantId => this.classificationTurns.get(conversation.id)?.turns.find(turn => turn.assistantId === assistantId)?.ledger)
       : undefined;
     const history = options.voice ? [] : store.listMessages(conversation.id);
     const conversationMemory = options.voice
       ? undefined
-      : boundedConversationMemory(history);
+      : this.classifiedConversationMemory(conversation.id, history);
     // The profile has its own room: on a full-size model it is added to the
     // room for the question and its evidence; a small on-device model keeps
     // its total and gives the profile a part of it.
     const smallVoiceModel = providerId === "apple-foundation";
+    if (options.voice && options.voiceProfile) registerTenantData("nova:profile", options.voiceProfile);
     const voiceProfile = options.voice && options.voiceProfile ? novaProfilePromptBlock({ ...options.voiceProfile, byteLimit: novaReasoningProfileByteLimit(providerId) }) : "";
     const voiceByteLimit = smallVoiceModel ? 3000 : VOICE_PROMPT_BYTE_LIMIT + Buffer.byteLength(voiceProfile) + (voiceProfile ? Buffer.byteLength(NOVA_PROFILE_BLOCK_END) + 2 : 0);
     const planned = planChatContext(voiceContext?.planningQuestion ?? content);
     const directResources = voiceDeviceEvidenceIntent(content) ? ["managedDevices" as const] : voiceResourcesForQuestion(content);
     if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
     const restriction = restrictPlannedResourcesForTenant(planned, tenant, noTenant);
+    registerTransientTenantData("chat:history", conversationMemory);
     const userMessage: IntuneChatMessage = {
       id: `msg_${randomUUID()}`,
       conversationId: conversation.id,
@@ -2985,6 +3099,7 @@ export class IntuneChatService {
       emitDelta(assistantContent);
     } else if (directVoiceAnswer !== undefined) {
       assistantContent = directVoiceAnswer;
+      currentClassificationLedger()?.markCoverageIncomplete();
       responseModel = undefined;
       emitDelta(assistantContent);
     } else {
@@ -3027,7 +3142,7 @@ export class IntuneChatService {
         const finishAnswerStep = startAnswerStep(steps, answerModel);
         const overhead = Buffer.byteLength(buildAnswerPrompt("", documentation)) + Buffer.byteLength(system);
         if (options.voice) answerPack = compactVoiceAnswerPack(answerPack, voiceByteLimit - overhead);
-        const prompt = buildAnswerPrompt(answerPack, documentation);
+        const prompt = buildAnswerPrompt(answerPack, documentation, packAggregates);
         if (options.voice) assertVoicePromptBudget(system, prompt, voiceByteLimit);
         // An answer that only promises work is asked again, at most twice; the last answer is kept.
         let attemptPrompt = prompt;
@@ -3344,6 +3459,7 @@ export class IntuneChatService {
       ...(assistantError ? { error: assistantError } : {}),
     };
     store.insertMessage(assistantMessage);
+    this.retainCompletedClassification(assistantMessage, noTenant ? undefined : tenant.id);
     if (toolTrace && toolTrace.length > 0) {
       this.persistToolTrace({
         conversationId: conversation.id,
@@ -4174,17 +4290,26 @@ function writeIntentBlockedMessage(
 function buildAnswerPrompt(
   answerPack: string,
   documentation: ReadonlyArray<{ file: string; title?: string; text: string }>,
+  aggregates?: AnswerPackAggregates,
 ): string {
   const pack = answerPack ? JSON.parse(answerPack) as Record<string, unknown> : {};
   const { question, instruction, ...evidence } = pack;
-  const context = [
+  const beforeFence = [
     `Admin question:\n${typeof question === "string" ? question : ""}`,
     "Retrieved tenant context:",
-    fenceTenantData(evidence, "chat:answer-pack"),
-    typeof instruction === "string" ? instruction : "",
+    "",
   ].join("\n\n");
+  const fence = fenceTenantData(evidence, "chat:answer-pack");
+  const context = beforeFence + fence + "\n\n" + (typeof instruction === "string" ? instruction : "");
+  const withContext = (prefix: string) => {
+    if (Array.isArray(evidence.resources) && (evidence.resources.length || Array.isArray(evidence.deterministicFindings) && evidence.deterministicFindings.length)) {
+      currentClassificationLedger()?.registerFencedRendering(fence, prefix.length + beforeFence.length,
+        (body, offset) => traceAnswerPack(evidence, body, offset, aggregates));
+    }
+    return prefix + context;
+  };
   if (documentation.length === 0) {
-    return `Use this retrieved tenant context to answer the admin.\n\n${context}`;
+    return withContext("Use this retrieved tenant context to answer the admin.\n\n");
   }
   const passages = documentation
     .map(
@@ -4192,13 +4317,13 @@ function buildAnswerPrompt(
         `[${index + 1}] ${chunk.title ? `${chunk.title} - ` : ""}${chunk.file}\n${chunk.text.trim()}`,
     )
     .join("\n\n");
-  return [
+  return withContext([
     "Microsoft documentation passages from the local docs index on this device. Call them the local docs index, never Microsoft Learn:",
     passages,
     "",
     "The documentation above describes how Microsoft 365 behaves in general. It is not this tenant's state. When you rely on it, cite the source in square brackets, for example [1]. A passage about another product or topic is not a source: do not cite it, also not to say that it does not apply. If it does not cover the question, say so rather than guessing.",
     "",
     "Retrieved tenant context, which is this tenant's actual state:",
-    context,
-  ].join("\n");
+    "",
+  ].join("\n"));
 }

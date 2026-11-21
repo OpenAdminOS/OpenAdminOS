@@ -138,6 +138,13 @@
           "children": []
         },
         {
+          "title": "Data policy",
+          "source": "features/data-policy.md",
+          "route": "features/data-policy",
+          "path": "features/data-policy",
+          "children": []
+        },
+        {
           "title": "Multi-tenant Chat",
           "source": "features/multi-tenant-intune-chat.md",
           "route": "features/multi-tenant-intune-chat",

@@ -9,6 +9,18 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./data-classification": {
+      "types": "./dist/data-classification.d.ts",
+      "import": "./dist/data-classification.js"
+    },
+    "./tenant-value-index": {
+      "types": "./dist/tenant-value-index.d.ts",
+      "import": "./dist/tenant-value-index.js"
+    },
+    "./tenant-token-normalization": {
+      "types": "./dist/tenant-token-normalization.d.ts",
+      "import": "./dist/tenant-token-normalization.js"
     }
   },
   "files": [

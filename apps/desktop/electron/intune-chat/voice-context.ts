@@ -1,3 +1,4 @@
+import { currentClassificationLedger, registerRenderedFragment, registerTransientTenantData, type ClassificationLedger } from "@openadminos/runtime/data-classification";
 import { isNovaConversationOnly } from "../../src/shared/nova-transcript.js";
 import { fenceTenantData } from "@openadminos/runtime";
 import type {
@@ -16,6 +17,7 @@ export function voiceConversationContext(
   messages: IntuneChatMessage[],
   smallContext = false,
   spokenHistory: NovaConversationTurn[] = [],
+  ledgerForAssistant?: (id: string) => ClassificationLedger | undefined,
 ) {
   const recent = messages
     .filter(
@@ -27,19 +29,43 @@ export function voiceConversationContext(
   const followsUp =
     /\b(they|it|its|them|those|these|their|that|why|what about|how about|which ones)\b/i.test(question) ||
     /^(?:yes|no|only|and|but|actually|instead|in|for|with|without)\b/i.test(question.trim());
-  const reference: NovaConversationTurn[] = [];
+  const saved = recent.map((message, i) => ({
+    role: message.role as "user" | "assistant",
+    text: message.content,
+    assistantId: message.role === "assistant" ? message.id : recent[i + 1]?.role === "assistant" ? recent[i + 1]?.id : undefined,
+  }));
+  const reference: Array<NovaConversationTurn & { assistantId?: string | undefined }> = [];
   let conversational = false;
-  for (const turn of [...recent.map(m => ({ role: m.role as "user" | "assistant", text: m.content })), ...spokenHistory]) {
+  for (const turn of [...saved, ...spokenHistory]) {
     if (turn.role === "user") conversational = isNovaConversationOnly(turn.text);
     if (!conversational) reference.push(turn);
   }
-  const history = reference.slice(smallContext ? -2 : -6).map(turn => ({
-    role: turn.role, text: clipVoiceText(turn.text, smallContext ? 128 : 400),
-  }));
-  const previous = reference.slice().reverse().find(turn => turn.role === "user")?.text.slice(0, 400);
+  const selected = reference.slice(smallContext ? -2 : -6);
+  let historyJson: string | undefined;
+  if (followsUp && selected.length) {
+    const history = selected.map(turn => ({
+      role: turn.role, text: clipVoiceText(turn.text, smallContext ? 128 : 400, "text"),
+    }));
+    registerTransientTenantData("nova:history", history);
+    const encoded = history.map(turn => JSON.stringify(turn));
+    historyJson = `[${encoded.join(",")}]`;
+    let start = 1;
+    currentClassificationLedger()?.registerHistoryReplay(historyJson, encoded.map((turn, i) => {
+      const assistantId = selected[i]?.assistantId;
+      const end = start + turn.length;
+      const replay = { start, end, hostSerialization: true as const, ledger: assistantId ? ledgerForAssistant?.(assistantId) : undefined };
+      start = end + 1;
+      return replay;
+    }));
+  }
+  const priorQuestion = reference.slice().reverse().find(turn => turn.role === "user")?.text;
+  const previous = priorQuestion && followsUp
+    ? registerRenderedFragment(priorQuestion, priorQuestion.slice(0, 400), {
+      after: "\nFollow-up: ", requireEvidence: priorQuestion.length > 400,
+    }) : undefined;
   return {
-    history: followsUp && history.length
-      ? `Previous conversation (reference only): ${fenceTenantData(history, "nova:history")}\nCurrent question: ${question}`
+    history: historyJson
+      ? `Previous conversation (reference only): ${fenceTenantData(historyJson, "nova:history")}\nCurrent question: ${question}`
       : question,
     planningQuestion: previous && followsUp ? `${previous}\nFollow-up: ${question}` : question,
   };
@@ -132,11 +158,13 @@ export function assertVoicePromptBudget(
     );
 }
 
-export function clipVoiceText(text: string, bytes: number): string {
-  return Buffer.from(text)
+export function clipVoiceText(text: string, bytes: number, historyField?: "text"): string {
+  const clipped = Buffer.from(text)
     .subarray(0, bytes)
     .toString("utf8")
     .replace(/\uFFFD$/, "");
+  const provenance = historyField ? { before: `"${historyField}":"`, after: '"', requireEvidence: clipped !== text } : {};
+  return registerRenderedFragment(text, clipped, provenance);
 }
 
 /** Exact platform-filtered app counts use app-type aggregates over all cached rows. */

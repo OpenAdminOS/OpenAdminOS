@@ -1,0 +1,171 @@
+import { walkDataClasses, type ClassifiedValues, type ClassificationOptions } from "./data-classification.js";
+import { GRAPH_FIELD_CLASSES_VERSION } from "./graph-field-classes.js";
+import { TenantValueIndex, type TenantMatchEntry, type TenantValueIndexSnapshot } from "./tenant-value-index.js";
+import { collectTenantValues } from "./tenant-values.js";
+import type { DataClass } from "@openadminos/agent-sdk";
+
+type MaskRole = NonNullable<ClassifiedValues["fields"][number]["maskRole"]>;
+type Field = [path: string[], key: string, kind: DataClass, maskRole?: MaskRole];
+type RowClassification = [version: number, incomplete: boolean, fields: Field[]];
+
+/** The SQLite sidecar contains paths and classes only. Values stay in raw_json. */
+export function describeCacheRow(row: unknown, options: ClassificationOptions): string {
+  const fields: Field[] = [];
+  try {
+    const summary = walkDataClasses(row, options, (_value, kind, pointer, key, maskRole) => {
+      const path = pointer === "" ? [] : pointer.slice(1).split("/").map(part => part.replaceAll("~1", "/").replaceAll("~0", "~"));
+      fields.push(maskRole ? [path, key, kind, maskRole] : [path, key, kind]);
+    });
+    return JSON.stringify([GRAPH_FIELD_CLASSES_VERSION, summary.budgetExhausted, fields] satisfies RowClassification);
+  } catch {
+    return JSON.stringify([GRAPH_FIELD_CLASSES_VERSION, true, []] satisfies RowClassification);
+  }
+}
+
+// A single JSON parse is indivisible. Skip legacy or unusually large sidecars
+// before parsing and let the request report incomplete coverage.
+export const MAX_READ_SIDECAR_UNITS = 128 * 1024;
+
+export function decodeCacheRowClassification(encoded: string | null | undefined): RowClassification | undefined {
+  if (!encoded || encoded.length > MAX_READ_SIDECAR_UNITS) return undefined;
+  try {
+    const result = JSON.parse(encoded) as RowClassification;
+    if (result[0] === GRAPH_FIELD_CLASSES_VERSION && Array.isArray(result[2])) return result;
+  } catch { /* The caller records unavailable sidecar evidence. */ }
+  return undefined;
+}
+
+export function* cacheClassificationFields(
+  row: unknown, encoded: string | null | undefined, original = row,
+): Generator<ClassifiedValues["fields"][number] | undefined, boolean> {
+  const decoded = decodeCacheRowClassification(encoded);
+  if (!decoded) return true;
+  try {
+    const [, incomplete, fields] = decoded;
+    for (const [path, key, kind, maskRole] of fields) {
+      const value = fieldAt(row, path);
+      if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
+        yield undefined;
+        continue;
+      }
+      const source = row === original ? value : fieldAt(original, path);
+      // Ignore fields removed or replaced by projection. A clipped string
+      // keeps the original type and is matched using only the emitted prefix.
+      yield source === value || typeof value === "string" && typeof source === "string" &&
+        value.endsWith("...") && source.startsWith(value.slice(0, -3))
+        ? { value, key, kind, ...(maskRole ? { maskRole } : {}) } : undefined;
+    }
+    return incomplete;
+  } catch {
+    return true;
+  }
+}
+
+function fieldAt(row: unknown, path: readonly string[]): unknown {
+  let value = row;
+  for (const part of path) {
+    if (!value || typeof value !== "object" || !Object.hasOwn(value, part)) return undefined;
+    value = (value as Record<string, unknown>)[part];
+  }
+  return value;
+}
+
+export interface CacheClassificationRow {
+  rawJson: string;
+  graphId: string;
+  displayName: string | null;
+}
+
+export interface CacheStartupPage {
+  dbPath: string;
+  tenantId: string;
+  resource: string;
+  afterRowId: number;
+  indexOnly: boolean;
+  snapshotId?: string;
+}
+
+export interface CacheClassificationResult {
+  sidecars: string[];
+  startupSidecars?: Array<{ rowid: number; snapshotId: string; compressed: Uint8Array }>;
+  nextRowId?: number;
+  identityBatches?: { egress: ArrayBuffer[]; firstNames: ArrayBuffer[]; incomplete: boolean };
+  egressIndex?: TenantValueIndexSnapshot;
+  firstNames?: TenantValueIndexSnapshot;
+}
+
+const IDENTITY_BATCH_BYTES = 16 * 1024;
+const IDENTITY_PAGE_BYTES = 4 * 1024 * 1024;
+
+export function packCacheIdentity(snapshot: TenantValueIndexSnapshot | undefined): {
+  batches: ArrayBuffer[]; incomplete: boolean;
+} {
+  const batches: ArrayBuffer[] = [];
+  if (!snapshot) return { batches, incomplete: false };
+  const encoder = new TextEncoder();
+  let parts: string[] = [];
+  let bytes = 2; // JSON array brackets
+  let total = 0;
+  let incomplete = false;
+  const flush = () => {
+    if (!parts.length) return;
+    batches.push(encoder.encode(`[${parts.join(",")}]`).buffer as ArrayBuffer);
+    total += bytes;
+    parts = [];
+    bytes = 2;
+  };
+  for (const entry of TenantValueIndex.fromWorkerSnapshot(snapshot).workerEntries()) {
+    const encoded = JSON.stringify(entry);
+    const size = Buffer.byteLength(encoded);
+    if (size + 2 > IDENTITY_BATCH_BYTES) {
+      incomplete = true;
+      continue;
+    }
+    if (bytes + size + Number(parts.length > 0) > IDENTITY_BATCH_BYTES) flush();
+    if (total + bytes + size + Number(parts.length > 0) > IDENTITY_PAGE_BYTES) {
+      incomplete = true;
+      break;
+    }
+    bytes += size + Number(parts.length > 0);
+    parts.push(encoded);
+  }
+  flush();
+  return { batches, incomplete };
+}
+
+export function decodeCacheIdentityBatch(batch: ArrayBuffer): TenantMatchEntry[] {
+  return JSON.parse(Buffer.from(batch).toString("utf8")) as TenantMatchEntry[];
+}
+
+export const INCOMPLETE_CACHE_CLASSIFICATION = JSON.stringify([GRAPH_FIELD_CLASSES_VERSION, true, []] satisfies RowClassification);
+
+export function addCacheIdentity(index: TenantValueIndex, id: string, name: string | null, row: unknown): void {
+  index.add(id);
+  index.add(name, "name");
+  collectTenantValues(row, index);
+}
+
+export function addUserFirstName(index: TenantValueIndex, name: string | null, row: unknown): void {
+  const record = row as Record<string, unknown> | null;
+  index.add(record?.givenName ?? name?.trim().split(/\s+/, 1)[0], "name");
+}
+
+export function prepareCacheClassification(
+  rows: readonly CacheClassificationRow[], options: ClassificationOptions, indexValues: boolean, indexNames: boolean,
+  indexOnly = false,
+): CacheClassificationResult {
+  const egressIndex = indexValues ? new TenantValueIndex() : undefined;
+  const firstNames = indexNames ? new TenantValueIndex() : undefined;
+  const sidecars: string[] = [];
+  for (const { rawJson, graphId, displayName } of rows) {
+    const row: unknown = JSON.parse(rawJson);
+    if (egressIndex) addCacheIdentity(egressIndex, graphId, displayName, row);
+    if (firstNames) addUserFirstName(firstNames, displayName, row);
+    if (!indexOnly) sidecars.push(describeCacheRow(row, options));
+  }
+  return {
+    sidecars,
+    ...(egressIndex ? { egressIndex: egressIndex.workerSnapshot() } : {}),
+    ...(firstNames ? { firstNames: firstNames.workerSnapshot() } : {}),
+  };
+}

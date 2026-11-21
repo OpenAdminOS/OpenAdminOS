@@ -6,6 +6,7 @@ import {
   tenantAuthority,
   type ExpectedTenantAccount,
 } from "@openadminos/runtime";
+import { registerRenderedFragment } from "@openadminos/runtime/data-classification";
 import {
   AVAILABLE_SERVICES,
   GRAPH_CACHE_LOG_ROW_LIMIT,
@@ -1441,13 +1442,14 @@ const CHAT_MEMORY_MAX_MESSAGE_CHARS = 1000;
  */
 export function boundedConversationMemory(
   messages: readonly IntuneChatMessage[],
+  onReplay?: (assistantId: string, start: number, end: number) => void,
 ): string | undefined {
   // Build turns first. Filtering messages individually kept the user
   // prompts of failed or cancelled exchanges (user rows stay
   // "completed"), so eight abandoned prompts could ride along under a
   // four-turn policy. Only exchanges whose assistant reply completed
   // count as memory.
-  const turns: string[] = [];
+  const turns: Array<[IntuneChatMessage, IntuneChatMessage]> = [];
   const format = (message: IntuneChatMessage): string => {
     const text = message.content.trim();
     const bounded = text.length > CHAT_MEMORY_MAX_MESSAGE_CHARS
@@ -1455,7 +1457,7 @@ export function boundedConversationMemory(
       : text;
     return `${message.role === "user" ? "User" : "Assistant"}: ${bounded}`;
   };
-  for (let index = 0; index < messages.length; index += 1) {
+  for (let index = messages.length - 2; index >= 0 && turns.length < CHAT_MEMORY_MAX_TURNS; index -= 1) {
     const user = messages[index]!;
     if (user.role !== "user" || user.status !== "completed" || !user.content.trim()) continue;
     const assistant = messages[index + 1];
@@ -1467,18 +1469,36 @@ export function boundedConversationMemory(
     ) {
       continue;
     }
-    turns.push(`${format(user)}\n${format(assistant)}`);
-    index += 1;
+    turns.unshift([user, assistant]);
+    index -= 1;
   }
-  const windowed = turns.slice(-CHAT_MEMORY_MAX_TURNS);
-  while (windowed.length > 1 && windowed.join("\n").length > CHAT_MEMORY_MAX_CHARS) {
+  const windowed = turns.map(([user, assistant]) => ({
+    user, assistant, text: `${format(user)}\n${format(assistant)}`,
+  }));
+  while (windowed.length > 1 && windowed.map(turn => turn.text).join("\n").length > CHAT_MEMORY_MAX_CHARS) {
     windowed.shift();
   }
   if (windowed.length === 0) return undefined;
-  const joined = windowed.join("\n");
-  return joined.length > CHAT_MEMORY_MAX_CHARS
-    ? joined.slice(joined.length - CHAT_MEMORY_MAX_CHARS)
-    : joined;
+  for (const { user, assistant } of windowed) {
+    for (const message of [user, assistant]) {
+      const text = message.content.trim();
+      const prefix = message.role === "user" ? "User: " : "Assistant: ";
+      const fragment = format(message).slice(prefix.length);
+      registerRenderedFragment(message.content, fragment, {
+        before: prefix, after: "\n", requireEvidence: text.length > CHAT_MEMORY_MAX_MESSAGE_CHARS,
+      });
+      if (message.content !== text) registerRenderedFragment(text, fragment, { before: prefix, after: "\n" });
+    }
+  }
+  const joined = windowed.map(turn => turn.text).join("\n");
+  const cut = Math.max(0, joined.length - CHAT_MEMORY_MAX_CHARS);
+  let start = 0;
+  for (const turn of windowed) {
+    const end = start + turn.text.length;
+    if (end > cut) onReplay?.(turn.assistant.id, Math.max(0, start - cut), end - cut);
+    start = end + 1;
+  }
+  return joined.slice(cut);
 }
 
 /**

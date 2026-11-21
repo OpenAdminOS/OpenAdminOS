@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { RunRecord, AgentSummary, GraphRequestInput } from "@openadminos/agent-sdk";
+import { currentClassificationLedger, type ClassificationLedger } from "@openadminos/runtime/data-classification";
 import { RunService, type RunPersistedState, type RunServiceHost } from "./runs.js";
 
 function deferred() {
@@ -15,6 +16,7 @@ function harness() {
   const release = deferred();
   const requests: GraphRequestInput[] = [];
   let signal: AbortSignal | undefined;
+  let ledger: ClassificationLedger | undefined;
   const host = {
     read: async () => structuredClone(state),
     write: async (next: RunPersistedState) => { state = structuredClone(next); },
@@ -25,6 +27,7 @@ function harness() {
       signal = execution?.signal;
       return { tenantId: "test", tenantSession: {} as never, createGraph: () => ({
         request: async (input: GraphRequestInput) => {
+          ledger = currentClassificationLedger();
           requests.push(input); entered.resolve(); await release.promise;
         },
       }) as never };
@@ -37,7 +40,7 @@ function harness() {
     processPendingRunDeliveries: async () => undefined,
   } satisfies Partial<RunServiceHost>;
   return { service: new RunService(host as unknown as RunServiceHost), host, entered, release, requests,
-    state: () => state, signal: () => signal };
+    state: () => state, signal: () => signal, ledger: () => ledger };
 }
 async function queue(h: ReturnType<typeof harness>) {
   return h.service.startRollbackRun({ tenantId: "test", baselineId: "test", requiredScopes: [], manualCount: 0,
@@ -50,6 +53,36 @@ async function queue(h: ReturnType<typeof harness>) {
 async function settle() { await new Promise((resolve) => setTimeout(resolve, 20)); }
 
 describe("run lifecycle", () => {
+  for (const end of ["completion", "cancellation"] as const) {
+    it(`disposes the run's credential observations on ${end}`, async () => {
+      const h = harness();
+      const run = await queue(h);
+      await h.service.confirmRun(run.id, "ROLLBACK 2 OBJECTS");
+      await h.entered.promise;
+      const drive = (h.service as unknown as { drives: Map<string, Promise<void>> }).drives.get(run.id);
+      const ledger = h.ledger();
+      try {
+        assert.ok(drive);
+        assert.equal(ledger?.scopeId, run.id);
+        const probe = { prompt: '{"hint":"q7z"}' };
+        ledger.register("fixture", { hint: "q7z" }, { graphPath: "/applications/app/addPassword" });
+        assert.equal(ledger.classifyRequest(probe).counts.credential, 1);
+        if (end === "cancellation") {
+          await h.service.cancelRun(run.id);
+        } else {
+          h.release.resolve();
+          await drive;
+        }
+        assert.equal(ledger.expired, true);
+        assert.equal(ledger.classifyRequest(probe).counts.credential, 0);
+        assert.equal(h.state().runs[0]?.status, end === "completion" ? "completed" : "cancelled");
+      } finally {
+        h.release.resolve();
+        await drive;
+      }
+    });
+  }
+
   it("stops between approved actions and retains the outcome of the dispatched request", async () => {
     const h = harness(); const run = await queue(h);
     await h.service.confirmRun(run.id, "ROLLBACK 2 OBJECTS");

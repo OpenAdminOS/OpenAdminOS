@@ -118,6 +118,8 @@ export interface McpCatalogEntry {
   topics: readonly string[];
   auth: McpServerAuth;
   readOnly: true;
+  /** Allowlisted static references and public catalogs. Other servers default to Identity. */
+  publicReference?: true;
   /**
    * The tools OpenAdminOS uses from this server. The host still lists tools
    * live, but only these reach the Marketplace, Chat and the query writer,
@@ -158,6 +160,7 @@ export type McpListingLogo = NonNullable<McpServerSummary["logo"]>;
 export const MCP_CATALOG: readonly McpCatalogEntry[] = [
   {
     id: "microsoft-learn",
+    publicReference: true,
     name: "Microsoft Learn",
     publisher: "Microsoft",
     url: "https://learn.microsoft.com/api/mcp",
@@ -172,6 +175,7 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
   },
   {
     id: "kql-search",
+    publicReference: true,
     name: "KQL Search",
     publisher: "KQL Search",
     url: "https://www.kqlsearch.com/mcp",
@@ -186,6 +190,7 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
   },
   {
     id: "intuneautomation",
+    publicReference: true,
     name: "IntuneAutomation",
     publisher: "IntuneAutomation",
     url: "https://www.intuneautomation.com/mcp/",
@@ -200,6 +205,7 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
   },
   {
     id: "release-communications",
+    publicReference: true,
     name: "Microsoft Release Communications",
     publisher: "Microsoft",
     url: "https://www.microsoft.com/releasecommunications/mcp",
@@ -238,6 +244,7 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
   },
   {
     id: "windowsforum",
+    publicReference: true,
     name: "WindowsForum",
     publisher: "WindowsForum.com",
     url: "https://mcp.windowsforum.com/",
@@ -264,6 +271,7 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
   },
   {
     id: "splashtop-kb",
+    publicReference: true,
     name: "Splashtop Docs",
     publisher: "OpenAdminOS",
     url: SPLASHTOP_KB_URL,
@@ -293,6 +301,7 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
   },
   {
     id: "splashtop-packr-kb",
+    publicReference: true,
     name: "Splashtop Agentic Packr Docs",
     publisher: "OpenAdminOS",
     url: SPLASHTOP_PACKR_KB_URL,
@@ -322,6 +331,7 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
   },
   {
     id: "endoflife-ai",
+    publicReference: true,
     name: "endoflife.ai",
     publisher: "EndofLife AI Inc.",
     url: "https://mcp.endoflife.ai/mcp",

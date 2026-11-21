@@ -1,3 +1,4 @@
+import { ClassificationLedger, withClassificationScope } from "@openadminos/runtime/data-classification";
 import { TENANT_CLOSED_COPY } from "./tenant-lifecycle.js";
 import { createHash, randomUUID } from "node:crypto";
 
@@ -404,6 +405,7 @@ export interface RunServiceHost {
 
 export class RunService {
   private readonly controllers = new Map<string, AbortController>();
+  private readonly runClassifications = new Map<string, ClassificationLedger>();
   /** The work driving each run, so a disconnect can wait for it to stop. */
   private readonly drives = new Map<string, Promise<void>>();
 
@@ -417,14 +419,24 @@ export class RunService {
    * the lease signal cancels the run and Disconnect waits for the drive.
    */
   private track(runId: string, tenantId: string | undefined, start: () => Promise<void>): void {
+    const ledger = new ClassificationLedger(tenantId ? this.host.intelligenceStore?.classificationIdentityIndex(tenantId) : undefined, runId, tenantId ? [tenantId] : []);
+    this.runClassifications.set(runId, ledger);
+    const run = () => withClassificationScope(ledger, start);
     const leased = tenantId && this.host.tenantLease
       ? this.host.tenantLease(tenantId, async (signal) => {
-          const stop = () => this.controllers.get(runId)?.abort(signal.reason);
+          const stop = () => {
+            ledger.dispose();
+            this.controllers.get(runId)?.abort(signal.reason);
+          };
           signal.addEventListener("abort", stop, { once: true });
-          try { return await start(); } finally { signal.removeEventListener("abort", stop); }
+          try { return await run(); } finally { signal.removeEventListener("abort", stop); }
         })
-      : start();
+      : run();
     const settled = leased.catch(() => undefined).finally(() => {
+      void ledger.waitForObservations().then(() => {
+        ledger.dispose();
+        if (this.runClassifications.get(runId) === ledger) this.runClassifications.delete(runId);
+      });
       if (this.drives.get(runId) === settled) this.drives.delete(runId);
     });
     this.drives.set(runId, settled);
@@ -485,6 +497,7 @@ export class RunService {
         return run;
       }
 
+      this.runClassifications.get(runId)?.dispose();
       this.controllers.get(runId)?.abort(new Error("Run cancelled by user."));
       const finishedAt = new Date().toISOString();
       const cancelled: RunRecord = {
@@ -1668,7 +1681,10 @@ export class RunService {
       .filter((run) => run.origin === "splashtop-change" && run.splashtop?.organizationId === organizationId)
       .filter((run) => run.status === "running" || run.status === "queued" || this.drives.has(run.id))
       .map((run) => run.id);
-    for (const runId of runIds) this.controllers.get(runId)?.abort(new Error(reason));
+    for (const runId of runIds) {
+      this.runClassifications.get(runId)?.dispose();
+      this.controllers.get(runId)?.abort(new Error(reason));
+    }
     await Promise.all(runIds.map((runId) => this.drives.get(runId) ?? Promise.resolve()));
   }
 

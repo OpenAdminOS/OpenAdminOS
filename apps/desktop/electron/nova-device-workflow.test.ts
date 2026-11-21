@@ -59,5 +59,5 @@ it('answers the reported fleet conversation through real SQLite and prepares the
     assert.equal(requests.filter(p => p === '/deviceManagement/managedDevices').length, 1, 'reuse the populated snapshot');
     assert.equal(requests.filter(p => p.endsWith('/settingStates')).length, 2);
     await nova.handle({ action: 'stop' });
-  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  } finally { await store.close(); await rm(dir, { recursive: true, force: true }); }
 });

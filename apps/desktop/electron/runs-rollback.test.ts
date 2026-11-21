@@ -95,6 +95,7 @@ function makeHarness(options: HarnessOptions = {}) {
     processPendingRunDeliveries: async () => undefined,
     appVersion: "0.5.0-test",
     intelligenceStore: {
+      classificationIdentityIndex: () => ({ matches: () => false }),
       markGraphResourcesStale: (tenantId: string, resources: string[]) => {
         invalidations.push({ tenantId, resources });
         return resources.length;

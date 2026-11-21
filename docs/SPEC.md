@@ -1795,6 +1795,233 @@ every malicious instruction. Host-enforced write confirmation remains the real
 control over tenant changes, with typed confirmation for destructive actions.
 Local providers keep the same on-device data boundary.
 
+### Data policy: data classes and classification (2026-11-18)
+
+Classification runs on this device. Each field has one class. The classes
+below are in descending sensitivity.
+
+| Class | What it covers |
+| --- | --- |
+| Credential | Recovery keys, LAPS and device account passwords, client secrets and their hints, tokens, shared secrets, product keys and certificate key material |
+| Identity | Names, UPNs, email addresses, phone numbers, user and group IDs in security policies, sign-in locations, and sign-in and audit actor IP addresses |
+| Security | Conditional Access and named locations, authentication methods and strength policies, security defaults, authorization policy, device compliance policies, application and service principal permission footprints, security baselines, Defender, firewall, disk encryption, attack surface reduction, admin roles and assignments, PIM, cross-tenant access, and identity protection policies |
+| Device | Device names and IDs, serial numbers, IMEI, MEID, MAC addresses and private IP addresses |
+| Activity | Timestamps, statuses, results and app usage without the person's identity |
+| Configuration | Tenant settings outside the Security class |
+| Public | Web search and reference content from catalog servers explicitly marked as public |
+
+Security posture can reveal how to plan an attack on a tenant. Phase A3 will
+default to masked on hosted providers and allowed on local and confidential
+providers. Phase A4 masking will replace policy names and IDs, named locations
+and their IP ranges, excluded users and groups, and role names and identifiers
+while keeping setting values readable. User and group identifiers keep their
+Identity class and secrets keep their Credential class within security objects.
+Security fields carry a mask role for names and identifiers or for setting values.
+App role and permission scope names are identifiers. App role flags,
+compliance rules and authorization policy settings stay readable in A4.
+Field map v8 classifies device attestation, compliance and endpoint protection
+posture as Security. The rule covers measured boot, code integrity, Windows
+protection, Defender status, device compliance and Secure Score controls.
+The report, policy and control identifiers use the identifier role. Posture
+values use the setting role. Device and user identifiers retain their own
+classes. Recovery keys retain their Credential class.
+The field map gives the identifier role to Conditional Access location and role
+GUIDs, terms of use IDs, custom authentication factor IDs, and preauthorized
+delegated permission IDs. Terms such as All and AllTrusted and control values
+such as mfa use the setting role.
+
+An unmapped Graph field or resource defaults to Identity. Mapped containers
+supply a class to unmapped descendants. An explicit child rule can specialize
+that class, with Credential and Security inheritance preserving the higher
+sensitivity. Settings Catalog, intent and Group Policy values use their setting
+metadata, including metadata in `additionalData`, to identify secrets.
+Counts cover present scalar leaves. Nulls, blank strings, empty objects or arrays
+and absent fields add no counts.
+A returned secret hint counts as Credential when it has a value. Credential
+key matching is anchored to the whole normalized key so metadata such as
+`preSharedKeyIsSet` keeps its own class.
+
+Rules apply to response fields that actually arrive, including fields Graph
+returns outside a requested projection. Route normalization and case-insensitive
+lookup preserve original JSON Pointers. Credential endpoint aliases share one
+field map. Paging and delta links count as Identity
+because continuation tokens can carry tenant values. The device name fields
+`deviceName`, `managedDeviceName` and Entra device `displayName` start as Device.
+The tenant identity index and text detectors run on all of them, so an embedded
+known person's name can raise the value to Identity. Free-text scan rules include
+descriptions, notes, group tags, publishers, assignment filter rules, redirect
+URIs and audit change values. Recognizable credentials can raise any value,
+including a public result. MCP results start as Identity unless the catalog
+marks the server as a public reference. The built-in web search tool is a separate
+Public ingress. Text detectors can raise its class too.
+
+The [Graph field record](research/graph-field-classes.md) tracks observed and
+documented shapes. Revalidate the versioned field map when a Graph beta shape or
+a planner selection changes. Compare official schemas and authorized sample
+responses with the existing map, update the sanitized record and synthetic
+fixtures, run the mapped-field and cache ingestion checks, and increment the
+field map version when classifications change.
+
+The SDK exposes `DataClass`, `DATA_CLASSES_BY_SENSITIVITY`, `DataClassCounts`,
+`highestDataClass` and `maxDataClass`. `classifyData` is a host-only API on
+`@openadminos/runtime/data-classification` and returns both field counts and
+coverage. The SQLite cache stores versioned paths, classes and mask roles alongside
+rows after background classification. The classifier reads the existing
+row values at those paths. It stores no second copy of the values in SQLite.
+The local worker classifies incoming Graph responses and prepares cache row
+classifications and identity indexes after the raw snapshot commits atomically.
+Cache reads return before sidecars are decoded. Background batches register
+fields that survive projection when the final row shape is available. A sidecar
+is valid only for the snapshot read. The observer records incomplete coverage
+if a needed sidecar is missing, stale or too large for a bounded decode.
+Graph observations cross from the worker in bounded transferable batches.
+Startup reads and classifies cache rows in pages on a read-only worker
+connection. The main process publishes sidecars through the existing SQLite
+connection, one row per scheduled turn. Compressed sidecars live in a separate
+table so publication does not rewrite the raw rows. The write checks the row ID and
+snapshot ID on every attempt. Replacing or clearing the raw snapshot invalidates
+its sidecars in the same transaction. Background batches reclaim stale
+sidecars with row and byte limits and a zero busy timeout. Disconnect waits for its sidecars to be physically removed. Busy writes retry in the background with a
+bounded backoff and a zero SQLite busy timeout. Drift pruning, drift baseline
+creation and tracked cache refresh read inside deferred transactions so they
+can return promptly when another connection holds the writer lock.
+Backfill skips rows larger than 256 KiB of raw JSON or with a sidecar above the
+decode budget. Missing sidecars leave coverage incomplete. The worker transfers
+startup identity entries in batches of up to 16 KiB, even when one row needs
+multiple batches. The main process applies the batches in yielding slices
+before publishing the shard. If an entry or page exceeds the transfer budget,
+classification reports incomplete identity coverage. Chat and MCP can reuse
+their raw identity lookup until the tenant cache changes, even while
+classification is still pending. The request scanner marks coverage incomplete
+if the worker lacks the current identity index. A detector match can raise a
+mapped class when it identifies more sensitive data. Generic syntax such as an unconfirmed GUID uses the type of the field
+when known. Field map v6 classifies group mail addresses, mail nicknames and
+proxy addresses as Identity.
+
+The model-facing ledger is a plaintext secret store in process memory. Never
+log, persist or send its contents outside the local classification worker.
+Runs keep registering evidence for their full lifetime and dispose of it when
+they finish or are cancelled. Chat retains observations per completed turn for up to four turns
+in each of eight conversations, with a 15-minute maximum lifetime per ledger.
+Cancellation disposes of the active turn. Conversation deletion and switching
+organizations release the corresponding observations. Disconnect releases them
+when the organization is removed, even if subsequent cleanup needs a retry.
+Disconnect clears staged and published identity shards, disposes active
+classification ledgers and waits for the worker generation to exit. Startup
+skips pending removals and resumes indexing other organizations on the new
+generation. Temporary history evidence is
+disposed of after the current turn. Chat and desktop Nova reasoning mark
+replayed ranges incomplete if the original observations were dropped, expired
+or otherwise unavailable. Text detectors and the cache index still identify
+evidence in the replay. A short Credential value that matches replayed text
+without its original field or rendering provenance marks that matching range
+incomplete. Retained replay decodes up to three escape layers plus the Nova
+history wrapper in bounded work and maps matches to the original UTF-16
+spelling. Escaped short values with no proven original field also leave
+incomplete ranges. Unsupported, truncated
+or over-budget escape evidence leaves the affected replay incomplete.
+Desktop Nova command routing scans with the current tenant's
+identity index and marks the previous request's range incomplete when the
+original evidence is unavailable. Disconnect clears its local diagnostics.
+
+The decorator scans final system and prompt text for raw and JSON-serialized
+values and recognizes credential and identifier patterns, including UPNs,
+GUIDs, IPs, MAC addresses and labeled serials. It keeps UTF-16 offsets for
+exact spans in the provider's request. Strings under 12 Unicode code points
+and low-specificity values need field or rendering provenance, or a
+whole-word match for distinctive short identifiers. Boolean and numeric
+values need provenance. Serialized arrays preserve field provenance for all
+elements, including nested arrays. Generic phrases use word boundaries.
+JSON and fence escapes count as boundaries at the edges of a match, with
+offsets in the original provider text. Exact ranges keep the highest class
+from competing observations. If a lower-class field match and a more sensitive
+origin cannot be resolved from the rendering provenance, the local record marks
+that range incomplete.
+In Phase A1, a model request from a sandboxed script that has read tenant
+data records the script-supplied system text and prompt ranges as incomplete.
+Scripts can transform values arbitrarily. The effective class incorporates the
+most sensitive class read by the run, with Credential used when the read's
+class is still unknown. The observer still records any spans it finds. A script
+that has read no tenant data uses normal scanning.
+TODO(ugur): In Phase A3, how should hosted providers handle requests from scripts
+that have read tenant data when the script-supplied ranges are incomplete?
+Transformed values carry their original class through clipping, scalar
+interpolation and standalone fences. JSON previews retain the containing field
+when a cut falls inside an array element, including in nested arrays. A clipped
+preview also retains the last scalar's field when the cut falls in whitespace
+before its delimiter. A clipped value in a preview, compacted observation or
+replayed message has an unexamined range when the observer cannot recover its
+original field or value.
+Template joins, samples, bounded JSON
+and case changes preserve source fields and individual element offsets.
+Keys and counts derived from source values, mapped scalars and correlated
+device fields carry their source evidence into the rendered request. The
+observer binds those values to the serialized key or value offsets. Chat cache
+breakdown keys and counts inherit their Graph dimension's mapped class even
+when SQLite coerces a Boolean to an integer. Aggregates without a reliable
+source dimension, such as transformed platform aliases or combined totals,
+record an incomplete range. It resolves
+bounded provenance off the provider call path. Missing evidence, unsupported
+coercions, collection aggregates that lose per-element provenance and exceeded
+trace limits leave coverage incomplete.
+An unfamiliar name or an opaque unlabeled secret can evade detection.
+
+A turn keeps up to two million units for values and provenance, favoring
+Credential and Identity when it has to drop lower classes. Retained evidence
+and drops are counted separately. Received data has
+a 32-million-unit work limit per classification. Live Graph observations over
+32,768 UTF-16 code units count as dropped from the ledger. The request scan
+matches ledger evidence in chunks across up to 16 million UTF-16 code units
+and 200,000 units of match work per section. Text detectors read the bounded
+section so long gaps and tokens can cross ledger chunk boundaries. Each turn indexes its own match patterns, and the scanner checks
+an anchor's first code unit before looking up the full anchor. Later turns
+reuse the existing indexes. One local worker per desktop process scans larger
+requests and requests with cached identity indexes. Matcher changes synchronize
+in batches. The desktop transfers request text and receives classification
+offsets from the worker. The main thread handles up to 512 UTF-16 code units
+of combined request text with bounded matcher state. The worker has a
+three-second deadline covering queueing, synchronization and scanning. Its
+queue admits up to 24 jobs and 128 MiB of estimated input across scopes,
+including the active job and ingress and request work admitted before
+scheduling. Graph ingress reserves up to 16 MiB before measuring its input
+and limits each worker message to an estimated 512 KiB. One scheduler shares
+the main-thread budget across scopes. If capacity is unavailable, the
+observer records incomplete coverage without queuing the input. Cancellation
+releases queued input promptly. The app stops the worker on quit.
+Multi-tenant summaries use the job ID as their scope.
+Stopping the job releases the summary ledger.
+If work or retention limits leave evidence unexamined, the
+effective class is Credential, with a separate coverage-incomplete flag,
+unexamined quantities and text ranges where applicable. Observed counts and
+spans only include evidence the classifier found. A turn's dropped evidence
+does not mark a later turn incomplete. In Phase A1 no data path waits for
+classification. Chat turn start, ingress, Graph paging, agent steps, cache
+reads and the provider proceed independently. The provider receives the original
+options and signal. The observer has its own deadline and captures the evidence
+revision at dispatch. Pending evidence in the request scope or evidence lost
+during synchronization makes coverage incomplete and gives the affected
+content Credential as its effective class. Failure and timeouts also produce
+incomplete coverage. Phase A3 will revisit which waits enforcement needs, with
+its own budget and designed states for incomplete coverage and policy decisions.
+
+Each local diagnostic event includes the field map version, dispatch sequence,
+timestamp and available run or conversation ID. The sequence identifies the
+request even when observations finish out of order. Graph evidence sources use static route
+labels. The host retains the most recent 16 records per scope across 32 scopes,
+with up to 256 combined classified spans and unexamined ranges per retained
+record. When offsets exceed the cap, the record keeps the aggregate counts and
+the number of omitted spans and ranges. Records expire after 15 minutes.
+Disconnect clears records associated with that organization. Live observers
+receive the full classification result. The host exposes counters for unscoped
+registrations and requests.
+
+Record IDs and tenant IDs can correlate fields of one record. Phase A4 will
+treat fields that co-occur in a record at that record's highest class when it
+prepares masking. Phase A1 preserves request bytes and does not block, mask or
+reroute provider traffic. Provider routing, masking, audit decisions and UI
+land in later phases. Hosted Nova voice sends from the renderer outside
+`RunLlmApi`. Phase A3 will cover that provider path.
+
 ### Intune Chat and local intelligence
 
 Intune Chat is the operating surface for exploratory tenant work. Agents remain

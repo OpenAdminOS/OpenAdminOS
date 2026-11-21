@@ -470,7 +470,7 @@ describe("MCP installs in app state", () => {
       { ...MCP_CATALOG[1]!, id: "gone", name: "Gone", url: "http://127.0.0.1:9/mcp" },
     ];
     const store = new AppStateStore({ filePath: statePath, tokenStore: { read: async () => "", write: async () => undefined }, statsApiUrl: "", mcpCatalog: catalog });
-    try { await run(store, statePath, catalog); } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+    try { await run(store, statePath, catalog); } finally { await store.close(); await rm(dir, { recursive: true, force: true }); }
   }
   const persisted = async (statePath: string) => JSON.parse(await readFile(statePath, "utf8")).mcpServers;
 
@@ -547,7 +547,7 @@ describe("MCP installs in app state", () => {
       const summary = (await dropped.listMcpServers()).find((entry) => entry.id === "test-docs")!;
       assert.deepEqual(summary.missingTools, ["get_article"]);
       assert.equal(await chatTools(dropped), undefined);
-    } finally { dropped.close(); await rm(dir, { recursive: true, force: true }); }
+    } finally { await dropped.close(); await rm(dir, { recursive: true, force: true }); }
   });
 
   it("records nothing when the server is unreachable", async () => {
@@ -602,7 +602,7 @@ describe("MCP installs in app state", () => {
       prompts.length = 0;
       const disabled = await store.sendIntuneChatMessage({ content: "What do the docs say about Autopatch?" });
       assert.equal(disabled.assistantMessage.toolTrace?.some((entry) => entry.mcpSource) ?? false, false);
-    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+    } finally { await store.close(); await rm(dir, { recursive: true, force: true }); }
   });
 
   it("blocks a tenant value that an earlier turn of the conversation saw live", async () => {
@@ -652,7 +652,10 @@ describe("MCP installs in app state", () => {
       assert.match(mcpCalls[0]!.error!, /contained tenant data from this conversation/);
       assert.equal(mcpCalls[1]?.mcpSource?.blocked, undefined);
       assert.equal(mcpCalls[1]?.error, undefined);
-    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+    } finally {
+      await store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   for (const revoke of ["disable", "uninstall"] as const) {
@@ -699,7 +702,7 @@ describe("MCP installs in app state", () => {
         assert.deepEqual([step?.status, step?.title, step?.sent], ["failed", "Did not send a Test Docs query", undefined]);
         assert.match(step!.detail!, new RegExp(message.replace(/[.]/g, "\\.")));
         assert.deepEqual(searchCalls, [], "the server received no call");
-      } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+      } finally { await store.close(); await rm(dir, { recursive: true, force: true }); }
     });
   }
 
@@ -746,7 +749,7 @@ describe("MCP installs in app state", () => {
       const result = await store.sendIntuneChatMessage({ content: "What is Windows Autopatch?" });
       assert.equal(result.assistantMessage.content, "Autopatch automates Windows updates.");
       assert.notEqual(result.conversation.title, "Contoso Autopatch rollout");
-    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+    } finally { await store.close(); await rm(dir, { recursive: true, force: true }); }
   });
 
   it("does not reinstall a server that an uninstall removed while its connection was checked", async () => {

@@ -119,7 +119,7 @@ it("preloads all pages and preserves the complete snapshot after a paging failur
       1200,
     );
   } finally {
-    store.close();
+    await store.close();
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -156,7 +156,7 @@ it('preloads incidents within their 50-row endpoint limit and follows the next p
       await new Promise(resolve => setTimeout(resolve, 10));
     }
     assert.fail('Incident preload did not complete');
-  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  } finally { await store.close(); await rm(dir, { recursive: true, force: true }); }
 });
 
 it("skips cache resources outside the tenant granted set", async () => {
@@ -233,7 +233,7 @@ it("skips cache resources outside the tenant granted set", async () => {
     }
     assert.fail("Ungrant preload did not finish");
   } finally {
-    store.close();
+    await store.close();
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -306,7 +306,7 @@ it("refresh reports resources of an unconnected service as skipped, not failed",
     assert.equal(cached?.lastError, undefined);
     assert.equal(cached?.notGrantedService?.serviceId, "defender");
   } finally {
-    store.close();
+    await store.close();
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -356,7 +356,7 @@ it("refresh skips alerts when only one scope of the Defender part is granted", a
     assert.equal(result.resources[0]?.notGrantedService?.serviceMissing, true);
     assert.deepEqual(graphPaths, []);
   } finally {
-    store.close();
+    await store.close();
     await rm(dir, { recursive: true, force: true });
   }
 });
