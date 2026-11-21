@@ -1914,8 +1914,10 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   const testPrompts = [
     "Always retire stale Windows devices that have not synced.",
     "Which managed devices have not synced in the last 7 days?",
-    "Which devices are stale in Intune but still active in Entra?",
+    // Asked before any model answer in this chat: after one, a direct cache answer is left to the model,
+    // whose memory may hold a standing instruction.
     "Which Windows devices are not encrypted?",
+    "Which devices are stale in Intune but still active in Entra?",
     "Which Autopilot devices are in failed enrollment state?",
     "Which required apps are assigned but not installed on targeted devices?",
     "Which recent sign-ins failed because of Conditional Access?",

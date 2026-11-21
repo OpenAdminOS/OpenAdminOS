@@ -34,7 +34,17 @@ describe("agentic capability routing", () => {
     assert.equal(decision.enabled, false, "repeated failures stop the retry");
     assert.equal(decision.reason, "capability-fallback");
     // The notice says what the model did, not that it broke a format it may have kept.
-    assert.equal(decision.notice, "Answered from cached data without the tool loop: openadminos/openadmin-8b did not complete its last 2 tool-loop answers; on the last one it did not finish its plan. Chat skips the tool loop for this model until OpenAdminOS restarts or another model is selected.");
+    assert.equal(decision.notice, "Answered from cached data without the tool loop: openadminos/openadmin-8b did not complete its last 2 tool-loop answers: it did not finish its plan once. Chat skips the tool loop for this model until OpenAdminOS restarts or another model is selected.");
+  });
+
+  it("names every failure since the last success, context overflows included", () => {
+    const model = "small-context-model";
+    recordAgenticOutcome("ollama", model, false, "context-too-small");
+    recordAgenticOutcome("ollama", model, false, "context-too-small");
+    recordAgenticOutcome("ollama", model, false, "malformed");
+    const decision = resolveAgenticCapabilityForTest({ mode: "auto", provider, providerId: "ollama", model });
+    assert.equal(decision.enabled, false);
+    assert.equal(decision.notice, "Answered from cached data without the tool loop: small-context-model did not complete its last 3 tool-loop answers: the question and its data did not fit its context window twice; it did not return a valid tool request once. Chat skips the tool loop for this model until OpenAdminOS restarts or another model is selected.");
   });
 
   it("recovers when the model succeeds again", () => {

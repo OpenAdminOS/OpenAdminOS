@@ -2345,7 +2345,8 @@ export class IntuneChatService {
       return computedAnswerText(computed);
     };
     // Attached workspace context is read by the model; no direct answer from the cache stands in for it.
-    const directDeviceAnswer = !noTenant && !planned.hasWriteIntent && !accessBlockedMessage && answerPlan.sources.kind !== "docs" && !input.workspaceContext
+    // Neither does one after a model answer, whose memory may hold a standing instruction code cannot apply.
+    const directDeviceAnswer = !noTenant && !planned.hasWriteIntent && !accessBlockedMessage && answerPlan.sources.kind !== "docs" && !input.workspaceContext && !modelAnsweredBefore(history)
       ? codeAnswer() ?? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant), () => {}, entry => { (toolTrace ??= []).push(entry); }) ??
         voiceAppPlatformCountAnswer(content, cacheStatus, (resource) =>
           this.graphAggregatesFor(store, tenant.id, [resource])[resource],
@@ -2357,6 +2358,7 @@ export class IntuneChatService {
       responseModel = undefined;
     } else if (planned.hasWriteIntent) {
       assistantContent = writeIntentBlockedMessage(agentSuggestions);
+      responseModel = undefined;
     } else if (accessBlockedMessage) {
       assistantContent = accessBlockedMessage;
       responseModel = undefined;
@@ -2473,7 +2475,8 @@ export class IntuneChatService {
             }));
             responseModel = agentic.model ?? responseModel;
             toolTrace = agentic.toolTrace;
-            if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok, agentic.ok ? undefined : agentic.failureReason);
+            // A hosted context overflow says more about the question than the model; a local one is the model's fit.
+            if (agentic.ok || agentic.reason !== "context-limit" || provider.isLocal) recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok, agentic.ok ? undefined : agentic.failureReason);
             if (agentic.ok) {
               assistantContent = agentic.answer;
               modelFollowUps = agentic.followUps ?? [];
@@ -3058,7 +3061,8 @@ export class IntuneChatService {
       return computedAnswerText(computed);
     };
     // Attached workspace context is read by the model; no direct answer from the cache stands in for it.
-    const directVoiceAnswer = noTenant || accessBlockedMessage || answerPlan?.sources.kind === "docs" || (!options.voice && input.workspaceContext)
+    // Neither does one after a model answer, whose memory may hold a standing instruction code cannot apply.
+    const directVoiceAnswer = noTenant || accessBlockedMessage || answerPlan?.sources.kind === "docs" || (!options.voice && input.workspaceContext) || modelAnsweredBefore(history)
       ? undefined
       : codeAnswer() ?? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant, options.signal), message => sendProgress({ message, stage: "running-tools" }), entry => { (toolTrace ??= []).push(entry); }) ?? voiceInventoryAnswer(content, cacheStatus) ?? voiceAppPlatformCountAnswer(content, cacheStatus, (resource) => this.graphAggregatesFor(store, tenant.id, [resource])[resource]) ?? voiceDeviceSummaryAnswer(content, cacheStatus, () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices);
     const namedAgent = persisted.installedAgents.find(a => [a.name, a.slug].some(n => n.toLowerCase() === content.toLowerCase()));
@@ -3068,6 +3072,7 @@ export class IntuneChatService {
       emitDelta(assistantContent);
     } else if (planned.hasWriteIntent) {
       assistantContent = writeIntentBlockedMessage(agentSuggestions);
+      responseModel = undefined;
       emitDelta(assistantContent);
     } else if (accessBlockedMessage) {
       assistantContent = accessBlockedMessage;
@@ -3270,7 +3275,8 @@ export class IntuneChatService {
             }));
             responseModel = agentic.model ?? responseModel;
             toolTrace = agentic.toolTrace;
-            if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok, agentic.ok ? undefined : agentic.failureReason);
+            // A hosted context overflow says more about the question than the model; a local one is the model's fit.
+            if (agentic.ok || agentic.reason !== "context-limit" || provider.isLocal) recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok, agentic.ok ? undefined : agentic.failureReason);
             if (agentic.ok) {
               modelFollowUps = agentic.followUps ?? [];
               modelTitle = agentic.title;
@@ -4074,8 +4080,8 @@ export class IntuneChatService {
  */
 const AGENTIC_FAILURE_LIMIT = 2;
 const agenticFailuresByModel = new Map<string, number>();
-/** What went wrong on the last failed tool-loop answer per model, for an honest notice. */
-const agenticLastFailureByModel = new Map<string, AgenticFailureReason>();
+/** What went wrong on each failed tool-loop answer per model since its last success, for an honest notice. */
+const agenticFailureReasonsByModel = new Map<string, AgenticFailureReason[]>();
 
 /** Plain words for what a model did on its failed turns. */
 const FAILURE_WORDS: Record<AgenticFailureReason, string> = {
@@ -4102,12 +4108,18 @@ export function recordAgenticOutcome(
   const key = agenticModelKey(providerId, model);
   if (ok) {
     agenticFailuresByModel.delete(key);
-    agenticLastFailureByModel.delete(key);
+    agenticFailureReasonsByModel.delete(key);
     return;
   }
   agenticFailuresByModel.set(key, (agenticFailuresByModel.get(key) ?? 0) + 1);
-  if (failure) agenticLastFailureByModel.set(key, failure);
-  else agenticLastFailureByModel.delete(key);
+  if (failure) agenticFailureReasonsByModel.set(key, [...(agenticFailureReasonsByModel.get(key) ?? []), failure]);
+}
+
+/** "the question and its data did not fit its context window twice; it did not finish its plan once", first seen first. */
+function failureReasonsText(reasons: readonly AgenticFailureReason[]): string {
+  const counts = new Map<AgenticFailureReason, number>();
+  for (const reason of reasons) counts.set(reason, (counts.get(reason) ?? 0) + 1);
+  return [...counts].map(([reason, count]) => `${FAILURE_WORDS[reason]} ${count === 1 ? "once" : count === 2 ? "twice" : `${count} times`}`).join("; ");
 }
 
 function agenticModelHasFailedRepeatedly(
@@ -4253,11 +4265,11 @@ function resolveAgenticCapability(input: {
   if (agenticModelHasFailedRepeatedly(input.providerId, observedModel)) {
     const key = agenticModelKey(input.providerId, observedModel);
     const failures = agenticFailuresByModel.get(key) ?? AGENTIC_FAILURE_LIMIT;
-    const last = agenticLastFailureByModel.get(key);
+    const reasons = failureReasonsText(agenticFailureReasonsByModel.get(key) ?? []);
     return {
       enabled: false,
       reason: "capability-fallback",
-      notice: `Answered from cached data without the tool loop: ${observedModel ?? input.providerId} did not complete its last ${failures} tool-loop answers${last ? `; on the last one ${FAILURE_WORDS[last]}` : ""}. Chat skips the tool loop for this model until OpenAdminOS restarts or another model is selected.`,
+      notice: `Answered from cached data without the tool loop: ${observedModel ?? input.providerId} did not complete its last ${failures} tool-loop answers${reasons ? `: ${reasons}` : ""}. Chat skips the tool loop for this model until OpenAdminOS restarts or another model is selected.`,
     };
   }
   if (input.provider?.isLocal === false) {

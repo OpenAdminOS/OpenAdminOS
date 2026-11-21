@@ -375,6 +375,46 @@ describe("local model accuracy on the tester's tenant", () => {
     });
   });
 
+  it("leaves the direct compliance answer to the model once a model answered in the chat, in both send paths", async () => {
+    await withHarness(async ({ store, calls, reply }) => {
+      await store.setChatInvestigationMode("always-deterministic");
+      for (const send of ["send", "stream"] as const) {
+        reply(() => "Understood. Devices whose name starts with WIN- are left out from now on.");
+        const first = await store.sendIntuneChatMessage({ content: "For the rest of this chat, exclude devices whose names start with WIN-.", refreshIfStale: false });
+        reply(() => "Model answer without the WIN- devices.");
+        const request = { content: "Which devices are noncompliant?", conversationId: first.conversation.id, refreshIfStale: false };
+        const message = (send === "send" ? await store.sendIntuneChatMessage(request) : await store.streamIntuneChatMessage(request, () => {})).assistantMessage;
+        assert.equal(message.content, "Model answer without the WIN- devices.", send);
+        assert.ok(calls.some((call) => /exclude devices whose names start with WIN-/i.test(call.prompt)), `${send}: the model read the earlier instruction`);
+        for (const name of NONCOMPLIANT_WINDOWS) assert.ok(!message.content.includes(name), `${send}: ${name}`);
+      }
+    });
+  });
+
+  it("corrects the premise of a compliance question about a compliant device, with no failed rule guidance", async () => {
+    await withHarness(async ({ store, calls, reply }) => {
+      await store.setChatInvestigationMode("always-deterministic");
+      reply(() => "WIN-05 is not compliant because BitLocker is off.");
+      const message = (await store.sendIntuneChatMessage({ content: "why is WIN-05 not compliant?", refreshIfStale: false })).assistantMessage;
+      assert.equal(calls.length, 0);
+      assert.match(message.content, /WIN-05 \(Windows\) is marked compliant/);
+      assert.match(message.content, /WIN-05 is compliant in this snapshot, so no compliance rule is failing for it here\./);
+      assert.doesNotMatch(message.content, /failing setting|failed for this device|Lead in the data|BitLocker/);
+      assert.match(message.content, /The last sync was on /);
+    });
+  });
+
+  it("does not write the selected model on a blocked write request", async () => {
+    await withHarness(async ({ store, reply }) => {
+      reply(() => "unused");
+      for (const send of ["send", "stream"] as const) {
+        const request = { content: "Retire WIN-01", refreshIfStale: false };
+        const message = (send === "send" ? await store.sendIntuneChatMessage(request) : await store.streamIntuneChatMessage(request, () => {})).assistantMessage;
+        assert.equal(message.model, undefined, send);
+      }
+    });
+  });
+
   it("says how many devices have no reported sync time instead of leaving them out silently", async () => {
     await withHarness(async ({ store, cache }) => {
       cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: new Date().toISOString(),
@@ -417,7 +457,27 @@ describe("local model accuracy on the tester's tenant", () => {
       reply(() => "Deterministic answer.");
       const skipped = (await store.sendIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false })).assistantMessage;
       assert.equal(calls.filter((call) => call.loop).length, 0);
-      assert.match(skipped.engineNotice ?? "", /openadminos\/openadmin-8b did not complete its last 2 tool-loop answers; on the last one it did not finish its plan\./);
+      assert.match(skipped.engineNotice ?? "", /openadminos\/openadmin-8b did not complete its last 2 tool-loop answers: it did not return a valid tool request once; it did not finish its plan once\./);
+    });
+  });
+});
+
+describe("Local context overflows in the failure memory", () => {
+  it("counts a local model's context overflows towards skipping the tool loop, and names them", async () => {
+    await withHarness(async ({ store, calls, reply }) => {
+      reply(({ loop }) => {
+        if (loop) throw new Error("the prompt exceeds the model's maximum context length (8192 tokens)");
+        return "Deterministic answer.";
+      });
+      for (let turn = 0; turn < 2; turn += 1) {
+        const overflow = (await store.sendIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false })).assistantMessage;
+        assert.equal(overflow.status, "completed");
+        assert.equal(overflow.engineNotice, LOCAL_FALLBACK_NOTICES["context-too-small"]);
+      }
+      const before = calls.filter((call) => call.loop).length;
+      const skipped = (await store.sendIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false })).assistantMessage;
+      assert.equal(calls.filter((call) => call.loop).length, before, "the third question skips the tool loop");
+      assert.match(skipped.engineNotice ?? "", /did not complete its last 2 tool-loop answers: the question and its data did not fit its context window twice\./);
     });
   });
 });
@@ -436,6 +496,37 @@ describe("Stop during the refresh before an answer", () => {
       assert.equal(result.assistantMessage.status, "cancelled");
       assert.match(result.assistantMessage.content, /stopped by user/i);
       assert.ok(events.includes("cancelled"));
+    });
+  });
+});
+
+describe("computed answers on partial and never-synced data", () => {
+  it("leads an unfiltered count with the Graph total when the cache is partial, and labels its splits", async () => {
+    await withHarness(async ({ cache }) => {
+      const at = new Date().toISOString();
+      const partial = (tenantTotal?: number) => cache.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]).map((status) => status.resource === "managedDevices" ? { ...status, ...(tenantTotal ? { tenantTotal } : { pageLimitReached: true }) } : status);
+      const count = (question: string, cacheStatus: ReturnType<typeof partial>) => computeStructuredResult({ store: cache, tenantId: tenant.id, query: structuredQueryForQuestion({ question, generatedAt: at })!, cacheStatus, generatedAt: at })!.facts.join("\n");
+      const reported = count(Q1, partial(90));
+      assert.match(reported, /^Intune managed devices: 90, as Microsoft Graph reported\. The cache holds 9 of them \(per OS: Windows 5, Android 2, macOS 2, cached part only\)\./);
+      assert.match(reported, /these counts cover the cached part only/);
+      assert.match(count("How many devices are there in Intune?", partial()), /^Intune managed devices: at least 9, the part the cache holds\./);
+      assert.match(count("How many noncompliant devices are there?", partial(90)), /^Intune managed devices not compliant in the cached part: 6\./);
+    });
+  });
+
+  it("says no sync reported for a device Intune lists as never synced, in any time zone", async () => {
+    await withHarness(async ({ cache }) => {
+      const at = new Date().toISOString();
+      cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: at,
+        rows: [...managedDevices, { id: "md-never", deviceName: "WIN-NEVER", operatingSystem: "Windows", complianceState: "noncompliant", lastSyncDateTime: "0001-01-01T00:00:00Z" }] });
+      const cacheStatus = cache.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
+      const listed = computeStructuredResult({ store: cache, tenantId: tenant.id, query: structuredQueryForQuestion({ question: "Which devices have not synced in the last 7 days?", generatedAt: at })!, cacheStatus, generatedAt: at })!.facts.join("\n");
+      assert.match(listed, /- WIN-NEVER \(Windows, noncompliant, no sync reported\)/);
+      assert.doesNotMatch(listed, /0001|0-12-31/);
+      const lookup = deviceComplianceReasonQuery("why is WIN-NEVER not compliant?", cache, tenant.id)!;
+      const detail = computeStructuredResult({ store: cache, tenantId: tenant.id, query: lookup, cacheStatus, generatedAt: at })!.facts.join("\n");
+      assert.match(detail, /Lead in the data: Intune reports no sync for this device\./);
+      assert.doesNotMatch(detail, /0001|0-12-31|days before this answer/);
     });
   });
 });
@@ -472,7 +563,9 @@ describe("structured device questions", () => {
     }
     assert.equal(structuredQueryForQuestion({ question: "which devices are not compliant or in grace period", generatedAt: at }), undefined);
     // A second count clause is the subset, never a filter on the whole count.
-    const twoParts = structuredQueryForQuestion({ question: "how many Windows devices are there and how many are not compliant", generatedAt: at });
+    const twoParts = structuredQueryForQuestion({ question: "how many Windows devices are there in Intune and how many are not compliant", generatedAt: at });
+    // Compliance named only in the second clause does not make the counted Windows devices the Intune inventory.
+    assert.equal(structuredQueryForQuestion({ question: "how many Windows devices are there and how many are not compliant", generatedAt: at }), undefined);
     assert.deepEqual(twoParts?.filters, [{ field: "operatingSystem", op: "eq", value: "Windows" }]);
     assert.deepEqual(twoParts?.focus?.filters, [{ field: "complianceState", op: "eq", value: "noncompliant" }]);
     // An OS named only in the second clause is the subset too: the fleet total is still counted.
@@ -498,7 +591,7 @@ describe("structured device questions", () => {
     // A clause after a space is read like one after a comma.
     assert.deepEqual(structuredQueryForQuestion({ question: "how many devices are there in Intune per OS", generatedAt: at })?.breakdown, ["operatingSystem"]);
     // A plain or tenant-wide device count can mean Intune or Entra devices: the planner counts both.
-    for (const question of ["How many devices are there in our tenant?", "How many devices are there?"]) assert.equal(structuredQueryForQuestion({ question, generatedAt: at }), undefined, question);
+    for (const question of ["How many devices are there in our tenant?", "How many devices are there?", "How many devices are there? Show which are not compliant."]) assert.equal(structuredQueryForQuestion({ question, generatedAt: at }), undefined, question);
     assert.deepEqual(structuredQueryForQuestion({ question: "How many devices are there in Intune?", generatedAt: at })?.filters, []);
     // A list is labelled in the question's words.
     assert.equal(structuredQueryForQuestion({ question: "Which managed devices have not synced in the last 7 days?", generatedAt: at })?.scopeLabel, "Intune managed devices not synced in the last 7 days");

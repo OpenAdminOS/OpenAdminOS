@@ -4692,7 +4692,9 @@ function buildGraphCachePredicateSql(predicate: GraphCacheQueryPredicate): {
       if (!Array.isArray(value)) {
         throw new Error("query_cache predicate 'in' requires an array value.");
       }
-      const values = value.slice(0, 20).map(sqlScalar);
+      // A longer list is refused, never cut: a count over a cut list would be stated as exact.
+      if (value.length > 20) throw new Error("query_cache predicate 'in' takes at most 20 values.");
+      const values = value.map(sqlScalar);
       if (values.length === 0) return { sql: "1 = 0", args: [] };
       return {
         sql: `${field} IN (${values.map(() => "?").join(", ")})`,

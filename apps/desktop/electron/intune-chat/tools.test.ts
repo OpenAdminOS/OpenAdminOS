@@ -1198,6 +1198,10 @@ describe("count_cached", () => {
 
       const invalid = await executeIntuneChatTool(ctx, "count_cached", { resource: "managedDevices", groupBy: ["noSuchField"] });
       assert.match(invalid.trace.error ?? "", /Unsupported managedDevices field: noSuchField/);
+      // An in list longer than 20 values is refused, not cut and then counted as exact.
+      const long = await executeIntuneChatTool(ctx, "count_cached", { resource: "managedDevices", filters: [{ field: "deviceName", op: "in", value: Array.from({ length: 21 }, (_, index) => `D-${index}`) }] });
+      assert.match(long.trace.error ?? "", /at most 20 values for in/);
+      assert.equal((long.result as { totalCount?: number } | undefined)?.totalCount, undefined);
 
       // Times compare as times: a sync half a second before the cutoff is before it, whatever the text sorts.
       store.replaceGraphResources({
