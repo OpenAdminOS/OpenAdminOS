@@ -712,6 +712,38 @@ describe("The MCP query writer boundary", () => {
     });
   });
 
+  it("counts a writer call whose request failed at the host, after it was sent, against the compact budget", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const prompts: Array<{ system?: string; prompt: string }> = [];
+      const writerPrompts: string[] = [];
+      const failing: McpChatContext = { ...mcpContext(calls), async call(tool, args) { calls.push({ tool: tool.tool, args }); throw new Error("The server returned HTTP 503."); } };
+      // The writer always produces a valid query; the host fails every request after it was sent.
+      const result = await runAgenticChat({
+        ...input(store, scriptedLlm([callDocs("intune compliance grace period")], prompts, writerPrompts), failing),
+        budget: "compact",
+      });
+      assert.equal(result.ok, false);
+      assert.ok(calls.length > 0, "the query was sent");
+      assert.ok(prompts.length + writerPrompts.length <= 4, `${prompts.length} answering and ${writerPrompts.length} writer calls`);
+    });
+  });
+
+  it("does not count a writer call whose request answered with results", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const prompts: Array<{ system?: string; prompt: string }> = [];
+      const writerPrompts: string[] = [];
+      const result = await runAgenticChat({
+        ...input(store, scriptedLlm([callDocs("intune compliance grace period"), callDocs("intune compliance grace period settings"), callDocs("intune grace period actions"), '{"final":true,"answer":"Grace period keeps devices compliant for the configured days [1]."}'], prompts, writerPrompts), mcpContext(calls, JSON.stringify({ results: [{ title: "Compliance policies", contentUrl: "https://learn.microsoft.com/intune/protect/device-compliance-get-started", content: "Grace period." }] }))),
+        budget: "compact",
+        questionKind: "docs",
+      });
+      assert.equal(result.ok, true, "three answered reads and the answer fit, the writer calls are not failures");
+      assert.equal(writerPrompts.length, 3);
+    });
+  });
+
   it("tells the answering model the query is written from the current question only", async () => {
     await withStore(async (store) => {
       const prompts: Array<{ system?: string; prompt: string }> = [];

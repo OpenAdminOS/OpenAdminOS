@@ -444,6 +444,25 @@ describe("local model accuracy on the tester's tenant", () => {
     });
   });
 
+  it("reads \"which of those are compliant now\" on the previous answer's devices after a refresh", async () => {
+    await withHarness(async ({ store, cache, calls }) => {
+      await store.setChatInvestigationMode("always-deterministic");
+      const first = await store.sendIntuneChatMessage({ content: Q1, refreshIfStale: false });
+      cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: new Date().toISOString(),
+        rows: managedDevices.map((device) => (device.deviceName === "WIN-01" ? { ...device, complianceState: "compliant" } : device)) });
+      const followUp = (await store.sendIntuneChatMessage({ content: "Which of those are compliant now?", conversationId: first.conversation.id, refreshIfStale: false })).assistantMessage;
+      assert.equal(calls.length, 0, "answered by code");
+      assert.match(followUp.content, /Compliant among the 6 /);
+      assert.match(followUp.content, /: 1:/);
+      assert.ok(followUp.content.includes("WIN-01"));
+      // Devices already compliant in the first answer are not part of it.
+      for (const name of ["WIN-05", "MAC-01", "AND-02"]) assert.ok(!followUp.content.includes(name), name);
+      // "only the compliant ones" does not name the previous rows and stays with the planner.
+      const previous = { version: 1 as const, question: Q1, resource: "managedDevices" as const, filters: [{ field: "complianceState", op: "eq" as const, value: "noncompliant" }], label: "Intune managed devices not compliant", total: 6, ids: ["md-w1"], tenantId: tenant.id, computedAt: new Date().toISOString() };
+      assert.equal(structuredQueryForQuestion({ question: "only the compliant ones", generatedAt: new Date().toISOString(), previous }), undefined);
+    });
+  });
+
   it("keeps a follow-up to the previous answer's devices after a refresh adds one", async () => {
     await withHarness(async ({ store, cache }) => {
       await store.setChatInvestigationMode("always-deterministic");
@@ -530,6 +549,17 @@ describe("computed answers on partial and never-synced data", () => {
       assert.match(reported, /these counts cover the cached part only/);
       assert.match(count("How many devices are there in Intune?", partial()), /^Intune managed devices: at least 9, the part the cache holds\./);
       assert.match(count("How many noncompliant devices are there?", partial(90)), /^Intune managed devices not compliant in the cached part: 6\./);
+    });
+  });
+
+  it("says a failed latest refresh in a device lookup", async () => {
+    await withHarness(async ({ cache }) => {
+      const at = new Date().toISOString();
+      const cacheStatus = cache.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]).map((status) => status.resource === "managedDevices" ? { ...status, lastError: "Forbidden" } : status);
+      const lookup = deviceComplianceReasonQuery("why is MAC-02 not compliant?", cache, tenant.id)!;
+      const detail = computeStructuredResult({ store: cache, tenantId: tenant.id, query: lookup, cacheStatus, generatedAt: at })!.facts;
+      assert.match(detail[0]!, /^The latest refresh failed, so this is the device's state in the snapshot refreshed /);
+      assert.match(detail.join("\n"), /MAC-02 \(macOS\) is marked noncompliant/);
     });
   });
 

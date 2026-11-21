@@ -767,9 +767,13 @@ export async function runAgenticChat(
       },
     } : undefined;
     const execution = await executeIntuneChatTool(input.tools, action.tool, action.params, mcpHooks);
-    // A query writer that produced nothing sendable was a failed model call: the compact budget counts it.
-    // One that prepared a query is part of a working tool call and is not counted.
-    if (compact && mcpTool && execution.trace.error && !execution.trace.mcpSource?.sentToHost) attempts += 1;
+    // The query writer is a model call. It is part of a working tool call, and not counted, only when the
+    // server answered with results; one whose query was not sent, failed at the host or found nothing is a
+    // failed attempt, so a failing turn still stops within the compact budget.
+    const writerSource = execution.trace.mcpSource;
+    const mcpAnswered = !execution.trace.error && writerSource !== undefined && writerSource.empty !== true
+      && !(writerSource.serverId === LEARN_SERVER_ID && (writerSource.results?.length ?? 0) === 0);
+    if (compact && mcpTool && !mcpAnswered) attempts += 1;
     toolTrace.push(execution.trace);
     if (!execution.trace.error && isEvidenceResult(action.tool, execution.result)) evidenceToolCalls += 1;
     const mcpSource = execution.trace.mcpSource;

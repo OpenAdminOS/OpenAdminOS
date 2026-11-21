@@ -3915,6 +3915,10 @@ the format. Decisions:
   the current values. In a two-clause question each filter belongs to its
   clause: the first clause is the counted set, the second the listed subset. A different value on a field already filtered after a switch lead
   ("what about macOS" after Windows) asks the same question of a fresh set.
+  "Which of those are compliant now?" names the previous rows, so it is read
+  on them by id with their current values even though the previous answer
+  filtered on compliance; "only the compliant ones" does not and goes to the
+  planner.
   What ran shows the filters of a follow-up, not the row ids. A device
   lookup stores no follow-up context, and a stopped turn clears the context. When the previous answer matched more
   than 500 rows, no rows were kept and "of those" goes to the planner. Any other answer clears the context, and
@@ -3931,7 +3935,8 @@ the format. Decisions:
   so no compliance rule is failing for it here") and no failed-rule or lead
   wording; a grace period device is worded as an unmet setting; any other
   state says the snapshot does not establish a failure. The last sync is
-  named as a lead only when it is at least 7 days old. A name two cached
+  named as a lead only when it is at least 7 days old. A failed latest
+  refresh is said first. A name two cached
   records share goes to the planner, so code never picks one. The device name
   is resolved against the cache at question time; a device first seen by this
   turn's refresh is answered by the planner path.
@@ -3947,10 +3952,11 @@ the format. Decisions:
   repair for malformed, empty, unfinished or evidence-free replies, no repair
   turn for a missing question kind, at most four model calls before the
   fallback; the short query-writing call of an MCP tool the model chose is not
-  a failure turn and is not counted, because counting it pushed ordinary
-  Microsoft Learn answers into the fallback while a failing turn stops within
-  four calls either way; a writer call that produced nothing
-  sendable is, and no writer runs once the budget is spent). A second
+  counted when the server answered with results, because counting it pushed
+  ordinary Microsoft Learn answers into the fallback; a writer call whose
+  query was not sent, failed at the host (also after it was sent) or found
+  nothing is counted, so a failing turn stops within four model calls, and no
+  writer runs once the budget is spent). A second
   progress-only reply falls back as `unfinished` instead of being kept. A rejected `count_cached` call blocks a zero answer as a
   rejected `query_cache` does. A context overflow falls back instead of failing
   the message and returns the provider's error as `failureDetail`.

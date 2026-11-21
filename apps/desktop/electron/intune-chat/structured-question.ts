@@ -232,7 +232,7 @@ const CLAUSE_LIST = /^(?:show|list)(?: me)? (?:them|the devices|the list|their n
 const F_ONLY_OS = new RegExp(`^(?:only|just)(?: the)? (?:(?<os>${OS_WORDS})(?: ones| devices)?|(?<osMacs>macs))$`);
 const F_ONLY_STATE = new RegExp(`^(?:only|just)(?: the)? (?<state>${STATE_WORDS})(?: ones| devices)?$`);
 const F_OF_THOSE_OS = new RegExp(`^(?:which|how many) of (?:those|them|these) (?:are|run) (?<os>${OS_WORDS})(?: devices)?(?: (?<bstate>(?:by|per) compliance(?: state| status)?))?$`);
-const F_OF_THOSE_STATE = new RegExp(`^(?:which|how many) of (?:those|them|these) are (?<state>${STATE_WORDS})(?: (?<bos>(?:by|per) os))?$`);
+const F_OF_THOSE_STATE = new RegExp(`^(?:which|how many) of (?:those|them|these) are (?<state>${STATE_WORDS})(?: now)?(?: (?<bos>(?:by|per) os))?$`);
 const F_OF_THOSE_SYNC = new RegExp(`^(?:which|how many) of (?:those|them|these) ${SYNCED}$`);
 const F_SWITCH_OS = new RegExp(`^(?:what|how) about (?:(?<os>${OS_WORDS})(?: devices)?|(?<osMacs>macs))$|^(?:same )?for (?<os2>${OS_WORDS})$`);
 
@@ -367,15 +367,22 @@ function followUpQuery(text: string, previous: ChatResultContext, generatedAt: s
   let switching = false;
   const breakdown: string[] = [];
   let groups: Record<string, string | undefined> | undefined;
+  // "which of those ..." names the previous rows outright; "only ..." does not.
+  let ofThose = false;
   if ((groups = F_ONLY_OS.exec(text)?.groups)) added = parts(osPart(groups));
   else if ((groups = F_ONLY_STATE.exec(text)?.groups)) added = parts(statePart(groups.state));
   else if ((groups = F_OF_THOSE_OS.exec(text)?.groups)) {
+    ofThose = true;
     added = parts(osPart(groups));
     if (groups.bstate) breakdown.push("complianceState");
   } else if ((groups = F_OF_THOSE_STATE.exec(text)?.groups)) {
+    ofThose = true;
     added = parts(statePart(groups.state));
     if (groups.bos) breakdown.push("operatingSystem");
-  } else if ((groups = F_OF_THOSE_SYNC.exec(text)?.groups)) added = parts(syncPart(groups, generatedAt));
+  } else if ((groups = F_OF_THOSE_SYNC.exec(text)?.groups)) {
+    ofThose = true;
+    added = parts(syncPart(groups, generatedAt));
+  }
   else if ((groups = F_SWITCH_OS.exec(text)?.groups)) {
     added = parts(osPart(groups) ?? (groups.os2 ? osFilter(groups.os2) : undefined));
     switching = true;
@@ -406,8 +413,9 @@ function followUpQuery(text: string, previous: ChatResultContext, generatedAt: s
     };
   }
   // A different value on a field already in force without a switch lead ("only the compliant ones" after the
-  // noncompliant list) is ambiguous and goes to the planner.
-  if (previous.filters.some((filter) => filter.field === part.predicate.field && JSON.stringify(filter) !== JSON.stringify(part.predicate))) return undefined;
+  // noncompliant list) is ambiguous and goes to the planner. "Which of those are compliant now?" names the
+  // previous rows, so it is read on them by id with their current values.
+  if (!ofThose && previous.filters.some((filter) => filter.field === part.predicate.field && JSON.stringify(filter) !== JSON.stringify(part.predicate))) return undefined;
   // "of those" needs the previous rows: an answer of more than CONTEXT_ID_LIMIT rows kept none, so the cache
   // could only be read afresh, which may count devices added since. Such a follow-up goes to the planner.
   if (!previous.ids) return undefined;
@@ -554,7 +562,9 @@ export function computeStructuredResult(input: {
         listLimit: COMPUTED_LIST_LIMIT,
       })
     : undefined;
-  const listedFilters = query.focus ? [...query.filters, ...query.focus.filters] : query.filters;
+  // The subset's filter replaces the set's filter on the same field: "which of those are compliant now" after the
+  // noncompliant list lists the compliant ones, labelled as such.
+  const listedFilters = query.focus ? [...query.filters.filter((filter) => !query.focus!.filters.some((focus) => focus.field === filter.field)), ...query.focus.filters] : query.filters;
   const listedTotal = query.focus && focusCount ? focusCount.total : counted.total;
   // The ids a follow-up narrows: the listed set, when it is small enough to keep.
   const contextIds = listedTotal <= CONTEXT_ID_LIMIT
@@ -664,6 +674,8 @@ function computeDeviceDetail(
   const row = listedRow(raw);
   if (!row) return undefined;
   const facts: string[] = [];
+  // A failed latest refresh is said, as the computed counts say it: this state is older evidence.
+  if (snapshot?.lastError) facts.push(`The latest refresh failed, so this is the device's state in the snapshot refreshed ${snapshot.refreshedAt ?? "earlier"}.`);
   const state = row.complianceState ?? "not reported";
   facts.push(`${row.name}${row.operatingSystem ? ` (${row.operatingSystem})` : ""} is marked ${state} in the Intune device cache${snapshot?.refreshedAt ? ` refreshed ${snapshot.refreshedAt}` : ""}.`);
   // Only a failing state has a failed rule to look up; for any other state the question's premise is corrected first.
