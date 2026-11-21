@@ -2382,7 +2382,6 @@ export class IntuneChatService {
       ): Promise<{ content: string; model?: string }> => {
         await prepareDeterministic();
         usedDeterministic = true;
-        engineNotice = notice;
         provenance.add("answer-pack");
         const answerPack = buildAnswerPack({
           question: modelQuestion,
@@ -2421,9 +2420,11 @@ export class IntuneChatService {
           finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0, failed: true });
           assistantStatus = "failed";
           assistantError = LOCAL_FALLBACK_UNFINISHED;
-          engineNotice = undefined;
+          documentationSources = [];
           return { content: LOCAL_FALLBACK_UNFINISHED, ...(model ? { model } : {}) };
         }
+        // The notice ("Answered from cached data instead") is said only once that answer exists.
+        engineNotice = notice;
         finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0 });
         // The answer was written from the computed result, so a follow-up may narrow it.
         if (computed && content.trim()) computedShown = true;
@@ -2618,12 +2619,15 @@ export class IntuneChatService {
     const noTenant = !persisted.activeTenantId;
     const tenant = noTenant ? NO_TENANT_SCOPE : this.host.resolveTenant(persisted);
     // A tenant send runs under the tenant's lease; Disconnect stops and drains it. No tenant, no lease.
+    const userSignal = options.signal;
     return this.leasedScope(noTenant ? undefined : tenant.id, options.signal, async (leaseSignal) => {
     if (leaseSignal) options = { ...options, signal: leaseSignal };
     const providers = await this.host.listProviders();
     const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
     const providerId = provider.id;
-    options.signal?.throwIfAborted();
+    // A closing tenant ends the send here. Stop pressed while providers were still being read goes on to the
+    // designed cancelled answer below, never out of the send as an abort error.
+    if (!userSignal?.aborted) options.signal?.throwIfAborted();
     // Nova keeps requiring a tenant.
     if (noTenant && (options.voice || options.scope)) {
       throw new Error("Nova voice needs an organization. Connect Microsoft 365, or ask in Chat, which answers without one.");
@@ -3108,7 +3112,6 @@ export class IntuneChatService {
       const streamDeterministicAnswer = async (notice?: string, afterCompactLoop = false) => {
         await prepareDeterministic();
         usedDeterministic = true;
-        engineNotice = notice;
         provenance.add("answer-pack");
         let answerPack = buildAnswerPack({
           question: modelQuestion,
@@ -3167,11 +3170,13 @@ export class IntuneChatService {
           assistantStatus = "failed";
           assistantError = LOCAL_FALLBACK_UNFINISHED;
           assistantContent = LOCAL_FALLBACK_UNFINISHED;
-          engineNotice = undefined;
+          documentationSources = [];
           emitDelta(assistantContent, "");
           finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0, failed: true });
           return;
         }
+        // The notice ("Answered from cached data instead") is said only once that answer exists.
+        if (!isCancelled()) engineNotice = notice;
         // The answer was written from the computed result, so a follow-up may narrow it; a blank one shows nothing.
         if (computed && assistantContent.trim()) computedShown = true;
         emitDelta(assistantContent, "");

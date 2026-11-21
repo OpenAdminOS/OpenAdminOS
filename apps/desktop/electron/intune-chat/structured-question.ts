@@ -462,15 +462,19 @@ function dedupe(filters: GraphCacheQueryPredicate[]): GraphCacheQueryPredicate[]
 }
 
 /** "why is LAPTOP-07 not compliant", read whole; the name between the fixed words must be one cached managed device's, exactly. */
-const WHY_NOT_COMPLIANT = /^why (?:is|does) (?:the device |device )?(?<name>[a-z0-9][a-z0-9 ._'-]{0,62}?) (?:not compliant|noncompliant|non-compliant|non compliant|marked (?:as )?(?:noncompliant|non-compliant)|show as (?:noncompliant|non-compliant)|failing compliance|fail compliance|out of compliance)$/;
+const WHY_NOT_COMPLIANT = /^why (?:is|does) (?<name>[a-z0-9][a-z0-9 ._'-]{0,74}?) (?:not compliant|noncompliant|non-compliant|non compliant|marked (?:as )?(?:noncompliant|non-compliant)|show as (?:noncompliant|non-compliant)|failing compliance|fail compliance|out of compliance)$/;
 
 /** Whether a question asks why a named managed device is not compliant. */
 export function deviceComplianceReasonQuery(question: string, store: IntelligenceSqliteStore, tenantId: string): DeviceDetailQuery | undefined {
   // Read from the question as typed, not shapeText: its rewrites ("non-compliant" to "noncompliant") would change a device name.
   const name = WHY_NOT_COMPLIANT.exec(normalize(question).replace(/[?!.]+$/, ""))?.groups?.name;
   if (!name) return undefined;
-  // Matched by exact name, so "PC1" and "Front Desk" are found and "my laptop" is not.
-  const matches = store.findGraphRowsNamed({ tenantId, resource: "managedDevices", name, limit: 2 });
+  // Matched by exact name, so "PC1" and "Front Desk" are found and "my laptop" is not. The whole name is tried
+  // first, so "Device Lab" is never answered as "Lab"; "the device" or "device" before it is dropped only when
+  // the whole name matches nothing.
+  let matches = store.findGraphRowsNamed({ tenantId, resource: "managedDevices", name, limit: 2 });
+  const unprefixed = name.replace(/^(?:the device|device) /, "");
+  if (matches.length === 0 && unprefixed !== name) matches = store.findGraphRowsNamed({ tenantId, resource: "managedDevices", name: unprefixed, limit: 2 });
   // None, or two records with this name: their states can differ, so code does not pick one. The planner path answers.
   if (matches.length !== 1) return undefined;
   const match = matches[0]!;

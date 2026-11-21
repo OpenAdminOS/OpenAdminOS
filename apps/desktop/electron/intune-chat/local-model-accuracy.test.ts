@@ -423,6 +423,13 @@ describe("local model accuracy on the tester's tenant", () => {
       }
       assert.equal(calls.length, 0, "answered by code");
       assert.equal(deviceComplianceReasonQuery("why is my laptop not compliant?", cache, tenant.id), undefined);
+      // A name that starts with "Device" is looked up whole first, never as the shorter name next to it.
+      cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: new Date().toISOString(),
+        rows: [...managedDevices,
+          { id: "md-devlab", deviceName: "Device Lab", operatingSystem: "Windows", complianceState: "noncompliant", lastSyncDateTime: recent },
+          { id: "md-lab", deviceName: "Lab", operatingSystem: "macOS", complianceState: "compliant", lastSyncDateTime: recent }] });
+      assert.equal(deviceComplianceReasonQuery("Why is Device Lab not compliant?", cache, tenant.id)?.deviceId, "md-devlab");
+      assert.equal(deviceComplianceReasonQuery("Why is the device WIN-01 not compliant?", cache, tenant.id)?.deviceId, "md-w1");
     });
   });
 
@@ -554,6 +561,21 @@ describe("The fallback after a failed compact loop", () => {
   });
 });
 
+describe("A provider that refuses every call", () => {
+  it("fails the message without claiming a cached-data answer, in both send paths", async () => {
+    await withHarness(async ({ store, reply }) => {
+      for (const send of ["send", "stream"] as const) {
+        recordAgenticOutcome("ollama", "openadminos/openadmin-8b", true);
+        reply(() => { throw new Error("connect ECONNREFUSED 127.0.0.1:11434"); });
+        const request = { content: "Which of our devices need attention?", refreshIfStale: false };
+        const message = (send === "send" ? await store.sendIntuneChatMessage(request) : await store.streamIntuneChatMessage(request, () => {})).assistantMessage;
+        assert.equal(message.status, "failed", send);
+        assert.equal(message.engineNotice, undefined, `${send}: no "answered from cached data" notice on a failed message`);
+      }
+    });
+  });
+});
+
 describe("Local context overflows in the failure memory", () => {
   it("counts a local model's context overflows towards skipping the tool loop, and names them", async () => {
     await withHarness(async ({ store, calls, reply }) => {
@@ -605,6 +627,18 @@ describe("Stop during the refresh before an answer", () => {
       assert.equal(result.assistantMessage.status, "cancelled");
       assert.match(result.assistantMessage.content, /stopped by user/i);
       assert.ok(events.includes("cancelled"));
+    });
+  });
+
+  it("ends in the cancelled answer when Stop arrives before the providers are read", async () => {
+    await withHarness(async ({ store, calls }) => {
+      const controller = new AbortController();
+      controller.abort();
+      const events: string[] = [];
+      const result = await store.streamIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false }, (event) => { events.push(event.type); }, { signal: controller.signal });
+      assert.equal(result.assistantMessage.status, "cancelled");
+      assert.ok(events.includes("cancelled"));
+      assert.equal(calls.length, 0, "no model call after Stop");
     });
   });
 });

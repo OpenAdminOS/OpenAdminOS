@@ -751,13 +751,15 @@ export async function runAgenticChat(
     // would read tenant data no answer uses).
     if (compact && attempts >= maxAttempts) {
       await settleModelStep({ kind: "repair", reason: "budget-spent" });
+      // The loop ran out of calls on a valid tool request; an earlier, repaired problem is not the reason.
+      lastProblem = undefined;
       break;
     }
     if (compact && mcpTool && attempts >= maxAttempts - 1) {
       await settleModelStep({ kind: "repair", reason: "budget" });
       turns.push({ role: "repair", content: mcpResults.length > 0
         ? `No model call is left for another lookup, so ${mcpTool.serverName} was not asked again. Answer now from the results above; if they do not cover the question, say what was not consulted.`
-        : `No model call is left for a lookup, so ${mcpTool.serverName} was not asked. Answer now from what is in this prompt, and say that no documentation source was consulted.` });
+        : `No model call is left for a lookup, so ${mcpTool.serverName} was not asked. Answer now from what is in this prompt, citing any passages it holds by their numbers, and say that ${mcpTool.serverName} was not consulted.` });
       continue;
     }
     await settleModelStep({ kind: "tool", tool: action.tool, params: action.params });

@@ -3930,7 +3930,8 @@ the format. Decisions:
   its own way.
 - Questions the data cannot answer: "why is <device> not compliant" names the
   device's cached state (the device is found by its exact cached name,
-  ignoring case, so "PC1" and "Front Desk" match and "my laptop" does not),
+  ignoring case, so "PC1" and "Front Desk" match and "my laptop" does not;
+  the whole name is tried first, so "Device Lab" is never answered as "Lab"),
   says the failing rule is not in the cached data, and
   gives the last sync as the lead, with nothing invented. Only a failing state
   (noncompliant, conflict, error) and grace period get that guidance. A
@@ -3968,7 +3969,11 @@ the format. Decisions:
   ordinary Microsoft Learn answers into the fallback). After a failed compact
   loop the cached-data fallback is one model call with no promise retries;
   when that reply is empty or only promises work, the message fails with
-  "The local model did not finish an answer ..." instead of showing it. A second
+  "The local model did not finish an answer ..." instead of showing it. The
+  "Answered from cached data instead" notice is set only once that answer
+  exists, so a provider that refuses every call leaves no such notice on the
+  failed message. Stop pressed while the providers are still being read ends
+  in the designed cancelled answer, not an abort error. A second
   progress-only reply falls back as `unfinished` instead of being kept. A rejected `count_cached` call blocks a zero answer as a
   rejected `query_cache` does. A context overflow falls back instead of failing
   the message and returns the provider's error as `failureDetail`.
