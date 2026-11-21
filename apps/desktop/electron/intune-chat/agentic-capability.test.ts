@@ -24,7 +24,7 @@ describe("agentic capability routing", () => {
       "one failure could be transient, so keep trying",
     );
 
-    recordAgenticOutcome("ollama", model, false);
+    recordAgenticOutcome("ollama", model, false, "iteration-cap");
     const decision = resolveAgenticCapabilityForTest({
       mode: "auto",
       provider,
@@ -33,7 +33,8 @@ describe("agentic capability routing", () => {
     });
     assert.equal(decision.enabled, false, "repeated failures stop the retry");
     assert.equal(decision.reason, "capability-fallback");
-    assert.match(decision.notice ?? "", /investigative format/i);
+    // The notice says what the model did, not that it broke a format it may have kept.
+    assert.equal(decision.notice, "Answered from cached data without the tool loop: openadminos/openadmin-8b did not complete its last 2 tool-loop answers; on the last one it did not finish its plan. Chat skips the tool loop for this model until OpenAdminOS restarts or another model is selected.");
   });
 
   it("recovers when the model succeeds again", () => {

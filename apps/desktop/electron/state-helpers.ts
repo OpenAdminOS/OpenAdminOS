@@ -57,6 +57,7 @@ import {
   staleManagedDeviceSyncThresholdDays,
   thresholdIsoDaysBefore,
 } from "./intune-chat/planner.js";
+import { DEVICE_FIELD_WORDS, deviceRowFilters, QUESTION_WORDS } from "./intune-chat/structured-question.js";
 import { withAgentCompatibility } from "./agent-draft-helpers.js";
 
 
@@ -973,18 +974,34 @@ export function readPlannedChatRows(
     limitPerResource: number;
   },
 ): Record<GraphCacheResourceKind, unknown[]> {
+  // OS and compliance state named in the question filter the device rows on their fields.
+  // Question words ("how", "many") match nothing a row is named for; ANDed as text they only emptied the match.
+  const deviceFilters = deviceRowFilters(input.question);
+  const terms = input.searchTerms.filter((term) => !QUESTION_WORDS.has(term));
+  const others = input.resources.filter((resource) => resource !== "managedDevices");
   const rows = store.readGraphRows({
     tenantId: input.tenantId,
-    resources: input.resources,
-    searchTerms: input.searchTerms,
+    resources: others,
+    searchTerms: terms,
     limitPerResource: input.limitPerResource,
   });
+  if (input.resources.includes("managedDevices")) {
+    // The device words the field filters replace leave the text match of device rows.
+    rows.managedDevices = store.readGraphRows({
+      tenantId: input.tenantId,
+      resources: ["managedDevices"],
+      searchTerms: terms.filter((term) => !DEVICE_FIELD_WORDS.has(term)),
+      limitPerResource: input.limitPerResource,
+      ...(deviceFilters.length > 0 ? { filters: { managedDevices: deviceFilters } } : {}),
+    }).managedDevices;
+  }
   const staleSyncDays = staleManagedDeviceSyncThresholdDays(input.question);
   if (staleSyncDays !== undefined && input.resources.includes("managedDevices")) {
     rows.managedDevices = store.readManagedDevicesLastSyncBefore({
       tenantId: input.tenantId,
       thresholdIso: thresholdIsoDaysBefore(input.generatedAt, staleSyncDays),
       limit: input.limitPerResource,
+      ...(deviceFilters.length > 0 ? { filters: deviceFilters } : {}),
     });
   }
   return rows;
@@ -1500,6 +1517,7 @@ export function resourcesFromToolTrace(
     const params = (entry.params ?? {}) as Record<string, unknown>;
     if (
       entry.tool === "query_cache" ||
+      entry.tool === "count_cached" ||
       entry.tool === "refresh_resource" ||
       entry.tool === "query_drift"
     ) {

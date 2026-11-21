@@ -221,7 +221,7 @@ export const MCP_ARGS_LIMIT = 2_000;
  * do not.
  */
 const TENANT_RESULT_TOOLS = new Set<string>([
-  "list_cached_resources", "query_cache", "graph_get", "refresh_resource", "query_drift",
+  "list_cached_resources", "query_cache", "count_cached", "graph_get", "refresh_resource", "query_drift",
   ...SPLASHTOP_READ_TOOLS.map((tool) => tool.name),
 ]);
 
@@ -645,7 +645,7 @@ export function tenantDataSourceForTool(tool: IntuneChatInvestigationToolName, p
   const values = params && typeof params === "object" ? params as Record<string, unknown> : {};
   if (tool === "graph_get" && typeof values.path === "string") return `graph:${values.path}`;
   if (isSplashtopReadTool(tool)) return `splashtop:${tool}`;
-  if (tool === "query_cache" && typeof values.resource === "string") return `cache:${values.resource}`;
+  if ((tool === "query_cache" || tool === "count_cached") && typeof values.resource === "string") return `cache:${values.resource}`;
   return `tool:${tool}`;
 }
 
@@ -755,6 +755,25 @@ export const INTUNE_CHAT_TOOL_DEFINITIONS: readonly IntuneChatToolDefinition[] =
     },
   },
   {
+    name: "count_cached",
+    description:
+      'Count cached rows exactly, in code, over every cached row of one resource. Use it for every "how many", "per OS" or breakdown question instead of counting rows yourself. Filter like query_cache, group with groupBy, for example {"resource":"managedDevices","where":{"complianceState":"noncompliant"},"groupBy":["operatingSystem"],"list":true}. list:true also returns the matching rows when at most 50 match.',
+    params: {
+      type: "object",
+      required: ["resource"],
+      properties: {
+        resource: {
+          type: "string",
+          enum: GRAPH_CACHE_RESOURCES.map((entry) => entry.resource),
+        },
+        where: { type: "object", description: 'Field to required value, for example {"operatingSystem":"Windows"}.' },
+        filters: { type: "array", description: 'Comparisons other than equality: [{"field":"complianceState","op":"neq","value":"compliant"}].' },
+        groupBy: { type: "array", items: { type: "string" }, description: "Up to three fields, each counted separately within the filtered rows." },
+        list: { type: "boolean", description: "Also return the matching rows when at most 50 match." },
+      },
+    },
+  },
+  {
     name: "find_graph_endpoint",
     description:
       "Find the Microsoft Graph GET path for a subject before calling graph_get. Search in plain words, for example 'conditional access named locations' or 'mailbox settings'. Returns candidate paths with a summary and whether this tenant's consent covers them. Use this whenever the exact path is not already known; do not guess a path.",
@@ -853,7 +872,8 @@ export const INTUNE_CHAT_TOOL_DEFINITIONS: readonly IntuneChatToolDefinition[] =
 export function toolDefinitionsForPrompt(webSearch = false, compact = false, tenantTools = true): string {
   if (compact) return [
     ...(tenantTools ? ["- list_cached_resources {}: list available resource names, counts, freshness and errors.",
-      '- query_cache {resource, where?:{field:value}, filters?:[{field,op,value}], select?:string[], limit?:number}: read up to 50 cached rows; default 25. Filters support eq,neq,contains,startsWith,in,lt,lte,gt,gte. Use managedDevices for Intune devices, entraDevices for directory devices. Empty matches do not prove an empty tenant.'] : []),
+      '- query_cache {resource, where?:{field:value}, filters?:[{field,op,value}], select?:string[], limit?:number}: read up to 50 cached rows; default 25. Filters support eq,neq,contains,startsWith,in,lt,lte,gt,gte. Use managedDevices for Intune devices, entraDevices for directory devices. Empty matches do not prove an empty tenant.',
+      '- count_cached {resource, where?, filters?, groupBy?:string[], list?:boolean}: exact counts over every cached row, with a breakdown per groupBy field; list:true adds the matching rows when at most 50 match. Use it for every count and breakdown.'] : []),
     '- find_graph_endpoint {query, limit?:number}: discover permitted GET paths; do not guess unknown paths.',
     ...(tenantTools ? ['- graph_get {path, query?:object}: live Graph GET only; query may include $select,$top,$filter,$orderby,$count. At most 50 rows.',
       '- refresh_resource {resource}: refresh one cached resource before querying missing/stale data.',
@@ -912,7 +932,7 @@ export async function executeIntuneChatTool(
     const cacheSource = ((): IntuneChatToolTraceEntry["cacheSource"] => {
       if (result === null || typeof result !== "object") return undefined;
       const record = result as Record<string, unknown>;
-      if (tool === "query_cache" && record.snapshot && typeof record.snapshot === "object") {
+      if ((tool === "query_cache" || tool === "count_cached") && record.snapshot && typeof record.snapshot === "object") {
         const snapshot = record.snapshot as Record<string, unknown>;
         if (typeof record.resource !== "string") return undefined;
         return {
@@ -1042,6 +1062,8 @@ function executeToolUnchecked(
       return Promise.resolve(listCachedResources(ctx, params));
     case "query_cache":
       return Promise.resolve(queryCache(ctx, params));
+    case "count_cached":
+      return Promise.resolve(countCached(ctx, params));
     case "find_graph_endpoint":
       return Promise.resolve(findGraphEndpoint(ctx, params));
     case "graph_get":
@@ -1319,19 +1341,8 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
     }
     filters = filtersParam(params);
     sort = sortParam(params);
-    for (const field of [...(filters ?? []).map(f => f.field), ...(sort ? [sort.field] : [])]) {
-      if (!availableFields.includes(field)) throw new Error(`Unsupported ${resource} field: ${field}. This failed query provides no matching count.`);
-    }
-    for (const filter of filters ?? []) {
-      const types = ctx.store.graphCacheFieldTypes(ctx.tenantId, resource, filter.field);
-      if (types.length && types.every(type => type === 'true' || type === 'false')) {
-        const values = Array.isArray(filter.value) ? filter.value : [filter.value];
-        if (values.some(value => typeof value !== 'boolean' && value !== null)) throw new Error(`${filter.field} is a boolean field. Use true or false, not strings or numbers.`);
-      }
-      if (filter.field === 'isEncrypted' && (filter.op !== 'eq' && filter.op !== 'neq' || typeof filter.value !== 'boolean' && filter.value !== null)) {
-        throw new Error('isEncrypted requires eq or neq with boolean true, false, or null (unknown), not an encryption-state string. Retry the query.');
-      }
-    }
+    assertCacheFields(resource, [...(filters ?? []).map(f => f.field), ...(sort ? [sort.field] : [])], availableFields);
+    assertFilterTypes(ctx, resource, filters);
   } catch (error) {
     throw new InvalidCacheQueryError(`${error instanceof Error ? error.message : String(error)} Use where:{"fieldName":value} or filters:[{"field":"fieldName","op":"eq","value":value}]. Values must be scalars. Available fields: ${availableFields.join(', ')}.`);
   }
@@ -1393,6 +1404,103 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
       refreshedAt: entry.refreshedAt,
       row: compactValue(selectedFields && entry.row && typeof entry.row === 'object' ? Object.fromEntries(selectedFields.filter(field => Object.hasOwn(entry.row as object, field)).map(field => [field, (entry.row as Record<string, unknown>)[field]])) : entry.row),
     })),
+  };
+}
+
+function assertCacheFields(resource: GraphCacheResourceKind, fields: readonly string[], availableFields: readonly string[]): void {
+  for (const field of fields) {
+    if (!availableFields.includes(field)) throw new Error(`Unsupported ${resource} field: ${field}. This failed query provides no matching count.`);
+  }
+}
+
+function assertFilterTypes(ctx: IntuneChatToolContext, resource: GraphCacheResourceKind, filters: readonly GraphCacheQueryPredicate[] | undefined): void {
+  for (const filter of filters ?? []) {
+    const types = ctx.store.graphCacheFieldTypes(ctx.tenantId, resource, filter.field);
+    if (types.length && types.every(type => type === 'true' || type === 'false')) {
+      const values = Array.isArray(filter.value) ? filter.value : [filter.value];
+      if (values.some(value => typeof value !== 'boolean' && value !== null)) throw new Error(`${filter.field} is a boolean field. Use true or false, not strings or numbers.`);
+    }
+    if (filter.field === 'isEncrypted' && (filter.op !== 'eq' && filter.op !== 'neq' || typeof filter.value !== 'boolean' && filter.value !== null)) {
+      throw new Error('isEncrypted requires eq or neq with boolean true, false, or null (unknown), not an encryption-state string. Retry the query.');
+    }
+  }
+}
+
+/** The fields a listed row keeps: enough to name and place it, not the whole Graph object. */
+const LIST_FIELDS: Partial<Record<GraphCacheResourceKind, readonly string[]>> = {
+  managedDevices: ["id", "deviceName", "operatingSystem", "osVersion", "complianceState", "lastSyncDateTime", "userPrincipalName", "managedDeviceOwnerType", "isEncrypted"],
+  entraDevices: ["id", "displayName", "operatingSystem", "operatingSystemVersion", "trustType", "isManaged", "isCompliant", "approximateLastSignInDateTime"],
+  users: ["id", "displayName", "userPrincipalName", "accountEnabled", "userType"],
+};
+
+/** A listed row with its identifying fields, or the compacted row for resources without a field list. */
+export function listedCacheRow(resource: GraphCacheResourceKind, row: unknown): unknown {
+  const fields = LIST_FIELDS[resource];
+  if (!fields || !row || typeof row !== "object") return compactValue(row);
+  const record = row as Record<string, unknown>;
+  return Object.fromEntries(fields.filter((field) => Object.hasOwn(record, field)).map((field) => [field, record[field]]));
+}
+
+export const COUNT_CACHED_LIST_CAP = 50;
+
+/**
+ * Exact counts for one resource under filters, computed in SQL. A small
+ * local model counted sample rows and said 3 where 6 devices matched;
+ * this tool gives it the number to state instead.
+ */
+function countCached(ctx: IntuneChatToolContext, params: unknown): unknown {
+  const resource = resourceParam(params, "resource");
+  assertResourceGranted(ctx, resource);
+  const availableFields = fieldsForResource(ctx, resource);
+  let filters: GraphCacheQueryPredicate[] | undefined;
+  let groupBy: string[] = [];
+  let list = false;
+  try {
+    const record = params as Record<string, unknown>;
+    const extras = Object.keys(record).filter(key => !["resource", "where", "filters", "groupBy", "list"].includes(key));
+    if (extras.length) throw new Error(`Unsupported count_cached parameters: ${extras.join(", ")}. Use resource, where, filters, groupBy or list; nothing was counted.`);
+    const rawGroup = record.groupBy;
+    groupBy = rawGroup === undefined ? [] : typeof rawGroup === "string" ? [rawGroup] : Array.isArray(rawGroup) && rawGroup.every(field => typeof field === "string") ? rawGroup as string[] : (() => { throw new Error("groupBy must be a field name or an array of at most three field names."); })();
+    if (groupBy.length > 3) throw new Error("groupBy takes at most three fields.");
+    if (record.list !== undefined && typeof record.list !== "boolean") throw new Error("list must be true or false.");
+    list = record.list === true;
+    filters = filtersParam(params);
+    assertCacheFields(resource, [...(filters ?? []).map(f => f.field), ...groupBy], availableFields);
+    assertFilterTypes(ctx, resource, filters);
+  } catch (error) {
+    throw new InvalidCacheQueryError(`${error instanceof Error ? error.message : String(error)} Use where:{"fieldName":value}, groupBy:["fieldName"]. Available fields: ${availableFields.join(", ")}.`);
+  }
+  const snapshot = ctx.store.getGraphCacheStatus(ctx.tenantId, [definitionForResource(resource)])[0];
+  // Never refreshed: there is nothing to count, and zero would read as an empty tenant.
+  if (!snapshot?.refreshedAt) {
+    return {
+      resource,
+      snapshot,
+      cached: false,
+      note: `Nothing is cached for ${resource}, so no count is available. Refresh the resource before concluding anything about it.`,
+    };
+  }
+  const counted = ctx.store.countGraphCache({
+    tenantId: ctx.tenantId,
+    resource,
+    ...(filters ? { filters } : {}),
+    groupBy,
+    ...(list ? { listLimit: COUNT_CACHED_LIST_CAP } : {}),
+  });
+  const listed = counted.rows && counted.total <= COUNT_CACHED_LIST_CAP ? counted.rows.map((row) => listedCacheRow(resource, row)) : undefined;
+  return {
+    resource,
+    ...(snapshot ? logWindowCoverage(snapshot) : {}),
+    snapshot,
+    // The number to state: every cached row matching the filters, counted in code.
+    totalCount: counted.total,
+    exact: true,
+    ...(filters?.length ? { filters } : {}),
+    ...(groupBy.length ? { groups: counted.groups } : {}),
+    ...(listed ? { returnedRows: listed.length, rows: listed } : { returnedRows: 0 }),
+    note: list && !listed
+      ? `${counted.total} rows match, more than ${COUNT_CACHED_LIST_CAP}, so none are listed. Use query_cache for a capped list and say it is capped.`
+      : "Counts cover every cached row of this resource. State these numbers; do not count rows yourself.",
   };
 }
 
@@ -1920,6 +2028,11 @@ function summarizeToolResult(
     }
     return `${Number(record.returnedRows ?? 0).toLocaleString()} of ${Number(record.totalCount ?? 0).toLocaleString()} cached rows returned`;
   }
+  if (tool === "count_cached") {
+    if (record.cached === false) return "nothing is cached for this resource yet";
+    const groups = record.groups && typeof record.groups === "object" ? Object.keys(record.groups as object) : [];
+    return `${Number(record.totalCount ?? 0).toLocaleString()} matching cached rows counted${groups.length ? ` · by ${groups.join(", ")}` : ""}${Number(record.returnedRows ?? 0) > 0 ? ` · ${Number(record.returnedRows).toLocaleString()} listed` : ""}`;
+  }
   if (tool === "find_graph_endpoint") {
     const candidates = Array.isArray(record.candidates) ? record.candidates : [];
     const usable = candidates.filter((entry) =>
@@ -1956,6 +2069,9 @@ export function summarizeToolCallForProgress(
   if (tool === "list_cached_resources") return "Inspecting cache inventory.";
   if (tool === "query_cache") {
     return `Querying cache: ${String(record.resource ?? "resource")}.`;
+  }
+  if (tool === "count_cached") {
+    return `Counting cache: ${String(record.resource ?? "resource")}.`;
   }
   if (tool === "find_graph_endpoint") {
     return `Looking up Graph endpoints for: ${String(record.query ?? "")}.`;

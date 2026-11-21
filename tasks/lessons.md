@@ -53,3 +53,13 @@ Format:
 **Why:** For PR #205 two WebFetch summaries of docs.github.com said Fusion Max was not included in Copilot Pro+. The github/docs source shows Pro+ includes it. The wrong plan names shipped in the unavailable-tier reason and the docs until a reviewer (Muse, round 2) checked the source; a Pro user would have been told to buy a larger plan than needed.
 
 **How to apply:** Any user-facing sentence naming plans, tiers, prices or regions gets a source-level check, and a test that asserts the exact sentence.
+
+---
+
+## Never load a local model on the maintainer's Mac
+
+**Pattern:** Tests and live checks never load a model in Ollama or LM Studio: no `ollama run`, no requests to `/api/chat` or `/api/generate` on localhost:11434. Tests use scripted mock models; live app checks use a hosted provider (Claude Code or Codex CLI).
+
+**Why:** Loading a local model makes the machine unusable (maintainer, 2026-11-19, during the local model accuracy work for the 8B demos).
+
+**How to apply:** Before an end-to-end or smoke run, confirm its provider is a mock or a hosted CLI. Run `ollama ps` afterwards (it reads status and loads nothing); if a model is listed, run `ollama stop <model>` at once. Name the provider and model used in every hand-back.
