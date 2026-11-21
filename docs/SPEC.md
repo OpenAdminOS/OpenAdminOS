@@ -3876,12 +3876,20 @@ the format. Decisions:
   to the planner, and no direct answer from the cache stands in for it, since
   code reads none of its instructions; once a model wrote an answer in a
   chat, its memory may hold a standing instruction ("for the rest of this
-  chat, exclude WIN-"), so the chat's later questions go to the model; a plain
+  chat, exclude WIN-"), so the chat's later questions go to the model, and the
+  older direct cache answers (compliance, encryption, app platform counts) are
+  left to the model too, in both send paths; a write request refused in chat
+  carries no model name, since code wrote it; a plain
   or tenant-wide "how many devices" can mean Intune or Entra devices and goes
-  to the planner, so a count is computed only when it names Intune, managed
-  devices, a compliance state or a sync window; devices with no reported sync
-  time are said, not silently left out of a sync window; dates are shown on
-  this device's calendar; a device lookup is
+  to the planner, so a count is computed only when its counted clause names
+  Intune, managed devices, a compliance state or a sync window (a later
+  clause about compliance does not qualify it); devices with no reported sync
+  time are said, not silently left out of a sync window; a device Intune
+  reports as never synced (0001-01-01) reads "no sync reported"; dates are
+  shown on this device's calendar; when the cache is partial, an unfiltered
+  count leads with the total Graph reported (or says "at least" the cached
+  count) and filtered counts and splits say they cover the cached part only;
+  a device lookup is
   resolved again by name in the snapshot that answers; Entra device questions
   always go to the planner. The deterministic
   answer pack carries the result as an authoritative `computedResult` (exact
@@ -3917,7 +3925,11 @@ the format. Decisions:
   its own way.
 - Questions the data cannot answer: "why is <device> not compliant" names the
   device's cached state, says the failing rule is not in the cached data, and
-  gives the last sync as the lead, with nothing invented. A name two cached
+  gives the last sync as the lead, with nothing invented. Only a failing state
+  (noncompliant, conflict, error) and grace period get that guidance. A
+  compliant device gets its premise corrected ("is compliant in this snapshot,
+  so no compliance rule is failing for it here") and no failed-rule or lead
+  wording; any other state says the snapshot does not establish a failure. A name two cached
   records share goes to the planner, so code never picks one. The device name
   is resolved against the cache at question time; a device first seen by this
   turn's refresh is answered by the planner path.
@@ -3933,7 +3945,9 @@ the format. Decisions:
   repair for malformed, empty, unfinished or evidence-free replies, no repair
   turn for a missing question kind, at most four model calls before the
   fallback; the short query-writing call of an MCP tool the model chose is not
-  a failure turn and is not counted; a writer call that produced nothing
+  a failure turn and is not counted, because counting it pushed ordinary
+  Microsoft Learn answers into the fallback while a failing turn stops within
+  four calls either way; a writer call that produced nothing
   sendable is, and no writer runs once the budget is spent). A second
   progress-only reply falls back as `unfinished` instead of being kept. A rejected `count_cached` call blocks a zero answer as a
   rejected `query_cache` does. A context overflow falls back instead of failing
@@ -3945,5 +3959,10 @@ the format. Decisions:
   `empty-answer`, `unfinished` or `provider-unavailable`. Local fallbacks say
   what happened in plain words, for example "The local model did not finish
   its plan. Answered from cached data instead." The per-model failure memory
-  (two failures, in memory until restart) now says what the model did on its
-  last failed turn instead of blaming the format.
+  (two failures, in memory until restart) now says what the model did on each
+  failed turn since its last success ("did not fit its context window twice")
+  instead of blaming the format. A local model's context overflow counts
+  towards the two failures, since it says the model does not fit Chat; a
+  hosted one does not, since it says more about the question. `count_cached`
+  and `query_cache` refuse an `in` list of more than 20 values instead of
+  cutting it, so a count is never stated as exact over a cut list.
