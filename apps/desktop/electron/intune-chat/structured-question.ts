@@ -208,7 +208,7 @@ const STATE_WORDS = "not compliant|noncompliant|compliant|in grace period";
 const SYNC_WINDOW = "in the last \\d{1,4} days|within the last \\d{1,4} days|in the past \\d{1,4} days|this month|this week|today";
 const SYNCED = `(?<sneg>have not |has not |did not |that have not |that have |have )?(?:synced|checked in) (?<swin>${SYNC_WINDOW})`;
 const THERE = "(?: are there| do we have| do i have| we have| exist)?";
-const WHERE = "(?: in intune| in our tenant| in the tenant| in total)?";
+const WHERE = "(?: in intune| in total)?";
 
 /** Intune devices, optionally of one OS: "devices", "managed Windows devices", "Macs". */
 function devicesSlot(name: string): string {
@@ -306,6 +306,9 @@ function countQuery(text: string, generatedAt: string): StructuredDeviceQuery | 
   const groups = match.groups;
   const scope = parts(osPart(groups), statePart(groups.pre ?? groups.post), syncPart(groups, generatedAt));
   if ((groups.pre && groups.post) || (groups.swin && !scope.some((part) => part.predicate.field === "lastSyncDateTime"))) return undefined;
+  // A plain "how many devices" can mean Intune or Entra devices; only one that names Intune, managed devices,
+  // a compliance state or a sync window is the Intune inventory. Any other goes to the planner, which counts both.
+  if (!/\bintune\b|\bmanaged\b/.test(text) && !scope.some((part) => part.predicate.field !== "operatingSystem") && !(groups.rest ?? "").match(/compliant|grace period|compliance/)) return undefined;
   const breakdown: string[] = [];
   let focus: Part | undefined;
   let listed = false;
@@ -427,7 +430,7 @@ function describeFilters(filters: readonly GraphCacheQueryPredicate[]): string {
   const base = `Intune managed ${os ? `${os} ` : ""}devices`;
   const parts = [
     state === "noncompliant" ? "not compliant" : state === "inGracePeriod" ? "in grace period" : state === "compliant" ? "compliant" : undefined,
-    sync && typeof sync.value === "string" ? `${sync.op === "lt" ? "not synced" : "synced"} since ${sync.value.slice(0, 10)}` : undefined,
+    sync && typeof sync.value === "string" ? `${sync.op === "lt" ? "not synced" : "synced"} since ${localDate(sync.value)}` : undefined,
   ].filter(Boolean);
   return parts.length ? `${base} ${parts.join(", ")}` : base;
 }
@@ -490,8 +493,16 @@ function groupText(group: Record<string, number> | undefined): string {
 
 const FIELD_WORDS: Record<string, string> = { operatingSystem: "per OS", complianceState: "per compliance state" };
 
+/** A timestamp's date on this device: the same calendar the "today" and "this month" windows use. */
+function localDate(iso: string): string {
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return iso.slice(0, 10);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
 function rowLine(row: ComputedListedRow): string {
-  const details = [row.operatingSystem, row.complianceState, row.lastSyncDateTime ? `last sync ${row.lastSyncDateTime.slice(0, 10)}` : undefined].filter(Boolean);
+  const details = [row.operatingSystem, row.complianceState, row.lastSyncDateTime ? `last sync ${localDate(row.lastSyncDateTime)}` : undefined].filter(Boolean);
   return `- ${row.name}${details.length ? ` (${details.join(", ")})` : ""}`;
 }
 
@@ -518,7 +529,8 @@ export function computeStructuredResult(input: {
     tenantId,
     resource: query.resource,
     filters: baseFilters,
-    groupBy: query.breakdown,
+    // A follow-up's split is over the narrowed rows (the subset below); the previous set is not split.
+    groupBy: query.followUp && query.focus ? [] : query.breakdown,
     ...ids,
     ...(listSet ? { listLimit: COMPUTED_LIST_LIMIT } : {}),
   });
@@ -566,6 +578,14 @@ export function computeStructuredResult(input: {
   } else if (listSet) {
     facts.push(...rows.map(rowLine));
     if (counted.total > rows.length) facts.push(`${counted.total - rows.length} more match and are not listed.`);
+  }
+  // A sync window counts devices with a reported sync time; those without one are said, not silently left out.
+  // The set the window applied to is what was counted: the previous rows by id for a follow-up, the filters otherwise.
+  const countedFilters = query.focus ? [...baseFilters, ...query.focus.filters] : baseFilters;
+  if (countedFilters.some((filter) => filter.field === "lastSyncDateTime")) {
+    const others = countedFilters.filter((filter) => filter.field !== "lastSyncDateTime");
+    const unknown = store.countGraphCache({ tenantId, resource: query.resource, filters: [...others, { field: "lastSyncDateTime", op: "eq", value: null }], ...ids }).total;
+    if (unknown > 0) facts.push(`${unknown} ${unknown === 1 ? "device has" : "devices have"} no reported sync time and ${unknown === 1 ? "is" : "are"} not counted in the sync window.`);
   }
   // A failed latest refresh is said, as the direct answers say it: these counts are older evidence.
   if (snapshot?.lastError) facts.unshift(`The latest refresh failed, so these counts are from the snapshot refreshed ${snapshot.refreshedAt ?? "earlier"}.`);
@@ -624,10 +644,10 @@ function computeDeviceDetail(
   facts.push(notInData[0]!);
   let lastSyncDate: string | undefined;
   if (row.lastSyncDateTime) {
-    lastSyncDate = row.lastSyncDateTime.slice(0, 10);
+    lastSyncDate = localDate(row.lastSyncDateTime);
     const days = Math.floor((new Date(generatedAt).getTime() - new Date(row.lastSyncDateTime).getTime()) / MS_PER_DAY);
     const age = Number.isFinite(days) && days >= 0 ? `, ${days} ${days === 1 ? "day" : "days"} before this answer` : "";
-    facts.push(`Lead in the data: the last sync was on ${lastSyncDate}${age}.${Number.isFinite(days) && days > 30 ? " Its compliance state is the one reported at that check-in." : ""}`);
+    facts.push(`Lead in the data: the last sync was on ${lastSyncDate}${age}.`);
   } else {
     facts.push("The cache has no last sync time for this device.");
   }

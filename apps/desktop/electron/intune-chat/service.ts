@@ -229,6 +229,11 @@ function planForFollowUp(content: string, previousQuestion: string | undefined):
   return planned;
 }
 
+/** Whether a model wrote a completed answer earlier in this conversation; its memory may hold a standing instruction. */
+function modelAnsweredBefore(history: readonly IntuneChatMessage[]): boolean {
+  return history.some((message) => message.role === "assistant" && message.status === "completed" && Boolean(message.model));
+}
+
 function restrictPlannedResourcesForTenant(
   planned: PlannedChatContext,
   tenant: TenantRecord,
@@ -2194,7 +2199,9 @@ export class IntuneChatService {
       : voiceResourcesForQuestion(content);
     if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
     // Attached workspace instructions ("exclude LAB- devices") are read by the model; code answers none of them.
-    const structured = followUp && !planned.hasWriteIntent && !input.workspaceContext ? planStructuredQuery({ question: content, generatedAt: now, ...(followUp.result ? { previous: followUp.result } : {}), store, tenantId: tenant.id }) : undefined;
+    // Nor does code read a standing instruction earlier in the chat ("for the rest of this chat, exclude WIN-"):
+    // once a model wrote an answer here, the conversation memory may hold one, so the model answers.
+    const structured = followUp && !planned.hasWriteIntent && !input.workspaceContext && !modelAnsweredBefore(history) ? planStructuredQuery({ question: content, generatedAt: now, ...(followUp.result ? { previous: followUp.result } : {}), store, tenantId: tenant.id }) : undefined;
     if (structured) planned.resources = [structured.resource];
     const restriction = restrictPlannedResourcesForTenant(planned, tenant, noTenant);
     const userMessage: IntuneChatMessage = {
@@ -2335,7 +2342,8 @@ export class IntuneChatService {
       (toolTrace ??= []).push(computedTraceEntry(computed));
       return computedAnswerText(computed);
     };
-    const directDeviceAnswer = !noTenant && !planned.hasWriteIntent && !accessBlockedMessage && answerPlan.sources.kind !== "docs"
+    // Attached workspace context is read by the model; no direct answer from the cache stands in for it.
+    const directDeviceAnswer = !noTenant && !planned.hasWriteIntent && !accessBlockedMessage && answerPlan.sources.kind !== "docs" && !input.workspaceContext
       ? codeAnswer() ?? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant), () => {}, entry => { (toolTrace ??= []).push(entry); }) ??
         voiceAppPlatformCountAnswer(content, cacheStatus, (resource) =>
           this.graphAggregatesFor(store, tenant.id, [resource])[resource],
@@ -2691,7 +2699,9 @@ export class IntuneChatService {
     const directResources = voiceDeviceEvidenceIntent(content) ? ["managedDevices" as const] : voiceResourcesForQuestion(content);
     if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
     // Attached workspace instructions ("exclude LAB- devices") are read by the model; code answers none of them.
-    const structured = followUp && !planned.hasWriteIntent && !input.workspaceContext ? planStructuredQuery({ question: content, generatedAt: now, ...(followUp.result ? { previous: followUp.result } : {}), store, tenantId: tenant.id }) : undefined;
+    // Nor does code read a standing instruction earlier in the chat ("for the rest of this chat, exclude WIN-"):
+    // once a model wrote an answer here, the conversation memory may hold one, so the model answers.
+    const structured = followUp && !planned.hasWriteIntent && !input.workspaceContext && !modelAnsweredBefore(history) ? planStructuredQuery({ question: content, generatedAt: now, ...(followUp.result ? { previous: followUp.result } : {}), store, tenantId: tenant.id }) : undefined;
     // Code answers this question exactly from one resource; nothing else is planned or refreshed for it.
     if (structured) planned.resources = [structured.resource];
     const restriction = restrictPlannedResourcesForTenant(planned, tenant, noTenant);
@@ -3045,7 +3055,8 @@ export class IntuneChatService {
       (toolTrace ??= []).push(computedTraceEntry(computed));
       return computedAnswerText(computed);
     };
-    const directVoiceAnswer = noTenant || accessBlockedMessage || answerPlan?.sources.kind === "docs"
+    // Attached workspace context is read by the model; no direct answer from the cache stands in for it.
+    const directVoiceAnswer = noTenant || accessBlockedMessage || answerPlan?.sources.kind === "docs" || (!options.voice && input.workspaceContext)
       ? undefined
       : codeAnswer() ?? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant, options.signal), message => sendProgress({ message, stage: "running-tools" }), entry => { (toolTrace ??= []).push(entry); }) ?? voiceInventoryAnswer(content, cacheStatus) ?? voiceAppPlatformCountAnswer(content, cacheStatus, (resource) => this.graphAggregatesFor(store, tenant.id, [resource])[resource]) ?? voiceDeviceSummaryAnswer(content, cacheStatus, () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices);
     const namedAgent = persisted.installedAgents.find(a => [a.name, a.slug].some(n => n.toLowerCase() === content.toLowerCase()));

@@ -3855,7 +3855,15 @@ the format. Decisions:
   in the set and the subset alike, and a split that was over a follow-up's
   subset is not rebuilt; a split asked after the subset clause could mean
   either and goes to the planner; a turn with attached workspace context goes
-  to the planner, since code reads none of its instructions; a device lookup is
+  to the planner, and no direct answer from the cache stands in for it, since
+  code reads none of its instructions; once a model wrote an answer in a
+  chat, its memory may hold a standing instruction ("for the rest of this
+  chat, exclude WIN-"), so the chat's later questions go to the model; a plain
+  or tenant-wide "how many devices" can mean Intune or Entra devices and goes
+  to the planner, so a count is computed only when it names Intune, managed
+  devices, a compliance state or a sync window; devices with no reported sync
+  time are said, not silently left out of a sync window; dates are shown on
+  this device's calendar; a device lookup is
   resolved again by name in the snapshot that answers; Entra device questions
   always go to the planner. The deterministic
   answer pack carries the result as an authoritative `computedResult` (exact

@@ -25,7 +25,8 @@ const Q1 = "how many devices are there in Intune? show per OS, and show which ar
 const NONCOMPLIANT = ["WIN-01", "WIN-02", "WIN-03", "WIN-04", "MAC-02", "AND-01"];
 const NONCOMPLIANT_WINDOWS = ["WIN-01", "WIN-02", "WIN-03", "WIN-04"];
 const ENTRA_ONLY = Array.from({ length: 13 }, (_, i) => `ENTRA-ONLY-${String(i + 1).padStart(2, "0")}`);
-const recent = "2026-11-17T08:00:00.000Z";
+// Two days ago, so the sync windows in these tests hold on any day they run.
+const recent = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
 
 const managedDevices = [
   { id: "md-w1", deviceName: "WIN-01", operatingSystem: "Windows", complianceState: "noncompliant", lastSyncDateTime: recent },
@@ -346,6 +347,44 @@ describe("local model accuracy on the tester's tenant", () => {
     });
   });
 
+  it("leaves the direct compliance answer to the model when workspace instructions are attached, in both send paths", async () => {
+    await withHarness(async ({ store, calls, reply }) => {
+      await store.setChatInvestigationMode("always-deterministic");
+      const workspace = await store.createWorkspace({ title: "Lab review", tenantId: tenant.id, instructions: "Exclude devices whose name starts with WIN-." });
+      reply(() => "Model answer that applies the workspace instructions.");
+      const workspaceContext = { workspaceId: workspace.id, evidenceIds: [], noteIds: [], includeInstructions: true };
+      for (const send of ["send", "stream"] as const) {
+        const message = (send === "send"
+          ? await store.sendIntuneChatMessage({ content: "Which devices are noncompliant?", refreshIfStale: false, workspaceContext })
+          : await store.streamIntuneChatMessage({ content: "Which devices are noncompliant?", refreshIfStale: false, workspaceContext }, () => {})).assistantMessage;
+        assert.equal(message.content, "Model answer that applies the workspace instructions.", send);
+        assert.ok(calls.some((call) => /Exclude devices whose name starts with WIN-/.test(call.prompt)), send);
+      }
+    });
+  });
+
+  it("leaves a counted question to the model once a model answered in the chat, which may hold a standing instruction", async () => {
+    await withHarness(async ({ store, calls, reply }) => {
+      await store.setChatInvestigationMode("always-deterministic");
+      reply(() => "Understood. Devices whose name starts with WIN- are left out from now on.");
+      const first = await store.sendIntuneChatMessage({ content: "For the rest of this chat, exclude devices whose names start with WIN-.", refreshIfStale: false });
+      reply(() => "Model answer without the WIN- devices.");
+      const next = (await store.sendIntuneChatMessage({ content: Q1, conversationId: first.conversation.id, refreshIfStale: false })).assistantMessage;
+      assert.equal(next.content, "Model answer without the WIN- devices.");
+      assert.ok(calls.some((call) => /exclude devices whose names start with WIN-/i.test(call.prompt)), "the model read the earlier instruction");
+    });
+  });
+
+  it("says how many devices have no reported sync time instead of leaving them out silently", async () => {
+    await withHarness(async ({ store, cache }) => {
+      cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: new Date().toISOString(),
+        rows: [...managedDevices, { id: "md-nosync", deviceName: "NEW-01", operatingSystem: "Windows", complianceState: "compliant" }] });
+      const message = (await store.sendIntuneChatMessage({ content: "How many devices have not synced in the last 7 days?", refreshIfStale: false })).assistantMessage;
+      assert.match(message.content, /Intune managed devices not synced in the last 7 days: 1\./);
+      assert.match(message.content, /1 device has no reported sync time and is not counted in the sync window\./);
+    });
+  });
+
   it("keeps a follow-up to the previous answer's devices after a refresh adds one", async () => {
     await withHarness(async ({ store, cache }) => {
       await store.setChatInvestigationMode("always-deterministic");
@@ -437,7 +476,7 @@ describe("structured device questions", () => {
     assert.deepEqual(twoParts?.filters, [{ field: "operatingSystem", op: "eq", value: "Windows" }]);
     assert.deepEqual(twoParts?.focus?.filters, [{ field: "complianceState", op: "eq", value: "noncompliant" }]);
     // An OS named only in the second clause is the subset too: the fleet total is still counted.
-    for (const question of ["how many devices do we have, and how many are Windows", "how many devices are there and which are Windows"]) {
+    for (const question of ["how many devices do we have in Intune, and how many are Windows", "how many devices are there in Intune and which are Windows"]) {
       const subset = structuredQueryForQuestion({ question, generatedAt: at });
       assert.deepEqual(subset?.filters, [], question);
       assert.deepEqual(subset?.focus?.filters, [{ field: "operatingSystem", op: "eq", value: "Windows" }], question);
@@ -457,7 +496,10 @@ describe("structured device questions", () => {
     // A second sentence with its own subject is its own question, not a subset of the first.
     assert.equal(structuredQueryForQuestion({ question: "How many Windows devices are there? Which devices are not compliant?", generatedAt: at }), undefined);
     // A clause after a space is read like one after a comma.
-    assert.deepEqual(structuredQueryForQuestion({ question: "how many devices are there per OS", generatedAt: at })?.breakdown, ["operatingSystem"]);
+    assert.deepEqual(structuredQueryForQuestion({ question: "how many devices are there in Intune per OS", generatedAt: at })?.breakdown, ["operatingSystem"]);
+    // A plain or tenant-wide device count can mean Intune or Entra devices: the planner counts both.
+    for (const question of ["How many devices are there in our tenant?", "How many devices are there?"]) assert.equal(structuredQueryForQuestion({ question, generatedAt: at }), undefined, question);
+    assert.deepEqual(structuredQueryForQuestion({ question: "How many devices are there in Intune?", generatedAt: at })?.filters, []);
     // A list is labelled in the question's words.
     assert.equal(structuredQueryForQuestion({ question: "Which managed devices have not synced in the last 7 days?", generatedAt: at })?.scopeLabel, "Intune managed devices not synced in the last 7 days");
     // A union samples no ANDed rows.
