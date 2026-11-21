@@ -2476,7 +2476,8 @@ export class IntuneChatService {
             responseModel = agentic.model ?? responseModel;
             toolTrace = agentic.toolTrace;
             // A hosted context overflow says more about the question than the model; a local one is the model's fit.
-            if (agentic.ok || agentic.reason !== "context-limit" || provider.isLocal) recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok, agentic.ok ? undefined : agentic.failureReason);
+            // A provider that could not be reached says nothing about the model.
+            if (agentic.ok || (agentic.reason !== "provider-unavailable" && (agentic.reason !== "context-limit" || provider.isLocal))) recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok, agentic.ok ? undefined : agentic.failureReason);
             if (agentic.ok) {
               assistantContent = agentic.answer;
               modelFollowUps = agentic.followUps ?? [];
@@ -3276,7 +3277,8 @@ export class IntuneChatService {
             responseModel = agentic.model ?? responseModel;
             toolTrace = agentic.toolTrace;
             // A hosted context overflow says more about the question than the model; a local one is the model's fit.
-            if (agentic.ok || agentic.reason !== "context-limit" || provider.isLocal) recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok, agentic.ok ? undefined : agentic.failureReason);
+            // A provider that could not be reached says nothing about the model.
+            if (agentic.ok || (agentic.reason !== "provider-unavailable" && (agentic.reason !== "context-limit" || provider.isLocal))) recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok, agentic.ok ? undefined : agentic.failureReason);
             if (agentic.ok) {
               modelFollowUps = agentic.followUps ?? [];
               modelTitle = agentic.title;

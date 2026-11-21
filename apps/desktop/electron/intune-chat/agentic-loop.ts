@@ -106,6 +106,8 @@ export const LOCAL_FALLBACK_NOTICES: Record<AgenticFailureReason, string> = {
 };
 
 /** Provider errors that mean the prompt did not fit the model's context window. */
+/** A request that never reached the model: the server is down or refused the connection. */
+const PROVIDER_UNREACHABLE = /ECONNREFUSED|ECONNRESET|ENOTFOUND|EHOSTUNREACH|fetch failed|socket hang up|isn't running|is not running|connection refused|could not connect/i;
 const CONTEXT_TOO_SMALL = /context (?:length|window|size|limit)|num_ctx|maximum context|context_length_exceeded|too many tokens|prompt is too long|exceeds? (?:the )?(?:model'?s )?(?:maximum )?context/i;
 
 const EVIDENCE_TOOLS = new Set<string>([
@@ -478,6 +480,14 @@ export async function runAgenticChat(
     } catch (caught) {
       // A local prompt that overflowed the context window falls back; any other error is the provider's.
       const detail = caught instanceof Error ? caught.message : String(caught);
+      // A local model that could not be reached ends the loop with a reason, as an overflow does; the fallback
+      // then meets the same provider and shows its designed error.
+      if (compact && !input.signal?.aborted && PROVIDER_UNREACHABLE.test(detail) && !CONTEXT_TOO_SMALL.test(detail)) {
+        input.modelStep?.finish({ kind: "unreachable" });
+        withdrawAnswer();
+        if (invalidQueries.size) return blockedAnswer();
+        return { ok: false, reason: "provider-unavailable", failureReason: "provider-unavailable", failureDetail: detail, fallbackNotice: LOCAL_FALLBACK_NOTICES["provider-unavailable"], toolTrace, iterations: iteration, ...(responseModel ? { model: responseModel } : {}) };
+      }
       if (!compact || input.signal?.aborted || !CONTEXT_TOO_SMALL.test(detail)) throw caught;
       input.modelStep?.finish({ kind: "context-limit" });
       withdrawAnswer();
@@ -622,7 +632,10 @@ export async function runAgenticChat(
     }
     const missingSources = [...required].filter((id) => !attemptedServers.has(id));
     const missingNames = missingSources.map((id) => input.tools.mcp?.servers?.find((server) => server.id === id)?.name ?? id);
-    if (action.kind === "final" && missingSources.length > 0 && missingSourceCount < MAX_NO_EVIDENCE_RETRIES) {
+    // Asking a missing source takes three more calls on the compact budget (the request, its query writer and the
+    // answer); when they do not fit, the answer is kept and says the source was not consulted.
+    const sourceRepairFits = !compact || attempts + 3 <= maxAttempts;
+    if (action.kind === "final" && missingSources.length > 0 && missingSourceCount < MAX_NO_EVIDENCE_RETRIES && sourceRepairFits) {
       missingSourceCount += 1;
       await settleModelStep({ kind: "repair", reason: "sources" });
       const names = missingNames;
@@ -732,8 +745,14 @@ export async function runAgenticChat(
     }
     const startedAt = new Date().toISOString();
     const mcpTool = isMcpChatToolName(action.tool) ? input.tools.mcp?.tools.find((tool) => tool.name === action.tool) : undefined;
-    // The query writer is a model call: with no budget left for it, the compact loop ends before it runs.
-    if (compact && mcpTool && attempts >= maxAttempts) break;
+    // The query writer is a model call and counts like any other. A lookup that would leave no call for the
+    // answer is not run; the model is told to answer from what it has, so a turn never exceeds the budget.
+    if (compact && mcpTool && attempts >= maxAttempts - 1) {
+      if (attempts >= maxAttempts) break;
+      turns.push({ role: "repair", content: `No model call is left for another lookup. ${action.tool} was not called. Answer now from the results above; if they do not cover the question, say what was not consulted.` });
+      continue;
+    }
+    let writerRan = false;
     input.onToolStart?.({
       tool: action.tool,
       // The model's params for an MCP tool are never sent, so they are not shown either.
@@ -743,16 +762,19 @@ export async function runAgenticChat(
     });
     const tool = action.tool;
     const mcpHooks: McpCallHooks | undefined = mcpTool ? {
-      writeQuery: (entry) => writeMcpQuery({
-        llm: input.llm,
-        ...(input.model ? { model: input.model } : {}),
-        ...(input.signal ? { signal: input.signal } : {}),
-        question: input.adminQuestion ?? "",
-        tool: entry,
-        earlierResults: mcpResults,
-        sentQueries,
-        earlierCalls: mcpCalls.filter((call) => call.serverId === entry.serverId && call.tool === entry.tool).map(({ sent, listed, matched, counts }) => ({ sent, listed, ...(matched !== undefined ? { matched } : {}), ...(counts ? { counts } : {}) })),
-      }),
+      writeQuery: (entry) => {
+        writerRan = true;
+        return writeMcpQuery({
+          llm: input.llm,
+          ...(input.model ? { model: input.model } : {}),
+          ...(input.signal ? { signal: input.signal } : {}),
+          question: input.adminQuestion ?? "",
+          tool: entry,
+          earlierResults: mcpResults,
+          sentQueries,
+          earlierCalls: mcpCalls.filter((call) => call.serverId === entry.serverId && call.tool === entry.tool).map(({ sent, listed, matched, counts }) => ({ sent, listed, ...(matched !== undefined ? { matched } : {}), ...(counts ? { counts } : {}) })),
+        });
+      },
       references: (serverId) => {
         const own = mcpResults.filter((item) => item.serverId === serverId);
         return {
@@ -767,13 +789,8 @@ export async function runAgenticChat(
       },
     } : undefined;
     const execution = await executeIntuneChatTool(input.tools, action.tool, action.params, mcpHooks);
-    // The query writer is a model call. It is part of a working tool call, and not counted, only when the
-    // server answered with results; one whose query was not sent, failed at the host or found nothing is a
-    // failed attempt, so a failing turn still stops within the compact budget.
-    const writerSource = execution.trace.mcpSource;
-    const mcpAnswered = !execution.trace.error && writerSource !== undefined && writerSource.empty !== true
-      && !(writerSource.serverId === LEARN_SERVER_ID && (writerSource.results?.length ?? 0) === 0);
-    if (compact && mcpTool && !mcpAnswered) attempts += 1;
+    // Every query writer call counts against the compact budget, whatever the server did with its query.
+    if (compact && writerRan) attempts += 1;
     toolTrace.push(execution.trace);
     if (!execution.trace.error && isEvidenceResult(action.tool, execution.result)) evidenceToolCalls += 1;
     const mcpSource = execution.trace.mcpSource;

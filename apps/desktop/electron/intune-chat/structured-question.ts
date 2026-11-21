@@ -63,7 +63,7 @@ export interface ChatResultContext {
   /** The rows the answer matched, when at most CONTEXT_ID_LIMIT: a follow-up narrows these, not a re-read of the cache. */
   ids?: string[];
   /** The question's shape (its set, subset, split and list), so "what about macOS?" asks it again with macOS. */
-  shape?: { filters: GraphCacheQueryPredicate[]; focus?: { label: string; filters: GraphCacheQueryPredicate[] }; breakdown: string[]; list: boolean; breakdownOnSubset?: boolean };
+  shape?: { filters: GraphCacheQueryPredicate[]; focus?: { label: string; filters: GraphCacheQueryPredicate[] }; breakdown: string[]; list: boolean; breakdownOnSubset?: boolean; subsetReplacesSet?: boolean };
   computedAt: string;
 }
 
@@ -393,7 +393,9 @@ function followUpQuery(text: string, previous: ChatResultContext, generatedAt: s
   // or a list, with the OS swapped in or added. A shape whose split was over a follow-up's subset is not rebuilt.
   if (switching) {
     const shape = previous.shape;
-    if (!shape || shape.breakdownOnSubset) return undefined;
+    // A subset that replaced a filter of its set ("which of those are compliant now" after the noncompliant list)
+    // was read on the previous rows' history; asked again of a fresh set it would need both values, so it is not rebuilt.
+    if (!shape || shape.breakdownOnSubset || shape.subsetReplacesSet) return undefined;
     const field = part.predicate.field;
     const inFocus = shape.focus?.filters.some((filter) => filter.field === field) ?? false;
     const swap = (filters: readonly GraphCacheQueryPredicate[]) => filters.map((filter) => (filter.field === field ? part.predicate : filter));
@@ -646,7 +648,7 @@ export function computeStructuredResult(input: {
       label: listedLabel,
       total: listedTotal,
       ...(contextIds ? { ids: contextIds } : {}),
-      shape: { filters: query.filters, ...(query.focus ? { focus: query.focus } : {}), breakdown: query.breakdown, list: query.list, ...(query.followUp && query.focus && query.breakdown.length > 0 ? { breakdownOnSubset: true } : {}) },
+      shape: { filters: query.filters, ...(query.focus ? { focus: query.focus } : {}), breakdown: query.breakdown, list: query.list, ...(query.followUp && query.focus && query.breakdown.length > 0 ? { breakdownOnSubset: true } : {}), ...(query.focus && query.filters.some((filter) => query.focus!.filters.some((focus) => focus.field === filter.field)) ? { subsetReplacesSet: true } : {}) },
     },
   };
 }
@@ -701,10 +703,10 @@ function computeDeviceDetail(
     const days = Math.floor((new Date(generatedAt).getTime() - new Date(row.lastSyncDateTime).getTime()) / MS_PER_DAY);
     const age = Number.isFinite(days) && days >= 0 ? `, ${days} ${days === 1 ? "day" : "days"} before this answer` : "";
     // An old sync is a lead for a device short of a policy; a recent one, or any sync of a compliant device, is plain context.
-    const lead = state !== "compliant" && Number.isFinite(days) && days >= STALE_SYNC_LEAD_DAYS;
+    const lead = (FAILING_COMPLIANCE_STATES.has(state) || state === "inGracePeriod") && Number.isFinite(days) && days >= STALE_SYNC_LEAD_DAYS;
     facts.push(`${lead ? "Lead in the data: the last sync" : "The last sync"} was on ${lastSyncDate}${age}.`);
   } else if (row.lastSyncDateTime) {
-    facts.push(state === "compliant" ? "Intune reports no sync for this device." : "Lead in the data: Intune reports no sync for this device.");
+    facts.push(FAILING_COMPLIANCE_STATES.has(state) || state === "inGracePeriod" ? "Lead in the data: Intune reports no sync for this device." : "Intune reports no sync for this device.");
   } else {
     facts.push("The cache has no last sync time for this device.");
   }

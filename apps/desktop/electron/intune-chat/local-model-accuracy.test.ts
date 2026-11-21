@@ -445,7 +445,7 @@ describe("local model accuracy on the tester's tenant", () => {
   });
 
   it("reads \"which of those are compliant now\" on the previous answer's devices after a refresh", async () => {
-    await withHarness(async ({ store, cache, calls }) => {
+    await withHarness(async ({ store, cache, calls, reply }) => {
       await store.setChatInvestigationMode("always-deterministic");
       const first = await store.sendIntuneChatMessage({ content: Q1, refreshIfStale: false });
       cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: new Date().toISOString(),
@@ -458,6 +458,11 @@ describe("local model accuracy on the tester's tenant", () => {
       // Devices already compliant in the first answer are not part of it.
       for (const name of ["WIN-05", "MAC-01", "AND-02"]) assert.ok(!followUp.content.includes(name), name);
       // "only the compliant ones" does not name the previous rows and stays with the planner.
+      // "what about macOS?" after it is not rebuilt: the set and the subset would need both compliance values.
+      reply(() => "Planner answer.");
+      const switched = (await store.sendIntuneChatMessage({ content: "What about macOS?", conversationId: first.conversation.id, refreshIfStale: false })).assistantMessage;
+      assert.doesNotMatch(switched.content, /: 0[.:]/);
+      assert.ok(calls.length > 0, "the switch went to the planner");
       const previous = { version: 1 as const, question: Q1, resource: "managedDevices" as const, filters: [{ field: "complianceState", op: "eq" as const, value: "noncompliant" }], label: "Intune managed devices not compliant", total: 6, ids: ["md-w1"], tenantId: tenant.id, computedAt: new Date().toISOString() };
       assert.equal(structuredQueryForQuestion({ question: "only the compliant ones", generatedAt: new Date().toISOString(), previous }), undefined);
     });
@@ -516,6 +521,23 @@ describe("Local context overflows in the failure memory", () => {
       const skipped = (await store.sendIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false })).assistantMessage;
       assert.equal(calls.filter((call) => call.loop).length, before, "the third question skips the tool loop");
       assert.match(skipped.engineNotice ?? "", /did not complete its last 2 tool-loop answers: the question and its data did not fit its context window twice\./);
+    });
+  });
+});
+
+describe("A local model that cannot be reached", () => {
+  it("ends the loop as provider-unavailable and does not count it against the model", async () => {
+    await withHarness(async ({ store, calls, reply }) => {
+      reply(({ loop }) => {
+        if (loop) throw new Error("connect ECONNREFUSED 127.0.0.1:11434");
+        return "Deterministic answer.";
+      });
+      for (let turn = 0; turn < 3; turn += 1) {
+        const before = calls.filter((call) => call.loop).length;
+        const message = (await store.sendIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false })).assistantMessage;
+        assert.equal(message.engineNotice, LOCAL_FALLBACK_NOTICES["provider-unavailable"], `turn ${turn}`);
+        assert.equal(calls.filter((call) => call.loop).length, before + 1, `turn ${turn}: the tool loop is still tried`);
+      }
     });
   });
 });

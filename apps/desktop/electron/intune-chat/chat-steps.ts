@@ -535,7 +535,9 @@ export type ModelStepOutcome =
   | { kind: "final"; passages: number; trace: readonly IntuneChatToolTraceEntry[] }
   | { kind: "repair"; reason: "malformed" | "kind" | "sources" | "evidence" | "unfinished" | "lookup" | "empty" | "documentation" | "excerpts" }
   /** The prompt did not fit the model's context window: the loop ends and Chat answers from cached data. */
-  | { kind: "context-limit" };
+  | { kind: "context-limit" }
+  /** The request did not reach the model: the loop ends with provider-unavailable. */
+  | { kind: "unreachable" };
 
 export interface ModelStepHooks {
   start(): void;
@@ -615,10 +617,12 @@ export function modelStepHooks(steps: ChatStepRecorder, model: AnswerModel, mcp:
       const title = outcome.kind === "final" ? "Wrote the answer"
         : outcome.kind === "tool" ? toolDecision(outcome.tool, outcome.params, mcp?.tools.find((tool) => tool.name === outcome.tool))
           : outcome.kind === "context-limit" ? "Prompt did not fit the model's context window"
-            : REPAIR[outcome.reason];
+            : outcome.kind === "unreachable" ? "Could not reach the model"
+              : REPAIR[outcome.reason];
       const detail = outcome.kind === "final" ? `${name} · ${answerInputs(outcome.passages, outcome.trace)}`
         : outcome.kind === "repair" ? `${name} · ${outcome.reason === "excerpts" ? "asked the model to read the best match first" : "asked the model to try again"}`
-          : outcome.kind === "context-limit" ? `${name} · answered from cached data instead` : name;
+          : outcome.kind === "context-limit" ? `${name} · answered from cached data instead`
+            : outcome.kind === "unreachable" ? `${name} · the request did not connect` : name;
       steps.finish(current.id, { title, detail: classification ? `${detail} · ${classification}` : detail, durationMs: Math.max(0, Date.now() - current.startedAt) });
       current = undefined;
     },

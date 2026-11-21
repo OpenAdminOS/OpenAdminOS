@@ -3918,7 +3918,8 @@ the format. Decisions:
   "Which of those are compliant now?" names the previous rows, so it is read
   on them by id with their current values even though the previous answer
   filtered on compliance; "only the compliant ones" does not and goes to the
-  planner.
+  planner, and so does a later "what about macOS?", which would need both
+  compliance values.
   What ran shows the filters of a follow-up, not the row ids. A device
   lookup stores no follow-up context, and a stopped turn clears the context. When the previous answer matched more
   than 500 rows, no rows were kept and "of those" goes to the planner. Any other answer clears the context, and
@@ -3951,12 +3952,13 @@ the format. Decisions:
 - Auto mode, local model, Chat: a compact loop budget (four iterations, one
   repair for malformed, empty, unfinished or evidence-free replies, no repair
   turn for a missing question kind, at most four model calls before the
-  fallback; the short query-writing call of an MCP tool the model chose is not
-  counted when the server answered with results, because counting it pushed
-  ordinary Microsoft Learn answers into the fallback; a writer call whose
-  query was not sent, failed at the host (also after it was sent) or found
-  nothing is counted, so a failing turn stops within four model calls, and no
-  writer runs once the budget is spent). A second
+  fallback; the short query-writing call of an MCP tool counts like any other
+  model call, so no turn exceeds four calls; a lookup that would leave no call
+  for the answer is not run and the model is told to answer from what it has,
+  and a repair that asks for a missing source runs only when its request, its
+  query writer and the answer still fit, otherwise the answer is kept and says
+  the source was not consulted. Counting the writer without these two rules
+  pushed ordinary Microsoft Learn answers into the fallback). A second
   progress-only reply falls back as `unfinished` instead of being kept. A rejected `count_cached` call blocks a zero answer as a
   rejected `query_cache` does. A context overflow falls back instead of failing
   the message and returns the provider's error as `failureDetail`.
@@ -3971,6 +3973,10 @@ the format. Decisions:
   failed turn since its last success ("did not fit its context window twice")
   instead of blaming the format. A local model's context overflow counts
   towards the two failures, since it says the model does not fit Chat; a
-  hosted one does not, since it says more about the question. `count_cached`
+  hosted one does not, since it says more about the question. A local model
+  that cannot be reached (connection refused, server not running) ends the
+  loop as `provider-unavailable` with the error as `failureDetail`, is not
+  counted against the model, and the fallback then shows the provider's
+  designed error. `count_cached`
   and `query_cache` refuse an `in` list of more than 20 values instead of
   cutting it, so a count is never stated as exact over a cut list.

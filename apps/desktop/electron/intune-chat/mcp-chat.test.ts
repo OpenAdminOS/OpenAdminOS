@@ -729,18 +729,37 @@ describe("The MCP query writer boundary", () => {
     });
   });
 
-  it("does not count a writer call whose request answered with results", async () => {
+  it("keeps answered lookups and the answer within four model calls, and leaves the last call for the answer", async () => {
     await withStore(async (store) => {
       const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
       const prompts: Array<{ system?: string; prompt: string }> = [];
       const writerPrompts: string[] = [];
+      const answered = JSON.stringify({ results: [{ title: "Compliance policies", contentUrl: "https://learn.microsoft.com/intune/protect/device-compliance-get-started", content: "Grace period." }] });
       const result = await runAgenticChat({
-        ...input(store, scriptedLlm([callDocs("intune compliance grace period"), callDocs("intune compliance grace period settings"), callDocs("intune grace period actions"), '{"final":true,"answer":"Grace period keeps devices compliant for the configured days [1]."}'], prompts, writerPrompts), mcpContext(calls, JSON.stringify({ results: [{ title: "Compliance policies", contentUrl: "https://learn.microsoft.com/intune/protect/device-compliance-get-started", content: "Grace period." }] }))),
+        ...input(store, scriptedLlm([callDocs("intune compliance grace period"), callDocs("intune compliance grace period settings"), '{"final":true,"answer":"Grace period keeps devices compliant for the configured days [1]."}'], prompts, writerPrompts), mcpContext(calls, answered)),
         budget: "compact",
         questionKind: "docs",
       });
-      assert.equal(result.ok, true, "three answered reads and the answer fit, the writer calls are not failures");
-      assert.equal(writerPrompts.length, 3);
+      assert.equal(result.ok, true, "the second lookup is skipped so the last call writes the answer");
+      assert.equal(writerPrompts.length, 1);
+      assert.equal(prompts.length + writerPrompts.length, 4);
+      assert.match(prompts.at(-1)!.prompt, /No model call is left for another lookup/);
+    });
+  });
+
+  it("falls back within four model calls when answered lookups are followed by malformed replies", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const prompts: Array<{ system?: string; prompt: string }> = [];
+      const writerPrompts: string[] = [];
+      const answered = JSON.stringify({ results: [{ title: "Compliance policies", contentUrl: "https://learn.microsoft.com/intune/protect/device-compliance-get-started", content: "Grace period." }] });
+      const result = await runAgenticChat({
+        ...input(store, scriptedLlm([callDocs("intune compliance grace period"), callDocs("intune grace period settings"), '```json\n{"tool": "query_ca\n```', '```json\n{"tool": "query_ca\n```'], prompts, writerPrompts), mcpContext(calls, answered)),
+        budget: "compact",
+        questionKind: "docs",
+      });
+      assert.equal(result.ok, false);
+      assert.ok(prompts.length + writerPrompts.length <= 4, `${prompts.length} answering and ${writerPrompts.length} writer calls`);
     });
   });
 
