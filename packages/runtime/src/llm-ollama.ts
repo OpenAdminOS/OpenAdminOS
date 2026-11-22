@@ -500,8 +500,10 @@ const familyKey = (endpoint: string, model: string) => `${endpoint.trim().replac
  */
 export function ollamaModelName(name: string): string {
   // Ollama's name parts: [scheme://][host/][namespace/]model[:tag][@digest][:local].
-  // A final ":local" only says the installed model is meant, as Ollama reads it.
-  const parts = name.trim().toLowerCase().replace(/:\s*local\s*$/, "").replace(/^[a-z][a-z0-9+.-]*:\/\//, "").split("/").filter(Boolean);
+  // A ":local" after a tag only says the installed model is meant, as Ollama
+  // 0.40 reads it. A lone ":local" stays: older Ollama reads it as a tag.
+  const parts = name.trim().toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, "").split("/").filter(Boolean);
+  if (parts.length > 0 && /:[^:]+:\s*local\s*$/.test(parts.at(-1)!)) parts[parts.length - 1] = parts.at(-1)!.replace(/:\s*local\s*$/, "");
   if (parts.length === 3 && parts[0] === "registry.ollama.ai") parts.shift();
   if (parts.length === 2 && parts[0] === "library") parts.shift();
   let normalized = parts.join("/");
@@ -623,11 +625,18 @@ export async function refreshOllamaModelFamily(endpoint: string, model: string, 
     if (!response.ok || isRefusedRedirect(response, url)) return;
     const data = (await response.json()) as { models?: Array<{ name?: unknown; model?: unknown }> };
     if (!Array.isArray(data.models)) return;
-    if (!recordOllamaModelList(endpoint, data.models, seq)) return;
+    const wanted = ollamaModelName(model);
+    const models: unknown[] = [...data.models];
+    // A lone ":local" with no model tagged "local" is the installed default
+    // tag, as Ollama 0.40 reads it; that model's entry stands for the name.
+    if (wanted.endsWith(":local") && !models.some((candidate) => entryName(candidate) === wanted)) {
+      const installed = models.find((candidate) => entryName(candidate) === `${wanted.slice(0, -":local".length)}:latest`);
+      if (typeof installed === "object" && installed !== null) models.push({ ...installed, name: model });
+    }
+    if (!recordOllamaModelList(endpoint, models, seq)) return;
     // The model is not installed: nothing known about it carries over to a
     // model installed later under the name, also a reply still in flight.
-    const wanted = ollamaModelName(model);
-    if (!data.models.some((candidate) => entryName(candidate) === wanted)) forgetOllamaModel(endpoint, model, seq);
+    if (!models.some((candidate) => entryName(candidate) === wanted)) forgetOllamaModel(endpoint, model, seq);
   } catch {
     // The send goes ahead with what is known; Ollama's answer still corrects it.
   } finally {
