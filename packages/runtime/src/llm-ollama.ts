@@ -136,8 +136,9 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         // the model produce its answer directly, so the model does not
         // spend its token budget inside a hidden chain-of-thought.
         // gpt-oss ignores `false` and always reasons, so it gets the
-        // lowest effort level instead.
-        think: ollamaThinkSetting(model),
+        // lowest effort level instead. What Ollama showed about this model
+        // (it rejected the level, or reasoned anyway) overrides its name.
+        think: ollamaThinkLearned.get(`${endpoint}\0${model}`) ?? ollamaThinkSetting(model),
       };
       const optionsPayload: Record<string, number> = {};
       if (typeof opts.temperature === "number") {
@@ -247,6 +248,14 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         startAttempt(cachedCtx === undefined ? "" : ` with the ${formatTokens(cachedCtx)} token context kept from an earlier request`);
         response = await send(numCtx);
         let detail = await errorDetail(response);
+        if (response.status === 400 && body.think !== false && rejectsThinkLevel(detail)) {
+          // A model named like gpt-oss that is not one: ask again without a level.
+          ollamaThinkLearned.set(cacheKey, false);
+          body.think = false;
+          startAttempt(attemptLabel);
+          response = await send(numCtx);
+          detail = await errorDetail(response);
+        }
         const overflow = response.status === 400 ? parseContextOverflow(detail) : undefined;
         if (overflow) {
           // Less room than the kept size asked for means Ollama can no longer
@@ -355,6 +364,11 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
             const reasoningDelta = chunk.message?.thinking ?? "";
             if (reasoningDelta.length > 0) {
               reasoningOnly += reasoningDelta;
+              // A model that reasons although it was asked not to always
+              // does (gpt-oss under another name); later requests ask for the
+              // lowest level instead. A model that already rejected a level
+              // keeps `false`.
+              if (body.think === false && !ollamaThinkLearned.has(cacheKey)) ollamaThinkLearned.set(cacheKey, "low");
             }
             accumulated += delta;
             // Reasoning is not an answer, so it is never returned as one,
@@ -397,6 +411,18 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       }
     },
   };
+}
+
+/**
+ * The think value Ollama showed a model needs, keyed by endpoint and model:
+ * `false` after it rejected a level, "low" after it reasoned when asked not to.
+ */
+const ollamaThinkLearned = new Map<string, false | "low">();
+
+/** Ollama's answer to a think level the model does not support. */
+function rejectsThinkLevel(detail: string): boolean {
+  // The quotes arrive escaped inside Ollama's JSON error body.
+  return /think value \\?"[^"\\]*\\?" is not supported for this model/i.test(detail);
 }
 
 /**

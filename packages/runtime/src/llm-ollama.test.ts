@@ -1214,4 +1214,74 @@ describe("Ollama reasoning models", () => {
     }
   });
 
+
+  /** A fake /api/chat that answers by the think value each request sent. */
+  async function fakeByThink(answer: (think: unknown) => { status?: number; body: string }) {
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        const think = (JSON.parse(raw) as { think?: unknown }).think;
+        thinks.push(think);
+        const reply = answer(think);
+        res.statusCode = reply.status ?? 200;
+        res.end(reply.body);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    return { endpoint, thinks, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
+  }
+  const stream = (...lines: object[]) => `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`;
+  const rejected = { status: 400, body: JSON.stringify({ error: 'think value "low" is not supported for this model' }) };
+  const answered = stream({ model: "m", message: { content: "ok" }, done: true, done_reason: "stop", eval_count: 1 });
+
+  it("asks again without a level when a model named like gpt-oss rejects it, and remembers that", async () => {
+    const fake = await fakeByThink((think) => (think === false ? { body: answered } : rejected));
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss-office" });
+      assert.equal((await llm.complete({ prompt: "p" })).text, "ok");
+      assert.equal((await llm.complete({ prompt: "p" })).text, "ok");
+      assert.deepEqual(fake.thinks, ["low", false, false]);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("asks a model that reasons although asked not to for the lowest level next time", async () => {
+    const fake = await fakeByThink(() => ({
+      body: stream(
+        { model: "m", message: { content: "", thinking: "Thinking." }, done: false },
+        { model: "m", message: { content: "ok" }, done: true, done_reason: "stop", eval_count: 1 },
+      ),
+    }));
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "office-report" });
+      assert.equal((await llm.complete({ prompt: "p" })).text, "ok");
+      assert.equal((await llm.complete({ prompt: "p" })).text, "ok");
+      assert.deepEqual(fake.thinks, [false, "low"]);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("keeps no level for a model that rejected one, even when it reasons anyway", async () => {
+    const fake = await fakeByThink((think) => (think === false
+      ? { body: stream(
+        { model: "m", message: { content: "", thinking: "Thinking." }, done: false },
+        { model: "m", message: { content: "ok" }, done: true, done_reason: "stop", eval_count: 1 },
+      ) }
+      : rejected));
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss-qwen-copy" });
+      await llm.complete({ prompt: "p" });
+      await llm.complete({ prompt: "p" });
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(fake.thinks, ["low", false, false, false]);
+    } finally {
+      await fake.close();
+    }
+  });
+
 });
