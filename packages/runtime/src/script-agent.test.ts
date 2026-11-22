@@ -384,8 +384,14 @@ definition:
       { agent: `throw new Error(${carried});`, cause: true },
       // A rejected promise carrying it.
       { agent: `await Promise.reject(new Error(${carried}));`, cause: true },
-      // Its message also holds a diagnostic with a caret.
-      { agent: `throw new Error(${caretNote} + "\\n" + ${carried});`, cause: true },
+      // Its message also holds a diagnostic with a caret; the error carries the request id, as the bundled scripts set it.
+      { agent: `throw Object.assign(new Error(${caretNote} + "\\n" + ${carried}), { brokerRequestId: "llm-1" });`, cause: true },
+      // Wrapped: the failure with its request id is the cause of the error the script throws.
+      { agent: `throw new Error("summary step failed", { cause: Object.assign(new Error(${carried}), { brokerRequestId: "llm-1" }) });`, cause: true },
+      // An error of the script's own that only quotes the failure.
+      { agent: `throw new Error("ENOSPC: could not write the fallback report after " + ${carried});`, cause: false },
+      // Handled by a capture callback, then a later explicit exit.
+      { agent: `process.setUncaughtExceptionCaptureCallback((error) => console.error(error.message)); setTimeout(() => process.exit(1), 20); throw new Error(${carried});`, cause: false },
       // Prints a diagnostic with a caret, logs the failure it caught, and exits.
       { agent: `console.error(${caretNote}); console.error(new Error(${carried})); process.exit(1);`, cause: false },
       // Handles the failure with its own listener, carries on, and exits later.

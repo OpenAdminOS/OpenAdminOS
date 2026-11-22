@@ -31,7 +31,7 @@ import {
   type SandboxRunResult,
   type SandboxRunner,
 } from "./sandbox.js";
-import { createSandboxBroker } from "./sandbox-broker.js";
+import { createSandboxBroker, type ScriptExitRecord } from "./sandbox-broker.js";
 
 const SCRIPT_RESULT_FILE = "result.json";
 const BROKER_DIR_ENV = "OPENADMINOS_BROKER_DIR";
@@ -39,17 +39,22 @@ const EXIT_RECORD_ENV = "OPENADMINOS_EXIT_RECORD";
 
 /**
  * Loaded into the script's Node process before its entrypoint: records the
- * message of the error the script ends with (an uncaught exception or an
- * unhandled rejection), without changing how Node reports it or exits. An
- * error the script handles with its own uncaughtException listener is not
- * fatal and is not recorded.
+ * error the script ends with (an uncaught exception or an unhandled
+ * rejection), without changing how Node reports it or exits: its message and
+ * the broker request id it or an error in its cause chain carries. An error
+ * the script handles itself (an uncaughtException listener or a capture
+ * callback) is not fatal and is not recorded.
  */
 const EXIT_RECORD_HOOK = `import { writeFileSync } from "node:fs";
 process.on("uncaughtExceptionMonitor", (error) => {
-  if (process.listenerCount("uncaughtException") > 0) return;
+  if (process.listenerCount("uncaughtException") > 0 || process.hasUncaughtExceptionCaptureCallback()) return;
   try {
     const message = error instanceof Error ? String(error.message) : String(error);
-    writeFileSync(process.env.${EXIT_RECORD_ENV}, JSON.stringify({ message }));
+    let brokerRequestId;
+    for (let current = error, depth = 0; current && depth < 8; current = current.cause, depth += 1) {
+      if (typeof current.brokerRequestId === "string") { brokerRequestId = current.brokerRequestId; break; }
+    }
+    writeFileSync(process.env.${EXIT_RECORD_ENV}, JSON.stringify(brokerRequestId ? { message, brokerRequestId } : { message }));
   } catch {}
 });
 `;
@@ -213,7 +218,7 @@ async function runScriptAgent(
           // when the error the script ended with, as its process recorded
           // it, carries it.
           const ended = await readExitRecord(exitRecordPath);
-          const cause = (ended !== undefined ? broker.llmFailureFor(ended) : undefined) ?? broker.graphDenialFor(detail);
+          const cause = (ended ? broker.llmFailureFor(ended) : undefined) ?? broker.graphDenialFor(detail);
           throw new Error(
             `MXC script agent "${manifest.descriptor.id}" failed: ${truncate(detail, 600)}`,
             cause ? { cause } : undefined,
@@ -228,11 +233,15 @@ async function runScriptAgent(
   }
 }
 
-/** The message of the error the script ended with, when its process recorded one. */
-async function readExitRecord(recordPath: string): Promise<string | undefined> {
+/** The error the script ended with, when its process recorded one. */
+async function readExitRecord(recordPath: string): Promise<ScriptExitRecord | undefined> {
   try {
-    const record = JSON.parse(await readFile(recordPath, "utf8")) as { message?: unknown };
-    return typeof record.message === "string" ? record.message : undefined;
+    const record = JSON.parse(await readFile(recordPath, "utf8")) as { message?: unknown; brokerRequestId?: unknown };
+    if (typeof record.message !== "string") return undefined;
+    return {
+      message: record.message,
+      ...(typeof record.brokerRequestId === "string" ? { brokerRequestId: record.brokerRequestId } : {}),
+    };
   } catch {
     return undefined;
   }

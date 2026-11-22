@@ -149,7 +149,10 @@ function unwrapBrokerResponse(method, response, id) {
   }
   if (!response.ok) {
     const message = response.error?.message ?? "Broker request failed.";
-    throw new Error(`${method}: ${message}`);
+    const error = new Error(`${method}: ${message}`);
+    // Lets the host tell which brokered request the script ended on.
+    error.brokerRequestId = id;
+    throw error;
   }
   return response.result;
 }

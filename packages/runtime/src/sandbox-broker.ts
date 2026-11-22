@@ -39,11 +39,20 @@ export interface SandboxBroker {
   graphDenialFor(scriptOutput: string): Error | undefined;
   /**
    * The typed model failure (a reply with reasoning and no answer) behind a
-   * script failure: the newest brokered failure that the message of the error
-   * the script ended with carries, when that is a reply with reasoning and no
-   * answer. The message comes from the script's own process, not its output.
+   * script failure, from the error the script's own process recorded it ended
+   * with: the failure of the broker request id that error (or its cause
+   * chain) carries; without an id, the newest failure whose message is
+   * exactly that error's message, or the "<method>: <message>" the bundled
+   * scripts throw. Only a reply with reasoning and no answer is returned.
    */
-  llmFailureFor(endedWith: string): Error | undefined;
+  llmFailureFor(endedWith: ScriptExitRecord): Error | undefined;
+}
+
+/** The error a script ended with, as its process recorded it. */
+export interface ScriptExitRecord {
+  message: string;
+  /** The broker request whose failure the error, or one in its cause chain, carries. */
+  brokerRequestId?: string;
 }
 
 export interface SandboxBrokerInput {
@@ -75,7 +84,7 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
   let lastFailure: unknown;
   // Every failure a brokered request answered with, one per distinct message,
   // so repeated failures never push out another one.
-  const failures = new Map<string, Error>();
+  const failures = new Map<string, { method: string; error: Error }>();
 
   return {
     async handle(request) {
@@ -111,9 +120,8 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
         }
       } catch (error) {
         if (request?.method !== "log") lastFailure = error;
-        if (request?.method !== "log" && error instanceof Error && error.message.length > 0) {
-          failures.delete(error.message);
-          failures.set(error.message, error);
+        if (request?.method !== "log" && error instanceof Error) {
+          failures.set(id, { method: String(request?.method ?? ""), error });
         }
         return failure(id, error);
       }
@@ -124,12 +132,14 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
         ? lastFailure
         : undefined,
     llmFailureFor: (endedWith) => {
-      // The failure the error carries is the most specific one it contains
-      // (the longest message, then the newest), whatever its type; only then
-      // is it checked for a reply with reasoning and no answer.
       let match: Error | undefined;
-      for (const failure of failures.values()) {
-        if (endedWith.includes(failure.message) && (!match || failure.message.length >= match.message.length)) match = failure;
+      if (endedWith.brokerRequestId !== undefined) {
+        match = failures.get(endedWith.brokerRequestId)?.error;
+      } else {
+        // Without an id, only an error that is the broker failure itself.
+        for (const { method, error } of failures.values()) {
+          if (endedWith.message === error.message || endedWith.message === `${method}: ${error.message}`) match = error;
+        }
       }
       return match && isReasoningWithoutAnswerError(match) ? match : undefined;
     },
