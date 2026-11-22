@@ -1014,7 +1014,9 @@ export function readPlannedChatRows(
       // Every named row goes first, also one already sampled further down, so no cap after this drops it.
       const namedIds = new Set(namedRows.map((row) => (row as { id?: unknown }).id));
       const others = (rows.managedDevices ?? []).filter((row) => !namedIds.has(row && typeof row === "object" ? (row as { id?: unknown }).id : undefined));
-      rows.managedDevices = [...namedRows, ...others].slice(0, Math.max(input.limitPerResource, namedRows.length));
+      // Marked, so a model reading the samples does not take a named device for one that matched the filters.
+      const marked = namedRows.map((row) => (row && typeof row === "object" ? { ...(row as Record<string, unknown>), namedInQuestion: true } : row));
+      rows.managedDevices = [...marked, ...others].slice(0, Math.max(input.limitPerResource, namedRows.length));
     }
   }
   return rows;

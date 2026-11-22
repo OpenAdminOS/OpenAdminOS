@@ -633,6 +633,9 @@ describe("The fallback after a failed compact loop", () => {
         ["stream", '{"kind":"tenant","sources":[],"tool":"query_cache","params":{"resource":"managedDevices"}}'],
         ["send", 'I will check the cache.\n```json\n{"tool":"count_cached","params":{"resource":"managedDevices"}}\n```'],
         ["stream", 'I will check the cache.\n```json\n{"tool":"count_cached","params":{"resource":"managedDevices"}}\n```'],
+        // Cut short: the closing brace is missing.
+        ["send", '{"tool":"count_cached","params":{"resource":"managedDevices"}'],
+        ["stream", '{"tool":"count_cached","params":{"resource":"managedDevices"}'],
       ] as const) {
         recordAgenticOutcome("ollama", "openadminos/openadmin-8b", true);
         reply(() => request);
@@ -641,6 +644,29 @@ describe("The fallback after a failed compact loop", () => {
         assert.equal(calls.filter((call) => !call.loop).length, 1, `${send}: one fallback call`);
         assert.equal(message.status, "failed", send);
         assert.match(message.content, /^The local model did not finish an answer\./, send);
+        assert.equal(message.engineNotice, undefined, send);
+      }
+    });
+  });
+
+  it("keeps a prose answer that ends with a JSON example, and fails a failure-routed fallback that only promises work", async () => {
+    await withHarness(async ({ store, calls, reply }) => {
+      recordAgenticOutcome("ollama", "openadminos/openadmin-8b", true);
+      const prose = 'WIN-01 to WIN-04 need attention.\n\nAn FAQ entry looks like this:\n```json\n{"question":"What is a grace period?","answer":"Time before noncompliance.","kind":"faq"}\n```';
+      reply(({ loop }) => (loop ? JSON.stringify({ tool: "list_cached_resources", params: {} }) : prose));
+      const kept = (await store.sendIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false })).assistantMessage;
+      assert.equal(kept.status, "completed");
+      assert.equal(kept.content, prose, "the example is part of the prose answer");
+
+      // After two failed loop answers the model is taken off the tool loop; its one fallback call is checked the same way.
+      recordAgenticOutcome("ollama", "openadminos/openadmin-8b", false, "iteration-cap");
+      recordAgenticOutcome("ollama", "openadminos/openadmin-8b", false, "iteration-cap");
+      for (const send of ["send", "stream"] as const) {
+        reply(() => "I'll check that now.");
+        const input = { content: "Which of our devices need attention?", refreshIfStale: false };
+        const message = (send === "send" ? await store.sendIntuneChatMessage(input) : await store.streamIntuneChatMessage(input, () => {})).assistantMessage;
+        assert.equal(calls.length, 1, `${send}: one model call, no promise retries`);
+        assert.equal(message.status, "failed", send);
         assert.equal(message.engineNotice, undefined, send);
       }
     });
@@ -690,6 +716,25 @@ describe("A failed lookup on the compact budget", () => {
       const message = (await store.sendIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false })).assistantMessage;
       assert.match(message.content, /a data lookup failed/);
       assert.doesNotMatch(message.content, /0 devices match/);
+    });
+  });
+});
+
+describe("A retry that finds nothing cached", () => {
+  it("keeps the failed lookup pending, so a zero count is not stated", async () => {
+    await withHarness(async ({ store, reply }) => {
+      let turn = 0;
+      reply(({ loop }) => {
+        if (!loop) return "0 groups.";
+        turn += 1;
+        if (turn === 1) return JSON.stringify({ tool: "count_cached", params: { resource: "users" } });
+        if (turn === 2) return JSON.stringify({ tool: "count_cached", params: { resource: "groups", groupBy: ["noSuchField"] } });
+        if (turn === 3) return JSON.stringify({ tool: "count_cached", params: { resource: "groups" } });
+        return final("There are 0 groups.");
+      });
+      const message = (await store.sendIntuneChatMessage({ content: "How many users and groups do we have?", refreshIfStale: false })).assistantMessage;
+      assert.doesNotMatch(message.content, /0 groups/);
+      assert.match(message.content, /a data lookup failed/);
     });
   });
 });

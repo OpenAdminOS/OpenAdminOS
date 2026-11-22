@@ -2503,7 +2503,9 @@ export class IntuneChatService {
               responseModel = deterministic.model ?? responseModel;
             }
           } else {
-            const deterministic = await buildDeterministicAnswer(withMcpSkippedNotice(capability, answerPlan?.mcpInstalled ?? false));
+            // A local model the failure memory took off the tool loop gets the same one-call, checked fallback.
+            const failureRouted = provider?.isLocal === true && investigationSettings.mode === "auto" && capability.reason === "capability-fallback";
+            const deterministic = await buildDeterministicAnswer(withMcpSkippedNotice(capability, answerPlan?.mcpInstalled ?? false), failureRouted);
             assistantContent = deterministic.content;
             responseModel = deterministic.model ?? responseModel;
           }
@@ -3358,15 +3360,18 @@ export class IntuneChatService {
             }
           } else {
             const notice = withMcpSkippedNotice(capability, answerPlan?.mcpInstalled ?? false);
+            // A local model the failure memory took off the tool loop gets the same one-call, checked fallback.
+            const failureRouted = provider?.isLocal === true && !options.voice && investigationSettings.mode === "auto" && capability.reason === "capability-fallback";
             if (capability.reason === "capability-fallback" && notice) {
               sendProgress({
-                message: notice,
+                // Said as pending: the cached-data answer does not exist yet and can still fail.
+                message: notice.replace(/^Answered from cached data/, "Answering from cached data"),
                 stage: "building-context",
                 contextStatus: "active",
                 modelStatus: "pending",
               });
             }
-            await streamDeterministicAnswer(notice);
+            await streamDeterministicAnswer(notice, failureRouted);
           }
         } catch (caught) {
           if (isCancelled()) {
@@ -4099,21 +4104,40 @@ export class IntuneChatService {
 }
 
 
+/** Tool names the Chat loop offers: a "tool" naming one of these is a request wherever it sits in a reply. */
+const CHAT_TOOL_NAME = /^(?:mcp__\S+|splashtop_\S+|list_cached_resources|query_cache|count_cached|find_graph_endpoint|graph_get|refresh_resource|query_drift|web_search)$/;
+
 /**
- * A reply in the tool loop's JSON protocol, read the way the loop reads one (the whole reply, the last fenced
- * block or the last balanced object, also after prose): `{ answer }` when it carries an answer text and no tool
- * name, `{ request }` when it names a tool or is a protocol object with no answer, undefined otherwise.
+ * A reply in the tool loop's JSON protocol, read the way the loop reads one: `{ answer }` when it carries an
+ * answer text, `{ request }` when it is a tool request or a protocol object with no answer, undefined for
+ * prose. Only the reply's own structure counts: a whole-reply object (bare or in one fence), a request naming
+ * a Chat tool anywhere (also after prose), or a final answer object. A JSON example inside a prose answer
+ * ({"answer": ...} in an FAQ, "kind" in a policy) is prose. A protocol object cut short (a missing brace) is a
+ * request, not an answer.
  */
 function protocolReply(text: string): { answer: string } | { request: true } | undefined {
+  const bare = text.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i, "$1").replace(/^```(?:json)?\s*/i, "").trim();
+  let wholeValue: unknown;
+  let wholeParses = false;
+  if (bare.startsWith("{")) {
+    try {
+      wholeValue = JSON.parse(bare);
+      wholeParses = true;
+    } catch {
+      // A reply that opens as a protocol object and does not parse was cut short: a request, never an answer.
+      if (/^\{\s*"(?:tool|kind|final|answer|sources)"\s*:/.test(bare)) return { request: true };
+    }
+  }
   const extracted = extractLastJsonObject(text);
   if (!extracted.found || !extracted.valid) return undefined;
   const parsed = extracted.value;
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
   const record = parsed as Record<string, unknown>;
+  const whole = wholeParses && JSON.stringify(wholeValue) === JSON.stringify(parsed);
   const tool = typeof record.tool === "string" ? record.tool.trim() : "";
-  if (tool && tool.toLowerCase() !== "none") return { request: true };
-  if (typeof record.answer === "string" && record.answer.trim()) return { answer: record.answer.trim() };
-  return "final" in record || "kind" in record || "tool" in record ? { request: true } : undefined;
+  if (tool && tool.toLowerCase() !== "none" && (whole || CHAT_TOOL_NAME.test(tool))) return { request: true };
+  if (typeof record.answer === "string" && record.answer.trim() && (whole || record.final === true)) return { answer: record.answer.trim() };
+  return whole && ("final" in record || "kind" in record || "tool" in record) ? { request: true } : undefined;
 }
 
 /** A local model whose tool loop and one cached-data answer both came back without an answer. */

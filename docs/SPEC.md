@@ -3911,7 +3911,8 @@ the format. Decisions:
   the named device stays in the samples; every other question keeps both, and
   any cached device the question names by its whole name goes first in the
   samples, with or without filters ("is Windows-Lab compliant" about a Mac,
-  "why is 上海总部 not compliant"), so no later cap drops it.
+  "why is 上海总部 not compliant"), so no later cap drops it; it is marked
+  `namedInQuestion`, so it is not read as a row that matched the filters.
 - Follow-ups: the structured result of the last answer is stored per
   conversation (`chat_result_context`: resource, filters, label, total and up
   to 500 matched row ids; deleted with the conversation) and a follow-up such
@@ -3982,17 +3983,22 @@ the format. Decisions:
   left to use its result. Counting the writer without these rules pushed
   ordinary Microsoft Learn answers into the fallback). After a failed compact
   loop the cached-data fallback is one model call with no promise retries;
-  a reply in the loop's JSON, read as the loop reads it (also after prose),
-  shows its answer text; when the reply is empty, only promises work or names
-  a tool (any key order), the message fails with
+  only the reply's own structure counts as the loop's JSON: a whole-reply
+  object shows its answer text, a request naming a Chat tool counts anywhere
+  (also after prose), a protocol object cut short is a request, and a JSON
+  example inside a prose answer stays prose; when the reply is empty, only
+  promises work or is a request, the message fails with
   "The local model did not finish an answer ..." instead of showing it. The
   "Answered from cached data instead" notice is set only once that answer
   exists, so a provider that refuses every call leaves no such notice on the
-  failed message. Stop pressed while the providers are still being read ends
+  failed message. A local model the failure memory took off the tool loop
+  gets the same one-call, checked fallback. Stop pressed while the providers
+  are still being read ends
   in the designed cancelled answer, not an abort error. A second
   progress-only reply falls back as `unfinished` instead of being kept, unless
   a lookup in the turn failed: then, as for an empty answer, the turn says no
-  verified count is available instead of falling back. A rejected `count_cached` call blocks a zero answer as a
+  verified count is available instead of falling back. A retry that finds the
+  resource not cached keeps that failed lookup pending. A rejected `count_cached` call blocks a zero answer as a
   rejected `query_cache` does. A context overflow falls back instead of failing
   the message and returns the provider's error as `failureDetail`.
   Always investigative mode and hosted providers keep the established budget,
