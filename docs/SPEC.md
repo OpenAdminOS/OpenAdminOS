@@ -398,16 +398,15 @@ Reasoning models on Ollama (added 2026-11-21, PR #222). Every request sends
 it gets `think: "low"`. The model family that provider detection reads from
 `/api/tags` on every check (`gptoss` or `gpt-oss`) decides, so a copy under
 another name, or a name replaced and restored, gets the right value before its
-first request; the chat path adds no `/api/show` call. Ollama's answers come
-first, per endpoint and model, because they are about the model installed now:
-a rejected level (`think value ... is not supported`, or `... does not support
-thinking`) is sent again once with `false`, and reasoning streamed after `false`
-switches later requests to "low". Each answer replaces the one before, and a
-check that finds another version (digest) under the name drops them. Before
-each send or run, the app reads the selected model's entry from `/api/tags`
-(which loads no model), so a model replaced under the name since the provider
-check gets its own family and version. Without answers the family decides,
-then the name. A reply with reasoning and no answer
+first request; the chat path adds no `/api/show` call. Before each send or run,
+the app reads the selected model's entry from `/api/tags` (which loads no
+model), so a model replaced under the name since the provider check gets its
+own family and version. A family Ollama reported decides. For a model without
+one, Ollama's answers decide, per endpoint and model and only for the version
+(digest) the request was sent to: a rejected level (`think value ... is not
+supported`, or `... does not support thinking`) is sent again once with
+`false`, and reasoning streamed after `false` switches later requests to "low".
+Without either, the name decides. A reply with reasoning and no answer
 is never returned as the answer: it fails with
 `OllamaReasoningWithoutAnswerError`, naming the token limit when
 `done_reason` is `length`, before any completed chunk. A run records it as
