@@ -56,7 +56,13 @@ const EXCLUSIVE = [isLmStudioContextTooSmall, isContextLimitLookup];
  */
 const MICROSOFT_SIGN_IN_ERROR = /^(?:The (?:plan|proposal) could not be checked[^.]*\. |Nothing was applied: )?(?:AADSTS\d+|(?:interaction_required|invalid_grant|consent_required): AADSTS\d+)/;
 
-const REASONING_WITHOUT_ANSWER = /(at the token limit while it was still reasoning|returned only reasoning)/i;
+/**
+ * The runtime's two messages for an Ollama reply with reasoning and no answer,
+ * read from the app's own text so a quoted server body cannot match.
+ */
+const isReasoningWithoutAnswer = (e: string) =>
+  /^Ollama stopped "[^"]+" at the token limit while it was still reasoning, so there is no answer\./.test(ownText(e)) ||
+  /^Ollama returned only reasoning from "[^"]+" and no answer\./.test(ownText(e));
 
 const SUGGESTIONS: Suggestion[] = [
   {
@@ -80,7 +86,7 @@ const SUGGESTIONS: Suggestion[] = [
     body: lmStudioContextAdvice,
   },
   {
-    match: (e) => /ollama/i.test(e) && REASONING_WITHOUT_ANSWER.test(e),
+    match: isReasoningWithoutAnswer,
     title: "Model reasoned without answering",
     body: "The local model spent its output on reasoning and wrote no answer, so there is no report. Raise the step's maxTokens, narrow the agent's scope, or pick a model that answers without reasoning in Settings → LLM Providers, then re-run.",
   },

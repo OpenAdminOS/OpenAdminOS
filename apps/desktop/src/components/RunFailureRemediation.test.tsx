@@ -356,3 +356,20 @@ it("explains a reasoning-only Ollama reply instead of suggesting a model pull", 
   expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
   expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
 });
+
+it.each([
+  'Ollama returned only reasoning from "gpt-oss:20b" and no answer. Retry, or pick a model that answers without reasoning.',
+])("gives the other reasoning-only Ollama reply the same recovery: %s", (error) => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Model reasoned without answering")).toBeInTheDocument();
+});
+
+it("does not read a server body that mentions reasoning as a reasoning-only reply", () => {
+  const run: RunRecord = {
+    id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [],
+    error: 'Ollama responded with HTTP 500: proxy note: upstream returned only reasoning from "gpt-oss:20b" and no answer.',
+  };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.queryByText("Model reasoned without answering")).not.toBeInTheDocument();
+});
