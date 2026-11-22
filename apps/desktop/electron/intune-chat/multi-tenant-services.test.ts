@@ -32,7 +32,7 @@ function stateJson(tenants: TenantRecord[]): string {
   });
 }
 
-async function makeFixture(tenants: TenantRecord[], answers?: string[]) {
+async function makeFixture(tenants: TenantRecord[], answers?: Array<string | Error>) {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-mt-services-"));
   const filePath = join(dir, "state.json");
   await writeFile(filePath, stateJson(tenants));
@@ -67,6 +67,7 @@ async function makeFixture(tenants: TenantRecord[], answers?: string[]) {
         prompts.push(request.prompt);
         const text = answers?.shift();
         if (text === undefined) throw new Error("Not used.");
+        if (text instanceof Error) throw text;
         return { text, model: "mock-chat" };
       },
       async *stream() { yield { delta: "", accumulated: "", done: true, model: "mock-chat" }; },
@@ -191,4 +192,20 @@ describe("multi-tenant Chat and connected services", () => {
       await answered.close();
     }
   });
+
+  it("fails the assistant message with the cause when the summary model fails, and keeps the tenant results", async () => {
+    const tenants = [tenant("contoso", "Contoso"), tenant("fabrikam", "Fabrikam")];
+    const cause = 'Ollama stopped "gpt-oss:20b" at the token limit while it was still reasoning, so there is no answer. Raise the token limit, shorten the request, or pick a model that answers without reasoning.';
+    const fixture = await makeFixture(tenants, [new Error(cause)]);
+    try {
+      const { job, assistantMessage } = await fixture.store.runMultiTenantIntuneChat({ prompt: PROMPT, tenantScope: { kind: "all" } });
+      assert.equal(assistantMessage.status, "failed");
+      assert.equal(assistantMessage.error, cause);
+      assert.match(assistantMessage.content, /The selected LLM provider failed while summarizing this multi-tenant result\. Ollama stopped/);
+      assert.equal(job.comparisons.find((row) => row.tenantId === "contoso")?.windowsDevices, 1);
+    } finally {
+      await fixture.close();
+    }
+  });
+
 });

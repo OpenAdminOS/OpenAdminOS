@@ -1239,7 +1239,7 @@ export class IntuneChatService {
     }
 
     const summary = buildMultiTenantSummary(comparisons);
-    const assistantText = await this.buildMultiTenantAssistantText({
+    const { text: assistantText, error: assistantError } = await this.buildMultiTenantAssistantText({
       tenantIds: [activeTenant.id, ...preflight.resolvedTenantIds],
       prompt: content,
       providerId,
@@ -1301,7 +1301,9 @@ export class IntuneChatService {
       conversationId: conversation.id,
       role: "assistant",
       content: assistantText,
-      status: finalStatus === "completed" || finalStatus === "partial" ? "completed" : "failed",
+      // The tenant results stay in the job; a failed summary fails the message.
+      status: !assistantError && (finalStatus === "completed" || finalStatus === "partial") ? "completed" : "failed",
+      ...(assistantError ? { error: assistantError } : {}),
       createdAt: new Date().toISOString(),
       providerId,
       ...(preflight.model ? { model: preflight.model } : {}),
@@ -1706,10 +1708,10 @@ export class IntuneChatService {
     model?: string;
     summary: MultiTenantChatJob["summary"];
     comparisons: MultiTenantChatJob["comparisons"];
-  }): Promise<string> {
+  }): Promise<{ text: string; error?: string }> {
     const deterministic = summarizeMultiTenantResult(input.summary, input.comparisons);
     const llm = withTenantDataOutputFilter(await this.tenantLlm(input.providerId, input.model, input.tenantIds));
-    if (!llm.available) return deterministic;
+    if (!llm.available) return { text: deterministic };
     try {
       const system = buildIntuneChatSystemPrompt(input.provider?.isLocal === true);
       const prompt = [
@@ -1733,10 +1735,13 @@ export class IntuneChatService {
         temperature: 0.2,
         maxTokens: 700,
       })).text.trim(), prompt);
-      return text || deterministic;
+      return { text: text || deterministic };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return `${deterministic}\n\nThe selected LLM provider failed while summarizing this multi-tenant result. ${message}`;
+      return {
+        text: `${deterministic}\n\nThe selected LLM provider failed while summarizing this multi-tenant result. ${message}`,
+        error: message,
+      };
     }
   }
 
